@@ -1697,7 +1697,7 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
   const selectedPaymentEnabled=paymentMethod==="UPI"?!!paymentSettings?.upiEnabled:!!paymentSettings?.cashEnabled;
   const selectedCustomer=customers.find(item=>item.id===selectedCustomerId);
   const canContinue=!!file&&enabledPhotoSizes&&selectedPaymentEnabled&&
-    (recipientType==="EXISTING_CUSTOMER"?!!selectedCustomerId:recipientName.trim().length>0);
+    (recipientType==="EXISTING_CUSTOMER"?!!selectedCustomer:recipientName.trim().length>0);
 
   function selectFile(event:ChangeEvent<HTMLInputElement>) {
     const candidate=event.currentTarget.files?.[0]??null;setError("");
