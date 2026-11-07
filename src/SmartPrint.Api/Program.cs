@@ -2339,23 +2339,6 @@ shop.MapPost("/photo-jobs", async (
         });
     }
 
-    var pricing = await db.ShopPricingProfiles.AsNoTracking()
-        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
-    if (pricing is null)
-        return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure the shop's photo sizes and per-photo prices before creating a photo order." });
-
-    long unitPrice;
-    long amount;
-    try
-    {
-        unitPrice = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
-        amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
-    }
-    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
-    {
-        return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
-    }
-
     var upload = form.Files[0];
     if (upload.Length is <= 0 or > 20 * 1024 * 1024 ||
         !string.Equals(Path.GetExtension(upload.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
@@ -2466,6 +2449,31 @@ shop.MapPost("/photo-jobs", async (
                 Payment = existingPayment,
                 DuplicateRequest = true
             });
+        }
+
+        var pricing = await db.ShopPricingProfiles.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
+        if (pricing is null)
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure the shop's photo sizes and per-photo prices before creating a photo order." });
+        }
+
+        long unitPrice;
+        long amount;
+        try
+        {
+            unitPrice = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
+            amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
         }
 
         var paymentSettings = await db.ShopPaymentProfiles.AsNoTracking()
