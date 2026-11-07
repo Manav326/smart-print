@@ -203,7 +203,12 @@ export default function PhotoStudio({
   const maxCopies=MAX_PHOTO_COUNT;
   const parsedCopiesInput = Number(copiesInput);
   const copiesInputValid = Number.isInteger(parsedCopiesInput) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies;
-  const copies = Math.max(1, Math.min(maxCopies, Number(copiesInput) || 1));
+  // Keep the live preview on a valid integer grid even while the editable field
+  // contains an invalid fraction. Validation below still blocks preparation until
+  // the owner/customer enters a whole number from 1 to 100.
+  const copies = Number.isFinite(parsedCopiesInput)
+    ? Math.max(1, Math.min(maxCopies, Math.floor(parsedCopiesInput) || 1))
+    : 1;
   const sheetCount = Math.ceil(copies / photosPerPage);
   const previewPageIndex=Math.max(0,Math.min(previewPage,sheetCount-1));
   const previewPhotoCount=Math.min(layout.perSheet,copies-previewPageIndex*layout.perSheet);
