@@ -358,6 +358,12 @@ class PhotoStudioWebViewInstrumentedTest {
             clickButton(scenario, "Sheet")
 
             setLabelValue(scenario, "Photo size", "35x45")
+            setLabelValue(scenario, "Number of photos", "1.5")
+            waitFor(
+                scenario,
+                "Array.from(document.querySelectorAll('[role=dialog] input')).find(input => input.getAttribute('aria-label') === 'Number of photos')?.value === '1.5' && document.querySelector('[role=dialog]')?.innerText.includes('Enter a whole number from 1 to 100') && Array.from(document.querySelectorAll('[role=dialog] button')).find(button => button.innerText.includes('Prepare A4 sheet'))?.disabled === true",
+                "fractional quantities to remain visible, invalid and blocked without crashing Photo Studio"
+            )
             setLabelValue(scenario, "Number of photos", "50")
             setLabelValue(scenario, "Photos per A4 page", "9")
             waitFor(
@@ -428,6 +434,89 @@ class PhotoStudioWebViewInstrumentedTest {
             val releaseDeadline = SystemClock.uptimeMillis() + 5_000
             while (isSecure(scenario) && SystemClock.uptimeMillis() < releaseDeadline) Thread.sleep(100)
             assertFalse("Native screenshot protection must be released after Photo Studio closes.", isSecure(scenario))
+        } finally {
+            scenario.close()
+        }
+    }
+
+    @Test
+    fun shopOwnerCanEditAnExistingPhotoJobInsideAndroidWebViewAndSaveReplacementPdf() {
+        val scenario = openFixture("?mode=shop&theme=dark")
+        try {
+            tapCssSelector(scenario, "#open-photo-studio")
+            waitFor(scenario, "document.querySelector('[role=dialog]') !== null", "shop Photo Studio dialog")
+            waitFor(
+                scenario,
+                "document.querySelector('[role=dialog]')?.getAttribute('aria-busy') === 'false'",
+                "shop-owned source photo to decode"
+            )
+            assertTrue(
+                "Shop mode must identify this as editing the existing job.",
+                evaluate(scenario, "document.querySelector('[role=dialog]')?.innerText.includes('SHOP · EDIT EXISTING JOB')") == "true"
+            )
+            assertTrue(
+                "Shop mode must explain that the prepared PDF replaces the unpaid job file.",
+                evaluate(scenario, "document.querySelector('[role=dialog]')?.innerText.includes('Save your prepared multi-page A4 photo PDF to this existing unpaid job.')") == "true"
+            )
+            assertTrue(
+                "The shop owner must have the existing-job save action.",
+                evaluate(scenario, "Array.from(document.querySelectorAll('[role=dialog] button')).some(button => button.innerText.trim().startsWith('Save sheet to this job'))") == "true"
+            )
+
+            val secureDeadline = SystemClock.uptimeMillis() + 5_000
+            while (!isSecure(scenario) && SystemClock.uptimeMillis() < secureDeadline) Thread.sleep(100)
+            assertTrue("The shop owner's sensitive photo preview must be protected by FLAG_SECURE.", isSecure(scenario))
+
+            setLabelValue(scenario, "Photo size", "35x45")
+            setLabelValue(scenario, "Number of photos", "1.5")
+            waitFor(
+                scenario,
+                "Array.from(document.querySelectorAll('[role=dialog] input')).find(input => input.getAttribute('aria-label') === 'Number of photos')?.value === '1.5' && document.querySelector('[role=dialog]')?.innerText.includes('Enter a whole number from 1 to 100')",
+                "fractional shop photo quantity to stay visible with validation"
+            )
+            setLabelValue(scenario, "Number of photos", "14")
+            setLabelValue(scenario, "Photos per A4 page", "9")
+            waitFor(
+                scenario,
+                "Array.from(document.querySelectorAll('[class*=sheetSummary] > div')).some(row => row.textContent.includes('A4 pages in this job') && row.querySelector('strong')?.textContent === '2')",
+                "two-page replacement sheet for the shop-owned job"
+            )
+
+            tapButtonText(scenario, "Save sheet to this job")
+            waitFor(
+                scenario,
+                "document.querySelector('#photo-studio-result')?.textContent.includes('application/pdf')",
+                "replacement PDF to be prepared for the existing shop job"
+            )
+            val resultText = evaluate(
+                scenario,
+                "JSON.stringify(JSON.parse(document.querySelector('#photo-studio-result').textContent))"
+            )
+            val result = JSONObject(decodeJavascriptString(resultText))
+            assertEquals("shop", result.getString("mode"))
+            assertEquals("application/pdf", result.getString("mediaType"))
+            assertEquals("35x45", result.getString("sizeCode"))
+            assertEquals(14, result.getInt("photoCount"))
+            assertEquals(9, result.getInt("photosPerPage"))
+            assertEquals(2, result.getInt("pageCount"))
+            assertEquals(2, result.getInt("mediaBoxCount"))
+            assertEquals(2, result.getInt("previewPageCount"))
+            assertTrue(result.getLong("bytes") in 1L..(20L * 1024L * 1024L))
+
+            waitFor(scenario, "document.querySelector('[role=dialog]') === null", "shop Photo Studio close after save")
+            assertTrue("Screenshot protection must be released after the shop owner saves the sheet.", !isSecure(scenario))
+            assertEquals(
+                "The original uploaded photo must remain available for a safe follow-up edit.",
+                "true",
+                evaluate(scenario, "document.querySelector('#open-photo-studio')?.disabled === false")
+            )
+            tapCssSelector(scenario, "#open-photo-studio")
+            waitFor(scenario, "document.querySelector('[role=dialog]') !== null", "reopening the unchanged shop source photo")
+            waitFor(
+                scenario,
+                "document.querySelector('[role=dialog] canvas') !== null && document.querySelector('[role=dialog]')?.getAttribute('aria-busy') === 'false'",
+                "unchanged shop source photo to remain editable"
+            )
         } finally {
             scenario.close()
         }
