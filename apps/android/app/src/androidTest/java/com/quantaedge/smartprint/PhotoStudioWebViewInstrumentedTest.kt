@@ -1,0 +1,488 @@
+package com.quantaedge.smartprint
+
+import android.net.Uri
+import android.os.SystemClock
+import android.view.MotionEvent
+import android.view.WindowManager
+import android.webkit.WebView
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.json.JSONArray
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+
+@RunWith(AndroidJUnit4::class)
+class PhotoStudioWebViewInstrumentedTest {
+    private fun getWebView(activity: MainActivity): WebView {
+        return MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
+            isAccessible = true
+        }.invoke(activity) as WebView
+    }
+
+    private fun decodeJavascriptString(value: String): String =
+        JSONArray("[$value]").getString(0)
+
+    private fun evaluate(scenario: ActivityScenario<MainActivity>, script: String): String {
+        val result = AtomicReference<String>()
+        val completed = CountDownLatch(1)
+        scenario.onActivity { activity ->
+            getWebView(activity).evaluateJavascript(script) { value ->
+                result.set(value ?: "null")
+                completed.countDown()
+            }
+        }
+        assertTrue("Android WebView JavaScript did not respond.", completed.await(12, TimeUnit.SECONDS))
+        return result.get()
+    }
+
+    private fun waitFor(
+        scenario: ActivityScenario<MainActivity>,
+        expression: String,
+        description: String
+    ) {
+        val deadline = SystemClock.uptimeMillis() + 20_000
+        while (SystemClock.uptimeMillis() < deadline) {
+            if (evaluate(scenario, "Boolean($expression)") == "true") return
+            Thread.sleep(120)
+        }
+        throw AssertionError("Timed out waiting for Android Photo Studio: $description")
+    }
+
+    private fun openFixture(query: String): ActivityScenario<MainActivity> {
+        assumeTrue(
+            "Photo Studio WebView instrumentation is enabled only for the local .localqa package.",
+            BuildConfig.PHOTO_STUDIO_QA_ENABLED
+        )
+        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        val fixtureUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') +
+            "/tests/photo-studio.browser.html" + query
+        scenario.onActivity { activity ->
+            MainActivity::class.java.getDeclaredMethod("showPrint").apply {
+                isAccessible = true
+                invoke(activity)
+            }
+            val trustedHost = Uri.parse(BuildConfig.SERVICE_BASE_URL).host
+                ?: throw AssertionError("The configured SmartPrint QA portal has no host.")
+            MainActivity::class.java.getDeclaredField("portalHost").apply {
+                isAccessible = true
+            }.set(activity, trustedHost)
+            getWebView(activity).loadUrl(fixtureUrl)
+        }
+        waitFor(
+            scenario,
+            "document.readyState === 'complete' && document.querySelector('#open-photo-studio') && document.querySelector('#photo-studio-result')?.dataset.ready === 'true'",
+            "trusted local QA fixture to load"
+        )
+        assertEquals(
+            "The Android WebView must use its native SmartPrint user-agent marker.",
+            "true",
+            evaluate(scenario, "navigator.userAgent.includes('SmartPrintAndroid/1')")
+        )
+        return scenario
+    }
+
+    private fun tapElement(scenario: ActivityScenario<MainActivity>, elementExpression: String) {
+        val rectangle = evaluate(
+            scenario,
+            """(() => {
+              const element = $elementExpression;
+              if (!element) return null;
+              const rect = element.getBoundingClientRect();
+              return JSON.stringify({
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2
+              });
+            })()"""
+        )
+        val bounds = JSONObject(decodeJavascriptString(rectangle))
+        scenario.onActivity { activity ->
+            val view = getWebView(activity)
+            val density = activity.resources.displayMetrics.density
+            val x = (bounds.getDouble("x") * density).toFloat().coerceIn(1f, (view.width - 2).toFloat())
+            val y = (bounds.getDouble("y") * density).toFloat().coerceIn(1f, (view.height - 2).toFloat())
+            val downTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+            val up = MotionEvent.obtain(downTime, downTime + 70, MotionEvent.ACTION_UP, x, y, 0)
+            try {
+                view.dispatchTouchEvent(down)
+                view.dispatchTouchEvent(up)
+            } finally {
+                down.recycle()
+                up.recycle()
+            }
+        }
+    }
+
+    private fun tapCssSelector(scenario: ActivityScenario<MainActivity>, selector: String) {
+        tapElement(scenario, "document.querySelector(" + JSONObject.quote(selector) + ")")
+    }
+
+    private fun tapCssPoint(scenario: ActivityScenario<MainActivity>, xCss: Double, yCss: Double) {
+        val coordinates = evaluate(
+            scenario,
+            "JSON.stringify({ x: $xCss, y: $yCss })"
+        )
+        val point = JSONObject(decodeJavascriptString(coordinates))
+        scenario.onActivity { activity ->
+            val view = getWebView(activity)
+            val density = activity.resources.displayMetrics.density
+            val x = (point.getDouble("x") * density).toFloat().coerceIn(1f, (view.width - 2).toFloat())
+            val y = (point.getDouble("y") * density).toFloat().coerceIn(1f, (view.height - 2).toFloat())
+            val downTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+            val up = MotionEvent.obtain(downTime, downTime + 70, MotionEvent.ACTION_UP, x, y, 0)
+            try {
+                view.dispatchTouchEvent(down)
+                view.dispatchTouchEvent(up)
+            } finally {
+                down.recycle()
+                up.recycle()
+            }
+        }
+    }
+
+    private fun tapPhotoSheetPoint(scenario: ActivityScenario<MainActivity>, xMm: Double, yMm: Double) {
+        val x = xMm / 210.0
+        val y = yMm / 297.0
+        val coordinates = evaluate(
+            scenario,
+            """(() => {
+              const canvas = document.querySelector('[role="dialog"] canvas');
+              const rect = canvas.getBoundingClientRect();
+              return JSON.stringify({
+                x: rect.left + rect.width * $x,
+                y: rect.top + rect.height * $y
+              });
+            })()"""
+        )
+        val point = JSONObject(decodeJavascriptString(coordinates))
+        tapCssPoint(scenario, point.getDouble("x"), point.getDouble("y"))
+    }
+
+    private fun tapButtonText(scenario: ActivityScenario<MainActivity>, prefix: String) {
+        val quoted = JSONObject.quote(prefix)
+        tapElement(
+            scenario,
+            "Array.from(document.querySelectorAll('[role=dialog] button')).find(button => button.innerText.trim().startsWith($quoted))"
+        )
+    }
+
+    private fun setLabelValue(
+        scenario: ActivityScenario<MainActivity>,
+        labelText: String,
+        value: String
+    ) {
+        val label = JSONObject.quote(labelText)
+        val nextValue = JSONObject.quote(value)
+        val changed = evaluate(
+            scenario,
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                .find(item => item.textContent.trim().startsWith($label));
+              const control = label?.querySelector('input, select');
+              if (!control) return false;
+              const prototype = control instanceof HTMLSelectElement
+                ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+              const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+              if (!setter) return false;
+              setter.call(control, $nextValue);
+              control.dispatchEvent(new Event('input', { bubbles: true }));
+              control.dispatchEvent(new Event('change', { bubbles: true }));
+              control.blur();
+              return control.value === $nextValue;
+            })()"""
+        )
+        assertEquals("Could not set Photo Studio field: " + labelText, "true", changed)
+    }
+
+    private fun setRangeValue(
+        scenario: ActivityScenario<MainActivity>,
+        labelText: String,
+        value: Int
+    ) {
+        val label = JSONObject.quote(labelText)
+        val rectText = evaluate(
+            scenario,
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                .find(item => item.textContent.trim().startsWith($label));
+              const range = label?.querySelector('input[type="range"]');
+              if (!range) return null;
+              const rect = range.getBoundingClientRect();
+              const min = Number(range.min || 0);
+              const max = Number(range.max || 100);
+              const current = Number(range.value);
+              const point = (v) => rect.left + (max === min ? 0.5 : (v - min) / (max - min)) * rect.width;
+              return JSON.stringify({
+                startX: point(current), endX: point($value),
+                y: rect.top + rect.height / 2,
+                min, max
+              });
+            })()"""
+        )
+        val bounds = JSONObject(decodeJavascriptString(rectText))
+        val minimum = bounds.getDouble("min")
+        val maximum = bounds.getDouble("max")
+        require(value.toDouble() in minimum..maximum) {
+            "Photo Studio range value $value is outside $labelText bounds $minimum..$maximum."
+        }
+        scenario.onActivity { activity ->
+            val view = getWebView(activity)
+            val density = activity.resources.displayMetrics.density
+            val startX = (bounds.getDouble("startX") * density).toFloat().coerceIn(1f, (view.width - 2).toFloat())
+            val endX = (bounds.getDouble("endX") * density).toFloat().coerceIn(1f, (view.width - 2).toFloat())
+            val y = (bounds.getDouble("y") * density).toFloat().coerceIn(1f, (view.height - 2).toFloat())
+            val downTime = SystemClock.uptimeMillis()
+            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, startX, y, 0)
+            try {
+                view.dispatchTouchEvent(down)
+                val steps = 8
+                for (step in 1..steps) {
+                    val x = startX + (endX - startX) * step / steps
+                    val move = MotionEvent.obtain(
+                        downTime, downTime + step * 25L, MotionEvent.ACTION_MOVE, x, y, 0
+                    )
+                    try { view.dispatchTouchEvent(move) } finally { move.recycle() }
+                }
+                val up = MotionEvent.obtain(
+                    downTime, downTime + (steps + 1) * 25L, MotionEvent.ACTION_UP, endX, y, 0
+                )
+                try { view.dispatchTouchEvent(up) } finally { up.recycle() }
+            } finally {
+                down.recycle()
+            }
+        }
+        waitFor(
+            scenario,
+            "(() => { const dialog = document.querySelector('[role=dialog]'); const label = Array.from(dialog?.querySelectorAll('label') ?? []).find(item => item.textContent.trim().startsWith($label)); return Number(label?.querySelector('input[type=range]')?.value) === $value; })()",
+            "$labelText range to reach $value through touch input"
+        )
+    }
+
+    private fun clickButton(scenario: ActivityScenario<MainActivity>, prefix: String) {
+        // Use a real Android MotionEvent against the native WebView for each visible tool/button.
+        tapButtonText(scenario, prefix)
+        androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+    }
+
+    private fun isSecure(scenario: ActivityScenario<MainActivity>): Boolean {
+        val secure = AtomicReference<Boolean>()
+        scenario.onActivity { activity ->
+            secure.set(
+                activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
+            )
+        }
+        return secure.get() == true
+    }
+
+    @Test
+    fun customerPhotoStudioRunsInsideAndroidWebViewAndProducesExactMultiPagePdf() {
+        val scenario = openFixture("?mode=customer&theme=light")
+        try {
+            tapCssSelector(scenario, "#open-photo-studio")
+            waitFor(scenario, "document.querySelector('[role=dialog]') !== null", "Photo Studio dialog")
+            waitFor(scenario, "Boolean(window.SmartPrintNative)", "trusted native bridge")
+            waitFor(
+                scenario,
+                "document.querySelector('[role=dialog]')?.getAttribute('aria-busy') === 'false'",
+                "decoded source image"
+            )
+            val secureDeadline = SystemClock.uptimeMillis() + 5_000
+            while (!isSecure(scenario) && SystemClock.uptimeMillis() < secureDeadline) Thread.sleep(100)
+            assertTrue("Photo Studio must protect the native Android window while displaying a photo.", isSecure(scenario))
+
+            clickButton(scenario, "Crop")
+            setRangeValue(scenario, "Zoom", 1)
+            setRangeValue(scenario, "Horizontal position", 50)
+            setRangeValue(scenario, "Vertical position", 50)
+            clickButton(scenario, "Reset crop")
+
+            clickButton(scenario, "Looks")
+            clickButton(scenario, "Warm")
+            clickButton(scenario, "Crisp")
+            clickButton(scenario, "Black & white")
+            setRangeValue(scenario, "Brightness", 110)
+            setRangeValue(scenario, "Contrast", 120)
+            setRangeValue(scenario, "Colour", 90)
+            clickButton(scenario, "Reset")
+
+            clickButton(scenario, "Background")
+            clickButton(scenario, "Pick background from photo")
+            tapPhotoSheetPoint(scenario, 5.0, 10.0)
+            assertEquals(
+                "A4 page margin must not sample a background colour.",
+                "true",
+                evaluate(
+                    scenario,
+                    "document.querySelector('[role=dialog]')?.innerText.includes('Not selected')"
+                )
+            )
+            tapPhotoSheetPoint(scenario, 13.5, 10.0)
+            waitFor(
+                scenario,
+                "document.querySelector('[role=dialog]')?.innerText.includes('#D8E7F5')",
+                "sampled synthetic background colour"
+            )
+            setLabelValue(scenario, "Replacement background", "#f3f6fa")
+            setRangeValue(scenario, "Background tolerance", 65)
+            clickButton(scenario, "Reset background")
+
+            val captionsEnabled = evaluate(
+                scenario,
+                """(() => {
+                  const checkbox = Array.from(document.querySelectorAll('[role="dialog"] label'))
+                    .find(item => item.textContent.includes('Add name and DOB to each photo'))
+                    ?.querySelector('input[type="checkbox"]');
+                  if (!checkbox) return false;
+                  checkbox.checked = true;
+                  checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+                  return true;
+                })()"""
+            )
+            assertEquals("true", captionsEnabled)
+            setLabelValue(scenario, "Name for form (optional)", "Android Photo QA")
+            setLabelValue(scenario, "Date of birth (optional)", "2000-02-29")
+            clickButton(scenario, "Text")
+            setLabelValue(scenario, "Caption font size", "7")
+            setLabelValue(scenario, "Caption colour", "#ff0000")
+            clickButton(scenario, "Sheet")
+
+            setLabelValue(scenario, "Photo size", "35x45")
+            setLabelValue(scenario, "Number of photos", "50")
+            setLabelValue(scenario, "Photos per A4 page", "9")
+            waitFor(
+                scenario,
+                "Array.from(document.querySelectorAll('[class*=sheetSummary] > div')).some(row => row.textContent.includes('A4 pages in this job') && row.querySelector('strong')?.textContent === '6')",
+                "six-page count for 50 photos at nine per page"
+            )
+
+            repeat(5) { clickButton(scenario, "Next A4 page") }
+            waitFor(
+                scenario,
+                "document.querySelector('[role=dialog]')?.innerText.includes('Page 6 of 6')",
+                "last page navigation"
+            )
+            tapButtonText(scenario, "Prepare A4 sheet")
+            waitFor(
+                scenario,
+                "document.querySelector('#photo-studio-result')?.textContent.includes('application/pdf')",
+                "generated Android photo PDF"
+            )
+            val resultText = evaluate(
+                scenario,
+                "JSON.stringify(JSON.parse(document.querySelector('#photo-studio-result').textContent))"
+            )
+            val result = JSONObject(decodeJavascriptString(resultText))
+            assertEquals("customer", result.getString("mode"))
+            assertEquals("application/pdf", result.getString("mediaType"))
+            assertEquals("35x45", result.getString("sizeCode"))
+            assertEquals(50, result.getInt("photoCount"))
+            assertEquals(9, result.getInt("photosPerPage"))
+            assertEquals(6, result.getInt("pageCount"))
+            assertEquals(6, result.getInt("mediaBoxCount"))
+            assertEquals(6, result.getInt("previewPageCount"))
+            assertTrue(result.getLong("bytes") in 1L..(20L * 1024L * 1024L))
+
+            val rasterSizes = result.getJSONArray("pdfImageSizes")
+            assertEquals(6, rasterSizes.length())
+            repeat(rasterSizes.length()) { page ->
+                val size = rasterSizes.getJSONArray(page)
+                assertEquals(2480, size.getInt(0))
+                assertEquals(3508, size.getInt(1))
+            }
+
+            val embeddedPages = result.getJSONArray("embeddedPreviewPages")
+            assertEquals(6, embeddedPages.length())
+            repeat(embeddedPages.length()) { page ->
+                assertTrue("PDF page " + (page + 1) + " must embed its exact prepared raster.", embeddedPages.getBoolean(page))
+            }
+
+            val pixelProbes = result.getJSONArray("pixelProbes")
+            assertEquals(50, pixelProbes.length())
+            var finalPageTiles = 0
+            repeat(pixelProbes.length()) { index ->
+                val probe = pixelProbes.getJSONObject(index)
+                val pixels = probe.getJSONArray("rgb")
+                assertTrue((0 until pixels.length()).any { pixels.getInt(it) < 245 })
+                if (probe.getInt("page") == 6) {
+                    assertEquals(finalPageTiles, probe.getInt("slot"))
+                    finalPageTiles += 1
+                }
+            }
+            assertEquals(5, finalPageTiles)
+            val unused = result.getJSONArray("finalUnusedSlotRgb")
+            assertTrue("The final unused grid slot must remain white.", (0 until unused.length()).all { unused.getInt(it) > 245 })
+            assertTrue("Caption colour must be present in the generated Android PDF.", pixelProbes.getJSONObject(0).getInt("captionRedPixels") > 0)
+
+            waitFor(scenario, "document.querySelector('[role=dialog]') === null", "Photo Studio close after apply")
+            val releaseDeadline = SystemClock.uptimeMillis() + 5_000
+            while (isSecure(scenario) && SystemClock.uptimeMillis() < releaseDeadline) Thread.sleep(100)
+            assertFalse("Native screenshot protection must be released after Photo Studio closes.", isSecure(scenario))
+        } finally {
+            scenario.close()
+        }
+    }
+
+    @Test
+    fun androidSystemBackClosesPhotoStudioBeforeLeavingTheCustomerStation() {
+        val scenario = openFixture("?mode=customer&theme=dark")
+        try {
+            tapCssSelector(scenario, "#open-photo-studio")
+            waitFor(scenario, "document.querySelector('[role=dialog]') !== null", "Photo Studio dialog")
+            val originalPath = decodeJavascriptString(evaluate(scenario, "window.location.pathname"))
+            val secureDeadline = SystemClock.uptimeMillis() + 5_000
+            while (!isSecure(scenario) && SystemClock.uptimeMillis() < secureDeadline) Thread.sleep(100)
+            assertTrue(isSecure(scenario))
+
+            scenario.onActivity { activity -> activity.onBackPressedDispatcher.onBackPressed() }
+            waitFor(scenario, "document.querySelector('[role=dialog]') === null", "system Back to close Photo Studio")
+            assertEquals(originalPath, decodeJavascriptString(evaluate(scenario, "window.location.pathname")))
+            val releaseDeadline = SystemClock.uptimeMillis() + 5_000
+            while (isSecure(scenario) && SystemClock.uptimeMillis() < releaseDeadline) Thread.sleep(100)
+            assertFalse(isSecure(scenario))
+        } finally {
+            scenario.close()
+        }
+    }
+
+    @Test
+    fun photoStudioModalStateAndSecureFlagSurviveActivityRecreation() {
+        val scenario = openFixture("?mode=customer&theme=dark")
+        try {
+            tapCssSelector(scenario, "#open-photo-studio")
+            waitFor(scenario, "document.querySelector('[role=dialog]') !== null", "Photo Studio dialog")
+            setLabelValue(scenario, "Number of photos", "17")
+            waitFor(
+                scenario,
+                "Array.from(document.querySelectorAll('[class*=sheetSummary] > div')).some(row => row.textContent.includes('A4 pages in this job') && row.querySelector('strong')?.textContent === '1')",
+                "photo count before Activity recreation"
+            )
+            val secureDeadline = SystemClock.uptimeMillis() + 5_000
+            while (!isSecure(scenario) && SystemClock.uptimeMillis() < secureDeadline) Thread.sleep(100)
+            assertTrue(isSecure(scenario))
+
+            scenario.recreate()
+            waitFor(scenario, "document.querySelector('[role=dialog]') !== null", "Photo Studio after Activity recreation")
+            assertTrue("The modal's screenshot protection must be restored with the Activity.", isSecure(scenario))
+            assertEquals(
+                "true",
+                evaluate(
+                    scenario,
+                    "Array.from(document.querySelectorAll('[role=dialog] label')).find(label => label.textContent.trim().startsWith('Number of photos'))?.querySelector('input')?.value === '17'"
+                )
+            )
+        } finally {
+            scenario.close()
+        }
+    }
+}

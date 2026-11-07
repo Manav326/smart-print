@@ -1033,6 +1033,7 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.PrintKind,
             item.PhotoSizeCode,
             item.PhotoCount,
+            item.PhotosPerPage,
             item.Currency,
             item.QuotedAmountMinor,
             item.RejectedPageNumbersJson,
@@ -2007,6 +2008,7 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
+        job.PhotosPerPage,
             job.PhotoUnitPriceMinorSnapshot,
             job.Currency,
             job.QuotedAmountMinor,
@@ -2101,6 +2103,7 @@ shop.MapGet("/print-jobs", async (
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
+        job.PhotosPerPage,
             job.PhotoUnitPriceMinorSnapshot,
             job.Currency,
             job.QuotedAmountMinor,
@@ -3178,6 +3181,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     job.PrintKind = "PHOTO";
     job.PhotoSizeCode = photoSizeCode;
     job.PhotoCount = photoCount;
+    job.PhotosPerPage = photosPerPage;
     job.PhotoUnitPriceMinorSnapshot = unitPrice;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
@@ -3229,6 +3233,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         job.PrintKind,
         job.PhotoSizeCode,
         job.PhotoCount,
+        job.PhotosPerPage,
         job.PhotoUnitPriceMinorSnapshot,
         job.QuotedAmountMinor,
         job.PricingVersion,
@@ -5454,6 +5459,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.PageCount == request.PageCount &&
         job.PhotoSizeCode == request.PhotoSizeCode &&
         job.PhotoCount == request.PhotoCount &&
+        job.PhotosPerPage == request.PhotosPerPage &&
         string.Equals(
             job.PageRefundAllocationsJson,
             JsonSerializer.Serialize(PricingCalculator.CalculatePhotoPageRefundAllocations(
@@ -5479,6 +5485,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
                 job.PrintKind,
                 job.PhotoSizeCode,
                 job.PhotoCount,
+        job.PhotosPerPage,
                 job.PhotoUnitPriceMinorSnapshot,
                 job.QuotedAmountMinor,
                 job.PricingVersion,
@@ -5568,6 +5575,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     job.PrintKind = "PHOTO";
     job.PhotoSizeCode = request.PhotoSizeCode;
     job.PhotoCount = request.PhotoCount;
+    job.PhotosPerPage = request.PhotosPerPage;
     job.PhotoUnitPriceMinorSnapshot = unitPrice;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
@@ -5600,6 +5608,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.PrintKind,
         job.PhotoSizeCode,
         job.PhotoCount,
+        job.PhotosPerPage,
         job.PhotoUnitPriceMinorSnapshot,
         job.QuotedAmountMinor,
         job.PricingVersion,
@@ -8034,6 +8043,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.PrintKind = "DOCUMENT";
             job.PhotoSizeCode = null;
             job.PhotoCount = 0;
+            job.PhotosPerPage = null;
             job.PhotoUnitPriceMinorSnapshot = 0;
         }
 
@@ -8081,6 +8091,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
+        job.PhotosPerPage,
             PhotoUnitPriceMinor = photoUnitPriceMinor,
             job.Currency,
             job.QuotedAmountMinor,
@@ -9010,6 +9021,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.PrintKind,
             item.PhotoSizeCode,
             item.PhotoCount,
+            item.PhotosPerPage,
             item.PhotoUnitPriceMinorSnapshot,
             item.Currency,
             item.QuotedAmountMinor,
@@ -9344,10 +9356,9 @@ static bool IsTenantRecoveryOperation(
     bool shopOperations,
     bool allowPaidJobClaimsWhileSuspended = false)
 {
-    if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
-        return true;
-
     var path = context.Request.Path.Value ?? string.Empty;
+    if (TenantAccessRules.IsReadRecoveryOperation(context.Request.Method, path, shopOperations))
+        return true;
     if (!shopOperations && allowPaidJobClaimsWhileSuspended &&
         HttpMethods.IsPost(context.Request.Method) &&
         (path.EndsWith("/jobs/claim", StringComparison.OrdinalIgnoreCase) ||

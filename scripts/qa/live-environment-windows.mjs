@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createInterface } from 'node:readline/promises';
@@ -7,9 +7,12 @@ import { stdin as input, stdout as output } from 'node:process';
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) throw new Error('PLAYWRIGHT_MODULE_DIR is required.');
-const baseUrl = new URL(process.env.SMARTPRINT_LIVE_QA_BASE_URL || 'https://smartprint.quantaedge.in');
-if (baseUrl.protocol !== 'https:' || baseUrl.hostname !== 'smartprint.quantaedge.in' || baseUrl.pathname !== '/' || baseUrl.search || baseUrl.hash) {
-  throw new Error('This suite is restricted to https://smartprint.quantaedge.in.');
+const qaConfig = JSON.parse(readFileSync(new URL('./smartprint-qa.config.json', import.meta.url), 'utf8'));
+const configuredPublicOrigin = new URL(qaConfig.origins.public);
+const baseUrl = new URL(process.env.SMARTPRINT_LIVE_QA_BASE_URL || configuredPublicOrigin.origin);
+if (baseUrl.protocol !== 'https:' || baseUrl.origin !== configuredPublicOrigin.origin ||
+    baseUrl.pathname !== '/' || baseUrl.search || baseUrl.hash || baseUrl.username || baseUrl.password) {
+  throw new Error('This suite is restricted to the configured SmartPrint public origin: ' + configuredPublicOrigin.origin);
 }
 const origin = baseUrl.origin;
 const outputDirectory = process.env.LIVE_QA_ARTIFACT_DIR || 'artifacts/live-environment-qa-windows-headed';
@@ -48,7 +51,6 @@ const report = {
     printDispatches: false,
     shopSettingsChanged: false,
     temporaryCustomerSession: runStation,
-    documentsUploaded: false,
     printJobsCreated: false,
     testJobRejectedBeforePayment: false
   },
@@ -188,6 +190,77 @@ async function browserRangeProbe(path) {
 }
 
 
+
+async function browserFullDownloadProbe(path, expectedFileName) {
+  const requestUrl = new URL(path, origin).toString();
+  const result = await page.evaluate(async ({ requestUrl, expectedMaximumBytes }) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 120000);
+    try {
+      const response = await fetch(requestUrl, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/octet-stream' },
+        signal: controller.signal
+      });
+      const headers = {};
+      for (const [key, value] of response.headers.entries()) headers[key.toLowerCase()] = value;
+      if (!response.ok) {
+        await response.body?.cancel();
+        return { status: response.status, url: response.url, headers, bytesReceived: 0 };
+      }
+
+      const contentLength = Number(headers['content-length']);
+      if (Number.isFinite(contentLength) && contentLength > expectedMaximumBytes) {
+        await response.body?.cancel();
+        return { status: response.status, url: response.url, headers, bytesReceived: 0, tooLarge: true };
+      }
+
+      // Read the complete asset but discard each chunk immediately. This
+      // verifies a real browser transfer without retaining a 30–50 MB file
+      // in memory or saving release binaries onto a shop machine.
+      const reader = response.body?.getReader();
+      if (!reader) return { status: response.status, url: response.url, headers, bytesReceived: 0 };
+      let bytesReceived = 0;
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        bytesReceived += chunk.value?.byteLength ?? 0;
+        if (bytesReceived > expectedMaximumBytes) {
+          await reader.cancel();
+          return { status: response.status, url: response.url, headers, bytesReceived, tooLarge: true };
+        }
+      }
+      return { status: response.status, url: response.url, headers, bytesReceived };
+    } finally {
+      clearTimeout(timer);
+    }
+  }, { requestUrl, expectedMaximumBytes: qaConfig.downloads.maxTransferBytes });
+
+  assert.equal(new URL(result.url).origin, origin, path + ' redirected outside the SmartPrint origin.');
+  assert.equal(result.status, 200, path + ' should complete with HTTP 200.');
+  assert.equal(result.tooLarge, undefined, path + ' exceeded the configured QA safety limit.');
+  assert.ok(result.bytesReceived > 0, path + ' returned an empty download.');
+  assert.ok(
+    (result.headers['content-disposition'] || '').toLowerCase().includes(expectedFileName.toLowerCase()),
+    path + ' did not advertise the expected attachment name ' + expectedFileName + '.'
+  );
+
+  const contentLength = Number(result.headers['content-length']);
+  if (Number.isFinite(contentLength) && contentLength > 0) {
+    assert.equal(result.bytesReceived, contentLength, path + ' did not transfer its advertised Content-Length.');
+  }
+  return {
+    status: result.status,
+    fileName: expectedFileName,
+    bytesReceived: result.bytesReceived,
+    contentLength: Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null,
+    contentType: result.headers['content-type'] || null,
+    contentDisposition: result.headers['content-disposition'] || null
+  };
+}
+
+
 function createSyntheticPdfBase64() {
   const stream = 'BT /F1 18 Tf 72 720 Td (SmartPrint QA synthetic test document) Tj ET';
   const objects = [
@@ -212,7 +285,8 @@ function createSyntheticPdfBase64() {
   return Buffer.from(pdf, 'ascii').toString('base64');
 }
 
-async async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, fileName, base64) {
+async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, fileName, base64) {
+  await page.bringToFront();
   const result = await page.evaluate(async ({ sessionToken, batchId, idempotencyKey, fileName, base64 }) => {
     const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
     const form = new FormData();
@@ -227,6 +301,7 @@ async async function uploadSyntheticPdf(sessionToken, batchId, idempotencyKey, f
       method: 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
+      signal: AbortSignal.timeout(30000),
       headers: {
         'X-Print-Session': sessionToken,
         'Idempotency-Key': idempotencyKey,
@@ -636,7 +711,7 @@ try {
   });
 
   await record('Public release metadata and cache policy', async () => {
-    const response = await browserFetch('/downloads/status');
+    const response = await browserFetch(qaConfig.downloads.statusPath);
     assert.ok([200, 503].includes(response.status), `Unexpected release metadata HTTP ${response.status}.`);
     if (response.status === 503) return { status: response.status, warning: 'Upstream release metadata unavailable; retryable state is expected.' };
     const body = JSON.parse(response.body);
@@ -649,13 +724,23 @@ try {
   });
 
   await record('Windows download supports an exact one-byte range response', async () => {
-    if (releaseMetadata && !releaseMetadata.windowsAvailable) return { status: 'SKIPPED', reason: 'Windows installer is marked unavailable by release metadata.' };
-    return await browserRangeProbe('/downloads/windows');
+    if (!releaseMetadata || releaseMetadata.windowsAvailable !== true) return { status: 'SKIPPED', reason: 'Windows installer is not confirmed available by release metadata.' };
+    return await browserRangeProbe(qaConfig.downloads.windowsPath);
+  });
+
+  await record('Windows installer completes a full same-origin browser download', async () => {
+    if (!releaseMetadata || releaseMetadata.windowsAvailable !== true) return { status: 'SKIPPED', reason: 'Windows installer is not confirmed available by release metadata.' };
+    return await browserFullDownloadProbe(qaConfig.downloads.windowsPath, qaConfig.downloads.windowsAssetName);
   });
 
   await record('Android download supports an exact one-byte range response when published', async () => {
-    if (!releaseMetadata || releaseMetadata.androidAvailable !== true) return { status: 'SKIPPED', reason: 'Android asset is marked unavailable by release metadata.' };
-    return await browserRangeProbe('/downloads/android');
+    if (!releaseMetadata || releaseMetadata.androidAvailable !== true) return { status: 'SKIPPED', reason: 'Android asset is not confirmed available by release metadata.' };
+    return await browserRangeProbe(qaConfig.downloads.androidPath);
+  });
+
+  await record('Android APK completes a full same-origin browser download', async () => {
+    if (!releaseMetadata || releaseMetadata.androidAvailable !== true) return { status: 'SKIPPED', reason: 'Android asset is not confirmed available by release metadata.' };
+    return await browserFullDownloadProbe(qaConfig.downloads.androidPath, qaConfig.downloads.androidAssetName);
   });
 
   await record('Shop sign-in route renders', async () => visitRoute('/shop', '.auth-screen', 'shop login'));

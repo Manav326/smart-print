@@ -208,7 +208,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gradle --no-daemon -p apps/android \
+          gradle --no-daemon --console=plain -p apps/android \
             -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
             -PsmartPrintVersionCode="$GITHUB_RUN_NUMBER" \
             -PsmartPrintVersionName="$RELEASE_TAG" \

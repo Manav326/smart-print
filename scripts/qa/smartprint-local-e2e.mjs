@@ -1,14 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { executeIsolatedQaRecord, shouldFailQaRun } from "./local-e2e-record-runner.mjs";
+import { getUnexpectedHttpResponses } from "./local-e2e-http-audit.mjs";
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) throw new Error("PLAYWRIGHT_MODULE_DIR is required.");
-const baseUrl = new URL(process.env.SMARTPRINT_QA_BASE_URL || "http://127.0.0.1:3000");
-const allowedHosts = new Set(["127.0.0.1", "localhost"]);
-if (baseUrl.protocol !== "http:" || !allowedHosts.has(baseUrl.hostname) || baseUrl.port !== "3000" || baseUrl.pathname !== "/" || baseUrl.search || baseUrl.hash) {
-  throw new Error("The full E2E suite is restricted to the local SmartPrint portal at http://127.0.0.1:3000. It will not create QA data on production.");
+const qaConfig = JSON.parse(readFileSync(new URL("./smartprint-qa.config.json", import.meta.url), "utf8"));
+const configuredLocalUrl = new URL(qaConfig.origins.local);
+const allowedHosts = new Set(["127.0.0.1", "localhost", "[::1]"]);
+if (configuredLocalUrl.protocol !== "http:" || !allowedHosts.has(configuredLocalUrl.hostname) ||
+    configuredLocalUrl.pathname !== "/" || configuredLocalUrl.search || configuredLocalUrl.hash ||
+    configuredLocalUrl.username || configuredLocalUrl.password) {
+  throw new Error("The central SmartPrint local origin must be a plain loopback HTTP origin.");
+}
+const baseUrl = new URL(process.env.SMARTPRINT_QA_BASE_URL || configuredLocalUrl.origin);
+if (baseUrl.origin !== configuredLocalUrl.origin || baseUrl.pathname !== "/" ||
+    baseUrl.search || baseUrl.hash || baseUrl.username || baseUrl.password) {
+  throw new Error("The full E2E suite is restricted to the configured local SmartPrint portal at " +
+    configuredLocalUrl.origin + ". It will not create QA data on production.");
 }
 
 const requiredEnvironment = [
@@ -42,6 +53,9 @@ const report = {
     registeredLocalQaShops: false,
     registeredLocalQaCustomer: false,
     bootstrappedLocalQaPlatformAdmin: true,
+    qaPlanPublished: false,
+    qaPlanAssignedToShop1: false,
+    qaPlanAssignedToShop2: false,
     assignedQaOnlyFreePlan: false,
     syntheticDocumentsUploaded: false,
     realLocalDatabaseJobsCreated: false,
@@ -61,7 +75,9 @@ const report = {
   },
   checks: [],
   warnings: [],
-  errors: []
+  scopeNotes: [],
+  errors: [],
+  caseMappingErrors: []
 };
 
 let browser;
@@ -71,10 +87,17 @@ let pageErrors = [];
 let consoleErrors = [];
 let serverErrors = [];
 let resourceErrors = [];
+let requestFailures = [];
+let httpErrorResponses = [];
+let expectedHttpErrors = [];
+let networkStatusConsoleErrors = [];
 let shop1Page;
 let shop2Page;
 let adminPage;
 let customerPage;
+let guestCustomerPage;
+let guestCustomerSession;
+
 let shop1Tokens;
 let shop2Tokens;
 let adminTokens;
@@ -92,10 +115,12 @@ let batchCustomerPage;
 let batchCustomerSession;
 let reviewedBatchId;
 let reviewedBatchShopJobs = [];
+let reviewedBatchJobIdsByFileName = null;
 let paymentRejectedJob;
 let paymentRejectedBatchId;
 let paymentRejectedBatchPaymentId;
 let qaPlanVersionId;
+let qaPlan;
 let qaAgentEnrollment;
 let qaAgentIdentity;
 let qaAgentLastId;
@@ -113,9 +138,13 @@ const CASE_IDS_BY_RECORD_NAME = new Map([
   ["Create or sign in to the second real QA shop through the shop UI", ["SHOPAUTH-004", "SHOPAUTH-005", "SHOPAUTH-006"]],
   ["Create or sign in to the real global customer account", ["CUSTAUTH-001", "CUSTAUTH-002", "CUSTAUTH-003", "CUSTAUTH-004"]],
   ["Bootstrap-created platform administrator signs in through the real admin UI", ["ADMINAUTH-001", "ADMINAUTH-002"]],
-  ["Create and publish a free QA-only plan, then assign it through the platform UI", ["PLAN-001", "PLAN-002", "PLAN-003", "PLAN-004", "PLAN-005", "PLAN-006"]],
+  ["Create and publish a free QA-only plan through the platform UI", ["PLAN-001", "PLAN-002"]],
+  ["Assign the QA-only plan to Shop One through the platform UI", ["PLAN-003", "PLAN-004"]],
+  ["Assign the QA-only plan to Shop Two through the platform UI", ["PLAN-005", "PLAN-006"]],
   ["Platform admin navigates every real control-centre section", ["PLATFORM-005", "PLATFORM-006", "PLATFORM-007", "PLATFORM-008", "PLATFORM-009"]],
-  ["Shop one configures real QA printer/station, pricing and payment methods", ["SHOP-009", "SHOP-010", "SHOP-011", "SHOP-012", "SHOP-013", "SHOP-014"]],
+  ["Shop one provisions real QA printer and QR station", ["SHOP-009", "SHOP-010"]],
+  ["Shop one configures print pricing through the real UI", ["SHOP-011", "SHOP-012"]],
+  ["Shop one configures payment methods through the real UI", ["SHOP-013", "SHOP-014"]],
   ["Shop two configures isolated real QA printer/station", ["SHOP-015", "SHOP-016", "SHOP-017", "SHOP-018"]],
   ["Shop one navigates every real sidebar section and the account-menu-only tools", [
     "SHOPUI-001", "SHOPUI-002", "SHOPUI-003", "SHOPUI-004", "SHOPUI-005",
@@ -128,7 +157,8 @@ const CASE_IDS_BY_RECORD_NAME = new Map([
     "SHOPUI-026", "SHOPUI-027"
   ]],
   ["Shop, platform-admin and cross-tenant authorization boundaries", ["RBAC-001", "RBAC-002", "RBAC-003", "RBAC-004", "RBAC-005"]],
-  ["Customer opens shop-one QR station and receives a customer-bound real session", ["QR-008", "QR-009", "QR-010"]],
+  ["Customer opens the shop-one station link in a guest browser session", ["QR-008", "QR-009"]],
+  ["Customer opens the shop-one station with authenticated customer identity", ["QR-010"]],
   ["Customer QR session is linked to the global customer account", ["CUST-001", "CUST-002"]],
   ["Real document validator rejects a malformed PDF without creating a print job", ["DOC-001", "DOC-002"]],
   ["Customer uploads a synthetic two-page PDF through the real portal UI", ["DOC-003", "DOC-004", "DOC-005"]],
@@ -166,50 +196,107 @@ const PLANNED_CASE_IDS = [
     "TENANT-001", "TENANT-002", "TENANT-003",
     "PHOTO-001", "PHOTO-002", "PHOTO-003", "PHOTO-004", "PHOTO-005", "PHOTO-006",
     "REPORT-001", "REPORT-002", "REPORT-003", "REPORT-004",
-    "RBAC-007", "RBAC-008", "RBAC-009", "RBAC-010", "TENANT-005", "TENANT-006", "TENANT-007", "TENANT-008", "TENANT-009", "TENANT-010", "QR-011", "QR-012", "QR-013", "UPLOAD-003", "UPLOAD-004", "DOC-006", "JOB-010", "JOB-011", "PLATFORM-010", "PLATFORM-011", "PLATFORM-012", "PLATFORM-013", "PLATFORM-014", "SHOP-019", "SHOP-020", "SHOP-021", "SHOP-022", "SHOP-023", "SHOP-024", "PAY-011", "PAY-012", "PAY-013", "AGENT-030", "AGENT-031", "AGENT-032", "AGENT-033"
+    "RBAC-007", "RBAC-008", "RBAC-009", "RBAC-010", "TENANT-005", "TENANT-006", "TENANT-007", "TENANT-008", "TENANT-009", "TENANT-010", "QR-011", "QR-012", "QR-013", "UPLOAD-003", "UPLOAD-004", "DOC-006", "JOB-010", "JOB-011", "PLATFORM-010", "PLATFORM-011", "PLATFORM-012", "PLATFORM-013", "PLATFORM-014", "SHOP-019", "SHOP-020", "SHOP-021", "SHOP-022", "SHOP-023", "SHOP-024", "PAY-011", "PAY-012", "PAY-013", "AGENT-030", "AGENT-031", "AGENT-032", "AGENT-033", "GUEST-001", "GUEST-002", "GUEST-003", "GUEST-004", "GUEST-005", "GUEST-006", "GUEST-007"
   ])
 ];
 
+const recordStatuses = new Map();
+const recordCaseIdOwners = new Map();
+const plannedCaseIdSet = new Set(PLANNED_CASE_IDS);
+
 async function record(name, action, caseIds = CASE_IDS_BY_RECORD_NAME.get(name) ?? []) {
-  const started = Date.now();
-  try {
-    const details = await action();
-    const status = details?.status === "SKIPPED" ? "SKIPPED" : details?.warning ? "WARN" : "PASS";
-    if (status === "WARN") report.warnings.push({ name, message: details.warning });
-    report.checks.push({
-      id: "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0"),
-      name,
-      caseIds,
-      status,
-      durationMs: Date.now() - started,
-      details: details ?? null
-    });
-    console.log(status + " " + name);
-    return details;
-  } catch (error) {
-    const message = String(error instanceof Error ? error.message : error).slice(0, 1600);
-    report.checks.push({
-      id: "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0"),
-      name,
-      caseIds,
-      status: "FAIL",
-      durationMs: Date.now() - started,
-      error: message
-    });
-    report.errors.push({ name, message });
-    console.error("FAIL " + name + ": " + message);
-    return null;
+  const checkId = "SP-LOCAL-" + String(report.checks.length + 1).padStart(3, "0");
+  const seenInThisRecord = new Set();
+  const duplicateCaseIds = [];
+  const unplannedCaseIds = [];
+  for (const caseId of caseIds) {
+    if (seenInThisRecord.has(caseId) || recordCaseIdOwners.has(caseId)) {
+      duplicateCaseIds.push(caseId);
+    } else {
+      recordCaseIdOwners.set(caseId, { checkId, name });
+    }
+    seenInThisRecord.add(caseId);
+    if (!plannedCaseIdSet.has(caseId)) unplannedCaseIds.push(caseId);
   }
+  if (duplicateCaseIds.length > 0 || unplannedCaseIds.length > 0) {
+    const mappingError = {
+      checkId,
+      name,
+      duplicateCaseIds: [...new Set(duplicateCaseIds)],
+      unplannedCaseIds: [...new Set(unplannedCaseIds)]
+    };
+    report.caseMappingErrors.push(mappingError);
+    console.error("CASE MAPPING ERROR " + name + ": " + JSON.stringify(mappingError));
+  }
+
+  const caseLabel = caseIds.length > 0 ? " | cases=" + caseIds.join(",") : " | cases=UNMAPPED";
+  console.log("[QA-CASE-START] " + checkId + caseLabel + " | " + name);
+  console.log("[QA-START] " + name);
+  const outcome = await executeIsolatedQaRecord({
+    name,
+    action,
+    caseIds,
+    checkId,
+    recordStatuses
+  });
+  report.checks.push(outcome.check);
+
+  if (outcome.status === "WARN") {
+    report.warnings.push({ name, message: outcome.warning || "The check completed with a warning." });
+    console.warn("WARN " + name + ": " + (outcome.warning || "The check completed with a warning."));
+  } else if (outcome.status === "FAIL") {
+    report.errors.push({ name, message: outcome.errorMessage || outcome.check.error || "The check failed." });
+    console.error("FAIL " + name + ": " + (outcome.errorMessage || outcome.check.error || "The check failed."));
+  } else if (outcome.status === "SKIPPED") {
+    console.warn("SKIPPED " + name + " (blocked by: " + (outcome.check.details?.blockedBy || []).join("; ") + ")");
+  } else {
+    console.log("PASS " + name + " (" + outcome.check.durationMs + " ms)");
+  }
+  console.log("[QA-CASE-END] " + checkId + caseLabel + " | " + outcome.status + " | " + outcome.check.durationMs + " ms | " + name);
+
+  return outcome.check.details ?? null;
+}
+
+function markExpectedHttpError(result) {
+  if (!result || Number(result.status) < 400 || !result.method || !result.url) return;
+  const url = new URL(result.url, baseUrl);
+  expectedHttpErrors.push({
+    method: String(result.method).toUpperCase(),
+    path: url.pathname + url.search,
+    status: Number(result.status)
+  });
+}
+
+function assertExpectedHttpStatus(result, expected, label) {
+  const allowed = Array.isArray(expected) ? expected : [expected];
+  assert.ok(allowed.includes(result.status),
+    label + " returned HTTP " + result.status + "; expected " + allowed.join("/") + ". Body: " + String(result.text ?? "").slice(0, 900));
+  markExpectedHttpError(result);
+  return result;
 }
 
 function assertHttp(result, expected, label) {
   const allowed = Array.isArray(expected) ? expected : [expected];
   assert.ok(allowed.includes(result.status),
     label + " returned HTTP " + result.status + "; expected " + allowed.join("/") + ". Body: " + result.text.slice(0, 900));
+  markExpectedHttpError(result);
   return result.json;
 }
 
 async function request(page, method, path, { token, sessionToken, body, headers = {}, expectedOrigin = baseUrl.origin } = {}) {
+  assert.ok(page && typeof page.url === "function", "QA request requires an initialised browser page.");
+  await page.bringToFront();
+  const currentPageUrl = page.url();
+  assert.ok(currentPageUrl && currentPageUrl !== "about:blank",
+    "QA request blocked: browser page is still about:blank. A required station/session navigation did not complete.");
+  let currentPageOrigin;
+  try {
+    currentPageOrigin = new URL(currentPageUrl).origin;
+  } catch {
+    throw new Error("QA request blocked: browser page has an invalid URL: " + currentPageUrl);
+  }
+  assert.equal(currentPageOrigin, expectedOrigin,
+    "QA request blocked: browser page is not on the expected local SmartPrint origin.");
   const url = new URL(path, baseUrl).toString();
   assert.equal(new URL(url).origin, expectedOrigin, "QA request attempted to leave the local SmartPrint origin.");
   const result = await page.evaluate(async ({ url, method, token, sessionToken, body, headers }) => {
@@ -217,7 +304,7 @@ async function request(page, method, path, { token, sessionToken, body, headers 
     requestHeaders.set("Accept", "application/json");
     if (token) requestHeaders.set("Authorization", "Bearer " + token);
     if (sessionToken) requestHeaders.set("X-Print-Session", sessionToken);
-    const options = { method, headers: requestHeaders, cache: "no-store", credentials: "same-origin" };
+    const options = { method, headers: requestHeaders, cache: "no-store", credentials: "same-origin", signal: AbortSignal.timeout(15000) };
     if (body !== undefined) {
       if (body instanceof FormData || body instanceof Blob) options.body = body;
       else {
@@ -229,19 +316,97 @@ async function request(page, method, path, { token, sessionToken, body, headers 
     const text = await response.text();
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch {}
-    return { status: response.status, url: response.url, text, json };
+    return { status: response.status, url: response.url, method, text, json };
   }, { url, method, token, sessionToken, body, headers });
   assert.equal(new URL(result.url).origin, expectedOrigin, "Local API request redirected outside the local origin.");
   return result;
 }
 
+async function sendBatchAndWaitForShopApproval(page, sessionToken, jobIds, label) {
+  assert.ok(Array.isArray(jobIds) && jobIds.length > 0,
+    label + ": at least one uploaded job ID is required before quote acceptance.");
+  assert.ok(typeof sessionToken === "string" && sessionToken.length > 0,
+    label + ": the station session capability is required.");
+  const ids = jobIds.map(String);
+  assert.equal(new Set(ids).size, ids.length,
+    label + ": every uploaded file must have a distinct PrintJob ID.");
+
+  // The UI handler intentionally runs asynchronously. A visible status panel
+  // is not proof that the POST completed; wait for the exact per-job command
+  // and then read back the persisted server state.
+  const responseOutcome = Promise.all(ids.map(async jobId => {
+    const expectedPath = "/api/v1/public/jobs/" + jobId + "/accept-quote";
+    const response = await page.waitForResponse(candidate => {
+      if (candidate.request().method() !== "POST") return false;
+      try {
+        const candidateUrl = new URL(candidate.url());
+        return candidateUrl.origin === baseUrl.origin && candidateUrl.pathname === expectedPath;
+      } catch {
+        return false;
+      }
+    }, { timeout: 20000 });
+    return { jobId, response };
+  })).then(responses => ({ responses }), error => ({ error }));
+
+  const sendButton = page.getByRole("button", { name: "Send batch to shop" });
+  try {
+    await sendButton.waitFor({ state: "visible", timeout: 30000 });
+    await sendButton.click();
+  } catch (error) {
+    await responseOutcome;
+    throw error;
+  }
+
+  const outcome = await responseOutcome;
+  if (outcome.error) throw outcome.error;
+
+  const accepted = [];
+  for (const { jobId, response } of outcome.responses) {
+    const responseText = await response.text();
+    let payload = null;
+    try { payload = responseText ? JSON.parse(responseText) : null; } catch {}
+    assert.equal(response.status(), 200,
+      label + ": quote acceptance for " + jobId + " returned HTTP " + response.status() +
+      ". Body: " + responseText.slice(0, 900));
+    assert.equal(payload?.status, "AWAITING_SHOP_APPROVAL",
+      label + ": the accept-quote response did not move " + jobId + " to shop approval.");
+
+    const persisted = assertHttp(await request(page, "GET",
+      "/api/v1/public/jobs/" + jobId + "/status",
+      { sessionToken }), 200, label + ": persisted state after quote acceptance");
+    assert.equal(persisted.job?.status, "AWAITING_SHOP_APPROVAL",
+      label + ": persisted state for " + jobId + " did not reach shop approval.");
+    accepted.push({ jobId, status: persisted.job.status });
+  }
+  return accepted;
+}
+
 function watchPage(targetPage) {
   targetPage.on("pageerror", error => pageErrors.push(String(error.message).slice(0, 500)));
+  targetPage.on("requestfailed", request => {
+    try {
+      const url = new URL(request.url());
+      if (url.origin !== baseUrl.origin) return;
+      const error = request.failure()?.errorText || "Unknown network request failure";
+      if (error === "net::ERR_ABORTED") return;
+      requestFailures.push({
+        method: request.method(),
+        path: url.pathname,
+        resourceType: request.resourceType(),
+        error: error.slice(0, 300)
+      });
+    } catch {}
+  });
   targetPage.on("console", message => {
     if (message.type() !== "error") return;
+    const messageText = String(message.text()).slice(0, 500);
+    if (/^Failed to load resource: the server responded with a status of \d{3}\b/i.test(messageText)) {
+      networkStatusConsoleErrors.push({ pageUrl: targetPage.url(), message: messageText });
+      return;
+    }
     const sourceUrl = message.location()?.url || "";
     if (!sourceUrl || sourceUrl.startsWith(baseUrl.origin)) {
-      consoleErrors.push(String(message.text()).slice(0, 500));
+      consoleErrors.push(messageText);
     }
   });
   targetPage.on("response", response => {
@@ -249,6 +414,13 @@ function watchPage(targetPage) {
       const url = new URL(response.url());
       if (url.origin !== baseUrl.origin) return;
       if (response.status() >= 500) serverErrors.push({ status: response.status(), path: url.pathname });
+      if (response.status() >= 400) {
+        httpErrorResponses.push({
+          method: response.request().method().toUpperCase(),
+          path: url.pathname + url.search,
+          status: response.status()
+        });
+      }
       if (["script", "stylesheet", "font"].includes(response.request().resourceType()) && response.status() >= 400) {
         resourceErrors.push({ status: response.status(), path: url.pathname, type: response.request().resourceType() });
       }
@@ -257,14 +429,20 @@ function watchPage(targetPage) {
 }
 
 async function screenshot(page, name) {
+  await page.bringToFront();
   await page.screenshot({
     path: join(screenshotsDirectory, name.replace(/[^a-z0-9-]/gi, "-").toLowerCase() + ".png"),
     fullPage: true,
-    animations: "disabled"
-  }).catch(() => {});
+    animations: "disabled",
+    timeout: 15000
+  }).catch(error => {
+    console.warn("[QA-SCREENSHOT-WARN] " + name + ": " + String(error?.message || error).slice(0, 240));
+  });
 }
 
 async function openRoute(page, path, selector, label) {
+  await page.bringToFront();
+  console.log("[QA-VISIBLE] " + label + " | " + path);
   const response = await page.goto(new URL(path, baseUrl).toString(), {
     waitUntil: "domcontentloaded",
     timeout: 30000
@@ -304,29 +482,49 @@ async function registerOrSignInShop(page, email, password, businessName, ownerNa
   await page.getByLabel("Your name").fill(ownerName);
   await page.getByLabel("Email address").fill(email);
   await page.locator('input[type="password"]').first().fill(password);
+  const registrationResponsePromise = page.waitForResponse(response => {
+    const request = response.request();
+    const url = new URL(response.url());
+    return request.method() === "POST" &&
+      url.origin === baseUrl.origin &&
+      url.pathname === "/api/v1/auth/register-shop";
+  }, { timeout: 30000 });
   await page.getByRole("button", { name: "Create my shop" }).click();
+  const registrationResponse = await registrationResponsePromise;
 
   let registered = false;
-  try {
-    await page.locator(".app-shell").waitFor({ state: "visible", timeout: 20000 });
+  if (registrationResponse.status() === 201) {
     registered = true;
-  } catch {
-    const error = (await page.locator(".auth-error").allTextContents().catch(() => [])).join(" ");
-    if (!/already registered|already exists/i.test(error)) {
-      throw new Error("The real shop-registration flow failed: " + (error || "No workspace appeared after registration."));
-    }
+    await page.locator(".app-shell").waitFor({ state: "visible", timeout: 20000 });
+  } else if (registrationResponse.status() === 409) {
+    const errorMessage = page.locator(".auth-error");
+    await errorMessage.waitFor({ state: "visible", timeout: 10000 });
+    const error = (await errorMessage.innerText()).trim();
+    assert.match(error, /already registered|already exists/i,
+      "Shop registration returned HTTP 409 without the expected existing-account message: " + error);
+    markExpectedHttpError({
+      method: "POST",
+      url: registrationResponse.url(),
+      status: registrationResponse.status()
+    });
     await openRoute(page, "/shop", ".auth-screen", "shop-sign-in");
     await page.getByLabel("Email address").fill(email);
     await page.locator('input[type="password"]').first().fill(password);
     await page.getByRole("button", { name: "Sign in to workspace" }).click();
     await page.locator(".app-shell").waitFor({ state: "visible", timeout: 20000 });
+  } else {
+    const responseBody = await registrationResponse.text().catch(() => "");
+    throw new Error(
+      "The real shop-registration flow returned HTTP " + registrationResponse.status() +
+      " instead of 201 or the expected existing-account 409. Body: " + responseBody.slice(0, 700)
+    );
   }
 
   if (registered) {
     const invalidLogin = await request(page, "POST", "/api/v1/auth/login", {
       body: { email, password: password + "-wrong" }
     });
-    assert.equal(invalidLogin.status, 401, "Shop login accepted an incorrect password.");
+    assertExpectedHttpStatus(invalidLogin, 401, "Shop login accepted an incorrect password.");
 
     const accountMenu = page.getByRole("button", { name: /Account options for/ });
     await accountMenu.click();
@@ -348,7 +546,7 @@ async function signInPlatformAdmin(page, email, password) {
   const invalidLogin = await request(page, "POST", "/api/v1/auth/login", {
     body: { email, password: password + "-wrong" }
   });
-  assert.equal(invalidLogin.status, 401, "Platform admin login accepted an incorrect password.");
+  assertExpectedHttpStatus(invalidLogin, 401, "Platform admin login accepted an incorrect password.");
   await page.getByLabel("Email address").fill(email);
   await page.locator('input[type="password"]').first().fill(password);
   await page.getByRole("button", { name: "Sign in to administration" }).click();
@@ -358,29 +556,62 @@ async function signInPlatformAdmin(page, email, password) {
   return tokens;
 }
 
+async function navigateSidebarSection(page, label, progressContext = "") {
+  await page.bringToFront();
+  if (progressContext) console.log("[QA-PROGRESS] " + progressContext + " | opening " + label);
+  const viewportWidth = await page.evaluate(() => window.innerWidth);
+  const mobile = viewportWidth <= 850;
+  const sidebar = page.locator(".sidebar").first();
+
+  if (mobile) {
+    const isOpen = await sidebar.evaluate(element => element.classList.contains("sidebar-open"));
+    if (!isOpen) {
+      const openNavigation = page.getByRole("button", { name: "Open navigation", exact: true });
+      await openNavigation.waitFor({ state: "visible", timeout: 12000 });
+      await openNavigation.click({ timeout: 12000 });
+      await page.waitForFunction(
+        () => document.querySelector(".sidebar")?.classList.contains("sidebar-open") === true,
+        null,
+        { timeout: 10000 }
+      );
+    }
+  }
+
+  const item = sidebar.locator(".nav-item").filter({ hasText: label }).first();
+  await item.waitFor({ state: "visible", timeout: 12000 });
+  await item.scrollIntoViewIfNeeded();
+  await item.click({ timeout: 12000 });
+  await page.waitForFunction(
+    expected => [...document.querySelectorAll(".sidebar .nav-item")]
+      .some(element => element.classList.contains("active") &&
+        (element.getAttribute("aria-label") === expected ||
+         element.getAttribute("title") === expected ||
+         element.textContent.trim().startsWith(expected))),
+    label,
+    { timeout: 12000 }
+  );
+
+  if (mobile) {
+    await page.waitForFunction(
+      () => document.querySelector(".sidebar")?.classList.contains("sidebar-open") === false,
+      null,
+      { timeout: 10000 }
+    );
+  }
+  if (progressContext) console.log("[QA-PROGRESS] " + progressContext + " | opened " + label);
+}
+
 async function navigateSections(page, labels, prefix) {
   const visited = [];
-  for (const label of labels) {
-    const viewportWidth = await page.evaluate(() => window.innerWidth);
-    if (viewportWidth <= 850) {
-      const openNavigation = page.getByRole("button", { name: "Open navigation" });
-      if (await openNavigation.isVisible().catch(() => false)) {
-        await openNavigation.click();
-      }
-    }
-    const item = page.locator(".sidebar .nav-item").filter({ hasText: label }).first();
-    await item.waitFor({ state: "visible", timeout: 12000 });
-    await item.click();
-    await page.waitForFunction(
-      expected => [...document.querySelectorAll(".sidebar .nav-item")]
-        .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
-      label,
-      { timeout: 12000 }
-    );
+  for (let index = 0; index < labels.length; index++) {
+    const label = labels[index];
+    const progressContext = prefix + " sidebar " + (index + 1) + "/" + labels.length;
+    await navigateSidebarSection(page, label, progressContext);
     await page.waitForTimeout(120);
     await screenshot(page, prefix + "-" + label);
     visited.push(label);
   }
+  console.log("[QA-PROGRESS] " + prefix + " sidebar complete: " + visited.length + "/" + labels.length);
   return visited;
 }
 
@@ -422,6 +653,7 @@ function syntheticPdf(pageCount = 2, label = "SmartPrint local QA synthetic docu
 }
 
 async function uploadSyntheticPdf(page, sessionToken, batchId, idempotencyKey, fileName, bytes) {
+  await page.bringToFront();
   const base64 = bytes.toString("base64");
   return await page.evaluate(async ({ sessionToken, batchId, idempotencyKey, fileName, base64 }) => {
     const content = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
@@ -442,30 +674,18 @@ async function uploadSyntheticPdf(page, sessionToken, batchId, idempotencyKey, f
         "Idempotency-Key": idempotencyKey,
         "X-Print-Batch-Id": batchId
       },
+      signal: AbortSignal.timeout(30000),
       body: form
     });
     const text = await response.text();
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch {}
-    return { status: response.status, text, json };
+    return { status: response.status, url: response.url, method: "POST", text, json };
   }, { sessionToken, batchId, idempotencyKey, fileName, base64 });
 }
 
 async function clickAdminSection(page, label) {
-  const viewportWidth = await page.evaluate(() => window.innerWidth);
-  if (viewportWidth <= 850) {
-    const openNavigation = page.getByRole("button", { name: "Open navigation" });
-    if (await openNavigation.isVisible().catch(() => false)) await openNavigation.click();
-  }
-  const item = page.locator(".sidebar .nav-item").filter({ hasText: label }).first();
-  await item.waitFor({ state: "visible", timeout: 12000 });
-  await item.click();
-  await page.waitForFunction(
-    expected => [...document.querySelectorAll(".sidebar .nav-item")]
-      .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
-    label,
-    { timeout: 12000 }
-  );
+  await navigateSidebarSection(page, label);
 }
 
 async function fillQaPlanVersion(page) {
@@ -642,21 +862,10 @@ async function assignQaPlanThroughPlatformUi(adminPage, adminToken, shopName, pl
 }
 
 async function clickShopSection(page, label) {
-  const viewportWidth = await page.evaluate(() => window.innerWidth);
-  if (viewportWidth <= 850) {
-    const openNavigation = page.getByRole("button", { name: "Open navigation" });
-    if (await openNavigation.isVisible().catch(() => false)) await openNavigation.click();
-  }
-  await page.locator(".sidebar .nav-item").filter({ hasText: label }).first().click();
-  await page.waitForFunction(
-    expected => [...document.querySelectorAll(".sidebar .nav-item")]
-      .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
-    label,
-    { timeout: 12000 }
-  );
+  await navigateSidebarSection(page, label);
 }
 
-async function setupShopResources(page, tokens, shopLabel) {
+async function setupShopResources(page, tokens, shopLabel, onResourcesReady = () => {}) {
   const printerName = "SmartPrint QA no-dispatch test queue";
   const stationName = "SmartPrint QA customer station";
 
@@ -717,56 +926,18 @@ async function setupShopResources(page, tokens, shopLabel) {
   }
   assert.equal(station?.isEnabled, true, shopLabel + " QA QR station must be enabled.");
   assert.equal(station?.printerDeviceId, printer.id, shopLabel + " QR station must use its own QA printer.");
+  assert.ok(station?.publicUrl, shopLabel + " QA QR station must expose its public URL.");
 
-  const pricingValues = {
-    monoPerSideMinor: 200,
-    colourPerSideMinor: 500,
-    monoDuplexPerSheetMinor: 300,
-    colourDuplexPerSheetMinor: 700,
-    minimumChargeMinor: 100,
-    photo35x45Minor: 500,
-    photo25x35Minor: 500,
-    photo2x2Minor: 700,
-    photo4x6Minor: 1000
-  };
-  await clickShopSection(page, "Pricing");
-  await page.getByLabel("Black & white", { exact: true }).fill("2.00");
-  await page.getByLabel("Colour", { exact: true }).fill("5.00");
-  await page.getByLabel("Black & white duplex", { exact: true }).fill("3.00");
-  await page.getByLabel("Colour duplex", { exact: true }).fill("7.00");
-  await page.getByLabel("Minimum job charge", { exact: true }).fill("1.00");
-  await page.getByLabel("35 × 45 mm", { exact: true }).fill("5.00");
-  await page.getByLabel("25 × 35 mm", { exact: true }).fill("5.00");
-  await page.getByLabel("2 × 2 inch", { exact: true }).fill("7.00");
-  await page.getByLabel("4 × 6 inch", { exact: true }).fill("10.00");
-  await page.getByRole("button", { name: "Save print prices" }).click();
-  await page.getByText(/Rate card version/i).waitFor({ state: "visible", timeout: 15000 });
+  // The resource records are persistent after this point. Publish the fixture
+  // before optional pricing/payment configuration so a later failure does not
+  // hide successfully created records from diagnostics or the next idempotent run.
+  onResourcesReady({
+    printer: { id: printer.id, displayName: printer.displayName, outputMode: printer.outputMode,
+      agentDeviceId: printer.agentDeviceId ?? null, queueName: printer.queueName },
+    station: { id: station.id, displayName: station.displayName, publicUrl: station.publicUrl,
+      isEnabled: station.isEnabled, printerDeviceId: station.printerDeviceId }
+  });
 
-  const pricing = assertHttp(await request(page, "GET", "/api/v1/shop/pricing", {
-    token: tokens.accessToken
-  }), 200, shopLabel + " persisted pricing");
-  assert.equal(pricing.isConfigured, true);
-  assert.equal(pricing.monoPerSideMinor, pricingValues.monoPerSideMinor);
-  assert.equal(pricing.colourPerSideMinor, pricingValues.colourPerSideMinor);
-  assert.equal(pricing.photo4x6Minor, pricingValues.photo4x6Minor);
-
-  await clickShopSection(page, "Payments");
-  const methodCards = page.locator(".payment-method-card");
-  await methodCards.nth(0).locator('input[type="checkbox"]').setChecked(true);
-  await page.getByLabel("Shop UPI ID").fill("smartprintqa@upi");
-  await page.getByLabel("Payee / business name").fill("SmartPrint Local QA");
-  await methodCards.nth(1).locator('input[type="checkbox"]').setChecked(true);
-  await methodCards.nth(2).locator('input[type="checkbox"]').setChecked(false);
-  await page.getByRole("button", { name: "Save payment methods" }).click();
-
-  const paymentSettings = assertHttp(await request(page, "GET", "/api/v1/shop/payment-settings", {
-    token: tokens.accessToken
-  }), 200, shopLabel + " persisted payment settings");
-  assert.equal(paymentSettings.upiEnabled, true);
-  assert.equal(paymentSettings.upiId, "smartprintqa@upi");
-  assert.equal(paymentSettings.payeeName, "SmartPrint Local QA");
-  assert.equal(paymentSettings.cashEnabled, true);
-  assert.equal(paymentSettings.instantPaymentEnabled, false);
 
   return {
     printer: {
@@ -783,12 +954,182 @@ async function setupShopResources(page, tokens, shopLabel) {
       isEnabled: station.isEnabled,
       printerDeviceId: station.printerDeviceId
     },
-    pricingVersion: pricing.version,
-    pricingConfiguredThroughUi: true,
-    paymentMethodsConfiguredThroughUi: true,
     physicalPrinterPaired: false,
     printDispatchEnabled: false
   };
+}
+
+async function configureShopPricing(page, tokens, shopLabel) {
+  const pricingValues = {
+    monoPerSideMinor: 200,
+    colourPerSideMinor: 500,
+    monoDuplexPerSheetMinor: 300,
+    colourDuplexPerSheetMinor: 700,
+    minimumChargeMinor: 100,
+    photo35x45Minor: 500,
+    photo25x35Minor: 500,
+    photo2x2Minor: 700,
+    photo4x6Minor: 1000
+  };
+  await clickShopSection(page, "Pricing");
+  const pricingPanel = page.locator(".pricing-page");
+  await pricingPanel.waitFor({ state: "visible", timeout: 15000 });
+  assert.equal(await pricingPanel.locator('input[type="number"]').count(), 9,
+    shopLabel + " pricing page did not render all nine rate inputs.");
+  const pricingInputs = [
+  {
+    "id": "pricing-mono-per-side",
+    "label": "Black & white",
+    "value": "2.00"
+  },
+  {
+    "id": "pricing-colour-per-side",
+    "label": "Colour",
+    "value": "5.00"
+  },
+  {
+    "id": "pricing-mono-duplex",
+    "label": "Black & white duplex",
+    "value": "3.00"
+  },
+  {
+    "id": "pricing-colour-duplex",
+    "label": "Colour duplex",
+    "value": "7.00"
+  },
+  {
+    "id": "pricing-minimum-charge",
+    "label": "Minimum job charge",
+    "value": "1.00"
+  },
+  {
+    "id": "pricing-photo-35x45",
+    "label": "35 × 45 mm",
+    "value": "5.00"
+  },
+  {
+    "id": "pricing-photo-25x35",
+    "label": "25 × 35 mm",
+    "value": "5.00"
+  },
+  {
+    "id": "pricing-photo-2x2",
+    "label": "2 × 2 inch",
+    "value": "7.00"
+  },
+  {
+    "id": "pricing-photo-4x6",
+    "label": "4 × 6 inch",
+    "value": "10.00"
+  }
+];
+  for (const pricingInput of pricingInputs) {
+    const input = pricingPanel.locator("#" + pricingInput.id);
+    await input.waitFor({ state: "visible", timeout: 10000 });
+    assert.equal(await input.count(), 1,
+      shopLabel + " expected exactly one #" + pricingInput.id + " pricing input.");
+    assert.equal(await input.getAttribute("aria-label"), pricingInput.label,
+      shopLabel + " #" + pricingInput.id + " has an unexpected explicit accessible name.");
+    assert.equal(await pricingPanel.getByLabel(pricingInput.label, { exact: true }).count(), 1,
+      shopLabel + " #" + pricingInput.id + " is missing its accessible label.");
+    const nativeLabelDetails = await input.evaluate(element => ({
+      id: element.id,
+      ariaLabel: element.getAttribute("aria-label"),
+      labels: Array.from(element.labels || []).map(label => ({
+        htmlFor: label.htmlFor,
+        text: (label.innerText || "").trim()
+      })),
+      enclosingLabel: element.closest("label")?.outerHTML ?? null,
+      outerHTML: element.outerHTML
+    }));
+    assert.ok(nativeLabelDetails.labels.some(label => label.htmlFor === nativeLabelDetails.id),
+      shopLabel + " #" + pricingInput.id + " is missing its native label[for] association. DOM: " +
+      JSON.stringify(nativeLabelDetails));
+    await input.fill(pricingInput.value);
+  }
+  const pricingSaveResponsePromise = page.waitForResponse(response => {
+    const request = response.request();
+    const url = new URL(response.url());
+    return url.origin === baseUrl.origin &&
+      url.pathname === "/api/v1/shop/pricing" &&
+      request.method() === "PUT";
+  }, { timeout: 20000 });
+  await page.getByRole("button", { name: "Save print prices" }).click();
+  const pricingSaveResponse = await pricingSaveResponsePromise;
+  const pricingSaveBody = await pricingSaveResponse.json().catch(() => null);
+  assert.equal(pricingSaveResponse.status(), 200,
+    shopLabel + " pricing save must return HTTP 200. Body: " + JSON.stringify(pricingSaveBody));
+  assert.equal(pricingSaveBody?.isConfigured, true,
+    shopLabel + " pricing save response did not mark the rate card configured.");
+  for (const [field, expected] of Object.entries(pricingValues)) {
+    assert.equal(pricingSaveBody?.[field], expected,
+      shopLabel + " pricing save response did not persist " + field + ".");
+  }
+  await page.locator(".inline-success").filter({ hasText: "Print rate card saved." })
+    .waitFor({ state: "visible", timeout: 15000 });
+
+  const pricing = assertHttp(await request(page, "GET", "/api/v1/shop/pricing", {
+    token: tokens.accessToken
+  }), 200, shopLabel + " persisted pricing");
+  assert.equal(pricing.isConfigured, true, shopLabel + " saved pricing read-back is not configured.");
+  assert.equal(pricing.monoPerSideMinor, pricingValues.monoPerSideMinor, shopLabel + " mono rate read-back differs.");
+  assert.equal(pricing.colourPerSideMinor, pricingValues.colourPerSideMinor, shopLabel + " colour rate read-back differs.");
+  assert.equal(pricing.photo4x6Minor, pricingValues.photo4x6Minor, shopLabel + " 4x6 photo rate read-back differs.");
+
+
+  return { pricingVersion: pricing.version, pricingConfiguredThroughUi: true };
+}
+
+async function configureShopPaymentMethods(page, tokens, shopLabel) {
+  await clickShopSection(page, "Payments");
+  const methodCards = page.locator(".payment-method-card");
+  const setVisiblePaymentSwitch = async (card, inputId, enabled, description) => {
+    const input = card.locator("#" + inputId);
+    assert.equal(await input.count(), 1, shopLabel + " " + description + " switch ID is missing or duplicated.");
+    if (await input.isChecked() !== enabled) {
+      const visibleSwitch = card.locator("label.switch");
+      assert.equal(await visibleSwitch.count(), 1, shopLabel + " " + description + " visible switch is missing or duplicated.");
+      await visibleSwitch.click();
+    }
+    assert.equal(await input.isChecked(), enabled,
+      shopLabel + " " + description + " did not change through its visible switch.");
+  };
+  await setVisiblePaymentSwitch(methodCards.nth(0), "payment-upi-enabled", true, "UPI");
+  await page.getByLabel("Shop UPI ID").fill("smartprintqa@upi");
+  await page.getByLabel("Payee / business name").fill("SmartPrint Local QA");
+  await setVisiblePaymentSwitch(methodCards.nth(1), "payment-cash-enabled", true, "cash");
+  await setVisiblePaymentSwitch(methodCards.nth(2), "payment-instant-enabled", false, "instant payment");
+
+  const paymentSaveResponsePromise = page.waitForResponse(response => {
+    const request = response.request();
+    const url = new URL(response.url());
+    return url.origin === baseUrl.origin &&
+      url.pathname === "/api/v1/shop/payment-settings" &&
+      request.method() === "PUT";
+  }, { timeout: 20000 });
+  await page.getByRole("button", { name: "Save payment methods" }).click();
+  const paymentSaveResponse = await paymentSaveResponsePromise;
+  const paymentSaveBody = await paymentSaveResponse.json().catch(() => null);
+  assert.equal(paymentSaveResponse.status(), 200,
+    shopLabel + " payment settings save must return HTTP 200. Body: " + JSON.stringify(paymentSaveBody));
+  assert.equal(paymentSaveBody?.upiEnabled, true, shopLabel + " save response did not enable UPI.");
+  assert.equal(paymentSaveBody?.upiId, "smartprintqa@upi", shopLabel + " save response returned the wrong UPI ID.");
+  assert.equal(paymentSaveBody?.payeeName, "SmartPrint Local QA", shopLabel + " save response returned the wrong payee.");
+  assert.equal(paymentSaveBody?.cashEnabled, true, shopLabel + " save response did not enable cash.");
+  assert.equal(paymentSaveBody?.instantPaymentEnabled, false, shopLabel + " instant payment must remain disabled.");
+  await page.locator(".inline-success").filter({ hasText: "Shop payment settings saved." })
+    .waitFor({ state: "visible", timeout: 15000 });
+
+  const paymentSettings = assertHttp(await request(page, "GET", "/api/v1/shop/payment-settings", {
+    token: tokens.accessToken
+  }), 200, shopLabel + " persisted payment settings");
+  assert.equal(paymentSettings.upiEnabled, true, shopLabel + " payment settings read-back did not enable UPI.");
+  assert.equal(paymentSettings.upiId, "smartprintqa@upi", shopLabel + " payment settings read-back returned the wrong UPI ID.");
+  assert.equal(paymentSettings.payeeName, "SmartPrint Local QA", shopLabel + " payment settings read-back returned the wrong payee.");
+  assert.equal(paymentSettings.cashEnabled, true, shopLabel + " payment settings read-back did not enable cash.");
+  assert.equal(paymentSettings.instantPaymentEnabled, false, shopLabel + " payment settings read-back unexpectedly enabled instant payment.");
+
+  return { paymentMethodsConfiguredThroughUi: true, paymentSettingsVerified: true };
 }
 
 async function assertResponsive(page, label, viewport) {
@@ -860,27 +1201,21 @@ async function runAuthenticatedResponsiveMatrix(page, sections, label) {
     { width: 390, height: 844 }
   ];
   let checks = 0;
+  const totalChecks = sections.length * viewports.length * 2;
   for (const dark of [false, true]) {
+    const themeLabel = dark ? "dark" : "light";
+    console.log("[QA-PROGRESS] " + label + " responsive matrix | starting " + themeLabel + " theme");
     await setWorkspaceTheme(page, dark);
     for (const viewport of viewports) {
+      console.log("[QA-PROGRESS] " + label + " responsive matrix | " + themeLabel + " theme at " + viewport.width + "px");
       await page.setViewportSize(viewport);
       for (const section of sections) {
-        if (viewport.width <= 850) {
-          const openNavigation = page.getByRole("button", { name: "Open navigation" });
-          if (await openNavigation.isVisible().catch(() => false)) await openNavigation.click();
-        }
-        const item = page.locator(".sidebar .nav-item").filter({ hasText: section }).first();
-        await item.waitFor({ state: "visible", timeout: 12000 });
-        await item.click();
-        await page.waitForFunction(
-          expected => [...document.querySelectorAll(".sidebar .nav-item")]
-            .some(element => element.classList.contains("active") && (element.getAttribute("aria-label") === expected || element.getAttribute("title") === expected || element.textContent.trim().startsWith(expected))),
-          section,
-          { timeout: 12000 }
-        );
-        await assertResponsive(page, label + " / " + section + " / " + (dark ? "dark" : "light"), viewport);
+        const progressContext = label + " responsive " + themeLabel + " " + viewport.width + "px (" + (checks + 1) + "/" + totalChecks + ")";
+        await navigateSidebarSection(page, section, progressContext);
+        await assertResponsive(page, label + " / " + section + " / " + themeLabel, viewport);
         checks += 1;
       }
+      console.log("[QA-PROGRESS] " + label + " responsive matrix | completed " + themeLabel + " " + viewport.width + "px (" + checks + "/" + totalChecks + ")");
     }
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -890,13 +1225,22 @@ async function runAuthenticatedResponsiveMatrix(page, sections, label) {
 }
 
 try {
-  browser = await chromium.launch({ headless: false });
+  browser = await chromium.launch({
+    headless: false,
+    args: ["--start-maximized"]
+  });
   report.browser = "Playwright Chromium headed";
   report.browserVersion = browser.version();
   report.browserExecutablePath = chromium.executablePath();
   context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: false });
-  context.on("page", watchPage);
+  context.on("page", targetPage => {
+    watchPage(targetPage);
+    targetPage.bringToFront().catch(error => {
+      console.warn("[QA-VISIBLE-WARN] Could not foreground a new Chromium tab: " + String(error?.message || error).slice(0, 200));
+    });
+  });
   page = await context.newPage();
+  await page.bringToFront();
   page.setDefaultTimeout(15000);
 
   await record("Local portal and API health", async () => {
@@ -990,8 +1334,7 @@ try {
       created = true;
       report.safety.registeredLocalQaCustomer = true;
     } else {
-      assert.equal(registration.status, 409,
-        "Customer registration returned an unexpected status: " + registration.status + " " + registration.text.slice(0, 500));
+      assertExpectedHttpStatus(registration, 409, "Customer registration returned an unexpected status: " + registration.status + " " + registration.text.slice(0, 500));
     }
     const invalidLogin = await request(page, "POST", "/api/v1/auth/customer-login", {
       body: {
@@ -999,7 +1342,7 @@ try {
         password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD + "-wrong"
       }
     });
-    assert.equal(invalidLogin.status, 401, "Customer login accepted an incorrect password.");
+    assertExpectedHttpStatus(invalidLogin, 401, "Customer login accepted an incorrect password.");
     const login = await request(page, "POST", "/api/v1/auth/customer-login", {
       body: {
         email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL,
@@ -1033,28 +1376,77 @@ try {
     return { account: "local platform admin", tenantCount: overview.tenantCount };
   });
 
-  await record("Create and publish a free QA-only plan, then assign it through the platform UI", async () => {
-    const plan = await ensureQaPlanThroughPlatformUi(adminPage, adminTokens.accessToken);
-    const one = await assignQaPlanThroughPlatformUi(
-      adminPage, adminTokens.accessToken, process.env.SMARTPRINT_QA_SHOP1_NAME, plan
-    );
-    const two = await assignQaPlanThroughPlatformUi(
-      adminPage, adminTokens.accessToken, process.env.SMARTPRINT_QA_SHOP2_NAME, plan
-    );
-    shop1TenantId = one.tenantId;
-    shop2TenantId = two.tenantId;
-    qaPlanVersionId = plan.planVersionId;
-    report.safety.assignedQaOnlyFreePlan = true;
+  await record("Create and publish a free QA-only plan through the platform UI", async () => {
+    qaPlan = await ensureQaPlanThroughPlatformUi(adminPage, adminTokens.accessToken);
+    qaPlanVersionId = qaPlan.planVersionId;
+    report.safety.qaPlanPublished = true;
     return {
-      planCode: plan.planCode,
-      planVersionId: plan.planVersionId,
+      planCode: qaPlan.planCode,
+      planVersionId: qaPlan.planVersionId,
       freeMonthlyPrice: true,
       cloudAssistedPrinting: true,
-      shopOne: one,
-      shopTwo: two,
-      assignmentsPerformedThisRun: Number(!one.alreadyAssigned) + Number(!two.alreadyAssigned),
+      published: true,
       noPaymentRequiredOrRecorded: true
     };
+  });
+
+  await record("Assign the QA-only plan to Shop One through the platform UI", async () => {
+    const assignmentContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const assignmentPage = await assignmentContext.newPage();
+    watchPage(assignmentPage);
+    try {
+      const assignmentAdminTokens = await signInPlatformAdmin(
+        assignmentPage,
+        process.env.SMARTPRINT_QA_ADMIN_EMAIL,
+        process.env.SMARTPRINT_QA_ADMIN_PASSWORD
+      );
+      const one = await assignQaPlanThroughPlatformUi(
+        assignmentPage, assignmentAdminTokens.accessToken, process.env.SMARTPRINT_QA_SHOP1_NAME, qaPlan
+      );
+      shop1TenantId = one.tenantId;
+      report.safety.qaPlanAssignedToShop1 = true;
+      return {
+        shop: "Shop One",
+        tenantId: one.tenantId,
+        planVersionId: qaPlan.planVersionId,
+        assignmentPerformedThisRun: !one.alreadyAssigned,
+        status: one.status,
+        noPaymentRequiredOrRecorded: true
+      };
+    } finally {
+      await assignmentContext.close().catch(() => {});
+    }
+  });
+
+  await record("Assign the QA-only plan to Shop Two through the platform UI", async () => {
+    const assignmentContext = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+    const assignmentPage = await assignmentContext.newPage();
+    watchPage(assignmentPage);
+    try {
+      const assignmentAdminTokens = await signInPlatformAdmin(
+        assignmentPage,
+        process.env.SMARTPRINT_QA_ADMIN_EMAIL,
+        process.env.SMARTPRINT_QA_ADMIN_PASSWORD
+      );
+      const two = await assignQaPlanThroughPlatformUi(
+        assignmentPage, assignmentAdminTokens.accessToken, process.env.SMARTPRINT_QA_SHOP2_NAME, qaPlan
+      );
+      shop2TenantId = two.tenantId;
+      report.safety.qaPlanAssignedToShop2 = true;
+      report.safety.assignedQaOnlyFreePlan = Boolean(
+        report.safety.qaPlanAssignedToShop1 && report.safety.qaPlanAssignedToShop2
+      );
+      return {
+        shop: "Shop Two",
+        tenantId: two.tenantId,
+        planVersionId: qaPlan.planVersionId,
+        assignmentPerformedThisRun: !two.alreadyAssigned,
+        status: two.status,
+        noPaymentRequiredOrRecorded: true
+      };
+    } finally {
+      await assignmentContext.close().catch(() => {});
+    }
   });
 
   await record("Platform admin navigates every real control-centre section", async () => {
@@ -1076,8 +1468,11 @@ try {
     const subscriptions = assertHttp(await request(adminPage, "GET", "/api/v1/platform/subscriptions?page=1&pageSize=50", {
       token: adminTokens.accessToken
     }), 200, "Platform subscriptions");
-    assert.ok(tenants.items.some(item => item.id === shop1TenantId));
-    assert.ok(tenants.items.some(item => item.id === shop2TenantId));
+    const subscriptionShopNames = new Set(subscriptions.items.map(item => item.businessName));
+    assert.ok(subscriptionShopNames.has(process.env.SMARTPRINT_QA_SHOP1_NAME),
+      "The platform control centre cannot find QA Shop One.");
+    assert.ok(subscriptionShopNames.has(process.env.SMARTPRINT_QA_SHOP2_NAME),
+      "The platform control centre cannot find QA Shop Two.");
     assert.ok(plans.some(item => item.code === "SMARTPRINT_QA_AUTOMATION"));
     const responsive = await runAuthenticatedResponsiveMatrix(
       adminPage,
@@ -1095,20 +1490,38 @@ try {
     };
   });
 
-  await record("Shop one configures real QA printer/station, pricing and payment methods", async () => {
-    const resources = await setupShopResources(shop1Page, shop1Tokens, "Shop one");
+  await record("Shop one provisions real QA printer and QR station", async () => {
+    const resources = await setupShopResources(shop1Page, shop1Tokens, "Shop one", ready => {
+      shop1Printer = ready.printer;
+      shop1Station = ready.station;
+    });
     shop1Printer = resources.printer;
     shop1Station = resources.station;
     return {
       tenant: process.env.SMARTPRINT_QA_SHOP1_NAME,
       printerId: shop1Printer.id,
       stationId: shop1Station.id,
-      stationEnabled: shop1Station.isEnabled
+      stationEnabled: shop1Station.isEnabled,
+      printerAndStationPersisted: true,
+      printDispatchEnabled: false
     };
   });
 
+  await record("Shop one configures print pricing through the real UI", async () => ({
+    tenant: process.env.SMARTPRINT_QA_SHOP1_NAME,
+    ...(await configureShopPricing(shop1Page, shop1Tokens, "Shop one"))
+  }));
+
+  await record("Shop one configures payment methods through the real UI", async () => ({
+    tenant: process.env.SMARTPRINT_QA_SHOP1_NAME,
+    ...(await configureShopPaymentMethods(shop1Page, shop1Tokens, "Shop one"))
+  }));
+
   await record("Shop two configures isolated real QA printer/station", async () => {
-    const resources = await setupShopResources(shop2Page, shop2Tokens, "Shop two");
+    const resources = await setupShopResources(shop2Page, shop2Tokens, "Shop two", ready => {
+      shop2Printer = ready.printer;
+      shop2Station = ready.station;
+    });
     shop2Printer = resources.printer;
     shop2Station = resources.station;
     return {
@@ -1145,13 +1558,13 @@ try {
       token: shop1Tokens.accessToken,
       body: { ...commonPricing, monoPerSideMinor: -1 }
     });
-    assert.equal(negativeRate.status, 400, "Negative print rates must be rejected.");
+    assertExpectedHttpStatus(negativeRate, 400, "Negative print rates must be rejected.");
 
     const zeroBaseRate = await request(shop1Page, "PUT", "/api/v1/shop/pricing", {
       token: shop1Tokens.accessToken,
       body: { ...commonPricing, monoPerSideMinor: 0 }
     });
-    assert.equal(zeroBaseRate.status, 400, "A zero mono base rate must be rejected.");
+    assertExpectedHttpStatus(zeroBaseRate, 400, "A zero mono base rate must be rejected.");
 
     const invalidCapabilities = await request(shop1Page, "POST", "/api/v1/shop/printers", {
       token: shop1Tokens.accessToken,
@@ -1164,7 +1577,7 @@ try {
         capabilitiesJson: "[]"
       }
     });
-    assert.equal(invalidCapabilities.status, 400, "Printer capabilities must be a JSON object, not an array.");
+    assertExpectedHttpStatus(invalidCapabilities, 400, "Printer capabilities must be a JSON object, not an array.");
 
     const unsupportedConnection = await request(shop1Page, "POST", "/api/v1/shop/printers", {
       token: shop1Tokens.accessToken,
@@ -1177,13 +1590,13 @@ try {
         capabilitiesJson: "{}"
       }
     });
-    assert.equal(unsupportedConnection.status, 400, "Unsupported printer connection types must be rejected.");
+    assertExpectedHttpStatus(unsupportedConnection, 400, "Unsupported printer connection types must be rejected.");
 
     const foreignPrinterStation = await request(shop1Page, "POST", "/api/v1/shop/qr-stations", {
       token: shop1Tokens.accessToken,
       body: { displayName: "QA must not bind foreign printer", printerDeviceId: shop2Printer.id }
     });
-    assert.equal(foreignPrinterStation.status, 400, "A station must not be attached to another shop's printer.");
+    assertExpectedHttpStatus(foreignPrinterStation, 400, "A station must not be attached to another shop's printer.");
 
     const currentProfile = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", {
       token: shop1Tokens.accessToken
@@ -1196,13 +1609,13 @@ try {
         logoUrl: "http://example.invalid/logo.png"
       }
     });
-    assert.equal(insecureLogo.status, 400, "Shop branding must reject non-HTTPS logo URLs.");
+    assertExpectedHttpStatus(insecureLogo, 400, "Shop branding must reject non-HTTPS logo URLs.");
 
     const invalidAccount = await request(shop1Page, "PUT", "/api/v1/shop/account", {
       token: shop1Tokens.accessToken,
       body: { ownerName: "SmartPrint QA Owner One", email: "invalid-email", currentPassword: null }
     });
-    assert.equal(invalidAccount.status, 400, "Owner account changes must reject invalid email addresses.");
+    assertExpectedHttpStatus(invalidAccount, 400, "Owner account changes must reject invalid email addresses.");
 
     const pricingAfter = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/pricing", {
       token: shop1Tokens.accessToken
@@ -1247,7 +1660,7 @@ try {
     const unsupported = await request(shop1Page, "GET",
       "/api/v1/shop/reports/summary?days=14",
       { token: shop1Tokens.accessToken });
-    assert.equal(unsupported.status, 400, "Unsupported reporting periods must be rejected.");
+    assertExpectedHttpStatus(unsupported, 400, "Unsupported reporting periods must be rejected.");
 
     const secondTenant = assertHttp(await request(shop2Page, "GET",
       "/api/v1/shop/reports/summary?days=30",
@@ -1269,19 +1682,23 @@ try {
     ];
     const visited = await navigateSections(shop1Page, sections, "shop-one");
     const accountMenu = shop1Page.getByRole("button", { name: /Account options for/ });
+    console.log("[QA-PROGRESS] shop-one account tools | Personal details");
     await accountMenu.click();
     await shop1Page.getByRole("button", { name: "Personal details" }).click();
     await shop1Page.getByRole("dialog", { name: "Personal details" }).waitFor({ state: "visible", timeout: 10000 });
     await screenshot(shop1Page, "shop-one-personal-details");
     await shop1Page.getByRole("button", { name: "Close" }).last().click();
+    console.log("[QA-PROGRESS] shop-one account tools | Shop profile & branding");
     await accountMenu.click();
     await shop1Page.getByRole("button", { name: "Shop profile & branding" }).click();
     await shop1Page.locator(".settings-panel").waitFor({ state: "visible", timeout: 10000 });
     await screenshot(shop1Page, "shop-one-profile-branding");
+    console.log("[QA-PROGRESS] shop-one account tools | Trial & subscription");
     await accountMenu.click();
     await shop1Page.getByRole("button", { name: "Trial & subscription" }).click();
     await shop1Page.locator(".subscription-workspace").waitFor({ state: "visible", timeout: 10000 });
     await screenshot(shop1Page, "shop-one-subscription");
+    console.log("[QA-PROGRESS] shop-one account tools | Help & support");
     await accountMenu.click();
     await shop1Page.getByRole("button", { name: "Help & support" }).click();
     await shop1Page.getByRole("dialog", { name: "Help & support" }).waitFor({ state: "visible", timeout: 10000 });
@@ -1302,18 +1719,26 @@ try {
       ["/api/v1/shop/refunds", "refunds"]
     ];
     const payload = {};
-    for (const [path, key] of checks) {
+    for (let index = 0; index < checks.length; index++) {
+      const [path, key] = checks[index];
+      const progress = "shop-one API reads " + (index + 1) + "/" + checks.length + " | " + key;
+      console.log("[QA-PROGRESS] " + progress + " | started");
       payload[key] = assertHttp(await request(shop1Page, "GET", path, { token: shop1Tokens.accessToken }), 200, "Shop one " + key);
+      console.log("[QA-PROGRESS] " + progress + " | completed");
     }
-    assert.ok(payload.printers.some(item => item.id === shop1Printer.id));
-    assert.ok(payload.stations.some(item => item.id === shop1Station.id));
-    assert.ok(payload.pricing.isConfigured);
     const responsive = await runAuthenticatedResponsiveMatrix(
       shop1Page,
       sections,
       "shop-one"
     );
-    return { sectionsVisited: visited, realApiReads: checks.length, printerRows: payload.printers.length, stationRows: payload.stations.length, responsive };
+    return {
+      sectionsVisited: visited,
+      realApiReads: checks.length,
+      printerRows: payload.printers.length,
+      stationRows: payload.stations.length,
+      pricingConfigured: Boolean(payload.pricing.isConfigured),
+      responsive
+    };
   });
 
   await record("Shop two navigates every real sidebar section and account-menu-only tools", async () => {
@@ -1323,9 +1748,11 @@ try {
     ];
     const visited = await navigateSections(shop2Page, sections, "shop-two");
     const accountMenu = shop2Page.getByRole("button", { name: /Account options for/ });
+    console.log("[QA-PROGRESS] shop-two account tools | Shop profile & branding");
     await accountMenu.click();
     await shop2Page.getByRole("button", { name: "Shop profile & branding" }).click();
     await shop2Page.locator(".settings-panel").waitFor({ state: "visible", timeout: 10000 });
+    console.log("[QA-PROGRESS] shop-two account tools | Trial & subscription");
     await accountMenu.click();
     await shop2Page.getByRole("button", { name: "Trial & subscription" }).click();
     await shop2Page.locator(".subscription-workspace").waitFor({ state: "visible", timeout: 10000 });
@@ -1336,7 +1763,12 @@ try {
       "/api/v1/shop/agent-devices", "/api/v1/shop/payment-settings",
       "/api/v1/shop/payments", "/api/v1/shop/refunds"
     ];
-    for (const path of paths) assertHttp(await request(shop2Page, "GET", path, { token: shop2Tokens.accessToken }), 200, "Shop two " + path);
+    for (let index = 0; index < paths.length; index++) {
+      const path = paths[index];
+      console.log("[QA-PROGRESS] shop-two API reads " + (index + 1) + "/" + paths.length + " | " + path + " | started");
+      assertHttp(await request(shop2Page, "GET", path, { token: shop2Tokens.accessToken }), 200, "Shop two " + path);
+      console.log("[QA-PROGRESS] shop-two API reads " + (index + 1) + "/" + paths.length + " | completed");
+    }
     const responsive = await runAuthenticatedResponsiveMatrix(
       shop2Page,
       sections,
@@ -1347,51 +1779,161 @@ try {
 
   await record("Shop, platform-admin and cross-tenant authorization boundaries", async () => {
     const shopCannotSeePlatform = await request(shop1Page, "GET", "/api/v1/platform/overview", { token: shop1Tokens.accessToken });
-    assert.ok([401, 403].includes(shopCannotSeePlatform.status), "Shop owner unexpectedly accessed platform overview.");
+    assertExpectedHttpStatus(shopCannotSeePlatform, [401, 403], "Shop owner unexpectedly accessed platform overview.");
     const adminCannotSeeShopProfile = await request(adminPage, "GET", "/api/v1/shop/profile", { token: adminTokens.accessToken });
-    assert.ok([401, 403].includes(adminCannotSeeShopProfile.status), "Platform admin unexpectedly accessed shop profile.");
+    assertExpectedHttpStatus(adminCannotSeeShopProfile, [401, 403], "Platform admin unexpectedly accessed shop profile.");
     const shopOneCannotSeeShopTwoPrinter = await request(shop1Page, "PATCH",
       "/api/v1/shop/printers/" + shop2Printer.id + "/active?isActive=false",
       { token: shop1Tokens.accessToken });
-    assert.equal(shopOneCannotSeeShopTwoPrinter.status, 404,
-      "Shop one could alter a printer belonging to shop two.");
+    assertExpectedHttpStatus(shopOneCannotSeeShopTwoPrinter, 404, "Shop one could alter a printer belonging to shop two.");
     const customerCannotSeePlatform = await request(page, "GET", "/api/v1/platform/overview", {
       token: customerTokens.accessToken
     });
-    assert.ok([401, 403].includes(customerCannotSeePlatform.status));
+    assertExpectedHttpStatus(customerCannotSeePlatform, [401, 403], "A global customer must not access the platform control plane.");
     return { shopToPlatform: shopCannotSeePlatform.status, adminToShop: adminCannotSeeShopProfile.status, crossTenantPrinter: shopOneCannotSeeShopTwoPrinter.status, customerToPlatform: customerCannotSeePlatform.status };
   });
 
-  await record("Customer opens shop-one QR station and receives a customer-bound real session", async () => {
+  await record("Customer opens the shop-one station link in a guest browser session", async () => {
+    guestCustomerPage = await context.newPage();
+    const stationPath = new URL(shop1Station.publicUrl).pathname;
+    const publicCode = stationPath.split("/").filter(Boolean)[1];
+    const customerQuery = "/api/v1/shop/customers?search=" +
+      encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
+    const customersBefore = assertHttp(await request(shop1Page, "GET", customerQuery, {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop customer directory before guest station entry");
+    const customerBefore = customersBefore.items.find(item => item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME);
+    const sessionCountBefore = customerBefore?.sessionCount ?? 0;
+
+    const creationResponsePromise = guestCustomerPage.waitForResponse(response => {
+      const request = response.request();
+      const url = new URL(response.url());
+      return request.method() === "POST" && url.origin === baseUrl.origin &&
+        url.pathname === "/api/v1/public/stations/" + publicCode + "/sessions";
+    }, { timeout: 20000 });
+
+    const navigation = await guestCustomerPage.goto(new URL(stationPath, baseUrl).toString(), {
+      waitUntil: "domcontentloaded", timeout: 30000
+    });
+    assert.equal(navigation?.status(), 200,
+      "Opening the printed station link in an ordinary browser must render the customer entry page.");
+
+    const creationResponse = await creationResponsePromise;
+    assert.equal(creationResponse.status(), 201, "A public station URL must create a short-lived guest session.");
+    const requestHeaders = await creationResponse.request().allHeaders();
+    assert.equal(requestHeaders.authorization, undefined,
+      "An ordinary browser link must not inherit a native SmartPrint account bearer token.");
+
+    const created = await creationResponse.json();
+    await guestCustomerPage.locator(".customer-entry-card .entry-eyebrow").waitFor({ state: "visible", timeout: 30000 });
+    assert.equal((await guestCustomerPage.locator(".customer-entry-card .entry-eyebrow").innerText()).trim(), "SECURE SESSION CREATED");
+
+    const sessionToken = await guestCustomerPage.evaluate(code =>
+      sessionStorage.getItem("qrtoprint.customer-session:" + code), publicCode);
+    assert.ok(sessionToken, "The browser must keep its QR session token in tab-scoped sessionStorage.");
+    assert.equal(sessionToken, created.sessionToken, "The browser must persist the exact server-issued token.");
+    assert.ok(!guestCustomerPage.url().includes(sessionToken),
+      "The opaque session token must never appear in the QR URL or browser address bar.");
+
+    const session = assertHttp(await request(guestCustomerPage, "GET", "/api/v1/public/sessions/current", {
+      sessionToken
+    }), 200, "Guest browser current customer session");
+    assert.equal(session.id, created.id);
+    assert.equal(session.shop.displayName, process.env.SMARTPRINT_QA_SHOP1_NAME);
+
+    const customersAfter = assertHttp(await request(shop1Page, "GET", customerQuery, {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop customer directory after guest station entry");
+    const customerAfter = customersAfter.items.find(item => item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME);
+    const sessionCountAfter = customerAfter?.sessionCount ?? 0;
+    assert.equal(sessionCountAfter, sessionCountBefore,
+      "A guest session without an Authorization header must not bind to or increment the global customer's shop session count.");
+
+    guestCustomerSession = { sessionToken, publicCode, stationPath, id: session.id, shopName: session.shop.displayName };
+    return {
+      entryMode: "ordinary HTTPS browser link",
+      authorizationHeaderSent: false,
+      sessionId: session.id,
+      sessionStoredInTabSessionStorage: true,
+      tokenInUrl: false,
+      globalCustomerSessionCountBefore: sessionCountBefore,
+      globalCustomerSessionCountAfter: sessionCountAfter,
+      shopName: session.shop.displayName
+    };
+  });
+
+  await record("Customer opens the shop-one station with authenticated customer identity", async () => {
     customerPage = await context.newPage();
+    const customerQuery = "/api/v1/shop/customers?search=" +
+      encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
+    const customersBefore = assertHttp(await request(shop1Page, "GET", customerQuery, {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop customer directory before authenticated station entry");
+    const customerBefore = customersBefore.items.find(item =>
+      item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
+    );
+    const sessionCountBefore = customerBefore?.sessionCount ?? 0;
+    let observedAuthorizationHeader = null;
     await customerPage.route("**/api/v1/public/stations/**/sessions", async route => {
       const headers = { ...route.request().headers(), authorization: "Bearer " + customerTokens.accessToken };
+      observedAuthorizationHeader = headers.authorization;
       await route.continue({ headers });
     });
     const stationPath = new URL(shop1Station.publicUrl).pathname;
+    const publicCode = stationPath.split("/").filter(Boolean)[1];
     const response = await customerPage.goto(new URL(stationPath, baseUrl).toString(), {
-      waitUntil: "domcontentloaded",
-      timeout: 30000
+      waitUntil: "domcontentloaded", timeout: 30000
     });
     assert.equal(response?.status(), 200);
     await customerPage.locator(".customer-entry-card .entry-eyebrow").waitFor({ state: "visible", timeout: 30000 });
-    const state = (await customerPage.locator(".customer-entry-card .entry-eyebrow").innerText()).trim();
-    assert.equal(state, "SECURE SESSION CREATED");
-    const publicCode = stationPath.split("/").filter(Boolean)[1];
+    assert.equal((await customerPage.locator(".customer-entry-card .entry-eyebrow").innerText()).trim(), "SECURE SESSION CREATED");
+    assert.equal(observedAuthorizationHeader, "Bearer " + customerTokens.accessToken,
+      "The authenticated native-account header contract must pass the global customer's bearer token only in Authorization.");
+
     const sessionToken = await customerPage.evaluate(code =>
       sessionStorage.getItem("qrtoprint.customer-session:" + code), publicCode);
-    assert.ok(sessionToken, "Customer session token was not saved in the browser session.");
+    assert.ok(sessionToken, "The authenticated customer station token must be persisted in tab storage.");
+    assert.ok(!customerPage.url().includes(sessionToken), "The opaque session token must never appear in the authenticated station URL.");
     const session = assertHttp(await request(customerPage, "GET", "/api/v1/public/sessions/current", {
       sessionToken
-    }), 200, "Current customer session");
+    }), 200, "Authenticated customer current station session");
     assert.equal(session.shop.displayName, process.env.SMARTPRINT_QA_SHOP1_NAME);
-    customerSession = { sessionToken, publicCode, stationPath, id: session.id, shopName: session.shop.displayName };
-    return { stationPath: "[local QA station path]", sessionId: session.id, shopName: session.shop.displayName, customerBound: true, expiresUtc: session.expiresUtc };
+    const customerProfile = assertHttp(await request(customerPage, "GET", "/api/v1/customer/me", {
+      token: customerTokens.accessToken
+    }), 200, "Global customer profile for authenticated station linkage");
+    assert.ok(customerProfile.id && customerProfile.email === process.env.SMARTPRINT_QA_CUSTOMER_EMAIL,
+      "The authenticated QR session must belong to the expected global customer.");
+
+    const customersAfter = assertHttp(await request(shop1Page, "GET", customerQuery, {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop customer directory after authenticated station entry");
+    const customerAfter = customersAfter.items.find(item =>
+      item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
+    );
+    assert.ok(customerAfter, "The authenticated station session must appear in the shop customer directory.");
+    assert.equal(customerAfter.id, customerProfile.id,
+      "The shop directory customer ID must match the signed-in global customer identity.");
+    assert.equal(customerAfter.sessionCount, sessionCountBefore + 1,
+      "The authenticated station session must bind exactly once to the global customer account.");
+
+    customerSession = {
+      sessionToken, publicCode, stationPath, id: session.id,
+      customerId: customerProfile.id, sessionCount: customerAfter.sessionCount,
+      shopName: session.shop.displayName
+    };
+    return {
+      entryMode: "authenticated native-account header contract",
+      accountBoundSession: true,
+      sessionId: session.id,
+      globalCustomerSessionCount: customerAfter.sessionCount,
+      tokenInUrl: false,
+      shopName: session.shop.displayName
+    };
   });
 
   await record("QR/UPLOAD: session renewal, scoped resume and invalid local-upload metadata are safely rejected", async () => {
     const anonymousCurrent = await request(customerPage, "GET", "/api/v1/public/sessions/current");
-    assert.equal(anonymousCurrent.status, 401, "A customer session must not be readable without its opaque session token.");
+    assertExpectedHttpStatus(anonymousCurrent, 401, "A customer session must not be readable without its opaque session token.");
 
     const renewed = assertHttp(await request(customerPage, "POST", "/api/v1/public/sessions/current/renew", {
       token: customerTokens.accessToken,
@@ -1412,7 +1954,7 @@ try {
       sessionToken: customerSession.sessionToken,
       body: { publicCode: shopTwoCode }
     });
-    assert.equal(crossStationResume.status, 401, "A customer session must not be rebound to another shop's station.");
+    assertExpectedHttpStatus(crossStationResume, 401, "A customer session must not be rebound to another shop's station.");
 
     const invalidDigest = await request(customerPage, "POST", "/api/v1/public/sessions/current/local-upload-tickets", {
       sessionToken: customerSession.sessionToken,
@@ -1428,7 +1970,7 @@ try {
         orientation: "AUTO"
       }
     });
-    assert.equal(invalidDigest.status, 422, "A local upload ticket with an invalid SHA-256 digest must be rejected.");
+    assertExpectedHttpStatus(invalidDigest, 422, "A local upload ticket with an invalid SHA-256 digest must be rejected.");
 
     const unsupportedExtension = await request(customerPage, "POST", "/api/v1/public/sessions/current/local-upload-tickets", {
       sessionToken: customerSession.sessionToken,
@@ -1444,7 +1986,7 @@ try {
         orientation: "AUTO"
       }
     });
-    assert.equal(unsupportedExtension.status, 422, "Local upload must reject unsupported file extensions.");
+    assertExpectedHttpStatus(unsupportedExtension, 422, "Local upload must reject unsupported file extensions.");
 
     return {
       sessionRenewed: true,
@@ -1456,12 +1998,221 @@ try {
   }, ["QR-001", "QR-002", "QR-003", "QR-004", "UPLOAD-001", "UPLOAD-002"]);
 
   await record("Customer QR session is linked to the global customer account", async () => {
+    assert.ok(customerSession?.id && customerSession?.customerId && customerSession?.sessionToken,
+      "The authenticated customer station session must have a captured global identity.");
+
+    const profile = assertHttp(await request(customerPage, "GET", "/api/v1/customer/me", {
+      token: customerTokens.accessToken
+    }), 200, "Global customer profile");
+    assert.equal(profile.id, customerSession.customerId,
+      "The customer token must resolve to the identity used for station entry.");
+
+    const currentSession = assertHttp(await request(customerPage, "GET", "/api/v1/public/sessions/current", {
+      sessionToken: customerSession.sessionToken
+    }), 200, "Current authenticated QR session");
+    assert.equal(currentSession.id, customerSession.id,
+      "The current QR session must be the same server-issued session created with the customer bearer token.");
+
+    const customerQuery = "/api/v1/shop/customers?search=" +
+      encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
+    const directory = assertHttp(await request(shop1Page, "GET", customerQuery, {
+      token: shop1Tokens.accessToken
+    }), 200, "Shop directory for the authenticated global customer");
+    const linkedCustomer = directory.items.find(item => item.id === profile.id);
+    assert.ok(linkedCustomer,
+      "The shop directory must link the authenticated station session to the same global customer ID.");
+    assert.equal(linkedCustomer.sessionCount, customerSession.sessionCount,
+      "The directory must retain the exact authenticated session count captured at creation.");
+
     const jobs = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
       token: customerTokens.accessToken
     }), 200, "Global customer job history");
-    assert.ok(Array.isArray(jobs));
-    return { customerJobsBeforeUpload: jobs.length, globalIdentityApi: "PASS" };
+    assert.ok(Array.isArray(jobs.jobs),
+      "The global customer history endpoint must return a jobs collection.");
+    return {
+      sessionId: currentSession.id,
+      globalCustomerId: profile.id,
+      linkedShopCustomerId: linkedCustomer.id,
+      authenticatedSessionCount: linkedCustomer.sessionCount,
+      customerJobsBeforeUpload: jobs.jobs.length,
+      globalIdentityApi: "PASS"
+    };
   });
+
+  await record("Guest customer completes a no-account upload from the shop station link", async () => {
+    let guestJobId = null;
+    let guestJobSubmissionAttempted = false;
+    let guestJobRejected = false;
+    let guestUploadRequestHeaders = null;
+    try {
+      assert.ok(guestCustomerPage && guestCustomerSession?.sessionToken,
+        "A guest station link must be opened successfully before testing guest uploads.");
+
+      const session = assertHttp(await request(guestCustomerPage, "GET", "/api/v1/public/sessions/current", {
+        sessionToken: guestCustomerSession.sessionToken
+      }), 200, "Guest browser current session");
+      assert.equal(session.id, guestCustomerSession.id,
+        "The guest browser must keep using the server-issued station session.");
+      assert.equal(session.shop.displayName, process.env.SMARTPRINT_QA_SHOP1_NAME);
+      assert.ok(!guestCustomerPage.url().includes(guestCustomerSession.sessionToken),
+        "The opaque guest session token must never be present in the station URL.");
+
+      const customerQuery = "/api/v1/shop/customers?search=" +
+        encodeURIComponent(process.env.SMARTPRINT_QA_CUSTOMER_EMAIL) + "&page=1&pageSize=50";
+      const customersBefore = assertHttp(await request(shop1Page, "GET", customerQuery, {
+        token: shop1Tokens.accessToken
+      }), 200, "Shop customer directory before guest upload");
+      const customerBefore = customersBefore.items.find(item =>
+        item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
+      );
+      const customerSessionCountBefore = customerBefore?.sessionCount ?? 0;
+      const customerJobsBefore = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
+        token: customerTokens.accessToken
+      }), 200, "Signed-in customer's history before guest upload");
+      assert.ok(Array.isArray(customerJobsBefore.jobs));
+
+      guestCustomerPage.on("request", observedRequest => {
+        try {
+          const observedUrl = new URL(observedRequest.url());
+          if (observedRequest.method() === "POST" &&
+              observedUrl.origin === baseUrl.origin &&
+              observedUrl.pathname === "/api/v1/public/sessions/current/jobs") {
+            guestUploadRequestHeaders = observedRequest.headers();
+          }
+        } catch {}
+      });
+
+      await guestCustomerPage.locator('input[type="file"][accept*="application/pdf"]').first().setInputFiles({
+        name: "smartprint-guest-qa-" + runId + ".pdf",
+        mimeType: "application/pdf",
+        buffer: syntheticPdf(2, "SmartPrint guest-only QA upload")
+      });
+      const uploadButton = guestCustomerPage.getByRole("button", { name: /Upload 1 file/ });
+      await uploadButton.waitFor({ state: "visible", timeout: 10000 });
+      await uploadButton.click();
+      await guestCustomerPage.locator(".customer-batch-quote-action").waitFor({
+        state: "visible",
+        timeout: 45000
+      });
+      await guestCustomerPage.getByRole("button", { name: "Calculate batch quote" }).click();
+      await guestCustomerPage.locator(".customer-batch-quote-card").waitFor({
+        state: "visible",
+        timeout: 30000
+      });
+
+      const draft = await guestCustomerPage.evaluate(code => {
+        const raw = localStorage.getItem("qrtoprint.customer-active-job:" + code);
+        try { return raw ? JSON.parse(raw) : null; } catch { return null; }
+      }, guestCustomerSession.publicCode);
+      const job = draft?.uploaded?.job || draft?.uploadedBatch?.[0]?.job;
+      assert.ok(job?.id, "The guest browser did not persist the uploaded server job metadata.");
+      guestJobId = job.id;
+      assert.ok(guestUploadRequestHeaders,
+        "The guest browser did not send the expected real upload request.");
+      assert.equal(guestUploadRequestHeaders.authorization, undefined,
+        "Guest document upload must not send a customer Authorization bearer token.");
+      assert.equal(guestUploadRequestHeaders["x-print-session"], guestCustomerSession.sessionToken,
+        "Guest upload must carry only the opaque station-scoped print-session capability.");
+      assert.equal(job.pageCount, 2);
+      assert.equal(job.status, "AWAITING_CONFIGURATION");
+
+      guestJobSubmissionAttempted = true;
+      const acceptanceResponses = await sendBatchAndWaitForShopApproval(
+        guestCustomerPage,
+        guestCustomerSession.sessionToken,
+        [job.id],
+        "Guest customer"
+      );
+      const queued = assertHttp(await request(guestCustomerPage, "GET",
+        "/api/v1/public/jobs/" + job.id + "/status",
+        { sessionToken: guestCustomerSession.sessionToken }), 200, "Guest customer submitted job status");
+      assert.equal(queued.job.status, "AWAITING_SHOP_APPROVAL");
+      await screenshot(guestCustomerPage, "guest-customer-queued-job");
+
+      const shopQueue = assertHttp(await request(shop1Page, "GET",
+        "/api/v1/shop/print-jobs?offset=0&take=100&search=" + encodeURIComponent(job.jobNumber),
+        { token: shop1Tokens.accessToken }), 200, "Shop queue for guest-uploaded job");
+      assert.ok(shopQueue.some(item => item.id === job.id),
+        "A guest-uploaded job must appear in the station owner's queue.");
+
+      const customerJobsAfter = assertHttp(await request(customerPage, "GET", "/api/v1/customer/jobs", {
+        token: customerTokens.accessToken
+      }), 200, "Signed-in customer's history after guest upload");
+      assert.ok(!customerJobsAfter.jobs.some(item => item.id === job.id),
+        "A guest job must not leak into an unrelated signed-in customer's global history.");
+
+      const customersAfter = assertHttp(await request(shop1Page, "GET", customerQuery, {
+        token: shop1Tokens.accessToken
+      }), 200, "Shop customer directory after guest upload");
+      const customerAfter = customersAfter.items.find(item =>
+        item.displayName === process.env.SMARTPRINT_QA_CUSTOMER_NAME
+      );
+      assert.equal(customerAfter?.sessionCount ?? 0, customerSessionCountBefore,
+        "A guest upload must not bind the guest session to the signed-in customer account.");
+
+      const rejected = assertHttp(await request(shop1Page, "POST",
+        "/api/v1/shop/print-jobs/" + job.id + "/reject",
+        { token: shop1Tokens.accessToken }), 200, "Shop rejects unpaid guest QA job");
+      assert.equal(rejected.status, "REJECTED");
+      guestJobRejected = true;
+      const guestStatusAfterRejection = assertHttp(await request(guestCustomerPage, "GET",
+        "/api/v1/public/jobs/" + job.id + "/status",
+        { sessionToken: guestCustomerSession.sessionToken }), 200, "Guest sees rejected job status");
+      assert.equal(guestStatusAfterRejection.job.status, "REJECTED");
+      await screenshot(guestCustomerPage, "guest-customer-rejected-job");
+
+      report.safety.syntheticDocumentsUploaded = true;
+      report.safety.realLocalDatabaseJobsCreated = true;
+      guestCustomerSession.jobId = job.id;
+      return {
+        entryMode: "ordinary browser station link; no customer Authorization header",
+        guestSessionId: guestCustomerSession.id,
+        pageCount: job.pageCount,
+        jobNumber: job.jobNumber,
+        shopQueueVisible: true,
+        customerAccountHistoryLinked: false,
+        sessionCountChanged: false,
+        uploadAuthorizationHeaderSent: false,
+        uploadUsedStationSessionCapability: true,
+        quoteAcceptanceResponses: acceptanceResponses.length,
+        finalStatus: guestStatusAfterRejection.job.status,
+        paymentAttempted: false,
+        dispatchAttempted: false
+      };
+    } finally {
+      // A failure after submit must not leave an unattended unpaid job in the
+      // QA shop queue. Resolve only this exact disposable guest job; never touch
+      // another job, payment, customer account or printer.
+      if (guestJobSubmissionAttempted && guestJobId && !guestJobRejected) {
+        let current = null;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          current = await request(guestCustomerPage, "GET",
+            "/api/v1/public/jobs/" + guestJobId + "/status",
+            { sessionToken: guestCustomerSession.sessionToken });
+          if (current.status === 200 &&
+              ["AWAITING_CONFIGURATION", "AWAITING_SHOP_APPROVAL", "REJECTED"].includes(current.json?.job?.status)) break;
+          await guestCustomerPage.waitForTimeout(500);
+        }
+        assertExpectedHttpStatus(current, 200, "QA cleanup reads the disposable guest job state");
+        if (current.json.job.status === "AWAITING_SHOP_APPROVAL") {
+          const cleanup = await request(shop1Page, "POST",
+            "/api/v1/shop/print-jobs/" + guestJobId + "/reject",
+            { token: shop1Tokens.accessToken });
+          assertExpectedHttpStatus(cleanup, 200, "QA cleanup rejects the unpaid guest job");
+          assert.equal(cleanup.json?.status, "REJECTED",
+            "QA cleanup must leave the guest job in a terminal rejected state.");
+        } else if (current.json.job.status === "REJECTED") {
+          // The normal assertion path may have completed the rejection already.
+        } else {
+          assert.equal(current.json.job.status, "AWAITING_CONFIGURATION",
+            "QA cleanup found an unexpected guest job state and will not mutate it.");
+          // The upload never entered the shop queue, so no shop-side work exists
+          // to resolve. Leave its local guest draft untouched for diagnosis. 
+        }
+        guestJobRejected = true;
+      }
+    }
+  }, ["GUEST-001", "GUEST-002", "GUEST-003", "GUEST-004", "GUEST-005", "GUEST-006", "GUEST-007"]);
 
   await record("PHOTO: customer Photo Studio edits and prepares a local multi-photo A4 PDF without creating a print job", async () => {
     const photoPage = await context.newPage();
@@ -1480,6 +2231,9 @@ try {
       const jobsBefore = assertHttp(await request(photoPage, "GET", "/api/v1/customer/jobs", {
         token: customerTokens.accessToken
       }), 200, "Customer jobs before Photo Studio");
+      assert.ok(Array.isArray(jobsBefore.jobs),
+        "Customer history before Photo Studio must contain a jobs array.");
+      const jobIdsBeforePhotoStudio = jobsBefore.jobs.map(job => job.id).sort();
       const picker = photoPage.locator('input[type="file"][accept*="image/png"]').first();
       await picker.setInputFiles({
         name: "smartprint-photo-studio-qa.png",
@@ -1500,7 +2254,12 @@ try {
 
       const cropTool = studio.getByRole("button", { name: "Crop" });
       await cropTool.click();
-      const zoom = studio.getByLabel("Zoom");
+      const zoomLabel = studio.locator("label").filter({ hasText: /^Zoom\b/ });
+      const zoom = zoomLabel.locator('input[type="range"]');
+      await zoom.waitFor({ state: "visible", timeout: 10000 });
+      assert.equal(await zoomLabel.count(), 1, "Photo Studio must render exactly one Zoom control in the Crop tool.");
+      assert.equal(await zoom.count(), 1, "Photo Studio Zoom must be a single native range input.");
+      assert.equal(await zoom.getAttribute("type"), "range");
       await zoom.focus();
       await zoom.press("ArrowRight");
       assert.notEqual(await zoom.inputValue(), "1", "Crop zoom control did not respond to keyboard input.");
@@ -1511,22 +2270,32 @@ try {
       await studio.getByRole("button", { name: "Set background #f3f6fa" }).click();
       assert.equal(await studio.getByRole("button", { name: "Set background #f3f6fa" }).getAttribute("aria-pressed"), "true");
 
-      await studio.getByRole("button", { name: "Sheet" }).click();
+      await studio.getByRole("button", { name: "Sheet", exact: true }).click();
       await studio.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).check();
       await studio.getByLabel("Name for form (optional)").fill("SmartPrint QA Photo");
       await studio.getByLabel("Date of birth (optional)").fill("1990-01-02");
       await studio.getByRole("button", { name: "Text" }).click();
       await studio.getByLabel("Caption font size").selectOption("7");
-      await studio.getByRole("button", { name: "Sheet" }).click();
+      await studio.getByRole("button", { name: "Sheet", exact: true }).click();
 
       await studio.getByLabel("Photo size").selectOption("25x35");
       const photoCount = studio.getByLabel("Number of photos");
       await photoCount.fill("3");
       await photoCount.blur();
       assert.equal(await photoCount.inputValue(), "3");
-      const sheetSummary = await studio.locator(".sheetSummary").innerText();
-      assert.match(sheetSummary, /A4 pages in this job\s*1/i);
-      assert.match(sheetSummary, /25\s*[×x]\s*35\s*mm/i);
+      await studio.getByLabel("Photos per A4 page").selectOption("2");
+      // PhotoStudio.module.css is a CSS Module: its class names are hashed at build time.
+      // Assert the visible summary rows through their user-facing labels instead of
+      // querying the source-only ".sheetSummary" class name.
+      const photoDimensionsRow = studio.getByText("Photo dimensions", { exact: true }).locator("xpath=..");
+      const pageCountRow = studio.getByText("A4 pages in this job", { exact: true }).locator("xpath=..");
+      const photosPerPageRow = studio.getByText("Photos per A4 page", { exact: true }).locator("xpath=..");
+      assert.equal(await photoDimensionsRow.locator("strong").innerText(), "25 × 35 mm",
+        "The selected photo dimensions must be reflected in the sheet summary.");
+      assert.equal(await photosPerPageRow.locator("strong").innerText(), "2",
+        "Manual density must be reflected in the sheet summary.");
+      assert.equal(await pageCountRow.locator("strong").innerText(), "2",
+        "Three selected photos at two per page must generate exactly two A4 pages.");
 
       await studio.getByRole("button", { name: "Prepare A4 sheet" }).click();
       await studio.waitFor({ state: "detached", timeout: 60000 });
@@ -1543,7 +2312,11 @@ try {
       const jobsAfter = assertHttp(await request(photoPage, "GET", "/api/v1/customer/jobs", {
         token: customerTokens.accessToken
       }), 200, "Customer jobs after local Photo Studio preparation");
-      assert.equal(jobsAfter.length, jobsBefore.length, "Preparing the photo sheet locally must not create a server print job.");
+      assert.ok(Array.isArray(jobsAfter.jobs),
+        "Customer history after Photo Studio must contain a jobs array.");
+      const jobIdsAfterPhotoStudio = jobsAfter.jobs.map(job => job.id).sort();
+      assert.deepEqual(jobIdsAfterPhotoStudio, jobIdsBeforePhotoStudio,
+        "Preparing the photo sheet locally must not create, replace or remove a server print job.");
 
       return {
         sourcePhotoSelected: true,
@@ -1551,7 +2324,8 @@ try {
         optionalNameAndDobApplied: true,
         photoSize: "25x35",
         photoCount: 3,
-        generatedA4Pages: 1,
+        generatedA4Pages: 2,
+        photosPerPage: 2,
         previewImages: preparedImages,
         originalUploadNotSent: true,
         serverPrintJobCountUnchanged: true
@@ -1566,7 +2340,7 @@ try {
       customerPage, customerSession.sessionToken, crypto.randomUUID(), crypto.randomUUID(),
       "smartprint-invalid-qa.pdf", Buffer.from("This is not a PDF document.", "ascii")
     );
-    assert.equal(invalid.status, 422, "Malformed PDF was not rejected by the local document validator: " + invalid.text.slice(0, 500));
+    assertExpectedHttpStatus(invalid, 422, "Malformed PDF was not rejected by the local document validator: " + invalid.text.slice(0, 500));
     return { status: invalid.status, printJobCreated: false };
   });
 
@@ -1599,8 +2373,12 @@ try {
   });
 
   await record("Customer accepts the calculated quote and sends the job to the real shop queue", async () => {
-    await customerPage.getByRole("button", { name: "Send batch to shop" }).click();
-    await customerPage.locator(".customer-job-state").waitFor({ state: "visible", timeout: 25000 });
+    const acceptanceResponses = await sendBatchAndWaitForShopApproval(
+      customerPage,
+      customerSession.sessionToken,
+      [uploadedJob.id],
+      "Signed-in customer"
+    );
     const status = assertHttp(await request(customerPage, "GET",
       "/api/v1/public/jobs/" + uploadedJob.id + "/status",
       { sessionToken: customerSession.sessionToken }), 200, "Customer uploaded job status");
@@ -1613,7 +2391,13 @@ try {
       token: customerTokens.accessToken
     }), 200, "Customer job history after upload");
     assert.ok(customerJobsResponse.jobs?.some(item => item.id === uploadedJob.id), "The signed-in customer did not see the job in their history.");
-    return { jobNumber: uploadedJob.jobNumber, customerStatus: status.job.status, shopQueueVisible: true, customerHistoryVisible: true };
+    return {
+      jobNumber: uploadedJob.jobNumber,
+      customerStatus: status.job.status,
+      shopQueueVisible: true,
+      customerHistoryVisible: true,
+      quoteAcceptanceResponses: acceptanceResponses.length
+    };
   });
 
   await record("Shop rejects the unpaid QA job and customer sees the same terminal result", async () => {
@@ -1632,7 +2416,7 @@ try {
     const start = await request(customerPage, "POST",
       "/api/v1/public/batches/" + uploadedBatchId + "/payments",
       { sessionToken: customerSession.sessionToken, body: { method: "UPI" } });
-    assert.equal(start.status, 409, "A rejected QA job's batch should not enter checkout.");
+    assertExpectedHttpStatus(start, 409, "A rejected QA job's batch should not enter checkout.");
     return { status: start.status, rejectedBeforeCheckout: true };
   });
 
@@ -1698,6 +2482,13 @@ try {
     const names = draft.uploadedBatch.map(item => item.document.originalFileName);
     assert.equal(new Set(names).size, 2, "Both source documents must remain distinct.");
     assert.ok(draft.uploadedBatch.every(item => item.job?.id), "Both file uploads must have real persisted PrintJob IDs.");
+    const fileAName = "smartprint-qa-batch-a-" + runId + ".pdf";
+    const fileBName = "smartprint-qa-batch-b-" + runId + ".pdf";
+    const fileA = draft.uploadedBatch.find(item => item.document.originalFileName === fileAName);
+    const fileB = draft.uploadedBatch.find(item => item.document.originalFileName === fileBName);
+    assert.ok(fileA?.job?.id && fileB?.job?.id,
+      "The uploaded batch must preserve a stable filename-to-PrintJob mapping for files A and B.");
+    reviewedBatchJobIdsByFileName = { fileA: fileA.job.id, fileB: fileB.job.id };
     reviewedBatchId = draft.batchId;
     report.safety.syntheticDocumentsUploaded = true;
     report.safety.realLocalDatabaseJobsCreated = true;
@@ -1713,13 +2504,24 @@ try {
   });
 
   await record("Two-file customer batch is sent to the shop and appears as one tenant-scoped batch", async () => {
-    await batchCustomerPage.getByRole("button", { name: "Send batch to shop" }).click();
-    await batchCustomerPage.locator(".customer-job-state").waitFor({ state: "visible", timeout: 30000 });
+    assert.ok(reviewedBatchJobIdsByFileName?.fileA && reviewedBatchJobIdsByFileName?.fileB,
+      "The batch must retain both filename-to-job identities before customer acceptance.");
+    const acceptanceResponses = await sendBatchAndWaitForShopApproval(
+      batchCustomerPage,
+      batchCustomerSession.sessionToken,
+      [reviewedBatchJobIdsByFileName.fileA, reviewedBatchJobIdsByFileName.fileB],
+      "Two-file customer batch"
+    );
     reviewedBatchShopJobs = assertHttp(await request(shop1Page, "GET",
       "/api/v1/shop/print-jobs?offset=0&take=100&batchId=" + encodeURIComponent(reviewedBatchId),
       { token: shop1Tokens.accessToken }), 200, "Two-file QA batch in shop queue");
     assert.equal(reviewedBatchShopJobs.length, 2, "Shop queue must contain exactly the two uploaded files.");
     assert.ok(reviewedBatchShopJobs.every(job => job.batchId === reviewedBatchId));
+    assert.deepEqual(
+      reviewedBatchShopJobs.map(job => job.id).sort(),
+      [reviewedBatchJobIdsByFileName.fileA, reviewedBatchJobIdsByFileName.fileB].sort(),
+      "The shop queue must contain the exact two files uploaded in this batch."
+    );
     assert.ok(reviewedBatchShopJobs.every(job => job.status === "AWAITING_SHOP_APPROVAL"));
     const customerStates = [];
     for (const job of reviewedBatchShopJobs) {
@@ -1734,48 +2536,100 @@ try {
       batchId: reviewedBatchId,
       filesVisibleInShop: reviewedBatchShopJobs.length,
       allFilesAwaitShopReview: true,
-      customerStatusCount: customerStates.length
+      customerStatusCount: customerStates.length,
+      quoteAcceptanceResponses: acceptanceResponses.length
     };
   });
 
   await record("Shopkeeper rejects one file, undoes that rejection, then applies the individual file decision", async () => {
     await clickShopSection(shop1Page, "Print Queue");
-    const reviewButton = shop1Page.getByRole("button", { name: /Preview & review/ }).first();
+    assert.ok(reviewedBatchJobIdsByFileName?.fileA && reviewedBatchJobIdsByFileName?.fileB,
+      "The reviewed batch must retain filename-to-job identity.");
+
+    assert.ok(reviewedBatchShopJobs.length === 2,
+      "The tenant-scoped API must contain both persisted files before opening the shop UI review.");
+    const targetJob = reviewedBatchShopJobs[0];
+    assert.ok(targetJob?.jobNumber && targetJob?.id,
+      "The batch lookup must return a persisted job number and ID.");
+
+    // Print Queue is paged and keeps its own loaded data. Search by the exact
+    // real job number so this test does not assume a background refresh already
+    // inserted a just-created batch into the current first page.
+    const queueSearch = shop1Page.getByRole("searchbox", { name: "Search all print jobs" });
+    await queueSearch.fill(targetJob.jobNumber);
+    const searchResponsePromise = shop1Page.waitForResponse(response => {
+      if (response.request().method() !== "GET") return false;
+      try {
+        const url = new URL(response.url());
+        return url.origin === baseUrl.origin &&
+          url.pathname === "/api/v1/shop/print-jobs" &&
+          url.searchParams.get("offset") === "0" &&
+          url.searchParams.get("take") === "100" &&
+          url.searchParams.get("search") === targetJob.jobNumber;
+      } catch {
+        return false;
+      }
+    }, { timeout: 20000 });
+    await shop1Page.locator(".queue-search-form button[type='submit']").click();
+    const searchResponse = await searchResponsePromise;
+    assert.equal(searchResponse.status(), 200, "The shop's real queue search must return HTTP 200.");
+    const searchedJobs = await searchResponse.json();
+    assert.ok(Array.isArray(searchedJobs), "The shop queue search must return a job array.");
+    assert.deepEqual(
+      searchedJobs.map(job => job.id),
+      [targetJob.id],
+      "Searching the exact persisted job number must return that one file in the authenticated shop."
+    );
+
+    const matchingQueueRows = shop1Page.locator(".queue-batch-summary-row")
+      .filter({ hasText: targetJob.jobNumber });
+    await matchingQueueRows.waitFor({ state: "visible", timeout: 15000 });
+    assert.equal(await matchingQueueRows.count(), 1,
+      "The exact searched job must appear in one shop batch summary row.");
+    const reviewButton = matchingQueueRows.getByRole("button", { name: /Preview & review/ });
     await reviewButton.waitFor({ state: "visible", timeout: 15000 });
     await reviewButton.click();
+
     const modal = shop1Page.getByRole("dialog", { name: "Review batch" });
     await modal.waitFor({ state: "visible", timeout: 15000 });
     const rows = modal.locator(".batch-review-row");
-    await rows.nth(1).waitFor({ state: "visible", timeout: 10000 });
-    assert.equal(await rows.count(), 2);
-    const decisions = rows.locator('input[type="checkbox"]');
-    assert.equal(await decisions.count(), 2);
-    assert.equal(await decisions.nth(0).isChecked(), true);
-    assert.equal(await decisions.nth(1).isChecked(), true);
+    assert.equal(await rows.count(), 2, "The review dialog must contain exactly this batch's two files.");
 
-    // Exercise the real, read-only cloud document preview before applying decisions.
-    const previewResponse = shop1Page.waitForResponse(response =>
-      response.url().includes("/api/v1/shop/print-jobs/") &&
-      response.url().endsWith("/document") &&
-      response.status() === 200,
-      { timeout: 30000 }
-    );
-    await rows.nth(0).getByRole("button", { name: "Preview" }).click();
-    await previewResponse;
-    const previewDialog = shop1Page.getByRole("dialog", { name: /smartprint-qa-batch-a-/i });
+    const fileAName = "smartprint-qa-batch-a-" + runId + ".pdf";
+    const fileBName = "smartprint-qa-batch-b-" + runId + ".pdf";
+    const fileARow = rows.filter({ hasText: fileAName });
+    const fileBRow = rows.filter({ hasText: fileBName });
+    assert.equal(await fileARow.count(), 1, "File A must be identifiable regardless of review-row ordering.");
+    assert.equal(await fileBRow.count(), 1, "File B must be identifiable regardless of review-row ordering.");
+    const fileADecision = fileARow.locator('input[type="checkbox"]');
+    const fileBDecision = fileBRow.locator('input[type="checkbox"]');
+    assert.equal(await fileADecision.count(), 1);
+    assert.equal(await fileBDecision.count(), 1);
+    assert.equal(await fileADecision.isChecked(), true, "File A must start accepted.");
+    assert.equal(await fileBDecision.isChecked(), true, "File B must start accepted.");
+
+    // Preview the exact File A document by its persisted job ID, independent of queue ordering.
+    const previewPath = "/api/v1/shop/print-jobs/" + reviewedBatchJobIdsByFileName.fileA + "/document";
+    const previewResponsePromise = shop1Page.waitForResponse(response => {
+      try { return new URL(response.url()).pathname === previewPath; } catch { return false; }
+    }, { timeout: 30000 });
+    await fileARow.getByRole("button", { name: "Preview" }).click();
+    const previewResponse = await previewResponsePromise;
+    assert.equal(previewResponse.status(), 200, "The File A cloud preview request must succeed.");
+    const previewDialog = shop1Page.getByRole("dialog", { name: fileAName });
     await previewDialog.waitFor({ state: "visible", timeout: 15000 });
     await previewDialog.locator(".shop-document-preview iframe").waitFor({ state: "visible", timeout: 10000 });
     await screenshot(shop1Page, "shop-batch-real-document-preview");
     await previewDialog.getByRole("button", { name: "Close preview" }).click();
     await previewDialog.waitFor({ state: "detached", timeout: 10000 });
 
-    await decisions.nth(1).uncheck();
-    assert.equal(await decisions.nth(1).isChecked(), false, "The second file should be marked for rejection.");
-    await decisions.nth(1).check();
-    assert.equal(await decisions.nth(1).isChecked(), true, "The shopkeeper must be able to undo a rejection before applying it.");
-    await decisions.nth(1).uncheck();
-    assert.equal(await decisions.nth(0).isChecked(), true, "The first file remains accepted.");
-    assert.equal(await decisions.nth(1).isChecked(), false, "Only the second file is rejected.");
+    await fileBDecision.uncheck();
+    assert.equal(await fileBDecision.isChecked(), false, "File B should be marked for rejection.");
+    await fileBDecision.check();
+    assert.equal(await fileBDecision.isChecked(), true, "The shopkeeper must be able to undo File B rejection before applying it.");
+    await fileBDecision.uncheck();
+    assert.equal(await fileADecision.isChecked(), true, "File A remains accepted.");
+    assert.equal(await fileBDecision.isChecked(), false, "Only File B is rejected.");
 
     await modal.getByRole("button", { name: "Apply review" }).click();
     const confirmation = shop1Page.getByRole("dialog", { name: "Confirm batch review" });
@@ -1791,6 +2645,10 @@ try {
     const rejected = reviewedBatchShopJobs.filter(job => job.status === "REJECTED");
     assert.equal(accepted.length, 1, "Exactly one file must remain accepted for checkout.");
     assert.equal(rejected.length, 1, "Exactly one file must be rejected and excluded.");
+    assert.equal(accepted[0].id, reviewedBatchJobIdsByFileName.fileA,
+      "The file left accepted must be File A.");
+    assert.equal(rejected[0].id, reviewedBatchJobIdsByFileName.fileB,
+      "The individually rejected file must be File B.");
     const customerRejected = assertHttp(await request(batchCustomerPage, "GET",
       "/api/v1/public/jobs/" + rejected[0].id + "/status", {
         sessionToken: batchCustomerSession.sessionToken
@@ -1907,7 +2765,7 @@ try {
     const noVerifiedPaymentRefund = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/refund-preview",
       { token: shop1Tokens.accessToken, body: { rejectedPageNumbers: [2] } });
-    assert.equal(noVerifiedPaymentRefund.status, 409, "Refund preview must be blocked without a verified payment.");
+    assertExpectedHttpStatus(noVerifiedPaymentRefund, 409, "Refund preview must be blocked without a verified payment.");
     return {
       paymentRows: payments.length,
       existingRefundRows: refunds.length,
@@ -1920,17 +2778,17 @@ try {
     const verifyRejectedPayment = await request(shop1Page, "POST",
       "/api/v1/shop/payments/" + paymentRejectedBatchPaymentId + "/verify",
       { token: shop1Tokens.accessToken });
-    assert.equal(verifyRejectedPayment.status, 409, "A rejected UPI report must never be marked as received.");
+    assertExpectedHttpStatus(verifyRejectedPayment, 409, "A rejected UPI report must never be marked as received.");
 
     const approveRejectedJob = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/approve",
       { token: shop1Tokens.accessToken });
-    assert.equal(approveRejectedJob.status, 409, "A rejected file cannot be approved for printing.");
+    assertExpectedHttpStatus(approveRejectedJob, 409, "A rejected file cannot be approved for printing.");
 
     const dispatchRejectedJob = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/dispatch",
       { token: shop1Tokens.accessToken });
-    assert.equal(dispatchRejectedJob.status, 409, "A rejected file cannot be dispatched to a printer.");
+    assertExpectedHttpStatus(dispatchRejectedJob, 409, "A rejected file cannot be dispatched to a printer.");
 
     const refundPreview = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + paymentRejectedJob.id + "/refund-preview",
@@ -1938,7 +2796,7 @@ try {
         token: shop1Tokens.accessToken,
         body: { rejectedPageNumbers: [1] }
       });
-    assert.equal(refundPreview.status, 409, "A payment-rejected file has no verified payment to refund.");
+    assertExpectedHttpStatus(refundPreview, 409, "A payment-rejected file has no verified payment to refund.");
 
     const refundNotConfirmed = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + paymentRejectedJob.id + "/refund",
@@ -1953,7 +2811,7 @@ try {
           rejectedPageNumbers: [1]
         }
       });
-    assert.equal(refundNotConfirmed.status, 400, "The system must require explicit confirmation that a refund was actually sent.");
+    assertExpectedHttpStatus(refundNotConfirmed, 400, "The system must require explicit confirmation that a refund was actually sent.");
 
     const events = assertHttp(await request(shop1Page, "GET",
       "/api/v1/shop/print-jobs/" + paymentRejectedJob.id + "/events",
@@ -1994,7 +2852,7 @@ try {
     const dispatch = await request(shop1Page, "POST",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/dispatch",
       { token: shop1Tokens.accessToken });
-    assert.equal(dispatch.status, 409, "Rejected/unpaid/no-agent job dispatch must be rejected.");
+    assertExpectedHttpStatus(dispatch, 409, "Rejected/unpaid/no-agent job dispatch must be rejected.");
     return {
       pairedAgentsForQaTenant: agents.length,
       dispatchGuard: dispatch.status,
@@ -2049,7 +2907,7 @@ try {
     const outcomes = [];
     for (const [method, path, body] of protectedRequests) {
       const response = await request(page, method, path, { body });
-      assert.equal(response.status, 401, "Protected Agent endpoint must reject missing agent credentials: " + method + " " + path);
+      assertExpectedHttpStatus(response, 401, "Protected Agent endpoint must reject missing agent credentials: " + method + " " + path);
       outcomes.push({ method, path: path.replace(jobId, "[job]").replace(ticketId, "[ticket]"), status: response.status });
     }
     return { protectedAgentEndpoints: outcomes.length, allRejectedWithoutCredentials: true, outcomes };
@@ -2083,7 +2941,7 @@ try {
         },
         body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
       });
-      assert.equal(invalidAgentSecret.status, 401, "A known Agent ID with an incorrect secret must be rejected.");
+      assertExpectedHttpStatus(invalidAgentSecret, 401, "A known Agent ID with an incorrect secret must be rejected.");
 
       const malformedAgentId = await request(page, "POST", "/api/v1/agent/heartbeat", {
         headers: {
@@ -2092,7 +2950,7 @@ try {
         },
         body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
       });
-      assert.equal(malformedAgentId.status, 401, "A malformed Agent identity must be rejected.");
+      assertExpectedHttpStatus(malformedAgentId, 401, "A malformed Agent identity must be rejected.");
 
       const invalidEnrollmentCode = await request(page, "POST", "/api/v1/agent/enroll", {
         body: {
@@ -2101,12 +2959,12 @@ try {
           deviceName: "SmartPrint QA Invalid Enrollment"
         }
       });
-      assert.equal(invalidEnrollmentCode.status, 401, "An unknown Agent enrollment code must be rejected.");
+      assertExpectedHttpStatus(invalidEnrollmentCode, 401, "An unknown Agent enrollment code must be rejected.");
 
       const invalidEnrollmentMetadata = await request(page, "POST", "/api/v1/agent/enroll", {
         body: { code: qaAgentEnrollment.code, fingerprint: "", deviceName: "" }
       });
-      assert.equal(invalidEnrollmentMetadata.status, 400, "Enrollment must reject missing device identity metadata.");
+      assertExpectedHttpStatus(invalidEnrollmentMetadata, 400, "Enrollment must reject missing device identity metadata.");
 
       enrollmentReplay = await request(page, "POST", "/api/v1/agent/enroll", {
         body: {
@@ -2115,7 +2973,7 @@ try {
           deviceName: "SmartPrint QA Enrollment Replay"
         }
       });
-      assert.equal(enrollmentReplay.status, 401, "A one-time enrollment code must not be reusable.");
+      assertExpectedHttpStatus(enrollmentReplay, 401, "A one-time enrollment code must not be reusable.");
 
       const agentHeaders = {
         "X-Print-Agent-Id": qaAgentIdentity.id,
@@ -2143,7 +3001,7 @@ try {
           }]
         }
       });
-      assert.equal(invalidSync.status, 400, "Invalid printer capability payload must be rejected.");
+      assertExpectedHttpStatus(invalidSync, 400, "Invalid printer capability payload must be rejected.");
 
       emptySync = assertHttp(await request(page, "POST", "/api/v1/agent/printers/sync", {
         headers: agentHeaders,
@@ -2168,7 +3026,7 @@ try {
         headers: agentHeaders,
         body: { version: "smartprint-local-qa", operatingSystem: "Windows", localEndpoints: [] }
       });
-      assert.equal(heartbeatAfterRevoke.status, 401, "A revoked Agent credential must no longer authenticate.");
+      assertExpectedHttpStatus(heartbeatAfterRevoke, 401, "A revoked Agent credential must no longer authenticate.");
 
       const finalDevices = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/agent-devices", {
         token: shop1Tokens.accessToken
@@ -2237,7 +3095,7 @@ try {
       assert.equal(disabledStation.isEnabled, false);
 
       const blockedSession = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
-      assert.equal(blockedSession.status, 404, "A disabled QR station must not create new customer sessions.");
+      assertExpectedHttpStatus(blockedSession, 404, "A disabled QR station must not create new customer sessions.");
 
       const enabledStationResponse = await request(shop1Page, "PATCH",
         "/api/v1/shop/qr-stations/" + shop1Station.id + "/enabled?isEnabled=true",
@@ -2253,7 +3111,7 @@ try {
       assert.ok(newStationCode && newStationCode !== oldStationCode, "QR rotation must issue a new public code.");
 
       const oldCodeAfterRotation = await request(page, "POST", "/api/v1/public/stations/" + oldStationCode + "/sessions");
-      assert.equal(oldCodeAfterRotation.status, 404, "A rotated public QR code must no longer create sessions.");
+      assertExpectedHttpStatus(oldCodeAfterRotation, 404, "A rotated public QR code must no longer create sessions.");
 
       const newCodeSession = assertHttp(await request(page, "POST",
         "/api/v1/public/stations/" + newStationCode + "/sessions",
@@ -2288,7 +3146,7 @@ try {
     const crossTenant = await request(shop2Page, "GET",
       "/api/v1/shop/print-jobs/" + uploadedJob.id + "/events",
       { token: shop2Tokens.accessToken });
-    assert.equal(crossTenant.status, 404, "Shop two could read shop one's job events.");
+    assertExpectedHttpStatus(crossTenant, 404, "Shop two could read shop one's job events.");
     const shopOneTenantList = assertHttp(await request(adminPage, "GET",
       "/api/v1/platform/tenants?search=" + encodeURIComponent(process.env.SMARTPRINT_QA_SHOP1_NAME) + "&page=1&pageSize=20",
       { token: adminTokens.accessToken }), 200, "Platform tenant search");
@@ -2317,7 +3175,7 @@ try {
         reason: "QA invalid boundary"
       }
     });
-    assert.equal(invalidSettings.status, 400, "Platform operational settings must reject out-of-range quotas.");
+    assertExpectedHttpStatus(invalidSettings, 400, "Platform operational settings must reject out-of-range quotas.");
 
     const noOpUpdatePayload = {
       trialMaxMonthlyPrintJobs: settings.trialMaxMonthlyPrintJobs,
@@ -2353,7 +3211,7 @@ try {
         token: adminTokens.accessToken,
         body: { status: "Frozen", reason: "QA invalid status" }
       });
-    assert.equal(invalidTenantTransition.status, 400, "Unknown tenant states must be rejected.");
+    assertExpectedHttpStatus(invalidTenantTransition, 400, "Unknown tenant states must be rejected.");
 
     let suspended = null;
     let blockedShopRead = null;
@@ -2374,7 +3232,8 @@ try {
       blockedShopRead = await request(shop2Page, "GET", "/api/v1/shop/profile", {
         token: shop2Tokens.accessToken
       });
-      assert.equal(blockedShopRead.status, 403, "A suspended shop must be blocked from ordinary shop API work.");
+      assertExpectedHttpStatus(blockedShopRead, 403, "A suspended shop must be blocked from reading its ordinary workspace profile. Actual HTTP " +
+        blockedShopRead.status + " from " + blockedShopRead.url + ". Body: " + blockedShopRead.text.slice(0, 600));
 
       const restoredResponse = await request(adminPage, "PATCH",
         "/api/v1/platform/tenants/" + shop2TenantId + "/status",
@@ -2427,7 +3286,7 @@ try {
     const invalidShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
       body: { businessName: "", ownerName: "", email: "not-an-email", password: "invalid" }
     });
-    assert.equal(invalidShopRegistration.status, 400, "Invalid shop registration data must be rejected.");
+    assertExpectedHttpStatus(invalidShopRegistration, 400, "Invalid shop registration data must be rejected.");
 
     const duplicateShopRegistration = await request(shop1Page, "POST", "/api/v1/auth/register-shop", {
       body: {
@@ -2437,7 +3296,7 @@ try {
         password: process.env.SMARTPRINT_QA_SHOP1_PASSWORD
       }
     });
-    assert.equal(duplicateShopRegistration.status, 409, "A duplicate shop email must not create a second tenant.");
+    assertExpectedHttpStatus(duplicateShopRegistration, 409, "A duplicate shop email must not create a second tenant.");
 
     const duplicateCustomerRegistration = await request(page, "POST", "/api/v1/auth/register-customer", {
       body: {
@@ -2446,22 +3305,22 @@ try {
         password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD
       }
     });
-    assert.equal(duplicateCustomerRegistration.status, 409, "A duplicate global customer email must be rejected.");
+    assertExpectedHttpStatus(duplicateCustomerRegistration, 409, "A duplicate global customer email must be rejected.");
 
     const customerThroughShopLogin = await request(page, "POST", "/api/v1/auth/login", {
       body: { email: process.env.SMARTPRINT_QA_CUSTOMER_EMAIL, password: process.env.SMARTPRINT_QA_CUSTOMER_PASSWORD }
     });
-    assert.equal(customerThroughShopLogin.status, 401, "A global customer must not authenticate as a shop owner.");
+    assertExpectedHttpStatus(customerThroughShopLogin, 401, "A global customer must not authenticate as a shop owner.");
 
     const shopThroughCustomerLogin = await request(page, "POST", "/api/v1/auth/customer-login", {
       body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
     });
-    assert.equal(shopThroughCustomerLogin.status, 401, "A shop owner must not authenticate as a global customer.");
+    assertExpectedHttpStatus(shopThroughCustomerLogin, 401, "A shop owner must not authenticate as a global customer.");
 
     const anonymousShopProfile = await request(page, "GET", "/api/v1/shop/profile");
     const anonymousPlatformOverview = await request(page, "GET", "/api/v1/platform/overview");
-    assert.equal(anonymousShopProfile.status, 401, "Shop profile must require an access token.");
-    assert.equal(anonymousPlatformOverview.status, 401, "Platform administration must require an access token.");
+    assertExpectedHttpStatus(anonymousShopProfile, 401, "Shop profile must require an access token.");
+    assertExpectedHttpStatus(anonymousPlatformOverview, 401, "Platform administration must require an access token.");
 
     const login = assertHttp(await request(shop2Page, "POST", "/api/v1/auth/login", {
       body: { email: process.env.SMARTPRINT_QA_SHOP2_EMAIL, password: process.env.SMARTPRINT_QA_SHOP2_PASSWORD }
@@ -2475,17 +3334,17 @@ try {
     const replay = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
       body: { refreshToken: login.refreshToken }
     });
-    assert.equal(replay.status, 401, "A previously rotated refresh token must not be reusable.");
+    assertExpectedHttpStatus(replay, 401, "A previously rotated refresh token must not be reusable.");
 
     const logout = await request(shop2Page, "POST", "/api/v1/auth/logout", {
       body: { refreshToken: rotated.refreshToken }
     });
-    assert.equal(logout.status, 204, "Logout should revoke the active refresh token.");
+    assertExpectedHttpStatus(logout, 204, "Logout should revoke the active refresh token.");
 
     const refreshAfterLogout = await request(shop2Page, "POST", "/api/v1/auth/refresh", {
       body: { refreshToken: rotated.refreshToken }
     });
-    assert.equal(refreshAfterLogout.status, 401, "A logged-out refresh token must not be reusable.");
+    assertExpectedHttpStatus(refreshAfterLogout, 401, "A logged-out refresh token must not be reusable.");
 
     return {
       invalidRegistration: invalidShopRegistration.status,
@@ -2503,31 +3362,31 @@ try {
 
   await record("RBAC: a global customer token cannot enter shop-owner APIs", async () => {
     const response = await request(page, "GET", "/api/v1/shop/profile", { token: customerTokens.accessToken });
-    assert.equal(response.status, 403, "Customer identity must not be accepted as a shop owner.");
+    assertExpectedHttpStatus(response, 403, "Customer identity must not be accepted as a shop owner.");
     return { customerToShopProfile: response.status, shopDataReturned: false };
   }, ["RBAC-007"]);
 
   await record("RBAC: a shop-owner token cannot enter customer identity APIs", async () => {
     const response = await request(page, "GET", "/api/v1/customer/me", { token: shop1Tokens.accessToken });
-    assert.equal(response.status, 403, "Shop-owner identity must not be accepted as a global customer.");
+    assertExpectedHttpStatus(response, 403, "Shop-owner identity must not be accepted as a global customer.");
     return { shopToCustomerProfile: response.status, customerDataReturned: false };
   }, ["RBAC-008"]);
 
   await record("RBAC: a shop-owner token cannot access the platform control plane", async () => {
     const response = await request(page, "GET", "/api/v1/platform/overview", { token: shop1Tokens.accessToken });
-    assert.equal(response.status, 403, "Tenant shop owners must not access platform administration.");
+    assertExpectedHttpStatus(response, 403, "Tenant shop owners must not access platform administration.");
     return { shopToPlatformOverview: response.status, platformDataReturned: false };
   }, ["RBAC-009"]);
 
   await record("RBAC: a customer token cannot access the platform control plane", async () => {
     const response = await request(page, "GET", "/api/v1/platform/overview", { token: customerTokens.accessToken });
-    assert.equal(response.status, 403, "Global customers must not access platform administration.");
+    assertExpectedHttpStatus(response, 403, "Global customers must not access platform administration.");
     return { customerToPlatformOverview: response.status, platformDataReturned: false };
   }, ["RBAC-010"]);
 
   await record("TENANT: Shop One cannot disable Shop Two's printer", async () => {
     const attempt = await request(shop1Page, "PATCH", "/api/v1/shop/printers/" + shop2Printer.id + "/active?isActive=false", { token: shop1Tokens.accessToken });
-    assert.equal(attempt.status, 404, "Foreign tenant printer IDs must be indistinguishable from missing printer IDs.");
+    assertExpectedHttpStatus(attempt, 404, "Foreign tenant printer IDs must be indistinguishable from missing printer IDs.");
     const printers = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/printers", { token: shop2Tokens.accessToken }), 200, "Shop Two printer read-back");
     assert.ok(printers.find(item => item.id === shop2Printer.id)?.isActive, "Cross-tenant access must not disable Shop Two's printer.");
     return { foreignPrinterMutation: attempt.status, foreignPrinterStillActive: true };
@@ -2535,7 +3394,7 @@ try {
 
   await record("TENANT: Shop One cannot disable Shop Two's QR station", async () => {
     const attempt = await request(shop1Page, "PATCH", "/api/v1/shop/qr-stations/" + shop2Station.id + "/enabled?isEnabled=false", { token: shop1Tokens.accessToken });
-    assert.equal(attempt.status, 404, "Foreign tenant QR station IDs must be rejected.");
+    assertExpectedHttpStatus(attempt, 404, "Foreign tenant QR station IDs must be rejected.");
     const stations = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/qr-stations", { token: shop2Tokens.accessToken }), 200, "Shop Two station read-back");
     assert.ok(stations.find(item => item.id === shop2Station.id)?.isEnabled, "Cross-tenant access must not disable Shop Two's station.");
     return { foreignStationMutation: attempt.status, foreignStationStillEnabled: true };
@@ -2543,7 +3402,7 @@ try {
 
   await record("TENANT: Shop One cannot rotate Shop Two's QR station code", async () => {
     const attempt = await request(shop1Page, "POST", "/api/v1/shop/qr-stations/" + shop2Station.id + "/rotate-code", { token: shop1Tokens.accessToken });
-    assert.equal(attempt.status, 404, "Foreign station QR-code rotation must be rejected.");
+    assertExpectedHttpStatus(attempt, 404, "Foreign station QR-code rotation must be rejected.");
     const stations = assertHttp(await request(shop2Page, "GET", "/api/v1/shop/qr-stations", { token: shop2Tokens.accessToken }), 200, "Shop Two station code read-back");
     assert.equal(stations.find(item => item.id === shop2Station.id)?.publicUrl, shop2Station.publicUrl,
       "A foreign tenant must not rotate or replace the station's public code.");
@@ -2581,72 +3440,72 @@ try {
 
   await record("QR: unknown public station codes cannot create a customer session", async () => {
     const response = await request(page, "POST", "/api/v1/public/stations/SMARTPRINT-QA-NO-SUCH-STATION/sessions");
-    assert.equal(response.status, 404, "An unknown or disabled public station code must not create a session.");
+    assertExpectedHttpStatus(response, 404, "An unknown or disabled public station code must not create a session.");
     assert.equal(response.json?.code, "station_not_available");
     return { unknownStationStatus: response.status, sessionCreated: false };
   }, ["QR-011"]);
 
   await record("QR: an invalid opaque session token cannot read current session data", async () => {
-    const response = await request(customerPage, "GET", "/api/v1/public/sessions/current", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
-    assert.equal(response.status, 401, "An invalid opaque session token must be rejected.");
+    const response = await request(page, "GET", "/api/v1/public/sessions/current", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
+    assertExpectedHttpStatus(response, 401, "An invalid opaque session token must be rejected.");
     return { invalidSessionRead: response.status, sessionDataReturned: false };
   }, ["QR-012"]);
 
   await record("QR: an invalid opaque session token cannot renew a session", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/renew", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
-    assert.equal(response.status, 401, "An invalid opaque session token must not be renewed.");
+    const response = await request(page, "POST", "/api/v1/public/sessions/current/renew", { sessionToken: "SMARTPRINT-QA-INVALID-SESSION-TOKEN" });
+    assertExpectedHttpStatus(response, 401, "An invalid opaque session token must not be renewed.");
     return { invalidSessionRenewal: response.status, sessionChanged: false };
   }, ["QR-013"]);
 
   await record("UPLOAD: a print upload requires an Idempotency-Key", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/jobs", { sessionToken: customerSession.sessionToken });
-    assert.equal(response.status, 400, "A cloud document upload must require an idempotency key.");
+    const response = await request(page, "POST", "/api/v1/public/sessions/current/jobs", { sessionToken: customerSession.sessionToken });
+    assertExpectedHttpStatus(response, 400, "A cloud document upload must require an idempotency key.");
     assert.equal(response.json?.code, "session_and_idempotency_required");
     return { missingIdempotencyKey: response.status, printJobCreated: false };
   }, ["UPLOAD-003"]);
 
   await record("UPLOAD: malformed batch identifiers are rejected before document ingestion", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/jobs", {
+    const response = await request(page, "POST", "/api/v1/public/sessions/current/jobs", {
       sessionToken: customerSession.sessionToken,
       headers: { "Idempotency-Key": "smartprint-qa-invalid-batch-" + crypto.randomUUID(), "X-Print-Batch-Id": "not-a-guid" }
     });
-    assert.equal(response.status, 400, "Malformed batch IDs must be rejected.");
+    assertExpectedHttpStatus(response, 400, "Malformed batch IDs must be rejected.");
     assert.equal(response.json?.code, "invalid_batch_id");
     return { invalidBatchId: response.status, printJobCreated: false };
   }, ["UPLOAD-004"]);
 
   await record("DOC: cloud document upload rejects non-multipart requests", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/sessions/current/jobs", {
+    const response = await request(page, "POST", "/api/v1/public/sessions/current/jobs", {
       sessionToken: customerSession.sessionToken,
       headers: { "Idempotency-Key": "smartprint-qa-non-multipart-" + crypto.randomUUID() },
       body: { unexpected: "json is not a document upload" }
     });
-    assert.equal(response.status, 400, "Document ingestion must require multipart form data.");
+    assertExpectedHttpStatus(response, 400, "Document ingestion must require multipart form data.");
     assert.equal(response.json?.code, "multipart_form_required");
     return { nonMultipartUpload: response.status, printJobCreated: false };
   }, ["DOC-006"]);
 
   await record("JOB: a customer session cannot read a job outside its session", async () => {
-    const response = await request(customerPage, "GET", "/api/v1/public/jobs/" + crypto.randomUUID() + "/status", { sessionToken: customerSession.sessionToken });
-    assert.equal(response.status, 404, "A customer session must not reveal jobs outside its own session.");
+    const response = await request(page, "GET", "/api/v1/public/jobs/" + crypto.randomUUID() + "/status", { sessionToken: customerSession.sessionToken });
+    assertExpectedHttpStatus(response, 404, "A customer session must not reveal jobs outside its own session.");
     return { foreignOrUnknownJobStatus: response.status, jobDataReturned: false };
   }, ["JOB-010"]);
 
   await record("JOB: a signed-in customer cannot read another customer's job history entry", async () => {
-    const response = await request(customerPage, "GET", "/api/v1/customer/jobs/" + crypto.randomUUID() + "/status", { token: customerTokens.accessToken });
-    assert.equal(response.status, 404, "Customer account job status must hide jobs not owned by that customer.");
+    const response = await request(page, "GET", "/api/v1/customer/jobs/" + crypto.randomUUID() + "/status", { token: customerTokens.accessToken });
+    assertExpectedHttpStatus(response, 404, "Customer account job status must hide jobs not owned by that customer.");
     return { foreignOrUnknownCustomerJob: response.status, jobDataReturned: false };
   }, ["JOB-011"]);
 
   await record("PLATFORM: tenant directory rejects overlong search input", async () => {
     const response = await request(adminPage, "GET", "/api/v1/platform/tenants?search=" + encodeURIComponent("x".repeat(101)), { token: adminTokens.accessToken });
-    assert.equal(response.status, 400, "Tenant search must reject more than 100 characters.");
+    assertExpectedHttpStatus(response, 400, "Tenant search must reject more than 100 characters.");
     return { overlongSearch: response.status };
   }, ["PLATFORM-010"]);
 
   await record("PLATFORM: tenant directory rejects overlong status filters", async () => {
     const response = await request(adminPage, "GET", "/api/v1/platform/tenants?status=" + encodeURIComponent("S".repeat(25)), { token: adminTokens.accessToken });
-    assert.equal(response.status, 400, "Tenant status filters must reject more than 24 characters.");
+    assertExpectedHttpStatus(response, 400, "Tenant status filters must reject more than 24 characters.");
     return { overlongStatus: response.status };
   }, ["PLATFORM-011"]);
 
@@ -2668,7 +3527,7 @@ try {
 
   await record("PLATFORM: unknown tenant status history does not disclose audit data", async () => {
     const response = await request(adminPage, "GET", "/api/v1/platform/tenants/" + crypto.randomUUID() + "/status-history", { token: adminTokens.accessToken });
-    assert.equal(response.status, 404, "Unknown tenant IDs must not return a status history.");
+    assertExpectedHttpStatus(response, 404, "Unknown tenant IDs must not return a status history.");
     return { unknownTenantHistory: response.status, auditRowsReturned: false };
   }, ["PLATFORM-014"]);
 
@@ -2678,7 +3537,7 @@ try {
       token: shop1Tokens.accessToken,
       body: { displayName: "Q".repeat(181), accentColor: before.accentColor, logoUrl: before.logoUrl }
     });
-    assert.equal(rejected.status, 400, "Shop display names must be limited to 180 characters.");
+    assertExpectedHttpStatus(rejected, 400, "Shop display names must be limited to 180 characters.");
     const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", { token: shop1Tokens.accessToken }), 200, "Shop profile after display-name boundary test");
     assert.equal(after.displayName, before.displayName, "Rejected profile changes must not persist.");
     return { rejectedStatus: rejected.status, savedDisplayNameUnchanged: true };
@@ -2690,7 +3549,7 @@ try {
       token: shop1Tokens.accessToken,
       body: { displayName: before.displayName, accentColor: "#12X45G", logoUrl: before.logoUrl }
     });
-    assert.equal(rejected.status, 400, "Accent colors must be six-digit hexadecimal colors.");
+    assertExpectedHttpStatus(rejected, 400, "Accent colors must be six-digit hexadecimal colors.");
     const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/profile", { token: shop1Tokens.accessToken }), 200, "Shop profile after accent-color boundary test");
     assert.equal(after.accentColor, before.accentColor, "Rejected accent colors must not persist.");
     return { rejectedStatus: rejected.status, savedAccentColorUnchanged: true };
@@ -2702,7 +3561,7 @@ try {
       token: shop1Tokens.accessToken,
       body: { displayName: "SmartPrint QA Incomplete Printer", manufacturer: "", model: "", connectionType: "USB", capabilitiesJson: "{}" }
     });
-    assert.equal(rejected.status, 400, "Printer creation must require manufacturer and model.");
+    assertExpectedHttpStatus(rejected, 400, "Printer creation must require manufacturer and model.");
     const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/printers", { token: shop1Tokens.accessToken }), 200, "Printer list after required-field test");
     assert.equal(after.length, before.length, "Rejected printer creation must not create a record.");
     return { rejectedStatus: rejected.status, printerCountUnchanged: true };
@@ -2714,7 +3573,7 @@ try {
       token: shop1Tokens.accessToken,
       body: { displayName: " ", printerDeviceId: shop1Printer.id }
     });
-    assert.equal(rejected.status, 400, "QR station creation must require a non-empty name.");
+    assertExpectedHttpStatus(rejected, 400, "QR station creation must require a non-empty name.");
     const after = assertHttp(await request(shop1Page, "GET", "/api/v1/shop/qr-stations", { token: shop1Tokens.accessToken }), 200, "Station list after required-field test");
     assert.equal(after.length, before.length, "Rejected station creation must not create a row.");
     return { rejectedStatus: rejected.status, stationCountUnchanged: true };
@@ -2722,90 +3581,137 @@ try {
 
   await record("SHOP: an unknown printer ID cannot be changed", async () => {
     const response = await request(shop1Page, "PATCH", "/api/v1/shop/printers/" + crypto.randomUUID() + "/active?isActive=false", { token: shop1Tokens.accessToken });
-    assert.equal(response.status, 404, "Unknown printer IDs must return not found.");
+    assertExpectedHttpStatus(response, 404, "Unknown printer IDs must return not found.");
     return { unknownPrinterMutation: response.status, recordsChanged: false };
   }, ["SHOP-023"]);
 
   await record("SHOP: an unknown QR station ID cannot be changed", async () => {
     const response = await request(shop1Page, "PATCH", "/api/v1/shop/qr-stations/" + crypto.randomUUID() + "/enabled?isEnabled=false", { token: shop1Tokens.accessToken });
-    assert.equal(response.status, 404, "Unknown station IDs must return not found.");
+    assertExpectedHttpStatus(response, 404, "Unknown station IDs must return not found.");
     return { unknownStationMutation: response.status, recordsChanged: false };
   }, ["SHOP-024"]);
 
   await record("PAYMENT: UPI references shorter than four characters are rejected", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "A1" } });
-    assert.equal(response.status, 400, "UPI references shorter than four characters must be rejected.");
+    const response = await request(page, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "A1" } });
+    assertExpectedHttpStatus(response, 400, "UPI references shorter than four characters must be rejected.");
     return { shortReference: response.status, paymentUpdated: false };
   }, ["PAY-011"]);
 
   await record("PAYMENT: UPI references containing whitespace or punctuation are rejected", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "QA 1234!" } });
-    assert.equal(response.status, 400, "UPI reference characters must be letters, digits, hyphens or underscores.");
+    const response = await request(page, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "QA 1234!" } });
+    assertExpectedHttpStatus(response, 400, "UPI reference characters must be letters, digits, hyphens or underscores.");
     return { invalidReferenceCharacters: response.status, paymentUpdated: false };
   }, ["PAY-012"]);
 
   await record("PAYMENT: UPI references longer than one hundred characters are rejected", async () => {
-    const response = await request(customerPage, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "Q".repeat(101) } });
-    assert.equal(response.status, 400, "UPI references must not exceed 100 characters.");
+    const response = await request(page, "POST", "/api/v1/public/batch-payments/" + crypto.randomUUID() + "/report", { body: { referenceNumber: "Q".repeat(101) } });
+    assertExpectedHttpStatus(response, 400, "UPI references must not exceed 100 characters.");
     return { overlongReference: response.status, paymentUpdated: false };
   }, ["PAY-013"]);
 
 
   await record("Live local browser has no same-origin server errors or critical resource failures", async () => {
+    const unexpectedHttpErrors = getUnexpectedHttpResponses(httpErrorResponses, expectedHttpErrors);
     assert.equal(serverErrors.length, 0, JSON.stringify(serverErrors));
     assert.equal(resourceErrors.length, 0, JSON.stringify(resourceErrors));
     assert.equal(pageErrors.length, 0, pageErrors.join("\n"));
     assert.equal(consoleErrors.length, 0, consoleErrors.join("\n"));
+    assert.equal(requestFailures.length, 0, JSON.stringify(requestFailures));
+    assert.equal(unexpectedHttpErrors.length, 0, JSON.stringify(unexpectedHttpErrors));
     return {
       serverErrors: serverErrors.length,
       resourceErrors: resourceErrors.length,
       pageErrors: pageErrors.length,
       consoleErrors: consoleErrors.length,
+      networkStatusConsoleMessages: networkStatusConsoleErrors.length,
+      requestFailures: requestFailures.length,
+      unexpectedHttpErrors: unexpectedHttpErrors.length,
+      expectedHttpErrors: expectedHttpErrors.length,
+      observedHttpErrors: httpErrorResponses.length,
       pagesObserved: context.pages().length
     };
   });
 
-  report.warnings.push({
+  report.scopeNotes.push({
     name: "Physical Windows print acceptance",
     message: "Not run. The QA printer record is deliberately non-dispatchable. Physical output requires a separate Windows Agent paired to a QA tenant and an explicitly designated test printer."
   });
-  report.warnings.push({
+  report.scopeNotes.push({
     name: "Android physical acceptance",
     message: "Not run by browser automation. Run the Android real-device/emulator stage separately; QR camera, Android document picker, local-network permission and LAN transfer cannot be proved by desktop Playwright."
   });
 } finally {
   report.finishedUtc = new Date().toISOString();
   const caseResults = new Map();
+  const caseOwners = new Map();
+  const duplicateCaseIds = new Set();
+  const unplannedCaseIds = new Set();
   for (const check of report.checks) {
-    // Case IDs are grouped under a record. If that record aborts on an assertion,
-    // the runner cannot prove every grouped case completed, so do not award them
-    // completion coverage. This is intentionally conservative.
+    // Failed/uncertain checks cannot earn coverage. Duplicate assignments
+    // are incomplete; unplanned IDs are reported and fail the coverage gate.
     const caseStatus = check.status === "FAIL" || check.status === "WARN"
       ? "INCOMPLETE"
       : check.status;
     for (const caseId of check.caseIds || []) {
-      caseResults.set(caseId, caseStatus);
+      if (caseOwners.has(caseId)) duplicateCaseIds.add(caseId);
+      else caseOwners.set(caseId, check.id);
+      if (!plannedCaseIdSet.has(caseId)) unplannedCaseIds.add(caseId);
+      const previousStatus = caseResults.get(caseId);
+      if (previousStatus === "INCOMPLETE" || caseStatus === "INCOMPLETE") {
+        caseResults.set(caseId, "INCOMPLETE");
+      } else if (previousStatus === "SKIPPED" || caseStatus === "SKIPPED") {
+        caseResults.set(caseId, "SKIPPED");
+      } else {
+        caseResults.set(caseId, caseStatus);
+      }
     }
   }
+  for (const caseId of duplicateCaseIds) {
+    if (caseResults.has(caseId)) caseResults.set(caseId, "INCOMPLETE");
+  }
+  for (const caseId of unplannedCaseIds) caseResults.set(caseId, "INCOMPLETE");
   const passedCases = [...caseResults.values()].filter(status => status === "PASS").length;
   const incompleteCases = [...caseResults.values()].filter(status => status === "INCOMPLETE").length;
   const skippedCases = [...caseResults.values()].filter(status => status === "SKIPPED").length;
   const missingCases = PLANNED_CASE_IDS.filter(caseId => !caseResults.has(caseId));
+  const unknownCaseStatuses = [...caseResults.values()].filter(status =>
+    !["PASS", "INCOMPLETE", "SKIPPED"].includes(status)).length;
+  const caseStatusTotalsMatch = unknownCaseStatuses === 0 &&
+    passedCases + incompleteCases + skippedCases === caseResults.size;
+  const uniqueCasesExercised = passedCases + incompleteCases;
   const caseExecutionCoveragePercent = Number(((passedCases / PLANNED_CASE_IDS.length) * 100).toFixed(1));
   const casePassPercent = caseExecutionCoveragePercent;
   report.caseCoverage = {
     plannedCases: PLANNED_CASE_IDS.length,
     caseIdsMappedToChecks: caseResults.size,
-    uniqueCasesExercised: passedCases,
+    uniqueCasesExercised,
     uniqueCasesFullyCompleted: passedCases,
     coveragePercent: caseExecutionCoveragePercent,
     caseExecutionCoveragePercent,
     casePassPercent,
-    allPlannedCasesPassed: caseResults.size === PLANNED_CASE_IDS.length && passedCases === PLANNED_CASE_IDS.length,
-    coverageGatePassed: (passedCases / PLANNED_CASE_IDS.length) >= 0.9,
+    allPlannedCasesPassed: caseResults.size === PLANNED_CASE_IDS.length &&
+      passedCases === PLANNED_CASE_IDS.length &&
+      caseStatusTotalsMatch &&
+      missingCases.length === 0 &&
+      duplicateCaseIds.size === 0 &&
+      unplannedCaseIds.size === 0,
+    coverageGatePassed: caseResults.size === PLANNED_CASE_IDS.length &&
+      passedCases === PLANNED_CASE_IDS.length &&
+      incompleteCases === 0 &&
+      skippedCases === 0 &&
+      caseStatusTotalsMatch &&
+      missingCases.length === 0 &&
+      duplicateCaseIds.size === 0 &&
+      unplannedCaseIds.size === 0 &&
+      report.caseMappingErrors.length === 0,
+    duplicateCaseIds: [...duplicateCaseIds].sort(),
+    unplannedCaseIds: [...unplannedCaseIds].sort(),
+    caseMappingErrors: report.caseMappingErrors.length,
     passedCases,
     incompleteCases,
     skippedCases,
+    unknownCaseStatuses,
+    caseStatusTotalsMatch,
     missingCases,
     caseStatuses: Object.fromEntries([...caseResults.entries()].sort(([left], [right]) => left.localeCompare(right)))
   };
@@ -2814,6 +3720,7 @@ try {
     failed: report.checks.filter(check => check.status === "FAIL").length,
     skipped: report.checks.filter(check => check.status === "SKIPPED").length,
     warnings: report.warnings.length,
+    outOfScopeStages: report.scopeNotes.length,
     plannedCases: report.caseCoverage.plannedCases,
     caseIdsMappedToChecks: report.caseCoverage.caseIdsMappedToChecks,
     uniqueCasesExercised: report.caseCoverage.uniqueCasesExercised,
@@ -2825,6 +3732,13 @@ try {
     coverageGatePassed: report.caseCoverage.coverageGatePassed,
     passedCases: report.caseCoverage.passedCases,
     incompleteCases: report.caseCoverage.incompleteCases,
+    skippedCases: report.caseCoverage.skippedCases,
+    unknownCaseStatuses: report.caseCoverage.unknownCaseStatuses,
+    caseStatusTotalsMatch: report.caseCoverage.caseStatusTotalsMatch,
+    warningDetails: report.warnings.map(item => ({ name: item.name, message: item.message })),
+    duplicateCaseIds: report.caseCoverage.duplicateCaseIds,
+    unplannedCaseIds: report.caseCoverage.unplannedCaseIds,
+    caseMappingErrors: report.caseCoverage.caseMappingErrors,
     missingCases: report.caseCoverage.missingCases
   };
   writeFileSync(join(outputDirectory, "report.json"), JSON.stringify(report, null, 2) + "\n");
@@ -2835,12 +3749,21 @@ try {
     "Failed: " + report.summary.failed + "\n" +
     "Skipped: " + report.summary.skipped + "\n" +
     "Warnings: " + report.summary.warnings + "\n" +
-    "Case IDs mapped to attempted checks: " + report.caseCoverage.caseIdsMappedToChecks + "/" + report.caseCoverage.plannedCases + "\n" +
+    "Out-of-scope stages (not warnings): " + report.summary.outOfScopeStages + "\n" +
+    "Out-of-scope acceptance notes: " + report.scopeNotes.map(item => item.name).join(", ") + "\n" +
+    "Warning details (each is release-blocking):\n" +
+    (report.warnings.length
+      ? report.warnings.map(item => "- " + item.name + ": " + item.message).join("\n")
+      : "None") + "\n" +
+    "Case IDs with a check result: " + report.caseCoverage.caseIdsMappedToChecks + "/" + report.caseCoverage.plannedCases + "\n" +
+    "Case IDs in checks that ran (PASS or incomplete): " + report.caseCoverage.uniqueCasesExercised + "/" + report.caseCoverage.plannedCases + "\n" +
     "Functional case IDs fully completed: " + report.caseCoverage.uniqueCasesFullyCompleted + "/" + report.caseCoverage.plannedCases + "\n" +
-    "Functional case completion coverage: " + report.caseCoverage.caseExecutionCoveragePercent + "% (minimum 90%)\n" +
+    "Functional case completion coverage: " + report.caseCoverage.caseExecutionCoveragePercent + "% (every planned case must pass)\n" +
     "Functional case pass rate: " + report.caseCoverage.casePassPercent + "%\n" +
     "Case IDs linked to incomplete checks: " + report.caseCoverage.incompleteCases + "\n" +
     "Skipped case IDs: " + report.caseCoverage.skippedCases + "\n" +
+    "Unclassified case IDs: " + report.caseCoverage.unknownCaseStatuses + "\n" +
+    "Case status totals reconcile: " + report.caseCoverage.caseStatusTotalsMatch + "\n" +
     "Coverage gate: " + (report.caseCoverage.coverageGatePassed ? "PASS" : "FAIL") + "\n" +
     "Missing test cases: " + report.caseCoverage.missingCases.join(", ") + "\n" +
     "Evidence: " + outputDirectory + "\n");
@@ -2851,4 +3774,10 @@ try {
   await browser?.close().catch(() => {});
 }
 
-if (report.summary.failed > 0 || !report.caseCoverage.coverageGatePassed) process.exitCode = 1;
+if (shouldFailQaRun({
+  failed: report.summary.failed,
+  warnings: report.summary.warnings,
+  skipped: report.summary.skipped,
+  coverageGatePassed: report.caseCoverage.coverageGatePassed,
+  caseMappingErrors: report.caseCoverage.caseMappingErrors
+})) process.exitCode = 1;

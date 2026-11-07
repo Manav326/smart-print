@@ -12,6 +12,19 @@ $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $repoRoot
 
+$qaConfigPath = Join-Path $PSScriptRoot "smartprint-qa.config.json"
+if (-not (Test-Path -LiteralPath $qaConfigPath -PathType Leaf)) {
+    throw "The central SmartPrint QA configuration is missing: $qaConfigPath"
+}
+$qaConfig = Get-Content -LiteralPath $qaConfigPath -Raw | ConvertFrom-Json -ErrorAction Stop
+$publicOrigin = [Uri]$qaConfig.origins.public
+$minimumNodeVersion = [Version]$qaConfig.runtime.minimumNodeVersion
+if ($publicOrigin.Scheme -ne "https" -or $publicOrigin.AbsolutePath -ne "/" -or
+    $publicOrigin.UserInfo -or $publicOrigin.Query -or $publicOrigin.Fragment) {
+    throw "The configured SmartPrint public origin must be a plain HTTPS origin."
+}
+$canonicalPublicOrigin = $publicOrigin.GetLeftPart([UriPartial]::Authority)
+
 $environmentNames = @(
     "PLAYWRIGHT_MODULE_DIR",
     "SMARTPRINT_LIVE_QA_BASE_URL",
@@ -52,8 +65,10 @@ try {
     $node = Get-Command node.exe -ErrorAction SilentlyContinue
     if (-not $node) { $node = Get-Command node -ErrorAction Stop }
     $nodeVersion = (& $node.Source --version).Trim()
-    if ($nodeVersion -notmatch "^v(\d+)\." -or [int]$Matches[1] -lt 22) {
-        throw "Node.js 22 or newer is required. Found $nodeVersion."
+    $nodeVersionMatch = [regex]::Match($nodeVersion, '^v(?<version>\d+\.\d+\.\d+)')
+    $actualNodeVersion = if ($nodeVersionMatch.Success) { [Version]$nodeVersionMatch.Groups["version"].Value } else { [Version]"0.0.0" }
+    if (-not $nodeVersionMatch.Success -or $actualNodeVersion -lt $minimumNodeVersion) {
+        throw "Node.js $minimumNodeVersion or newer is required. Found $nodeVersion."
     }
 
     $testScript = Join-Path $PSScriptRoot "live-environment-windows.mjs"
@@ -65,7 +80,7 @@ try {
         throw "PLAYWRIGHT_MODULE_DIR must point to an installed Playwright package. Run the repository SmartPrint QA orchestrator first or install the pinned Playwright package."
     }
 
-    $env:SMARTPRINT_LIVE_QA_BASE_URL = "https://smartprint.quantaedge.in"
+    $env:SMARTPRINT_LIVE_QA_BASE_URL = $canonicalPublicOrigin
     if ([string]::IsNullOrWhiteSpace($env:LIVE_QA_ARTIFACT_DIR)) {
         $env:LIVE_QA_ARTIFACT_DIR = Join-Path "artifacts" ("live-environment-qa-windows-headed-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
     }
@@ -115,7 +130,7 @@ try {
     }
 
     Write-Host ""
-    Write-Host "Target: https://smartprint.quantaedge.in" -ForegroundColor Cyan
+    Write-Host ("Target: " + $canonicalPublicOrigin) -ForegroundColor Cyan
     Write-Host "A visible Microsoft Edge window will open. Complete any Cloudflare challenge normally if one appears." -ForegroundColor Yellow
     Write-Host "This optional production-origin smoke suite is separate from the local real-data acceptance runner." -ForegroundColor Yellow
     Write-Host "It does not change Cloudflare settings." -ForegroundColor Yellow

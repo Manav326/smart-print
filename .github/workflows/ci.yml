@@ -28,14 +28,29 @@ jobs:
         with:
           node-version: 22
       - name: Install portal dependencies
+        id: portal_dependencies
         run: pnpm install --frozen-lockfile
-      - name: Validate local real-data Playwright suite syntax
-        run: node --check scripts/qa/smartprint-local-e2e.mjs
-      - name: Test public, admin, shop and station route boundaries
-        run: node --experimental-strip-types --test apps/portal/tests/portal-routing.test.ts apps/portal/tests/order-journey.test.ts apps/portal/tests/customer-session-state.test.ts apps/portal/tests/table-layout.test.ts apps/portal/tests/theme-responsive.test.ts apps/portal/tests/batch-checkout-state.test.ts apps/portal/tests/local-upload-routing.test.ts apps/portal/tests/print-fulfilment-flow.test.ts apps/portal/tests/photo-studio.test.ts apps/portal/tests/upi-payment-intent.test.ts
+      - name: Validate every QA harness JavaScript module
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          for file in scripts/qa/*.mjs; do
+            echo "Syntax-checking $file"
+            node --check "$file"
+          done
+      - name: Test local E2E prerequisite and HTTP audit helpers
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        run: node --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs scripts/qa/live-node-test-reporter.test.mjs scripts/qa/production-qa-plan.test.mjs scripts/qa/smartprint-qa-config.test.mjs scripts/qa/local-e2e-prerequisites.test.mjs scripts/qa/local-e2e-http-audit.test.mjs
+      - name: Test portal logic regression suite
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        run: |
+          node --experimental-strip-types --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs apps/portal/tests/portal-routing.test.ts apps/portal/tests/order-journey.test.ts apps/portal/tests/customer-session-state.test.ts apps/portal/tests/table-layout.test.ts apps/portal/tests/theme-responsive.test.ts apps/portal/tests/batch-checkout-state.test.ts apps/portal/tests/local-upload-routing.test.ts apps/portal/tests/print-fulfilment-flow.test.ts apps/portal/tests/photo-studio.test.ts apps/portal/tests/upi-payment-intent.test.ts
       - name: Install Chromium for real-browser appearance and viewport checks
+        id: chromium_install
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: npx --yes --package=playwright@1.56.1 playwright install --with-deps chromium
       - name: Verify theme persistence and responsive layouts in Chromium
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
         run: |
           npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" node apps/portal/tests/theme-responsive.browser.mjs'
       - name: Upload responsive browser screenshots
@@ -46,15 +61,23 @@ jobs:
           path: artifacts/theme-responsive/
           if-no-files-found: warn
           retention-days: 14
-      - run: pnpm typecheck
-      - run: pnpm build
+      - name: Typecheck portal and shared packages
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        run: pnpm typecheck
+      - name: Build portal and shared packages
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        run: pnpm build
       - name: Typecheck native desktop frontend
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: pnpm --filter @smart-print/desktop typecheck
       - name: Build native desktop frontend
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: pnpm --filter @smart-print/desktop build
       - name: Validate portal Nginx proxy configuration
+        if: ${{ !cancelled() }}
         run: docker run --rm --add-host smart-print-api:127.0.0.1 -v "$GITHUB_WORKSPACE/apps/portal/nginx.conf:/etc/nginx/conf.d/default.conf:ro" nginx:alpine nginx -t
       - name: Enforce the dedicated SmartPrint API upstream
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           count="$(grep -Fc 'proxy_pass http://smart-print-api:8080' apps/portal/nginx.conf)"
@@ -63,12 +86,14 @@ jobs:
             exit 1
           fi
       - name: Validate production Compose configuration
+        if: ${{ !cancelled() }}
         env:
           PUBLIC_BASE_URL: https://example.invalid
           IMAGE_NAMESPACE: ghcr.io/compose-validation
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: docker compose --env-file .env.example -f compose.yml config --quiet
       - name: Validate local development Compose configuration
+        if: ${{ !cancelled() }}
         env:
           POSTGRES_DB: qrtoprint
           POSTGRES_USER: qrtoprint
@@ -83,23 +108,32 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - name: Set up .NET
+        id: setup_dotnet
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
       - name: Build cloud API
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
         run: dotnet build src/SmartPrint.Api/SmartPrint.Api.csproj --configuration Release
       - name: Run API unit and model tests
-        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
+        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
 
   agent_dotnet:
+    outputs:
+      agent_package_ready: ${{ steps.agent_package_upload.outcome == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - name: Set up .NET
+        id: setup_dotnet
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
       - name: Validate PowerShell deployment scripts
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
         shell: pwsh
         run: |
           $scriptFiles = Get-ChildItem scripts -Filter *.ps1 -Recurse
@@ -115,8 +149,12 @@ jobs:
             }
           }
       - name: Build Windows Print Agent
+        id: agent_build
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
         run: dotnet build src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release
       - name: Verify the real Microsoft Print to PDF Windows queue
+        id: pdf_queue
+        if: ${{ !cancelled() }}
         shell: pwsh
         run: |
           $queueName = "Microsoft Print to PDF"
@@ -140,6 +178,8 @@ jobs:
           Write-Host "Driver: $($printer.DriverName)"
           Write-Host "Port: $($printer.PortName)"
       - name: Create a second Windows queue on the same port for multi-printer validation
+        id: secondary_queue
+        if: ${{ !cancelled() && steps.pdf_queue.outcome == 'success' }}
         shell: pwsh
         run: |
           $primary = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction Stop
@@ -153,17 +193,22 @@ jobs:
           Write-Host "Primary queue: $($primary.Name) -> $($primary.PortName)"
           Write-Host "Secondary queue: $($secondary.Name) -> $($secondary.PortName)"
       - name: Run Windows Agent unit and real spooler integration tests
+        id: agent_tests
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
         env:
-          SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION: "1"
-          SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION: "1"
-        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release
+          SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION: ${{ steps.pdf_queue.outcome == 'success' && '1' || '0' }}
+          SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION: ${{ steps.secondary_queue.outcome == 'success' && '1' || '0' }}
+        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
       - name: Remove the temporary secondary Windows queue
         if: always()
         shell: pwsh
         run: Remove-Printer -Name "SmartPrint CI Secondary Queue" -ErrorAction SilentlyContinue
       - name: Publish self-contained Windows Agent
+        id: agent_publish
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
         run: dotnet publish src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/agent
       - name: Smoke-test non-interactive Agent pairing status command
+        if: ${{ !cancelled() && steps.agent_publish.outcome == 'success' }}
         shell: pwsh
         run: |
           $agent = Join-Path (Resolve-Path artifacts/agent) "SmartPrint.Agent.exe"
@@ -172,11 +217,14 @@ jobs:
             throw "Expected an unpaired Windows Agent to exit with code 2, got $($agentProcess.ExitCode)."
           }
       - name: Add Agent setup scripts and guide
+        if: ${{ !cancelled() && steps.agent_publish.outcome == 'success' }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/agent | Out-Null
           Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
       - name: Upload Windows Agent package
+        id: agent_package_upload
+        if: ${{ always() && steps.agent_publish.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: smart-print-agent-win-x64
@@ -185,6 +233,8 @@ jobs:
           retention-days: 30
 
   windows_desktop:
+    outputs:
+      desktop_package_ready: ${{ steps.desktop_package_upload.outcome == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -197,41 +247,122 @@ jobs:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - name: Install desktop dependencies
+        id: desktop_dependencies
         run: pnpm install --frozen-lockfile
-      - name: Compile the native Windows desktop host
-        shell: pwsh
-        run: |
-          pnpm --filter @smart-print/desktop build
-          if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
-          cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
-          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host compilation failed." }
-          cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
-          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop host tests failed." }
+      - name: Build desktop frontend
+        id: desktop_frontend_build
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: pnpm --filter @smart-print/desktop build
+      - name: Compile native Windows desktop host
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
+      - name: Run native Windows desktop host tests
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-msvc
       - name: Build native Windows desktop executable
+        id: desktop_executable_build
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' && steps.desktop_frontend_build.outcome == 'success' }}
         shell: pwsh
         run: |
           if ([string]::IsNullOrWhiteSpace($env:SMARTPRINT_PUBLIC_BASE_URL)) {
             throw "Configure the SMARTPRINT_PUBLIC_BASE_URL Actions variable before building the desktop application."
           }
           $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
+
+          # Build the distributable executable with the production Tauri config.
+          # This binary must never contain the CI-only remote-debugging port.
           pnpm --filter @smart-print/desktop exec tauri build --no-bundle --ci
-          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop build failed." }
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint production desktop build failed." }
           $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
-          if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint native desktop executable was not produced." }
+          if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint production desktop executable was not produced." }
           New-Item -ItemType Directory -Force -Path artifacts/desktop | Out-Null
           Copy-Item -LiteralPath $nativeExe -Destination "artifacts/desktop/SmartPrint.Desktop.exe"
           Get-ChildItem -Path "apps/desktop/src-tauri/target/release" -Filter "*.dll" -File |
             Copy-Item -Destination "artifacts/desktop" -Force
-      - name: Bundle the Microsoft WebView2 Evergreen bootstrapper
+
+          # Build a separate, non-distributable executable with WebView2 DevTools
+          # enabled only for this CI smoke test. Keep it in a temporary Cargo
+          # target directory so it cannot overwrite or leak into the installer.
+          $desktopSmokeConfig = Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-tauri.conf.json"
+          ./scripts/qa/prepare-desktop-smoke-config.ps1 -OutputPath $desktopSmokeConfig
+          if ($LASTEXITCODE -ne 0) { throw "Could not prepare the isolated desktop smoke configuration." }
+          $desktopSmokeTarget = Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-target"
+          $previousCargoTargetDir = $env:CARGO_TARGET_DIR
+          try {
+            $env:CARGO_TARGET_DIR = $desktopSmokeTarget
+            pnpm --filter @smart-print/desktop exec tauri build --config "$desktopSmokeConfig" --no-bundle --ci
+            if ($LASTEXITCODE -ne 0) { throw "SmartPrint CI-only desktop smoke build failed." }
+          }
+          finally {
+            if ([string]::IsNullOrWhiteSpace($previousCargoTargetDir)) {
+              Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
+            } else {
+              $env:CARGO_TARGET_DIR = $previousCargoTargetDir
+            }
+          }
+          $smokeExe = Join-Path $desktopSmokeTarget "release/smartprint-desktop.exe"
+          if (-not (Test-Path -LiteralPath $smokeExe)) { throw "The isolated SmartPrint desktop smoke executable was not produced." }
+      - name: Install and bundle the Microsoft WebView2 Evergreen Runtime
+        id: webview2_runtime
+        if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' }}
         shell: pwsh
         run: |
           $bootstrapper = "artifacts/desktop/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          New-Item -ItemType Directory -Force -Path "artifacts/desktop" | Out-Null
           Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $bootstrapper -MaximumRedirection 10
           $signature = Get-AuthenticodeSignature -LiteralPath $bootstrapper
           if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
             throw "The downloaded WebView2 prerequisite did not pass Microsoft Authenticode verification."
           }
+
+          function Find-WebView2RuntimeExecutable {
+            $roots = @(
+              (Join-Path ${env:ProgramFiles(x86)} "Microsoft\EdgeWebView\Application"),
+              (Join-Path ${env:ProgramFiles} "Microsoft\EdgeWebView\Application"),
+              (Join-Path ${env:LOCALAPPDATA} "Microsoft\EdgeWebView\Application")
+            )
+            $candidates = @()
+            foreach ($root in $roots) {
+              if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+              foreach ($directory in Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue) {
+                try { $version = [version]$directory.Name }
+                catch { continue }
+                $runtimePath = Join-Path $directory.FullName "msedgewebview2.exe"
+                if (Test-Path -LiteralPath $runtimePath -PathType Leaf) {
+                  $candidates += [PSCustomObject]@{ Version = $version; Path = $runtimePath }
+                }
+              }
+            }
+            return ($candidates | Sort-Object Version -Descending | Select-Object -First 1)
+          }
+
+          $runtime = Find-WebView2RuntimeExecutable
+          if (-not $runtime) {
+            Write-Host "No Evergreen WebView2 Runtime was installed on this runner; installing the verified Microsoft bootstrapper."
+            $installer = Start-Process -FilePath $bootstrapper -ArgumentList @("/silent", "/install") -Wait -PassThru
+            if ($installer.ExitCode -notin @(0, 3010)) {
+              throw "WebView2 Runtime installation failed with exit code $($installer.ExitCode)."
+            }
+            $deadline = [DateTime]::UtcNow.AddSeconds(45)
+            do {
+              $runtime = Find-WebView2RuntimeExecutable
+              if ($runtime) { break }
+              Start-Sleep -Seconds 1
+            } while ([DateTime]::UtcNow -lt $deadline)
+          }
+          if (-not $runtime) {
+            throw "Microsoft WebView2 Runtime is still not present after the signed bootstrapper completed."
+          }
+          $runtimeVersion = (Get-Item -LiteralPath $runtime.Path).VersionInfo.ProductVersion
+          Write-Host "PASS: WebView2 Runtime $runtimeVersion is installed at $($runtime.Path)."
+
+      - name: Smoke-test native desktop launch and rendered WebView2 frontend
+        if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' && steps.webview2_runtime.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/qa/desktop-open-smoke.ps1 -ExecutablePath (Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-target/release/smartprint-desktop.exe") -RequireDevTools
       - name: Upload Windows desktop package
+        id: desktop_package_upload
+        if: ${{ always() && steps.desktop_executable_build.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: smart-print-desktop-win-x64
@@ -241,6 +372,7 @@ jobs:
 
   windows_installer:
     needs: [agent_dotnet, windows_desktop]
+    if: ${{ always() && needs.agent_dotnet.outputs.agent_package_ready == 'true' && needs.windows_desktop.outputs.desktop_package_ready == 'true' }}
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -345,7 +477,7 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Upgrade a historical PostgreSQL schema and verify operational defaults
-        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release
+        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
 
   android:
     runs-on: ubuntu-latest
@@ -353,17 +485,25 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-java@v6
+      - name: Set up Java
+        id: java_setup
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v6
+      - name: Set up Gradle
+        id: gradle_setup
+        uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: "8.13"
-      - uses: android-actions/setup-android@v4
+      - name: Set up Android SDK tools
+        id: android_setup
+        uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
       - name: Validate configured Android service origin
+        id: android_origin
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           set -euo pipefail
@@ -377,15 +517,25 @@ jobs:
           print(f"Android service origin validated: {parsed.scheme}://{parsed.netloc}")
           PY
       - name: Install Android SDK 36
+        id: android_sdk_install
+        if: ${{ !cancelled() && steps.android_origin.outcome == 'success' && steps.java_setup.outcome == 'success' && steps.gradle_setup.outcome == 'success' && steps.android_setup.outcome == 'success' }}
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
-      - name: Run Android unit tests and build APK
-        run: gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:testDebugUnitTest :app:assembleDebug
+      - name: Run Android JVM unit tests
+        if: ${{ !cancelled() && steps.android_sdk_install.outcome == 'success' }}
+        run: gradle --no-daemon --console=plain -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:testDebugUnitTest
+      - name: Build Android debug APK
+        id: android_apk_build
+        if: ${{ !cancelled() && steps.android_sdk_install.outcome == 'success' }}
+        run: gradle --no-daemon --console=plain -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:assembleDebug
       - name: Enable KVM for Android emulator
+        id: android_kvm
+        if: ${{ !cancelled() && steps.android_sdk_install.outcome == 'success' }}
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Run Android emulator UI tests
+      - name: Run Android emulator UI and installation lifecycle tests
+        if: ${{ !cancelled() && steps.android_sdk_install.outcome == 'success' && steps.android_apk_build.outcome == 'success' && steps.android_kvm.outcome == 'success' }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
@@ -408,6 +558,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
       - name: Upload debug APK
+        if: ${{ always() && steps.android_apk_build.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: smart-print-android-debug

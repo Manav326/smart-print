@@ -6,7 +6,13 @@ import android.net.Uri
 import android.webkit.ValueCallback
 import android.webkit.WebSettings
 import android.webkit.WebView
+import java.io.ByteArrayInputStream
+import android.webkit.WebViewClient
+import android.webkit.WebResourceResponse
+import android.webkit.WebResourceRequest
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -65,8 +71,9 @@ class MainActivityInstrumentedTest {
     }
 
     private fun openFilesTab() {
-        // Target the actual menu item, then verify that the Files screen is visible.
+        // Target the actual menu item, then verify both user-facing content and its stable QA landmark.
         openNavigationDestination(2, "New folder")
+        onView(withId(R.id.smartprint_files_heading)).check(matches(isDisplayed()))
     }
 
     @Test
@@ -355,9 +362,147 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun acceptedShopQrIsSavedAsTheSelectedShopAndOpenedInTheWebView() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val shopPreferences = context.getSharedPreferences(
+            "smartprint.customer.last-shop",
+            Context.MODE_PRIVATE
+        )
+        val previousPreferences = shopPreferences.all.toMap()
+        shopPreferences.edit().clear().commit()
+
+        val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "Q".repeat(32)
+        val stationHost = Uri.parse(stationUrl).host.orEmpty()
+        val pageLoaded = CountDownLatch(1)
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
+                        .apply { isAccessible = true }
+                        .invoke(activity) as WebView
+                    webView.webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView,
+                            request: WebResourceRequest
+                        ): WebResourceResponse? {
+                            if (!request.isForMainFrame) return null
+                            val html = "<!doctype html><html><head><title>SmartPrint QR handoff QA</title></head><body>Station link received</body></html>"
+                            return WebResourceResponse(
+                                "text/html",
+                                "UTF-8",
+                                200,
+                                "OK",
+                                mapOf("Cache-Control" to "no-store"),
+                                ByteArrayInputStream(html.toByteArray(Charsets.UTF_8))
+                            )
+                        }
+
+                        override fun onPageFinished(view: WebView, url: String) {
+                            if (url == stationUrl) pageLoaded.countDown()
+                        }
+                    }
+
+                    MainActivity::class.java.getDeclaredMethod(
+                        "handleScannedQr",
+                        String::class.java,
+                        QrScanPurpose::class.java
+                    ).apply { isAccessible = true }
+                        .invoke(activity, stationUrl, QrScanPurpose.SHOP_CONNECTION)
+                }
+
+                assertTrue(
+                    "The accepted station URL must finish loading in the SmartPrint WebView.",
+                    pageLoaded.await(10, TimeUnit.SECONDS)
+                )
+
+                scenario.onActivity { activity ->
+                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
+                        .apply { isAccessible = true }
+                        .invoke(activity) as WebView
+                    val savedUrl = MainActivity::class.java.getDeclaredField("portalUrl")
+                        .apply { isAccessible = true }
+                        .get(activity) as? String
+                    val savedHost = MainActivity::class.java.getDeclaredField("portalHost")
+                        .apply { isAccessible = true }
+                        .get(activity) as? String
+
+                    assertEquals(stationUrl, savedUrl)
+                    assertEquals(stationHost, savedHost)
+                    assertEquals(stationUrl, shopPreferences.getString("portalUrl", null))
+                    assertEquals(stationHost, shopPreferences.getString("portalHost", null))
+                    assertTrue("The selected shop WebView must be visible.", webView.isShown)
+                    assertEquals(
+                        "The accepted station URL must be loaded into the existing SmartPrint WebView.",
+                        stationUrl,
+                        webView.url
+                    )
+                    assertEquals(
+                        "The URL ends at the public station code.",
+                        "Q".repeat(32),
+                        Uri.parse(webView.url).lastPathSegment
+                    )
+                    assertTrue(
+                        "The public station URL must not contain a customer session secret.",
+                        !webView.url.orEmpty().contains("sessionToken", ignoreCase = true)
+                    )
+                }
+            }
+        } finally {
+            val editor = shopPreferences.edit().clear()
+            previousPreferences.forEach { (key, value) ->
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                }
+            }
+            editor.commit()
+        }
+    }
+    @Test
+    fun launcherIntentOpensMainActivityAndInflatesSmartPrintShell() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val launcherIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?: throw AssertionError("SmartPrint must be discoverable through an Android launcher intent.")
+
+        assertEquals(android.content.Intent.ACTION_MAIN, launcherIntent.action)
+        assertTrue(
+            "The app's launch intent must include CATEGORY_LAUNCHER.",
+            launcherIntent.hasCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        )
+        assertEquals(
+            "The launcher must resolve to MainActivity.",
+            MainActivity::class.java.name,
+            launcherIntent.component?.className
+        )
+
+        ActivityScenario.launch<MainActivity>(launcherIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue("MainActivity must remain open after launcher startup.", !activity.isFinishing)
+                assertTrue("MainActivity must not be destroyed during startup.", !activity.isDestroyed)
+
+                val nativeRoot = activity.findViewById<ViewGroup>(R.id.smartprint_native_root)
+                    ?: throw AssertionError("The launcher must inflate #smartprint_native_root.")
+                assertTrue("#smartprint_native_root must be visible after launcher startup.", nativeRoot.isShown)
+                assertTrue("#smartprint_native_root must contain the native SmartPrint shell.", nativeRoot.childCount > 0)
+
+                val toolbar = MainActivity::class.java.getDeclaredField("toolbar")
+                    .apply { isAccessible = true }
+                    .get(activity) as com.google.android.material.appbar.MaterialToolbar
+                assertEquals("SmartPrint", toolbar.title.toString())
+            }
+        }
+    }
+
+    @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))
+            onView(withId(R.id.smartprint_home_heading)).check(matches(isDisplayed()))
             onView(withText("Recent")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
             onView(withText("Choose from phone")).check(matches(isDisplayed()))
@@ -366,6 +511,10 @@ class MainActivityInstrumentedTest {
                 val customBar = MainActivity::class.java.getDeclaredField("bottomNavigationContent").apply {
                     isAccessible = true
                 }.get(activity) as LinearLayout
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_native_root))
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_nav_home))
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_nav_files))
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_home_heading))
                 assertEquals(4, customBar.childCount)
                 val labels = (0 until customBar.childCount).map { index ->
                     (customBar.getChildAt(index) as LinearLayout).getChildAt(1)

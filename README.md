@@ -169,6 +169,9 @@ Inspect the deployment with docker compose --env-file .env -f compose.yml ps and
 - [Delivery roadmap and acceptance criteria](docs/ROADMAP.md)
 - [Public website and download launch checklist](docs/PUBLIC_LAUNCH_CHECKLIST.md)
 - [Release signing setup](docs/RELEASE_SIGNING_SETUP.md)
+- [Local native Windows and Android QA](docs/LOCAL_NATIVE_APP_QA.md)
+- [Role-based Web, Android and Windows acceptance matrix](docs/ROLE_BASED_CROSS_PLATFORM_QA.md)
+- [Production QA master test plan](docs/PRODUCTION_QA_TEST_PLAN.md)
 
 ## Delivery principles
 

@@ -216,8 +216,9 @@ test("photo studio's selected photo quantity creates one multi-page file with on
  const app=read("../src/App.tsx");
  const studio=read("../src/PhotoStudio.tsx");
  assert.match(studio,/const pages=Math\.ceil\(parsedCopies\/photosPerPage\)/);
- assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage,previewPages:jpegPages\.map/);
+ assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage,captionHeightMm,previewPages:jpegPages\.map/);
  assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
+ assert.match(studio,/export type PreparedPhotoSheet = \{ file: File; sizeCode: string; photoCount: number; photosPerPage: number; captionHeightMm: number; previewPages\?: Blob\[\] \}/);
  assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
  assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
 });

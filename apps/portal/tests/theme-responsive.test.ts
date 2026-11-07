@@ -166,7 +166,8 @@ test("QR station poster renders one canonical QR in an isolated single-page A5 p
   assert.match(poster, /src="\/branding\/quantaedge-logo\.svg" alt="QuantaEdge/);
   assert.match(css, /@page\s*\{\s*size:\s*A5 landscape;\s*margin:\s*0;/);
   assert.doesNotMatch(css, /size: 90mm 54mm/);
-  assert.match(css, /body > #root\s*\{\s*display:\s*none\s*!important;/);
+  assert.match(css, /body > #root,\s*body > #smartprint-desktop-root\s*\{\s*display:\s*none\s*!important;/,
+    "Print mode must hide both React roots while preserving the isolated station QR poster.");
   assert.match(css, /body > \.qr-print-document\s*\{[^}]*width:\s*210mm[^}]*height:\s*148mm/s);
   assert.match(css, /\.qr-print-code-frame svg\s*\{[^}]*width:\s*66mm[^}]*height:\s*66mm/s);
 });

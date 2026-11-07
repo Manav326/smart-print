@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) throw new Error("PLAYWRIGHT_MODULE_DIR is required.");
+const qaConfig = JSON.parse(readFileSync(new URL("./smartprint-qa.config.json", import.meta.url), "utf8"));
 const rawUrl = (process.env.SMARTPRINT_LIVE_QA_BASE_URL || "").trim();
 if (!rawUrl) throw new Error("SMARTPRINT_LIVE_QA_BASE_URL is required.");
 const parsedBase = new URL(rawUrl);
@@ -178,7 +179,7 @@ try {
     return { status: response.status };
   });
   await check("Public release availability endpoint", async () => {
-    const response = await targetFetch("/downloads/status");
+    const response = await targetFetch(qaConfig.downloads.statusPath);
     assert.ok([200, 503].includes(response.status), "Unexpected release status HTTP " + response.status);
     if (response.status === 503) {
       report.warnings.push("Release metadata endpoint returned 503; investigate GitHub release connectivity before relying on in-app downloads.");

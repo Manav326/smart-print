@@ -117,6 +117,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingImportDestinationPath = ""
     private var portalUrl: String? = null
     private var portalHost: String? = null
+    private var photoStudioOpen = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val pendingLocalNetworkPermissionReplies = mutableListOf<JavaScriptReplyProxy>()
     private var localNetworkPermissionRequestInProgress = false
@@ -155,6 +156,8 @@ class MainActivity : AppCompatActivity() {
         // Restore the explicit app preference before AppCompat inflates theme-aware UI.
         SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
+        photoStudioOpen = savedInstanceState?.getBoolean("photoStudioOpen") ?: false
+        if (photoStudioOpen) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (handleBackNavigation()) return
@@ -249,6 +252,7 @@ class MainActivity : AppCompatActivity() {
         outState.putInt("viewerPosition", documentViewer?.currentPosition() ?: 0)
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
+        outState.putBoolean("photoStudioOpen", photoStudioOpen)
         webView?.let { view ->
             val webState = Bundle()
             view.saveState(webState)
@@ -265,6 +269,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleBackNavigation(): Boolean {
         when {
+            photoStudioOpen -> {
+                webView?.evaluateJavascript(
+                    "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));",
+                    null
+                )
+            }
             profileVisible -> returnFromProfile()
             pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
             pickerMode -> cancelPicker()
@@ -475,6 +485,7 @@ class MainActivity : AppCompatActivity() {
         window.navigationBarColor = getColor(R.color.qp_surface)
         val backdrop = SmartPrintGlass.backdrop(this)
         val root = FrameLayout(this).apply {
+            id = R.id.smartprint_native_root
             clipChildren = false
             clipToPadding = false
             background = backdrop
@@ -626,13 +637,18 @@ class MainActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(root)
     }
 
-    private fun addBottomNavigationItem(id: Int, label: String, description: String, iconResource: Int) {
+    private fun addBottomNavigationItem(destinationId: Int, label: String, description: String, iconResource: Int) {
         val item = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
             setPadding(dp(11), 0, dp(11), 0)
             minimumWidth = dp(48)
             minimumHeight = dp(48)
+            id = when (destinationId) {
+                HOME -> R.id.smartprint_nav_home
+                FILES -> R.id.smartprint_nav_files
+                else -> View.NO_ID
+            }
             contentDescription = description
             isClickable = true
             isFocusable = true
@@ -640,7 +656,7 @@ class MainActivity : AppCompatActivity() {
             if (this@MainActivity.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, selectable, true)) {
                 foreground = this@MainActivity.getDrawable(selectable.resourceId)
             }
-            setOnClickListener { navigation.selectedItemId = id }
+            setOnClickListener { navigation.selectedItemId = destinationId }
         }
         val icon = ImageView(this).apply {
             setImageResource(iconResource)
@@ -656,7 +672,7 @@ class MainActivity : AppCompatActivity() {
         }
         item.addView(icon, LinearLayout.LayoutParams(dp(21), dp(21)))
         item.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        bottomNavigationItemViews[id] = Triple(item, icon, title)
+        bottomNavigationItemViews[destinationId] = Triple(item, icon, title)
         bottomNavigationContent.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(52)))
     }
 
@@ -967,7 +983,9 @@ class MainActivity : AppCompatActivity() {
         val heading = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
-        heading.addView(text("Your space", 23, R.color.qp_text, true))
+        heading.addView(text("Your space", 23, R.color.qp_text, true).apply {
+            id = R.id.smartprint_home_heading
+        })
         heading.addView(text("${recentFiles.size} files · $used used", 12, R.color.qp_muted, false).apply {
             setPadding(0, dp(3), 0, 0)
         })
@@ -1251,6 +1269,15 @@ class MainActivity : AppCompatActivity() {
                                 .apply { setPadding(0, dp(5), 0, dp(5)) })
                             body.addView(text(batch.size.toString() + " file(s) · " +
                                 batch.sumOf { it.pageCount } + " pages", 10, R.color.qp_muted, false))
+                            val photoLayouts = batch.filter { it.printKind == "PHOTO" }
+                            if (photoLayouts.isNotEmpty()) {
+                                val layoutSummary = photoLayouts.joinToString(" · ") { photo ->
+                                    val density = photo.photosPerPage?.let { "$it/A4" } ?: "layout not recorded"
+                                    "${photo.photoCount} × ${photo.photoSizeCode ?: "photo"} · ${density} · ${photo.pageCount} A4 page(s)"
+                                }
+                                body.addView(text("Photo layout · " + layoutSummary, 10, R.color.qp_muted, false)
+                                    .apply { setPadding(0, dp(5), 0, 0) })
+                            }
                             val paid = batch.sumOf { it.paidAmountMinor }
                             val refunded = batch.sumOf { it.refundedAmountMinor }
                             val net = maxOf(0L, paid - refunded)
@@ -1364,6 +1391,16 @@ class MainActivity : AppCompatActivity() {
                             " pages · " + summary.optInt("copies", historyItem.copies) + " copies · " +
                             summary.optString("paperSize", "A4"), 10, R.color.qp_muted, false)
                             .apply { setPadding(0, dp(4), 0, dp(5)) })
+                        if (historyItem.printKind == "PHOTO" || summary.optString("printKind") == "PHOTO") {
+                            val density = summary.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }
+                                ?.optInt("photosPerPage")
+                                ?.takeIf { it > 0 } ?: historyItem.photosPerPage
+                            val densityLabel = density?.let { "$it per A4 page" } ?: "Layout density not recorded for this older order"
+                            detailColumn.addView(text(
+                                "${summary.optInt("photoCount", historyItem.photoCount)} ${summary.optString("photoSizeCode", historyItem.photoSizeCode ?: "photo")} · ${densityLabel} · ${historyItem.pageCount} A4 PDF page(s)",
+                                10, R.color.qp_muted, false
+                            ).apply { setPadding(0, 0, 0, dp(5)) })
+                        }
                         val payment = response.optJSONObject("payment")
                         val paymentStatus = payment?.optString("status")?.takeIf { it.isNotBlank() }
                             ?: historyItem.paymentStatus
@@ -1531,7 +1568,9 @@ class MainActivity : AppCompatActivity() {
         copy.addView(text(
             if (!isPicker) "My Files" else if (fileChooserSelectFolders) "Choose folders" else "Choose files",
             21, R.color.qp_text, true
-        ))
+        ).apply {
+            if (!isPicker) id = R.id.smartprint_files_heading
+        })
         copy.addView(text(
             when {
                 !isPicker -> "${allEntries.count { it.isDirectory }} folders · ${allEntries.count { !it.isDirectory }} files"
@@ -2448,6 +2487,15 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         val parts = message.data.orEmpty().split("|", limit = 3)
                         when {
+                            parts.size == 2 && parts[0] == "setPhotoStudioOpen" &&
+                                parts[1] in setOf("on", "off") -> {
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        photoStudioOpen = parts[1] == "on"
+                                        replyProxy.postMessage("OK")
+                                    }
+                                }
+                            }
                             parts.size == 2 && parts[0] == "setSensitivePreview" &&
                                 parts[1] in setOf("on", "off") -> {
                                 runOnUiThread {

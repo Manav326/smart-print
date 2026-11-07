@@ -64,6 +64,9 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611030002_AddPhotoPrintingPricingAndJobSnapshots",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611070001_AddPhotoSheetDensitySnapshot",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
@@ -216,6 +219,68 @@ public sealed class PostgresMigrationUpgradeTests
         await VerifyConcurrentBatchAssignmentsRemainAtomicAsync(
             options, tenant.Id, station.Id, session.Id, printer.Id, now);
         await VerifyAgentReferencesCannotCrossTenantAsync(options, now);
+
+        // The saved layout density is part of the quote snapshot and must survive a fresh DbContext.
+        var photoJobId = Guid.NewGuid();
+        var legacyPhotoJobId = Guid.NewGuid();
+        db.PrintJobs.AddRange(
+            new PrintJob
+            {
+                Id = photoJobId, TenantId = tenant.Id, QrStationId = station.Id,
+                CustomerSessionId = session.Id, JobNumber = "SP-PHOTO-DENSITY",
+                IdempotencyKey = "PHOTO-DENSITY-SNAPSHOT", Status = "AWAITING_PAYMENT",
+                PageCount = 6, Copies = 1, Currency = "INR",
+                QuotedAmountMinor = 8750, PrintKind = "PHOTO", PhotoSizeCode = "35x45",
+                PhotoCount = 50, PhotosPerPage = 9, PhotoUnitPriceMinorSnapshot = 175,
+                CreatedUtc = now, UpdatedUtc = now
+            },
+            new PrintJob
+            {
+                Id = legacyPhotoJobId, TenantId = tenant.Id, QrStationId = station.Id,
+                CustomerSessionId = session.Id, JobNumber = "SP-PHOTO-LEGACY",
+                IdempotencyKey = "PHOTO-LEGACY-NO-DENSITY", Status = "AWAITING_PAYMENT",
+                PageCount = 2, Copies = 1, Currency = "INR",
+                QuotedAmountMinor = 8750, PrintKind = "PHOTO", PhotoSizeCode = "35x45",
+                PhotoCount = 50, PhotosPerPage = null, PhotoUnitPriceMinorSnapshot = 175,
+                CreatedUtc = now, UpdatedUtc = now
+            });
+        await db.SaveChangesAsync();
+
+        await using var photoSnapshotVerification = new SmartPrintDbContext(options);
+        var savedPhotoJob = await photoSnapshotVerification.PrintJobs.AsNoTracking()
+            .SingleAsync(item => item.Id == photoJobId);
+        var legacyPhotoJob = await photoSnapshotVerification.PrintJobs.AsNoTracking()
+            .SingleAsync(item => item.Id == legacyPhotoJobId);
+        Assert.Equal(50, savedPhotoJob.PhotoCount);
+        Assert.Equal(9, savedPhotoJob.PhotosPerPage);
+        Assert.Equal(6, savedPhotoJob.PageCount);
+        Assert.Equal(50, legacyPhotoJob.PhotoCount);
+        Assert.Null(legacyPhotoJob.PhotosPerPage); // Existing records are not assigned a guessed density.
+
+        // The database must reject a layout density that the selected physical size cannot fit.
+        var invalidDensityScenarios = new[]
+        {
+            (PhotoSizeCode: "35x45", PhotoCount: 50, PhotosPerPage: 26, PrintKind: "PHOTO"),
+            (PhotoSizeCode: "4x6", PhotoCount: 2, PhotosPerPage: 2, PrintKind: "PHOTO"),
+            (PhotoSizeCode: (string?)null, PhotoCount: 0, PhotosPerPage: 1, PrintKind: "DOCUMENT")
+        };
+        foreach (var scenario in invalidDensityScenarios)
+        {
+            await using var invalidDensityContext = new SmartPrintDbContext(options);
+            invalidDensityContext.PrintJobs.Add(new PrintJob
+            {
+                Id = Guid.NewGuid(), TenantId = tenant.Id, QrStationId = station.Id,
+                CustomerSessionId = session.Id, JobNumber = $"SP-PHOTO-INVALID-{Guid.NewGuid():N}"[..24],
+                IdempotencyKey = $"PHOTO-INVALID-DENSITY-{Guid.NewGuid():N}",
+                Status = "AWAITING_PAYMENT", PageCount = 1, Copies = 1,
+                Currency = "INR", QuotedAmountMinor = 100,
+                PrintKind = scenario.PrintKind, PhotoSizeCode = scenario.PhotoSizeCode,
+                PhotoCount = scenario.PhotoCount, PhotosPerPage = scenario.PhotosPerPage,
+                PhotoUnitPriceMinorSnapshot = scenario.PrintKind == "PHOTO" ? 100 : 0,
+                CreatedUtc = now, UpdatedUtc = now
+            });
+            await Assert.ThrowsAsync<DbUpdateException>(() => invalidDensityContext.SaveChangesAsync());
+        }
     }
 
     private static async Task VerifyConcurrentLocalBatchReservationsStayOnOneComputerAsync(

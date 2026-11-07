@@ -51,10 +51,16 @@ apk_certificate() {
     tr '[:upper:]' '[:lower:]'
 }
 
-echo "Waiting for the disposable Android emulator..."
+echo "[QA-STEP-START] Android package lifecycle | wait for the disposable emulator to boot and respond."
 adb wait-for-device
-for _ in $(seq 1 30); do
-  if [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == "1" ]]; then break; fi
+for attempt in $(seq 1 30); do
+  if [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == "1" ]]; then
+    echo "[QA-STEP-END] Android emulator boot complete | attempts=$attempt"
+    break
+  fi
+  if (( attempt == 1 || attempt % 5 == 0 )); then
+    echo "[QA-PROGRESS] Android emulator boot | attempt=$attempt/30 | waited=$((attempt * 2))s"
+  fi
   sleep 2
 done
 [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == "1" ]] || fail "Android emulator did not finish booting."

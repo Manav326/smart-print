@@ -47,7 +47,11 @@ data class CustomerPrintHistoryItem(
     val paymentStatus: String,
     val paymentMethod: String,
     val rejectedPageNumbersJson: String,
-    val outputCompletedUtc: String?
+    val outputCompletedUtc: String?,
+    val printKind: String?,
+    val photoSizeCode: String?,
+    val photoCount: Int,
+    val photosPerPage: Int?
 )
 
 /**
@@ -202,7 +206,11 @@ object CustomerAccountClient {
                 paymentStatus = job.optString("paymentStatus").takeUnless { it.isBlank() || it == "null" }.orEmpty(),
                 paymentMethod = job.optString("paymentMethod").takeUnless { it.isBlank() || it == "null" }.orEmpty(),
                 rejectedPageNumbersJson = job.optString("rejectedPageNumbersJson", "[]"),
-                outputCompletedUtc = job.optString("outputCompletedUtc").takeUnless { it.isBlank() || it == "null" }
+                outputCompletedUtc = job.optString("outputCompletedUtc").takeUnless { it.isBlank() || it == "null" },
+                printKind = job.optString("printKind").takeUnless { it.isBlank() || it == "null" },
+                photoSizeCode = job.optString("photoSizeCode").takeUnless { it.isBlank() || it == "null" },
+                photoCount = job.optInt("photoCount"),
+                photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage")
             )
         }
     }

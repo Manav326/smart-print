@@ -4,6 +4,8 @@ export const A4_WIDTH_PX = 2480;
 export const A4_HEIGHT_PX = 3508;
 export const A4_WIDTH_POINTS = 595.275590551;
 export const A4_HEIGHT_POINTS = 841.88976378;
+export const PHOTO_SHEET_MARGIN_MM = 8;
+export const PHOTO_SHEET_GUTTER_MM = 3;
 
 export type PhotoSheetSize = { widthMm: number; heightMm: number };
 export type PhotoSheetLayout = {
@@ -13,7 +15,7 @@ export type PhotoSheetLayout = {
 
 /** captionHeightMm adds a label region without shrinking the physical photo. */
 export function getPhotoSheetLayout(size: PhotoSheetSize, captionHeightMm = 0, requestedPhotosPerPage?: number): PhotoSheetLayout {
-  const margin = 8, gap = 3, tileHeight = size.heightMm + captionHeightMm;
+  const margin = PHOTO_SHEET_MARGIN_MM, gap = PHOTO_SHEET_GUTTER_MM, tileHeight = size.heightMm + captionHeightMm;
   const usableW = A4_WIDTH_MM - margin * 2, usableH = A4_HEIGHT_MM - margin * 2;
   const maximumColumns = Math.max(1, Math.floor((usableW + gap) / (size.widthMm + gap)));
   const maximumRows = Math.max(1, Math.floor((usableH + gap) / (tileHeight + gap)));
@@ -35,6 +37,69 @@ export function getPhotoSheetLayout(size: PhotoSheetSize, captionHeightMm = 0, r
     offsetYmm: margin,
     contentWidthMm, contentHeightMm
   };
+}
+
+
+export type PhotoSheetPhotoPosition = { photoIndex: number; row: number; column: number; xMm: number; yMm: number };
+
+/**
+ * Returns deterministic cut-grid coordinates for the populated slots on one A4 page.
+ * Every page uses the same origin and slot positions; a partial final row leaves later
+ * slots empty instead of recentering the remaining photos.
+ */
+export function getPhotoSheetPhotoPositions(
+  size: PhotoSheetSize,
+  captionHeightMm: number,
+  photosPerPage: number,
+  photosOnPage: number
+): PhotoSheetPhotoPosition[] {
+  const layout = getPhotoSheetLayout(size, captionHeightMm, photosPerPage);
+  if (!Number.isInteger(photosOnPage) || photosOnPage < 0 || photosOnPage > photosPerPage) {
+    throw new RangeError(`Photos on this A4 page must be between 0 and ${photosPerPage}.`);
+  }
+
+  return Array.from({ length: photosOnPage }, (_, photoIndex) => {
+    const column = photoIndex % layout.columns;
+    const row = Math.floor(photoIndex / layout.columns);
+    return {
+      photoIndex,
+      row,
+      column,
+      xMm: layout.offsetXmm + column * (size.widthMm + PHOTO_SHEET_GUTTER_MM),
+      yMm: layout.offsetYmm + row * (size.heightMm + captionHeightMm + PHOTO_SHEET_GUTTER_MM)
+    };
+  });
+}
+
+/** Checks the cropped pixels available after framing/zoom against both 300-DPI axes. */
+export function hasSufficientPhotoResolution(
+  sourceWidth: number,
+  sourceHeight: number,
+  size: PhotoSheetSize,
+  zoom = 1,
+  dpi = 300
+): boolean {
+  if (![sourceWidth, sourceHeight, size.widthMm, size.heightMm, zoom, dpi].every(Number.isFinite) ||
+      sourceWidth <= 0 || sourceHeight <= 0 || size.widthMm <= 0 || size.heightMm <= 0 || zoom < 1 || dpi <= 0) {
+    return false;
+  }
+
+  const targetRatio = size.widthMm / size.heightMm;
+  let cropWidth = sourceWidth;
+  let cropHeight = sourceHeight;
+  if (sourceWidth / sourceHeight > targetRatio) {
+    cropWidth = sourceHeight * targetRatio;
+  } else {
+    cropHeight = sourceWidth / targetRatio;
+  }
+  cropWidth /= zoom;
+  cropHeight /= zoom;
+
+  const requiredWidth = size.widthMm / 25.4 * dpi;
+  const requiredHeight = size.heightMm / 25.4 * dpi;
+  // Avoid rejecting exact-DPI sources because of sub-pixel floating-point division drift.
+  const pixelTolerance = 1e-6;
+  return cropWidth + pixelTolerance >= requiredWidth && cropHeight + pixelTolerance >= requiredHeight;
 }
 
 /** One exact-A4 multi-page PDF: one upload/job, with the requested number of photos. */

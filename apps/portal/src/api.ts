@@ -647,6 +647,7 @@ export interface ShopCustomerJob {
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -920,6 +921,7 @@ export interface ShopPrintJob {
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -978,6 +980,7 @@ export interface UploadedPrintJob {
     printKind?: string;
     photoSizeCode?: string | null;
     photoCount?: number;
+    photosPerPage?: number | null;
     photoUnitPriceMinorSnapshot?: number;
   };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
@@ -998,6 +1001,7 @@ export interface PrintQuoteResult {
   printKind?: "DOCUMENT" | "PHOTO";
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinor?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -1442,6 +1446,7 @@ export interface CustomerJobStatus {
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -1816,6 +1821,7 @@ export function replaceShopPhotoDocument(
     printKind: "PHOTO";
     photoSizeCode: string;
     photoCount: number;
+    photosPerPage: number;
     photoUnitPriceMinorSnapshot: number;
     quotedAmountMinor: number;
     pricingVersion: number;

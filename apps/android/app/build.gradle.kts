@@ -13,6 +13,13 @@ val smartPrintServiceUrl = providers.gradleProperty("smartPrintServiceUrl")
     )
 val smartPrintVersionCode = providers.gradleProperty("smartPrintVersionCode").orNull?.toIntOrNull() ?: 1
 val smartPrintVersionName = providers.gradleProperty("smartPrintVersionName").orElse("0.1.0").get()
+val smartPrintLocalQa = providers.gradleProperty("smartPrintLocalQa").orNull?.toBooleanStrictOrNull() ?: false
+val smartPrintPhotoStudioQaEnabled = providers.gradleProperty("smartPrintPhotoStudioQaEnabled").orNull?.toBooleanStrictOrNull() ?: false
+val smartPrintApplicationId = if (smartPrintLocalQa) {
+    "com.quantaedge.smartprint.localqa"
+} else {
+    "com.quantaedge.smartprint"
+}
 val releaseKeystorePath = providers.environmentVariable("ANDROID_SIGNING_KEYSTORE_FILE").orNull
 val releaseKeystorePassword = providers.environmentVariable("ANDROID_SIGNING_KEYSTORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("ANDROID_SIGNING_KEY_ALIAS").orNull
@@ -24,12 +31,15 @@ android {
     namespace = "com.quantaedge.smartprint"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.quantaedge.smartprint"
+        // Local physical-device QA installs side-by-side with the customer app.
+        // It must never replace the production-signed package or clear its data.
+        applicationId = smartPrintApplicationId
         minSdk = 26
         targetSdk = 36
         versionCode = smartPrintVersionCode
         versionName = smartPrintVersionName
         buildConfigField("String", "SERVICE_BASE_URL", "\"$smartPrintServiceUrl\"")
+        buildConfigField("Boolean", "PHOTO_STUDIO_QA_ENABLED", smartPrintPhotoStudioQaEnabled.toString())
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     signingConfigs {
@@ -60,6 +70,16 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}
+
+// Stream each Android JVM test as it starts and completes so local QA and CI
+// show the exact test currently executing instead of a silent Gradle wait.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    testLogging {
+        events("started", "passed", "skipped", "failed")
+        showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
 }
 

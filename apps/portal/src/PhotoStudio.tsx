@@ -5,9 +5,9 @@ import {
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
-import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout } from "./photo-studio-layout";
+import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "./photo-studio-layout";
 
-export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number; previewPages?: Blob[] };
+export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number; captionHeightMm: number; previewPages?: Blob[] };
 
 type PhotoSize = {
   id: string;
@@ -17,7 +17,7 @@ type PhotoSize = {
   heightMm: number;
 };
 
-type LookPreset = "natural" | "warm" | "crisp" | "mono";
+type LookPreset = "natural" | "warm" | "crisp" | "mono" | "custom";
 type Tool = "crop" | "look" | "sheet" | "text" | "background";
 
 type Adjustments = {
@@ -36,7 +36,7 @@ const PHOTO_SIZES: PhotoSize[] = [
   { id: "35x45", label: "35 × 45 mm", detail: "Portrait ID photo", widthMm: 35, heightMm: 45 },
   { id: "25x35", label: "25 × 35 mm", detail: "Compact ID photo", widthMm: 25, heightMm: 35 },
   { id: "2x2", label: "2 × 2 inch", detail: "Square photo", widthMm: 50.8, heightMm: 50.8 },
-  { id: "4x6", label: "4 × 6 inch", detail: "Standard photo print", widthMm: 101.6, heightMm: 152.4 }
+  { id: "4x6", label: "4 × 6 inch · Portrait", detail: "Portrait tile on an A4 sheet", widthMm: 101.6, heightMm: 152.4 }
 ];
 
 const LOOKS: Array<{ id: LookPreset; label: string; note: string; adjustments: Adjustments }> = [
@@ -83,23 +83,17 @@ function drawPhotoSheetPage(
   caption:{name:string;dob:string;fontSizePt:number;color:string},
   background:{sourceColor:string|null;targetColor:string;tolerance:number},captionHeightMm:number
 ){
-  const scale=canvasWidth/A4_WIDTH_MM,layout=getPhotoSheetLayout(size,captionHeightMm,photosPerPage);
-  const tileHeight=size.heightMm+captionHeightMm,pageStart=pageIndex*photosPerPage;
+  const scaleX=canvasWidth/A4_WIDTH_MM,scaleY=context.canvas.height/A4_HEIGHT_MM;
+  const pageStart=pageIndex*photosPerPage;
   const pageCopies=Math.max(0,Math.min(photosPerPage,copies-pageStart));
-  const visibleRows=Math.max(1,Math.ceil(pageCopies/layout.columns));
-  const visibleContentHeightMm=visibleRows*tileHeight+(visibleRows-1)*3;
-  const pageOffsetY=Math.max(8,(A4_HEIGHT_MM-visibleContentHeightMm)/2);
+  const positions=getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,pageCopies);
   context.save();context.setTransform(1,0,0,1,0,0);context.fillStyle="#fff";
-  context.fillRect(0,0,canvasWidth,context.canvas.height);context.scale(scale,scale);
+  context.fillRect(0,0,canvasWidth,context.canvas.height);context.scale(scaleX,scaleY);
   const source=cropSource(image,size,zoom,focusX,focusY);
   const filter=`brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%)`;
   const photoW=Math.max(1,Math.round(size.widthMm/25.4*300)),photoH=Math.max(1,Math.round(size.heightMm/25.4*300));
-  for(let index=0;index<pageCopies;index++){
-    const col=index%layout.columns,row=Math.floor(index/layout.columns);
-    const rowStart=row*layout.columns,rowCount=Math.min(layout.columns,pageCopies-rowStart);
-    const rowWidth=rowCount*size.widthMm+(rowCount-1)*3;
-    const rowOffset=(layout.contentWidthMm-rowWidth)/2;
-    const x=layout.offsetXmm+rowOffset+col*(size.widthMm+3),y=pageOffsetY+row*(tileHeight+3);
+  for(const position of positions){
+    const x=position.xMm,y=position.yMm;
     const crop=document.createElement("canvas");crop.width=photoW;crop.height=photoH;
     const cropContext=crop.getContext("2d");if(!cropContext)throw new Error("A photo crop could not be prepared.");
     cropContext.filter=filter;cropContext.drawImage(image,source.x,source.y,source.width,source.height,0,0,photoW,photoH);cropContext.filter="none";
@@ -145,16 +139,10 @@ function safeBaseName(fileName: string) {
   return withoutExtension.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "photo";
 }
 
-function sourceResolutionNote(image: HTMLImageElement, size: PhotoSize) {
-  const requiredWidth = Math.round(size.widthMm / 25.4 * 300);
-  const requiredHeight = Math.round(size.heightMm / 25.4 * 300);
-  const targetAspect = size.widthMm / size.heightMm;
-  const sourceAspect = image.naturalWidth / image.naturalHeight;
-  const availableShortSide = sourceAspect > targetAspect ? image.naturalHeight : image.naturalWidth;
-  const targetShortSide = Math.min(requiredWidth, requiredHeight);
-  return availableShortSide >= targetShortSide
-    ? "Source resolution is suitable for this print size."
-    : "This photo may look soft at the selected size. A sharper original is recommended.";
+function sourceResolutionNote(image: HTMLImageElement, size: PhotoSize, zoom: number) {
+  return hasSufficientPhotoResolution(image.naturalWidth,image.naturalHeight,size,zoom)
+    ? "Source resolution is suitable for this print size and crop."
+    : "This crop may look soft at the selected size. Use a sharper original or reduce the zoom.";
 }
 
 export default function PhotoStudio({
@@ -213,6 +201,8 @@ export default function PhotoStudio({
     ? requestedPhotosPerPage : maximumLayout.perSheet;
   const layout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm,photosPerPage),[size,captionHeightMm,photosPerPage]);
   const maxCopies=MAX_PHOTO_COUNT;
+  const parsedCopiesInput = Number(copiesInput);
+  const copiesInputValid = Number.isInteger(parsedCopiesInput) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies;
   const copies = Math.max(1, Math.min(maxCopies, Number(copiesInput) || 1));
   const sheetCount = Math.ceil(copies / photosPerPage);
   const previewPageIndex=Math.max(0,Math.min(previewPage,sheetCount-1));
@@ -275,9 +265,15 @@ export default function PhotoStudio({
 
   useEffect(()=>{
     const bridge=(window as Window & {SmartPrintNative?:{postMessage:(value:string)=>void}}).SmartPrintNative;
-    try{bridge?.postMessage("setSensitivePreview|on");}catch{/* Native screenshot protection is best-effort outside supported desktop builds. */}
+    try {
+      bridge?.postMessage("setPhotoStudioOpen|on");
+      bridge?.postMessage("setSensitivePreview|on");
+    } catch {/* Native modal state and screenshot protection are best-effort outside supported Android builds. */}
     return ()=>{
-      try{bridge?.postMessage("setSensitivePreview|off");}catch{/* The WebView may already be closing. */}
+      try {
+        bridge?.postMessage("setSensitivePreview|off");
+        bridge?.postMessage("setPhotoStudioOpen|off");
+      } catch {/* The WebView may already be closing. */}
     };
   },[]);
 
@@ -339,19 +335,10 @@ export default function PhotoStudio({
     if(!bounds.width||!bounds.height)return;
     const px=(event.clientX-bounds.left)/bounds.width*canvas.width,py=(event.clientY-bounds.top)/bounds.height*canvas.height;
     const xMm=px/(canvas.width/A4_WIDTH_MM),yMm=py/(canvas.height/A4_HEIGHT_MM);
-    const tileH=size.heightMm+captionHeightMm;
-    const visibleRows=Math.max(1,Math.ceil(previewPhotoCount/layout.columns));
-    const visibleContentHeightMm=visibleRows*tileH+(visibleRows-1)*3;
-    const pageOffsetY=Math.max(8,(A4_HEIGHT_MM-visibleContentHeightMm)/2);
-    const row=Math.floor((yMm-pageOffsetY)/(tileH+3));
-    if(row<0||row>=visibleRows)return;
-    const rowStart=row*layout.columns,rowCount=Math.min(layout.columns,previewPhotoCount-rowStart);
-    const rowWidth=rowCount*size.widthMm+(rowCount-1)*3;
-    const rowOffset=(layout.contentWidthMm-rowWidth)/2;
-    const col=Math.floor((xMm-layout.offsetXmm-rowOffset)/(size.widthMm+3));
-    if(col<0||col>=rowCount)return;
-    const localX=xMm-layout.offsetXmm-rowOffset-col*(size.widthMm+3),localY=yMm-pageOffsetY-row*(tileH+3);
-    if(localX<0||localX>size.widthMm||localY<0||localY>size.heightMm)return;
+    const positions=getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount);
+    const position=positions.find(item=>xMm>=item.xMm&&xMm<=item.xMm+size.widthMm&&yMm>=item.yMm&&yMm<=item.yMm+size.heightMm);
+    if(!position)return;
+    const localX=xMm-position.xMm,localY=yMm-position.yMm;
     const crop=cropSource(image,size,zoom,focusX,focusY);
     const sx=Math.max(0,Math.min(image.naturalWidth-1,Math.floor(crop.x+localX/size.widthMm*crop.width)));
     const sy=Math.max(0,Math.min(image.naturalHeight-1,Math.floor(crop.y+localY/size.heightMm*crop.height)));
@@ -372,10 +359,10 @@ export default function PhotoStudio({
   }
 
   async function createPrintSheets(){
-    if(!image||busy)return;
+    if(!image||busyRef.current)return;
     const parsedCopies=Number(copiesInput);
     if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photos. The A4 page count is calculated automatically.");return;}
-    setBusy(true);setError("");
+    busyRef.current=true;setBusy(true);setError("");
     try{
       const pages=Math.ceil(parsedCopies/photosPerPage),jpegPages:Uint8Array[]=[];
       let jpegByteLength=0;
@@ -398,12 +385,12 @@ export default function PhotoStudio({
       const pdf=new Blob([buffer],{type:"application/pdf"});
       if(pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's 20 MB file limit. Use a smaller original photo or reduce the number of copies.");
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
-      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage,previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))}]);
+      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage,captionHeightMm,previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))}]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
-    finally{setBusy(false);}
+    finally{busyRef.current=false;setBusy(false);}
   }
 
-  const resolutionMessage = image ? sourceResolutionNote(image, size) : "";
+  const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
   const footerHint = mode === "shop"
     ? "Save your prepared multi-page A4 photo PDF to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
     : "The original upload stays untouched. This prepared multi-page A4 photo PDF replaces it in your batch when you submit your print request.";
@@ -445,13 +432,13 @@ export default function PhotoStudio({
 
           {lookPanel && <>
             <div className={styles.lookGrid}>
-              {LOOKS.map(item => <button type="button" key={item.id} className={look === item.id ? styles.lookActive : styles.lookButton} onClick={() => selectLook(item.id)}>
+              {LOOKS.map(item => <button type="button" key={item.id} className={look === item.id ? styles.lookActive : styles.lookButton} onClick={() => selectLook(item.id)} aria-pressed={look === item.id}>
                 <span className={styles.lookSwatch + " " + styles["look_" + item.id]}/><strong>{item.label}</strong><small>{item.note}</small>
               </button>)}
             </div>
-            <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("natural"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
-            <label className={styles.rangeControl}>Contrast <output>{adjustments.contrast}%</output><input type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("natural"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
-            <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("natural"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>Contrast <output>{adjustments.contrast}%</output><input type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
           </>}
 
           {textPanel && <>
@@ -494,8 +481,10 @@ export default function PhotoStudio({
               </select>
             </label>
             <label className={styles.fieldLabel}>Number of photos
-              <input type="number" min="1" max={maxCopies} step="1" inputMode="numeric" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => setCopiesInput(String(copies))}/>
+              <input type="number" min="1" max={maxCopies} step="1" inputMode="numeric" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => {if(Number.isInteger(Number(copiesInput)))setCopiesInput(String(Math.max(1,Math.min(maxCopies,Number(copiesInput)||1))));}}/>
             </label>
+            {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter a whole number from 1 to {maxCopies}. The sheet count is calculated automatically.</div>}
+            {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.</div>}
             <label className={styles.fieldLabel}>Photos per A4 page
               <select value={photosPerPageInput} onChange={event=>setPhotosPerPageInput(event.target.value)}>
                 <option value="auto">Fit as many as possible ({maximumLayout.perSheet})</option>
@@ -534,7 +523,7 @@ export default function PhotoStudio({
           <div className={styles.canvasViewport}>
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
-              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
+              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/> : <div className={styles.loadingState} role={imageError ? "alert" : "status"}>{imageError || "Preparing your photo…"}</div>}
               <div className={styles.previewProtection} aria-hidden="true"/>
             </div>
           </div>
@@ -551,7 +540,7 @@ export default function PhotoStudio({
         <div className={styles.footerHint}><Check size={14}/> {footerHint}</div>
         <div className={styles.footerActions}>
           <button type="button" className={styles.cancelButton} onClick={onCancel} disabled={busy}>Cancel</button>
-          <button type="button" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !Number.isInteger(Number(copiesInput)) || Number(copiesInput) < 1 || Number(copiesInput) > maxCopies}>
+          <button type="button" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !copiesInputValid}>
             {busy ? busyLabel : actionLabel} <Check size={15}/>
           </button>
         </div>
