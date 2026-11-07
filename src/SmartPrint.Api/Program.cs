@@ -2353,6 +2353,29 @@ shop.MapPost("/photo-jobs", async (
     var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     StoredDocument? stored = null;
+
+    async Task CleanupUncommittedStorageAsync()
+    {
+        if (stored is null) return;
+        var storageKey = stored.StorageKey;
+        bool referencedByCommittedDocument;
+        try
+        {
+            referencedByCommittedDocument = await db.PrintDocuments.AsNoTracking()
+                .AnyAsync(item => item.TenantId == tenantId && item.StorageKey == storageKey, ct);
+        }
+        catch
+        {
+            // A database outcome that cannot be checked is uncertain. Retain the
+            // encrypted file rather than risk deleting a committed print document.
+            return;
+        }
+
+        if (!referencedByCommittedDocument)
+            await storage.DeleteAsync(storageKey);
+        stored = null;
+    }
+
     try
     {
         var now = DateTimeOffset.UtcNow;
@@ -2626,11 +2649,7 @@ shop.MapPost("/photo-jobs", async (
     catch (DbUpdateException)
     {
         await transaction.RollbackAsync(ct);
-        if (stored is not null)
-        {
-            await storage.DeleteAsync(stored.StorageKey);
-            stored = null;
-        }
+        await CleanupUncommittedStorageAsync();
 
         // A concurrent request may have won the unique (TenantId, IdempotencyKey)
         // insert. Do not create another job/payment or surface a generic 500.
@@ -2647,8 +2666,7 @@ shop.MapPost("/photo-jobs", async (
     catch
     {
         await transaction.RollbackAsync(ct);
-        if (stored is not null)
-            await storage.DeleteAsync(stored.StorageKey);
+        await CleanupUncommittedStorageAsync();
         throw;
     }
 })
