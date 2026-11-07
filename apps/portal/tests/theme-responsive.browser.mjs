@@ -1103,11 +1103,10 @@ async function exercisePhotoStudioFeatureMatrix() {
     await count.fill("0");
     await count.press("Tab");
     assert.equal(await count.inputValue(),"1");
+    // Fractional values are invalid as soon as the controlled input changes;
+    // verify the inline error and disabled action without relying on browser-
+    // specific stepMismatch blur behaviour for input[type=number].
     await count.fill("1.5");
-    // The browser may flag a stepMismatch for fractional number inputs. Use the
-    // page keyboard directly after fill so the test does not re-resolve a
-    // temporarily invalid number-input locator while React applies validation.
-    await page.keyboard.press("Tab");
     assert.equal(await count.inputValue(),"1.5");
     assert.equal(await dialog.getByText(/Enter a whole number from 1 to 100/).count(),1);
     assert.equal(await dialog.getByRole("button",{name:"Prepare A4 sheet"}).isDisabled(),true);
