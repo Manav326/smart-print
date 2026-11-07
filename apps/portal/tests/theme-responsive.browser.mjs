@@ -1096,15 +1096,15 @@ async function exercisePhotoStudioFeatureMatrix() {
     await count.waitFor({ state: "visible" });
     assert.equal(await count.count(),1,"Photo Studio must expose one quantity input.");
     await count.fill("101");
-    await count.evaluate(element => element.blur());
+    await count.press("Tab");
     assert.equal(await count.inputValue(),"100");
     assert.equal(await readSummary("A4 pages in this job"), "4",
       "100 photos at 25 per A4 page must produce four sheets.");
     await count.fill("0");
-    await count.evaluate(element => element.blur());
+    await count.press("Tab");
     assert.equal(await count.inputValue(),"1");
     await count.fill("1.5");
-    await count.evaluate(element => element.blur());
+    await count.press("Tab");
     assert.equal(await count.inputValue(),"1.5");
     assert.equal(await dialog.getByText(/Enter a whole number from 1 to 100/).count(),1);
     assert.equal(await dialog.getByRole("button",{name:"Prepare A4 sheet"}).isDisabled(),true);
