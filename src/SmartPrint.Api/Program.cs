@@ -2404,7 +2404,7 @@ shop.MapPost("/photo-jobs", async (
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
-                message = $"The prepared file must contain exactly {expectedPageCount} portrait A4 page(s). Check the sheet preview and prepare it again."
+                message = $"The prepared file must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page 2480 × 3508 raster. Check the sheet preview and prepare it again."
             });
         }
 
