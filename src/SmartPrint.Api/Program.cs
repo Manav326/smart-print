@@ -2224,6 +2224,8 @@ shop.MapGet("/print-jobs", async (
             job.JobNumber.ToLower().Contains(normalizedSearch) ||
             (job.BatchName != null && job.BatchName.ToLower().Contains(normalizedSearch)) ||
             (job.BatchGroupName != null && job.BatchGroupName.ToLower().Contains(normalizedSearch)) ||
+            (job.RecipientName != null && job.RecipientName.ToLower().Contains(normalizedSearch)) ||
+            (job.RecipientPhone != null && job.RecipientPhone.ToLower().Contains(normalizedSearch)) ||
             job.Document.OriginalFileName.ToLower().Contains(normalizedSearch) ||
             (job.PrinterName != null && job.PrinterName.ToLower().Contains(normalizedSearch)));
     }
