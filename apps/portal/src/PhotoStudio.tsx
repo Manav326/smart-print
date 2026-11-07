@@ -483,7 +483,7 @@ export default function PhotoStudio({
               </select>
             </label>
             <label className={styles.fieldLabel}>Number of photos
-              <input type="number" min="1" max={maxCopies} step="1" inputMode="numeric" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => {if(Number.isInteger(Number(copiesInput)))setCopiesInput(String(Math.max(1,Math.min(maxCopies,Number(copiesInput)||1))));}}/>
+              <input type="number" aria-label="Number of photos" min="1" max={maxCopies} step="1" inputMode="numeric" value={copiesInput} onChange={event => setCopiesInput(event.target.value)} onBlur={() => {if(Number.isInteger(Number(copiesInput)))setCopiesInput(String(Math.max(1,Math.min(maxCopies,Number(copiesInput)||1))));}}/>
             </label>
             {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter a whole number from 1 to {maxCopies}. The sheet count is calculated automatically.</div>}
             {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.</div>}
