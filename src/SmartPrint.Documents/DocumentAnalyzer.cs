@@ -27,11 +27,31 @@ public static class DocumentAnalyzer
             try
             {
                 using var document = PdfDocument.Open(new MemoryStream(bytes, writable: false));
-                var pages = document.GetPages().Select(page => new
+                var pages = document.GetPages().Select(page =>
                 {
-                    widthPoints = Math.Round(page.Width, 2),
-                    heightPoints = Math.Round(page.Height, 2),
-                    orientation = page.Width > page.Height ? "Landscape" : page.Width < page.Height ? "Portrait" : "Square"
+                    var images = page.GetImages().Select(image =>
+                    {
+                        var box = image.BoundingBox;
+                        return new
+                        {
+                            image.WidthInSamples,
+                            image.HeightInSamples,
+                            LeftPoints = Math.Round(box.Left, 2),
+                            BottomPoints = Math.Round(box.Bottom, 2),
+                            RightPoints = Math.Round(box.Right, 2),
+                            TopPoints = Math.Round(box.Top, 2),
+                            RotationDegrees = Math.Round(box.Rotation, 2),
+                            image.IsImageMask
+                        };
+                    }).ToArray();
+
+                    return new
+                    {
+                        widthPoints = Math.Round(page.Width, 2),
+                        heightPoints = Math.Round(page.Height, 2),
+                        orientation = page.Width > page.Height ? "Landscape" : page.Width < page.Height ? "Portrait" : "Square",
+                        images
+                    };
                 }).ToArray();
 
                 if (document.NumberOfPages is <= 0 or > MaximumPages)
