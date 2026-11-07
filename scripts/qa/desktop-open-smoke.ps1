@@ -354,77 +354,99 @@ new Promise(resolve => {
 })
 "@.Trim()
 
-        $command = @{
-            id = 1
-            method = "Runtime.evaluate"
-            params = @{
-                expression = $probeExpression
-                returnByValue = $true
-                awaitPromise = $true
-            }
-        } | ConvertTo-Json -Depth 8 -Compress
+        function Invoke-WebView2RuntimeProbe {
+            param(
+                [Parameter(Mandatory)][System.Net.WebSockets.ClientWebSocket]$Socket,
+                [Parameter(Mandatory)][string]$Expression,
+                [Parameter(Mandatory)][int]$CommandId,
+                [ValidateRange(5, 60)][int]$TimeoutSeconds = 20
+            )
 
-        $payload = [Text.Encoding]::UTF8.GetBytes($command)
-        $sendTimeoutSeconds = 10
-        $sendCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($sendTimeoutSeconds))
-        try {
-            $webSocket.SendAsync(
-                [System.ArraySegment[byte]]::new($payload),
-                [System.Net.WebSockets.WebSocketMessageType]::Text,
-                $true,
-                $sendCancellation.Token
-            ).GetAwaiter().GetResult()
-        }
-        catch [System.OperationCanceledException] {
-            throw "WebView2 DevTools did not accept the startup probe within $sendTimeoutSeconds seconds."
-        }
-        finally {
-            $sendCancellation.Dispose()
-        }
-
-        $responseText = [Text.StringBuilder]::new()
-        $buffer = New-Object byte[] 8192
-        $responseTimeoutSeconds = 20
-        $responseDeadline = [DateTime]::UtcNow.AddSeconds($responseTimeoutSeconds)
-        $receiveCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($responseTimeoutSeconds))
-        $probeResponse = $null
-
-        try {
-            do {
-                $received = $webSocket.ReceiveAsync(
-                    [System.ArraySegment[byte]]::new($buffer),
-                    $receiveCancellation.Token
-                ).GetAwaiter().GetResult()
-
-                if ($received.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-                    throw "WebView2 closed its DevTools connection before returning the startup probe."
+            $command = @{
+                id = $CommandId
+                method = "Runtime.evaluate"
+                params = @{
+                    expression = $Expression
+                    returnByValue = $true
+                    awaitPromise = $true
                 }
+            } | ConvertTo-Json -Depth 8 -Compress
 
-                [void]$responseText.Append([Text.Encoding]::UTF8.GetString($buffer, 0, $received.Count))
+            $payload = [Text.Encoding]::UTF8.GetBytes($command)
+            $sendCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(10))
+            try {
+                $Socket.SendAsync(
+                    [System.ArraySegment[byte]]::new($payload),
+                    [System.Net.WebSockets.WebSocketMessageType]::Text,
+                    $true,
+                    $sendCancellation.Token
+                ).GetAwaiter().GetResult()
+            }
+            catch [System.OperationCanceledException] {
+                throw "WebView2 DevTools did not accept startup probe attempt $CommandId within 10 seconds."
+            }
+            finally {
+                $sendCancellation.Dispose()
+            }
 
-                if ($received.EndOfMessage) {
+            $responseText = [Text.StringBuilder]::new()
+            $buffer = New-Object byte[] 8192
+            $responseDeadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+            $receiveCancellation = [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSeconds))
+            try {
+                do {
+                    $received = $Socket.ReceiveAsync(
+                        [System.ArraySegment[byte]]::new($buffer),
+                        $receiveCancellation.Token
+                    ).GetAwaiter().GetResult()
+
+                    if ($received.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                        throw "WebView2 closed its DevTools connection before returning startup probe attempt $CommandId."
+                    }
+
+                    [void]$responseText.Append([Text.Encoding]::UTF8.GetString($buffer, 0, $received.Count))
+                    if (-not $received.EndOfMessage) { continue }
+
                     $message = $responseText.ToString() | ConvertFrom-Json -ErrorAction Stop
                     $responseText.Clear() | Out-Null
-
-                    if ($message.id -eq 1) {
-                        $probeResponse = $message
-                        break
+                    if ($null -ne $message.id -and [int]$message.id -eq $CommandId) {
+                        return $message
                     }
-                }
-            } while ([DateTime]::UtcNow -lt $responseDeadline)
+                    # DevTools lifecycle events can arrive before the command response.
+                    # Keep receiving until the matching command ID arrives.
+                } while ([DateTime]::UtcNow -lt $responseDeadline)
+            }
+            catch [System.OperationCanceledException] {
+                throw "WebView2 did not return startup probe attempt $CommandId within $TimeoutSeconds seconds."
+            }
+            finally {
+                $receiveCancellation.Dispose()
+            }
+
+            throw "WebView2 did not return startup probe attempt $CommandId within $TimeoutSeconds seconds."
         }
-        catch [System.OperationCanceledException] {
-            throw "WebView2 did not return the desktop frontend startup probe within $responseTimeoutSeconds seconds."
-        }
-        finally {
-            $receiveCancellation.Dispose()
+
+        $probeResponse = $null
+        $probeMaxAttempts = 3
+        for ($probeAttempt = 1; $probeAttempt -le $probeMaxAttempts; $probeAttempt++) {
+            $probeResponse = Invoke-WebView2RuntimeProbe -Socket $webSocket -Expression $probeExpression -CommandId $probeAttempt -TimeoutSeconds 20
+            if (-not $probeResponse.error) { break }
+
+            $probeErrorMessage = [string]$probeResponse.error.message
+            $contextWasDestroyed = $probeErrorMessage -match "Execution context was destroyed|Cannot find context with specified id"
+            if (-not $contextWasDestroyed -or $probeAttempt -eq $probeMaxAttempts) {
+                throw "WebView2 startup probe failed: $probeErrorMessage"
+            }
+
+            Write-Host "[QA-RETRY] WebView2 navigated while the startup probe was executing; retrying in the new document context ($probeAttempt/$probeMaxAttempts)." -ForegroundColor Yellow
+            Start-Sleep -Milliseconds 750
         }
 
         if (-not $probeResponse) {
-            throw "WebView2 did not return the desktop frontend startup probe within $responseTimeoutSeconds seconds."
+            throw "WebView2 did not return a startup probe response."
         }
         if ($probeResponse.error) {
-            throw "WebView2 startup probe failed: $($probeResponse.error.message)"
+            throw "WebView2 startup probe failed after $probeMaxAttempts attempts: $($probeResponse.error.message)"
         }
 
         $probeJson = [string]$probeResponse.result.result.value
