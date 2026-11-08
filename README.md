@@ -172,6 +172,7 @@ Inspect the deployment with docker compose --env-file .env -f compose.yml ps and
 - [Local native Windows and Android QA](docs/LOCAL_NATIVE_APP_QA.md)
 - [Role-based Web, Android and Windows acceptance matrix](docs/ROLE_BASED_CROSS_PLATFORM_QA.md)
 - [Production QA master test plan](docs/PRODUCTION_QA_TEST_PLAN.md)
+- [Final pre-production release gate and blocker register](docs/FINAL_PRE_PRODUCTION_RELEASE_GATE.md)
 
 ## Delivery principles
 

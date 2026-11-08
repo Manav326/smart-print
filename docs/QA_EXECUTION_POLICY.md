@@ -4,6 +4,8 @@ This is a standing project instruction. Apply it to Photo Studio, print/PDF work
 
 ## Required order
 
+Use [FINAL_PRE_PRODUCTION_RELEASE_GATE.md](FINAL_PRE_PRODUCTION_RELEASE_GATE.md) as the release go/no-go index; retain the detailed case IDs in the linked master, role-based and physical-device catalogues.
+
 1. Inspect the current connected repository and the exact implementation. Do not ask the owner to upload a ZIP when repository access is already available.
 2. Execute automated tests on GitHub-hosted runners first. Use all applicable Linux/Chromium, Windows, and Android emulator jobs.
 3. Add feature-specific runner coverage where generic platform tests do not exercise the feature. A web browser test is not proof of native Android WebView behaviour; an Android unit test is not proof of Android UI behaviour; a Windows build is not proof of Windows runtime behaviour.

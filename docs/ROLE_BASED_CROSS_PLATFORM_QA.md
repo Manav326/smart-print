@@ -6,12 +6,12 @@
 
 This is a supplement, not a replacement, for:
 
-- [Production QA Master Test Plan](PRODUCTION_QA_TEST_PLAN.md) — 333 detailed baseline cases covering release, identity, shop operations, QR, Android, documents, quotes, jobs, refunds, finance, admin, security, recovery, operations and accessibility.
+- [Production QA Master Test Plan](PRODUCTION_QA_TEST_PLAN.md) — 345 detailed baseline cases covering release, identity, shop operations, QR, Android, documents, quotes, jobs, refunds, finance, admin, security, recovery, operations and accessibility.
 - [Exhaustive local real-data QA plan](SMARTPRINT_EXHAUSTIVE_LIVE_QA_PLAN.md) — 262 uniquely mapped real-local-data Playwright acceptance cases with a 100% completion gate.
 - [Android physical-device acceptance](ANDROID_PHYSICAL_ACCEPTANCE.md) — physical camera, QR, shop-Wi-Fi and Windows-to-Android readiness workflow.
 - [Local native application QA](LOCAL_NATIVE_APP_QA.md) — local Windows Desktop build/smoke and side-by-side Android QA app execution.
 
-The 168 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
+The 174 cases below add role-focused, cross-surface assertions for the newer Android customer account/document-studio workflows and for the actual Windows Desktop owner experience. They must be recorded independently. They are **not** counted as passed by the 262-case browser run or by a native build.
 
 ## 1. Product and role contract
 
@@ -310,7 +310,7 @@ The existing local Photo Studio browser checks cover image selection/editing and
 | PHOX-020 | P0 | Submit invalid/missing file, non-JPG/PNG source, zero-byte or >20 MB source, malformed or >20 MB output PDF, wrong page count, non-A4 or landscape page box, disabled photo size, missing price profile, disabled payment method and exhausted tenant quota. | The owner is shown a recoverable validation or configuration error. No PrintJob or PrintPayment is created for rejected input; temporary encrypted storage is cleaned; page count is exactly ceil(photoCount/photosPerPage); only supported portrait A4 pages and current enabled server rates are accepted. Tile-content geometry remains separately gated by PSHT-025. |
 | PHOX-021 | P0 | In shop A, start a new photo order then cancel Photo Studio; close the intake before saving; retry after network failure; attempt the create endpoint as a customer, platform admin, shop B owner or without authentication. | Cancel/close before Apply creates no job/payment and leaves the original source untouched. A failed network attempt keeps the same retry key and source available; successful replay does not duplicate. Only the authenticated owner of the target tenant can create the job; no cross-tenant job/document/recipient leakage is possible. |
 
-**Release interpretation:** PHOX-001 through PHOX-003 verify the customer photo-print purchase path; PHOX-004 through PHOX-010 verify editing of customer-uploaded photos already attached to a shop job, including safety, concurrency and photo refunds; PHOX-011 through PHOX-013 verify PDF footer and export-specific behaviour; PHOX-014 verifies Android-to-shop continuity; PHOX-015 is the distinct shop-owner-originated upload/new-job workflow and is currently NOT IMPLEMENTED. These are separate from the six local-only Photo Studio browser cases in the 262-case suite.
+**Release interpretation:** PHOX-001 through PHOX-003 verify the customer photo-print purchase path; PHOX-004 through PHOX-010 verify editing of customer-uploaded photos already attached to a shop job, including safety, concurrency and photo refunds; PHOX-011 through PHOX-013 verify PDF footer and export-specific behaviour; PHOX-014 verifies Android-to-shop continuity; PHOX-015 through PHOX-021 describe the distinct shop-owner-originated upload/new-job workflow. The UI, job-origin model and API migration are present in the candidate source; these seven cases remain NOT RUN/acceptance-pending until the full local real-data journey passes. Do not mark them passed from source inspection alone. These are separate from the six local-only Photo Studio browser cases in the 262-case suite.
 
 ## 11. Photo-sheet geometry, quantity, pagination and physical print acceptance
 
@@ -393,7 +393,7 @@ For repeatable cutting, use one fixed A4 grid origin, fixed row/column coordinat
 A candidate is not accepted merely because CI is green or the automated local runner exits successfully.
 
 - Every P0 case in the master plan and this supplement must PASS on the candidate, or be a confirmed NOT APPLICABLE with written approval. BLOCKED, NOT RUN, FAIL and NOT IMPLEMENTED are not passes.
-- All 131 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
+- All 174 supplemental cases must have an explicit result. The native Windows Desktop cases must be run in the native window; Android physical cases must be run on real supported hardware for their hardware-dependent scenarios.
 - No unresolved P0 defect is permitted. P1 issues require correction/retest or an explicit, time-bound risk decision by the release authority.
 - No claims of complete manager/operator roles, email verification/recovery, live gateway payments/refunds, encrypted direct-LAN payloads, malware scanning, offline printing, universal printer support, signed release readiness or physical-device compatibility beyond the evidence actually collected.
 - Any test involving an actual physical print must use synthetic content and a specifically designated QA printer. Output confirmation must be based on observed output, never spooler acceptance alone.
