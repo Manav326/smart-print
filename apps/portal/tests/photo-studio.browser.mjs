@@ -114,8 +114,12 @@ async function samplePhotoBackground(page) {
   await page.getByRole("button", { name: /Pick background from photo/ }).click();
   await page.locator('[data-testid="photo-studio-preview-canvas"]').evaluate(canvas => {
     const bounds = canvas.getBoundingClientRect();
-    const clientX = bounds.left + bounds.width * (15 / 210);
-    const clientY = bounds.top + bounds.height * (104 / 297);
+    const sampleXmm = Number(canvas.getAttribute("data-background-sample-x-mm"));
+    const sampleYmm = Number(canvas.getAttribute("data-background-sample-y-mm"));
+    assert.ok(Number.isFinite(sampleXmm) && sampleXmm > 0, "Photo Studio must expose the first photo tile's background sample X coordinate.");
+    assert.ok(Number.isFinite(sampleYmm) && sampleYmm > 0, "Photo Studio must expose the first photo tile's background sample Y coordinate.");
+    const clientX = bounds.left + bounds.width * (sampleXmm / 210);
+    const clientY = bounds.top + bounds.height * (sampleYmm / 297);
     canvas.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX, clientY }));
   });
   const sampled = await page.locator('[data-testid="photo-studio-background-state"] strong').textContent();
@@ -266,6 +270,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   }, { timeout: 90000 });
   const result = await verifyComponentResult(page, scenario.mode);
   assert.equal(result.sourceFingerprintBefore, originalFingerprint);
+  assert.equal(result.sourceFingerprintAfter, originalFingerprint, "The original source file must remain byte-identical after editing and PDF preparation.");
   assert.equal(result.backgroundSampled, true);
   assert.equal(result.captionsIncluded, true);
   assert.equal(pageErrors.length, 0, "Uncaught Photo Studio component errors: " + pageErrors.join("; "));
