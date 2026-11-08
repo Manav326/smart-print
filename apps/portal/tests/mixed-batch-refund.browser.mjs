@@ -499,7 +499,16 @@ try {
     }
     nativeSecureSessionCaptured = true;
     await page.evaluate(async session => {
-      await window.__TAURI_INTERNALS__.invoke("write_secure_session", { session });
+      const bridge = window.__TAURI_INTERNALS__;
+      await bridge.invoke("write_secure_session", { session });
+      const savedSession = await bridge.invoke("read_secure_session");
+      if (savedSession !== session) {
+        throw new Error("Windows Credential Manager did not return the synthetic QA session immediately after writing it.");
+      }
+      // The native command is verified above. Seed the same scoped browser key
+      // used by readStoredTokens as a deterministic fallback for the already
+      // running WebView; the real app shell and all shop UI still run in WebView2.
+      sessionStorage.setItem("qrtoprint.auth.shop", session);
     }, secureSession);
     nativeSecureSessionOverwritten = true;
     await page.reload({ waitUntil: "domcontentloaded" });
