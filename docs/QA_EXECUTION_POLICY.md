@@ -31,6 +31,19 @@ Optional local variants:
 
 `-RunAndroidEmulator` requires an online Android emulator and runs the shared Photo Studio inside SmartPrint's actual Android WebView. `-UseVirtualPdfPrinter` opts into the Windows **Microsoft Print to PDF virtual queue only**; it never selects a physical printer. The browser runner writes screenshots, a structured summary, and failure details under the selected artifact directory.
 
+## Mixed-file batch page rejection and refund acceptance
+
+Run the isolated workflow with:
+
+```powershell
+.\scripts\qa\mixed-batch-refund-test.ps1 -Help
+.\scripts\qa\mixed-batch-refund-test.ps1 -Platform All
+```
+
+The case uses one verified batch payment containing a three-page PDF, one JPEG and one PNG. It verifies undo before recording, rejects PDF pages 2 and 3 and the page in each image file, records exact per-file page refunds, checks the three-entry refund audit and retries idempotently without duplicating the refund. Only PDF page 1 remains paid and eligible. The fixture totals are ₹50.00 paid, ₹40.00 returned for rejected pages and ₹10.00 retained for the accepted page.
+
+GitHub CI runs the portal flow on Linux/Chromium and the desktop entry on Windows/Chromium. The Windows desktop-entry run loads `apps/desktop/src/main.tsx` and uses a Tauri secure-session/Agent IPC test double; it is not native WebView2 DOM automation. The Windows workflow separately installs/validates WebView2 and smoke-launches the packaged native desktop window. A Windows Agent PDF test checks that rejected source pages are excluded from output. All payment/refund data in the UI scenario is in-memory QA data; no actual transfer, live payment, printer dispatch or physical output occurs.
+
 ## Evidence and status discipline
 
 - A written test case, source-code inspection, or test file present in the repository is not an executed PASS.
@@ -57,7 +70,7 @@ Optional local variants:
 ## Current runner inventory verified in `.github/workflows/ci.yml`
 
 - Ubuntu 24.04: portal regression tests, Photo Studio layout/PDF tests, Chromium customer/shop-owner browser acceptance, pixel-level page-image checks, typecheck and build.
-- Windows: API tests, Windows Print Agent tests with the Microsoft Print to PDF virtual queue, Windows desktop compilation, Windows Chromium Photo Studio acceptance and installer lifecycle validation.
+- Windows: API tests, Windows Print Agent tests with the Microsoft Print to PDF virtual queue, Windows desktop compilation, Windows Chromium Photo Studio and mixed-batch refund acceptance, native WebView2 launch smoke and installer lifecycle validation.
 - Android: Android JVM tests, debug APK build, API 36 emulator UI tests, and a dedicated instrumented test that exercises shop-owner and customer Photo Studio flows, native Back dismissal, and A4 PDF content inside MainActivity's real WebView.
 
 **Acceptance gate:** applicable GitHub-hosted runner jobs must pass on the exact commit before requesting the owner's local acceptance run.

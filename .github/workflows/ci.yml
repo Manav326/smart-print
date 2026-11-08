@@ -51,6 +51,23 @@ jobs:
           path: artifacts/photo-studio-browser/
           if-no-files-found: warn
           retention-days: 14
+      - name: Validate mixed-batch refund browser runner syntax
+        run: node --check apps/portal/tests/mixed-batch-refund.browser.mjs
+      - name: Run mixed-type batch page rejection and complete refund acceptance (web shop)
+        env:
+          VITE_API_BASE_URL: ""
+          SMARTPRINT_MIXED_BATCH_REFUND_APP: web
+          SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR: artifacts/mixed-batch-refund-web
+        run: |
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" node apps/portal/tests/mixed-batch-refund.browser.mjs'
+      - name: Upload web mixed-batch refund evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-mixed-batch-refund-web-qa
+          path: artifacts/mixed-batch-refund-web/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify theme persistence and responsive layouts in Chromium
         run: |
           npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" node apps/portal/tests/theme-responsive.browser.mjs'
@@ -249,6 +266,34 @@ jobs:
           path: artifacts/photo-studio-windows/
           if-no-files-found: warn
           retention-days: 14
+      - name: Validate mixed-batch refund desktop runner syntax
+        shell: pwsh
+        run: |
+          node --check apps/portal/tests/mixed-batch-refund.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Mixed-batch refund runner syntax validation failed." }
+      - name: Run mixed-type batch page rejection and complete refund acceptance (Windows desktop renderer)
+        shell: pwsh
+        env:
+          VITE_API_BASE_URL: ""
+          SMARTPRINT_MIXED_BATCH_REFUND_APP: desktop
+          SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR: artifacts/mixed-batch-refund-windows
+        run: |
+          $cache = (npm config get cache).Trim()
+          $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\.mjs$" } |
+            Select-Object -First 1
+          if (-not $module) { throw "Could not locate the isolated Playwright package installed by npx." }
+          $env:PLAYWRIGHT_MODULE_DIR = $module.DirectoryName
+          node apps/portal/tests/mixed-batch-refund.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Windows desktop mixed-batch refund acceptance failed." }
+      - name: Upload Windows desktop mixed-batch refund evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-mixed-batch-refund-windows-desktop-qa
+          path: artifacts/mixed-batch-refund-windows/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Compile the native Windows desktop host
         shell: pwsh
         run: |
@@ -281,6 +326,32 @@ jobs:
           $signature = Get-AuthenticodeSignature -LiteralPath $bootstrapper
           if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
             throw "The downloaded WebView2 prerequisite did not pass Microsoft Authenticode verification."
+          }
+      - name: Smoke-launch the packaged native Windows WebView2 desktop window
+        shell: pwsh
+        run: |
+          $bootstrapper = Join-Path (Resolve-Path artifacts/desktop) "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          $runtimeInstall = Start-Process -FilePath $bootstrapper -ArgumentList @("/silent", "/install") -Wait -PassThru
+          if ($runtimeInstall.ExitCode -notin @(0, 3010)) {
+            throw "Microsoft WebView2 runtime bootstrap failed with exit code $($runtimeInstall.ExitCode)."
+          }
+          $exe = Join-Path (Resolve-Path artifacts/desktop) "SmartPrint.Desktop.exe"
+          $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:RUNNER_TEMP "smartprint-webview2-native-smoke"
+          $process = Start-Process -FilePath $exe -PassThru
+          try {
+            Start-Sleep -Seconds 8
+            $process.Refresh()
+            if ($process.HasExited) {
+              throw "The packaged SmartPrint desktop process exited during native WebView2 startup (exit $($process.ExitCode))."
+            }
+            Write-Host "Native Windows desktop/WebView2 process started and remained alive: PID $($process.Id)"
+          }
+          finally {
+            $process.Refresh()
+            if (-not $process.HasExited) {
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
+            }
           }
       - name: Upload Windows desktop package
         uses: actions/upload-artifact@v7

@@ -292,6 +292,55 @@ public sealed class PdfExportExecutorTests
         }
     }
 
+    [Fact]
+    public void PdfExportPrintsOnlyTheAcceptedPageAfterMultiplePagesAreRejected()
+    {
+        using var source = new MemoryStream();
+        using (var pdf = SkiaSharp.SKDocument.CreatePdf(source))
+        {
+            // Landscape pages bracket the accepted portrait page. Rejecting pages 1 and 3
+            // must leave one portrait output page (source page 2), not either rejected page.
+            foreach (var landscape in new[] { true, false, true })
+            {
+                var width = landscape ? 841.89f : 595.276f;
+                var height = landscape ? 595.276f : 841.89f;
+                var canvas = pdf.BeginPage(width, height);
+                using var typeface = SkiaSharp.SKTypeface.FromFamilyName("Arial", SkiaSharp.SKFontStyle.Normal);
+                using var font = new SkiaSharp.SKFont(typeface, 18);
+                using var paint = new SkiaSharp.SKPaint { Color = SkiaSharp.SKColors.Black, IsAntialias = true };
+                canvas.DrawText(landscape ? "REJECTED LANDSCAPE PAGE" : "ACCEPTED PORTRAIT PAGE",
+                    48, 72, SkiaSharp.SKTextAlign.Left, font, paint);
+                pdf.EndPage();
+            }
+            pdf.Close();
+        }
+
+        var bytes = source.ToArray();
+        var directory = Path.Combine(Path.GetTempPath(), "smartprint-rejected-pages-" + Guid.NewGuid().ToString("N"));
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-MIXED-REFUND-ACCEPTED-PAGE", Guid.NewGuid(),
+            "PDF Export", "PDF Export", "mixed-batch.pdf", "application/pdf",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            3, 1, "Colour", "A4", false, "INR", 3_000, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            OutputMode: PrinterOutputModeRules.PdfExport,
+            RejectedPageNumbers: [1, 3]);
+
+        try
+        {
+            var receipt = new WindowsPrintExecutor().ExportPdf(entry, bytes, directory, CancellationToken.None);
+            using var rendered = UglyToad.PdfPig.PdfDocument.Open(receipt.OutputPath);
+            var outputPage = Assert.Single(rendered.GetPages());
+            Assert.InRange(Math.Abs(outputPage.Width - 595.276), 0d, 1d);
+            Assert.InRange(Math.Abs(outputPage.Height - 841.89), 0d, 1d);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+    }
+
 public sealed class PdfBrandingOverlayTests
 {
     [Fact]
