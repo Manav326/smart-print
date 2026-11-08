@@ -472,14 +472,16 @@ class PhotoStudioWebViewInstrumentedTest {
         // be dragged. Keep the test on the real touch path: use a native tap
         // to move only an edge-positioned thumb into the safe interior, then
         // start the asserted native swipe from the resulting actual value.
-        var swipeStartScreenX = startScreenX
+        var swipeStartScreenX = startScreenX.toDouble()
         var swipeStartValue = bounds.getDouble("current")
         val edgeInsetPixels = (64f * displayMetrics.density).roundToInt()
+        val leftGestureEdgeX = edgeInsetPixels.toDouble()
+        val rightGestureEdgeX = (displayMetrics.widthPixels - edgeInsetPixels).toDouble()
         val startIsInSystemGestureEdge =
-            swipeStartScreenX < edgeInsetPixels ||
-                swipeStartScreenX > displayMetrics.widthPixels - edgeInsetPixels
+            swipeStartScreenX < leftGestureEdgeX ||
+                swipeStartScreenX > rightGestureEdgeX
         if (startIsInSystemGestureEdge) {
-            val safeRatio = if (swipeStartScreenX < edgeInsetPixels) 0.4 else 0.6
+            val safeRatio = if (swipeStartScreenX < leftGestureEdgeX) 0.4 else 0.6
             val rangeRect = bounds.getJSONObject("rangeRect")
             val safeStartValue = minimum + (maximum - minimum) * safeRatio
             val safeStartCssX = rangeRect.getDouble("left") +
@@ -528,8 +530,8 @@ class PhotoStudioWebViewInstrumentedTest {
             assertTrue(
                 "Native pre-positioning did not move '$labelText' outside Android's system Back gesture edge: " +
                     "value=$swipeStartValue, x=$swipeStartScreenX, edgeInset=$edgeInsetPixels, geometry=$bounds.",
-                swipeStartScreenX >= edgeInsetPixels &&
-                    swipeStartScreenX <= displayMetrics.widthPixels - edgeInsetPixels
+                swipeStartScreenX >= leftGestureEdgeX &&
+                    swipeStartScreenX <= rightGestureEdgeX
             )
         }
 
