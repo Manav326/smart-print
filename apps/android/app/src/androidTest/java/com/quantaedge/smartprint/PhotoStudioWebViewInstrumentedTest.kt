@@ -2,8 +2,7 @@ package com.quantaedge.smartprint
 
 import android.net.Uri
 import android.os.SystemClock
-import android.view.InputDevice
-import android.view.MotionEvent
+import android.os.ParcelFileDescriptor
 import android.view.WindowManager
 import android.webkit.WebView
 import androidx.test.core.app.ActivityScenario
@@ -80,6 +79,7 @@ class PhotoStudioWebViewInstrumentedTest {
                           visualScale: window.visualViewport?.scale ?? 1
                         };
                       }),
+                    touchTrace: window.__smartPrintTouchTrace?.slice(-80) ?? null,
                     dialogButtons: Array.from(document.querySelectorAll('[role="dialog"] button'))
                       .map(button => button.textContent?.replace(/\s+/g, " ").trim() ?? "").slice(0, 24)
                 })"""
@@ -422,66 +422,67 @@ class PhotoStudioWebViewInstrumentedTest {
 
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
-        val downTime = SystemClock.uptimeMillis()
-        fun injectTouch(action: Int, x: Float) {
-            val pointerProperties = arrayOf(
-                MotionEvent.PointerProperties().apply {
-                    id = 0
-                    toolType = MotionEvent.TOOL_TYPE_FINGER
-                }
-            )
-            val pointerCoordinates = arrayOf(
-                MotionEvent.PointerCoords().apply {
-                    this.x = x
-                    this.y = screenY
-                    pressure = 1f
-                    size = 1f
-                }
-            )
-            val event = MotionEvent.obtain(
-                downTime,
-                SystemClock.uptimeMillis(),
-                action,
-                1,
-                pointerProperties,
-                pointerCoordinates,
-                0,
-                0,
-                1f,
-                1f,
-                0,
-                0,
-                InputDevice.SOURCE_TOUCHSCREEN,
-                0
-            )
-            try {
-                assertTrue(
-                    "Android rejected touchscreen injection for '$labelText' at ($x,$screenY); geometry=$bounds",
-                    automation.injectInputEvent(event, true)
-                )
-            } finally {
-                event.recycle()
-            }
-            SystemClock.sleep(24)
-        }
 
-        var pointerDown = false
-        try {
-            injectTouch(MotionEvent.ACTION_DOWN, startScreenX)
-            pointerDown = true
-            val steps = 16
-            for (step in 1..steps) {
-                val x = startScreenX + (endScreenX - startScreenX) * step / steps
-                injectTouch(MotionEvent.ACTION_MOVE, x)
-            }
-            injectTouch(MotionEvent.ACTION_UP, endScreenX)
-            pointerDown = false
-        } finally {
-            if (pointerDown) {
-                runCatching { injectTouch(MotionEvent.ACTION_CANCEL, endScreenX) }
-            }
-        }
+        // Record trusted DOM input events at the document boundary. This
+        // distinguishes a real Android gesture that lands on the slider from
+        // an event that the emulator injects elsewhere or WebView drops.
+        val traceInstalled = evaluate(
+            scenario,
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                .find(item => item.textContent.trim().startsWith($label));
+              const range = label?.querySelector('input[type="range"]');
+              if (!range) return false;
+              window.__smartPrintTouchTrace = [];
+              const eventTypes = [
+                "pointerdown", "pointermove", "pointerup", "pointercancel",
+                "touchstart", "touchmove", "touchend", "input", "change"
+              ];
+              for (const type of eventTypes) {
+                document.addEventListener(type, event => {
+                  const path = typeof event.composedPath === "function" ? event.composedPath() : [];
+                  const target = event.target;
+                  window.__smartPrintTouchTrace.push({
+                    type,
+                    trusted: event.isTrusted,
+                    target: target instanceof Element
+                      ? target.tagName + (target.id ? "#" + target.id : "") + (typeof target.className === "string" && target.className ? "." + target.className.trim().replace(/\\s+/g, ".") : "")
+                      : String(target),
+                    pathHitsRange: path.includes(range),
+                    pointerType: "pointerType" in event ? event.pointerType : null,
+                    clientX: "clientX" in event ? event.clientX : null,
+                    clientY: "clientY" in event ? event.clientY : null,
+                    value: range.value
+                  });
+                  if (window.__smartPrintTouchTrace.length > 120) {
+                    window.__smartPrintTouchTrace.splice(0, 40);
+                  }
+                }, true);
+              }
+              return true;
+            })()"""
+        )
+        assertEquals("Could not install native range event diagnostics.", "true", traceInstalled)
 
+        // Android's input command injects a SOURCE_TOUCHSCREEN finger stream
+        // through InputManager, matching the emulator shell/ADB touch tooling.
+        val x1 = startScreenX.roundToInt()
+        val x2 = endScreenX.roundToInt()
+        val y = screenY.roundToInt()
+        val command = "input swipe $x1 $y $x2 $y 650; status=\\$?; echo __SMARTPRINT_TOUCH_EXIT__\\$status"
+        val shellOutput = ParcelFileDescriptor.AutoCloseInputStream(
+            automation.executeShellCommand(command)
+        ).bufferedReader().use { it.readText() }
+        assertTrue(
+            "Android input swipe command failed for '$labelText' from ($x1,$y) to ($x2,$y): $shellOutput; " +
+                "geometry=$bounds; view=${viewWidth}x${viewHeight}; origin=${screenOriginX},${screenOriginY}",
+            shellOutput.contains("__SMARTPRINT_TOUCH_EXIT__0")
+        )
+
+        // Give Chromium a frame to commit pointer/input/change events before
+        // the existing bounded assertion verifies the controlled React value.
+        instrumentation.waitForIdleSync()
         waitFor(
             scenario,
             """(() => {
