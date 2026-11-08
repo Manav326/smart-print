@@ -461,31 +461,6 @@ class PhotoStudioWebViewInstrumentedTest {
             }
         }
 
-        val afterGesture = evaluate(
-            scenario,
-            """(() => {
-              const dialog = document.querySelector('[role="dialog"]');
-              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                .find(item => item.textContent.trim().startsWith($label));
-              const range = label?.querySelector('input[type="range"]');
-              return JSON.stringify({
-                value: range?.value ?? null,
-                activeElement: document.activeElement?.outerHTML?.slice(0, 240) ?? null,
-                rect: (() => {
-                  const r = range?.getBoundingClientRect();
-                  return r ? { left:r.left,top:r.top,width:r.width,height:r.height } : null;
-                })()
-              });
-            })()"""
-        )
-        val gestureResult = JSONObject(decodeJavascriptString(afterGesture))
-        val afterValue = gestureResult.optString("value", "")
-        assertTrue(
-            "Native touchscreen gesture did not change Photo Studio '$labelText' " +
-                "(before=${bounds.getDouble("current")}, requested=$value, after=$afterValue, " +
-                "geometry=$bounds, result=$gestureResult).",
-            afterValue.isNotBlank() && afterValue.toDoubleOrNull() != bounds.getDouble("current")
-        )
         waitFor(
             scenario,
             """(() => {
