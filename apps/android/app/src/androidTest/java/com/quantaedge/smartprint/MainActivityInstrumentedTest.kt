@@ -373,7 +373,16 @@ class MainActivityInstrumentedTest {
 
         val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "Q".repeat(32)
         val stationHost = Uri.parse(stationUrl).host.orEmpty()
+        val acceptedRoute = QrScanRoutingPolicy.route(
+            rawValue = stationUrl,
+            purpose = QrScanPurpose.SHOP_CONNECTION,
+            expectedServiceUrl = BuildConfig.SERVICE_BASE_URL,
+            allowLocalDevelopment = BuildConfig.DEBUG
+        ) as? QrScanRoute.ConnectToShop
+            ?: throw AssertionError("The generated station QR must pass the configured-origin routing policy: service=${BuildConfig.SERVICE_BASE_URL}, station=$stationUrl")
+        assertEquals("The QR routing policy must preserve the canonical station URL.", stationUrl, acceptedRoute.link.url)
         val pageLoaded = CountDownLatch(1)
+        val requestedWebViewUrl = AtomicReference<String>()
         val interceptedMainFrameUrl = AtomicReference<String>()
         val pageStartedUrl = AtomicReference<String>()
         val pageFinishedUrl = AtomicReference<String>()
@@ -429,6 +438,7 @@ class MainActivityInstrumentedTest {
                         QrScanPurpose::class.java
                     ).apply { isAccessible = true }
                         .invoke(activity, stationUrl, QrScanPurpose.SHOP_CONNECTION)
+                    requestedWebViewUrl.set(webView.url)
                 }
 
                 val pageFinished = pageLoaded.await(20, TimeUnit.SECONDS)
@@ -436,7 +446,7 @@ class MainActivityInstrumentedTest {
                     "The accepted station URL must finish loading in the SmartPrint WebView. " +
                         "intercepted=${interceptedMainFrameUrl.get()}, " +
                         "started=${pageStartedUrl.get()}, finished=${pageFinishedUrl.get()}, " +
-                        "loadError=${mainFrameLoadError.get()}",
+                        "loadError=${mainFrameLoadError.get()}, requested=${requestedWebViewUrl.get()}",
                     pageFinished
                 )
 
