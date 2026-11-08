@@ -327,11 +327,14 @@ async function exercisePhotoSizeOutputs(browser) {
     const expectedPerPage = Number(summary.match(/Photos per A4 page\s+(\d+)/)?.[1] ?? 0);
     assert.ok(expectedPerPage >= 1, sizeCode + " must expose a valid automatic page density.");
     await page.getByRole("button", { name: "Prepare A4 sheet" }).click();
-    await page.waitForFunction(() => {
+    await page.waitForFunction((expectedSize) => {
       const node = document.querySelector("#photo-studio-result");
       if (!node?.textContent) return false;
-      try { return Boolean(JSON.parse(node.textContent).pageCount); } catch { return false; }
-    }, { timeout: 90000 });
+      try {
+        const output = JSON.parse(node.textContent);
+        return Boolean(output.pageCount) && output.sizeCode === expectedSize;
+      } catch { return false; }
+    }, sizeCode, { timeout: 90000 });
     const result = JSON.parse(await page.locator("#photo-studio-result").textContent() ?? "{}");
     const expectedPages = Math.ceil(3 / expectedPerPage);
     verifyPreparedPdfResult(result, {
