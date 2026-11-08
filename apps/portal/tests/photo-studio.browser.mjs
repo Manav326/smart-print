@@ -200,7 +200,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await setControlValue(page, "Contrast", "120");
   await setControlValue(page, "Colour", "82");
   await page.getByRole("button", { name: "Warm" }).click();
-  await page.getByRole("button", { name: "Sheet" }).click();
+  await page.getByRole("button", { name: "Sheet", exact: true }).click();
 
   const size = page.getByLabel("Photo size");
   for (const sizeCode of ["25x35", "2x2", "4x6", "35x45"]) {
@@ -222,7 +222,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await assertNoPageOverflow(page, scenario.mode + " quantity-17");
   await samplePhotoBackground(page);
 
-  await page.getByRole("button", { name: "Sheet" }).click();
+  await page.getByRole("button", { name: "Sheet", exact: true }).click();
   const captionToggle = page.getByRole("checkbox", { name: /Add name and DOB to each photo/ });
   assert.equal(await page.getByRole("button", { name: "Text" }).isDisabled(), true,
     "Caption styling must stay disabled until the owner opts in.");
@@ -234,7 +234,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await page.getByRole("button", { name: "Text" }).click();
   await page.getByLabel("Caption font size").selectOption("7");
   await setControlValue(page, "Caption colour", "#202020");
-  await page.getByRole("button", { name: "Sheet" }).click();
+  await page.getByRole("button", { name: "Sheet", exact: true }).click();
 
   await size.selectOption("35x45");
   await page.getByLabel("Number of photos").fill("17");
@@ -274,7 +274,7 @@ async function exercisePhotoSizeOutputs(browser) {
   const generated = [];
   for (const sizeCode of ["25x35", "2x2", "4x6"]) {
     await openComponentStudio(page);
-    await page.getByRole("button", { name: "Sheet" }).click();
+    await page.getByRole("button", { name: "Sheet", exact: true }).click();
     await page.getByLabel("Photo size").selectOption(sizeCode);
     await setControlValue(page, "Number of photos", "3");
     await page.getByLabel("Photos per A4 page").selectOption("auto");
@@ -534,7 +534,7 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
     }));
   });
   await assertNoPageOverflow(page, "real-shop-owner-edited-preview");
-  await page.getByRole("button", { name: "Sheet" }).click();
+  await page.getByRole("button", { name: "Sheet", exact: true }).click();
   await page.getByLabel("Photo size").selectOption("35x45");
   await page.getByLabel("Number of photos").fill("17");
   await page.getByLabel("Number of photos").press("Tab");
@@ -545,7 +545,7 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
   await page.getByRole("button", { name: "Text" }).click();
   await page.getByLabel("Caption font size").selectOption("7");
   await setControlValue(page, "Caption colour", "#202020");
-  await page.getByRole("button", { name: "Sheet" }).click();
+  await page.getByRole("button", { name: "Sheet", exact: true }).click();
   await page.getByRole("button", { name: "Next A4 page" }).click();
   const finalPage = await page.locator('[data-testid="photo-studio-preview-canvas"]').getAttribute("aria-label");
   assert.match(finalPage ?? "", /page 2 of 2 with 8 photos/i);
