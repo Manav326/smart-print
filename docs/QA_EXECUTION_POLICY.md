@@ -58,6 +58,6 @@ Optional local variants:
 
 - Ubuntu 24.04: portal regression tests, Photo Studio layout/PDF tests, Chromium customer/shop-owner browser acceptance, pixel-level page-image checks, typecheck and build.
 - Windows: API tests, Windows Print Agent tests with the Microsoft Print to PDF virtual queue, Windows desktop compilation, Windows Chromium Photo Studio acceptance and installer lifecycle validation.
-- Android: Android JVM tests, debug APK build, API 36 emulator UI tests, and a dedicated instrumented test that operates the shared Photo Studio inside MainActivity's real WebView.
+- Android: Android JVM tests, debug APK build, API 36 emulator UI tests, and a dedicated instrumented test that exercises shop-owner and customer Photo Studio flows, native Back dismissal, and A4 PDF content inside MainActivity's real WebView.
 
 **Acceptance gate:** applicable GitHub-hosted runner jobs must pass on the exact commit before requesting the owner's local acceptance run.

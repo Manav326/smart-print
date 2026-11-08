@@ -84,6 +84,15 @@ class PhotoStudioWebViewInstrumentedTest {
         val dialogText = evaluateJavascript("document.querySelector('[role=dialog]').innerText")
         assertTrue("The Android WebView must open the shop-owner editor mode.", dialogText.contains("SHOP · EDIT EXISTING JOB"))
 
+        // Android system Back should dismiss only the editor and preserve the existing shop job.
+        androidx.test.espresso.Espresso.pressBack()
+        waitForJavascript("!document.querySelector('[role=dialog][aria-modal=true]')", 20_000)
+        assertEquals("The native Back action must keep the existing job page open.", "/tests/photo-studio.browser.html", evaluateJavascript("location.pathname"))
+        assertEquals("shop", evaluateJavascript("new URLSearchParams(location.search).get('mode')"))
+        assertEquals("open-photo-studio", evaluateJavascript("document.activeElement?.id || ''"))
+
+        clickButton("Open Photo Studio")
+        waitForJavascript("!!document.querySelector('[role=dialog][aria-modal=true]')", 20_000)
         clickButton("Crop")
         setEditorControl("Zoom", "1.25")
         setEditorControl("Horizontal position", "48")
@@ -176,6 +185,76 @@ class PhotoStudioWebViewInstrumentedTest {
         val afterResume = JSONObject(evaluateJavascript("document.querySelector('#photo-studio-result').textContent"))
         assertEquals(17, afterResume.getInt("photoCount"))
         assertEquals(2, afterResume.getInt("pageCount"))
+
+        // Exercise the customer-facing mode in the same real Android WebView.
+        val customerFixtureUrl = fixtureUrl.replace(
+            "mode=shop&theme=dark",
+            "mode=customer&theme=light"
+        )
+        scenario!!.onActivity { activity ->
+            val field = MainActivity::class.java.getDeclaredField("webView")
+            field.isAccessible = true
+            val view = field.get(activity) as? WebView
+                ?: throw AssertionError("MainActivity did not keep its customer/shop WebView.")
+            view.loadUrl(customerFixtureUrl)
+        }
+        waitForJavascript(
+            "new URLSearchParams(location.search).get('mode') === 'customer' && " +
+                "(() => { const button=document.querySelector('#open-photo-studio'); return !!button && !button.disabled; })()",
+            60_000
+        )
+        clickButton("Open Photo Studio")
+        waitForJavascript("!!document.querySelector('[role=dialog][aria-modal=true]')", 20_000)
+        val customerDialogText = evaluateJavascript("document.querySelector('[role=dialog]').innerText")
+        assertTrue("The Android WebView must open the customer editor mode.", customerDialogText.contains("CUSTOMER · BEFORE UPLOAD"))
+
+        clickButton("Sheet")
+        setEditorControl("Photo size", "35x45")
+        setEditorControl("Number of photos", "10")
+        setEditorControl("Photos per A4 page", "9")
+        val customerSummary = evaluateJavascript("document.querySelector('[data-testid=photo-studio-sheet-summary]')?.innerText || ''")
+        assertTrue("The customer flow must calculate two A4 pages.", customerSummary.contains("A4 pages in this job") && customerSummary.contains("2"))
+        assertTrue("The customer flow must show its one-photo final page.", customerSummary.contains("Final A4 page: 1 photos"))
+
+        clickButton("Next A4 page")
+        val customerFinalPageLabel = evaluateJavascript("document.querySelector('[data-testid=photo-studio-preview-canvas]')?.getAttribute('aria-label') || ''")
+        assertTrue("The customer WebView must preview the final partial page.", customerFinalPageLabel.contains("page 2 of 2 with 1 photos"))
+        clickButton("Previous A4 page")
+        clickButton("Prepare A4 sheet")
+        waitForJavascript(
+            "(() => { const node=document.querySelector('#photo-studio-result'); if(!node?.textContent) return false;" +
+                "try { return JSON.parse(node.textContent).pageCount===2; } catch (_) { return false; } })()",
+            90_000
+        )
+
+        val customerResult = JSONObject(evaluateJavascript("document.querySelector('#photo-studio-result').textContent"))
+        assertEquals("customer", customerResult.getString("mode"))
+        assertTrue("The customer flow must not be assigned an existing shop job.", customerResult.isNull("sourceJobId"))
+        assertEquals("application/pdf", customerResult.getString("mediaType"))
+        assertEquals("35x45", customerResult.getString("sizeCode"))
+        assertEquals(10, customerResult.getInt("photoCount"))
+        assertEquals(9, customerResult.getInt("photosPerPage"))
+        assertEquals(2, customerResult.getInt("pageCount"))
+        assertEquals(2, customerResult.getInt("pageImageCount"))
+        assertTrue("The customer PDF must use exact A4 page dimensions.", customerResult.getBoolean("pdfHasExactA4MediaBox"))
+        assertTrue("The customer photo source must remain byte-for-byte unchanged.", customerResult.getBoolean("sourceIntegrityPreserved"))
+        assertTrue("The customer PDF must contain page data.", customerResult.getLong("outputBytes") > 1_000L)
+
+        val customerPages = customerResult.getJSONArray("pages")
+        assertEquals(2, customerPages.length())
+        val customerExpectedCounts = listOf(9, 1)
+        for (index in 0 until customerPages.length()) {
+            val page = customerPages.getJSONObject(index)
+            assertEquals(customerExpectedCounts[index], page.getInt("photoCount"))
+            assertEquals(2480, page.getInt("width"))
+            assertEquals(3508, page.getInt("height"))
+            assertTrue("Customer page " + (index + 1) + " must contain every expected photo tile.", page.getBoolean("allPhotoCentresContainImage"))
+            assertTrue("Customer page " + (index + 1) + " must preserve cutting gaps.", page.getBoolean("allInterPhotoGapsRemainBlank"))
+            assertTrue("Customer page " + (index + 1) + " must embed its reviewed JPEG payload in the PDF.", page.getBoolean("jpegPayloadEmbeddedInPdf"))
+        }
+
+        val customerErrors = JSONArray(evaluateJavascript("JSON.stringify(window.__photoStudioQaPageErrors || [])"))
+        assertEquals("The customer Android WebView must not produce uncaught Photo Studio errors.", 0, customerErrors.length())
     }
 
     private fun waitForJavascript(condition: String, timeoutMillis: Long) {
@@ -212,13 +291,14 @@ class PhotoStudioWebViewInstrumentedTest {
         val quoted = JSONObject.quote(label)
         val script = """
             (() => {
-              const buttons = [...document.querySelectorAll('[role="dialog"] button')];
+              const buttons = [...document.querySelectorAll('button')];
               const button = buttons.find(item =>
                 (item.getAttribute('aria-label') || '').trim() === $quoted ||
                 (item.innerText || '').trim() === $quoted ||
                 (item.innerText || '').includes($quoted)
               );
-              if (!button) throw new Error('Photo Studio button not found: ' + $quoted);
+              if (!button || button.disabled) throw new Error('Photo Studio button not found or disabled: ' + $quoted);
+              button.focus();
               button.click();
               return true;
             })()

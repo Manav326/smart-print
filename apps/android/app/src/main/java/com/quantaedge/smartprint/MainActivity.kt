@@ -270,12 +270,33 @@ class MainActivity : AppCompatActivity() {
             pickerMode -> cancelPicker()
             documentViewer != null -> if (customerUploadPdfPreviewOpen) closeCustomerUploadPdfPreview() else closeDocumentViewer()
             editingPdf != null -> showFiles()
-            navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
+            navigation.selectedItemId == SCAN_PRINT -> {
+                webView?.let { activeWebView ->
+                    activeWebView.evaluateJavascript(
+                        """
+                        (() => {
+                            const dialog = document.querySelector('[role="dialog"][aria-modal="true"]');
+                            if (!dialog || !dialog.querySelector("#photo-studio-title")) return "no-photo-studio";
+                            if (dialog.getAttribute("aria-busy") === "true") return "photo-studio-busy";
+                            document.dispatchEvent(new KeyboardEvent("keydown", {
+                                key: "Escape",
+                                bubbles: true,
+                                cancelable: true
+                            }));
+                            return "photo-studio-dismissed";
+                        })()
+                        """.trimIndent()
+                    ) { result ->
+                        if (result != "\"photo-studio-dismissed\"" && result != "\"photo-studio-busy\"") {
+                            if (activeWebView.canGoBack()) activeWebView.goBack() else showHome()
+                        }
+                    }
+                } ?: showHome()
+            }
             navigation.selectedItemId == FILES && folderPath.isNotEmpty() -> {
                 folderPath = parent(folderPath)
                 showFiles()
             }
-            navigation.selectedItemId == SCAN_PRINT -> showHome()
             navigation.selectedItemId != HOME -> showHome()
             folderPath.isNotEmpty() -> { folderPath = parent(folderPath); showFiles() }
             else -> return false
