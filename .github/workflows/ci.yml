@@ -148,6 +148,25 @@ jobs:
               throw "PowerShell syntax validation failed for $($scriptFile.Name)."
             }
           }
+          $helpChecks = @(
+            @{ Path = "scripts/qa/run-smartprint-qa.ps1"; Expected = "-AndroidAppOnly" },
+            @{ Path = "scripts/qa/run-smartprint-native-local.ps1"; Expected = "-AndroidDeviceSerial" },
+            @{ Path = "scripts/qa/run-smartprint-headed-playwright.ps1"; Expected = "-RunCustomerUploadWorkflow" },
+            @{ Path = "scripts/qa/desktop-open-smoke.ps1"; Expected = "-RequireDevTools" },
+            @{ Path = "scripts/qa/windows-installer-lifecycle.ps1"; Expected = "-InstallerV1" },
+            @{ Path = "scripts/qa/test-published-apps.ps1"; Expected = "-InstallPublishedAndroidApk" }
+          )
+          foreach ($check in $helpChecks) {
+            $helpOutput = & pwsh -NoProfile -File $check.Path -Help 2>&1 | Out-String
+            $helpExitCode = $LASTEXITCODE
+            if ($helpExitCode -ne 0) {
+              throw "Help invocation failed for $($check.Path) with exit code $helpExitCode."
+            }
+            if (-not $helpOutput.Contains($check.Expected)) {
+              throw "Help output for $($check.Path) did not document $($check.Expected)."
+            }
+            Write-Host "PASS: $($check.Path) -Help"
+          }
       - name: Build Windows Print Agent
         id: agent_build
         if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
@@ -501,6 +520,18 @@ jobs:
         uses: android-actions/setup-android@v4
         with:
           packages: 'platform-tools'
+      - name: Verify Android QA script help
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          emulator_help="$(bash scripts/qa/android-emulator-ci.sh --help)"
+          grep -Fq "Usage: bash scripts/qa/android-emulator-ci.sh" <<<"$emulator_help"
+          grep -Fq "SMARTPRINT_PUBLIC_BASE_URL" <<<"$emulator_help"
+          lifecycle_help="$(bash scripts/qa/android-install-lifecycle.sh --help)"
+          grep -Fq "Usage: bash scripts/qa/android-install-lifecycle.sh <APK_N> <APK_N_PLUS_1>" <<<"$lifecycle_help"
+          grep -Fq "DESTRUCTIVE SAFETY WARNING" <<<"$lifecycle_help"
+          echo "PASS: Android QA helper --help options"
       - name: Validate configured Android service origin
         id: android_origin
         if: ${{ !cancelled() }}
