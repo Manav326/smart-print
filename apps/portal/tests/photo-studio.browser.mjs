@@ -227,6 +227,14 @@ async function exerciseComponentFullFlow(browser, scenario) {
   const url = baseUrl + "/tests/photo-studio.browser.html?mode=" + scenario.mode + "&theme=" + scenario.theme +
     "&jobId=SP-PHOTO-STUDIO-" + scenario.mode.toUpperCase() + "-001";
   await page.goto(url, { waitUntil: "networkidle" });
+  // The fixture creates its synthetic image in a React effect after navigation.
+  // networkidle can happen before that effect has encoded the canvas and
+  // committed the fingerprint, so explicitly wait for the ready state.
+  await page.waitForFunction(() => {
+    const ready = document.querySelector("#photo-studio-result")?.getAttribute("data-ready") === "true";
+    const fingerprint = document.querySelector("#photo-studio-source-fingerprint")?.textContent?.trim();
+    return ready && Boolean(fingerprint);
+  }, null, { timeout: 15000 });
   const originalFingerprint = await page.locator("#photo-studio-source-fingerprint").textContent();
   assert.ok(originalFingerprint, "The synthetic source photo was not created.");
   await openComponentStudio(page);
