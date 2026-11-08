@@ -339,7 +339,7 @@ try {
     return estimate.includes("3 pages will remain") && estimate.includes("₹0.00");
   });
   assert.equal(refunds.length, 0, "Undo must not create a refund.");
-  await pdfDialog.getByRole("button", { name: "Close" }).click();
+  await pdfDialog.locator(".modal-actions").getByRole("button", { name: "Close", exact: true }).click();
   await pdfDialog.waitFor({ state: "detached" });
 
   // PDF pages 2+3 are rejected; page 1 stays accepted.
