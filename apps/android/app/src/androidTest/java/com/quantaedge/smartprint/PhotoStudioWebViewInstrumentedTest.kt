@@ -689,6 +689,8 @@ class PhotoStudioWebViewInstrumentedTest {
             setLabelValue(scenario, "photo-studio-replacement-background", "#f3f6fa")
             setRangeValue(scenario, "photo-studio-background-tolerance", 65)
             clickButton(scenario, "photo-studio-reset-background")
+            // The form-details checkbox exists only in the Sheet panel, not Background.
+            clickButton(scenario, "photo-studio-tool-sheet")
 
             val captionsEnabled = evaluate(
                 scenario,
