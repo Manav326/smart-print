@@ -328,7 +328,7 @@ async function exerciseComponentViewport(browser, scenario) {
   await openComponentStudio(page);
   await assertNoPageOverflow(page, scenario.label);
   for (const tool of ["Sheet", "Crop", "Looks", "Background"]) {
-    await page.getByRole("button", { name: tool }).click();
+    await page.getByRole("button", { name: tool, exact: true }).click();
     await page.locator('[data-testid="photo-studio-tool-panel"]').waitFor({ state: "visible" });
   }
   await page.getByRole("button", { name: scenario.mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet" }).waitFor({ state: "visible" });
