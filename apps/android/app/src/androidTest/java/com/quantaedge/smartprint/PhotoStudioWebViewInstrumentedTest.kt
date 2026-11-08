@@ -298,11 +298,29 @@ class PhotoStudioWebViewInstrumentedTest {
               const min = Number(range.min || 0);
               const max = Number(range.max || 100);
               const current = Number(range.value);
-              const point = (v) => rect.left + (max === min ? 0.5 : (v - min) / (max - min)) * rect.width;
+              // Chromium's native range thumb travels inside the track: its centre
+              // cannot reach rect.left/rect.right. Starting at the raw input edge
+              // misses a thumb parked at min (notably Colour after Black & white).
+              // Read the WebKit thumb width, with Chromium's 16px default as fallback.
+              let thumbWidth = 16;
+              try {
+                const declaredThumbWidth = Number.parseFloat(
+                  getComputedStyle(range, '::-webkit-slider-thumb').width
+                );
+                if (Number.isFinite(declaredThumbWidth) && declaredThumbWidth > 0) {
+                  thumbWidth = declaredThumbWidth;
+                }
+              } catch {
+                // The Android Chromium default range thumb is 16 CSS px.
+              }
+              const thumbInset = Math.min(thumbWidth / 2, rect.width / 2);
+              const travelWidth = Math.max(1, rect.width - thumbInset * 2);
+              const point = (v) => rect.left + thumbInset +
+                (max === min ? 0.5 : (v - min) / (max - min)) * travelWidth;
               return JSON.stringify({
                 startX: point(current), endX: point($value),
                 y: rect.top + rect.height / 2,
-                min, max
+                min, max, thumbWidth, travelWidth
               });
             })()"""
         )
