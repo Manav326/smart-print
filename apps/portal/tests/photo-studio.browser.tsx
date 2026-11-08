@@ -14,6 +14,21 @@ const delayApply = query.get("delayApply") === "1";
 const invalidSource = query.get("source") === "invalid";
 const failRasterOnce = query.get("failRender") === "1";
 const oversizedRaster = query.get("oversizeRaster") === "1";
+const draftStorageKey = "smartprint.photo-studio-qa.draft";
+
+function readFixtureDraft(): { open: boolean; photoCount: string | null } {
+  try {
+    const raw = sessionStorage.getItem(draftStorageKey);
+    if (!raw) return { open: false, photoCount: null };
+    const value = JSON.parse(raw) as { open?: unknown; photoCount?: unknown };
+    return {
+      open: value.open === true,
+      photoCount: typeof value.photoCount === "string" ? value.photoCount : null
+    };
+  } catch {
+    return { open: false, photoCount: null };
+  }
+}
 
 function createFixturePhoto(): Promise<File> {
   if (invalidSource) {
@@ -61,11 +76,56 @@ async function fingerprintFile(file: File): Promise<string> {
 
 function PhotoStudioBrowserFixture() {
   const [source, setSource] = useState<File | null>(null);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => readFixtureDraft().open);
+  const [draftPhotoCount, setDraftPhotoCount] = useState<string | null>(() => readFixtureDraft().photoCount);
   const [result, setResult] = useState("");
   const [sourceFingerprint, setSourceFingerprint] = useState("");
   const [error, setError] = useState("");
   const applyAttempts = useRef(0);
+
+  // The Android Activity may recreate its WebView while the customer is editing.
+  // Keep this isolated fixture's modal-open flag and active quantity in the browser
+  // session so restoreState can reopen the same Photo Studio screen.
+  useEffect(() => {
+    const captureQuantity = (event: Event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      const dialog = document.querySelector('[role="dialog"]');
+      const label = Array.from(dialog?.querySelectorAll("label") ?? [])
+        .find(item => item.textContent?.trim().startsWith("Number of photos"));
+      if (label?.contains(target)) setDraftPhotoCount(target.value);
+    };
+    document.addEventListener("input", captureQuantity, true);
+    document.addEventListener("change", captureQuantity, true);
+    return () => {
+      document.removeEventListener("input", captureQuantity, true);
+      document.removeEventListener("change", captureQuantity, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (!open) {
+        sessionStorage.removeItem(draftStorageKey);
+      } else {
+        sessionStorage.setItem(draftStorageKey, JSON.stringify({ open: true, photoCount: draftPhotoCount }));
+      }
+    } catch { /* The fixture remains usable when browser storage is unavailable. */ }
+  }, [open, draftPhotoCount]);
+
+  useEffect(() => {
+    if (!open || !source || !draftPhotoCount) return;
+    const dialog = document.querySelector('[role="dialog"]');
+    const label = Array.from(dialog?.querySelectorAll("label") ?? [])
+      .find(item => item.textContent?.trim().startsWith("Number of photos"));
+    const input = label?.querySelector("input");
+    if (!(input instanceof HTMLInputElement)) return;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    if (!setter) return;
+    setter.call(input, draftPhotoCount);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }, [open, source, draftPhotoCount]);
 
   useEffect(() => {
     let active = true;
