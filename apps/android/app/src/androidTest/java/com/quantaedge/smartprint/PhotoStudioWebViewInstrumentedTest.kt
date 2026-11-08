@@ -319,6 +319,24 @@ class PhotoStudioWebViewInstrumentedTest {
         // Use a real Android MotionEvent against the native WebView for each visible tool/button.
         tapButtonText(scenario, prefix)
         androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+
+        // React state updates are asynchronous relative to Android's UI queue. Tool
+        // and look buttons expose aria-pressed so the next assertion must not race
+        // the panel swap (for example, Looks -> Brightness).
+        val quoted = JSONObject.quote(prefix)
+        val hasPressedState = evaluate(
+            scenario,
+            """Array.from(document.querySelectorAll('[role=dialog] button'))
+                .some(button => button.innerText.trim().startsWith($quoted) && button.hasAttribute('aria-pressed'))"""
+        )
+        if (hasPressedState == "true") {
+            waitFor(
+                scenario,
+                """Array.from(document.querySelectorAll('[role=dialog] button'))
+                    .some(button => button.innerText.trim().startsWith($quoted) && button.getAttribute('aria-pressed') === 'true')""",
+                "Photo Studio control '$prefix' to become active"
+            )
+        }
     }
 
     private fun isSecure(scenario: ActivityScenario<MainActivity>): Boolean {
