@@ -80,15 +80,20 @@ class PhotoStudioWebViewInstrumentedTest {
         assertEquals("Android emulator Photo Studio QA must use ADB-reversed localhost.", "127.0.0.1", Uri.parse(fixtureUrl).host)
         assertEquals("Android emulator Photo Studio QA must use the isolated Vite preview port.", 3000, Uri.parse(fixtureUrl).port)
         scenario.onActivity { activity ->
+            val trustedHost = Uri.parse(BuildConfig.SERVICE_BASE_URL).host
+                ?: throw AssertionError("The configured SmartPrint QA portal has no host.")
+            // Persist a QA-only station URL in Activity state so WebView.restoreState()
+            // exercises the same connected-shop restoration path as a real customer session.
+            MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                isAccessible = true
+            }.set(activity, fixtureUrl)
+            MainActivity::class.java.getDeclaredField("portalHost").apply {
+                isAccessible = true
+            }.set(activity, trustedHost)
             MainActivity::class.java.getDeclaredMethod("showPrint").apply {
                 isAccessible = true
                 invoke(activity)
             }
-            val trustedHost = Uri.parse(BuildConfig.SERVICE_BASE_URL).host
-                ?: throw AssertionError("The configured SmartPrint QA portal has no host.")
-            MainActivity::class.java.getDeclaredField("portalHost").apply {
-                isAccessible = true
-            }.set(activity, trustedHost)
             val localFixtureAllowed = MainActivity::class.java.getDeclaredMethod(
                 "allowedLocalDevelopmentEndpoint", Uri::class.java
             ).apply { isAccessible = true }.invoke(activity, Uri.parse(fixtureUrl)) as Boolean
@@ -201,6 +206,16 @@ class PhotoStudioWebViewInstrumentedTest {
     ) {
         val label = JSONObject.quote(labelText)
         val nextValue = JSONObject.quote(value)
+        waitFor(
+            scenario,
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                .find(item => item.textContent.trim().startsWith($label));
+              return Boolean(label?.querySelector('input, select'));
+            })()""",
+            "Photo Studio field '$labelText' to become available"
+        )
         val changed = evaluate(
             scenario,
             """(() => {
@@ -229,6 +244,18 @@ class PhotoStudioWebViewInstrumentedTest {
         value: Int
     ) {
         val label = JSONObject.quote(labelText)
+        // React swaps tool panels asynchronously after the real Android touch event.
+        // Wait for the target control instead of parsing evaluateJavascript("null") as JSON.
+        waitFor(
+            scenario,
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                .find(item => item.textContent.trim().startsWith($label));
+              return Boolean(label?.querySelector('input[type="range"]'));
+            })()""",
+            "Photo Studio range '$labelText' to become available"
+        )
         val rectText = evaluate(
             scenario,
             """(() => {
