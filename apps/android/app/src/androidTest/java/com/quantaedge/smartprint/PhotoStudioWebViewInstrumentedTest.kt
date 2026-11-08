@@ -321,13 +321,11 @@ class PhotoStudioWebViewInstrumentedTest {
               const min = Number(range.min || 0);
               const max = Number(range.max || 100);
               const current = Number(range.value);
-              const thumbCssWidth = Number.parseFloat(
-                getComputedStyle(range, "::-webkit-slider-thumb").width
-              );
-              const thumbInset = Math.min(
-                Number.isFinite(thumbCssWidth) && thumbCssWidth > 0 ? thumbCssWidth / 2 : 8,
-                rect.width / 2
-              );
+              // PhotoStudio.module.css defines a 16px border-box thumb.
+              // Chromium reports the auto-appearance thumb as the whole track
+              // width (192px on the Pixel 2 emulator), which collapses travel
+              // to 1px and makes both swipe endpoints identical.
+              const thumbInset = Math.min(8, rect.width / 2);
               const travelWidth = Math.max(1, rect.width - thumbInset * 2);
               const point = value => rect.left + thumbInset +
                 (max === min ? 0.5 : (value - min) / (max - min)) * travelWidth;
@@ -348,7 +346,6 @@ class PhotoStudioWebViewInstrumentedTest {
               const hitIsRange = hit => hit === range || Boolean(hit && range.contains(hit));
               return JSON.stringify({
                 startX, endX, y, min, max, current,
-                thumbCssWidth: Number.isFinite(thumbCssWidth) ? thumbCssWidth : null,
                 thumbInset, travelWidth,
                 devicePixelRatio: window.devicePixelRatio,
                 visualViewportScale: window.visualViewport?.scale ?? 1,
@@ -472,19 +469,31 @@ class PhotoStudioWebViewInstrumentedTest {
         val x1 = startScreenX.roundToInt()
         val x2 = endScreenX.roundToInt()
         val y = screenY.roundToInt()
-        val command = "input swipe $x1 $y $x2 $y 650 && echo __SMARTPRINT_TOUCH_EXIT__0 || echo __SMARTPRINT_TOUCH_EXIT__1"
-        val shellOutput = ParcelFileDescriptor.AutoCloseInputStream(
+        // Execute only the input command. UiAutomation's returned pipe carries
+        // stdout, but Android's input utility is intentionally silent on success.
+        val command = "input swipe $x1 $y $x2 $y 650"
+        ParcelFileDescriptor.AutoCloseInputStream(
             automation.executeShellCommand(command)
         ).bufferedReader().use { it.readText() }
-        assertTrue(
-            "Android input swipe command failed for '$labelText' from ($x1,$y) to ($x2,$y): $shellOutput; " +
-                "geometry=$bounds; view=${viewWidth}x${viewHeight}; origin=${screenOriginX},${screenOriginY}",
-            shellOutput.contains("__SMARTPRINT_TOUCH_EXIT__0")
-        )
-
-        // Give Chromium a frame to commit pointer/input/change events before
-        // the existing bounded assertion verifies the controlled React value.
         instrumentation.waitForIdleSync()
+
+        val touchTraceText = evaluate(
+            scenario,
+            "JSON.stringify(window.__smartPrintTouchTrace ?? [])"
+        )
+        val touchTrace = JSONArray(decodeJavascriptString(touchTraceText))
+        val rangeReceivedTouch = (0 until touchTrace.length()).any { index ->
+            val event = touchTrace.getJSONObject(index)
+            event.optBoolean("trusted") &&
+                (event.optBoolean("pathHitsRange") || event.optString("target").startsWith("INPUT"))
+        }
+        assertTrue(
+            "Android shell swipe produced no trusted DOM event targeted at '$labelText'; " +
+                "screen=($x1,$y)->($x2,$y), view=${viewWidth}x${viewHeight}, " +
+                "origin=${screenOriginX},${screenOriginY}, scale=$scale, " +
+                "geometry=$bounds, trace=$touchTraceText",
+            rangeReceivedTouch
+        )
         waitFor(
             scenario,
             """(() => {
