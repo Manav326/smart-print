@@ -67,7 +67,7 @@ class PhotoStudioWebViewInstrumentedTest {
                     activeTools: Array.from(document.querySelectorAll('[role="dialog"] nav[aria-label="Photo editing tools"] button'))
                       .map(button => ({ text: button.textContent?.trim() ?? "", pressed: button.getAttribute("aria-pressed") })),
                     dialogButtons: Array.from(document.querySelectorAll('[role="dialog"] button'))
-                      .map(button => button.textContent?.replace(/\\s+/g, " ").trim() ?? "").slice(0, 24)
+                      .map(button => button.textContent?.replace(/\s+/g, " ").trim() ?? "").slice(0, 24)
                 })"""
             )
         }.getOrElse { "WebView diagnostic read failed: ${it.message}" }
@@ -219,13 +219,13 @@ class PhotoStudioWebViewInstrumentedTest {
         waitFor(
             scenario,
             """Array.from(document.querySelectorAll('[role="dialog"] button'))
-                .some(button => (button.textContent ?? "").replace(/\\s+/g, " ").trim().includes($quoted))""",
+                .some(button => (button.textContent ?? "").replace(/\s+/g, " ").trim().includes($quoted))""",
             "Photo Studio button '$prefix' to become available"
         )
         tapElement(
             scenario,
             """Array.from(document.querySelectorAll('[role="dialog"] button'))
-                .find(button => (button.textContent ?? "").replace(/\\s+/g, " ").trim().includes($quoted))"""
+                .find(button => (button.textContent ?? "").replace(/\s+/g, " ").trim().includes($quoted))"""
         )
     }
 
