@@ -26,6 +26,12 @@ if (!Number.isInteger(webViewDebugPort) || webViewDebugPort < 1024 || webViewDeb
   throw new Error("SMARTPRINT_WEBVIEW2_DEBUG_PORT must be a valid TCP port.");
 }
 const webViewDebugUrl = "http://127.0.0.1:" + webViewDebugPort;
+const nativeStartupTimeoutSeconds = Number(process.env.SMARTPRINT_WEBVIEW2_STARTUP_TIMEOUT_SECONDS || "420");
+if (!Number.isInteger(nativeStartupTimeoutSeconds) ||
+    nativeStartupTimeoutSeconds < 120 ||
+    nativeStartupTimeoutSeconds > 900) {
+  throw new Error("SMARTPRINT_WEBVIEW2_STARTUP_TIMEOUT_SECONDS must be an integer from 120 to 900.");
+}
 const serverArgs = appMode === "desktop"
   ? ["--filter", "@smart-print/desktop", "dev", "--host", "127.0.0.1", "--port", port, "--strictPort"]
   : ["--filter", "@smart-print/portal", "dev", "--host", "127.0.0.1", "--port", port, "--strictPort"];
@@ -68,19 +74,39 @@ function stopServer(child) {
   }
 }
 async function waitForServer(child) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+  const timeoutSeconds = appMode === "desktop-native" ? nativeStartupTimeoutSeconds : 120;
+  const healthUrl = appMode === "desktop-native"
+    ? webViewDebugUrl + "/json/version"
+    : baseUrl + "/shop";
+  let nextProgressLog = 30;
+
+  for (let attempt = 0; attempt < timeoutSeconds; attempt += 1) {
     if (child?.spawnError) throw new Error("QA server failed to start: " + child.spawnError.message);
     if (child?.exitCode !== null && child?.exitCode !== undefined) {
       throw new Error("QA server exited with code " + child.exitCode);
     }
     try {
-      const healthUrl = appMode === "desktop-native" ? webViewDebugUrl + "/json/version" : baseUrl + "/shop";
-      if ((await fetch(healthUrl)).ok) return;
+      const response = await fetch(healthUrl);
+      if (response.ok) {
+        if (appMode === "desktop-native") {
+          console.log("Native Windows WebView2 CDP endpoint is ready: " + healthUrl);
+        }
+        return;
+      }
     } catch {}
+
+    if (appMode === "desktop-native" && attempt + 1 >= nextProgressLog) {
+      console.log(
+        "Waiting for the native Tauri/WebView2 host to finish its first build and expose localhost CDP (" +
+        (attempt + 1) + "/" + timeoutSeconds + " seconds)."
+      );
+      nextProgressLog += 30;
+    }
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
+
   throw new Error(appMode === "desktop-native"
-    ? "Native Windows WebView2 did not expose its localhost CDP endpoint within 120 seconds."
+    ? "Native Windows WebView2 did not expose its localhost CDP endpoint within " + timeoutSeconds + " seconds."
     : "QA server did not become ready within 120 seconds.");
 }
 
