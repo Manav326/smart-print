@@ -75,8 +75,9 @@ class PhotoStudioWebViewInstrumentedTest {
             BuildConfig.PHOTO_STUDIO_QA_ENABLED
         )
         val scenario = ActivityScenario.launch(MainActivity::class.java)
+        val resetDraftQuery = if (query.contains("?")) "&resetDraft=1" else "?resetDraft=1"
         val fixtureUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') +
-            "/tests/photo-studio.browser.html" + query
+            "/tests/photo-studio.browser.html" + query + resetDraftQuery
         assertEquals("Android emulator Photo Studio QA must use ADB-reversed localhost.", "127.0.0.1", Uri.parse(fixtureUrl).host)
         assertEquals("Android emulator Photo Studio QA must use the isolated Vite preview port.", 3000, Uri.parse(fixtureUrl).port)
         scenario.onActivity { activity ->

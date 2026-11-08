@@ -15,10 +15,20 @@ const invalidSource = query.get("source") === "invalid";
 const failRasterOnce = query.get("failRender") === "1";
 const oversizedRaster = query.get("oversizeRaster") === "1";
 const draftStorageKey = "smartprint.photo-studio-qa.draft";
+if (query.get("resetDraft") === "1") {
+  try { localStorage.removeItem(draftStorageKey); } catch { /* QA fixture reset is best-effort. */ }
+  query.delete("resetDraft");
+  const nextSearch = query.toString();
+  window.history.replaceState(
+    window.history.state,
+    "",
+    window.location.pathname + (nextSearch ? "?" + nextSearch : "") + window.location.hash
+  );
+}
 
 function readFixtureDraft(): { open: boolean; photoCount: string | null } {
   try {
-    const raw = sessionStorage.getItem(draftStorageKey);
+    const raw = localStorage.getItem(draftStorageKey);
     if (!raw) return { open: false, photoCount: null };
     const value = JSON.parse(raw) as { open?: unknown; photoCount?: unknown };
     return {
@@ -106,26 +116,12 @@ function PhotoStudioBrowserFixture() {
   useEffect(() => {
     try {
       if (!open) {
-        sessionStorage.removeItem(draftStorageKey);
+        localStorage.removeItem(draftStorageKey);
       } else {
-        sessionStorage.setItem(draftStorageKey, JSON.stringify({ open: true, photoCount: draftPhotoCount }));
+        localStorage.setItem(draftStorageKey, JSON.stringify({ open: true, photoCount: draftPhotoCount }));
       }
     } catch { /* The fixture remains usable when browser storage is unavailable. */ }
   }, [open, draftPhotoCount]);
-
-  useEffect(() => {
-    if (!open || !source || !draftPhotoCount) return;
-    const dialog = document.querySelector('[role="dialog"]');
-    const label = Array.from(dialog?.querySelectorAll("label") ?? [])
-      .find(item => item.textContent?.trim().startsWith("Number of photos"));
-    const input = label?.querySelector("input");
-    if (!(input instanceof HTMLInputElement)) return;
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-    if (!setter) return;
-    setter.call(input, draftPhotoCount);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }, [open, source, draftPhotoCount]);
 
   useEffect(() => {
     let active = true;
@@ -284,6 +280,7 @@ function PhotoStudioBrowserFixture() {
       mode={mode}
       dark={dark}
       photoPrices={photoPrices}
+      initialPhotoCount={draftPhotoCount ? Number(draftPhotoCount) : undefined}
       onCancel={() => setOpen(false)}
       onApply={apply}
     />}

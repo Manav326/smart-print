@@ -151,7 +151,8 @@ export default function PhotoStudio({
   onApply,
   photoPrices,
   mode = "customer",
-  dark = false
+  dark = false,
+  initialPhotoCount
 }: {
   source: File;
   onCancel: () => void;
@@ -159,6 +160,7 @@ export default function PhotoStudio({
   onApply: (sheets: PreparedPhotoSheet[]) => void | Promise<void>;
   mode?: "customer" | "shop" | "shop-create";
   dark?: boolean;
+  initialPhotoCount?: number;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -168,7 +170,12 @@ export default function PhotoStudio({
   const [sizeId, setSizeId] = useState("35x45");
   const [look, setLook] = useState<LookPreset>("natural");
   const [adjustments, setAdjustments] = useState<Adjustments>(LOOKS[0].adjustments);
-  const [copiesInput, setCopiesInput] = useState("8");
+  const [copiesInput, setCopiesInput] = useState(() => {
+    const initialCount = Number(initialPhotoCount);
+    return Number.isInteger(initialCount) && initialCount >= 1 && initialCount <= MAX_PHOTO_COUNT
+      ? String(initialCount)
+      : "8";
+  });
   const [photosPerPageInput,setPhotosPerPageInput]=useState("auto");
   const [previewPage,setPreviewPage]=useState(0);
   const [zoom, setZoom] = useState(1);

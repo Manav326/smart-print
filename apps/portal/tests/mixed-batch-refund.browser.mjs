@@ -141,11 +141,10 @@ async function waitForServer(child) {
     : "QA server did not become ready within 120 seconds.");
 }
 
-async function waitForNativeApplicationPage(page, phase) {
+async function waitForNativeApplicationPage(page, phase, { requireAuthenticatedShell = true } = {}) {
   const expectedPort = new URL(baseUrl).port || "80";
   try {
-    // The DevTools HTTP endpoint can appear while the WebView is still on about:blank.
-    // Wait for the actual Tauri dev document before invoking its native command bridge.
+    // CDP can attach before the Tauri WebView has navigated away from about:blank.
     await page.waitForURL(
       url => url.protocol === "http:" && url.port === expectedPort,
       { timeout: 60_000 }
@@ -159,12 +158,24 @@ async function waitForNativeApplicationPage(page, phase) {
       state: "attached",
       timeout: 60_000
     });
-    await page.waitForFunction(
-      () => document.body?.dataset.appShell === "desktop" &&
-        Boolean(document.querySelector(".app-shell")),
-      null,
-      { timeout: 60_000 }
-    );
+    if (requireAuthenticatedShell) {
+      await page.waitForFunction(
+        () => document.body?.dataset.appShell === "desktop" &&
+          Boolean(document.querySelector(".app-shell")),
+        null,
+        { timeout: 60_000 }
+      );
+    } else {
+      // The very first Tauri page is intentionally unauthenticated. Wait for its
+      // React root to render the sign-in route before writing the isolated test
+      // credential; requiring .app-shell here deadlocks before the session exists.
+      await page.waitForFunction(
+        () => document.readyState === "complete" &&
+          Boolean(document.querySelector("#smartprint-desktop-root")?.firstElementChild),
+        null,
+        { timeout: 60_000 }
+      );
+    }
   } catch (error) {
     const diagnostics = await page.evaluate(() => ({
       href: location.href,
@@ -486,7 +497,7 @@ try {
   });
 
   if (appMode === "desktop-native") {
-    await waitForNativeApplicationPage(page, "initial Tauri navigation");
+    await waitForNativeApplicationPage(page, "initial Tauri navigation", { requireAuthenticatedShell: false });
     nativePreviousSecureSession = await page.evaluate(async () => {
       const bridge = window.__TAURI_INTERNALS__;
       if (!bridge || typeof bridge.invoke !== "function") {

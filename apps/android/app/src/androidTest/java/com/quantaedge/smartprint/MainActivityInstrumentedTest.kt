@@ -371,15 +371,18 @@ class MainActivityInstrumentedTest {
         val previousPreferences = shopPreferences.all.toMap()
         shopPreferences.edit().clear().commit()
 
-        val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "Q".repeat(32)
+        // Keep production QR trust rules strict: the emulator's isolated Photo Studio
+        // fixture origin is loopback and must not be accepted as a real shop QR.
+        val serviceOrigin = "https://service.smartprint.example"
+        val stationUrl = serviceOrigin + "/s/" + "Q".repeat(32)
         val stationHost = Uri.parse(stationUrl).host.orEmpty()
         val acceptedRoute = QrScanRoutingPolicy.route(
             rawValue = stationUrl,
             purpose = QrScanPurpose.SHOP_CONNECTION,
-            expectedServiceUrl = BuildConfig.SERVICE_BASE_URL,
-            allowLocalDevelopment = BuildConfig.DEBUG
+            expectedServiceUrl = serviceOrigin,
+            allowLocalDevelopment = false
         ) as? QrScanRoute.ConnectToShop
-            ?: throw AssertionError("The generated station QR must pass the configured-origin routing policy: service=${BuildConfig.SERVICE_BASE_URL}, station=$stationUrl")
+            ?: throw AssertionError("The synthetic production-origin station QR must pass the configured-origin routing policy: station=$stationUrl")
         assertEquals("The QR routing policy must preserve the canonical station URL.", stationUrl, acceptedRoute.link.url)
         val pageLoaded = CountDownLatch(1)
         val requestedWebViewUrl = AtomicReference<String>()
@@ -432,12 +435,13 @@ class MainActivityInstrumentedTest {
                         }
                     }
 
+                    // Exercise the same post-validation handoff used by the accepted
+                    // QR route. The routing policy above remains pinned to HTTPS.
                     MainActivity::class.java.getDeclaredMethod(
-                        "handleScannedQr",
-                        String::class.java,
-                        QrScanPurpose::class.java
+                        "confirmShop",
+                        StationQrLink::class.java
                     ).apply { isAccessible = true }
-                        .invoke(activity, stationUrl, QrScanPurpose.SHOP_CONNECTION)
+                        .invoke(activity, acceptedRoute.link)
                     requestedWebViewUrl.set(webView.url)
                 }
 

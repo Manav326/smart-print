@@ -774,7 +774,7 @@ async function exercisePhotoStudioBrowser() {
 
     const largePhotoBatch = item.mode === "shop" && item.width === 768;
     if (largePhotoBatch) {
-      await reopened.getByRole("button", { name: "Sheet", exact: true }).click();
+      await activatePhotoTool(page, reopened, "Sheet", "Photos per A4 page");
       const batchQuantity = reopened.getByLabel("Number of photos");
       await batchQuantity.waitFor({ state: "visible" });
       assert.equal(await batchQuantity.count(),1,"Shop Photo Studio must show one number-of-photos input in Sheet settings.");
@@ -864,6 +864,18 @@ async function readPhotoCanvasPixels(page) {
     const points = [[20,20],[30,30],[51,47],[51,65],[51,90],[80,25],[80,80],[120,120],[200,200],[300,400]];
     return points.map(([x,y]) => Array.from(context.getImageData(x,y,1,1).data).slice(0,3));
   });
+}
+
+async function activatePhotoTool(page, dialog, label, controlLabel) {
+  await dialog.locator(".toolRail button").filter({ hasText: label }).first().click();
+  await page.waitForFunction(({ tool, field }) => {
+    const root = document.querySelector('[role="dialog"]');
+    const active = Array.from(root?.querySelectorAll(".toolRail button") ?? [])
+      .some(button => button.textContent?.trim() === tool && button.getAttribute("aria-pressed") === "true");
+    const labelNode = Array.from(root?.querySelectorAll("label") ?? [])
+      .find(item => item.textContent?.trim().startsWith(field));
+    return active && Boolean(labelNode?.querySelector("input, select, textarea"));
+  }, { tool: label, field: controlLabel });
 }
 
 async function openPhotoStudioFixture(page, queryString = "") {
