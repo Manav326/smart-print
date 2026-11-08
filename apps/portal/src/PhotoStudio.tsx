@@ -438,9 +438,9 @@ export default function PhotoStudio({
           </div>
 
           {cropPanel && <>
-            <label className={styles.rangeControl}>Zoom <output>{zoom.toFixed(1)}×</output><input type="range" min="1" max="3" step="0.05" value={zoom} onChange={event => setZoom(Number(event.target.value))}/></label>
-            <label className={styles.rangeControl}>Horizontal position <output>{focusX}%</output><input type="range" min="0" max="100" value={focusX} onChange={event => setFocusX(Number(event.target.value))}/></label>
-            <label className={styles.rangeControl}>Vertical position <output>{focusY}%</output><input type="range" min="0" max="100" value={focusY} onChange={event => setFocusY(Number(event.target.value))}/></label>
+            <label className={styles.rangeControl}>Zoom <output>{zoom.toFixed(1)}×</output><input id="photo-studio-zoom" type="range" min="1" max="3" step="0.05" value={zoom} onChange={event => setZoom(Number(event.target.value))}/></label>
+            <label className={styles.rangeControl}>Horizontal position <output>{focusX}%</output><input id="photo-studio-horizontal-position" type="range" min="0" max="100" value={focusX} onChange={event => setFocusX(Number(event.target.value))}/></label>
+            <label className={styles.rangeControl}>Vertical position <output>{focusY}%</output><input id="photo-studio-vertical-position" type="range" min="0" max="100" value={focusY} onChange={event => setFocusY(Number(event.target.value))}/></label>
             <button type="button" className={styles.secondaryButton} onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); }}><RotateCcw size={14}/> Reset crop</button>
           </>}
 
@@ -450,30 +450,30 @@ export default function PhotoStudio({
                 <span className={styles.lookSwatch + " " + styles["look_" + item.id]}/><strong>{item.label}</strong><small>{item.note}</small>
               </button>)}
             </div>
-            <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
-            <label className={styles.rangeControl}>Contrast <output>{adjustments.contrast}%</output><input type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
-            <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input id="photo-studio-brightness" type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>Contrast <output>{adjustments.contrast}%</output><input id="photo-studio-contrast" type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input id="photo-studio-colour" type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
           </>}
 
           {textPanel && <>
-            <label className={styles.fieldLabel}>Caption font size<select value={captionFontSizePt} onChange={event=>setCaptionFontSizePt(Number(event.target.value))}><option value={5}>5 pt · Compact</option><option value={6}>6 pt · Standard</option><option value={7}>7 pt · Large</option></select></label>
-            <label className={styles.fieldLabel}>Caption colour<input type="color" value={captionColor} onChange={event=>setCaptionColor(event.target.value)}/></label>
+            <label className={styles.fieldLabel}>Caption font size<select id="photo-studio-caption-font-size" value={captionFontSizePt} onChange={event=>setCaptionFontSizePt(Number(event.target.value))}><option value={5}>5 pt · Compact</option><option value={6}>6 pt · Standard</option><option value={7}>7 pt · Large</option></select></label>
+            <label className={styles.fieldLabel}>Caption colour<input id="photo-studio-caption-colour" type="color" value={captionColor} onChange={event=>setCaptionColor(event.target.value)}/></label>
             <div className={styles.editorHelp}>These settings style the name and DOB printed below each photo. The photo dimensions stay unchanged.</div>
           </>}
 
           {backgroundPanel && <>
             <div className={styles.backgroundPreviewRow} data-testid="photo-studio-background-state"><span>Sampled background</span><strong>{sourceBackgroundColor?sourceBackgroundColor.toUpperCase():"Not selected"}</strong>{sourceBackgroundColor&&<i style={{background:sourceBackgroundColor}}/>}</div>
             <button type="button" className={styles.secondaryButton} onClick={()=>{setPickingBackground(true);setError("");}}><Pipette size={14}/>{pickingBackground?"Click the background in the preview…":"Pick background from photo"}</button>
-            <label className={styles.fieldLabel}>Replacement background<input type="color" value={targetBackgroundColor} onChange={event=>setTargetBackgroundColor(event.target.value)}/></label>
+            <label className={styles.fieldLabel}>Replacement background<input id="photo-studio-replacement-background" type="color" value={targetBackgroundColor} onChange={event=>setTargetBackgroundColor(event.target.value)}/></label>
             <div className={styles.backgroundPresets}>{["#ffffff","#f3f6fa","#dcecff","#dff3e7","#f6eadb"].map(color=><button key={color} type="button" style={{background:color}} aria-label={"Set background "+color} aria-pressed={targetBackgroundColor===color} onClick={()=>setTargetBackgroundColor(color)}/>)}</div>
-            <label className={styles.rangeControl}>Background tolerance<output>{backgroundTolerance}</output><input type="range" min="5" max="90" value={backgroundTolerance} onChange={event=>setBackgroundTolerance(Number(event.target.value))}/></label>
+            <label className={styles.rangeControl}>Background tolerance<output>{backgroundTolerance}</output><input id="photo-studio-background-tolerance" type="range" min="5" max="90" value={backgroundTolerance} onChange={event=>setBackgroundTolerance(Number(event.target.value))}/></label>
             <div className={styles.editorHelp}>This replaces sampled-colour pixels connected to the photo edges. Use a plain, evenly lit background and inspect hair/shoulders. This is a colour-key tool, not AI subject segmentation.</div>
             <button type="button" className={styles.secondaryButton} onClick={()=>{setSourceBackgroundColor(null);setPickingBackground(false);setBackgroundTolerance(30);setTargetBackgroundColor("#ffffff");}}>Reset background</button>
           </>}
 
           {activeTool === "sheet" && <>
             <label className={styles.captionOptIn}>
-              <input type="checkbox" checked={includeFormDetails} onChange={event=>{
+              <input id="photo-studio-include-form-details" type="checkbox" checked={includeFormDetails} onChange={event=>{
                 const enabled=event.target.checked;
                 setIncludeFormDetails(enabled);
                 if(!enabled){setPhotoName("");setDateOfBirth("");}
@@ -482,20 +482,21 @@ export default function PhotoStudio({
             </label>
             {includeFormDetails&&<>
               <label className={styles.fieldLabel}>Name for form (optional)
-                <input type="text" maxLength={48} value={photoName} onChange={event=>setPhotoName(event.target.value)} placeholder="Enter the name to print below each photo"/>
+                <input id="photo-studio-name" type="text" maxLength={48} value={photoName} onChange={event=>setPhotoName(event.target.value)} placeholder="Enter the name to print below each photo"/>
               </label>
               <label className={styles.fieldLabel}>Date of birth (optional)
-                <input type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={dateOfBirth} onChange={event=>setDateOfBirth(event.target.value)}/>
+                <input id="photo-studio-date-of-birth" type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={dateOfBirth} onChange={event=>setDateOfBirth(event.target.value)}/>
               </label>
               <div className={styles.editorHelp}>Only the details you enter are printed below each photo. The photo dimensions stay unchanged.</div>
             </>}
             <label className={styles.fieldLabel}>Photo size
-              <select value={sizeId} onChange={event => setSizeId(event.target.value)}>
+              <select id="photo-studio-photo-size" value={sizeId} onChange={event => setSizeId(event.target.value)}>
                 {availableSizes.map(item => <option key={item.id} value={item.id}>{item.label} · {item.detail} · {formatPhotoRate(photoPrices[item.id])}/photo</option>)}
               </select>
             </label>
             <label className={styles.fieldLabel}>Number of photos
               <input
+                id="photo-studio-photo-count"
                 type="number"
                 aria-label="Number of photos"
                 min="1"
@@ -519,7 +520,7 @@ export default function PhotoStudio({
             {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter a whole number from 1 to {maxCopies}. The sheet count is calculated automatically.</div>}
             {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.</div>}
             <label className={styles.fieldLabel}>Photos per A4 page
-              <select value={photosPerPageInput} onChange={event=>setPhotosPerPageInput(event.target.value)}>
+              <select id="photo-studio-photos-per-page" value={photosPerPageInput} onChange={event=>setPhotosPerPageInput(event.target.value)}>
                 <option value="auto">Fit as many as possible ({maximumLayout.perSheet})</option>
                 {Array.from({length:maximumLayout.perSheet},(_,index)=>index+1).map(count=><option key={count} value={String(count)}>{count} per page</option>)}
               </select>

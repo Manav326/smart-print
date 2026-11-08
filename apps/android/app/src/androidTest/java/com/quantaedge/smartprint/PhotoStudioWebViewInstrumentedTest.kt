@@ -247,32 +247,33 @@ class PhotoStudioWebViewInstrumentedTest {
 
     private fun setLabelValue(
         scenario: ActivityScenario<MainActivity>,
-        labelText: String,
+        controlId: String,
         value: String
     ) {
-        val label = JSONObject.quote(labelText)
+        val id = JSONObject.quote(controlId)
         val nextValue = JSONObject.quote(value)
         waitFor(
             scenario,
             """(() => {
               const dialog = document.querySelector('[role="dialog"]');
-              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                .find(item => item.textContent.trim().startsWith($label));
-              return Boolean(label?.querySelector('input, select'));
+              const control = document.getElementById($id);
+              return Boolean(dialog && control && dialog.contains(control) &&
+                (control instanceof HTMLInputElement || control instanceof HTMLSelectElement));
             })()""",
-            "Photo Studio field '$labelText' to become available"
+            "Photo Studio field '$controlId' to become available by ID"
         )
         val changed = evaluate(
             scenario,
             """(() => {
               const dialog = document.querySelector('[role="dialog"]');
-              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                .find(item => item.textContent.trim().startsWith($label));
-              const control = label?.querySelector('input, select');
-              if (!control) return false;
+              const control = document.getElementById($id);
+              if (!dialog || !control || !dialog.contains(control)) return false;
               const prototype = control instanceof HTMLSelectElement
-                ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
-              const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+                ? HTMLSelectElement.prototype
+                : control instanceof HTMLInputElement
+                  ? HTMLInputElement.prototype : null;
+              const setter = prototype
+                ? Object.getOwnPropertyDescriptor(prototype, 'value')?.set : null;
               if (!setter) return false;
               setter.call(control, $nextValue);
               control.dispatchEvent(new Event('input', { bubbles: true }));
@@ -281,35 +282,32 @@ class PhotoStudioWebViewInstrumentedTest {
               return control.value === $nextValue;
             })()"""
         )
-        assertEquals("Could not set Photo Studio field: " + labelText, "true", changed)
+        assertEquals("Could not set Photo Studio field by ID: " + controlId, "true", changed)
     }
 
     private fun setRangeValue(
         scenario: ActivityScenario<MainActivity>,
-        labelText: String,
+        controlId: String,
         value: Int
     ) {
-        val label = JSONObject.quote(labelText)
-        // React swaps tool panels asynchronously after the real Android touch event.
-        // Wait for the target control instead of parsing evaluateJavascript("null") as JSON.
+        val id = JSONObject.quote(controlId)
         waitFor(
             scenario,
             """(() => {
               const dialog = document.querySelector('[role="dialog"]');
-              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                .find(item => item.textContent.trim().startsWith($label));
-              return Boolean(label?.querySelector('input[type="range"]'));
+              const range = document.getElementById($id);
+              return Boolean(dialog && range instanceof HTMLInputElement &&
+                range.type === 'range' && dialog.contains(range));
             })()""",
-            "Photo Studio range '$labelText' to become available"
+            "Photo Studio range '$controlId' to become available by ID"
         )
         val rectText = evaluate(
             scenario,
             """(() => {
               const dialog = document.querySelector('[role="dialog"]');
-              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                .find(item => item.textContent.trim().startsWith($label));
-              const range = label?.querySelector('input[type="range"]');
-              if (!range) return null;
+              const range = document.getElementById($id);
+              if (!dialog || !(range instanceof HTMLInputElement) ||
+                  range.type !== 'range' || !dialog.contains(range)) return null;
 
               // The controls live inside an independently scrollable tool panel.
               // Scroll the actual input into the visible clipping region before
@@ -321,14 +319,10 @@ class PhotoStudioWebViewInstrumentedTest {
               const min = Number(range.min || 0);
               const max = Number(range.max || 100);
               const current = Number(range.value);
-              // PhotoStudio.module.css defines a 16px border-box thumb.
-              // Chromium reports the auto-appearance thumb as the whole track
-              // width (192px on the Pixel 2 emulator), which collapses travel
-              // to 1px and makes both swipe endpoints identical.
               const thumbInset = Math.min(8, rect.width / 2);
               const travelWidth = Math.max(1, rect.width - thumbInset * 2);
-              const point = value => rect.left + thumbInset +
-                (max === min ? 0.5 : (value - min) / (max - min)) * travelWidth;
+              const point = next => rect.left + thumbInset +
+                (max === min ? 0.5 : (next - min) / (max - min)) * travelWidth;
               const startX = point(current);
               const endX = point($value);
               const y = rect.top + rect.height / 2;
@@ -362,15 +356,15 @@ class PhotoStudioWebViewInstrumentedTest {
         val bounds = JSONObject(decodeJavascriptString(rectText))
         val minimum = bounds.getDouble("min")
         val maximum = bounds.getDouble("max")
-        require(value.toDouble() in minimum..maximum) {
-            "Photo Studio range value $value is outside $labelText bounds $minimum..$maximum."
+        require(maximum > minimum && value.toDouble() in minimum..maximum) {
+            "Photo Studio range value $value is outside '$controlId' bounds $minimum..$maximum."
         }
         assertTrue(
-            "Photo Studio range '$labelText' was not scrolled fully into the visible tool panel: $bounds",
+            "Photo Studio range '$controlId' was not scrolled fully into the visible tool panel: $bounds",
             bounds.getBoolean("visible")
         )
         assertTrue(
-            "Native touch start/end coordinates do not hit the '$labelText' range input: $bounds",
+            "Native touch start/end coordinates do not hit range '$controlId': $bounds",
             bounds.getBoolean("startHitIsRange") && bounds.getBoolean("endHitIsRange")
         )
         var screenOriginX = 0
@@ -387,10 +381,6 @@ class PhotoStudioWebViewInstrumentedTest {
             viewHeight = view.height
         }
 
-        // getBoundingClientRect() is expressed in CSS viewport pixels.
-        // Convert to display pixels, then add the WebView's screen origin:
-        // UiAutomation injects into Android's input dispatcher, not into the
-        // WebView's local dispatchTouchEvent method.
         val scale = bounds.getDouble("devicePixelRatio") *
             bounds.getDouble("visualViewportScale")
         val startLocalX = bounds.getDouble("startX") * scale
@@ -401,38 +391,33 @@ class PhotoStudioWebViewInstrumentedTest {
             endLocalX in 1.0..(viewWidth - 2).toDouble() &&
             localY in 1.0..(viewHeight - 2).toDouble()
         ) {
-            "Photo Studio range '$labelText' mapped outside the WebView bounds " +
+            "Photo Studio range '$controlId' mapped outside the WebView bounds " +
                 "(view=${viewWidth}x${viewHeight}, scale=$scale, geometry=$bounds)."
         }
-        val startScreenX = (screenOriginX + startLocalX).toFloat()
-        val endScreenX = (screenOriginX + endLocalX).toFloat()
-        val screenY = (screenOriginY + localY).toFloat()
+        val startScreenX = (screenOriginX + startLocalX).toDouble()
+        val endScreenX = (screenOriginX + endLocalX).toDouble()
+        val screenY = screenOriginY + localY
         val displayMetrics = InstrumentationRegistry.getInstrumentation()
             .targetContext.resources.displayMetrics
         require(
-            startScreenX in 1f..(displayMetrics.widthPixels - 2).toFloat() &&
-            endScreenX in 1f..(displayMetrics.widthPixels - 2).toFloat() &&
-            screenY in 1f..(displayMetrics.heightPixels - 2).toFloat()
+            startScreenX in 1.0..(displayMetrics.widthPixels - 2).toDouble() &&
+            endScreenX in 1.0..(displayMetrics.widthPixels - 2).toDouble() &&
+            screenY in 1.0..(displayMetrics.heightPixels - 2).toDouble()
         ) {
-            "Photo Studio range '$labelText' mapped outside the device display " +
+            "Photo Studio range '$controlId' mapped outside the device display " +
                 "(${displayMetrics.widthPixels}x${displayMetrics.heightPixels}, " +
                 "origin=${screenOriginX},${screenOriginY}, scale=$scale, geometry=$bounds)."
         }
 
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
-
-        // Record trusted DOM input events at the document boundary. This
-        // distinguishes a real Android gesture that lands on the slider from
-        // an event that the emulator injects elsewhere or WebView drops.
         val traceInstalled = evaluate(
             scenario,
             """(() => {
               const dialog = document.querySelector('[role="dialog"]');
-              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                .find(item => item.textContent.trim().startsWith($label));
-              const range = label?.querySelector('input[type="range"]');
-              if (!range) return false;
+              const range = document.getElementById($id);
+              if (!dialog || !(range instanceof HTMLInputElement) ||
+                  range.type !== 'range' || !dialog.contains(range)) return false;
               window.__smartPrintTouchTrace = [];
               const eventTypes = [
                 "pointerdown", "pointermove", "pointerup", "pointercancel",
@@ -446,7 +431,7 @@ class PhotoStudioWebViewInstrumentedTest {
                     type,
                     trusted: event.isTrusted,
                     target: target instanceof Element
-                      ? target.tagName + (target.id ? "#" + target.id : "") + (typeof target.className === "string" && target.className ? "." + target.className.trim().replace(/\s+/g, ".") : "")
+                      ? target.tagName + (target.id ? "#" + target.id : "") + (typeof target.className === "string" && target.className ? "." + target.className.trim().replace(/\\s+/g, ".") : "")
                       : String(target),
                     pathHitsRange: path.includes(range),
                     pointerType: "pointerType" in event ? event.pointerType : null,
@@ -462,17 +447,10 @@ class PhotoStudioWebViewInstrumentedTest {
               return true;
             })()"""
         )
-        assertEquals("Could not install native range event diagnostics.", "true", traceInstalled)
+        assertEquals("Could not install native diagnostics for range ID '$controlId'.", "true", traceInstalled)
 
         val y = screenY.roundToInt()
-        // A range whose current value is at its minimum places the thumb at
-        // the viewport's left edge. A horizontal Android touch that starts
-        // inside the system Back gesture inset is claimed by navigation, which
-        // sends pointercancel and dismisses Photo Studio before the slider can
-        // be dragged. Keep the test on the real touch path: use a native tap
-        // to move only an edge-positioned thumb into the safe interior, then
-        // start the asserted native swipe from the resulting actual value.
-        var swipeStartScreenX = startScreenX.toDouble()
+        var swipeStartScreenX = startScreenX
         var swipeStartValue = bounds.getDouble("current")
         val edgeInsetPixels = (64f * displayMetrics.density).roundToInt()
         val leftGestureEdgeX = edgeInsetPixels.toDouble()
@@ -488,13 +466,10 @@ class PhotoStudioWebViewInstrumentedTest {
                 bounds.getDouble("thumbInset") +
                 bounds.getDouble("travelWidth") * safeRatio
             val safeTapScreenX = (screenOriginX + safeStartCssX * scale).roundToInt()
-            require(
-                safeTapScreenX in edgeInsetPixels..(displayMetrics.widthPixels - edgeInsetPixels)
-            ) {
-                "Photo Studio range '$labelText' has no safe native swipe start outside Android's system gesture inset: " +
+            require(safeTapScreenX.toDouble() in leftGestureEdgeX..rightGestureEdgeX) {
+                "Photo Studio range '$controlId' has no safe native swipe start outside Android's system gesture inset: " +
                     "tapX=$safeTapScreenX, edgeInset=$edgeInsetPixels, geometry=$bounds."
             }
-
             ParcelFileDescriptor.AutoCloseInputStream(
                 automation.executeShellCommand("input tap $safeTapScreenX $y")
             ).bufferedReader().use { it.readText() }
@@ -503,21 +478,22 @@ class PhotoStudioWebViewInstrumentedTest {
                 scenario,
                 """(() => {
                   const dialog = document.querySelector('[role="dialog"]');
-                  const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                    .find(item => item.textContent.trim().startsWith($label));
-                  const range = label?.querySelector('input[type="range"]');
-                  return Boolean(range && Math.abs(Number(range.value) - $safeStartValue) <= 1);
+                  const range = document.getElementById($id);
+                  return Boolean(dialog && range instanceof HTMLInputElement &&
+                    range.type === 'range' && dialog.contains(range) &&
+                    Math.abs(Number(range.value) - $safeStartValue) <= 1);
                 })()""",
-                "Photo Studio '$labelText' thumb to move clear of Android's system Back gesture edge"
+                "Photo Studio range '$controlId' thumb to move clear of Android's system Back gesture edge"
             )
             val safeReadbackText = evaluate(
                 scenario,
                 """(() => {
                   const dialog = document.querySelector('[role="dialog"]');
-                  const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                    .find(item => item.textContent.trim().startsWith($label));
-                  const range = label?.querySelector('input[type="range"]');
-                  return JSON.stringify({ value: range ? Number(range.value) : null });
+                  const range = document.getElementById($id);
+                  return JSON.stringify({
+                    value: dialog && range instanceof HTMLInputElement &&
+                      range.type === 'range' && dialog.contains(range) ? Number(range.value) : null
+                  });
                 })()"""
             )
             val safeReadback = JSONObject(decodeJavascriptString(safeReadbackText))
@@ -528,85 +504,63 @@ class PhotoStudioWebViewInstrumentedTest {
                     bounds.getDouble("travelWidth")
             swipeStartScreenX = screenOriginX + actualStartCssX * scale
             assertTrue(
-                "Native pre-positioning did not move '$labelText' outside Android's system Back gesture edge: " +
+                "Native pre-positioning did not move range '$controlId' outside Android's system Back gesture edge: " +
                     "value=$swipeStartValue, x=$swipeStartScreenX, edgeInset=$edgeInsetPixels, geometry=$bounds.",
                 swipeStartScreenX >= leftGestureEdgeX &&
                     swipeStartScreenX <= rightGestureEdgeX
             )
         }
 
-        // Android's input command injects a SOURCE_TOUCHSCREEN finger stream
-        // through InputManager, matching the emulator shell/ADB touch tooling.
         val x1 = swipeStartScreenX.roundToInt()
         val x2 = endScreenX.roundToInt()
-        // Execute only the input command. UiAutomation's returned pipe carries
-        // stdout, but Android's input utility is intentionally silent on success.
         val command = "input swipe $x1 $y $x2 $y 650"
         ParcelFileDescriptor.AutoCloseInputStream(
             automation.executeShellCommand(command)
         ).bufferedReader().use { it.readText() }
         instrumentation.waitForIdleSync()
 
-        // A controlled React input can synchronously schedule a render from
-        // the native input event. Wait for the labelled range to be mounted
-        // again before reading its post-drag value instead of racing that commit.
-        val rangeAfterSwipeAvailable = """(() => {
-          const dialog = document.querySelector('[role="dialog"]');
-          const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-            .find(item => item.textContent.trim().startsWith($label));
-          return Boolean(label?.querySelector('input[type="range"]'));
-        })()"""
         waitFor(
             scenario,
-            rangeAfterSwipeAvailable,
-            "Photo Studio '$labelText' range to remain available after native swipe"
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const range = document.getElementById($id);
+              return Boolean(dialog && range instanceof HTMLInputElement &&
+                range.type === 'range' && dialog.contains(range));
+            })()""",
+            "Photo Studio range '$controlId' to remain available after native swipe"
         )
         val valueAfterSwipeText = evaluate(
             scenario,
             """(() => {
               const dialog = document.querySelector('[role="dialog"]');
-              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                .find(item => item.textContent.trim().startsWith($label));
-              const range = label?.querySelector('input[type="range"]');
+              const range = document.getElementById($id);
               return JSON.stringify({
-                labelFound: Boolean(label),
-                labelText: label?.textContent?.trim() ?? null,
-                value: range?.value ?? null,
-                disabled: range?.disabled ?? null,
+                idFound: Boolean(dialog && range instanceof HTMLInputElement &&
+                  range.type === 'range' && dialog.contains(range)),
+                value: dialog && range instanceof HTMLInputElement &&
+                  range.type === 'range' && dialog.contains(range) ? range.value : null,
+                disabled: range instanceof HTMLInputElement ? range.disabled : null,
                 activeTools: Array.from(dialog?.querySelectorAll('nav[aria-label="Photo editing tools"] button') ?? [])
                   .filter(button => button.getAttribute('aria-pressed') === 'true')
-                  .map(button => button.textContent.trim()),
-                ranges: Array.from(dialog?.querySelectorAll('input[type="range"]') ?? [])
-                  .map(input => ({
-                    label: input.closest('label')?.textContent?.trim() ?? "",
-                    value: input.value,
-                    min: input.min,
-                    max: input.max
-                  }))
+                  .map(button => button.textContent.trim())
               });
             })()"""
         )
         val readback = JSONObject(decodeJavascriptString(valueAfterSwipeText))
         val valueAfterSwipe = readback.optString("value", "").toDoubleOrNull()
             ?: throw AssertionError(
-                "Android native swipe did not leave a numeric '$labelText' range value. " +
+                "Android native swipe did not leave a numeric range value for '$controlId'. " +
                     "readback=$readback; raw=$valueAfterSwipeText; geometry=$bounds."
             )
         val initialValue = swipeStartValue
         if (kotlin.math.abs(initialValue - value.toDouble()) > 1.0) {
             assertTrue(
-                "The native drag gesture did not move '$labelText' from $initialValue; " +
+                "The native drag gesture did not move range '$controlId' from $initialValue; " +
                     "afterSwipe=$valueAfterSwipe, target=$value, geometry=$bounds.",
                 kotlin.math.abs(valueAfterSwipe - initialValue) >= 1.0
             )
         }
 
-        // Android's shell swipe emits the final target as ACTION_UP. Chromium
-        // updates the native range on ACTION_MOVE, not that terminal point, so
-        // the thumb can stop one or two values short (e.g. 102 -> 108 for 110).
-        // Finish with an actual touchscreen tap at the requested thumb centre.
-        // This is still a native user-input path; it avoids setting DOM/React
-        // values directly and makes the precise final thumb position deterministic.
         ParcelFileDescriptor.AutoCloseInputStream(
             automation.executeShellCommand("input tap $x2 $y")
         ).bufferedReader().use { it.readText() }
@@ -620,10 +574,10 @@ class PhotoStudioWebViewInstrumentedTest {
         val rangeReceivedTouch = (0 until touchTrace.length()).any { index ->
             val event = touchTrace.getJSONObject(index)
             event.optBoolean("trusted") &&
-                (event.optBoolean("pathHitsRange") || event.optString("target").startsWith("INPUT"))
+                (event.optBoolean("pathHitsRange") || event.optString("target").startsWith("INPUT#$controlId"))
         }
         assertTrue(
-            "Android shell swipe/tap produced no trusted DOM event targeted at '$labelText'; " +
+            "Android shell swipe/tap produced no trusted DOM event targeted at range '$controlId'; " +
                 "screen=($x1,$y)->($x2,$y), view=${viewWidth}x${viewHeight}, " +
                 "origin=${screenOriginX},${screenOriginY}, scale=$scale, " +
                 "geometry=$bounds, trace=$touchTraceText",
@@ -633,17 +587,14 @@ class PhotoStudioWebViewInstrumentedTest {
             scenario,
             """(() => {
               const dialog = document.querySelector('[role="dialog"]');
-              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
-                .find(item => item.textContent.trim().startsWith($label));
-              const range = label?.querySelector('input[type="range"]');
+              const range = document.getElementById($id);
               const actual = Number(range?.value);
-              // Android WebView range thumbs quantize to physical touch coordinates.
-              // Allow at most one declared step of rounding while still requiring
-              // the real native gesture to move the control.
               const step = Number(range?.step || 1);
-              return Number.isFinite(actual) && Math.abs(actual - $value) <= step;
+              return Boolean(dialog && range instanceof HTMLInputElement &&
+                range.type === 'range' && dialog.contains(range) &&
+                Number.isFinite(actual) && Math.abs(actual - $value) <= step);
             })()""",
-            "$labelText range to reach $value (within one native slider step) through touch input"
+            "Photo Studio range '$controlId' to reach $value (within one native slider step) through touch input"
         )
     }
 
@@ -698,18 +649,18 @@ class PhotoStudioWebViewInstrumentedTest {
             assertTrue("Photo Studio must protect the native Android window while displaying a photo.", isSecure(scenario))
 
             clickButton(scenario, "Crop")
-            setRangeValue(scenario, "Zoom", 1)
-            setRangeValue(scenario, "Horizontal position", 50)
-            setRangeValue(scenario, "Vertical position", 50)
+            setRangeValue(scenario, "photo-studio-zoom", 1)
+            setRangeValue(scenario, "photo-studio-horizontal-position", 50)
+            setRangeValue(scenario, "photo-studio-vertical-position", 50)
             clickButton(scenario, "Reset crop")
 
             clickButton(scenario, "Looks")
             clickButton(scenario, "Warm")
             clickButton(scenario, "Crisp")
             clickButton(scenario, "Black & white")
-            setRangeValue(scenario, "Brightness", 110)
-            setRangeValue(scenario, "Contrast", 120)
-            setRangeValue(scenario, "Colour", 90)
+            setRangeValue(scenario, "photo-studio-brightness", 110)
+            setRangeValue(scenario, "photo-studio-contrast", 120)
+            setRangeValue(scenario, "photo-studio-colour", 90)
             clickButton(scenario, "Reset")
 
             clickButton(scenario, "Background")
@@ -729,8 +680,8 @@ class PhotoStudioWebViewInstrumentedTest {
                 "document.querySelector('[role=dialog]')?.innerText.includes('#D8E7F5')",
                 "sampled synthetic background colour"
             )
-            setLabelValue(scenario, "Replacement background", "#f3f6fa")
-            setRangeValue(scenario, "Background tolerance", 65)
+            setLabelValue(scenario, "photo-studio-replacement-background", "#f3f6fa")
+            setRangeValue(scenario, "photo-studio-background-tolerance", 65)
             clickButton(scenario, "Reset background")
 
             val captionsEnabled = evaluate(
@@ -746,22 +697,22 @@ class PhotoStudioWebViewInstrumentedTest {
                 })()"""
             )
             assertEquals("true", captionsEnabled)
-            setLabelValue(scenario, "Name for form (optional)", "Android Photo QA")
-            setLabelValue(scenario, "Date of birth (optional)", "2000-02-29")
+            setLabelValue(scenario, "photo-studio-name", "Android Photo QA")
+            setLabelValue(scenario, "photo-studio-date-of-birth", "2000-02-29")
             clickButton(scenario, "Text")
-            setLabelValue(scenario, "Caption font size", "7")
-            setLabelValue(scenario, "Caption colour", "#ff0000")
+            setLabelValue(scenario, "photo-studio-caption-font-size", "7")
+            setLabelValue(scenario, "photo-studio-caption-colour", "#ff0000")
             clickButton(scenario, "Sheet")
 
-            setLabelValue(scenario, "Photo size", "35x45")
-            setLabelValue(scenario, "Number of photos", "1.5")
+            setLabelValue(scenario, "photo-studio-photo-size", "35x45")
+            setLabelValue(scenario, "photo-studio-photo-count", "1.5")
             waitFor(
                 scenario,
-                "Array.from(document.querySelectorAll('[role=dialog] input')).find(input => input.getAttribute('aria-label') === 'Number of photos')?.value === '1.5' && document.querySelector('[role=dialog]')?.innerText.includes('Enter a whole number from 1 to 100') && Array.from(document.querySelectorAll('[role=dialog] button')).find(button => button.innerText.includes('Prepare A4 sheet'))?.disabled === true",
+                "document.getElementById('photo-studio-photo-count')?.value === '1.5' && document.querySelector('[role=dialog]')?.innerText.includes('Enter a whole number from 1 to 100') && Array.from(document.querySelectorAll('[role=dialog] button')).find(button => button.innerText.includes('Prepare A4 sheet'))?.disabled === true",
                 "fractional quantities to remain visible, invalid and blocked without crashing Photo Studio"
             )
-            setLabelValue(scenario, "Number of photos", "50")
-            setLabelValue(scenario, "Photos per A4 page", "9")
+            setLabelValue(scenario, "photo-studio-photo-count", "50")
+            setLabelValue(scenario, "photo-studio-photos-per-page", "9")
             waitFor(
                 scenario,
                 "Array.from(document.querySelectorAll('[class*=sheetSummary] > div')).some(row => row.textContent.includes('A4 pages in this job') && row.querySelector('strong')?.textContent === '6')",
@@ -863,15 +814,15 @@ class PhotoStudioWebViewInstrumentedTest {
             while (!isSecure(scenario) && SystemClock.uptimeMillis() < secureDeadline) Thread.sleep(100)
             assertTrue("The shop owner's sensitive photo preview must be protected by FLAG_SECURE.", isSecure(scenario))
 
-            setLabelValue(scenario, "Photo size", "35x45")
-            setLabelValue(scenario, "Number of photos", "1.5")
+            setLabelValue(scenario, "photo-studio-photo-size", "35x45")
+            setLabelValue(scenario, "photo-studio-photo-count", "1.5")
             waitFor(
                 scenario,
                 "Array.from(document.querySelectorAll('[role=dialog] input')).find(input => input.getAttribute('aria-label') === 'Number of photos')?.value === '1.5' && document.querySelector('[role=dialog]')?.innerText.includes('Enter a whole number from 1 to 100')",
                 "fractional shop photo quantity to stay visible with validation"
             )
-            setLabelValue(scenario, "Number of photos", "14")
-            setLabelValue(scenario, "Photos per A4 page", "9")
+            setLabelValue(scenario, "photo-studio-photo-count", "14")
+            setLabelValue(scenario, "photo-studio-photos-per-page", "9")
             waitFor(
                 scenario,
                 "Array.from(document.querySelectorAll('[class*=sheetSummary] > div')).some(row => row.textContent.includes('A4 pages in this job') && row.querySelector('strong')?.textContent === '2')",
@@ -946,7 +897,7 @@ class PhotoStudioWebViewInstrumentedTest {
         try {
             tapCssSelector(scenario, "#open-photo-studio")
             waitFor(scenario, "document.querySelector('[role=dialog]') !== null", "Photo Studio dialog")
-            setLabelValue(scenario, "Number of photos", "17")
+            setLabelValue(scenario, "photo-studio-photo-count", "17")
             waitFor(
                 scenario,
                 "Array.from(document.querySelectorAll('[class*=sheetSummary] > div')).some(row => row.textContent.includes('A4 pages in this job') && row.querySelector('strong')?.textContent === '1')",
