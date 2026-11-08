@@ -240,19 +240,37 @@ async function openRefundDialog(page, fileName) {
 }
 async function rejectAndRefundPages(page, fileName, pageNumbers, expectedRefund, expectedAcceptedPages) {
   const dialog = await openRefundDialog(page, fileName);
-  for (const number of pageNumbers) {
+  const job = jobs.find(item => item.document.originalFileName === fileName);
+  assert.ok(job, "QA job not found for " + fileName);
+  const pageAllocations = allocations.get(job.id);
+  assert.ok(pageAllocations, "Quote-locked page allocations not found for " + fileName);
+
+  let expectedRunningRefundMinor = 0;
+  for (let index = 0; index < pageNumbers.length; index += 1) {
+    const number = pageNumbers[index];
     const row = dialog.locator(".page-refund-grid label").filter({ hasText: "Page " + number });
-    await row.locator("input").check();
+    const checkbox = row.locator("input");
+    await checkbox.check();
+    assert.equal(await checkbox.isChecked(), true, "Page " + number + " must be selected for " + fileName);
+
+    expectedRunningRefundMinor += pageAllocations[number - 1];
+    const expectedRemainingPages = job.pageCount - index - 1;
+    const expectedRefundText = "Return ₹" + (expectedRunningRefundMinor / 100).toFixed(2);
+    const expectedRemainingText = String(expectedRemainingPages) + " pages will remain";
+    await page.waitForFunction(
+      ({ refundText, remainingText }) => {
+        const text = document.querySelector(".page-refund-estimate")?.textContent || "";
+        return text.includes(refundText) && text.includes(remainingText);
+      },
+      { refundText: expectedRefundText, remainingText: expectedRemainingText },
+      { timeout: 20000 }
+    );
   }
+
   const estimate = dialog.locator(".page-refund-estimate");
-  await page.waitForFunction(
-    amount => document.querySelector(".page-refund-estimate")?.textContent?.includes(amount),
-    expectedRefund.toFixed(2),
-    { timeout: 15000 }
-  );
   const estimateText = await estimate.innerText();
   assert.ok(estimateText.includes(String(expectedAcceptedPages) + " pages will remain"), estimateText);
-  assert.ok(estimateText.includes(expectedRefund.toFixed(2)), estimateText);
+  assert.ok(estimateText.includes("Return ₹" + expectedRefund.toFixed(2)), estimateText);
   assert.equal(await dialog.locator(".refund-confirm-line input").isChecked(), false);
   await dialog.locator(".refund-confirm-line input").check();
   await dialog.getByRole("button", { name: "Record refund and reject selected pages" }).click();
