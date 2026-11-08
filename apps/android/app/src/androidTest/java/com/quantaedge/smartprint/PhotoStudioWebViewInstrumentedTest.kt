@@ -294,21 +294,55 @@ class PhotoStudioWebViewInstrumentedTest {
                 .find(item => item.textContent.trim().startsWith($label));
               const range = label?.querySelector('input[type="range"]');
               if (!range) return null;
+
+              // The controls live inside an independently scrollable tool panel.
+              // Scroll the actual input into the visible clipping region before
+              // collecting coordinates; getBoundingClientRect() alone also returns
+              // coordinates for content hidden outside that panel.
+              range.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+
               const rect = range.getBoundingClientRect();
               const min = Number(range.min || 0);
               const max = Number(range.max || 100);
               const current = Number(range.value);
-              // PhotoStudio.module.css defines a 16px WebKit thumb and a
-              // track spanning the input width. Chromium constrains the thumb
-              // centre by half that width at either end of the track.
-              const thumbInset = Math.min(8, rect.width / 2);
+              const thumbCssWidth = Number.parseFloat(
+                getComputedStyle(range, "::-webkit-slider-thumb").width
+              );
+              const thumbInset = Math.min(
+                Number.isFinite(thumbCssWidth) && thumbCssWidth > 0 ? thumbCssWidth / 2 : 8,
+                rect.width / 2
+              );
               const travelWidth = Math.max(1, rect.width - thumbInset * 2);
-              const point = (v) => rect.left + thumbInset +
-                (max === min ? 0.5 : (v - min) / (max - min)) * travelWidth;
+              const point = value => rect.left + thumbInset +
+                (max === min ? 0.5 : (value - min) / (max - min)) * travelWidth;
+              const startX = point(current);
+              const endX = point($value);
+              const y = rect.top + rect.height / 2;
+              const panel = range.closest('[class*="toolPanel"]');
+              const panelRect = panel?.getBoundingClientRect();
+              const visible = rect.width > 0 && rect.height > 0 &&
+                rect.left >= 0 && rect.right <= window.innerWidth &&
+                rect.top >= 0 && rect.bottom <= window.innerHeight &&
+                (!panelRect || (
+                  rect.left >= panelRect.left && rect.right <= panelRect.right &&
+                  rect.top >= panelRect.top && rect.bottom <= panelRect.bottom
+                ));
+              const startHit = document.elementFromPoint(startX, y);
+              const endHit = document.elementFromPoint(endX, y);
+              const hitIsRange = hit => hit === range || Boolean(hit && range.contains(hit));
               return JSON.stringify({
-                startX: point(current), endX: point($value),
-                y: rect.top + rect.height / 2,
-                min, max, thumbInset, travelWidth
+                startX, endX, y, min, max, current,
+                thumbCssWidth: Number.isFinite(thumbCssWidth) ? thumbCssWidth : null,
+                thumbInset, travelWidth,
+                devicePixelRatio: window.devicePixelRatio,
+                visualViewportScale: window.visualViewport?.scale ?? 1,
+                rangeRect: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height },
+                panelRect: panelRect ? { left: panelRect.left, top: panelRect.top, right: panelRect.right, bottom: panelRect.bottom } : null,
+                visible,
+                startHit: startHit ? startHit.tagName + (startHit.id ? "#" + startHit.id : "") : null,
+                endHit: endHit ? endHit.tagName + (endHit.id ? "#" + endHit.id : "") : null,
+                startHitIsRange: hitIsRange(startHit),
+                endHitIsRange: hitIsRange(endHit)
               });
             })()"""
         )
@@ -318,26 +352,46 @@ class PhotoStudioWebViewInstrumentedTest {
         require(value.toDouble() in minimum..maximum) {
             "Photo Studio range value $value is outside $labelText bounds $minimum..$maximum."
         }
+        assertTrue(
+            "Photo Studio range '$labelText' was not scrolled fully into the visible tool panel: $bounds",
+            bounds.getBoolean("visible")
+        )
+        assertTrue(
+            "Native touch start/end coordinates do not hit the '$labelText' range input: $bounds",
+            bounds.getBoolean("startHitIsRange") && bounds.getBoolean("endHitIsRange")
+        )
         scenario.onActivity { activity ->
             val view = getWebView(activity)
-            val density = activity.resources.displayMetrics.density
-            val startX = (bounds.getDouble("startX") * density).toFloat().coerceIn(1f, (view.width - 2).toFloat())
-            val endX = (bounds.getDouble("endX") * density).toFloat().coerceIn(1f, (view.width - 2).toFloat())
-            val y = (bounds.getDouble("y") * density).toFloat().coerceIn(1f, (view.height - 2).toFloat())
+            // WebView viewport CSS pixels map to physical view pixels using
+            // devicePixelRatio. Use the page's actual scale, not an assumed
+            // Android density, so viewport zoom cannot skew touch coordinates.
+            val scale = bounds.getDouble("devicePixelRatio") *
+                bounds.getDouble("visualViewportScale")
+            val startX = (bounds.getDouble("startX") * scale).toFloat()
+            val endX = (bounds.getDouble("endX") * scale).toFloat()
+            val y = (bounds.getDouble("y") * scale).toFloat()
+            require(
+                startX in 1f..(view.width - 2).toFloat() &&
+                endX in 1f..(view.width - 2).toFloat() &&
+                y in 1f..(view.height - 2).toFloat()
+            ) {
+                "Photo Studio range '$labelText' mapped outside the native WebView bounds " +
+                    "(view=${view.width}x${view.height}, scale=$scale, geometry=$bounds)."
+            }
             val downTime = SystemClock.uptimeMillis()
             val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, startX, y, 0)
             try {
                 view.dispatchTouchEvent(down)
-                val steps = 8
+                val steps = 12
                 for (step in 1..steps) {
                     val x = startX + (endX - startX) * step / steps
                     val move = MotionEvent.obtain(
-                        downTime, downTime + step * 25L, MotionEvent.ACTION_MOVE, x, y, 0
+                        downTime, downTime + step * 24L, MotionEvent.ACTION_MOVE, x, y, 0
                     )
                     try { view.dispatchTouchEvent(move) } finally { move.recycle() }
                 }
                 val up = MotionEvent.obtain(
-                    downTime, downTime + (steps + 1) * 25L, MotionEvent.ACTION_UP, endX, y, 0
+                    downTime, downTime + (steps + 1) * 24L, MotionEvent.ACTION_UP, endX, y, 0
                 )
                 try { view.dispatchTouchEvent(up) } finally { up.recycle() }
             } finally {
