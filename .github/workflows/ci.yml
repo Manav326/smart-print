@@ -67,6 +67,16 @@ jobs:
       - name: Build portal and shared packages
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: pnpm build
+      - name: Ensure production portal build excludes QA-only Photo Studio fixture
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -e apps/portal/dist/tests/photo-studio.browser.html ]]; then
+            echo "QA-only Photo Studio fixture leaked into the normal production portal build." >&2
+            exit 1
+          fi
+          echo "PASS: normal portal build does not publish the QA-only Photo Studio fixture"
       - name: Typecheck native desktop frontend
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: pnpm --filter @smart-print/desktop typecheck
@@ -532,6 +542,62 @@ jobs:
           grep -Fq "Usage: bash scripts/qa/android-install-lifecycle.sh <APK_N> <APK_N_PLUS_1>" <<<"$lifecycle_help"
           grep -Fq "DESTRUCTIVE SAFETY WARNING" <<<"$lifecycle_help"
           echo "PASS: Android QA helper --help options"
+      - name: Set up Node.js and pnpm for isolated Photo Studio WebView fixture
+        if: ${{ !cancelled() && steps.android_setup.outcome == 'success' }}
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.18.0
+      - name: Set up Node.js for isolated Photo Studio WebView fixture
+        if: ${{ !cancelled() && steps.android_setup.outcome == 'success' }}
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install portal dependencies for Android Photo Studio fixture
+        id: android_portal_dependencies
+        if: ${{ !cancelled() && steps.android_setup.outcome == 'success' }}
+        run: pnpm install --frozen-lockfile --filter @smart-print/portal...
+      - name: Build the QA-only Photo Studio fixture (never deployed)
+        id: android_photo_fixture_build
+        if: ${{ !cancelled() && steps.android_portal_dependencies.outcome == 'success' }}
+        env:
+          VITE_ENABLE_PHOTO_STUDIO_QA: "true"
+        run: |
+          pnpm --filter @smart-print/portal build
+          test -s apps/portal/dist/tests/photo-studio.browser.html
+      - name: Start the QA-only Photo Studio fixture for the Android emulator
+        id: android_photo_fixture_server
+        if: ${{ !cancelled() && steps.android_photo_fixture_build.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup pnpm --filter @smart-print/portal exec vite preview --host 0.0.0.0 --port 3000 --strictPort > "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log" 2>&1 &
+          echo "$!" > "$RUNNER_TEMP/smartprint-photo-studio-qa-server.pid"
+          ready=0
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:3000/tests/photo-studio.browser.html >/dev/null; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/smartprint-photo-studio-qa-server.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          if [[ "$ready" -ne 1 ]]; then
+            cat "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log"
+            echo "The isolated Android Photo Studio fixture did not become ready." >&2
+            exit 1
+          fi
+          echo "PASS: isolated QA fixture is reachable on host port 3000"
+      - name: Verify Android QA fixture is not part of the normal portal artifact
+        if: ${{ !cancelled() && steps.android_photo_fixture_build.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'Photo Studio browser QA' apps/portal/dist/tests/photo-studio.browser.html
+          echo "PASS: Android fixture build contains the dedicated QA page"
       - name: Validate configured Android service origin
         id: android_origin
         if: ${{ !cancelled() }}

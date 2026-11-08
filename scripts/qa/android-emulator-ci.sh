@@ -60,13 +60,81 @@ adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true
 # even if Espresso fails, still execute the package-manager scenarios.
 ui_test_status=0
 echo "[QA-STEP-START] Android Espresso instrumentation | running connected device UI tests with live Gradle detail."
-if gradle --no-daemon --console=plain --info -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:connectedDebugAndroidTest; then
+photo_studio_qa_origin="${SMARTPRINT_PHOTOSTUDIO_QA_BASE_URL:-http://10.0.2.2:3000}"
+case "$photo_studio_qa_origin" in
+  http://10.0.2.2:3000) ;;
+  *)
+    echo "::error::Photo Studio WebView QA must use the isolated emulator fixture at http://10.0.2.2:3000."
+    exit 2
+    ;;
+esac
+
+if gradle --no-daemon --console=plain --info -p apps/android \
+  -PsmartPrintServiceUrl="$photo_studio_qa_origin" \
+  -PsmartPrintLocalQa=true \
+  -PsmartPrintPhotoStudioQaEnabled=true \
+  :app:connectedDebugAndroidTest; then
   ui_test_status=0
 else
   ui_test_status=$?
 fi
 
 echo "[QA-STEP-END] Android Espresso instrumentation | exit=$ui_test_status"
+
+# Gradle can return success when JUnit Assumptions ignore the Photo Studio
+# tests. Require all four exact cases to exist and execute with no skip/failure.
+if [ "$ui_test_status" -eq 0 ]; then
+  echo "[QA-STEP-START] Android Photo Studio coverage gate | parsing connected instrumentation JUnit XML."
+  python - <<'PY'
+from pathlib import Path
+import sys
+import xml.etree.ElementTree as ET
+
+report_dir = Path("apps/android/app/build/outputs/androidTest-results/connected/debug")
+reports = list(report_dir.glob("TEST-*.xml"))
+if len(reports) != 1:
+    raise SystemExit(f"Expected exactly one connected Android JUnit XML report, found {len(reports)} in {report_dir}")
+
+expected = {
+    "customerPhotoStudioRunsInsideAndroidWebViewAndProducesExactMultiPagePdf",
+    "shopOwnerCanEditAnExistingPhotoJobInsideAndroidWebViewAndSaveReplacementPdf",
+    "androidSystemBackClosesPhotoStudioBeforeLeavingTheCustomerStation",
+    "photoStudioModalStateAndSecureFlagSurviveActivityRecreation",
+}
+root = ET.parse(reports[0]).getroot()
+matches = [
+    case for case in root.iter("testcase")
+    if case.attrib.get("classname") == "com.quantaedge.smartprint.PhotoStudioWebViewInstrumentedTest"
+]
+names = [case.attrib.get("name", "") for case in matches]
+missing = sorted(expected - set(names))
+duplicates = sorted(name for name in expected if names.count(name) != 1)
+skipped = sorted(case.attrib.get("name", "") for case in matches if case.find("skipped") is not None)
+failed = sorted(case.attrib.get("name", "") for case in matches if case.find("failure") is not None or case.find("error") is not None)
+
+print(f"Android Photo Studio WebView cases: total={len(matches)} expected=4")
+for case in matches:
+    name = case.attrib.get("name", "<unnamed>")
+    status = "SKIP" if case.find("skipped") is not None else "FAIL" if case.find("failure") is not None or case.find("error") is not None else "PASS"
+    print(f"[ANDROID-PHOTOSTUDIO] {status} | {name}")
+
+problems = []
+if len(matches) != 4: problems.append(f"expected exactly 4 Photo Studio cases, found {len(matches)}")
+if missing: problems.append("missing cases: " + ", ".join(missing))
+if duplicates: problems.append("missing/duplicated exact-one cases: " + ", ".join(duplicates))
+if skipped: problems.append("ignored cases: " + ", ".join(skipped))
+if failed: problems.append("failed cases: " + ", ".join(failed))
+if problems:
+    for problem in problems:
+        print("::error::" + problem, file=sys.stderr)
+    raise SystemExit(1)
+print("PASS: all four Android Photo Studio WebView tests executed and passed.")
+PY
+  photostudio_gate_status=$?
+else
+  photostudio_gate_status=1
+fi
+
 echo "[QA-STEP-START] Android package lifecycle | building isolated APK N for install/upgrade validation..."
 gradle --no-daemon --console=plain -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" -PsmartPrintVersionCode=9100 -PsmartPrintVersionName="lifecycle-n" :app:assembleDebug
 cp apps/android/app/build/outputs/apk/debug/app-debug.apk "$RUNNER_TEMP/smartprint-lifecycle-n.apk"
@@ -90,7 +158,7 @@ fi
 if [ "$lifecycle_status" -ne 0 ]; then
   echo "::error::Android package installation lifecycle checks failed (exit $lifecycle_status)."
 fi
-if [ "$ui_test_status" -ne 0 ] || [ "$lifecycle_status" -ne 0 ]; then
+if [ "$ui_test_status" -ne 0 ] || [ "$lifecycle_status" -ne 0 ] || [ "$photostudio_gate_status" -ne 0 ]; then
   exit 1
 fi
 
