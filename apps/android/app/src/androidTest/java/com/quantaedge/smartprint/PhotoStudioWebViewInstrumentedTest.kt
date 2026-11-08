@@ -464,11 +464,79 @@ class PhotoStudioWebViewInstrumentedTest {
         )
         assertEquals("Could not install native range event diagnostics.", "true", traceInstalled)
 
+        val y = screenY.roundToInt()
+        // A range whose current value is at its minimum places the thumb at
+        // the viewport's left edge. A horizontal Android touch that starts
+        // inside the system Back gesture inset is claimed by navigation, which
+        // sends pointercancel and dismisses Photo Studio before the slider can
+        // be dragged. Keep the test on the real touch path: use a native tap
+        // to move only an edge-positioned thumb into the safe interior, then
+        // start the asserted native swipe from the resulting actual value.
+        var swipeStartScreenX = startScreenX
+        var swipeStartValue = bounds.getDouble("current")
+        val edgeInsetPixels = (64f * displayMetrics.density).roundToInt()
+        val startIsInSystemGestureEdge =
+            swipeStartScreenX < edgeInsetPixels ||
+                swipeStartScreenX > displayMetrics.widthPixels - edgeInsetPixels
+        if (startIsInSystemGestureEdge) {
+            val safeRatio = if (swipeStartScreenX < edgeInsetPixels) 0.4 else 0.6
+            val rangeRect = bounds.getJSONObject("rangeRect")
+            val safeStartValue = minimum + (maximum - minimum) * safeRatio
+            val safeStartCssX = rangeRect.getDouble("left") +
+                bounds.getDouble("thumbInset") +
+                bounds.getDouble("travelWidth") * safeRatio
+            val safeTapScreenX = (screenOriginX + safeStartCssX * scale).roundToInt()
+            require(
+                safeTapScreenX in edgeInsetPixels..(displayMetrics.widthPixels - edgeInsetPixels)
+            ) {
+                "Photo Studio range '$labelText' has no safe native swipe start outside Android's system gesture inset: " +
+                    "tapX=$safeTapScreenX, edgeInset=$edgeInsetPixels, geometry=$bounds."
+            }
+
+            ParcelFileDescriptor.AutoCloseInputStream(
+                automation.executeShellCommand("input tap $safeTapScreenX $y")
+            ).bufferedReader().use { it.readText() }
+            instrumentation.waitForIdleSync()
+            waitFor(
+                scenario,
+                """(() => {
+                  const dialog = document.querySelector('[role="dialog"]');
+                  const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                    .find(item => item.textContent.trim().startsWith($label));
+                  const range = label?.querySelector('input[type="range"]');
+                  return Boolean(range && Math.abs(Number(range.value) - $safeStartValue) <= 1);
+                })()""",
+                "Photo Studio '$labelText' thumb to move clear of Android's system Back gesture edge"
+            )
+            val safeReadbackText = evaluate(
+                scenario,
+                """(() => {
+                  const dialog = document.querySelector('[role="dialog"]');
+                  const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                    .find(item => item.textContent.trim().startsWith($label));
+                  const range = label?.querySelector('input[type="range"]');
+                  return JSON.stringify({ value: range ? Number(range.value) : null });
+                })()"""
+            )
+            val safeReadback = JSONObject(decodeJavascriptString(safeReadbackText))
+            swipeStartValue = safeReadback.getDouble("value")
+            val actualStartCssX = rangeRect.getDouble("left") +
+                bounds.getDouble("thumbInset") +
+                ((swipeStartValue - minimum) / (maximum - minimum)) *
+                    bounds.getDouble("travelWidth")
+            swipeStartScreenX = screenOriginX + actualStartCssX * scale
+            assertTrue(
+                "Native pre-positioning did not move '$labelText' outside Android's system Back gesture edge: " +
+                    "value=$swipeStartValue, x=$swipeStartScreenX, edgeInset=$edgeInsetPixels, geometry=$bounds.",
+                swipeStartScreenX >= edgeInsetPixels &&
+                    swipeStartScreenX <= displayMetrics.widthPixels - edgeInsetPixels
+            )
+        }
+
         // Android's input command injects a SOURCE_TOUCHSCREEN finger stream
         // through InputManager, matching the emulator shell/ADB touch tooling.
-        val x1 = startScreenX.roundToInt()
+        val x1 = swipeStartScreenX.roundToInt()
         val x2 = endScreenX.roundToInt()
-        val y = screenY.roundToInt()
         // Execute only the input command. UiAutomation's returned pipe carries
         // stdout, but Android's input utility is intentionally silent on success.
         val command = "input swipe $x1 $y $x2 $y 650"
@@ -522,7 +590,7 @@ class PhotoStudioWebViewInstrumentedTest {
                 "Android native swipe did not leave a numeric '$labelText' range value. " +
                     "readback=$readback; raw=$valueAfterSwipeText; geometry=$bounds."
             )
-        val initialValue = bounds.getDouble("current")
+        val initialValue = swipeStartValue
         if (kotlin.math.abs(initialValue - value.toDouble()) > 1.0) {
             assertTrue(
                 "The native drag gesture did not move '$labelText' from $initialValue; " +
