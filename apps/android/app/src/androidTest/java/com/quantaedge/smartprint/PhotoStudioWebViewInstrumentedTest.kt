@@ -477,17 +477,51 @@ class PhotoStudioWebViewInstrumentedTest {
         ).bufferedReader().use { it.readText() }
         instrumentation.waitForIdleSync()
 
+        // A controlled React input can synchronously schedule a render from
+        // the native input event. Wait for the labelled range to be mounted
+        // again before reading its post-drag value instead of racing that commit.
+        val rangeAfterSwipeAvailable = """(() => {
+          const dialog = document.querySelector('[role="dialog"]');
+          const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+            .find(item => item.textContent.trim().startsWith($label));
+          return Boolean(label?.querySelector('input[type="range"]'));
+        })()"""
+        waitFor(
+            scenario,
+            rangeAfterSwipeAvailable,
+            "Photo Studio '$labelText' range to remain available after native swipe"
+        )
         val valueAfterSwipeText = evaluate(
             scenario,
             """(() => {
               const dialog = document.querySelector('[role="dialog"]');
               const label = Array.from(dialog?.querySelectorAll('label') ?? [])
                 .find(item => item.textContent.trim().startsWith($label));
-              return label?.querySelector('input[type="range"]')?.value ?? "";
+              const range = label?.querySelector('input[type="range"]');
+              return JSON.stringify({
+                labelFound: Boolean(label),
+                labelText: label?.textContent?.trim() ?? null,
+                value: range?.value ?? null,
+                disabled: range?.disabled ?? null,
+                activeTools: Array.from(dialog?.querySelectorAll('nav[aria-label="Photo editing tools"] button') ?? [])
+                  .filter(button => button.getAttribute('aria-pressed') === 'true')
+                  .map(button => button.textContent.trim()),
+                ranges: Array.from(dialog?.querySelectorAll('input[type="range"]') ?? [])
+                  .map(input => ({
+                    label: input.closest('label')?.textContent?.trim() ?? "",
+                    value: input.value,
+                    min: input.min,
+                    max: input.max
+                  }))
+              });
             })()"""
         )
-        val valueAfterSwipe = decodeJavascriptString(valueAfterSwipeText).toDoubleOrNull()
-            ?: throw AssertionError("Android swipe did not leave a readable '$labelText' range value.")
+        val readback = JSONObject(decodeJavascriptString(valueAfterSwipeText))
+        val valueAfterSwipe = readback.optString("value", "").toDoubleOrNull()
+            ?: throw AssertionError(
+                "Android native swipe did not leave a numeric '$labelText' range value. " +
+                    "readback=$readback; raw=$valueAfterSwipeText; geometry=$bounds."
+            )
         val initialValue = bounds.getDouble("current")
         if (kotlin.math.abs(initialValue - value.toDouble()) > 1.0) {
             assertTrue(
