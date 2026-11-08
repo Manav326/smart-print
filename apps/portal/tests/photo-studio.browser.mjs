@@ -510,7 +510,10 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
 
   await page.goto(baseUrl + "/shop", { waitUntil: "networkidle" });
   await page.locator(".app-shell").waitFor({ state: "visible", timeout: 30000 });
-  await page.getByRole("button", { name: "Order Journey" }).click();
+  await page.waitForFunction(() =>
+    document.querySelector('button[aria-label="Order Journey"]')?.classList.contains("active") === true,
+    { timeout: 30000 }
+  );
   await page.getByRole("button", { name: "Edit photo" }).waitFor({ state: "visible", timeout: 30000 });
   await page.getByRole("button", { name: "Edit photo" }).click();
   const dialog = page.getByRole("dialog", { name: "Photo Studio" });
