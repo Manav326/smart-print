@@ -2800,12 +2800,18 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun allowedLocalDevelopmentEndpoint(uri: Uri): Boolean =
-        BuildConfig.DEBUG &&
+    private fun allowedLocalDevelopmentEndpoint(uri: Uri): Boolean {
+        val isolatedPhotoStudioLoopback =
+            BuildConfig.PHOTO_STUDIO_QA_ENABLED &&
+                packageName.endsWith(".localqa") &&
+                uri.host.equals("127.0.0.1", true) &&
+                uri.port == 3000
+        return BuildConfig.DEBUG &&
             uri.scheme.equals("http", true) &&
             uri.port in setOf(3000, 8080) &&
             uri.host.equals(portalHost, true) &&
-            LocalAgentUploadPolicy.isPrivateIpv4Host(uri.host.orEmpty())
+            (LocalAgentUploadPolicy.isPrivateIpv4Host(uri.host.orEmpty()) || isolatedPhotoStudioLoopback)
+    }
 
     private fun showShopManager() {
         if (portalUrl == null) {

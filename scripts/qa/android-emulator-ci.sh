@@ -23,8 +23,9 @@ never run the lifecycle helper on a personal/shop phone with user data.
 Photo Studio instrumentation uses the QA-only Vite build containing
 tests/photo-studio.browser.html. The runner uses the side-by-side package ID
 com.quantaedge.smartprint.localqa and enables smartPrintPhotoStudioQaEnabled.
-The emulator reaches the fixture at http://10.0.2.2:3000; Android debug WebView
-allows this exact private-LAN development host/port. The normal Portal build
+The emulator reaches the fixture through an ADB reverse mapping to
+http://127.0.0.1:3000. That loopback route is allowed only in the explicitly
+enabled com.quantaedge.smartprint.localqa debug package. The normal Portal build
 separately asserts that the QA route is absent. After instrumentation, the
 runner parses JUnit XML and fails if any of the four Photo Studio cases is
 missing, skipped, failed or duplicated. The later install-lifecycle APKs use
@@ -64,14 +65,32 @@ adb shell dumpsys window | grep -E 'mCurrentFocus|mFocusedApp' || true
 # even if Espresso fails, still execute the package-manager scenarios.
 ui_test_status=0
 echo "[QA-STEP-START] Android Espresso instrumentation | running connected device UI tests with live Gradle detail."
-photo_studio_qa_origin="${SMARTPRINT_PHOTOSTUDIO_QA_BASE_URL:-http://10.0.2.2:3000}"
+photo_studio_qa_origin="${SMARTPRINT_PHOTOSTUDIO_QA_BASE_URL:-http://127.0.0.1:3000}"
 case "$photo_studio_qa_origin" in
-  http://10.0.2.2:3000) ;;
+  http://127.0.0.1:3000) ;;
   *)
-    echo "::error::Photo Studio WebView QA must use the isolated emulator fixture at http://10.0.2.2:3000."
+    echo "::error::Photo Studio WebView QA must use the isolated ADB-reversed fixture at http://127.0.0.1:3000."
     exit 2
     ;;
 esac
+
+echo "[QA-STEP-START] Android Photo Studio localhost route | mapping only the fixture port through ADB reverse."
+adb reverse tcp:3000 tcp:3000
+trap 'adb reverse --remove tcp:3000 >/dev/null 2>&1 || true' EXIT
+reverse_mappings="$(adb reverse --list)"
+if ! grep -Fq "tcp:3000 tcp:3000" <<< "$reverse_mappings"; then
+  echo "::error::ADB reverse did not install the isolated Photo Studio localhost mapping."
+  printf '%s\\n' "$reverse_mappings"
+  exit 2
+fi
+if ! curl --fail --silent --show-error "$photo_studio_qa_origin/tests/photo-studio.browser.html" >/dev/null; then
+  echo "::error::The isolated Photo Studio fixture is no longer reachable on host localhost."
+  if [[ -f "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log" ]]; then
+    cat "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log"
+  fi
+  exit 2
+fi
+echo "PASS: ADB reverse is active and the fixture is reachable on host localhost."
 
 if gradle --no-daemon --console=plain --info -p apps/android \
   -PsmartPrintServiceUrl="$photo_studio_qa_origin" \
@@ -84,6 +103,10 @@ else
 fi
 
 echo "[QA-STEP-END] Android Espresso instrumentation | exit=$ui_test_status"
+if [[ -f "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log" ]]; then
+  echo "[QA-STEP-CHECK] Local Photo Studio fixture server log:"
+  cat "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log"
+fi
 
 # Gradle can return success when JUnit Assumptions ignore the Photo Studio
 # tests. Require all four exact cases to exist and execute with no skip/failure.

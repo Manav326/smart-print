@@ -701,7 +701,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          nohup pnpm --filter @smart-print/portal exec vite preview --host 0.0.0.0 --port 3000 --strictPort > "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log" 2>&1 &
+          nohup pnpm --filter @smart-print/portal exec vite preview --host 127.0.0.1 --port 3000 --strictPort > "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log" 2>&1 &
           echo "$!" > "$RUNNER_TEMP/smartprint-photo-studio-qa-server.pid"
           ready=0
           for attempt in $(seq 1 40); do

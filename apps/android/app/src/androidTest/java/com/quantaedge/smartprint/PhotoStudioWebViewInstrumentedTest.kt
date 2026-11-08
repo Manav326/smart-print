@@ -53,7 +53,20 @@ class PhotoStudioWebViewInstrumentedTest {
             if (evaluate(scenario, "Boolean($expression)") == "true") return
             Thread.sleep(120)
         }
-        throw AssertionError("Timed out waiting for Android Photo Studio: $description")
+        val diagnostics = runCatching {
+            evaluate(
+                scenario,
+                """JSON.stringify({
+                    href: location.href,
+                    readyState: document.readyState,
+                    title: document.title,
+                    body: document.body?.innerText?.slice(0, 300) ?? "",
+                    openButton: Boolean(document.querySelector("#open-photo-studio")),
+                    fixtureReady: document.querySelector("#photo-studio-result")?.dataset.ready ?? null
+                })"""
+            )
+        }.getOrElse { "WebView diagnostic read failed: ${it.message}" }
+        throw AssertionError("Timed out waiting for Android Photo Studio: $description; document=$diagnostics")
     }
 
     private fun openFixture(query: String): ActivityScenario<MainActivity> {
@@ -64,6 +77,8 @@ class PhotoStudioWebViewInstrumentedTest {
         val scenario = ActivityScenario.launch(MainActivity::class.java)
         val fixtureUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') +
             "/tests/photo-studio.browser.html" + query
+        assertEquals("Android emulator Photo Studio QA must use ADB-reversed localhost.", "127.0.0.1", Uri.parse(fixtureUrl).host)
+        assertEquals("Android emulator Photo Studio QA must use the isolated Vite preview port.", 3000, Uri.parse(fixtureUrl).port)
         scenario.onActivity { activity ->
             MainActivity::class.java.getDeclaredMethod("showPrint").apply {
                 isAccessible = true
@@ -74,6 +89,10 @@ class PhotoStudioWebViewInstrumentedTest {
             MainActivity::class.java.getDeclaredField("portalHost").apply {
                 isAccessible = true
             }.set(activity, trustedHost)
+            val localFixtureAllowed = MainActivity::class.java.getDeclaredMethod(
+                "allowedLocalDevelopmentEndpoint", Uri::class.java
+            ).apply { isAccessible = true }.invoke(activity, Uri.parse(fixtureUrl)) as Boolean
+            assertTrue("Only the explicitly enabled .localqa package may load its ADB-reversed localhost Photo Studio fixture.", localFixtureAllowed)
             getWebView(activity).loadUrl(fixtureUrl)
         }
         waitFor(
