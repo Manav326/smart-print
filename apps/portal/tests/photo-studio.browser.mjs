@@ -17,7 +17,7 @@ mkdirSync(artifactDirectory, { recursive: true });
 function startServer() {
   const packageManager = process.env.SMARTPRINT_PNPM_COMMAND ?? "pnpm";
   const args = ["--filter", "@smart-print/portal", "dev", "--host", "0.0.0.0", "--port", "4173", "--strictPort"];
-  const options = { stdio: "inherit", env: process.env, windowsHide: true };
+  const options = { stdio: "inherit", env: process.env, windowsHide: true, detached: process.platform !== "win32" };
   if (process.platform === "win32") {
     const child = spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/c", [packageManager, ...args].join(" ")], options);
     child.spawnError = null;
@@ -31,11 +31,18 @@ function startServer() {
 }
 
 function stopServer(child) {
-  if (!child || child.exitCode !== null) return;
-  if (process.platform === "win32" && child.pid) {
+  if (!child?.pid) return;
+  if (process.platform === "win32") {
+    // pnpm starts Vite as a descendant; terminate the entire process tree, not only pnpm.
     spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
   } else {
-    child.kill("SIGTERM");
+    // detached:true gives the server its own process group. Kill the group to avoid
+    // leaving Vite alive and occupying the port for the repository's other browser suites.
+    try {
+      process.kill(-child.pid, "SIGTERM");
+    } catch {
+      if (child.exitCode === null) child.kill("SIGTERM");
+    }
   }
 }
 

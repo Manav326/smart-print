@@ -215,6 +215,7 @@ function PhotoStudioBrowserFixture() {
       mediaType: sheet.file.type,
       fileName: sheet.file.name,
       outputBytes: sheet.file.size,
+      bytes: sheet.file.size,
       sizeCode: sheet.sizeCode,
       photoCount: sheet.photoCount,
       photosPerPage: sheet.photosPerPage,
