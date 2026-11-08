@@ -20,11 +20,15 @@ Run this on a disposable CI emulator. The lifecycle helper uninstalls and
 reinstalls com.quantaedge.smartprint and tests production release APK updates;
 never run the lifecycle helper on a personal/shop phone with user data.
 
-Photo Studio note: the WebView instrumentation requires Gradle properties
-smartPrintLocalQa=true and smartPrintPhotoStudioQaEnabled=true. The CI entry
-point currently invokes the default connectedDebugAndroidTest build, where
-those Photo Studio QA-only tests can be reported as ignored. Check the JUnit
-XML report; a green Gradle task alone does not mean ignored tests ran.
+Photo Studio instrumentation uses the QA-only Vite build containing
+tests/photo-studio.browser.html. The runner uses the side-by-side package ID
+com.quantaedge.smartprint.localqa and enables smartPrintPhotoStudioQaEnabled.
+The emulator reaches the fixture at http://10.0.2.2:3000; Android debug WebView
+allows this exact private-LAN development host/port. The normal Portal build
+separately asserts that the QA route is absent. After instrumentation, the
+runner parses JUnit XML and fails if any of the four Photo Studio cases is
+missing, skipped, failed or duplicated. The later install-lifecycle APKs use
+the normal customer application ID and HTTPS public-origin setting.
 HELP
   exit 0
 fi
@@ -85,7 +89,7 @@ echo "[QA-STEP-END] Android Espresso instrumentation | exit=$ui_test_status"
 # tests. Require all four exact cases to exist and execute with no skip/failure.
 if [ "$ui_test_status" -eq 0 ]; then
   echo "[QA-STEP-START] Android Photo Studio coverage gate | parsing connected instrumentation JUnit XML."
-  python - <<'PY'
+  if python - <<'PY'
 from pathlib import Path
 import sys
 import xml.etree.ElementTree as ET
@@ -130,7 +134,11 @@ if problems:
     raise SystemExit(1)
 print("PASS: all four Android Photo Studio WebView tests executed and passed.")
 PY
-  photostudio_gate_status=$?
+  then
+    photostudio_gate_status=0
+  else
+    photostudio_gate_status=$?
+  fi
 else
   photostudio_gate_status=1
 fi
