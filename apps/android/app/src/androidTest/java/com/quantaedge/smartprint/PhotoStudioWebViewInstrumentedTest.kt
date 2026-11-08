@@ -2,6 +2,7 @@ package com.quantaedge.smartprint
 
 import android.net.Uri
 import android.os.SystemClock
+import android.view.InputDevice
 import android.view.MotionEvent
 import android.view.WindowManager
 import android.webkit.WebView
@@ -66,6 +67,18 @@ class PhotoStudioWebViewInstrumentedTest {
                     dialogText: document.querySelector('[role="dialog"]')?.innerText?.slice(0, 900) ?? null,
                     activeTools: Array.from(document.querySelectorAll('[role="dialog"] nav[aria-label="Photo editing tools"] button'))
                       .map(button => ({ text: button.textContent?.trim() ?? "", pressed: button.getAttribute("aria-pressed") })),
+                    ranges: Array.from(document.querySelectorAll('[role="dialog"] input[type="range"]'))
+                      .map(range => {
+                        const rect = range.getBoundingClientRect();
+                        const label = range.closest("label");
+                        return {
+                          label: label?.childNodes?.[0]?.textContent?.trim() ?? "",
+                          value: range.value, min: range.min, max: range.max, step: range.step,
+                          rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+                          dpr: window.devicePixelRatio,
+                          visualScale: window.visualViewport?.scale ?? 1
+                        };
+                      }),
                     dialogButtons: Array.from(document.querySelectorAll('[role="dialog"] button'))
                       .map(button => button.textContent?.replace(/\s+/g, " ").trim() ?? "").slice(0, 24)
                 })"""
@@ -360,44 +373,119 @@ class PhotoStudioWebViewInstrumentedTest {
             "Native touch start/end coordinates do not hit the '$labelText' range input: $bounds",
             bounds.getBoolean("startHitIsRange") && bounds.getBoolean("endHitIsRange")
         )
+        var screenOriginX = 0
+        var screenOriginY = 0
+        var viewWidth = 0
+        var viewHeight = 0
         scenario.onActivity { activity ->
             val view = getWebView(activity)
-            // WebView viewport CSS pixels map to physical view pixels using
-            // devicePixelRatio. Use the page's actual scale, not an assumed
-            // Android density, so viewport zoom cannot skew touch coordinates.
-            val scale = bounds.getDouble("devicePixelRatio") *
-                bounds.getDouble("visualViewportScale")
-            val startX = (bounds.getDouble("startX") * scale).toFloat()
-            val endX = (bounds.getDouble("endX") * scale).toFloat()
-            val y = (bounds.getDouble("y") * scale).toFloat()
-            require(
-                startX in 1f..(view.width - 2).toFloat() &&
-                endX in 1f..(view.width - 2).toFloat() &&
-                y in 1f..(view.height - 2).toFloat()
-            ) {
-                "Photo Studio range '$labelText' mapped outside the native WebView bounds " +
-                    "(view=${view.width}x${view.height}, scale=$scale, geometry=$bounds)."
-            }
-            val downTime = SystemClock.uptimeMillis()
-            val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, startX, y, 0)
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            screenOriginX = location[0]
+            screenOriginY = location[1]
+            viewWidth = view.width
+            viewHeight = view.height
+        }
+
+        // getBoundingClientRect() is expressed in CSS viewport pixels.
+        // Convert to display pixels, then add the WebView's screen origin:
+        // UiAutomation injects into Android's input dispatcher, not into the
+        // WebView's local dispatchTouchEvent method.
+        val scale = bounds.getDouble("devicePixelRatio") *
+            bounds.getDouble("visualViewportScale")
+        val startLocalX = bounds.getDouble("startX") * scale
+        val endLocalX = bounds.getDouble("endX") * scale
+        val localY = bounds.getDouble("y") * scale
+        require(
+            startLocalX in 1.0..(viewWidth - 2).toDouble() &&
+            endLocalX in 1.0..(viewWidth - 2).toDouble() &&
+            localY in 1.0..(viewHeight - 2).toDouble()
+        ) {
+            "Photo Studio range '$labelText' mapped outside the WebView bounds " +
+                "(view=${viewWidth}x${viewHeight}, scale=$scale, geometry=$bounds)."
+        }
+        val startScreenX = (screenOriginX + startLocalX).toFloat()
+        val endScreenX = (screenOriginX + endLocalX).toFloat()
+        val screenY = (screenOriginY + localY).toFloat()
+        val displayMetrics = InstrumentationRegistry.getInstrumentation()
+            .targetContext.resources.displayMetrics
+        require(
+            startScreenX in 1f..(displayMetrics.widthPixels - 2).toFloat() &&
+            endScreenX in 1f..(displayMetrics.widthPixels - 2).toFloat() &&
+            screenY in 1f..(displayMetrics.heightPixels - 2).toFloat()
+        ) {
+            "Photo Studio range '$labelText' mapped outside the device display " +
+                "(${displayMetrics.widthPixels}x${displayMetrics.heightPixels}, " +
+                "origin=${screenOriginX},${screenOriginY}, scale=$scale, geometry=$bounds)."
+        }
+
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val automation = instrumentation.uiAutomation
+        val downTime = SystemClock.uptimeMillis()
+        fun injectTouch(action: Int, x: Float) {
+            val event = MotionEvent.obtain(
+                downTime,
+                SystemClock.uptimeMillis(),
+                action,
+                x,
+                screenY,
+                0
+            )
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            event.setToolType(0, MotionEvent.TOOL_TYPE_FINGER)
             try {
-                view.dispatchTouchEvent(down)
-                val steps = 12
-                for (step in 1..steps) {
-                    val x = startX + (endX - startX) * step / steps
-                    val move = MotionEvent.obtain(
-                        downTime, downTime + step * 24L, MotionEvent.ACTION_MOVE, x, y, 0
-                    )
-                    try { view.dispatchTouchEvent(move) } finally { move.recycle() }
-                }
-                val up = MotionEvent.obtain(
-                    downTime, downTime + (steps + 1) * 24L, MotionEvent.ACTION_UP, endX, y, 0
+                assertTrue(
+                    "Android rejected touchscreen injection for '$labelText' at ($x,$screenY); geometry=$bounds",
+                    automation.injectInputEvent(event, true)
                 )
-                try { view.dispatchTouchEvent(up) } finally { up.recycle() }
             } finally {
-                down.recycle()
+                event.recycle()
+            }
+            SystemClock.sleep(24)
+        }
+
+        var pointerDown = false
+        try {
+            injectTouch(MotionEvent.ACTION_DOWN, startScreenX)
+            pointerDown = true
+            val steps = 16
+            for (step in 1..steps) {
+                val x = startScreenX + (endScreenX - startScreenX) * step / steps
+                injectTouch(MotionEvent.ACTION_MOVE, x)
+            }
+            injectTouch(MotionEvent.ACTION_UP, endScreenX)
+            pointerDown = false
+        } finally {
+            if (pointerDown) {
+                runCatching { injectTouch(MotionEvent.ACTION_CANCEL, endScreenX) }
             }
         }
+
+        val afterGesture = evaluate(
+            scenario,
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                .find(item => item.textContent.trim().startsWith($label));
+              const range = label?.querySelector('input[type="range"]');
+              return JSON.stringify({
+                value: range?.value ?? null,
+                activeElement: document.activeElement?.outerHTML?.slice(0, 240) ?? null,
+                rect: (() => {
+                  const r = range?.getBoundingClientRect();
+                  return r ? { left:r.left,top:r.top,width:r.width,height:r.height } : null;
+                })()
+              });
+            })()"""
+        )
+        val gestureResult = JSONObject(decodeJavascriptString(afterGesture))
+        val afterValue = gestureResult.optString("value", "")
+        assertTrue(
+            "Native touchscreen gesture did not change Photo Studio '$labelText' " +
+                "(before=${bounds.getDouble("current")}, requested=$value, after=$afterValue, " +
+                "geometry=$bounds, result=$gestureResult).",
+            afterValue.isNotBlank() && afterValue.toDoubleOrNull() != bounds.getDouble("current")
+        )
         waitFor(
             scenario,
             """(() => {
