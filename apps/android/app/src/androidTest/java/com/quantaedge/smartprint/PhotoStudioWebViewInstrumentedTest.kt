@@ -448,7 +448,7 @@ class PhotoStudioWebViewInstrumentedTest {
                     type,
                     trusted: event.isTrusted,
                     target: target instanceof Element
-                      ? target.tagName + (target.id ? "#" + target.id : "") + (typeof target.className === "string" && target.className ? "." + target.className.trim().replace(/\\s+/g, ".") : "")
+                      ? target.tagName + (target.id ? "#" + target.id : "") + (typeof target.className === "string" && target.className ? "." + target.className.trim().replace(/\s+/g, ".") : "")
                       : String(target),
                     pathHitsRange: path.includes(range),
                     pointerType: "pointerType" in event ? event.pointerType : null,
