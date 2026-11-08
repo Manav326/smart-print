@@ -74,8 +74,15 @@ async function openComponentStudio(page) {
   return dialog;
 }
 
+function getEditorControl(page, label) {
+  return page.locator('[role="dialog"] label')
+    .filter({ hasText: label })
+    .locator("input, select, textarea")
+    .first();
+}
+
 async function setControlValue(page, label, value) {
-  await page.getByLabel(label).evaluate((element, nextValue) => {
+  await getEditorControl(page, label).evaluate((element, nextValue) => {
     const prototype = element instanceof HTMLSelectElement ? HTMLSelectElement.prototype :
       element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
     const setter = Object.getOwnPropertyDescriptor(prototype, "value")?.set;
@@ -181,9 +188,9 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await setControlValue(page, "Horizontal position", "55");
   await setControlValue(page, "Vertical position", "45");
   await page.getByRole("button", { name: "Reset crop" }).click();
-  assert.equal(await page.getByLabel("Zoom").inputValue(), "1");
-  assert.equal(await page.getByLabel("Horizontal position").inputValue(), "50");
-  assert.equal(await page.getByLabel("Vertical position").inputValue(), "50");
+  assert.equal(await getEditorControl(page, "Zoom").inputValue(), "1");
+  assert.equal(await getEditorControl(page, "Horizontal position").inputValue(), "50");
+  assert.equal(await getEditorControl(page, "Vertical position").inputValue(), "50");
   await setControlValue(page, "Zoom", "1.35");
   await setControlValue(page, "Horizontal position", "55");
   await setControlValue(page, "Vertical position", "45");
