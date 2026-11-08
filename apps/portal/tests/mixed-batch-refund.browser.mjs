@@ -334,7 +334,10 @@ try {
   await page2Check.check();
   await page.waitForFunction(() => document.querySelector(".page-refund-estimate")?.textContent?.includes("10.00"));
   await page2Check.uncheck();
-  await page.waitForFunction(() => document.querySelector(".page-refund-estimate")?.textContent?.includes("Select at least one additional page"));
+  await page.waitForFunction(() => {
+    const estimate = document.querySelector(".page-refund-estimate")?.textContent || "";
+    return estimate.includes("3 pages will remain") && estimate.includes("₹0.00");
+  });
   assert.equal(refunds.length, 0, "Undo must not create a refund.");
   await pdfDialog.getByRole("button", { name: "Close" }).click();
   await pdfDialog.waitFor({ state: "detached" });
