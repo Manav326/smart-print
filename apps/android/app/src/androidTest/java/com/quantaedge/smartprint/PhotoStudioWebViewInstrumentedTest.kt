@@ -8,6 +8,7 @@ import android.view.WindowManager
 import android.webkit.WebView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -423,16 +424,36 @@ class PhotoStudioWebViewInstrumentedTest {
         val automation = instrumentation.uiAutomation
         val downTime = SystemClock.uptimeMillis()
         fun injectTouch(action: Int, x: Float) {
+            val pointerProperties = arrayOf(
+                MotionEvent.PointerProperties().apply {
+                    id = 0
+                    toolType = MotionEvent.TOOL_TYPE_FINGER
+                }
+            )
+            val pointerCoordinates = arrayOf(
+                MotionEvent.PointerCoords().apply {
+                    this.x = x
+                    this.y = screenY
+                    pressure = 1f
+                    size = 1f
+                }
+            )
             val event = MotionEvent.obtain(
                 downTime,
                 SystemClock.uptimeMillis(),
                 action,
-                x,
-                screenY,
+                1,
+                pointerProperties,
+                pointerCoordinates,
+                0,
+                0,
+                1f,
+                1f,
+                0,
+                0,
+                InputDevice.SOURCE_TOUCHSCREEN,
                 0
             )
-            event.source = InputDevice.SOURCE_TOUCHSCREEN
-            event.setToolType(0, MotionEvent.TOOL_TYPE_FINGER)
             try {
                 assertTrue(
                     "Android rejected touchscreen injection for '$labelText' at ($x,$screenY); geometry=$bounds",
