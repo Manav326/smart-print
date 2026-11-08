@@ -503,9 +503,9 @@ class PhotoStudioWebViewInstrumentedTest {
         // Finish with an actual touchscreen tap at the requested thumb centre.
         // This is still a native user-input path; it avoids setting DOM/React
         // values directly and makes the precise final thumb position deterministic.
-        automation.executeShellCommand("input tap $x2 $y").use { descriptor ->
-            ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
-        }
+        ParcelFileDescriptor.AutoCloseInputStream(
+            automation.executeShellCommand("input tap $x2 $y")
+        ).bufferedReader().use { it.readText() }
         instrumentation.waitForIdleSync()
 
         val touchTraceText = evaluate(
