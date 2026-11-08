@@ -431,7 +431,7 @@ export default function PhotoStudio({
           <button type="button" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"}><PaintBucket size={17}/><span>Background</span></button>
         </nav>
 
-        <aside className={styles.toolPanel}>
+        <aside className={styles.toolPanel} data-testid="photo-studio-tool-panel">
           <div className={styles.panelHeading}>
             <div><strong>{cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Caption styling":backgroundPanel?"Photo background":"Photo sheet & form details"}</strong><small>{cropPanel?"Frame the photo without changing facial features.":lookPanel?"Use subtle, print-friendly adjustments.":textPanel?"Set how the form details appear under each photo.":backgroundPanel?"Sample a flat background from the photo and replace only the edge-connected area.":"Set the ID photo size, form details and print quantity."}</small></div>
           </div>
@@ -461,7 +461,7 @@ export default function PhotoStudio({
           </>}
 
           {backgroundPanel && <>
-            <div className={styles.backgroundPreviewRow}><span>Sampled background</span><strong>{sourceBackgroundColor?sourceBackgroundColor.toUpperCase():"Not selected"}</strong>{sourceBackgroundColor&&<i style={{background:sourceBackgroundColor}}/>}</div>
+            <div className={styles.backgroundPreviewRow} data-testid="photo-studio-background-state"><span>Sampled background</span><strong>{sourceBackgroundColor?sourceBackgroundColor.toUpperCase():"Not selected"}</strong>{sourceBackgroundColor&&<i style={{background:sourceBackgroundColor}}/>}</div>
             <button type="button" className={styles.secondaryButton} onClick={()=>{setPickingBackground(true);setError("");}}><Pipette size={14}/>{pickingBackground?"Click the background in the preview…":"Pick background from photo"}</button>
             <label className={styles.fieldLabel}>Replacement background<input type="color" value={targetBackgroundColor} onChange={event=>setTargetBackgroundColor(event.target.value)}/></label>
             <div className={styles.backgroundPresets}>{["#ffffff","#f3f6fa","#dcecff","#dff3e7","#f6eadb"].map(color=><button key={color} type="button" style={{background:color}} aria-label={"Set background "+color} aria-pressed={targetBackgroundColor===color} onClick={()=>setTargetBackgroundColor(color)}/>)}</div>
@@ -502,7 +502,7 @@ export default function PhotoStudio({
                 {Array.from({length:maximumLayout.perSheet},(_,index)=>index+1).map(count=><option key={count} value={String(count)}>{count} per page</option>)}
               </select>
             </label>
-            <div className={styles.sheetSummary}>
+            <div className={styles.sheetSummary} data-testid="photo-studio-sheet-summary">
               <div><span>Photo dimensions</span><strong>{size.widthMm} × {size.heightMm} mm</strong></div>
               <div><span>Photos per A4 page</span><strong>{layout.perSheet}</strong></div>
               <div><span>Grid alignment</span><strong>{layout.columns} × {layout.rows}</strong></div>
@@ -534,7 +534,7 @@ export default function PhotoStudio({
           <div className={styles.canvasViewport}>
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
-              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
+              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} data-testid="photo-studio-preview-canvas" draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/> : <div className={styles.loadingState}>{imageError || "Preparing your photo…"}</div>}
               <div className={styles.previewProtection} aria-hidden="true"/>
             </div>
           </div>

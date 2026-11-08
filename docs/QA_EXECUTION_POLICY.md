@@ -10,6 +10,27 @@ This is a standing project instruction. Apply it to Photo Studio, print/PDF work
 4. Do not ask the owner to run local acceptance checks until the applicable GitHub runner jobs have passed on the exact commit under review.
 5. After CI is green, provide the owner with the small set of local acceptance checks that require their own machine, printer, account or device.
 
+## Local owner-run entry point
+
+Use the repository's PowerShell runner from the repository root:
+
+```powershell
+.\scripts\qa\photo-studio-test.ps1 -Help
+.\scripts\qa\photo-studio-test.ps1
+```
+
+The default run installs locked portal dependencies, executes the portal regression suite and Chromium Photo Studio acceptance flow, validates/builds the Windows desktop host and runs Windows API/Agent tests, and runs Android JVM tests plus a debug APK build. It does not connect to a physical printer or submit real payments.
+
+Optional local variants:
+
+```powershell
+.\scripts\qa\photo-studio-test.ps1 -Platform Web -Headed
+.\scripts\qa\photo-studio-test.ps1 -Platform Windows -UseVirtualPdfPrinter
+.\scripts\qa\photo-studio-test.ps1 -Platform Android -RunAndroidEmulator
+```
+
+`-RunAndroidEmulator` requires an online Android emulator and runs the shared Photo Studio inside SmartPrint's actual Android WebView. `-UseVirtualPdfPrinter` opts into the Windows **Microsoft Print to PDF virtual queue only**; it never selects a physical printer. The browser runner writes screenshots, a structured summary, and failure details under the selected artifact directory.
+
 ## Evidence and status discipline
 
 - A written test case, source-code inspection, or test file present in the repository is not an executed PASS.
@@ -35,8 +56,8 @@ This is a standing project instruction. Apply it to Photo Studio, print/PDF work
 
 ## Current runner inventory verified in `.github/workflows/ci.yml`
 
-- Ubuntu 24.04: portal tests, Photo Studio unit tests, Chromium responsive/browser flow, typecheck and build.
-- Windows: API tests, Windows Print Agent tests with the actual Microsoft Print to PDF queue, Windows desktop compilation and installer lifecycle validation.
-- Android: Android unit tests, debug APK build, and API 36 emulator UI tests.
+- Ubuntu 24.04: portal regression tests, Photo Studio layout/PDF tests, Chromium customer/shop-owner browser acceptance, pixel-level page-image checks, typecheck and build.
+- Windows: API tests, Windows Print Agent tests with the Microsoft Print to PDF virtual queue, Windows desktop compilation, Windows Chromium Photo Studio acceptance and installer lifecycle validation.
+- Android: Android JVM tests, debug APK build, API 36 emulator UI tests, and a dedicated instrumented test that operates the shared Photo Studio inside MainActivity's real WebView.
 
 **Acceptance gate:** applicable GitHub-hosted runner jobs must pass on the exact commit before requesting the owner's local acceptance run.

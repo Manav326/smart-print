@@ -32,8 +32,8 @@ test("multiple prepared A4 pages become one multi-page PDF",()=>{
  const value=new TextDecoder("latin1").decode(pdf);
  assert.ok(value.startsWith("%PDF-1.4"));
  assert.match(value,/\/Count 3/);
- assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,3);
- assert.match(value,/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/);
+  assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,pageCount);
+  assert.match(value,/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/);
  const xrefOffset=Number(value.match(/startxref\n(\d+)\n%%EOF/)?.[1]);
  assert.ok(Number.isInteger(xrefOffset));
  assert.ok(value.slice(xrefOffset).startsWith("xref\n"));
@@ -186,7 +186,7 @@ test("50 photos at nine per page build one six-page A4 PDF",()=>{
  const pdf=buildPhotoPdf(Array.from({length:6},()=>jpeg));
  const value=new TextDecoder("latin1").decode(pdf);
  assert.match(value,/\/Count 6/);
- assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,6);
+  assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,pageCount);
 });
 
 test("changing photos per A4 page redraws the live preview",()=>{
@@ -201,4 +201,55 @@ test("Photo Studio returns preview-only JPEG pages and the customer UI brands pr
  assert.match(app,/customer-original-image-preview/);
  assert.match(app,/customer-edited-photo-frame/);
  assert.match(app,/SmartPrint by QuantaEdge/);
+});
+
+test("photo quantity and final-page pagination reconcile for all supported sizes",()=>{
+ const sizes=[
+  {widthMm:35,heightMm:45},
+  {widthMm:25,heightMm:35},
+  {widthMm:50.8,heightMm:50.8},
+  {widthMm:101.6,heightMm:152.4}
+ ];
+ for(const size of sizes){
+  const capacity=getPhotoSheetLayout(size).perSheet;
+  for(const perPage of [...new Set([1,Math.max(1,Math.floor(capacity/2)),capacity])]){
+   for(let requested=1;requested<=100;requested++){
+    const pages=Math.ceil(requested/perPage);
+    const finalPageCount=requested-(pages-1)*perPage;
+    assert.ok(finalPageCount>=1&&finalPageCount<=perPage);
+    assert.equal((pages-1)*perPage+finalPageCount,requested);
+   }
+  }
+ }
+});
+
+test("photo layout rejects zero, negative, non-finite and physically impossible dimensions",()=>{
+ for(const size of [
+  {widthMm:0,heightMm:45},
+  {widthMm:-1,heightMm:45},
+  {widthMm:Number.NaN,heightMm:45},
+  {widthMm:35,heightMm:Number.POSITIVE_INFINITY},
+  {widthMm:500,heightMm:45},
+  {widthMm:35,heightMm:500}
+ ]) assert.throws(()=>getPhotoSheetLayout(size),RangeError);
+ assert.throws(()=>getPhotoSheetLayout({widthMm:35,heightMm:45},-1),RangeError);
+ assert.throws(()=>getPhotoSheetLayout({widthMm:35,heightMm:45},Number.NaN),RangeError);
+});
+
+test("100 requested photos reconcile to every page in one valid multi-page PDF",()=>{
+ const jpeg=new Uint8Array([0xff,0xd8,0xff,0xd9]);
+ for(const perPage of [1,2,5,9,25]){
+  const pageCount=Math.ceil(100/perPage);
+  const pdf=buildPhotoPdf(Array.from({length:pageCount},()=>jpeg));
+  const value=new TextDecoder("latin1").decode(pdf);
+  assert.match(value,new RegExp("/Count "+pageCount+"\\b"));
+  assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,pageCount);
+  assert.match(value,/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/);
+ }
+});
+
+test("PDF builder rejects incomplete or non-JPEG page images",()=>{
+ assert.throws(()=>buildPhotoPdf([]),/At least one/);
+ assert.throws(()=>buildPhotoPdf([new Uint8Array([0xff,0xd8,0x00,0x00])]),/complete JPEG/);
+ assert.throws(()=>buildPhotoPdf([new Uint8Array([0x00,0x00,0xff,0xd9])]),/complete JPEG/);
 });

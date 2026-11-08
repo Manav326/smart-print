@@ -35,6 +35,22 @@ jobs:
         run: node --experimental-strip-types --test apps/portal/tests/portal-routing.test.ts apps/portal/tests/order-journey.test.ts apps/portal/tests/customer-session-state.test.ts apps/portal/tests/table-layout.test.ts apps/portal/tests/theme-responsive.test.ts apps/portal/tests/batch-checkout-state.test.ts apps/portal/tests/local-upload-routing.test.ts apps/portal/tests/print-fulfilment-flow.test.ts apps/portal/tests/photo-studio.test.ts apps/portal/tests/upi-payment-intent.test.ts
       - name: Install Chromium for real-browser appearance and viewport checks
         run: npx --yes --package=playwright@1.56.1 playwright install --with-deps chromium
+      - name: Validate Photo Studio browser runner syntax
+        run: node --check apps/portal/tests/photo-studio.browser.mjs
+      - name: Run Photo Studio real-browser acceptance suite
+        env:
+          VITE_API_BASE_URL: ""
+        run: |
+          mkdir -p artifacts/photo-studio-browser
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" SMARTPRINT_PHOTO_STUDIO_ARTIFACT_DIR=artifacts/photo-studio-browser node apps/portal/tests/photo-studio.browser.mjs'
+      - name: Upload Photo Studio browser acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-photo-studio-browser-qa
+          path: artifacts/photo-studio-browser/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify theme persistence and responsive layouts in Chromium
         run: |
           npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" node apps/portal/tests/theme-responsive.browser.mjs'
@@ -198,6 +214,41 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install desktop dependencies
         run: pnpm install --frozen-lockfile
+      - name: Validate local Photo Studio QA runner help and syntax
+        shell: pwsh
+        run: |
+          node --check apps/portal/tests/photo-studio.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Photo Studio browser runner syntax validation failed." }
+          pwsh -File scripts/qa/photo-studio-test.ps1 -Help
+          if ($LASTEXITCODE -ne 0) { throw "Photo Studio local runner help command failed." }
+      - name: Install Chromium for Windows Photo Studio acceptance
+        shell: pwsh
+        run: |
+          npx --yes --package=playwright@1.56.1 playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw "Playwright Chromium installation failed." }
+      - name: Run Photo Studio browser acceptance on Windows
+        shell: pwsh
+        env:
+          VITE_API_BASE_URL: ""
+        run: |
+          $cache = (npm config get cache).Trim()
+          $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\.mjs$" } |
+            Select-Object -First 1
+          if (-not $module) { throw "Could not locate the isolated Playwright package installed by npx." }
+          New-Item -ItemType Directory -Force -Path artifacts/photo-studio-windows | Out-Null
+          $env:PLAYWRIGHT_MODULE_DIR = $module.DirectoryName
+          $env:SMARTPRINT_PHOTO_STUDIO_ARTIFACT_DIR = "artifacts/photo-studio-windows"
+          node apps/portal/tests/photo-studio.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Windows Photo Studio browser acceptance failed." }
+      - name: Upload Windows Photo Studio browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-photo-studio-windows-browser-qa
+          path: artifacts/photo-studio-windows/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Compile the native Windows desktop host
         shell: pwsh
         run: |
@@ -353,6 +404,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -378,6 +435,32 @@ jobs:
           PY
       - name: Install Android SDK 36
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Install the shared Photo Studio WebView fixture
+        run: pnpm install --frozen-lockfile
+      - name: Start the Photo Studio fixture server for Android emulator WebView
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup pnpm --filter @smart-print/portal dev --host 0.0.0.0 --port 3000 --strictPort > "$RUNNER_TEMP/photo-studio-vite.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/photo-studio-vite.pid"
+          ready=false
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:3000/tests/photo-studio.browser.html >/dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$(cat "$RUNNER_TEMP/photo-studio-vite.pid")" 2>/dev/null; then
+              cat "$RUNNER_TEMP/photo-studio-vite.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != "true" ]]; then
+            cat "$RUNNER_TEMP/photo-studio-vite.log"
+            echo "Photo Studio fixture server did not become ready." >&2
+            exit 1
+          fi
+          echo "Android emulator WebView fixture is ready on host port 3000."
       - name: Run Android unit tests and build APK
         run: gradle --no-daemon -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" :app:testDebugUnitTest :app:assembleDebug
       - name: Enable KVM for Android emulator
@@ -395,6 +478,14 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bash scripts/qa/android-emulator-ci.sh
+      - name: Upload Android Photo Studio WebView fixture log
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smart-print-android-photo-studio-webview-fixture
+          path: ${{ runner.temp }}/photo-studio-vite.log
+          if-no-files-found: ignore
+          retention-days: 14
       - name: Upload Android test reports
         if: always()
         uses: actions/upload-artifact@v7

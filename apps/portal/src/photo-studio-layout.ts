@@ -13,10 +13,21 @@ export type PhotoSheetLayout = {
 
 /** captionHeightMm adds a label region without shrinking the physical photo. */
 export function getPhotoSheetLayout(size: PhotoSheetSize, captionHeightMm = 0, requestedPhotosPerPage?: number): PhotoSheetLayout {
+  if (!Number.isFinite(size.widthMm) || !Number.isFinite(size.heightMm) ||
+      size.widthMm <= 0 || size.heightMm <= 0) {
+    throw new RangeError("Photo width and height must be positive, finite millimetre values.");
+  }
+  if (!Number.isFinite(captionHeightMm) || captionHeightMm < 0) {
+    throw new RangeError("Caption height must be a non-negative, finite millimetre value.");
+  }
+
   const margin = 8, gap = 3, tileHeight = size.heightMm + captionHeightMm;
   const usableW = A4_WIDTH_MM - margin * 2, usableH = A4_HEIGHT_MM - margin * 2;
-  const maximumColumns = Math.max(1, Math.floor((usableW + gap) / (size.widthMm + gap)));
-  const maximumRows = Math.max(1, Math.floor((usableH + gap) / (tileHeight + gap)));
+  const maximumColumns = Math.floor((usableW + gap) / (size.widthMm + gap));
+  const maximumRows = Math.floor((usableH + gap) / (tileHeight + gap));
+  if (maximumColumns < 1 || maximumRows < 1) {
+    throw new RangeError("The selected photo dimensions do not fit inside the A4 safe area.");
+  }
   const maximumPhotos = maximumColumns * maximumRows;
   if (requestedPhotosPerPage !== undefined &&
       (!Number.isInteger(requestedPhotosPerPage) || requestedPhotosPerPage < 1 || requestedPhotosPerPage > maximumPhotos)) {
