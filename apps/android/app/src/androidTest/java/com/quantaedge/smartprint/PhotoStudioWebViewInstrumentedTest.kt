@@ -19,6 +19,7 @@ import org.junit.runner.RunWith
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import kotlin.math.roundToInt
 
 @RunWith(AndroidJUnit4::class)
 class PhotoStudioWebViewInstrumentedTest {
@@ -470,7 +471,7 @@ class PhotoStudioWebViewInstrumentedTest {
         val x1 = startScreenX.roundToInt()
         val x2 = endScreenX.roundToInt()
         val y = screenY.roundToInt()
-        val command = "input swipe $x1 $y $x2 $y 650; status=\\$?; echo __SMARTPRINT_TOUCH_EXIT__\\$status"
+        val command = "input swipe $x1 $y $x2 $y 650 && echo __SMARTPRINT_TOUCH_EXIT__0 || echo __SMARTPRINT_TOUCH_EXIT__1"
         val shellOutput = ParcelFileDescriptor.AutoCloseInputStream(
             automation.executeShellCommand(command)
         ).bufferedReader().use { it.readText() }
