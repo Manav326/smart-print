@@ -3,6 +3,7 @@ package com.quantaedge.smartprint
 import android.net.Uri
 import android.os.SystemClock
 import android.os.ParcelFileDescriptor
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.webkit.WebView
 import androidx.test.core.app.ActivityScenario
