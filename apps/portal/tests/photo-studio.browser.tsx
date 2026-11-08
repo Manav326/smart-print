@@ -54,16 +54,22 @@ function createFixturePhoto(): Promise<File> {
   });
 }
 
+async function fingerprintFile(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  return Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, "0")).join("");
+}
+
 function PhotoStudioBrowserFixture() {
   const [source, setSource] = useState<File | null>(null);
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState("");
+  const [sourceFingerprint, setSourceFingerprint] = useState("");
   const [error, setError] = useState("");
   const applyAttempts = useRef(0);
 
   useEffect(() => {
     let active = true;
-    void createFixturePhoto().then(file => {
+    void createFixturePhoto().then(async file => {
       if (!active) return;
       if (failRasterOnce || oversizedRaster) {
         const originalToBlob = HTMLCanvasElement.prototype.toBlob;
@@ -83,6 +89,9 @@ function PhotoStudioBrowserFixture() {
           originalToBlob.call(this, callback, type, quality);
         };
       }
+      const fingerprint = await fingerprintFile(file);
+      if (!active) return;
+      setSourceFingerprint(fingerprint);
       setSource(file);
     }).catch(reason => {
       if (active) setError(reason instanceof Error ? reason.message : String(reason));
@@ -184,7 +193,9 @@ function PhotoStudioBrowserFixture() {
       pixelProbes,
       finalUnusedSlotRgb,
       applyAttempts: applyAttempts.current,
-      bytes: sheet.file.size
+      bytes: sheet.file.size,
+      sourceFingerprintBefore: sourceFingerprint,
+      sourceFingerprintAfter: await fingerprintFile(source!)
     }));
     setOpen(false);
   }
@@ -205,6 +216,7 @@ function PhotoStudioBrowserFixture() {
         Open Photo Studio
       </button>
       {error && <p role="alert">{error}</p>}
+      <output id="photo-studio-source-fingerprint" style={{ display: "none" }}>{sourceFingerprint}</output>
       <output id="photo-studio-result" data-ready={Boolean(source)}>{result}</output>
     </section>
     {open && source && <PhotoStudio

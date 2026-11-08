@@ -490,7 +490,7 @@ try {
   const queueNav = page.locator(".sidebar .nav-item").filter({ hasText: "Print Queue" }).first();
   await queueNav.waitFor({ state: "visible", timeout: 20000 });
   await queueNav.click();
-  await page.getByRole("heading", { name: "Customer print jobs" }).waitFor({ state: "visible", timeout: 20000 });
+  await page.getByRole("heading", { name: "Print jobs", exact: true }).waitFor({ state: "visible", timeout: 20000 });
   const batchRow = page.locator(".queue-batch-summary-row").filter({ hasText: "QA mixed PDF JPG PNG refund batch" });
   await batchRow.waitFor({ state: "visible", timeout: 20000 });
   assert.match(await batchRow.innerText(), /3 files/i);
