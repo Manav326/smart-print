@@ -156,32 +156,53 @@ function verifyPdfEnvelope(buffer, expectedPages) {
   return { bytes: bytes.length, pageCount: expectedPages, a4MediaBox: true, validXrefObjects: objectNumber - 1 };
 }
 
+function verifyPreparedPdfResult(result, expected) {
+  assert.equal(result.mediaType, "application/pdf");
+  assert.equal(result.sizeCode, expected.sizeCode);
+  assert.equal(result.photoCount, expected.photoCount);
+  assert.equal(result.photosPerPage, expected.photosPerPage);
+  assert.equal(result.pageCount, expected.pageCount);
+  assert.ok(result.bytes > 1000, "The prepared PDF must contain real output bytes.");
+  assert.equal(result.mediaBoxCount, expected.pageCount,
+    "Every exported page must use the exact A4 MediaBox.");
+  assert.equal(result.fullPageImageTransforms, expected.pageCount,
+    "Each A4 PDF page must place one full-page raster.");
+  assert.equal(result.previewPageCount, expected.pageCount);
+  assert.equal(result.pdfImageSizes.length, expected.pageCount);
+  for (const [width, height] of result.pdfImageSizes) {
+    assert.equal(width, 2480, "Every page image must be 300-DPI A4 width.");
+    assert.equal(height, 3508, "Every page image must be 300-DPI A4 height.");
+  }
+  assert.deepEqual(result.embeddedPreviewPages, Array(expected.pageCount).fill(true),
+    "The PDF must embed the exact JPEG page previews reviewed in Photo Studio.");
+  assert.equal(result.pixelProbes.length, expected.photoCount,
+    "Every requested photo tile must have a raster pixel probe.");
+  const expectedPagePhotoCounts = Array.from({ length: expected.pageCount }, (_, index) =>
+    Math.min(expected.photosPerPage, expected.photoCount - index * expected.photosPerPage));
+  const observedPagePhotoCounts = expectedPagePhotoCounts.map((_, index) =>
+    result.pixelProbes.filter(probe => probe.page === index + 1).length);
+  assert.deepEqual(observedPagePhotoCounts, expectedPagePhotoCounts,
+    "The raster must contain the expected number of photo tiles on each page.");
+  for (const probe of result.pixelProbes) {
+    assert.equal(probe.rgb.length, 3);
+    assert.equal(probe.backgroundRgb.length, 3);
+    assert.ok(probe.rgb.some(channel => channel < 245),
+      "Each photo centre must contain image pixels, not blank paper.");
+  }
+  return result;
+}
+
 async function verifyComponentResult(page, expectedMode, expectedPages = 2) {
   const raw = await page.locator("#photo-studio-result").textContent();
   assert.ok(raw, "The Photo Studio did not return a prepared PDF result.");
   const result = JSON.parse(raw);
   assert.equal(result.mode, expectedMode);
-  assert.equal(result.harness, "shared-component-only; persistence is verified by the separate shop-app browser test");
-  assert.equal(result.mediaType, "application/pdf");
-  assert.equal(result.sizeCode, "35x45");
-  assert.equal(result.photoCount, 17);
-  assert.equal(result.photosPerPage, 9);
-  assert.equal(result.pageCount, expectedPages);
-  assert.equal(result.pageImageCount, expectedPages);
-  assert.equal(result.pdfHasExactA4MediaBox, true);
-  assert.equal(result.sourceIntegrityPreserved, true, "Preparing a sheet must not mutate its uploaded original.");
-  assert.ok(result.outputBytes > 1000);
-  assert.deepEqual(result.pages.map(item => item.photoCount), [9, 8]);
-  for (const item of result.pages) {
-    assert.equal(item.width, 2480, "Every page image must be 300-DPI A4 width.");
-    assert.equal(item.height, 3508, "Every page image must be 300-DPI A4 height.");
-    assert.equal(item.allPhotoCentresContainImage, true, "Every expected photo tile must contain real image pixels.");
-    assert.equal(item.allPhotoBoundsContainImage, true, "Tile dimensions and placement must match the selected physical size.");
-    assert.equal(item.allInterPhotoGapsRemainBlank, true, "Photo gaps must remain clear for cutting.");
-    assert.equal(item.jpegPayloadEmbeddedInPdf, true, "The PDF must embed the exact reviewed page image.");
-  }
-  if (expectedMode === "shop") assert.ok(result.sourceJobId, "The component harness must retain its source-job context.");
-  return result;
+  return verifyPreparedPdfResult(result, {
+    sizeCode: "35x45",
+    photoCount: 17,
+    photosPerPage: 9,
+    pageCount: expectedPages
+  });
 }
 
 async function exerciseComponentFullFlow(browser, scenario) {
@@ -250,7 +271,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await page.getByLabel("Date of birth (optional)").fill("2000-01-02");
   await page.getByRole("button", { name: "Text" }).click();
   await page.getByLabel("Caption font size").selectOption("7");
-  await setControlValue(page, "Caption colour", "#202020");
+  await setControlValue(page, "Caption colour", "#c02020");
   await page.getByRole("button", { name: "Sheet", exact: true }).click();
 
   await size.selectOption("35x45");
@@ -275,8 +296,13 @@ async function exerciseComponentFullFlow(browser, scenario) {
   const result = await verifyComponentResult(page, scenario.mode);
   assert.equal(result.sourceFingerprintBefore, originalFingerprint);
   assert.equal(result.sourceFingerprintAfter, originalFingerprint, "The original source file must remain byte-identical after editing and PDF preparation.");
-  assert.equal(result.backgroundSampled, true);
-  assert.equal(result.captionsIncluded, true);
+  const targetBackground = [220, 236, 255];
+  for (const probe of result.pixelProbes) {
+    assert.ok(probe.backgroundRgb.every((value, index) => Math.abs(value - targetBackground[index]) <= 40),
+      "Every photo tile must contain the selected replacement background colour.");
+  }
+  const captionPixelCount = result.pixelProbes.reduce((total, probe) => total + probe.captionRedPixels, 0);
+  assert.ok(captionPixelCount > 0, "Opt-in red name/DOB captions must appear in the exported raster.");
   assert.equal(pageErrors.length, 0, "Uncaught Photo Studio component errors: " + pageErrors.join("; "));
   await page.screenshot({ path: join(artifactDirectory, scenario.mode + "-" + scenario.theme + "-prepared.png"), fullPage: true });
   await context.close();
@@ -308,25 +334,12 @@ async function exercisePhotoSizeOutputs(browser) {
     }, { timeout: 90000 });
     const result = JSON.parse(await page.locator("#photo-studio-result").textContent() ?? "{}");
     const expectedPages = Math.ceil(3 / expectedPerPage);
-    assert.equal(result.mediaType, "application/pdf");
-    assert.equal(result.sizeCode, sizeCode);
-    assert.equal(result.photoCount, 3);
-    assert.equal(result.photosPerPage, expectedPerPage);
-    assert.equal(result.pageCount, expectedPages);
-    assert.equal(result.pageImageCount, expectedPages);
-    assert.equal(result.pdfHasExactA4MediaBox, true);
-    assert.equal(result.sourceIntegrityPreserved, true);
-    assert.ok(result.outputBytes > 1000);
-    assert.equal(result.pages.length, expectedPages);
-    assert.equal(result.pages.reduce((total, item) => total + item.photoCount, 0), 3);
-    for (const item of result.pages) {
-      assert.equal(item.width, 2480);
-      assert.equal(item.height, 3508);
-      assert.equal(item.allPhotoCentresContainImage, true);
-      assert.equal(item.allPhotoBoundsContainImage, true, sizeCode + " tile edges must respect the chosen photo size.");
-      assert.equal(item.allInterPhotoGapsRemainBlank, true);
-      assert.equal(item.jpegPayloadEmbeddedInPdf, true);
-    }
+    verifyPreparedPdfResult(result, {
+      sizeCode,
+      photoCount: 3,
+      photosPerPage: expectedPerPage,
+      pageCount: expectedPages
+    });
     await page.screenshot({ path: join(artifactDirectory, "photo-size-" + sizeCode + ".png"), fullPage: true });
     generated.push({ sizeCode, requestedPhotos: 3, photosPerPage: expectedPerPage, pageCount: expectedPages });
   }
