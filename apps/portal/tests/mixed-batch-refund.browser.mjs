@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -36,74 +36,16 @@ const serverArgs = appMode === "desktop"
   ? ["--filter", "@smart-print/desktop", "dev", "--host", "127.0.0.1", "--port", port, "--strictPort"]
   : ["--filter", "@smart-print/portal", "dev", "--host", "127.0.0.1", "--port", port, "--strictPort"];
 
-function configureNativeWebViewDebugPolicy() {
-  const key = "HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments";
-  const valueName = "smartprint-desktop.exe";
-  const runReg = args => spawnSync("reg.exe", args, {
-    encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
-  });
-  const describe = result => [result.stdout || "", result.stderr || ""].join("\n").trim();
-
-  const keyBefore = runReg(["query", key]);
-  const keyExisted = keyBefore.status === 0;
-  if (!keyExisted && !/unable to find|could not find/i.test(describe(keyBefore))) {
-    throw new Error("Could not inspect the current WebView2 debug policy: " + describe(keyBefore));
-  }
-
-  const valueBefore = runReg(["query", key, "/v", valueName]);
-  let previous = null;
-  if (valueBefore.status === 0) {
-    const match = describe(valueBefore).split(/\r?\n/)
-      .map(line => line.match(/^\s*smartprint-desktop\.exe\s+(REG_\w+)\s+(.*)$/i))
-      .find(Boolean);
-    if (!match) throw new Error("Could not parse the existing SmartPrint WebView2 debug policy.");
-    previous = { type: match[1], value: match[2] };
-  } else if (!/unable to find|could not find/i.test(describe(valueBefore))) {
-    throw new Error("Could not inspect the SmartPrint WebView2 debug policy: " + describe(valueBefore));
-  }
-
-  const debugArguments = "--remote-debugging-port=" + webViewDebugPort;
-  const configured = runReg([
-    "add", key, "/v", valueName, "/t", previous?.type || "REG_SZ", "/d", debugArguments, "/f"
-  ]);
-  if (configured.status !== 0) {
-    throw new Error("Could not enable app-scoped WebView2 CDP: " + describe(configured));
-  }
-  console.log("Enabled localhost CDP through the temporary SmartPrint WebView2 per-app policy.");
-
-  return () => {
-    if (previous) {
-      const restored = runReg(["add", key, "/v", valueName, "/t", previous.type, "/d", previous.value, "/f"]);
-      if (restored.status !== 0) throw new Error("Could not restore the previous WebView2 policy: " + describe(restored));
-    } else {
-      const removed = runReg(["delete", key, "/v", valueName, "/f"]);
-      if (removed.status !== 0 && !/unable to find|could not find/i.test(describe(removed))) {
-        throw new Error("Could not remove the temporary WebView2 policy: " + describe(removed));
-      }
-      if (!keyExisted) {
-        const removedKey = runReg(["delete", key, "/f"]);
-        if (removedKey.status !== 0 && !/unable to find|could not find/i.test(describe(removedKey))) {
-          throw new Error("Could not remove the temporary WebView2 policy key: " + describe(removedKey));
-        }
-      }
-    }
-  };
-}
-
 function nativeWebViewProcessDiagnostics() {
   const query = spawnSync("powershell.exe", [
     "-NoProfile", "-NonInteractive", "-Command",
     "Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('smartprint-desktop.exe','msedgewebview2.exe') } | ForEach-Object { '{0} PID={1} Parent={2} Args={3}' -f $_.Name,$_.ProcessId,$_.ParentProcessId,$_.CommandLine }"
   ], { encoding: "utf8", windowsHide: true, timeout: 15000 });
-  const policy = spawnSync("reg.exe", [
-    "query", "HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments",
-    "/v", "smartprint-desktop.exe"
-  ], { encoding: "utf8", windowsHide: true, timeout: 15000 });
   return [
     "Native process diagnostics:",
     query.stdout || query.stderr || "(no process details)",
-    "WebView2 policy:",
-    policy.stdout || policy.stderr || "(no policy details)"
+    "Tauri test additionalBrowserArgs:",
+    nativeBrowserArguments || "(not configured)"
   ].join("\n");
 }
 
@@ -117,12 +59,26 @@ function startServer() {
     const userDataFolder = process.env.SMARTPRINT_WEBVIEW2_USER_DATA_FOLDER ||
       join(tmpdir(), "smartprint-mixed-batch-webview2-" + process.pid + "-" + Date.now());
     mkdirSync(userDataFolder, { recursive: true });
-    nativeRegistryRestore = configureNativeWebViewDebugPolicy();
+    const tauriDirectory = join(process.cwd(), "apps", "desktop", "src-tauri");
+    const tauriConfigPath = join(tauriDirectory, ".tauri.qa-webview2-" + process.pid + ".json");
+    const tauriConfig = JSON.parse(readFileSync(join(tauriDirectory, "tauri.conf.json"), "utf8"));
+    const mainWindow = tauriConfig.app?.windows?.find(window => window.label === "main");
+    if (!mainWindow) throw new Error("The Tauri application configuration has no main window.");
+    nativeBrowserArguments = [
+      "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection",
+      "--remote-debugging-port=" + webViewDebugPort
+    ].join(" ");
+    mainWindow.additionalBrowserArgs = nativeBrowserArguments;
+    writeFileSync(tauriConfigPath, JSON.stringify(tauriConfig, null, 2), "utf8");
+    nativeConfigPath = tauriConfigPath;
     const nativeEnvironment = {
       ...baseEnvironment,
       WEBVIEW2_USER_DATA_FOLDER: userDataFolder
     };
-    const command = ["pnpm", "--filter", "@smart-print/desktop", "exec", "tauri", "dev"].join(" ");
+    const command = [
+      "pnpm", "--filter", "@smart-print/desktop", "exec", "tauri", "dev",
+      "--config", '"' + tauriConfigPath + '"'
+    ].join(" ");
     child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", command], {
       ...options, env: nativeEnvironment
     });
@@ -423,6 +379,8 @@ let nativeCredentialSessionRestored = false;
 const pageErrors = [];
 let desktopShellBooted = false;
 let duplicateReplay = null;
+let nativeConfigPath = null;
+let nativeBrowserArguments = null;
 let nativeRegistryRestore = null;
 
 async function restoreNativeCredentialSession() {
@@ -700,18 +658,18 @@ try {
   }
   if (browser) await browser.close();
   stopServer(server);
-  if (nativeRegistryRestore) {
+  if (nativeConfigPath) {
     try {
-      nativeRegistryRestore();
-      nativeRegistryRestore = null;
+      unlinkSync(nativeConfigPath);
+      nativeConfigPath = null;
     } catch (error) {
       restoreError = restoreError || (error instanceof Error ? error : new Error(String(error)));
       writeFileSync(
-        join(artifactDirectory, "mixed-batch-refund-native-policy-restore-failure.txt"),
+        join(artifactDirectory, "mixed-batch-refund-native-config-cleanup-failure.txt"),
         restoreError.message,
         "utf8"
       );
     }
   }
-  if (restoreError) throw new Error("Could not restore the prior Windows QA state: " + restoreError.message);
+  if (restoreError) throw new Error("Could not clean up the temporary native QA config: " + restoreError.message);
 }
