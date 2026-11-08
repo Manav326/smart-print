@@ -63,6 +63,8 @@ async function assertNoPageOverflow(page, label) {
 }
 
 async function openComponentStudio(page) {
+  const previousDialog = page.getByRole("dialog", { name: "Photo Studio" });
+  if (await previousDialog.count()) await previousDialog.waitFor({ state: "detached" });
   await page.locator("#open-photo-studio").waitFor({ state: "visible" });
   await page.waitForFunction(() => {
     const button = document.querySelector("#open-photo-studio");
@@ -276,6 +278,7 @@ async function exercisePhotoSizeOutputs(browser) {
     await openComponentStudio(page);
     await page.getByRole("button", { name: "Sheet", exact: true }).click();
     await page.getByLabel("Photo size").selectOption(sizeCode);
+    assert.equal(await page.getByLabel("Photo size").inputValue(), sizeCode, "The requested photo size must be selected before export.");
     await setControlValue(page, "Number of photos", "3");
     await page.getByLabel("Photos per A4 page").selectOption("auto");
     const summary = await page.locator('[data-testid="photo-studio-sheet-summary"]').innerText();

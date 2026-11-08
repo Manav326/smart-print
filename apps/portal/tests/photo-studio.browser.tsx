@@ -244,7 +244,7 @@ function PhotoStudioBrowserFixture() {
     <section style={{ display: "grid", gap: 12, maxWidth: 520 }}>
       <h1 style={{ margin: 0, fontSize: 22 }}>Photo Studio QA fixture</h1>
       <p style={{ margin: 0, lineHeight: 1.6 }}>A synthetic test image is used. No customer document or external service is loaded.</p>
-      <button id="open-photo-studio" type="button" disabled={!source || !sourceFingerprint} onClick={() => { setError(""); setOpen(true); }}>
+      <button id="open-photo-studio" type="button" disabled={!source || !sourceFingerprint} onClick={() => { setError(""); setResult(""); setOpen(true); }}>
         Open Photo Studio
       </button>
       {error && <p role="alert">{error}</p>}
