@@ -12,6 +12,38 @@ Use [FINAL_PRE_PRODUCTION_RELEASE_GATE.md](FINAL_PRE_PRODUCTION_RELEASE_GATE.md)
 4. Do not ask the owner to run local acceptance checks until the applicable GitHub runner jobs have passed on the exact commit under review.
 5. After CI is green, provide the owner with the small set of local acceptance checks that require their own machine, printer, account or device.
 
+## Local owner-run Photo Studio entry point
+
+Use the repository PowerShell runner from the repository root:
+
+```powershell
+.\scripts\qa\photo-studio-test.ps1 -Help
+.\scripts\qa\photo-studio-test.ps1
+```
+
+The default run executes portal logic and Chromium acceptance, Windows API/Agent tests, and Android JVM tests plus a debug APK build. Optional variants are:
+
+```powershell
+.\scripts\qa\photo-studio-test.ps1 -Platform Web -Headed
+.\scripts\qa\photo-studio-test.ps1 -Platform Windows -UseVirtualPdfPrinter
+.\scripts\qa\photo-studio-test.ps1 -Platform Android -RunAndroidEmulator
+```
+
+`-RunAndroidEmulator` runs the shared Photo Studio inside the real Android WebView. `-UseVirtualPdfPrinter` opts into only the Microsoft Print to PDF virtual queue. No real payment or physical printer is used.
+
+## Mixed-file batch page rejection and refund acceptance
+
+Run the dedicated mixed-file scenario:
+
+```powershell
+.\scripts\qa\mixed-batch-refund-test.ps1 -Help
+.\scripts\qa\mixed-batch-refund-test.ps1 -Platform All
+```
+
+The fixture contains one three-page PDF, one JPEG and one PNG under one verified batch payment. It undoes a page rejection before confirmation, rejects PDF pages 2 and 3 and both image files, verifies the exact per-page/file refund allocation, checks the three-entry refund audit and retries idempotently. The expected fixture totals are ₹50.00 paid, ₹40.00 refunded and ₹10.00 retained for the accepted PDF page.
+
+CI exercises the shop workflow in Linux Chromium, the desktop renderer on Windows, and the actual Tauri/WebView2 Windows application. The native test uses a localhost-only CDP port and the real Tauri secure-session bridge, saves and restores the prior Windows Credential Manager session, and intercepts APIs with isolated in-memory fixtures. It does not submit a real payment, transfer a refund, dispatch a print job or produce physical output.
+
 ## Evidence and status discipline
 
 - A written test case, source-code inspection, or test file present in the repository is not an executed PASS.
@@ -37,8 +69,8 @@ Use [FINAL_PRE_PRODUCTION_RELEASE_GATE.md](FINAL_PRE_PRODUCTION_RELEASE_GATE.md)
 
 ## Current runner inventory verified in `.github/workflows/ci.yml`
 
-- Ubuntu 24.04: portal tests, Photo Studio unit tests, Chromium responsive/browser flow, typecheck and build.
-- Windows: API tests, Windows Print Agent tests with the actual Microsoft Print to PDF queue, Windows desktop compilation and installer lifecycle validation.
+- Ubuntu 24.04: portal regression tests, dedicated Photo Studio browser acceptance, mixed-type batch page rejection/refund browser acceptance, responsive/theme suite, typecheck and build.
+- Windows: API/Agent tests and Microsoft Print to PDF integration; Photo Studio browser acceptance; mixed-batch refund acceptance in the desktop renderer and actual native Tauri/WebView2 host; Windows desktop compilation, smoke launch and installer lifecycle validation.
 - Android: Android unit tests, debug APK build, and API 36 emulator UI tests.
 
 **Acceptance gate:** applicable GitHub-hosted runner jobs must pass on the exact commit before requesting the owner's local acceptance run.

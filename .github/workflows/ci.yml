@@ -49,6 +49,43 @@ jobs:
         id: chromium_install
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: npx --yes --package=playwright@1.56.1 playwright install --with-deps chromium
+      - name: Validate Photo Studio browser runner syntax
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        run: node --check apps/portal/tests/photo-studio.browser.mjs
+      - name: Run Photo Studio real-browser acceptance suite
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        env:
+          VITE_API_BASE_URL: ""
+        run: |
+          mkdir -p artifacts/photo-studio-browser
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" SMARTPRINT_PHOTO_STUDIO_ARTIFACT_DIR=artifacts/photo-studio-browser node apps/portal/tests/photo-studio.browser.mjs'
+      - name: Upload Photo Studio browser acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-photo-studio-browser-qa
+          path: artifacts/photo-studio-browser/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Validate mixed-batch refund browser runner syntax
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        run: node --check apps/portal/tests/mixed-batch-refund.browser.mjs
+      - name: Run mixed-type batch page rejection and complete refund acceptance (web shop)
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        env:
+          VITE_API_BASE_URL: ""
+          SMARTPRINT_MIXED_BATCH_REFUND_APP: web
+          SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR: artifacts/mixed-batch-refund-web
+        run: |
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" node apps/portal/tests/mixed-batch-refund.browser.mjs'
+      - name: Upload web mixed-batch refund evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-mixed-batch-refund-web-qa
+          path: artifacts/mixed-batch-refund-web/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Verify theme persistence and responsive layouts in Chromium
         if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
         run: |
@@ -278,6 +315,73 @@ jobs:
       - name: Install desktop dependencies
         id: desktop_dependencies
         run: pnpm install --frozen-lockfile
+      - name: Validate local Photo Studio and mixed-batch QA runner help and syntax
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          node --check apps/portal/tests/photo-studio.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Photo Studio browser runner syntax validation failed." }
+          node --check apps/portal/tests/mixed-batch-refund.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Mixed-batch refund browser runner syntax validation failed." }
+          pwsh -NoProfile -File scripts/qa/photo-studio-test.ps1 -Help
+          if ($LASTEXITCODE -ne 0) { throw "Photo Studio test runner help failed." }
+          pwsh -NoProfile -File scripts/qa/mixed-batch-refund-test.ps1 -Help
+          if ($LASTEXITCODE -ne 0) { throw "Mixed-batch refund test runner help failed." }
+      - name: Install Chromium for Windows Photo Studio and mixed-batch acceptance
+        id: browser_chromium_install
+        if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          npx --yes --package=playwright@1.56.1 playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw "Playwright Chromium installation failed." }
+      - name: Run Photo Studio browser acceptance on Windows
+        if: ${{ !cancelled() && steps.browser_chromium_install.outcome == 'success' }}
+        shell: pwsh
+        env:
+          VITE_API_BASE_URL: ""
+        run: |
+          $cache = (npm config get cache).Trim()
+          $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\.mjs$" } |
+            Select-Object -First 1
+          if (-not $module) { throw "Could not locate the isolated Playwright package installed by npx." }
+          New-Item -ItemType Directory -Force -Path artifacts/photo-studio-windows | Out-Null
+          $env:PLAYWRIGHT_MODULE_DIR = $module.DirectoryName
+          $env:SMARTPRINT_PHOTO_STUDIO_ARTIFACT_DIR = "artifacts/photo-studio-windows"
+          node apps/portal/tests/photo-studio.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Windows Photo Studio browser acceptance failed." }
+      - name: Upload Windows Photo Studio browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-photo-studio-windows-browser-qa
+          path: artifacts/photo-studio-windows/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Run mixed-type batch page rejection and complete refund acceptance (Windows desktop renderer)
+        if: ${{ !cancelled() && steps.browser_chromium_install.outcome == 'success' }}
+        shell: pwsh
+        env:
+          VITE_API_BASE_URL: ""
+          SMARTPRINT_MIXED_BATCH_REFUND_APP: desktop
+          SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR: artifacts/mixed-batch-refund-windows
+        run: |
+          $cache = (npm config get cache).Trim()
+          $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\.mjs$" } |
+            Select-Object -First 1
+          if (-not $module) { throw "Could not locate the isolated Playwright package installed by npx." }
+          $env:PLAYWRIGHT_MODULE_DIR = $module.DirectoryName
+          node apps/portal/tests/mixed-batch-refund.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Windows desktop mixed-batch refund acceptance failed." }
+      - name: Upload Windows desktop mixed-batch refund evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-mixed-batch-refund-windows-desktop-qa
+          path: artifacts/mixed-batch-refund-windows/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Build desktop frontend
         id: desktop_frontend_build
         if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
@@ -389,6 +493,32 @@ jobs:
         if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' && steps.webview2_runtime.outcome == 'success' }}
         shell: pwsh
         run: ./scripts/qa/desktop-open-smoke.ps1 -ExecutablePath (Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-target/release/smartprint-desktop.exe") -RequireDevTools
+      - name: Run mixed-batch refund acceptance in the actual native Windows WebView2 application
+        if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' && steps.webview2_runtime.outcome == 'success' }}
+        shell: pwsh
+        env:
+          VITE_API_BASE_URL: ""
+          SMARTPRINT_MIXED_BATCH_REFUND_APP: desktop-native
+          SMARTPRINT_WEBVIEW2_DEBUG_PORT: "9238"
+          SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR: artifacts/mixed-batch-refund-native-windows
+        run: |
+          $cache = (npm config get cache).Trim()
+          $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\.mjs$" } |
+            Select-Object -First 1
+          if (-not $module) { throw "Could not locate the isolated Playwright package installed by npx." }
+          New-Item -ItemType Directory -Force -Path $env:SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR | Out-Null
+          $env:PLAYWRIGHT_MODULE_DIR = $module.DirectoryName
+          node apps/portal/tests/mixed-batch-refund.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Native Windows WebView2 mixed-batch refund acceptance failed." }
+      - name: Upload native Windows WebView2 mixed-batch refund evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-mixed-batch-refund-native-webview2-qa
+          path: artifacts/mixed-batch-refund-native-windows/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload Windows desktop package
         id: desktop_package_upload
         if: ${{ always() && steps.desktop_executable_build.outcome == 'success' }}

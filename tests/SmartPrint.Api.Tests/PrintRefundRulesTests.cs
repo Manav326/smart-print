@@ -253,6 +253,30 @@ public sealed class PrintRefundRulesTests
     public void AdditionalRefundRejectsASelectionBelowAlreadyRefundedAmount()
         => Assert.Throws<InvalidOperationException>(() => PrintRefundRules.CalculateAdditionalRefundAmount(100, 75, [1], [50, 50]));
 
+    [Fact]
+    public void MixedFileBatchRefundsEveryRejectedPageAndLeavesOnlyAcceptedPageValuePaid()
+    {
+        // One verified batch payment contains a three-page PDF, one JPEG and one PNG.
+        var pdfRefund = PrintRefundRules.CalculateAdditionalRefundAmount(
+            3_000L, 0L, [2, 3], [1_000L, 1_000L, 1_000L]);
+        var jpegRefund = PrintRefundRules.CalculateAdditionalRefundAmount(
+            800L, 0L, [1], [800L]);
+        var pngRefund = PrintRefundRules.CalculateAdditionalRefundAmount(
+            1_200L, 0L, [1], [1_200L]);
+
+        var originalBatchPayment = 3_000L + 800L + 1_200L;
+        var completeRejectedPageRefund = checked(pdfRefund + jpegRefund + pngRefund);
+        var acceptedPageValue = originalBatchPayment - completeRejectedPageRefund;
+
+        Assert.Equal(2_000L, pdfRefund);
+        Assert.Equal(800L, jpegRefund);
+        Assert.Equal(1_200L, pngRefund);
+        Assert.Equal(4_000L, completeRejectedPageRefund);
+        Assert.Equal(1_000L, acceptedPageValue);
+        Assert.Equal(originalBatchPayment, completeRejectedPageRefund + acceptedPageValue);
+        Assert.Equal(1, 3 - new[] { 2, 3 }.Length);
+    }
+
     private static ShopPricingProfile Profile(long monoPerSide = 0, long monoDuplexPerSheet = 0, long minimumCharge = 0)
         => new() { IsConfigured = true, MonoPerSideMinor = monoPerSide, MonoDuplexPerSheetMinor = monoDuplexPerSheet, MinimumChargeMinor = minimumCharge };
 }
