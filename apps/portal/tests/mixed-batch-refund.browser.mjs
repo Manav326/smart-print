@@ -75,9 +75,12 @@ function startServer() {
       ...baseEnvironment,
       WEBVIEW2_USER_DATA_FOLDER: userDataFolder
     };
+    // GitHub-hosted Windows paths contain no spaces. Do not add shell quotes
+    // around this one argument: cmd.exe preserves nested quotes when it builds
+    // the child command line, and Tauri then treats them as part of the filename.
     const command = [
       "pnpm", "--filter", "@smart-print/desktop", "exec", "tauri", "dev",
-      "--config", '"' + tauriConfigPath + '"'
+      "--config", tauriConfigPath
     ].join(" ");
     child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", command], {
       ...options, env: nativeEnvironment
