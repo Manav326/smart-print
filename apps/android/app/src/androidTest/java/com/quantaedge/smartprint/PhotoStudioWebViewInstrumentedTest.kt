@@ -477,6 +477,37 @@ class PhotoStudioWebViewInstrumentedTest {
         ).bufferedReader().use { it.readText() }
         instrumentation.waitForIdleSync()
 
+        val valueAfterSwipeText = evaluate(
+            scenario,
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                .find(item => item.textContent.trim().startsWith($label));
+              return label?.querySelector('input[type="range"]')?.value ?? "";
+            })()"""
+        )
+        val valueAfterSwipe = decodeJavascriptString(valueAfterSwipeText).toDoubleOrNull()
+            ?: throw AssertionError("Android swipe did not leave a readable '$labelText' range value.")
+        val initialValue = bounds.getDouble("current")
+        if (kotlin.math.abs(initialValue - value.toDouble()) > 1.0) {
+            assertTrue(
+                "The native drag gesture did not move '$labelText' from $initialValue; " +
+                    "afterSwipe=$valueAfterSwipe, target=$value, geometry=$bounds.",
+                kotlin.math.abs(valueAfterSwipe - initialValue) >= 1.0
+            )
+        }
+
+        // Android's shell swipe emits the final target as ACTION_UP. Chromium
+        // updates the native range on ACTION_MOVE, not that terminal point, so
+        // the thumb can stop one or two values short (e.g. 102 -> 108 for 110).
+        // Finish with an actual touchscreen tap at the requested thumb centre.
+        // This is still a native user-input path; it avoids setting DOM/React
+        // values directly and makes the precise final thumb position deterministic.
+        automation.executeShellCommand("input tap $x2 $y").use { descriptor ->
+            ParcelFileDescriptor.AutoCloseInputStream(descriptor).bufferedReader().use { it.readText() }
+        }
+        instrumentation.waitForIdleSync()
+
         val touchTraceText = evaluate(
             scenario,
             "JSON.stringify(window.__smartPrintTouchTrace ?? [])"
@@ -488,7 +519,7 @@ class PhotoStudioWebViewInstrumentedTest {
                 (event.optBoolean("pathHitsRange") || event.optString("target").startsWith("INPUT"))
         }
         assertTrue(
-            "Android shell swipe produced no trusted DOM event targeted at '$labelText'; " +
+            "Android shell swipe/tap produced no trusted DOM event targeted at '$labelText'; " +
                 "screen=($x1,$y)->($x2,$y), view=${viewWidth}x${viewHeight}, " +
                 "origin=${screenOriginX},${screenOriginY}, scale=$scale, " +
                 "geometry=$bounds, trace=$touchTraceText",
