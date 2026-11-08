@@ -402,7 +402,10 @@ test("Photo Studio identifies custom manual image adjustments instead of marking
 
 test("Photo Studio normalizes the live Number of photos input value on blur",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- const quantityField=studio.match(/<input\s+type="number"\s+aria-label="Number of photos"[\s\S]*?\/>/)?.[0] ?? "";
+ const quantityField=studio.match(/<input\b(?=[^>]*\bid="photo-studio-photo-count")[^>]*\/>/)?.[0] ?? "";
+ assert.ok(quantityField,"Number of photos input must exist by its stable ID.");
+ assert.match(quantityField,/type="number"/);
+ assert.match(quantityField,/aria-label="Number of photos"/);
  assert.ok(quantityField,"Number of photos input must exist.");
  assert.match(quantityField,/onBlur=\{event\s*=>/);
  assert.match(quantityField,/event\.currentTarget\.value/);
