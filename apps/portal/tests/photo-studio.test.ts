@@ -418,6 +418,16 @@ test("Photo Studio prevents apply without a whole-number quantity or any shop ph
  assert.ok(studio.includes("availableSizes.length === 0 || !copiesInputValid"));
 });
 
+test("Photo Studio browser fixture observes quantity changes after React handles the input",()=>{
+ const fixture=readFileSync(new URL("./photo-studio.browser.tsx",import.meta.url),"utf8");
+ assert.ok(fixture.includes('document.addEventListener("input", captureQuantity);'));
+ assert.ok(fixture.includes('document.addEventListener("change", captureQuantity);'));
+ assert.ok(fixture.includes('document.removeEventListener("input", captureQuantity);'));
+ assert.ok(fixture.includes('document.removeEventListener("change", captureQuantity);'));
+ assert.doesNotMatch(fixture,/document\.(?:add|remove)EventListener\("(?:input|change)", captureQuantity, true\)/,
+  "Draft observation must not pre-empt the controlled Photo Studio input handler.");
+});
+
 test("Photo Studio browser fixture inspects generated PDF page boxes and rendered pixel evidence",()=>{
  const fixture=readFileSync(new URL("./photo-studio.browser.tsx",import.meta.url),"utf8");
  assert.match(fixture,/mediaBoxCount/);

@@ -105,11 +105,14 @@ function PhotoStudioBrowserFixture() {
         .find(item => item.textContent?.trim().startsWith("Number of photos"));
       if (label?.contains(target)) setDraftPhotoCount(target.value);
     };
-    document.addEventListener("input", captureQuantity, true);
-    document.addEventListener("change", captureQuantity, true);
+    // Let React's delegated onChange handler update the controlled field first.
+    // Capturing here would re-render the parent before PhotoStudio receives input
+    // and can restore the previous copiesInput value (for example 8 instead of 100).
+    document.addEventListener("input", captureQuantity);
+    document.addEventListener("change", captureQuantity);
     return () => {
-      document.removeEventListener("input", captureQuantity, true);
-      document.removeEventListener("change", captureQuantity, true);
+      document.removeEventListener("input", captureQuantity);
+      document.removeEventListener("change", captureQuantity);
     };
   }, []);
 
