@@ -36,6 +36,77 @@ const serverArgs = appMode === "desktop"
   ? ["--filter", "@smart-print/desktop", "dev", "--host", "127.0.0.1", "--port", port, "--strictPort"]
   : ["--filter", "@smart-print/portal", "dev", "--host", "127.0.0.1", "--port", port, "--strictPort"];
 
+function configureNativeWebViewDebugPolicy() {
+  const key = "HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments";
+  const valueName = "smartprint-desktop.exe";
+  const runReg = args => spawnSync("reg.exe", args, {
+    encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
+  });
+  const describe = result => [result.stdout || "", result.stderr || ""].join("\\n").trim();
+
+  const keyBefore = runReg(["query", key]);
+  const keyExisted = keyBefore.status === 0;
+  if (!keyExisted && !/unable to find|could not find/i.test(describe(keyBefore))) {
+    throw new Error("Could not inspect the current WebView2 debug policy: " + describe(keyBefore));
+  }
+
+  const valueBefore = runReg(["query", key, "/v", valueName]);
+  let previous = null;
+  if (valueBefore.status === 0) {
+    const match = describe(valueBefore).split(/\\r?\\n/)
+      .map(line => line.match(/^\\s*smartprint-desktop\\.exe\\s+(REG_\\w+)\\s+(.*)$/i))
+      .find(Boolean);
+    if (!match) throw new Error("Could not parse the existing SmartPrint WebView2 debug policy.");
+    previous = { type: match[1], value: match[2] };
+  } else if (!/unable to find|could not find/i.test(describe(valueBefore))) {
+    throw new Error("Could not inspect the SmartPrint WebView2 debug policy: " + describe(valueBefore));
+  }
+
+  const debugArguments = "--remote-debugging-port=" + webViewDebugPort;
+  const configured = runReg([
+    "add", key, "/v", valueName, "/t", previous?.type || "REG_SZ", "/d", debugArguments, "/f"
+  ]);
+  if (configured.status !== 0) {
+    throw new Error("Could not enable app-scoped WebView2 CDP: " + describe(configured));
+  }
+  console.log("Enabled localhost CDP through the temporary SmartPrint WebView2 per-app policy.");
+
+  return () => {
+    if (previous) {
+      const restored = runReg(["add", key, "/v", valueName, "/t", previous.type, "/d", previous.value, "/f"]);
+      if (restored.status !== 0) throw new Error("Could not restore the previous WebView2 policy: " + describe(restored));
+    } else {
+      const removed = runReg(["delete", key, "/v", valueName, "/f"]);
+      if (removed.status !== 0 && !/unable to find|could not find/i.test(describe(removed))) {
+        throw new Error("Could not remove the temporary WebView2 policy: " + describe(removed));
+      }
+      if (!keyExisted) {
+        const removedKey = runReg(["delete", key, "/f"]);
+        if (removedKey.status !== 0 && !/unable to find|could not find/i.test(describe(removedKey))) {
+          throw new Error("Could not remove the temporary WebView2 policy key: " + describe(removedKey));
+        }
+      }
+    }
+  };
+}
+
+function nativeWebViewProcessDiagnostics() {
+  const query = spawnSync("powershell.exe", [
+    "-NoProfile", "-NonInteractive", "-Command",
+    "Get-CimInstance Win32_Process | Where-Object { $_.Name -in @('smartprint-desktop.exe','msedgewebview2.exe') } | ForEach-Object { '{0} PID={1} Parent={2} Args={3}' -f $_.Name,$_.ProcessId,$_.ParentProcessId,$_.CommandLine }"
+  ], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+  const policy = spawnSync("reg.exe", [
+    "query", "HKCU\\Software\\Policies\\Microsoft\\Edge\\WebView2\\AdditionalBrowserArguments",
+    "/v", "smartprint-desktop.exe"
+  ], { encoding: "utf8", windowsHide: true, timeout: 15000 });
+  return [
+    "Native process diagnostics:",
+    query.stdout || query.stderr || "(no process details)",
+    "WebView2 policy:",
+    policy.stdout || policy.stderr || "(no policy details)"
+  ].join("\\n");
+}
+
 function startServer() {
   const baseEnvironment = { ...process.env, VITE_API_BASE_URL: "" };
   const options = { stdio: "inherit", env: baseEnvironment, windowsHide: true, detached: process.platform !== "win32" };
@@ -46,6 +117,7 @@ function startServer() {
     const userDataFolder = process.env.SMARTPRINT_WEBVIEW2_USER_DATA_FOLDER ||
       join(tmpdir(), "smartprint-mixed-batch-webview2-" + process.pid + "-" + Date.now());
     mkdirSync(userDataFolder, { recursive: true });
+    nativeRegistryRestore = configureNativeWebViewDebugPolicy();
     const nativeEnvironment = {
       ...baseEnvironment,
       WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=" + webViewDebugPort,
@@ -106,7 +178,8 @@ async function waitForServer(child) {
   }
 
   throw new Error(appMode === "desktop-native"
-    ? "Native Windows WebView2 did not expose its localhost CDP endpoint within " + timeoutSeconds + " seconds."
+    ? "Native Windows WebView2 did not expose its localhost CDP endpoint within " + timeoutSeconds +
+      " seconds.\\n" + nativeWebViewProcessDiagnostics()
     : "QA server did not become ready within 120 seconds.");
 }
 
@@ -351,6 +424,7 @@ let nativeCredentialSessionRestored = false;
 const pageErrors = [];
 let desktopShellBooted = false;
 let duplicateReplay = null;
+let nativeRegistryRestore = null;
 
 async function restoreNativeCredentialSession() {
   if (appMode !== "desktop-native" || !nativeSecureSessionCaptured || !nativeSecureSessionOverwritten || !page) return;
@@ -360,6 +434,10 @@ async function restoreNativeCredentialSession() {
       throw new Error("Native Tauri bridge disappeared before Credential Manager cleanup.");
     }
     await bridge.invoke("write_secure_session", { session: previousSession });
+    const restoredSession = await bridge.invoke("read_secure_session");
+    if (restoredSession !== previousSession) {
+      throw new Error("Windows Credential Manager did not return the previously saved session after restoration.");
+    }
     sessionStorage.removeItem("qrtoprint.auth.shop");
   }, nativePreviousSecureSession);
   nativeSecureSessionOverwritten = false;
@@ -554,6 +632,11 @@ try {
   assert.deepEqual(unhandledApi, [], "Unexpected API calls: " + JSON.stringify(unhandledApi));
   assert.deepEqual(pageErrors, [], "Uncaught UI errors: " + pageErrors.join("; "));
 
+  if (appMode === "desktop-native") {
+    await restoreNativeCredentialSession();
+    assert.equal(nativeCredentialSessionRestored, true, "The prior Windows Credential Manager session must be restored.");
+  }
+
   const report = {
     caseId: "BATCH-REFUND-MIXED-001",
     scenario: "Shop owner reviews one paid multi-file, multi-type batch; rejects selected pages from multiple files; records complete refunds for every rejected page; leaves accepted pages paid and eligible.",
@@ -589,7 +672,6 @@ try {
     refundLedgerIsInMemory: true,
     apiRequestCount: apiRequests.length
   };
-  if (appMode === "desktop-native") await restoreNativeCredentialSession();
   writeFileSync(join(artifactDirectory, "mixed-batch-refund-" + appMode + ".json"), JSON.stringify(report, null, 2), "utf8");
   console.log(JSON.stringify(report, null, 2));
   if (appMode !== "desktop-native") await context.close();
@@ -619,5 +701,18 @@ try {
   }
   if (browser) await browser.close();
   stopServer(server);
-  if (restoreError) throw new Error("Could not restore the prior Windows Credential Manager session: " + restoreError.message);
+  if (nativeRegistryRestore) {
+    try {
+      nativeRegistryRestore();
+      nativeRegistryRestore = null;
+    } catch (error) {
+      restoreError = restoreError || (error instanceof Error ? error : new Error(String(error)));
+      writeFileSync(
+        join(artifactDirectory, "mixed-batch-refund-native-policy-restore-failure.txt"),
+        restoreError.message,
+        "utf8"
+      );
+    }
+  }
+  if (restoreError) throw new Error("Could not restore the prior Windows QA state: " + restoreError.message);
 }
