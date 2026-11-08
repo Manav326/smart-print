@@ -1,4 +1,37 @@
 #!/usr/bin/env bash
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  cat <<'HELP'
+Usage: bash scripts/qa/android-emulator-ci.sh [--help|-h]
+
+Runs the complete Android emulator CI sequence; it has no test-selection
+flags. It wakes/unlocks the already-created emulator, runs the connected
+Android Espresso UI suite, builds APK N and N+1, then runs the app install,
+reinstall, upgrade, downgrade-rejection, signing-mismatch, uninstall and
+published-release upgrade lifecycle checks.
+
+Required environment:
+  SMARTPRINT_PUBLIC_BASE_URL  Canonical HTTPS origin for the local QA stack.
+  RUNNER_TEMP                 Writable temporary directory for APK fixtures.
+  ANDROID_HOME or ANDROID_SDK_ROOT, adb, Android SDK 36/build tools 36.0.0,
+  Gradle 8.13, and one already-booted Android API 36 emulator.
+
+Run this on a disposable CI emulator. The lifecycle helper uninstalls and
+reinstalls com.quantaedge.smartprint and tests production release APK updates;
+never run the lifecycle helper on a personal/shop phone with user data.
+
+Photo Studio note: the WebView instrumentation requires Gradle properties
+smartPrintLocalQa=true and smartPrintPhotoStudioQaEnabled=true. The CI entry
+point currently invokes the default connectedDebugAndroidTest build, where
+those Photo Studio QA-only tests can be reported as ignored. Check the JUnit
+XML report; a green Gradle task alone does not mean ignored tests ran.
+HELP
+  exit 0
+fi
+if [[ $# -ne 0 ]]; then
+  echo "Usage: bash scripts/qa/android-emulator-ci.sh [--help|-h]" >&2
+  exit 2
+fi
 # Run the Android emulator checks in one process. The emulator-runner action
 # executes individual script lines in separate shells, so state such as exit
 # codes must not be held in variables in its inline script.

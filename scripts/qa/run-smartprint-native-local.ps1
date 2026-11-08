@@ -1,11 +1,77 @@
+<#
+.SYNOPSIS
+Build and run local Windows Desktop and Android native-app QA.
+
+.DESCRIPTION
+Runs the local native-app suite against the SmartPrint portal exposed through
+the configured local HTTPS tunnel. It validates the Desktop TypeScript
+frontend, Rust host tests, builds the Windows executable, and checks a native
+Desktop launch. When an Android device is available it builds/installs the
+separate .localqa package and runs Android instrumentation, including the
+Photo Studio WebView tests when their QA flag is enabled.
+
+This script does not download or install the public website release packages.
+It does not replace the production Android package. It does not verify real
+paper output from a physical printer.
+
+.PARAMETER Help
+Show this guide and exit before creating output folders, building apps or
+talking to connected devices.
+
+.PARAMETER PublicOrigin
+Required canonical HTTPS origin from the repository's local .env.local
+PUBLIC_BASE_URL. Its tunnel must route to this local SmartPrint stack.
+
+.PARAMETER LocalPortalOrigin
+Local portal origin. Default: http://127.0.0.1:3000. It must remain loopback
+HTTP on port 3000.
+
+.PARAMETER OutputDirectory
+Directory for native build/test logs, screenshots and JSON evidence.
+Default: artifacts/smartprint-qa/native-local.
+
+.PARAMETER AndroidDeviceSerial
+Optional exact serial from adb devices. Selects only that Android device.
+If omitted, one online device is selected automatically; zero or multiple
+devices result in a skipped Android physical-device section.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-native-local.ps1 -Help
+Show this guide without running the native-app tests.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-native-local.ps1 -PublicOrigin 'https://smartprint.example.in'
+Build and test Windows Desktop and, when exactly one ADB device is online,
+the side-by-side Android .localqa app.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-native-local.ps1 -PublicOrigin 'https://smartprint.example.in' -AndroidDeviceSerial 'R58M123456A' -OutputDirectory 'artifacts/native-phone-qa'
+Explicitly target one physical Android device and write evidence to a custom
+directory.
+
+.NOTES
+Run from the SmartPrint repository on Windows. The PublicOrigin must match
+PUBLIC_BASE_URL in .env.local and point through the existing tunnel to local
+services, not to an unrelated production deployment. Device selection never
+falls back to a different serial.
+#>
+
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [string]$PublicOrigin,
+    [switch]$Help,
+    [string]$PublicOrigin = "",
     [string]$LocalPortalOrigin = "http://127.0.0.1:3000",
     [string]$OutputDirectory = "artifacts/smartprint-qa/native-local",
     [string]$AndroidDeviceSerial = ""
 )
+
+if ($Help) {
+    Get-Help -Name $PSCommandPath -Full | Out-String -Width 180 | Write-Host
+    exit 0
+}
+if ([string]::IsNullOrWhiteSpace($PublicOrigin)) {
+    throw "-PublicOrigin is required. Run this script with -Help to see usage examples."
+}
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path

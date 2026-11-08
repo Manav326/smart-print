@@ -1,5 +1,182 @@
+<#
+.SYNOPSIS
+Run SmartPrint's local acceptance suite or a selected QA mode.
+
+.DESCRIPTION
+This is the main Windows QA entry point. With no switches it runs the full
+local QA workflow against the configured local Docker/Compose environment:
+real local PostgreSQL and API, real browser workflows, Photo Studio browser
+acceptance, logic regression tests, and local Windows Desktop/Android native
+acceptance where the required tools/devices are available.
+
+Use -E2EOnly to avoid the full application/native rebuild path. E2E-only mode
+uses the existing local PostgreSQL data volume and Agent. By default it may
+refresh only the API and Portal containers. Add -ReuseRunningStack when all
+required containers are already healthy and must not be rebuilt or restarted.
+
+The published-app checks are an optional extra. -TestPublishedApps checks the
+website-published Windows and Android assets and the installed apps. It does
+not silently update an already-installed Android app. Use -AndroidAppOnly for
+a standalone Android release check; -InstallPublishedAndroidApk is explicit
+consent to update an existing Android package in place. No uninstall or data
+clear fallback is attempted.
+
+The local native Android path is different from published-app testing:
+-LocalAndroidDeviceSerial targets one explicitly selected phone with the
+side-by-side .localqa package. It does not replace the production app.
+
+.PARAMETER Help
+Show this complete guide and exit before checking dependencies or changing
+source, containers, devices, or installed apps. PowerShell's -? help is also
+available.
+
+.PARAMETER SkipUnitTests
+Skip the Portal, API and Agent logic/unit regression suites. Live browser E2E,
+Photo Studio browser acceptance, and the selected native/published-app checks
+still run.
+
+.PARAMETER SkipPlaywrightInstall
+Do not install the pinned Playwright/Chromium package. The exact Playwright
+version configured in scripts/qa/smartprint-qa.config.json must already exist
+in the local npm cache, including its Chromium browser.
+
+.PARAMETER E2EOnly
+Run the local real-data browser/API E2E path without building/testing the
+native Windows Desktop or local Android app. Without -ReuseRunningStack the
+script may refresh only API and Portal; PostgreSQL data and Agent are
+preserved.
+
+.PARAMETER PullLatest
+Fetch the current local branch's origin tracking branch and fast-forward only.
+Valid only with -E2EOnly. It never switches branches, resets, rebases or
+force-updates. If origin is ahead and the working tree has local changes, it
+refuses the update and preserves those changes. With -ReuseRunningStack it
+continues only when the fetched changes do not require an app/runtime refresh.
+
+.PARAMETER ReuseRunningStack
+Use the existing running PostgreSQL, API, Portal and Agent containers without
+building or restarting them. Valid only with -E2EOnly. Every required service
+must already be running and healthy.
+
+.PARAMETER TestPublishedApps
+Add checks for the website-published Windows installer and Android APK,
+including release metadata/download verification and safe installed-app
+acceptance. This can be combined with the default full mode or -E2EOnly.
+It cannot be combined with -AndroidAppOnly.
+
+.PARAMETER AndroidAppOnly
+Run only the website-published Android app acceptance path. Local Docker,
+PostgreSQL, API/Portal E2E, Windows Desktop and the local native app suite are
+not run. This is a standalone mode and cannot be combined with -E2EOnly,
+-PullLatest, -ReuseRunningStack or -TestPublishedApps.
+
+.PARAMETER AndroidDeviceSerial
+Exact ADB serial from 'adb devices'. Valid only with -AndroidAppOnly. An
+explicit serial allows targeting that specific physical phone. Without it,
+the helper auto-targets only when exactly one Android emulator is online;
+physical devices and ambiguous multiple-device setups are skipped.
+
+.PARAMETER InstallPublishedAndroidApk
+Explicitly authorise an in-place update of an already-installed Android app
+when its version differs from the verified website-published APK. Valid only
+with -AndroidAppOnly. Uses Android package-manager update semantics; it does
+not uninstall the app or clear app data. Without this switch, a mismatched
+existing install is left untouched and the update check is reported skipped.
+
+.PARAMETER LocalAndroidDeviceSerial
+Exact ADB serial for the local native Android QA path in the full local run.
+The runner builds and tests the separate com.quantaedge.smartprint.localqa
+package side-by-side with the production package. It never targets an
+unspecified phone when multiple devices are connected. Valid only for the
+full local mode; it cannot be combined with -AndroidAppOnly or -E2EOnly.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1
+Run the full local acceptance suite. This is the normal comprehensive local
+QA command.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -Help
+Print this guide without running any tests or changing anything.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -E2EOnly
+Run local browser/API E2E and Photo Studio browser acceptance. The existing
+database and Agent are preserved; API and Portal may be refreshed.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -E2EOnly -ReuseRunningStack
+Run E2E against an already-running healthy local stack without rebuilding or
+restarting its containers.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -E2EOnly -PullLatest
+Fetch and fast-forward the current branch first, then run E2E. The update is
+refused when newer upstream changes would overwrite local working-tree edits.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -SkipUnitTests
+Run the remaining full QA workflow while skipping the Portal/API/Agent
+logic-unit suites. Live E2E and Photo Studio browser acceptance still run.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -SkipPlaywrightInstall
+Reuse the already-installed pinned Playwright/Chromium package from the npm
+cache. This fails rather than downloading when the pinned package is absent.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -TestPublishedApps
+Add official website-published Windows and Android release checks to the
+normal local QA run. Existing installed apps are not silently upgraded.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -LocalAndroidDeviceSerial 'R58M123456A'
+Run full local QA and explicitly target the named physical Android device for
+the side-by-side .localqa native-app tests. Obtain the serial from adb devices.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -AndroidAppOnly
+Run only the published Android app check. With exactly one online emulator,
+the helper selects that emulator automatically.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -AndroidAppOnly -AndroidDeviceSerial 'R58M123456A'
+Run only the published Android app acceptance against the explicitly named
+physical phone.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -AndroidAppOnly -AndroidDeviceSerial 'R58M123456A' -InstallPublishedAndroidApk
+Explicitly allow an in-place update to the published APK on that phone when
+the installed version differs. No uninstall or data clear is attempted.
+
+.NOTES
+Run this script from a Windows PowerShell session in the repository checkout.
+The full local run requires the configured .env.local, Docker Desktop/Compose,
+Node.js version from the central QA config, and the Windows build tools used
+by the native app checks. Android checks additionally require Android SDK,
+ADB/Gradle, and an authorised emulator or explicitly selected phone.
+
+Target is controlled by scripts/qa/smartprint-qa.config.json and the local
+.env.local. The local E2E suite is restricted to the configured loopback
+origin; it is not a production data test. Actual paper output, USB/Wi-Fi
+printer behavior and physical print geometry still need owner hardware
+acceptance.
+
+Combination rules:
+- -PullLatest requires -E2EOnly.
+- -ReuseRunningStack requires -E2EOnly.
+- -PullLatest plus -ReuseRunningStack is allowed only if fetched changes do
+  not require an application/runtime refresh.
+- -AndroidDeviceSerial and -InstallPublishedAndroidApk require -AndroidAppOnly.
+- -LocalAndroidDeviceSerial is for full local QA only; it is incompatible with
+  -E2EOnly and -AndroidAppOnly.
+- -AndroidAppOnly is incompatible with -E2EOnly, -PullLatest,
+  -ReuseRunningStack and -TestPublishedApps.
+#>
+
 [CmdletBinding()]
 param(
+    [switch]$Help,
     [switch]$SkipUnitTests,
     [switch]$SkipPlaywrightInstall,
     [switch]$E2EOnly,
@@ -11,6 +188,11 @@ param(
     [switch]$InstallPublishedAndroidApk,
     [string]$LocalAndroidDeviceSerial = ""
 )
+
+if ($Help) {
+    Get-Help -Name $PSCommandPath -Full | Out-String -Width 180 | Write-Host
+    exit 0
+}
 
 $ErrorActionPreference = "Stop"
 if ($InstallPublishedAndroidApk -and -not $AndroidAppOnly) {

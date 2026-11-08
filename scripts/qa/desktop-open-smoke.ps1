@@ -1,9 +1,67 @@
+<#
+.SYNOPSIS
+Launch SmartPrint Desktop and verify its native window and rendered WebView2 app.
+
+.DESCRIPTION
+Starts the selected executable, checks its native Windows window, and verifies
+that WebView2 loaded the SmartPrint document and rendered visible app content.
+Without -RequireDevTools it uses Windows UI Automation and the normal WebView2
+profile, preserving the existing signed-in browser/session state. With
+-RequireDevTools it expects the dedicated CI diagnostic build, reserves the
+configured loopback DevTools port, and uses a private temporary WebView2 profile
+for a JavaScript startup probe.
+
+.PARAMETER Help
+Show this guide without launching the Desktop executable.
+
+.PARAMETER ExecutablePath
+Windows executable to launch. Default:
+apps/desktop/src-tauri/target/release/smartprint-desktop.exe. Relative paths
+are resolved from the current PowerShell working directory.
+
+.PARAMETER StartupTimeoutSeconds
+Startup window/WebView2 timeout. Default: 45 seconds. Valid range: 10-120.
+
+.PARAMETER RequireDevTools
+Enable the CI-only diagnostic probe. Use only with the diagnostic build and
+private QA profile; do not enable DevTools on a published production executable.
+
+.EXAMPLE
+.\scripts\qa\desktop-open-smoke.ps1 -Help
+Show the usage and diagnostic-mode warning.
+
+.EXAMPLE
+.\scripts\qa\desktop-open-smoke.ps1
+Launch the default release executable and verify its native window/accessibility
+tree using the normal profile.
+
+.EXAMPLE
+.\scripts\qa\desktop-open-smoke.ps1 -ExecutablePath 'C:\QA\SmartPrint\smartprint-desktop.exe' -StartupTimeoutSeconds 75
+Launch a specific build with a 75-second startup allowance.
+
+.EXAMPLE
+.\scripts\qa\desktop-open-smoke.ps1 -ExecutablePath 'C:\QA\smartprint-desktop-diagnostic.exe' -RequireDevTools
+Run the CI-only WebView2 JavaScript/render probe with an isolated temporary
+profile. The executable must be built for the configured diagnostic port.
+
+.NOTES
+The script launches only the executable path supplied and cleans up the
+process/profile it created. It does not install the app or modify the
+Windows Agent service.
+#>
+
 [CmdletBinding()]
 param(
+    [switch]$Help,
     [string]$ExecutablePath = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe",
     [ValidateRange(10, 120)][int]$StartupTimeoutSeconds = 45,
     [switch]$RequireDevTools
 )
+
+if ($Help) {
+    Get-Help -Name $PSCommandPath -Full | Out-String -Width 180 | Write-Host
+    exit 0
+}
 
 $ErrorActionPreference = "Stop"
 

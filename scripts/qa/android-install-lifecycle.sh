@@ -1,6 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  cat <<'HELP'
+Usage: bash scripts/qa/android-install-lifecycle.sh <APK_N> <APK_N_PLUS_1> [--help|-h]
+
+Arguments:
+  APK_N         First debug/QA APK. Must be signed with the same test key as N+1.
+  APK_N_PLUS_1  Higher-version APK signed with the same test key.
+
+Required tools/environment:
+  adb connected to one disposable Android emulator;
+  ANDROID_HOME or ANDROID_SDK_ROOT with build-tools 36.0.0 (aapt/apksigner);
+  keytool and curl; RUNNER_TEMP (optional, defaults to /tmp).
+
+Scenarios:
+  1. Fresh install and seed private/exported document fixtures.
+  2. Same-version reinstall preserves private and exported files.
+  3. N -> N+1 upgrade preserves both files.
+  4. Downgrade is rejected and existing app/data survive.
+  5. Different signing certificate is rejected without replacement.
+  6. Uninstall removes private app data but preserves exported file.
+  7. Fresh reinstall starts with empty private data.
+  8. Verify and install the configured production release APK versions in place.
+
+DESTRUCTIVE SAFETY WARNING:
+This helper begins by running adb uninstall for package
+com.quantaedge.smartprint, then installs test and production APKs. It is only
+for disposable CI/emulator state. Never run it on your personal phone, a
+shop device, or a device containing customer documents.
+HELP
+  exit 0
+fi
+if [[ $# -ne 2 ]]; then
+  echo "Usage: bash scripts/qa/android-install-lifecycle.sh <APK_N> <APK_N_PLUS_1> [--help|-h]" >&2
+  exit 2
+fi
+
 PACKAGE="com.quantaedge.smartprint"
 BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0"
 APKSIGNER="$BUILD_TOOLS/apksigner"

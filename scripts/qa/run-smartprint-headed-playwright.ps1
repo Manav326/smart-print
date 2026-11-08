@@ -1,5 +1,73 @@
+<#
+.SYNOPSIS
+Run selected headed Playwright acceptance scenarios on the configured SmartPrint website.
+
+.DESCRIPTION
+Opens a visible Microsoft Edge/Chromium browser against the canonical public
+origin in scripts/qa/smartprint-qa.config.json. Select the workspace/customer
+scenarios with the switches below. Credentials are read from process
+environment variables or requested interactively as secure prompts.
+
+.PARAMETER Help
+Show this guide and exit without opening a browser or prompting for credentials.
+
+.PARAMETER RunShopWorkspace
+Run the dedicated QA shop-owner workspace checks. Requires a dedicated QA
+shop email/password (environment variables or prompts).
+
+.PARAMETER RunPlatformAdmin
+Run the dedicated platform-admin workspace checks. Requires dedicated QA
+admin credentials (environment variables or prompts).
+
+.PARAMETER RunCustomerStation
+Run the customer QR station checks. Requires -StationPath for a dedicated
+disposable station such as /s/QA_STATION_01.
+
+.PARAMETER RunCustomerUploadWorkflow
+Run the real customer-upload workflow. Requires -RunShopWorkspace,
+-RunCustomerStation, -StationPath and -ExpectedQaShopName. Uses the dedicated
+QA shop and station to ensure the upload is associated with the intended shop.
+
+.PARAMETER StationPath
+Dedicated customer station URL path, for example /s/QA_STATION_01. Required
+with -RunCustomerStation. Never supply a customer's live station by accident.
+
+.PARAMETER ExpectedQaShopName
+Exact display name of the dedicated QA shop. Required with
+-RunCustomerUploadWorkflow to guard against uploads to the wrong shop.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-headed-playwright.ps1 -Help
+Show the available scenarios and requirements.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-headed-playwright.ps1 -RunShopWorkspace
+Run the dedicated QA shop workspace checks. The script prompts for missing
+QA credentials without echoing the password.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-headed-playwright.ps1 -RunPlatformAdmin
+Run the dedicated platform-admin workspace checks.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-headed-playwright.ps1 -RunCustomerStation -StationPath '/s/QA_STATION_01'
+Run customer station checks against the specified disposable QA station.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-headed-playwright.ps1 -RunShopWorkspace -RunCustomerStation -RunCustomerUploadWorkflow -StationPath '/s/QA_STATION_01' -ExpectedQaShopName 'SmartPrint QA Shop'
+Run the upload flow through the dedicated shop and station. Do not use a real
+customer station or a non-QA shop.
+
+.NOTES
+This is a separate live website suite, not the local Docker-backed E2E runner.
+It does not change Cloudflare configuration. It can create temporary QA
+sessions and perform the dedicated QA upload workflow, so use only QA
+accounts/stations. No real payments or refunds are submitted.
+#>
+
 [CmdletBinding()]
 param(
+    [switch]$Help,
     [switch]$RunShopWorkspace,
     [switch]$RunPlatformAdmin,
     [switch]$RunCustomerStation,
@@ -7,6 +75,11 @@ param(
     [string]$StationPath,
     [string]$ExpectedQaShopName
 )
+
+if ($Help) {
+    Get-Help -Name $PSCommandPath -Full | Out-String -Width 180 | Write-Host
+    exit 0
+}
 
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path

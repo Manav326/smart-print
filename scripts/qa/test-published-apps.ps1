@@ -1,12 +1,79 @@
+<#
+.SYNOPSIS
+Verify the currently website-published SmartPrint Windows installer and Android APK.
+
+.DESCRIPTION
+Checks canonical release metadata, same-origin asset downloads, file integrity,
+APK package/version/launcher metadata, and live installed-app acceptance.
+Existing Windows installation/service state is inspected without replacing
+an already-installed Windows app. An absent Android app may be installed after
+the published APK has been verified. An already-installed Android app is not
+silently updated.
+
+.PARAMETER Help
+Show this guide and exit before network requests, downloads or device access.
+
+.PARAMETER PublicOrigin
+Canonical HTTPS SmartPrint public website origin.
+
+.PARAMETER OutputDirectory
+Directory for downloaded release assets and JSON/text QA evidence.
+
+.PARAMETER ConfigPath
+Path to scripts/qa/smartprint-qa.config.json or a compatible config file.
+
+.PARAMETER AndroidOnly
+Skip Windows published-app checks and run only published Android APK/device QA.
+
+.PARAMETER AndroidDeviceSerial
+Optional exact ADB serial. Without it, only one online emulator is selected
+automatically; a physical phone requires its exact serial.
+
+.PARAMETER InstallPublishedAndroidApk
+Explicitly allow an in-place update when the installed Android version differs
+from the verified published APK. No uninstall or data clear is attempted.
+
+.EXAMPLE
+.\scripts\qa\test-published-apps.ps1 -Help
+Show the modes and optional parameters.
+
+.EXAMPLE
+.\scripts\qa\test-published-apps.ps1 -PublicOrigin 'https://smartprint.example.in' -OutputDirectory 'artifacts/published-apps' -ConfigPath 'scripts/qa/smartprint-qa.config.json'
+Check both website-published Windows and Android assets and the installed apps.
+
+.EXAMPLE
+.\scripts\qa\test-published-apps.ps1 -PublicOrigin 'https://smartprint.example.in' -OutputDirectory 'artifacts/android-release' -ConfigPath 'scripts/qa/smartprint-qa.config.json' -AndroidOnly
+Run only the published Android release checks.
+
+.EXAMPLE
+.\scripts\qa\test-published-apps.ps1 -PublicOrigin 'https://smartprint.example.in' -OutputDirectory 'artifacts/android-release' -ConfigPath 'scripts/qa/smartprint-qa.config.json' -AndroidOnly -AndroidDeviceSerial 'R58M123456A' -InstallPublishedAndroidApk
+Explicitly target a physical phone and consent to an in-place APK update if
+its installed version differs. No uninstall/data clear is attempted.
+
+.NOTES
+Use a dedicated QA device serial when targeting a physical phone. When multiple
+ADB devices are online and no serial is supplied, the Android test is skipped.
+#>
+
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][string]$PublicOrigin,
-  [Parameter(Mandatory=$true)][string]$OutputDirectory,
-  [Parameter(Mandatory=$true)][string]$ConfigPath,
+  [switch]$Help,
+  [string]$PublicOrigin = "",
+  [string]$OutputDirectory = "",
+  [string]$ConfigPath = "",
   [switch]$AndroidOnly,
   [string]$AndroidDeviceSerial = "",
   [switch]$InstallPublishedAndroidApk
 )
+if ($Help) {
+  Get-Help -Name $PSCommandPath -Full | Out-String -Width 180 | Write-Host
+  exit 0
+}
+foreach ($entry in @(@{Name="PublicOrigin";Value=$PublicOrigin}, @{Name="OutputDirectory";Value=$OutputDirectory}, @{Name="ConfigPath";Value=$ConfigPath})) {
+  if ([string]::IsNullOrWhiteSpace($entry.Value)) {
+    throw ("-" + $entry.Name + " is required. Run this script with -Help to see usage examples.")
+  }
+}
 $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Net.Http
 function Write-QAProgress([string]$Action,[string]$Detail="") {

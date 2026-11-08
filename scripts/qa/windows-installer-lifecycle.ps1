@@ -1,8 +1,65 @@
+<#
+.SYNOPSIS
+Exercise SmartPrint Windows installer install, upgrade, rollback and uninstall scenarios.
+
+.DESCRIPTION
+Runs a destructive lifecycle test against two versioned SmartPrint Windows
+installers. It seeds synthetic machine identity, network preference and
+encrypted local-queue fixtures; creates a secondary Microsoft Print to PDF
+queue; then installs/reinstalls/upgrades/rolls back/uninstalls the Agent and
+verifies the test-owned data is preserved or removed as expected.
+
+SAFETY: this script installs and uninstalls the SmartPrint Agent, registers
+Windows services/firewall rules, writes under ProgramData/Program Files, and
+creates/removes a printer queue. Run it only on a disposable Windows VM or
+isolated CI runner with Administrator rights. Do not run it on your everyday
+shop computer or a machine with real print jobs in its queue.
+
+.PARAMETER Help
+Show this guide without modifying Windows services, ProgramData, printers or
+firewall rules.
+
+.PARAMETER InstallerV1
+Path to the earlier-version Windows setup executable (upgrade source).
+
+.PARAMETER InstallerV2
+Path to the later-version Windows setup executable (upgrade target).
+
+.EXAMPLE
+.\scripts\qa\windows-installer-lifecycle.ps1 -Help
+Show test scenarios and safety requirements without running installers.
+
+.EXAMPLE
+.\scripts\qa\windows-installer-lifecycle.ps1 -InstallerV1 'artifacts/SmartPrint-v1.exe' -InstallerV2 'artifacts/SmartPrint-v2.exe'
+Run the complete lifecycle against two test setup packages on a disposable
+elevated Windows VM.
+
+.NOTES
+The script owns and removes only the fixtures and resources it creates. It
+does not intentionally change the pre-existing default printer. It must run
+elevated because service, firewall and machine-wide printer operations are
+required.
+#>
+
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$InstallerV1,
-    [Parameter(Mandatory = $true)][string]$InstallerV2
+    [switch]$Help,
+    [string]$InstallerV1 = "",
+    [string]$InstallerV2 = ""
 )
+
+if ($Help) {
+    Get-Help -Name $PSCommandPath -Full | Out-String -Width 180 | Write-Host
+    exit 0
+}
+foreach ($entry in @(@{Name="InstallerV1";Path=$InstallerV1}, @{Name="InstallerV2";Path=$InstallerV2})) {
+    if ([string]::IsNullOrWhiteSpace($entry.Path)) {
+        throw ("-" + $entry.Name + " is required. Run this script with -Help to see usage examples.")
+    }
+    if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) {
+        throw ("-" + $entry.Name + " does not exist: " + $entry.Path)
+    }
+}
 
 $ErrorActionPreference = "Stop"
 $serviceName = "QRtoPrintSmartPrintAgent"
