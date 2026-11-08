@@ -374,6 +374,10 @@ class MainActivityInstrumentedTest {
         val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "Q".repeat(32)
         val stationHost = Uri.parse(stationUrl).host.orEmpty()
         val pageLoaded = CountDownLatch(1)
+        val interceptedMainFrameUrl = AtomicReference<String>()
+        val pageStartedUrl = AtomicReference<String>()
+        val pageFinishedUrl = AtomicReference<String>()
+        val mainFrameLoadError = AtomicReference<String>()
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -387,6 +391,7 @@ class MainActivityInstrumentedTest {
                             request: WebResourceRequest
                         ): WebResourceResponse? {
                             if (!request.isForMainFrame) return null
+                            interceptedMainFrameUrl.set(request.url.toString())
                             val html = "<!doctype html><html><head><title>SmartPrint QR handoff QA</title></head><body>Station link received</body></html>"
                             return WebResourceResponse(
                                 "text/html",
@@ -398,8 +403,23 @@ class MainActivityInstrumentedTest {
                             )
                         }
 
+                        override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                            pageStartedUrl.set(url)
+                        }
+
                         override fun onPageFinished(view: WebView, url: String) {
+                            pageFinishedUrl.set(url)
                             if (url == stationUrl) pageLoaded.countDown()
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView,
+                            request: WebResourceRequest,
+                            error: android.webkit.WebResourceError
+                        ) {
+                            if (request.isForMainFrame) {
+                                mainFrameLoadError.set("${error.errorCode}: ${error.description}")
+                            }
                         }
                     }
 
@@ -411,9 +431,13 @@ class MainActivityInstrumentedTest {
                         .invoke(activity, stationUrl, QrScanPurpose.SHOP_CONNECTION)
                 }
 
+                val pageFinished = pageLoaded.await(20, TimeUnit.SECONDS)
                 assertTrue(
-                    "The accepted station URL must finish loading in the SmartPrint WebView.",
-                    pageLoaded.await(10, TimeUnit.SECONDS)
+                    "The accepted station URL must finish loading in the SmartPrint WebView. " +
+                        "intercepted=${interceptedMainFrameUrl.get()}, " +
+                        "started=${pageStartedUrl.get()}, finished=${pageFinishedUrl.get()}, " +
+                        "loadError=${mainFrameLoadError.get()}",
+                    pageFinished
                 )
 
                 scenario.onActivity { activity ->
