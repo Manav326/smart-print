@@ -120,7 +120,6 @@ function startServer() {
     nativeRegistryRestore = configureNativeWebViewDebugPolicy();
     const nativeEnvironment = {
       ...baseEnvironment,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=" + webViewDebugPort,
       WEBVIEW2_USER_DATA_FOLDER: userDataFolder
     };
     const command = ["pnpm", "--filter", "@smart-print/desktop", "exec", "tauri", "dev"].join(" ");
