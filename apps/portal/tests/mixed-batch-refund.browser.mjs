@@ -141,6 +141,49 @@ async function waitForServer(child) {
     : "QA server did not become ready within 120 seconds.");
 }
 
+async function waitForNativeApplicationPage(page, phase) {
+  const expectedPort = new URL(baseUrl).port || "80";
+  try {
+    // The DevTools HTTP endpoint can appear while the WebView is still on about:blank.
+    // Wait for the actual Tauri dev document before invoking its native command bridge.
+    await page.waitForURL(
+      url => url.protocol === "http:" && url.port === expectedPort,
+      { timeout: 60_000 }
+    );
+    await page.waitForFunction(
+      () => typeof window.__TAURI_INTERNALS__?.invoke === "function",
+      null,
+      { timeout: 60_000 }
+    );
+    await page.locator("#smartprint-desktop-root").waitFor({
+      state: "attached",
+      timeout: 60_000
+    });
+    await page.waitForFunction(
+      () => document.body?.dataset.appShell === "desktop" &&
+        Boolean(document.querySelector(".app-shell")),
+      null,
+      { timeout: 60_000 }
+    );
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => ({
+      href: location.href,
+      readyState: document.readyState,
+      title: document.title,
+      hasTauriBridge: typeof window.__TAURI_INTERNALS__?.invoke === "function",
+      appShell: document.body?.dataset.appShell ?? null,
+      rootChildren: document.querySelector("#smartprint-desktop-root")?.childElementCount ?? 0,
+      bodyText: document.body?.innerText?.slice(0, 400) ?? ""
+    })).catch(reason => ({ diagnosticError: reason instanceof Error ? reason.message : String(reason) }));
+    throw new Error(
+      "Native SmartPrint WebView was not ready during " + phase + ": " +
+      JSON.stringify(diagnostics) + "; " +
+      (error instanceof Error ? error.message : String(error)) + "\n" +
+      nativeWebViewProcessDiagnostics()
+    );
+  }
+}
+
 const SHOP_TOKEN = "e30." + Buffer.from(JSON.stringify({
   sub: "mixed-batch-refund-qa-owner", tenant_id: "mixed-batch-refund-qa-tenant"
 })).toString("base64url") + ".mixed-batch-refund-qa-signature";
@@ -416,11 +459,17 @@ try {
     const contexts = browser.contexts();
     if (!contexts.length) throw new Error("Native WebView2 did not expose a browser context.");
     context = contexts[0];
-    for (let attempt = 0; attempt < 30 && !context.pages().length; attempt += 1) {
+    const expectedPort = new URL(baseUrl).port;
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      const pages = context.pages();
+      page = pages.find(candidate => {
+        try { return new URL(candidate.url()).port === expectedPort; }
+        catch { return false; }
+      }) || pages[0] || null;
+      if (page) break;
       await new Promise(resolve => setTimeout(resolve, 500));
     }
-    page = context.pages()[0] || null;
-    if (!page) throw new Error("Native WebView2 did not expose the SmartPrint window page over CDP.");
+    if (!page) throw new Error("Native WebView2 did not expose a SmartPrint window page over CDP.");
   } else {
     browser = await chromium.launch({ headless: true });
     context = await browser.newContext({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1 });
@@ -437,6 +486,7 @@ try {
   });
 
   if (appMode === "desktop-native") {
+    await waitForNativeApplicationPage(page, "initial Tauri navigation");
     nativePreviousSecureSession = await page.evaluate(async () => {
       const bridge = window.__TAURI_INTERNALS__;
       if (!bridge || typeof bridge.invoke !== "function") {
@@ -453,6 +503,7 @@ try {
     }, secureSession);
     nativeSecureSessionOverwritten = true;
     await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForNativeApplicationPage(page, "reload after installing the QA secure session");
   } else {
     await page.addInitScript(({ sessionToken, desktopMode, serializedSession }) => {
       sessionStorage.setItem("qrtoprint.auth.shop", JSON.stringify({
