@@ -4437,7 +4437,16 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
     {
         await tx.RollbackAsync(ct);
         var raced = await db.PrintRefunds.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.IdempotencyKey == key, ct);
-        if (raced is not null) return Results.Ok(new { raced.Id, raced.PrintJobId, raced.PrintPaymentId, raced.AmountMinor, raced.Currency, raced.Method, raced.Status, raced.Reference, raced.Reason, raced.RefundedUtc, DuplicateRequest = true });
+        if (raced is not null)
+        {
+            if (raced.PrintJobId != jobId)
+                return Results.Conflict(new
+                {
+                    code = "refund_idempotency_key_reused",
+                    message = "This refund request key is already associated with another print file."
+                });
+            return Results.Ok(new { raced.Id, raced.PrintJobId, raced.PrintPaymentId, raced.AmountMinor, raced.Currency, raced.Method, raced.Status, raced.Reference, raced.Reason, raced.RefundedUtc, DuplicateRequest = true });
+        }
         throw;
     }
     return Results.Created($"/api/v1/shop/refunds/{refund.Id}", new { refund.Id, refund.PrintJobId, refund.PrintPaymentId, job.JobNumber,
