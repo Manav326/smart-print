@@ -98,9 +98,9 @@ async function samplePhotoBackground(page) {
   await page.getByRole("button", { name: "Background" }).click();
   await page.getByRole("button", { name: "Set background #dff3e7" }).click();
   await setControlValue(page, "Background tolerance", "48");
-  assert.equal(await page.getByLabel("Background tolerance").inputValue(), "48");
+  assert.equal(await getEditorControl(page, "Background tolerance").inputValue(), "48");
   await page.getByRole("button", { name: "Reset background" }).click();
-  assert.equal(await page.getByLabel("Background tolerance").inputValue(), "30");
+  assert.equal(await getEditorControl(page, "Background tolerance").inputValue(), "30");
   assert.equal((await page.getByLabel("Replacement background").inputValue()).toLowerCase(), "#ffffff");
   await page.getByRole("button", { name: /Pick background from photo/ }).click();
   await page.locator('[data-testid="photo-studio-preview-canvas"]').evaluate(canvas => {
