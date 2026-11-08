@@ -425,11 +425,11 @@ export default function PhotoStudio({
 
       <div className={styles.editor}>
         <nav className={styles.toolRail} aria-label="Photo editing tools">
-          <button type="button" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
-          <button type="button" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
-          <button type="button" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
-          <button type="button" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} disabled={!includeFormDetails} title={includeFormDetails?"Style the optional form details":"Enable form details in Sheet to style printed text"}><Type size={17}/><span>Text</span></button>
-          <button type="button" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"}><PaintBucket size={17}/><span>Background</span></button>
+          <button type="button" id="photo-studio-tool-sheet" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
+          <button type="button" id="photo-studio-tool-crop" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
+          <button type="button" id="photo-studio-tool-looks" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
+          <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} disabled={!includeFormDetails} title={includeFormDetails?"Style the optional form details":"Enable form details in Sheet to style printed text"}><Type size={17}/><span>Text</span></button>
+          <button type="button" id="photo-studio-tool-background" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"}><PaintBucket size={17}/><span>Background</span></button>
         </nav>
 
         <aside className={styles.toolPanel} data-testid="photo-studio-tool-panel">
@@ -441,12 +441,12 @@ export default function PhotoStudio({
             <label className={styles.rangeControl}>Zoom <output>{zoom.toFixed(1)}×</output><input id="photo-studio-zoom" type="range" min="1" max="3" step="0.05" value={zoom} onChange={event => setZoom(Number(event.target.value))}/></label>
             <label className={styles.rangeControl}>Horizontal position <output>{focusX}%</output><input id="photo-studio-horizontal-position" type="range" min="0" max="100" value={focusX} onChange={event => setFocusX(Number(event.target.value))}/></label>
             <label className={styles.rangeControl}>Vertical position <output>{focusY}%</output><input id="photo-studio-vertical-position" type="range" min="0" max="100" value={focusY} onChange={event => setFocusY(Number(event.target.value))}/></label>
-            <button type="button" className={styles.secondaryButton} onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); }}><RotateCcw size={14}/> Reset crop</button>
+            <button type="button" id="photo-studio-reset-crop" className={styles.secondaryButton} onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); }}><RotateCcw size={14}/> Reset crop</button>
           </>}
 
           {lookPanel && <>
             <div className={styles.lookGrid}>
-              {LOOKS.map(item => <button type="button" key={item.id} className={look === item.id ? styles.lookActive : styles.lookButton} onClick={() => selectLook(item.id)} aria-pressed={look === item.id}>
+              {LOOKS.map(item => <button type="button" key={item.id} id={"photo-studio-look-" + item.id} className={look === item.id ? styles.lookActive : styles.lookButton} onClick={() => selectLook(item.id)} aria-pressed={look === item.id}>
                 <span className={styles.lookSwatch + " " + styles["look_" + item.id]}/><strong>{item.label}</strong><small>{item.note}</small>
               </button>)}
             </div>
@@ -463,12 +463,12 @@ export default function PhotoStudio({
 
           {backgroundPanel && <>
             <div className={styles.backgroundPreviewRow} data-testid="photo-studio-background-state"><span>Sampled background</span><strong>{sourceBackgroundColor?sourceBackgroundColor.toUpperCase():"Not selected"}</strong>{sourceBackgroundColor&&<i style={{background:sourceBackgroundColor}}/>}</div>
-            <button type="button" className={styles.secondaryButton} onClick={()=>{setPickingBackground(true);setError("");}}><Pipette size={14}/>{pickingBackground?"Click the background in the preview…":"Pick background from photo"}</button>
+            <button type="button" id="photo-studio-pick-background" className={styles.secondaryButton} onClick={()=>{setPickingBackground(true);setError("");}}><Pipette size={14}/>{pickingBackground?"Click the background in the preview…":"Pick background from photo"}</button>
             <label className={styles.fieldLabel}>Replacement background<input id="photo-studio-replacement-background" type="color" value={targetBackgroundColor} onChange={event=>setTargetBackgroundColor(event.target.value)}/></label>
             <div className={styles.backgroundPresets}>{["#ffffff","#f3f6fa","#dcecff","#dff3e7","#f6eadb"].map(color=><button key={color} type="button" style={{background:color}} aria-label={"Set background "+color} aria-pressed={targetBackgroundColor===color} onClick={()=>setTargetBackgroundColor(color)}/>)}</div>
             <label className={styles.rangeControl}>Background tolerance<output>{backgroundTolerance}</output><input id="photo-studio-background-tolerance" type="range" min="5" max="90" value={backgroundTolerance} onChange={event=>setBackgroundTolerance(Number(event.target.value))}/></label>
             <div className={styles.editorHelp}>This replaces sampled-colour pixels connected to the photo edges. Use a plain, evenly lit background and inspect hair/shoulders. This is a colour-key tool, not AI subject segmentation.</div>
-            <button type="button" className={styles.secondaryButton} onClick={()=>{setSourceBackgroundColor(null);setPickingBackground(false);setBackgroundTolerance(30);setTargetBackgroundColor("#ffffff");}}>Reset background</button>
+            <button type="button" id="photo-studio-reset-background" className={styles.secondaryButton} onClick={()=>{setSourceBackgroundColor(null);setPickingBackground(false);setBackgroundTolerance(30);setTargetBackgroundColor("#ffffff");}}>Reset background</button>
           </>}
 
           {activeTool === "sheet" && <>
@@ -543,21 +543,21 @@ export default function PhotoStudio({
           <div className={styles.contextToolbar}>
             <span>PRINT SHEET PREVIEW</span>
             {sheetCount>1&&<div className={styles.pageNavigator}>
-              <button type="button" aria-label="Previous A4 page" onClick={()=>setPreviewPage(current=>Math.max(0,current-1))} disabled={previewPageIndex===0}><ChevronLeft size={14}/></button>
+              <button type="button" id="photo-studio-previous-page" aria-label="Previous A4 page" onClick={()=>setPreviewPage(current=>Math.max(0,current-1))} disabled={previewPageIndex===0}><ChevronLeft size={14}/></button>
               <span>Page {previewPageIndex+1} of {sheetCount}</span>
-              <button type="button" aria-label="Next A4 page" onClick={()=>setPreviewPage(current=>Math.min(sheetCount-1,current+1))} disabled={previewPageIndex>=sheetCount-1}><ChevronRight size={14}/></button>
+              <button type="button" id="photo-studio-next-page" aria-label="Next A4 page" onClick={()=>setPreviewPage(current=>Math.min(sheetCount-1,current+1))} disabled={previewPageIndex>=sheetCount-1}><ChevronRight size={14}/></button>
             </div>}
             <span className={styles.toolbarDivider}/>
             <button type="button" onClick={() => setZoom(value => Math.max(1, Number((value - 0.1).toFixed(2))))} disabled={zoom <= 1} aria-label="Zoom out"><ZoomOut size={15}/></button>
             <span className={styles.zoomLabel}>{zoom.toFixed(1)}×</span>
             <button type="button" onClick={() => setZoom(value => Math.min(3, Number((value + 0.1).toFixed(2))))} disabled={zoom >= 3} aria-label="Zoom in"><ZoomIn size={15}/></button>
             <span className={styles.toolbarDivider}/>
-            <button type="button" onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); selectLook("natural"); }}><RotateCcw size={14}/> Reset</button>
+            <button type="button" id="photo-studio-reset-look" onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); selectLook("natural"); }}><RotateCcw size={14}/> Reset</button>
           </div>
           <div className={styles.canvasViewport}>
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
-              {image ? <canvas ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} data-testid="photo-studio-preview-canvas" data-background-sample-x-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.xMm ?? 0) + 2} data-background-sample-y-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.yMm ?? 0) + 2} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/> : <div className={styles.loadingState} role={imageError ? "alert" : "status"}>{imageError || "Preparing your photo…"}</div>}
+              {image ? <canvas id="photo-studio-preview-canvas" ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} data-testid="photo-studio-preview-canvas" data-background-sample-x-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.xMm ?? 0) + 2} data-background-sample-y-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.yMm ?? 0) + 2} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/> : <div className={styles.loadingState} role={imageError ? "alert" : "status"}>{imageError || "Preparing your photo…"}</div>}
               <div className={styles.previewProtection} aria-hidden="true"/>
             </div>
           </div>
@@ -573,8 +573,8 @@ export default function PhotoStudio({
       <footer className={styles.footer}>
         <div className={styles.footerHint}><Check size={14}/> {footerHint}</div>
         <div className={styles.footerActions}>
-          <button type="button" className={styles.cancelButton} onClick={onCancel} disabled={busy}>Cancel</button>
-          <button type="button" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !copiesInputValid}>
+          <button type="button" id="photo-studio-cancel" className={styles.cancelButton} onClick={onCancel} disabled={busy}>Cancel</button>
+          <button type="button" id="photo-studio-apply" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !copiesInputValid}>
             {busy ? busyLabel : actionLabel} <Check size={15}/>
           </button>
         </div>

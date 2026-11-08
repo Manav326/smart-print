@@ -215,7 +215,9 @@ class PhotoStudioWebViewInstrumentedTest {
         val coordinates = evaluate(
             scenario,
             """(() => {
-              const canvas = document.querySelector('[role="dialog"] canvas');
+              const dialog = document.querySelector('[role="dialog"]');
+              const canvas = document.getElementById('photo-studio-preview-canvas');
+              if (!dialog || !(canvas instanceof HTMLCanvasElement) || !dialog.contains(canvas)) return null;
               const rect = canvas.getBoundingClientRect();
               return JSON.stringify({
                 x: rect.left + rect.width * $x,
@@ -227,22 +229,19 @@ class PhotoStudioWebViewInstrumentedTest {
         tapCssPoint(scenario, point.getDouble("x"), point.getDouble("y"))
     }
 
-    private fun tapButtonText(scenario: ActivityScenario<MainActivity>, prefix: String) {
-        val quoted = JSONObject.quote(prefix)
-        // React may still be committing the tool-panel update immediately after a
-        // native range gesture. Wait for the actual action by its rendered text,
-        // then scroll it into view before dispatching the Android touch event.
+    private fun tapButtonId(scenario: ActivityScenario<MainActivity>, componentId: String) {
+        val id = JSONObject.quote(componentId)
         waitFor(
             scenario,
-            """Array.from(document.querySelectorAll('[role="dialog"] button'))
-                .some(button => (button.textContent ?? "").replace(/\s+/g, " ").trim().includes($quoted))""",
-            "Photo Studio button '$prefix' to become available"
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const button = document.getElementById($id);
+              return Boolean(dialog && button instanceof HTMLButtonElement &&
+                dialog.contains(button) && !button.disabled);
+            })()""",
+            "Photo Studio button '$componentId' to become available by ID"
         )
-        tapElement(
-            scenario,
-            """Array.from(document.querySelectorAll('[role="dialog"] button'))
-                .find(button => (button.textContent ?? "").replace(/\s+/g, " ").trim().includes($quoted))"""
-        )
+        tapElement(scenario, "document.getElementById($id)")
     }
 
     private fun setLabelValue(
@@ -598,26 +597,33 @@ class PhotoStudioWebViewInstrumentedTest {
         )
     }
 
-    private fun clickButton(scenario: ActivityScenario<MainActivity>, prefix: String) {
-        // Use a real Android MotionEvent against the native WebView for each visible tool/button.
-        tapButtonText(scenario, prefix)
+    private fun clickButton(scenario: ActivityScenario<MainActivity>, componentId: String) {
+        // Select the exact component by its stable DOM ID, then dispatch native Android input.
+        tapButtonId(scenario, componentId)
         androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
 
-        // React state updates are asynchronous relative to Android's UI queue. Tool
-        // and look buttons expose aria-pressed so the next assertion must not race
-        // the panel swap (for example, Looks -> Brightness).
-        val quoted = JSONObject.quote(prefix)
+        // React may commit a tool-panel change after the Android input queue idles.
+        // For toggle buttons, wait for the exact same ID to expose its active state.
+        val id = JSONObject.quote(componentId)
         val hasPressedState = evaluate(
             scenario,
-            """Array.from(document.querySelectorAll('[role=dialog] button'))
-                .some(button => button.innerText.trim().startsWith($quoted) && button.hasAttribute('aria-pressed'))"""
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const button = document.getElementById($id);
+              return Boolean(dialog && button instanceof HTMLButtonElement &&
+                dialog.contains(button) && button.hasAttribute('aria-pressed'));
+            })()"""
         )
         if (hasPressedState == "true") {
             waitFor(
                 scenario,
-                """Array.from(document.querySelectorAll('[role=dialog] button'))
-                    .some(button => button.innerText.trim().startsWith($quoted) && button.getAttribute('aria-pressed') === 'true')""",
-                "Photo Studio control '$prefix' to become active"
+                """(() => {
+                  const dialog = document.querySelector('[role="dialog"]');
+                  const button = document.getElementById($id);
+                  return Boolean(dialog && button instanceof HTMLButtonElement &&
+                    dialog.contains(button) && button.getAttribute('aria-pressed') === 'true');
+                })()""",
+                "Photo Studio component '$componentId' to become active"
             )
         }
     }
@@ -648,23 +654,23 @@ class PhotoStudioWebViewInstrumentedTest {
             while (!isSecure(scenario) && SystemClock.uptimeMillis() < secureDeadline) Thread.sleep(100)
             assertTrue("Photo Studio must protect the native Android window while displaying a photo.", isSecure(scenario))
 
-            clickButton(scenario, "Crop")
+            clickButton(scenario, "photo-studio-tool-crop")
             setRangeValue(scenario, "photo-studio-zoom", 1)
             setRangeValue(scenario, "photo-studio-horizontal-position", 50)
             setRangeValue(scenario, "photo-studio-vertical-position", 50)
-            clickButton(scenario, "Reset crop")
+            clickButton(scenario, "photo-studio-reset-crop")
 
-            clickButton(scenario, "Looks")
-            clickButton(scenario, "Warm")
-            clickButton(scenario, "Crisp")
-            clickButton(scenario, "Black & white")
+            clickButton(scenario, "photo-studio-tool-looks")
+            clickButton(scenario, "photo-studio-look-warm")
+            clickButton(scenario, "photo-studio-look-crisp")
+            clickButton(scenario, "photo-studio-look-mono")
             setRangeValue(scenario, "photo-studio-brightness", 110)
             setRangeValue(scenario, "photo-studio-contrast", 120)
             setRangeValue(scenario, "photo-studio-colour", 90)
-            clickButton(scenario, "Reset")
+            clickButton(scenario, "photo-studio-reset-look")
 
-            clickButton(scenario, "Background")
-            clickButton(scenario, "Pick background from photo")
+            clickButton(scenario, "photo-studio-tool-background")
+            clickButton(scenario, "photo-studio-pick-background")
             tapPhotoSheetPoint(scenario, 5.0, 10.0)
             assertEquals(
                 "A4 page margin must not sample a background colour.",
@@ -682,7 +688,7 @@ class PhotoStudioWebViewInstrumentedTest {
             )
             setLabelValue(scenario, "photo-studio-replacement-background", "#f3f6fa")
             setRangeValue(scenario, "photo-studio-background-tolerance", 65)
-            clickButton(scenario, "Reset background")
+            clickButton(scenario, "photo-studio-reset-background")
 
             val captionsEnabled = evaluate(
                 scenario,
@@ -699,10 +705,10 @@ class PhotoStudioWebViewInstrumentedTest {
             assertEquals("true", captionsEnabled)
             setLabelValue(scenario, "photo-studio-name", "Android Photo QA")
             setLabelValue(scenario, "photo-studio-date-of-birth", "2000-02-29")
-            clickButton(scenario, "Text")
+            clickButton(scenario, "photo-studio-tool-text")
             setLabelValue(scenario, "photo-studio-caption-font-size", "7")
             setLabelValue(scenario, "photo-studio-caption-colour", "#ff0000")
-            clickButton(scenario, "Sheet")
+            clickButton(scenario, "photo-studio-tool-sheet")
 
             setLabelValue(scenario, "photo-studio-photo-size", "35x45")
             setLabelValue(scenario, "photo-studio-photo-count", "1.5")
@@ -719,13 +725,13 @@ class PhotoStudioWebViewInstrumentedTest {
                 "six-page count for 50 photos at nine per page"
             )
 
-            repeat(5) { clickButton(scenario, "Next A4 page") }
+            repeat(5) { clickButton(scenario, "photo-studio-next-page") }
             waitFor(
                 scenario,
                 "document.querySelector('[role=dialog]')?.innerText.includes('Page 6 of 6')",
                 "last page navigation"
             )
-            tapButtonText(scenario, "Prepare A4 sheet")
+            tapButtonId(scenario, "photo-studio-apply")
             waitFor(
                 scenario,
                 "document.querySelector('#photo-studio-result')?.textContent.includes('application/pdf')",
@@ -829,7 +835,7 @@ class PhotoStudioWebViewInstrumentedTest {
                 "two-page replacement sheet for the shop-owned job"
             )
 
-            tapButtonText(scenario, "Save sheet to this job")
+            tapButtonId(scenario, "photo-studio-apply")
             waitFor(
                 scenario,
                 "document.querySelector('#photo-studio-result')?.textContent.includes('application/pdf')",
