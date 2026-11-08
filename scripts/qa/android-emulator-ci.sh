@@ -80,7 +80,7 @@ trap 'adb reverse --remove tcp:3000 >/dev/null 2>&1 || true' EXIT
 reverse_mappings="$(adb reverse --list)"
 if ! grep -Fq "tcp:3000 tcp:3000" <<< "$reverse_mappings"; then
   echo "::error::ADB reverse did not install the isolated Photo Studio localhost mapping."
-  printf '%s\\n' "$reverse_mappings"
+  printf '%s\n' "$reverse_mappings"
   exit 2
 fi
 if ! curl --fail --silent --show-error "$photo_studio_qa_origin/tests/photo-studio.browser.html" >/dev/null; then
