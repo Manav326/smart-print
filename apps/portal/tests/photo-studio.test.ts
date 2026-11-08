@@ -32,8 +32,8 @@ test("multiple prepared A4 pages become one multi-page PDF",()=>{
  const value=new TextDecoder("latin1").decode(pdf);
  assert.ok(value.startsWith("%PDF-1.4"));
  assert.match(value,/\/Count 3/);
-  assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,pageCount);
-  assert.match(value,/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/);
+  assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,3);
+  assert.equal((value.match(/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/g)??[]).length,3);
  const xrefOffset=Number(value.match(/startxref\n(\d+)\n%%EOF/)?.[1]);
  assert.ok(Number.isInteger(xrefOffset));
  assert.ok(value.slice(xrefOffset).startsWith("xref\n"));
@@ -186,8 +186,8 @@ test("50 photos at nine per page build one six-page A4 PDF",()=>{
  const pdf=buildPhotoPdf(Array.from({length:6},()=>jpeg));
  const value=new TextDecoder("latin1").decode(pdf);
  assert.match(value,/\/Count 6/);
-  assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,pageCount);
-});
+  assert.equal((value.match(/\/Type \/Page \/Parent 2 0 R/g)??[]).length,6);
+  assert.equal((value.match(/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/g)??[]).length,6);
 
 test("changing photos per A4 page redraws the live preview",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
