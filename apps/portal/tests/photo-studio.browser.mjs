@@ -116,8 +116,12 @@ async function samplePhotoBackground(page) {
     const bounds = canvas.getBoundingClientRect();
     const sampleXmm = Number(canvas.getAttribute("data-background-sample-x-mm"));
     const sampleYmm = Number(canvas.getAttribute("data-background-sample-y-mm"));
-    assert.ok(Number.isFinite(sampleXmm) && sampleXmm > 0, "Photo Studio must expose the first photo tile's background sample X coordinate.");
-    assert.ok(Number.isFinite(sampleYmm) && sampleYmm > 0, "Photo Studio must expose the first photo tile's background sample Y coordinate.");
+    if (!Number.isFinite(sampleXmm) || sampleXmm <= 0) {
+      throw new Error("Photo Studio must expose the first photo tile's background sample X coordinate.");
+    }
+    if (!Number.isFinite(sampleYmm) || sampleYmm <= 0) {
+      throw new Error("Photo Studio must expose the first photo tile's background sample Y coordinate.");
+    }
     const clientX = bounds.left + bounds.width * (sampleXmm / 210);
     const clientY = bounds.top + bounds.height * (sampleYmm / 297);
     canvas.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX, clientY }));
