@@ -3,9 +3,15 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
 
 const appMode = (process.env.SMARTPRINT_MIXED_BATCH_REFUND_APP || "web").toLowerCase();
-if (!["web", "desktop"].includes(appMode)) throw new Error("App mode must be web or desktop.");
+if (!["web", "desktop", "desktop-native"].includes(appMode)) {
+  throw new Error("App mode must be web, desktop, or desktop-native.");
+}
+if (appMode === "desktop-native" && process.platform !== "win32") {
+  throw new Error("The native WebView2 acceptance case runs on Windows only.");
+}
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) throw new Error("PLAYWRIGHT_MODULE_DIR is required.");
 const { chromium } = await import(pathToFileURL(join(moduleDirectory, "index.mjs")).href);
@@ -13,17 +19,41 @@ const artifactDirectory = process.env.SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR
   join("artifacts", "mixed-batch-refund", appMode);
 mkdirSync(artifactDirectory, { recursive: true });
 
-const port = appMode === "desktop" ? "1420" : "4174";
+const port = appMode === "web" ? "4174" : "1420";
 const baseUrl = process.env.SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL || "http://127.0.0.1:" + port;
+const webViewDebugPort = Number(process.env.SMARTPRINT_WEBVIEW2_DEBUG_PORT || "9228");
+if (!Number.isInteger(webViewDebugPort) || webViewDebugPort < 1024 || webViewDebugPort > 65535) {
+  throw new Error("SMARTPRINT_WEBVIEW2_DEBUG_PORT must be a valid TCP port.");
+}
+const webViewDebugUrl = "http://127.0.0.1:" + webViewDebugPort;
 const serverArgs = appMode === "desktop"
   ? ["--filter", "@smart-print/desktop", "dev", "--host", "127.0.0.1", "--port", port, "--strictPort"]
   : ["--filter", "@smart-print/portal", "dev", "--host", "127.0.0.1", "--port", port, "--strictPort"];
 
 function startServer() {
-  const options = { stdio: "inherit", env: { ...process.env, VITE_API_BASE_URL: "" }, windowsHide: true, detached: process.platform !== "win32" };
-  const child = process.platform === "win32"
-    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", ["pnpm", ...serverArgs].join(" ")], options)
-    : spawn("pnpm", serverArgs, options);
+  const baseEnvironment = { ...process.env, VITE_API_BASE_URL: "" };
+  const options = { stdio: "inherit", env: baseEnvironment, windowsHide: true, detached: process.platform !== "win32" };
+  let child;
+  if (appMode === "desktop-native") {
+    // The native test uses Tauri dev with Vite-local API URLs only. CDP is enabled
+    // exclusively for this child process and is bound to localhost.
+    const userDataFolder = process.env.SMARTPRINT_WEBVIEW2_USER_DATA_FOLDER ||
+      join(tmpdir(), "smartprint-mixed-batch-webview2-" + process.pid + "-" + Date.now());
+    mkdirSync(userDataFolder, { recursive: true });
+    const nativeEnvironment = {
+      ...baseEnvironment,
+      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--remote-debugging-port=" + webViewDebugPort,
+      WEBVIEW2_USER_DATA_FOLDER: userDataFolder
+    };
+    const command = ["pnpm", "--filter", "@smart-print/desktop", "exec", "tauri", "dev"].join(" ");
+    child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", command], {
+      ...options, env: nativeEnvironment
+    });
+  } else if (process.platform === "win32") {
+    child = spawn(process.env.ComSpec || "cmd.exe", ["/d", "/c", ["pnpm", ...serverArgs].join(" ")], options);
+  } else {
+    child = spawn("pnpm", serverArgs, options);
+  }
   child.spawnError = null;
   child.on("error", error => { child.spawnError = error; });
   return child;
@@ -38,13 +68,20 @@ function stopServer(child) {
   }
 }
 async function waitForServer(child) {
-  for (let attempt = 0; attempt < 90; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     if (child?.spawnError) throw new Error("QA server failed to start: " + child.spawnError.message);
-    if (child?.exitCode !== null && child?.exitCode !== undefined) throw new Error("QA server exited with code " + child.exitCode);
-    try { if ((await fetch(baseUrl + "/shop")).ok) return; } catch {}
+    if (child?.exitCode !== null && child?.exitCode !== undefined) {
+      throw new Error("QA server exited with code " + child.exitCode);
+    }
+    try {
+      const healthUrl = appMode === "desktop-native" ? webViewDebugUrl + "/json/version" : baseUrl + "/shop";
+      if ((await fetch(healthUrl)).ok) return;
+    } catch {}
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
-  throw new Error("QA server did not become ready within 90 seconds.");
+  throw new Error(appMode === "desktop-native"
+    ? "Native Windows WebView2 did not expose its localhost CDP endpoint within 120 seconds."
+    : "QA server did not become ready within 120 seconds.");
 }
 
 const SHOP_TOKEN = "e30." + Buffer.from(JSON.stringify({
@@ -279,56 +316,112 @@ async function rejectAndRefundPages(page, fileName, pageNumbers, expectedRefund,
 
 let server = null;
 let browser = null;
+let context = null;
 let page = null;
+let nativePreviousSecureSession = null;
+let nativeSecureSessionCaptured = false;
+let nativeSecureSessionOverwritten = false;
+let nativeCredentialSessionRestored = false;
 const pageErrors = [];
 let desktopShellBooted = false;
 let duplicateReplay = null;
+
+async function restoreNativeCredentialSession() {
+  if (appMode !== "desktop-native" || !nativeSecureSessionCaptured || !nativeSecureSessionOverwritten || !page) return;
+  await page.evaluate(async previousSession => {
+    const bridge = window.__TAURI_INTERNALS__;
+    if (!bridge || typeof bridge.invoke !== "function") {
+      throw new Error("Native Tauri bridge disappeared before Credential Manager cleanup.");
+    }
+    await bridge.invoke("write_secure_session", { session: previousSession });
+    sessionStorage.removeItem("qrtoprint.auth.shop");
+  }, nativePreviousSecureSession);
+  nativeSecureSessionOverwritten = false;
+  nativeCredentialSessionRestored = true;
+}
+
 try {
-  if (!process.env.SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL) {
+  if (appMode === "desktop-native" || !process.env.SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL) {
     server = startServer();
     await waitForServer(server);
   }
-  browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1 });
-  page = await context.newPage();
+
+  if (appMode === "desktop-native") {
+    // Attach Playwright to the actual WebView2 hosted by the Tauri Windows process.
+    browser = await chromium.connectOverCDP(webViewDebugUrl);
+    const contexts = browser.contexts();
+    if (!contexts.length) throw new Error("Native WebView2 did not expose a browser context.");
+    context = contexts[0];
+    for (let attempt = 0; attempt < 30 && !context.pages().length; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    page = context.pages()[0] || null;
+    if (!page) throw new Error("Native WebView2 did not expose the SmartPrint window page over CDP.");
+  } else {
+    browser = await chromium.launch({ headless: true });
+    context = await browser.newContext({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1 });
+    page = await context.newPage();
+  }
+
   page.on("pageerror", error => pageErrors.push(error.message));
   await installApiRoutes(page);
 
-  await page.addInitScript(({ sessionToken, desktopMode, secureSession }) => {
-    sessionStorage.setItem("qrtoprint.auth.shop", JSON.stringify({
-      tokenType: "Bearer", accessToken: sessionToken, refreshToken: "mixed-batch-refund-qa-refresh",
-      accessTokenExpiresUtc: "2099-01-01T00:00:00.000Z"
-    }));
-    if (desktopMode) {
-      Object.defineProperty(window, "__TAURI_INTERNALS__", {
-        configurable: true,
-        value: {
-          invoke: async command => {
-            if (command === "read_secure_session") return secureSession;
-            if (command === "write_secure_session") return null;
-            if (command === "get_local_agent_status") return {
-              serviceReachable: true, localApiReachable: true, paired: true,
-              agentDeviceId: "87000000-0000-4000-8000-000000000001",
-              status: "PAIRED", apiBaseUrl: "http://127.0.0.1:17842", readiness: null
-            };
-            return null;
-          }
-        }
-      });
-    }
-  }, {
-    sessionToken: SHOP_TOKEN,
-    desktopMode: appMode === "desktop",
-    secureSession: JSON.stringify({
-      tokenType: "Bearer", accessToken: SHOP_TOKEN,
-      refreshToken: "mixed-batch-refund-qa-refresh",
-      accessTokenExpiresUtc: "2099-01-01T00:00:00.000Z"
-    })
+  const secureSession = JSON.stringify({
+    tokenType: "Bearer", accessToken: SHOP_TOKEN,
+    refreshToken: "mixed-batch-refund-qa-refresh",
+    accessTokenExpiresUtc: "2099-01-01T00:00:00.000Z"
   });
 
-  await page.goto(baseUrl + "/shop", { waitUntil: "networkidle" });
+  if (appMode === "desktop-native") {
+    nativePreviousSecureSession = await page.evaluate(async () => {
+      const bridge = window.__TAURI_INTERNALS__;
+      if (!bridge || typeof bridge.invoke !== "function") {
+        throw new Error("Native Tauri command bridge is not available inside WebView2.");
+      }
+      return await bridge.invoke("read_secure_session");
+    });
+    if (nativePreviousSecureSession !== null && typeof nativePreviousSecureSession !== "string") {
+      throw new Error("Native secure-session command returned an unexpected value.");
+    }
+    nativeSecureSessionCaptured = true;
+    await page.evaluate(async session => {
+      await window.__TAURI_INTERNALS__.invoke("write_secure_session", { session });
+    }, secureSession);
+    nativeSecureSessionOverwritten = true;
+    await page.reload({ waitUntil: "domcontentloaded" });
+  } else {
+    await page.addInitScript(({ sessionToken, desktopMode, serializedSession }) => {
+      sessionStorage.setItem("qrtoprint.auth.shop", JSON.stringify({
+        tokenType: "Bearer", accessToken: sessionToken, refreshToken: "mixed-batch-refund-qa-refresh",
+        accessTokenExpiresUtc: "2099-01-01T00:00:00.000Z"
+      }));
+      if (desktopMode) {
+        Object.defineProperty(window, "__TAURI_INTERNALS__", {
+          configurable: true,
+          value: {
+            invoke: async command => {
+              if (command === "read_secure_session") return serializedSession;
+              if (command === "write_secure_session") return null;
+              if (command === "get_local_agent_status") return {
+                serviceReachable: true, localApiReachable: true, paired: true,
+                agentDeviceId: "87000000-0000-4000-8000-000000000001",
+                status: "PAIRED", apiBaseUrl: "http://127.0.0.1:17842", readiness: null
+              };
+              return null;
+            }
+          }
+        });
+      }
+    }, {
+      sessionToken: SHOP_TOKEN,
+      desktopMode: appMode === "desktop",
+      serializedSession: secureSession
+    });
+    await page.goto(baseUrl + "/shop", { waitUntil: "networkidle" });
+  }
+
   await page.locator(".app-shell").waitFor({ state: "visible", timeout: 30000 });
-  if (appMode === "desktop") {
+  if (appMode === "desktop" || appMode === "desktop-native") {
     assert.equal(await page.locator("body").getAttribute("data-app-shell"), "desktop");
     desktopShellBooted = true;
   }
@@ -440,9 +533,13 @@ try {
     scenario: "Shop owner reviews one paid multi-file, multi-type batch; rejects selected pages from multiple files; records complete refunds for every rejected page; leaves accepted pages paid and eligible.",
     testedClient: appMode === "web"
       ? "Web shop portal"
-      : "Windows desktop entry/shared shop UI with Tauri secure-session and Agent IPC contract test double",
+      : appMode === "desktop-native"
+        ? "Actual Windows Tauri/WebView2 application automated over localhost CDP with the real Credential Manager bridge"
+        : "Windows desktop entry/shared shop UI with a Tauri secure-session and Agent IPC contract test double",
     appMode,
     desktopShellBooted,
+    nativeWebView2Automated: appMode === "desktop-native",
+    nativeCredentialSessionRestored: appMode === "desktop-native" ? nativeCredentialSessionRestored : null,
     batchId: BATCH_ID,
     files: [
       { name: "mixed-exam-set.pdf", mediaType: "application/pdf", totalPages: 3, rejectedPages: [2, 3], acceptedPages: 1, paidMinor: 3000, refundMinor: 2000 },
@@ -466,9 +563,10 @@ try {
     refundLedgerIsInMemory: true,
     apiRequestCount: apiRequests.length
   };
+  if (appMode === "desktop-native") await restoreNativeCredentialSession();
   writeFileSync(join(artifactDirectory, "mixed-batch-refund-" + appMode + ".json"), JSON.stringify(report, null, 2), "utf8");
   console.log(JSON.stringify(report, null, 2));
-  await context.close();
+  if (appMode !== "desktop-native") await context.close();
 } catch (error) {
   if (page) {
     try {
@@ -480,6 +578,20 @@ try {
   }, null, 2), "utf8");
   throw error;
 } finally {
+  let restoreError = null;
+  if (appMode === "desktop-native" && nativeSecureSessionOverwritten && page) {
+    try {
+      await restoreNativeCredentialSession();
+    } catch (error) {
+      restoreError = error instanceof Error ? error : new Error(String(error));
+      writeFileSync(
+        join(artifactDirectory, "mixed-batch-refund-native-session-restore-failure.txt"),
+        restoreError.message,
+        "utf8"
+      );
+    }
+  }
   if (browser) await browser.close();
   stopServer(server);
+  if (restoreError) throw new Error("Could not restore the prior Windows Credential Manager session: " + restoreError.message);
 }

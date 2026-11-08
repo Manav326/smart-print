@@ -1,7 +1,7 @@
 #requires -Version 7.0
 [CmdletBinding()]
 param(
-    [ValidateSet("All", "Web", "Windows")]
+    [ValidateSet("All", "Web", "Windows", "NativeWindows")]
     [string]$Platform = "All",
     [switch]$SkipInstall,
     [switch]$Help,
@@ -17,22 +17,24 @@ if ($Help) {
 SmartPrint mixed-file page rejection and refund acceptance runner
 
 Usage:
-  .\scripts\qa\mixed-batch-refund-test.ps1 [-Platform All|Web|Windows] [-SkipInstall] [-ArtifactDirectory path]
+  .\scripts\qa\mixed-batch-refund-test.ps1 [-Platform All|Web|Windows|NativeWindows] [-SkipInstall] [-ArtifactDirectory path]
 
 Platforms:
-  Web      Runs the shop portal UI in Chromium.
-  Windows  Runs the desktop entry (apps/desktop/src/main.tsx) on Windows with a
-           Tauri IPC contract test double.
-  All      Runs Web and Windows desktop-entry acceptance.
+  Web           Runs the shop portal UI in Chromium.
+  Windows       Runs the desktop-entry contract test and the actual native Windows
+                Tauri/WebView2 application.
+  NativeWindows Runs only the native Windows Tauri/WebView2 application.
+  All           Runs Web, the desktop-entry contract test and native WebView2 test.
 
-The packaged native WebView2 window is separately smoke-launched by GitHub Actions.
-Refunds and payments are in-memory QA fixtures; no real transfer, live payment,
-printer dispatch or physical output occurs.
+The native test uses a localhost-only CDP port and the real Tauri secure-session
+command. It restores the previously saved Windows Credential Manager session
+before exit. All refunds and payments are isolated QA fixtures; no real transfer,
+live payment, printer dispatch or physical output occurs.
 "@
     exit 0
 }
 
-if ($Platform -in @("All", "Windows") -and -not $IsWindows) {
+if ($Platform -in @("All", "Windows", "NativeWindows") -and -not $IsWindows) {
     throw "The Windows desktop renderer variant must run on Windows."
 }
 
@@ -61,11 +63,18 @@ if (-not $module) { throw "Could not locate the isolated Playwright package." }
 
 $env:PLAYWRIGHT_MODULE_DIR = $module.DirectoryName
 $env:VITE_API_BASE_URL = ""
-$modes = if ($Platform -eq "All") { @("web", "desktop") } elseif ($Platform -eq "Web") { @("web") } else { @("desktop") }
+$modes = if ($Platform -eq "All") { @("web", "desktop", "desktop-native") }
+    elseif ($Platform -eq "Web") { @("web") }
+    elseif ($Platform -eq "NativeWindows") { @("desktop-native") }
+    elseif ($Platform -eq "Windows") { @("desktop", "desktop-native") }
+    else { @("web", "desktop", "desktop-native") }
 
 foreach ($mode in $modes) {
-    $safeMode = if ($mode -eq "desktop") { "windows-desktop" } else { "web" }
+    $safeMode = if ($mode -eq "desktop") { "windows-desktop-contract" }
+        elseif ($mode -eq "desktop-native") { "windows-native-webview2" }
+        else { "web" }
     $env:SMARTPRINT_MIXED_BATCH_REFUND_APP = $mode
+    $env:SMARTPRINT_WEBVIEW2_DEBUG_PORT = "9228"
     $env:SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR = Join-Path $ArtifactDirectory $safeMode
     New-Item -ItemType Directory -Force -Path $env:SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR | Out-Null
     Write-Host "Running mixed-batch page rejection/refund acceptance: $safeMode"

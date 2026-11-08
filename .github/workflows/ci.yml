@@ -353,6 +353,31 @@ jobs:
               Wait-Process -Id $process.Id -Timeout 10 -ErrorAction SilentlyContinue
             }
           }
+      - name: Run mixed-batch refund acceptance in the actual native Windows WebView2 application
+        shell: pwsh
+        env:
+          VITE_API_BASE_URL: ""
+          SMARTPRINT_MIXED_BATCH_REFUND_APP: desktop-native
+          SMARTPRINT_WEBVIEW2_DEBUG_PORT: "9238"
+          SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR: artifacts/mixed-batch-refund-native-windows
+        run: |
+          $cache = (npm config get cache).Trim()
+          $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\.mjs$" } |
+            Select-Object -First 1
+          if (-not $module) { throw "Could not locate the isolated Playwright package installed by npx." }
+          New-Item -ItemType Directory -Force -Path $env:SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR | Out-Null
+          $env:PLAYWRIGHT_MODULE_DIR = $module.DirectoryName
+          node apps/portal/tests/mixed-batch-refund.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Native Windows WebView2 mixed-batch refund acceptance failed." }
+      - name: Upload native Windows WebView2 mixed-batch refund evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-mixed-batch-refund-native-webview2-qa
+          path: artifacts/mixed-batch-refund-native-windows/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload Windows desktop package
         uses: actions/upload-artifact@v7
         with:
