@@ -62,7 +62,12 @@ class PhotoStudioWebViewInstrumentedTest {
                     title: document.title,
                     body: document.body?.innerText?.slice(0, 300) ?? "",
                     openButton: Boolean(document.querySelector("#open-photo-studio")),
-                    fixtureReady: document.querySelector("#photo-studio-result")?.dataset.ready ?? null
+                    fixtureReady: document.querySelector("#photo-studio-result")?.dataset.ready ?? null,
+                    dialogText: document.querySelector('[role="dialog"]')?.innerText?.slice(0, 900) ?? null,
+                    activeTools: Array.from(document.querySelectorAll('[role="dialog"] nav[aria-label="Photo editing tools"] button'))
+                      .map(button => ({ text: button.textContent?.trim() ?? "", pressed: button.getAttribute("aria-pressed") })),
+                    dialogButtons: Array.from(document.querySelectorAll('[role="dialog"] button'))
+                      .map(button => button.textContent?.replace(/\\s+/g, " ").trim() ?? "").slice(0, 24)
                 })"""
             )
         }.getOrElse { "WebView diagnostic read failed: ${it.message}" }
@@ -106,6 +111,19 @@ class PhotoStudioWebViewInstrumentedTest {
             "document.readyState === 'complete' && document.querySelector('#open-photo-studio') && document.querySelector('#photo-studio-result')?.dataset.ready === 'true'",
             "trusted local QA fixture to load"
         )
+        // The one-time reset query is stripped by the fixture before the test opens
+        // Photo Studio. Persist that clean URL so Activity recreation cannot reload
+        // the reset flag and erase the draft whose restoration is under test.
+        val cleanFixtureUrl = decodeJavascriptString(evaluate(scenario, "window.location.href"))
+        assertFalse(
+            "The one-time fixture reset flag must not survive the initial navigation.",
+            cleanFixtureUrl.contains("resetDraft=")
+        )
+        scenario.onActivity { activity ->
+            MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                isAccessible = true
+            }.set(activity, cleanFixtureUrl)
+        }
         assertEquals(
             "The Android WebView must use its native SmartPrint user-agent marker.",
             "true",
@@ -120,6 +138,7 @@ class PhotoStudioWebViewInstrumentedTest {
             """(() => {
               const element = $elementExpression;
               if (!element) return null;
+              element.scrollIntoView({ block: "center", inline: "center" });
               const rect = element.getBoundingClientRect();
               return JSON.stringify({
                 x: rect.left + rect.width / 2,
@@ -194,9 +213,19 @@ class PhotoStudioWebViewInstrumentedTest {
 
     private fun tapButtonText(scenario: ActivityScenario<MainActivity>, prefix: String) {
         val quoted = JSONObject.quote(prefix)
+        // React may still be committing the tool-panel update immediately after a
+        // native range gesture. Wait for the actual action by its rendered text,
+        // then scroll it into view before dispatching the Android touch event.
+        waitFor(
+            scenario,
+            """Array.from(document.querySelectorAll('[role="dialog"] button'))
+                .some(button => (button.textContent ?? "").replace(/\\s+/g, " ").trim().includes($quoted))""",
+            "Photo Studio button '$prefix' to become available"
+        )
         tapElement(
             scenario,
-            "Array.from(document.querySelectorAll('[role=dialog] button')).find(button => button.innerText.trim().startsWith($quoted))"
+            """Array.from(document.querySelectorAll('[role="dialog"] button'))
+                .find(button => (button.textContent ?? "").replace(/\\s+/g, " ").trim().includes($quoted))"""
         )
     }
 

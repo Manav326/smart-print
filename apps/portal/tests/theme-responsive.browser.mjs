@@ -867,10 +867,11 @@ async function readPhotoCanvasPixels(page) {
 }
 
 async function activatePhotoTool(page, dialog, label, controlLabel) {
-  await dialog.locator(".toolRail button").filter({ hasText: label }).first().click();
+  const toolButtons = dialog.locator('nav[aria-label="Photo editing tools"] button');
+  await toolButtons.filter({ hasText: label }).first().click();
   await page.waitForFunction(({ tool, field }) => {
     const root = document.querySelector('[role="dialog"]');
-    const active = Array.from(root?.querySelectorAll(".toolRail button") ?? [])
+    const active = Array.from(root?.querySelectorAll('nav[aria-label="Photo editing tools"] button') ?? [])
       .some(button => button.textContent?.trim() === tool && button.getAttribute("aria-pressed") === "true");
     const labelNode = Array.from(root?.querySelectorAll("label") ?? [])
       .find(item => item.textContent?.trim().startsWith(field));
