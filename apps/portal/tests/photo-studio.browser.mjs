@@ -598,7 +598,7 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
 
   const preview = page.getByRole("dialog");
   await preview.waitFor({ state: "visible" });
-  assert.match(await preview.innerText(), /17 35 × 45 mm photos · 2 A4 PDF page\(s\)/);
+  assert.match(await preview.innerText(), /17 35 × 45 mm photos · 9 per A4 page · 2 A4 PDF page\(s\)/);
   assert.ok(revisionRequest.pdfBytes > 1000);
   await page.screenshot({ path: join(artifactDirectory, "real-shop-owner-saved-pdf.png"), fullPage: true });
   assert.equal(pageErrors.length, 0, "Uncaught shop workspace errors: " + pageErrors.join("; "));
