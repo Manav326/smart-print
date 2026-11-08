@@ -42,7 +42,7 @@ function configureNativeWebViewDebugPolicy() {
   const runReg = args => spawnSync("reg.exe", args, {
     encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
   });
-  const describe = result => [result.stdout || "", result.stderr || ""].join("\\n").trim();
+  const describe = result => [result.stdout || "", result.stderr || ""].join("\n").trim();
 
   const keyBefore = runReg(["query", key]);
   const keyExisted = keyBefore.status === 0;
@@ -53,8 +53,8 @@ function configureNativeWebViewDebugPolicy() {
   const valueBefore = runReg(["query", key, "/v", valueName]);
   let previous = null;
   if (valueBefore.status === 0) {
-    const match = describe(valueBefore).split(/\\r?\\n/)
-      .map(line => line.match(/^\\s*smartprint-desktop\\.exe\\s+(REG_\\w+)\\s+(.*)$/i))
+    const match = describe(valueBefore).split(/\r?\n/)
+      .map(line => line.match(/^\s*smartprint-desktop\.exe\s+(REG_\w+)\s+(.*)$/i))
       .find(Boolean);
     if (!match) throw new Error("Could not parse the existing SmartPrint WebView2 debug policy.");
     previous = { type: match[1], value: match[2] };
@@ -104,7 +104,7 @@ function nativeWebViewProcessDiagnostics() {
     query.stdout || query.stderr || "(no process details)",
     "WebView2 policy:",
     policy.stdout || policy.stderr || "(no policy details)"
-  ].join("\\n");
+  ].join("\n");
 }
 
 function startServer() {
@@ -179,7 +179,7 @@ async function waitForServer(child) {
 
   throw new Error(appMode === "desktop-native"
     ? "Native Windows WebView2 did not expose its localhost CDP endpoint within " + timeoutSeconds +
-      " seconds.\\n" + nativeWebViewProcessDiagnostics()
+      " seconds.\n" + nativeWebViewProcessDiagnostics()
     : "QA server did not become ready within 120 seconds.");
 }
 
