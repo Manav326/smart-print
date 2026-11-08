@@ -260,7 +260,15 @@ async function exerciseComponentFullFlow(browser, scenario) {
     await assertNoPageOverflow(page, scenario.mode + " " + sizeCode);
   }
 
-  await page.getByLabel("Number of photos").fill("100");
+  const quantityInput = page.getByLabel("Number of photos");
+  await quantityInput.fill("100");
+  await quantityInput.press("Tab");
+  await page.waitForFunction(() => {
+    const input = document.querySelector('[role="dialog"] input[aria-label="Number of photos"]');
+    const rows = Array.from(document.querySelectorAll('[data-testid="photo-studio-sheet-summary"] > div'));
+    const pages = rows.find(row => row.textContent?.includes("A4 pages in this job"))?.querySelector("strong")?.textContent;
+    return input instanceof HTMLInputElement && input.value === "100" && pages === "4";
+  }, null, { timeout: 10000 });
   await page.getByLabel("Photos per A4 page").selectOption("25");
   let quantitySummary = await page.locator('[data-testid="photo-studio-sheet-summary"]').innerText();
   assert.match(quantitySummary, /A4 pages in this job\s+4/, "100 photos at 25 per page must produce four A4 pages.");

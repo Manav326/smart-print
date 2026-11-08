@@ -779,6 +779,13 @@ async function exercisePhotoStudioBrowser() {
       await batchQuantity.waitFor({ state: "visible" });
       assert.equal(await batchQuantity.count(),1,"Shop Photo Studio must show one number-of-photos input in Sheet settings.");
       await batchQuantity.fill("50");
+      await batchQuantity.press("Tab");
+      await page.waitForFunction(() => {
+        const input = document.querySelector('[role="dialog"] input[aria-label="Number of photos"]');
+        const rows = Array.from(document.querySelectorAll("[class*='sheetSummary'] > div"));
+        const pages = rows.find(row => row.textContent?.includes("A4 pages in this job"))?.querySelector("strong")?.textContent;
+        return input instanceof HTMLInputElement && input.value === "50" && pages === "2";
+      }, null, { timeout: 10000 });
       await reopened.getByLabel("Photos per A4 page").selectOption("9");
       const pageSummary = reopened.locator("[class*='sheetSummary'] > div").filter({ hasText: "A4 pages in this job" }).locator("strong");
       await page.waitForFunction(() => {

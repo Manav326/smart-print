@@ -340,8 +340,19 @@ class PhotoStudioWebViewInstrumentedTest {
         }
         waitFor(
             scenario,
-            "(() => { const dialog = document.querySelector('[role=dialog]'); const label = Array.from(dialog?.querySelectorAll('label') ?? []).find(item => item.textContent.trim().startsWith($label)); return Number(label?.querySelector('input[type=range]')?.value) === $value; })()",
-            "$labelText range to reach $value through touch input"
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const label = Array.from(dialog?.querySelectorAll('label') ?? [])
+                .find(item => item.textContent.trim().startsWith($label));
+              const range = label?.querySelector('input[type="range"]');
+              const actual = Number(range?.value);
+              // Android WebView range thumbs quantize to physical touch coordinates.
+              // Allow at most one declared step of rounding while still requiring
+              // the real native gesture to move the control.
+              const step = Number(range?.step || 1);
+              return Number.isFinite(actual) && Math.abs(actual - $value) <= step;
+            })()""",
+            "$labelText range to reach $value (within one native slider step) through touch input"
         )
     }
 

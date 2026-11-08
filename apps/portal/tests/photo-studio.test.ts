@@ -400,6 +400,16 @@ test("Photo Studio identifies custom manual image adjustments instead of marking
  assert.ok(studio.includes("aria-pressed={look === item.id}"));
 });
 
+test("Photo Studio normalizes the live Number of photos input value on blur",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const quantityField=studio.match(/<input\s+type="number"\s+aria-label="Number of photos"[\s\S]*?\/>/)?.[0] ?? "";
+ assert.ok(quantityField,"Number of photos input must exist.");
+ assert.match(quantityField,/onBlur=\{event\s*=>/);
+ assert.match(quantityField,/event\.currentTarget\.value/);
+ assert.doesNotMatch(quantityField,/Number\(copiesInput\)/,
+  "Blur normalization must not read the potentially stale React state.");
+});
+
 test("Photo Studio prevents apply without a whole-number quantity or any shop photo rates",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.ok(studio.includes("const copiesInputValid = Number.isInteger(parsedCopiesInput) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies"));
