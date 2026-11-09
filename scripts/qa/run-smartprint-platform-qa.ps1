@@ -282,18 +282,27 @@ function Start-StaticPortalServer([string]$Directory, [int]$Port, [string]$LogPr
     $stderr = Join-Path $runDirectory ($LogPrefix + ".stderr.log")
     $argumentLine = '"{0}" "{1}" {2}' -f $serverScript, $Directory, $Port
     $process = Start-Process -FilePath $node.Source -ArgumentList $argumentLine -WorkingDirectory $repoRoot -PassThru -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-    $deadline = [DateTime]::UtcNow.AddSeconds(45)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        if ($process.HasExited) {
-            Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
-            throw "Static Portal QA server exited with code $($process.ExitCode)."
+    try {
+        $deadline = [DateTime]::UtcNow.AddSeconds(45)
+        while ([DateTime]::UtcNow -lt $deadline) {
+            if ($process.HasExited) {
+                Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+                throw "Static Portal QA server exited with code $($process.ExitCode)."
+            }
+            try {
+                $response = Invoke-WebRequest -Uri ("http://127.0.0.1:{0}/" -f $Port) -TimeoutSec 2
+                if ($response.StatusCode -eq 200) { return $process }
+            } catch { Start-Sleep -Milliseconds 500 }
         }
-        try {
-            $response = Invoke-WebRequest -Uri ("http://127.0.0.1:{0}/" -f $Port) -TimeoutSec 2
-            if ($response.StatusCode -eq 200) { return $process }
-        } catch { Start-Sleep -Milliseconds 500 }
+        throw "Static Portal did not become ready on port $Port."
+    } catch {
+        if ($process -and -not $process.HasExited) {
+            $process.Kill($true)
+            $process.WaitForExit(5000) | Out-Null
+        }
+        Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
+        throw
     }
-    throw "Static production Portal did not become ready on port $Port."
 }
 
 function Invoke-PhotoStudioSuite {
@@ -412,9 +421,19 @@ function Invoke-WindowsArtifactTests([string]$DesktopDirectory, [string]$ModeFor
 function Resolve-AndroidDeviceIfNeeded {
     if (-not ($Platforms -contains "Android")) { return $null }
     if ($AndroidDeviceSerial) { return $AndroidDeviceSerial }
-    $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
-    $adb = Join-Path $sdk "platform-tools\adb.exe"
-    if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) { return $null }
+    $sdk = $null
+    $adb = $null
+    foreach ($candidate in @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, (Join-Path $env:LOCALAPPDATA "Android\Sdk"))) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        $candidatePath = [Environment]::ExpandEnvironmentVariables($candidate.Trim().Trim('"'))
+        $candidateAdb = Join-Path $candidatePath "platform-tools\adb.exe"
+        if (Test-Path -LiteralPath $candidateAdb -PathType Leaf) {
+            $sdk = $candidatePath
+            $adb = $candidateAdb
+            break
+        }
+    }
+    if (-not $adb) { return $null }
     $lines = @(& $adb devices -l 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "ADB could not enumerate connected devices: $($lines -join '; ')" }
     $serials = @()
