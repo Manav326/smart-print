@@ -368,10 +368,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Photo Studio browser runner syntax validation failed." }
           node --check apps/portal/tests/mixed-batch-refund.browser.mjs
           if ($LASTEXITCODE -ne 0) { throw "Mixed-batch refund browser runner syntax validation failed." }
+          node --check scripts/qa/serve-static-portal.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Static Portal QA server syntax validation failed." }
+          node --check scripts/qa/create-qa-artifact-manifest.mjs
+          if ($LASTEXITCODE -ne 0) { throw "QA artifact manifest generator syntax validation failed." }
           pwsh -NoProfile -File scripts/qa/photo-studio-test.ps1 -Help
           if ($LASTEXITCODE -ne 0) { throw "Photo Studio test runner help failed." }
           pwsh -NoProfile -File scripts/qa/mixed-batch-refund-test.ps1 -Help
           if ($LASTEXITCODE -ne 0) { throw "Mixed-batch refund test runner help failed." }
+          pwsh -NoProfile -File scripts/qa/run-smartprint-platform-qa.ps1 -Help
+          if ($LASTEXITCODE -ne 0) { throw "Unified platform QA runner help failed." }
+          pwsh -NoProfile -File scripts/qa/run-smartprint-android-device-tests.ps1 -Help
+          if ($LASTEXITCODE -ne 0) { throw "Physical Android QA runner help failed." }
       - name: Install Chromium for Windows Photo Studio and mixed-batch acceptance
         id: browser_chromium_install
         if: ${{ !cancelled() && steps.desktop_dependencies.outcome == 'success' }}
