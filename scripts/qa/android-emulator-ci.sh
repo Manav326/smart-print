@@ -183,6 +183,8 @@ cp "$qa_app_apk" "$qa_artifact_dir/SmartPrint-Android-LocalQA.apk"
 cp "$qa_test_apk" "$qa_artifact_dir/SmartPrint-Android-LocalQA-Test.apk"
 mkdir -p "$qa_artifact_dir/fixture"
 cp -R apps/portal/dist/. "$qa_artifact_dir/fixture/"
+printf '{\n  "applicationId": "%s",\n  "testApplicationId": "%s.test",\n  "fixtureDirectory": "fixture",\n  "serviceUrl": "http://127.0.0.1:3000"\n}\n' \
+  "$photo_studio_qa_application_id" > "$qa_artifact_dir/qa-android.json"
 node scripts/qa/create-qa-artifact-manifest.mjs "$qa_artifact_dir" android
 
 echo "[QA-STEP-START] Android package lifecycle | building isolated APK N for install/upgrade validation..."
