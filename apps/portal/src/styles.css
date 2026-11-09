@@ -3305,3 +3305,29 @@ html[data-theme="dark"] .auth-proof {
 .photo-order-upi>span{font-size:12px;color:var(--muted);overflow-wrap:anywhere;text-align:center}
 .photo-order-upi>small{max-width:420px;text-align:center;color:var(--muted);font-size:11px;line-height:1.55}
 @media(max-width:520px){.photo-order-receipt .modal-actions{display:grid;grid-template-columns:1fr}.photo-order-receipt .modal-actions button{width:100%}.photo-order-upi{padding:12px}}
+
+
+/* Shop-owner Razorpay subscription checkout */
+.subscription-checkout-panel{padding:19px;min-width:0}
+.subscription-checkout-state{padding:12px 13px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);color:var(--muted);font-size:9px;line-height:1.55}
+.subscription-checkout-state.tone-error{color:var(--red)}
+.subscription-plan-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:12px}
+.subscription-purchase-card{display:flex;flex-direction:column;gap:12px;min-width:0;padding:15px;border:1px solid var(--border);border-radius:11px;background:var(--surface)}
+.subscription-purchase-card.is-current{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-soft)}
+.subscription-purchase-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.subscription-purchase-card-top h3{font:700 14px Manrope,sans-serif;color:var(--text);margin:5px 0 0}
+.subscription-plan-version{flex:0 0 auto;padding:4px 7px;border-radius:6px;background:var(--surface-2);color:var(--muted);font-size:8px;font-weight:700}
+.subscription-plan-description{font-size:9px;line-height:1.55;color:var(--muted);margin:0}
+.subscription-purchase-prices{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:9px;margin-top:auto}
+.subscription-purchase-prices>div{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:10px;border-radius:8px;background:var(--surface-2);min-width:0}
+.subscription-purchase-prices>div>span{font-size:8px;color:var(--muted)}
+.subscription-purchase-prices>div>strong{font-size:12px;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.subscription-purchase-prices .btn{width:100%;justify-content:center;min-height:34px;font-size:9px}
+.subscription-purchase-prices .btn:disabled{opacity:.55;cursor:not-allowed}
+.subscription-current-plan-label{font-size:8px;font-weight:700;color:var(--accent)}
+.subscription-payment-message{padding:12px 13px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);color:var(--text);font-size:9px;line-height:1.6}
+.subscription-payment-message.tone-success{border-color:rgba(88,214,160,.35);color:var(--green)}
+.subscription-payment-message.tone-error{border-color:rgba(240,110,110,.35);color:var(--red)}
+.subscription-payment-message.tone-info{color:var(--text)}
+@media(max-width:850px){.subscription-hero-grid{grid-template-columns:1fr}}
+@media(max-width:600px){.subscription-checkout-panel,.subscription-current-panel,.subscription-feature-panel,.subscription-usage-panel{padding:14px}.subscription-usage-heading{flex-direction:column}.subscription-updated{white-space:normal}.subscription-plan-grid{grid-template-columns:1fr}.subscription-period{grid-template-columns:1fr}.subscription-prices{grid-template-columns:1fr}}
