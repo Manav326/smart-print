@@ -129,6 +129,42 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
+    public async Task LateCreateResponseCannotReturnCheckoutAfterParallelResumeAlreadyCapturedTheOrder()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            fixture.Razorpay.ReturnCapturedPaymentOnOrderLookup = true;
+            await using var concurrentDb = fixture.CreateAdditionalDbContext();
+            var concurrentService = fixture.CreateService(concurrentDb);
+            SubscriptionPaymentException? resumeException = null;
+            fixture.Razorpay.BeforeCreateOrderResponse = async paymentId =>
+            {
+                try
+                {
+                    await concurrentService.ResumeOrderAsync(
+                        fixture.TenantId, paymentId, CancellationToken.None);
+                }
+                catch (SubscriptionPaymentException exception)
+                {
+                    resumeException = exception;
+                }
+            };
+
+            var createException = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.CreateOrderAsync("parallel-resume-captured-order"));
+
+            Assert.Equal("subscription_payment_already_captured", resumeException?.Code);
+            Assert.Equal("subscription_payment_already_captured", createException.Code);
+            var payment = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
+            Assert.Equal("CAPTURED", payment.Status);
+            Assert.NotNull(payment.AssignedSubscriptionId);
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal(2, await fixture.Db.TenantSubscriptions.CountAsync());
+            Assert.Equal(1, await fixture.Db.PlatformSubscriptionAudits.CountAsync());
+        });
+    }
+
+    [Fact]
     public async Task ResumeReturnsTheExistingOrderWithoutCreatingAnotherProviderOrder()
     {
         await WithPostgresAsync(async fixture =>
@@ -760,6 +796,7 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
         public bool LoseCreateOrderResponseAfterCreating { get; set; }
         public bool HideOrdersFromReceiptLookup { get; set; }
         public bool ReturnCapturedPaymentOnOrderLookup { get; set; }
+        public Func<Guid, Task>? BeforeCreateOrderResponse { get; set; }
 
         public string PaymentIdFor(string orderId) =>
             payments.Single(item => item.Value.OrderId == orderId).Key;
@@ -783,6 +820,8 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
                 var orderId = "order_test_" + number;
                 var paymentId = "pay_test_" + number;
                 payments[paymentId] = new PaymentRecord(orderId, amount, currency, receipt, subscriptionPaymentId);
+                if (BeforeCreateOrderResponse is not null)
+                    await BeforeCreateOrderResponse(Guid.Parse(subscriptionPaymentId));
                 if (LoseCreateOrderResponseAfterCreating)
                     return Json(HttpStatusCode.InternalServerError, new { error = new { description = "Simulated lost create-order response." } });
                 return Json(HttpStatusCode.OK, new
