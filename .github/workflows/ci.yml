@@ -842,6 +842,8 @@ jobs:
       - name: Run Android emulator UI and installation lifecycle tests
         id: android_emulator_tests
         if: ${{ !cancelled() && steps.android_sdk_install.outcome == 'success' && steps.android_apk_build.outcome == 'success' && steps.android_kvm.outcome == 'success' && steps.android_photo_fixture_server.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
