@@ -2803,7 +2803,8 @@ class MainActivity : AppCompatActivity() {
     private fun allowedLocalDevelopmentEndpoint(uri: Uri): Boolean {
         val isolatedPhotoStudioLoopback =
             BuildConfig.PHOTO_STUDIO_QA_ENABLED &&
-                packageName.endsWith(".localqa") &&
+                (packageName == "com.quantaedge.smartprint.localqa" ||
+                    packageName.startsWith("com.quantaedge.smartprint.localqa.")) &&
                 uri.host.equals("127.0.0.1", true) &&
                 uri.port == 3000
         return BuildConfig.DEBUG &&
