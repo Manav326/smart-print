@@ -102,6 +102,7 @@ public sealed class AgentControlPipeIntegrationTests
         var localApiState = new LocalAgentApiState();
         var networkPreferenceStore = new LocalNetworkPreferenceStore(Path.Combine(identityDirectory, "local-network.preference"));
         var localNetworkManager = new LocalNetworkManager(networkPreferenceStore, localApiState);
+        var testPipeName = $"{AgentControlPipeHostedService.PipeName}.test.{Guid.NewGuid():N}";
         var service = new AgentControlPipeHostedService(
             configuration,
             NullLogger<AgentControlPipeHostedService>.Instance,
@@ -109,14 +110,15 @@ public sealed class AgentControlPipeIntegrationTests
             credentialStore,
             localApiState,
             localNetworkManager,
-            new AgentRuntimeReadiness());
+            new AgentRuntimeReadiness(),
+            testPipeName);
 
         try
         {
             Assert.Equal(@"\\.\pipe\QRtoPrint.SmartPrint.Agent.Control", AgentControlPipeHostedService.PipePath);
             await service.StartAsync(timeout.Token);
 
-            using (var initialStatus = await SendPipeRequestAsync("status", null, timeout.Token))
+            using (var initialStatus = await SendPipeRequestAsync(testPipeName, "status", null, timeout.Token))
             {
                 Assert.True(initialStatus.RootElement.GetProperty("success").GetBoolean());
                 Assert.True(initialStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
@@ -126,7 +128,7 @@ public sealed class AgentControlPipeIntegrationTests
                 Assert.Equal(apiOrigin, initialStatus.RootElement.GetProperty("apiBaseUrl").GetString());
             }
 
-            using (var conflict = await SendPipeRequestAsync("enroll", conflictEnrollmentCode, timeout.Token))
+            using (var conflict = await SendPipeRequestAsync(testPipeName, "enroll", conflictEnrollmentCode, timeout.Token))
             {
                 Assert.False(conflict.RootElement.GetProperty("success").GetBoolean());
                 Assert.Equal("agent_already_enrolled", conflict.RootElement.GetProperty("code").GetString());
@@ -135,7 +137,7 @@ public sealed class AgentControlPipeIntegrationTests
                 Assert.False(credentialStore.IsRevoked());
             }
 
-            using (var response = await SendPipeRequestAsync("enroll", enrollmentCode, timeout.Token))
+            using (var response = await SendPipeRequestAsync(testPipeName, "enroll", enrollmentCode, timeout.Token))
             {
                 Assert.True(response.RootElement.GetProperty("success").GetBoolean());
                 Assert.Equal(deviceId, response.RootElement.GetProperty("agentDeviceId").GetGuid());
@@ -145,7 +147,7 @@ public sealed class AgentControlPipeIntegrationTests
 
             Assert.True(await apiRequestTask);
 
-            using (var pairedStatus = await SendPipeRequestAsync("status", null, timeout.Token))
+            using (var pairedStatus = await SendPipeRequestAsync(testPipeName, "status", null, timeout.Token))
             {
                 Assert.True(pairedStatus.RootElement.GetProperty("success").GetBoolean());
                 Assert.True(pairedStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
@@ -175,7 +177,7 @@ public sealed class AgentControlPipeIntegrationTests
             Assert.True(credentialStore.DeleteIfMatches(preservedCredentials));
             Assert.True(credentialStore.IsRevoked());
             Assert.Null(credentialStore.Load());
-            using (var revokedStatus = await SendPipeRequestAsync("status", null, timeout.Token))
+            using (var revokedStatus = await SendPipeRequestAsync(testPipeName, "status", null, timeout.Token))
             {
                 Assert.True(revokedStatus.RootElement.GetProperty("success").GetBoolean());
                 Assert.True(revokedStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
@@ -192,7 +194,7 @@ public sealed class AgentControlPipeIntegrationTests
             credentialStore.Save(renewedCredentials);
             Assert.False(credentialStore.IsRevoked());
             Assert.Equal(renewedCredentials.AgentDeviceId, credentialStore.Load()!.AgentDeviceId);
-            using (var renewedStatus = await SendPipeRequestAsync("status", null, timeout.Token))
+            using (var renewedStatus = await SendPipeRequestAsync(testPipeName, "status", null, timeout.Token))
             {
                 Assert.True(renewedStatus.RootElement.GetProperty("success").GetBoolean());
                 Assert.True(renewedStatus.RootElement.GetProperty("paired").GetBoolean());
@@ -203,7 +205,7 @@ public sealed class AgentControlPipeIntegrationTests
             // Corrupt the protected identity to ensure the pipe still reports
             // that the service is reachable, rather than falsely reporting it offline.
             File.WriteAllBytes(identityPath, [0x00, 0x01, 0x02, 0x03]);
-            using (var unreadableStatus = await SendPipeRequestAsync("status", null, timeout.Token))
+            using (var unreadableStatus = await SendPipeRequestAsync(testPipeName, "status", null, timeout.Token))
             {
                 Assert.False(unreadableStatus.RootElement.GetProperty("success").GetBoolean());
                 Assert.True(unreadableStatus.RootElement.GetProperty("serviceReachable").GetBoolean());
@@ -223,13 +225,14 @@ public sealed class AgentControlPipeIntegrationTests
     }
 
     private static async Task<JsonDocument> SendPipeRequestAsync(
+        string pipeName,
         string operation,
         string? enrollmentCode,
         CancellationToken cancellationToken)
     {
         using var pipe = new NamedPipeClientStream(
             ".",
-            AgentControlPipeHostedService.PipeName,
+            pipeName,
             PipeDirection.InOut,
             PipeOptions.Asynchronous);
         await pipe.ConnectAsync(10_000, cancellationToken);

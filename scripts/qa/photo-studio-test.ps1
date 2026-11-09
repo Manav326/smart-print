@@ -212,6 +212,11 @@ try {
         if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
             throw ".NET SDK is required for the Windows API and Agent suites."
         }
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+        if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            throw "Windows Agent QA must run from an elevated PowerShell 7 session. The credential-store tests verify SYSTEM/Administrators-only machine-wide ACLs and LocalMachine DPAPI. Open PowerShell 7 with Run as administrator and repeat Windows QA. The installed SmartPrint Agent service does not need to be stopped."
+        }
         if ($Platform -eq "Windows" -and -not $SkipInstall) {
             Invoke-Checked "Install locked desktop dependencies" { pnpm install --frozen-lockfile }
         }

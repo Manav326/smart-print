@@ -6,6 +6,7 @@ param(
     [switch]$SkipInstall,
     [switch]$Help,
     [switch]$Headed,
+    [string]$BaseUrl = "",
     [ValidateRange(1024,65535)][int]$WebView2DebugPort = 9228,
     [string]$NativeExecutablePath = "",
     [string]$ArtifactDirectory = "artifacts/mixed-batch-refund"
@@ -20,7 +21,7 @@ if ($Help) {
 SmartPrint mixed-file page rejection and refund acceptance runner
 
 Usage:
-  .\scripts\qa\mixed-batch-refund-test.ps1 [-Platform All|Web|Windows|NativeWindows] [-SkipInstall] [-Headed] [-NativeExecutablePath path] [-WebView2DebugPort port] [-ArtifactDirectory path]
+  .\scripts\qa\mixed-batch-refund-test.ps1 [-Platform All|Web|Windows|NativeWindows] [-SkipInstall] [-Headed] [-BaseUrl http://127.0.0.1:4174] [-NativeExecutablePath path] [-WebView2DebugPort port] [-ArtifactDirectory path]
 
 Platforms:
   Web           Runs the shop portal UI in Chromium.
@@ -90,6 +91,15 @@ $previousEnv = @{}
 foreach ($name in $trackedEnvNames) { $previousEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process") }
 
 try {
+if ($BaseUrl) {
+    $baseUri = $null
+    if (-not [Uri]::TryCreate($BaseUrl, [UriKind]::Absolute, [ref]$baseUri) -or
+        $baseUri.Scheme -ne "http" -or -not $baseUri.IsLoopback -or
+        $baseUri.AbsolutePath -ne "/" -or $baseUri.Query -or $baseUri.Fragment) {
+        throw "-BaseUrl must be a loopback HTTP origin with no path, query or fragment."
+    }
+    $env:SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL = $BaseUrl.TrimEnd("/")
+}
 foreach ($mode in $modes) {
     $safeMode = if ($mode -eq "desktop") { "windows-desktop-contract" }
         elseif ($mode -eq "desktop-native") { "windows-native-webview2" }

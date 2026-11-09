@@ -357,7 +357,7 @@ function Invoke-WebProductionArtifactTest([string]$DistDirectory) {
         $env:SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL = "http://127.0.0.1:4174"
         if ($Headless) { $env:SMARTPRINT_MIXED_BATCH_REFUND_HEADED = "0" } else { $env:SMARTPRINT_MIXED_BATCH_REFUND_HEADED = "1" }
         $mixed = Join-Path $PSScriptRoot "mixed-batch-refund-test.ps1"
-        & $script:powerShellExecutable.Source -NoProfile -File $mixed -Platform Web -SkipInstall -Headed:$(-not $Headless) -ArtifactDirectory (Join-Path $runDirectory "web-production-acceptance")
+        & $script:powerShellExecutable.Source -NoProfile -File $mixed -Platform Web -SkipInstall -Headed:$(-not $Headless) -BaseUrl "http://127.0.0.1:4174" -ArtifactDirectory (Join-Path $runDirectory "web-production-acceptance")
         if ($LASTEXITCODE -ne 0) { throw "Production Portal artifact browser acceptance failed (child PowerShell exit $LASTEXITCODE)." }
     } finally {
         [Environment]::SetEnvironmentVariable("SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL", $previousBase, "Process")

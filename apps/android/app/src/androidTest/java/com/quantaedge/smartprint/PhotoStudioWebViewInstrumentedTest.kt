@@ -480,7 +480,13 @@ class PhotoStudioWebViewInstrumentedTest {
                   const range = document.getElementById($id);
                   return Boolean(dialog && range instanceof HTMLInputElement &&
                     range.type === 'range' && dialog.contains(range) &&
-                    Math.abs(Number(range.value) - $safeStartValue) <= 1);
+                    (() => {
+                      const step = Number(range.step);
+                      const tolerance = Number.isFinite(step) && step > 0
+                        ? Math.max(0.005, step / 2)
+                        : 0.005;
+                      return Math.abs(Number(range.value) - $safeStartValue) <= tolerance;
+                    })());
                 })()""",
                 "Photo Studio range '$controlId' thumb to move clear of Android's system Back gesture edge"
             )
