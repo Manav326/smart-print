@@ -762,6 +762,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Run Android emulator UI and installation lifecycle tests
+        id: android_emulator_tests
         if: ${{ !cancelled() && steps.android_sdk_install.outcome == 'success' && steps.android_apk_build.outcome == 'success' && steps.android_kvm.outcome == 'success' && steps.android_photo_fixture_server.outcome == 'success' }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
@@ -803,6 +804,15 @@ jobs:
         with:
           name: smart-print-android-debug
           path: apps/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload isolated Android physical-device QA APK pair
+        if: ${{ always() && steps.android_emulator_tests.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: smart-print-android-device-qa
+          path: artifacts/android-device-qa/
           if-no-files-found: error
           retention-days: 30
 
