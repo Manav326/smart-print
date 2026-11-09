@@ -181,6 +181,8 @@ test -s "$qa_app_apk" || { echo "::error::The passing QA app APK is missing: $qa
 test -s "$qa_test_apk" || { echo "::error::The passing Android instrumentation APK is missing: $qa_test_apk"; exit 1; }
 cp "$qa_app_apk" "$qa_artifact_dir/SmartPrint-Android-LocalQA.apk"
 cp "$qa_test_apk" "$qa_artifact_dir/SmartPrint-Android-LocalQA-Test.apk"
+mkdir -p "$qa_artifact_dir/fixture"
+cp -R apps/portal/dist/. "$qa_artifact_dir/fixture/"
 node scripts/qa/create-qa-artifact-manifest.mjs "$qa_artifact_dir" android
 
 echo "[QA-STEP-START] Android package lifecycle | building isolated APK N for install/upgrade validation..."
