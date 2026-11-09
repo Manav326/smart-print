@@ -25,8 +25,7 @@ public sealed class AgentControlPipeHostedService(
     public const string PipeName = "QRtoPrint.SmartPrint.Agent.Control";
     public const string PipePath = @"\\.\pipe\" + PipeName;
 
-    private readonly string pipeName = ResolvePipeName(pipeNameOverride);
-    private readonly string pipePath = @"\\.\pipe\" + pipeName;
+    private readonly string pipePath = @"\\.\pipe\" + ResolvePipeName(pipeNameOverride);
 
     private static string ResolvePipeName(string? requestedName)
     {
