@@ -1,0 +1,81 @@
+name: Build Infinix TV Remote APK
+
+on:
+  push:
+    branches:
+      - build/infinix-tv-remote
+    paths:
+      - ".github/workflows/infinix-tv-remote.yml"
+      - ".github/scripts/patch-infinix-remote.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infinix-tv-remote-apk
+  cancel-in-progress: true
+
+jobs:
+  build-android-apk:
+    name: Build and test Android APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout the isolated build definition
+        uses: actions/checkout@v7
+
+      - name: Checkout pinned MIT Android TV remote source
+        uses: actions/checkout@v7
+        with:
+          repository: levhakobyan/OpenTV-Remote
+          ref: a3e9c04977783c76ee491795406dfc14d2eb99e4
+          path: upstream
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools platforms;android-34 build-tools;34.0.0"
+
+      - name: Apply Infinix-specific UI and configurable network endpoints
+        run: python3 .github/scripts/patch-infinix-remote.py upstream
+
+      - name: Run unit tests, assemble APK and lint
+        working-directory: upstream/android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug :app:lintDebug
+
+      - name: Prepare APK and provenance
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          mkdir -p ../artifacts/infinix-tv-remote
+          cp android/app/build/outputs/apk/debug/app-debug.apk ../artifacts/infinix-tv-remote/Infinix-TV-Remote.apk
+          cp LICENSE ../artifacts/infinix-tv-remote/UPSTREAM-MIT-LICENSE.txt
+          sha256sum ../artifacts/infinix-tv-remote/Infinix-TV-Remote.apk > ../artifacts/infinix-tv-remote/SHA256SUMS.txt
+          cat > ../artifacts/infinix-tv-remote/BUILD-INFO.txt <<'EOF'
+          App: Infinix TV Remote
+          Variant: Android debug APK (installable sideload build)
+          Protocol: Android TV Remote v2
+          Default TV IP: 192.168.31.216 (editable in the app)
+          Default pairing port: 6467 (editable in the app)
+          Default remote-control port: 6466 (editable in the app)
+          Upstream source: https://github.com/levhakobyan/OpenTV-Remote
+          Upstream commit: a3e9c04977783c76ee491795406dfc14d2eb99e4
+          Custom patch: this branch's .github/scripts/patch-infinix-remote.py
+          EOF
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: Infinix-TV-Remote-APK
+          path: artifacts/infinix-tv-remote/
+          if-no-files-found: error
+          retention-days: 30
