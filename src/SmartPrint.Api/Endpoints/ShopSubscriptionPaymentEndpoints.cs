@@ -92,15 +92,23 @@ public static class ShopSubscriptionPaymentEndpoints
                 return Results.BadRequest(new { code = "webhook_payload_too_large" });
             }
 
-            using var reader = new StreamReader(
-                request.Body, System.Text.Encoding.UTF8,
-                detectEncodingFromByteOrderMarks: false, leaveOpen: true);
-            var rawBody = await reader.ReadToEndAsync(ct);
-            if (rawBody.Length is 0 or > 65_536)
+            using var payloadBuffer = new MemoryStream();
+            var chunk = new byte[8_192];
+            while (payloadBuffer.Length <= 65_536)
+            {
+                var remaining = (int)Math.Min(chunk.Length, 65_537 - payloadBuffer.Length);
+                var read = await request.Body.ReadAsync(chunk.AsMemory(0, remaining), ct);
+                if (read == 0)
+                    break;
+                await payloadBuffer.WriteAsync(chunk.AsMemory(0, read), ct);
+            }
+
+            if (payloadBuffer.Length is 0 or > 65_536)
             {
                 return Results.BadRequest(new { code = "invalid_webhook_payload_size" });
             }
 
+            var rawBody = System.Text.Encoding.UTF8.GetString(payloadBuffer.GetBuffer(), 0, (int)payloadBuffer.Length);
             var signature = request.Headers["X-Razorpay-Signature"].FirstOrDefault() ?? string.Empty;
             var eventId = request.Headers["X-Razorpay-Event-Id"].FirstOrDefault() ?? string.Empty;
             try
