@@ -21,8 +21,9 @@ reinstalls com.quantaedge.smartprint and tests production release APK updates;
 never run the lifecycle helper on a personal/shop phone with user data.
 
 Photo Studio instrumentation uses the QA-only Vite build containing
-tests/photo-studio.browser.html. The runner uses the side-by-side package ID
-a unique com.quantaedge.smartprint.localqa.ci.<run-number> package and enables smartPrintPhotoStudioQaEnabled.
+tests/photo-studio.browser.html. The runner uses a unique side-by-side package
+ID under com.quantaedge.smartprint.localqa.ci<run-number> and enables
+smartPrintPhotoStudioQaEnabled.
 The emulator reaches the fixture through an ADB reverse mapping to
 http://127.0.0.1:3000. That loopback route is allowed only in the explicitly
 enabled com.quantaedge.smartprint.localqa debug package. The normal Portal build
