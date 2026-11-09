@@ -631,6 +631,7 @@ export interface ShopSubscriptionPaymentOrder {
 
 export interface ShopSubscriptionPaymentRecord {
   id: string;
+  planVersionId: string;
   planCode: string;
   billingInterval: string;
   amountMinor: number;
@@ -656,6 +657,14 @@ export function getShopSubscriptionPlans(token: string) {
 
 export function getShopSubscriptionPayments(token: string) {
   return apiRequest<ShopSubscriptionPaymentRecord[]>("/api/v1/shop/subscription/payments", {}, token);
+}
+
+export function resumeShopSubscriptionPaymentOrder(token: string, paymentId: string) {
+  return apiRequest<ShopSubscriptionPaymentOrder>(
+    `/api/v1/shop/subscription/payments/${encodeURIComponent(paymentId)}/resume`,
+    { method: "POST" },
+    token
+  );
 }
 
 export function createShopSubscriptionPaymentOrder(token: string, values: {
