@@ -67,7 +67,11 @@ function Resolve-Sdk {
 
 function Resolve-Gradle {
     $cached = Join-Path $env:LOCALAPPDATA "SmartPrint\qa-tools\gradle-8.13\bin\gradle.bat"
-    if (Test-Path -LiteralPath $cached -PathType Leaf) { return $cached }
+    if (Test-Path -LiteralPath $cached -PathType Leaf) {
+        $cachedVersion = (& $cached --version 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0 -and $cachedVersion -match '(?m)^Gradle\s+8\.13(?:\s|$)') { return $cached }
+        Write-Warning "The cached Gradle launcher is not a usable 8.13 distribution; resolving a verified copy."
+    }
     foreach ($name in @("gradle.bat", "gradle")) {
         $command = Get-Command $name -ErrorAction SilentlyContinue
         if ($command -and $command.Source) {
@@ -112,6 +116,9 @@ try {
     Write-Host "Production package com.quantaedge.smartprint will not be modified."
     $sdk = Resolve-Sdk
     $adb = Join-Path $sdk "platform-tools\adb.exe"
+    if (-not (Test-Path -LiteralPath (Join-Path $sdk "platforms\android-36\android.jar") -PathType Leaf)) {
+        throw "Android SDK Platform 36 is missing. Install platforms;android-36 through Android Studio SDK Manager."
+    }
     $aapt = Join-Path $sdk "build-tools\36.0.0\aapt.exe"
     if (-not (Test-Path $aapt -PathType Leaf)) { throw "Android Build-Tools 36.0.0/aapt.exe is missing." }
 
@@ -174,6 +181,7 @@ try {
     $model = (& $adb -s $serial shell getprop ro.product.model 2>&1) -join " "
     Write-Host "Selected Android device: $model ($serial)" -ForegroundColor Green
     Write-Host "Keep the phone unlocked and its screen visible during instrumentation." -ForegroundColor Cyan
+    & $adb -s $serial shell input keyevent KEYCODE_WAKEUP 2>$null | Out-Null
 
     # The app's QA BuildConfig remains 127.0.0.1:3000 on the phone. Reverse
     # that device-side port to a dynamically chosen laptop port so an existing
