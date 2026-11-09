@@ -692,19 +692,25 @@ class PhotoStudioWebViewInstrumentedTest {
             // The form-details checkbox exists only in the Sheet panel, not Background.
             clickButton(scenario, "photo-studio-tool-sheet")
 
-            val captionsEnabled = evaluate(
+            // Toggle the React-controlled checkbox with a real Android touch.
+            // Mutating checked and dispatching a synthetic change event bypasses
+            // React's input value tracker, leaving the controlled state unchanged.
+            tapElement(
+                scenario,
+                """Array.from(document.querySelectorAll('[role="dialog"] label'))
+                  .find(item => item.textContent.includes('Add name and DOB to each photo'))"""
+            )
+            waitFor(
                 scenario,
                 """(() => {
-                  const checkbox = Array.from(document.querySelectorAll('[role="dialog"] label'))
-                    .find(item => item.textContent.includes('Add name and DOB to each photo'))
-                    ?.querySelector('input[type="checkbox"]');
-                  if (!checkbox) return false;
-                  checkbox.checked = true;
-                  checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-                  return true;
-                })()"""
+                  const dialog = document.querySelector('[role="dialog"]');
+                  const checkbox = document.getElementById('photo-studio-include-form-details');
+                  return Boolean(dialog && checkbox instanceof HTMLInputElement && checkbox.checked &&
+                    dialog.querySelector('#photo-studio-name') &&
+                    dialog.querySelector('#photo-studio-date-of-birth'));
+                })()""",
+                "optional name and DOB fields to render after enabling form details"
             )
-            assertEquals("true", captionsEnabled)
             setLabelValue(scenario, "photo-studio-name", "Android Photo QA")
             setLabelValue(scenario, "photo-studio-date-of-birth", "2000-02-29")
             clickButton(scenario, "photo-studio-tool-text")
