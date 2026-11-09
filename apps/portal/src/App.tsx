@@ -3295,6 +3295,7 @@ function SubscriptionPage({
   const [paymentMessage, setPaymentMessage] = useState("");
   const [paymentMessageTone, setPaymentMessageTone] = useState<"info" | "success" | "error">("info");
   const checkoutBusy = useRef(false);
+  const verifyingPayment = useRef(false);
 
   const price = (amount: number | null | undefined, currency: string) =>
     amount == null ? "Not configured" : `${currency} ${(amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -3320,7 +3321,9 @@ function SubscriptionPage({
     order: { paymentId: string; orderId: string },
     response: RazorpayCheckoutResponse
   ) => {
+    verifyingPayment.current = true;
     if (response.razorpay_order_id !== order.orderId) {
+      verifyingPayment.current = false;
       checkoutBusy.current = false;
       setCheckoutKey("");
       setPaymentMessage("The checkout response did not match the order created for this subscription. No access has been changed.");
@@ -3357,6 +3360,7 @@ function SubscriptionPage({
       setPaymentMessage(exception instanceof Error ? exception.message : "Payment verification is still pending. Your shop subscription has not been changed by the browser.");
       setPaymentMessageTone("error");
     } finally {
+      verifyingPayment.current = false;
       checkoutBusy.current = false;
       setCheckoutKey("");
     }
@@ -3390,9 +3394,11 @@ function SubscriptionPage({
         handler: response => { void completePayment(order, response); },
         modal: {
           ondismiss: () => {
-            if (checkoutBusy.current) {
+            if (checkoutBusy.current && !verifyingPayment.current) {
               checkoutBusy.current = false;
               setCheckoutKey("");
+              setPaymentMessage("Checkout was closed before payment verification. Your current subscription has not been changed.");
+              setPaymentMessageTone("info");
             }
           }
         }
