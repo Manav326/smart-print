@@ -509,30 +509,38 @@ try {
     $resolvedAndroidSerial = Resolve-AndroidDeviceIfNeeded
     if ($resolvedAndroidSerial) { $AndroidDeviceSerial = $resolvedAndroidSerial }
 
+    $sharedPortalAndWindowsChecksPassed = $true
     if ($Platforms -contains "Web" -or $Platforms -contains "Windows") {
-        $portalStep = Invoke-QAStep "Web/Shared UI" "Photo Studio logic and headed browser acceptance" {
+        $portalStep = Invoke-QAStep "Web/Shared UI" "Photo Studio logic and headed browser acceptance plus selected source checks" {
             Invoke-PhotoStudioSuite
         } -Evidence (Join-Path $runDirectory "photo-studio")
-        if (-not $portalStep) { Write-Warning "Shared Web/Photo Studio tests failed. Remaining selected platform checks will continue." }
+        $sharedPortalAndWindowsChecksPassed = [bool]$portalStep
+        if (-not $portalStep) { Write-Warning "Shared source/build/browser checks failed. Independent selected platforms will continue; dependent local Build-mode app tests will be marked BLOCKED rather than using stale outputs." }
     }
 
     if ($Platforms -contains "Web") {
-        $webDist = if ($Mode -eq "Build") { Join-Path $repoRoot "apps/portal/dist" } else { $script:webArtifactDirectory }
-        Invoke-QAStep "Web" "Mixed-batch/refund acceptance against the production Portal dist" {
-            Invoke-WebProductionArtifactTest $webDist
-        } -Evidence (Join-Path $runDirectory "web-production-acceptance") | Out-Null
+        if ($Mode -eq "Build" -and -not $sharedPortalAndWindowsChecksPassed) {
+            Add-Result "Web" "Production Portal artifact acceptance" "BLOCKED" "The current-checkout Portal build/Photo Studio checks did not pass. Existing apps/portal/dist was not used."
+        } else {
+            $webDist = if ($Mode -eq "Build") { Join-Path $repoRoot "apps/portal/dist" } else { $script:webArtifactDirectory }
+            Invoke-QAStep "Web" "Mixed-batch/refund acceptance against the selected production Portal artifact" {
+                Invoke-WebProductionArtifactTest $webDist
+            } -Evidence (Join-Path $runDirectory "web-production-acceptance") | Out-Null
+        }
     }
 
     if ($Platforms -contains "Windows") {
         $windowsDirectory = $null
-        if ($Mode -eq "Build") {
+        if ($Mode -eq "Build" -and -not $sharedPortalAndWindowsChecksPassed) {
+            Add-Result "Windows" "Native packaged UI acceptance" "BLOCKED" "The current-checkout Portal/Windows source checks did not pass. Existing Tauri target outputs were not used."
+        } elseif ($Mode -eq "Build") {
             $productionExe = Join-Path $repoRoot "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
             $windowsDirectory = Join-Path $runDirectory "windows"
             $qaBuildOk = Invoke-QAStep "Windows" "Build isolated WebView2 QA executable from the current checkout" {
                 $script:windowsQaExecutable = Build-WindowsQaExecutable $productionExe
             } -Evidence $windowsDirectory
             if ($qaBuildOk) {
-                Invoke-QAStep "Windows" "Test built production executable and QA WebView2 executable" {
+                Invoke-QAStep "Windows" "Test isolated WebView2 QA executable built from this checkout" {
                     Invoke-WindowsArtifactTests $windowsDirectory "Build"
                 } -Evidence (Join-Path $windowsDirectory "acceptance") | Out-Null
             } else {
