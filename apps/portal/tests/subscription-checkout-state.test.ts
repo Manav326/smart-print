@@ -74,5 +74,5 @@ test("captured payment requiring plan review is not described as active", () => 
 
 test("failed and still-pending payments have distinct recovery messages", () => {
   assert.match(subscriptionPaymentStatusMessage("FAILED"), /try again/i);
-  assert.match(subscriptionPaymentStatusMessage("CREATED"), /Complete checkout/i);
+  assert.match(subscriptionPaymentStatusMessage("CREATED"), /Continue checkout/i);
 });
