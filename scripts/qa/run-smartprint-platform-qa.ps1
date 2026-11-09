@@ -8,8 +8,9 @@ Runs the complete safe automated CI matrix for the exact checkout commit and
 then performs local acceptance on the selected machine/device. Pull mode first
 requires every mandatory GitHub CI job to pass for this exact commit, validates
 artifact manifests, runs the shared QA harness, all Portal logic tests,
-responsive/browser acceptance, API/Agent/Rust/Android JVM tests, and native
-WebView2/device acceptance. CI-only destructive lifecycle and PostgreSQL
+responsive/browser acceptance, API/Agent/Android JVM tests, and native
+WebView2/device acceptance. The local Rust checks are repeated when Cargo is
+available; otherwise the exact-commit Windows desktop CI result supplies that coverage. CI-only destructive lifecycle and PostgreSQL
 integration tests are verified from their exact-commit CI jobs rather than
 replayed against a user's installed apps or local data.
 
@@ -469,8 +470,14 @@ function Invoke-PhotoStudioSuite {
         } else {
             Remove-Item Env:SMARTPRINT_PHOTO_STUDIO_BASE_URL -ErrorAction SilentlyContinue
         }
-        & $script:powerShellExecutable.Source -NoProfile -File $scriptPath @arguments
-        if ($LASTEXITCODE -ne 0) { throw "$Platform source/Photo Studio QA checks failed (child PowerShell exit $LASTEXITCODE)." }
+        $childLog = Join-Path $runDirectory ($Platform.ToLowerInvariant() + "-photo-studio-child.log")
+        & $script:powerShellExecutable.Source -NoProfile -File $scriptPath @arguments 2>&1 |
+            Tee-Object -FilePath $childLog
+        $childExitCode = $LASTEXITCODE
+        if ($childExitCode -ne 0) {
+            $tail = (Get-Content -LiteralPath $childLog -Tail 40 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+            throw "$Platform source/Photo Studio QA checks failed (child PowerShell exit $childExitCode). Detailed child output: $childLog`n$tail"
+        }
     } finally {
         [Environment]::SetEnvironmentVariable("SMARTPRINT_PHOTO_STUDIO_BASE_URL", $previousBase, "Process")
         if ($fixtureServer -and -not $fixtureServer.HasExited) {
@@ -705,17 +712,36 @@ try {
     }
 
     if ($Mode -eq "Pull" -and $Platforms -contains "Windows") {
-        $desktopSourceChecksPassed = [bool](Invoke-QAStep "Windows" "Desktop frontend typecheck and native Rust check/tests" {
+        $desktopTypecheckPassed = [bool](Invoke-QAStep "Windows" "Desktop frontend TypeScript typecheck for the exact source commit" {
             & pnpm.cmd --filter @smart-print/desktop typecheck
             if ($LASTEXITCODE -ne 0) { throw "Desktop frontend typecheck failed." }
-            if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw "Rust/Cargo is required for Windows native desktop validation." }
+        } -Evidence (Join-Path $runDirectory "windows-desktop-typecheck"))
+
+        $desktopRustPassed = $true
+        $cargoCommand = Get-Command cargo.exe -ErrorAction SilentlyContinue
+        if (-not $cargoCommand) { $cargoCommand = Get-Command cargo -ErrorAction SilentlyContinue }
+        if (-not $cargoCommand -and -not [string]::IsNullOrWhiteSpace($env:USERPROFILE)) {
+            $userCargo = Join-Path $env:USERPROFILE ".cargo\bin\cargo.exe"
+            if (Test-Path -LiteralPath $userCargo -PathType Leaf) {
+                $cargoCommand = [PSCustomObject]@{ Source = $userCargo }
+            }
+        }
+
+        if ($cargoCommand) {
             $nativeManifest = Join-Path $repoRoot "apps/desktop/src-tauri/Cargo.toml"
-            cargo check --locked --manifest-path $nativeManifest
-            if ($LASTEXITCODE -ne 0) { throw "Windows native desktop cargo check failed." }
-            cargo test --locked --manifest-path $nativeManifest
-            if ($LASTEXITCODE -ne 0) { throw "Windows native desktop Rust tests failed." }
-        } -Evidence (Join-Path $runDirectory "windows-source-typecheck-rust"))
-        if (-not $desktopSourceChecksPassed) { $windowsSourceChecksPassed = $false }
+            $desktopRustPassed = [bool](Invoke-QAStep "Windows" "Local native Rust check/tests" {
+                & $cargoCommand.Source check --locked --manifest-path $nativeManifest
+                if ($LASTEXITCODE -ne 0) { throw "Windows native desktop cargo check failed." }
+                & $cargoCommand.Source test --locked --manifest-path $nativeManifest
+                if ($LASTEXITCODE -ne 0) { throw "Windows native desktop Rust tests failed." }
+            } -Evidence (Join-Path $runDirectory "windows-native-rust"))
+        } else {
+            Add-Result "Windows" "Local native Rust check/tests" "SKIPPED" "Cargo is not installed or discoverable in this PowerShell session. The exact-commit windows_desktop CI job has already passed the required Rust host tests; Pull mode continues with the CI-built native/WebView2 artifacts."
+        }
+
+        if (-not $desktopTypecheckPassed -or -not $desktopRustPassed) {
+            $windowsSourceChecksPassed = $false
+        }
     }
 
     if (($Platforms -contains "Web") -or ($Platforms -contains "Windows")) {
