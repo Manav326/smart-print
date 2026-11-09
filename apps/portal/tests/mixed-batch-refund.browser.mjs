@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -53,7 +53,22 @@ function startServer() {
   const baseEnvironment = { ...process.env, VITE_API_BASE_URL: "" };
   const options = { stdio: "inherit", env: baseEnvironment, windowsHide: true, detached: process.platform !== "win32" };
   let child;
-  if (appMode === "desktop-native") {
+  if (appMode === "desktop-native" && process.env.SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE) {
+    // Pull-and-test mode launches the isolated CI/local QA executable itself.
+    // That executable was built with this exact localhost CDP port; never add
+    // debugging flags to or mutate the production executable.
+    const executable = process.env.SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE;
+    if (!existsSync(executable)) throw new Error("The supplied Windows QA executable does not exist: " + executable);
+    const userDataFolder = process.env.SMARTPRINT_WEBVIEW2_USER_DATA_FOLDER ||
+      join(tmpdir(), "smartprint-mixed-batch-webview2-" + process.pid + "-" + Date.now());
+    mkdirSync(userDataFolder, { recursive: true });
+    nativeBrowserArguments = "prebuilt QA executable; expected localhost CDP port " + webViewDebugPort;
+    child = spawn(executable, [], {
+      stdio: "inherit",
+      windowsHide: false,
+      env: { ...baseEnvironment, WEBVIEW2_USER_DATA_FOLDER: userDataFolder }
+    });
+  } else if (appMode === "desktop-native") {
     // The native test uses Tauri dev with Vite-local API URLs only. CDP is enabled
     // exclusively for this child process and is bound to localhost.
     const userDataFolder = process.env.SMARTPRINT_WEBVIEW2_USER_DATA_FOLDER ||
@@ -482,7 +497,7 @@ try {
     }
     if (!page) throw new Error("Native WebView2 did not expose a SmartPrint window page over CDP.");
   } else {
-    browser = await chromium.launch({ headless: true });
+    browser = await chromium.launch({ headless: process.env.SMARTPRINT_MIXED_BATCH_REFUND_HEADED !== "1" });
     context = await browser.newContext({ viewport: { width: 1440, height: 960 }, deviceScaleFactor: 1 });
     page = await context.newPage();
   }
