@@ -204,14 +204,19 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
         await WithPostgresAsync(async fixture =>
         {
             var first = await fixture.CreateOrderAsync("same-client-request-id");
-            var second = await fixture.Service.CreateOrderAsync(
-                fixture.TenantId,
-                fixture.OwnerId,
-                fixture.PlanVersionId,
-                "Monthly",
-                "same-client-request-id",
-                CancellationToken.None);
+            var existing = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
+            var exception = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.Service.CreateOrderAsync(
+                    fixture.TenantId,
+                    fixture.OwnerId,
+                    fixture.PlanVersionId,
+                    "Monthly",
+                    "same-client-request-id",
+                    CancellationToken.None));
+            var second = await fixture.Service.ResumeOrderAsync(
+                fixture.TenantId, existing.Id, CancellationToken.None);
 
+            Assert.Equal("subscription_payment_pending", exception.Code);
             Assert.Equal(first.OrderId, second.OrderId);
             Assert.Equal(first.AmountMinor, second.AmountMinor);
             Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
@@ -403,16 +408,21 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
         await WithPostgresAsync(async fixture =>
         {
             var first = await fixture.CreateOrderAsync("request-before-refresh");
-            var refreshedRequest = await fixture.Service.CreateOrderAsync(
-                fixture.TenantId,
-                fixture.OwnerId,
-                fixture.PlanVersionId,
-                "Monthly",
-                "request-after-refresh",
-                CancellationToken.None);
+            var payment = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
+            var exception = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.Service.CreateOrderAsync(
+                    fixture.TenantId,
+                    fixture.OwnerId,
+                    fixture.PlanVersionId,
+                    "Monthly",
+                    "request-after-refresh",
+                    CancellationToken.None));
+            var resumed = await fixture.Service.ResumeOrderAsync(
+                fixture.TenantId, payment.Id, CancellationToken.None);
 
-            Assert.Equal(first.OrderId, refreshedRequest.OrderId);
-            Assert.Equal(first.AmountMinor, refreshedRequest.AmountMinor);
+            Assert.Equal("subscription_payment_pending", exception.Code);
+            Assert.Equal(first.OrderId, resumed.OrderId);
+            Assert.Equal(first.AmountMinor, resumed.AmountMinor);
             Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
             Assert.Equal(1, await fixture.Db.ShopSubscriptionPayments.CountAsync());
         });
@@ -451,9 +461,13 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
             Assert.Equal(1, await fixture.Db.ShopSubscriptionPayments.CountAsync());
 
             var created = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
-            var resumed = await fixture.Service.CreateOrderAsync(
-                fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
-                "Monthly", "parallel-request-retry", CancellationToken.None);
+            var retryException = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.Service.CreateOrderAsync(
+                    fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
+                    "Monthly", "parallel-request-retry", CancellationToken.None));
+            var resumed = await fixture.Service.ResumeOrderAsync(
+                fixture.TenantId, created.Id, CancellationToken.None);
+            Assert.Equal("subscription_payment_pending", retryException.Code);
             Assert.Equal(created.RazorpayOrderId, resumed.OrderId);
             Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
         });
@@ -498,15 +512,20 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
                 "evt_subscription_retryable_failure",
                 CancellationToken.None);
 
-            var retry = await fixture.Service.CreateOrderAsync(
-                fixture.TenantId,
-                fixture.OwnerId,
-                fixture.PlanVersionId,
-                "Monthly",
-                "after-failed-attempt",
-                CancellationToken.None);
+            var payment = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
+            var retryConflict = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.Service.CreateOrderAsync(
+                    fixture.TenantId,
+                    fixture.OwnerId,
+                    fixture.PlanVersionId,
+                    "Monthly",
+                    "after-failed-attempt",
+                    CancellationToken.None));
+            var retry = await fixture.Service.ResumeOrderAsync(
+                fixture.TenantId, payment.Id, CancellationToken.None);
 
             Assert.Equal("PROCESSED_FAILED", failure.Status);
+            Assert.Equal("subscription_payment_pending", retryConflict.Code);
             Assert.Equal(order.OrderId, retry.OrderId);
             Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
             Assert.Equal("FAILED", (await fixture.Db.ShopSubscriptionPayments.SingleAsync()).Status);
