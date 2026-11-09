@@ -993,7 +993,36 @@ class MainActivityInstrumentedTest {
                 onView(withText("Scan the temporary phone-check QR shown on the shop computer."))
                     .check(matches(isDisplayed()))
                 onView(withContentDescription("Close QR scanner")).perform(click())
-                onView(withText("Wi-Fi Check Test Shop")).check(matches(isDisplayed()))
+                // Closing the native camera Activity can leave the underlying app window
+                // temporarily without focus on some OEM builds. Espresso requires window
+                // focus even when the resumed MainActivity and its restored view tree are
+                // already available, so verify the real visible home landmark directly.
+                var shopScreenRestored = false
+                val restoreDeadline = System.currentTimeMillis() + 10_000
+                while (!shopScreenRestored && System.currentTimeMillis() < restoreDeadline) {
+                    androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                    scenario.onActivity { activity ->
+                        fun containsVisibleShopName(view: View): Boolean {
+                            if (view is android.widget.TextView &&
+                                view.text?.toString() == "Wi-Fi Check Test Shop" && view.isShown
+                            ) return true
+                            if (view is ViewGroup) {
+                                for (index in 0 until view.childCount) {
+                                    if (containsVisibleShopName(view.getChildAt(index))) return true
+                                }
+                            }
+                            return false
+                        }
+                        shopScreenRestored = activity.lifecycle.currentState.isAtLeast(
+                            androidx.lifecycle.Lifecycle.State.RESUMED
+                        ) && containsVisibleShopName(activity.window.decorView)
+                    }
+                    if (!shopScreenRestored) Thread.sleep(100)
+                }
+                assertTrue(
+                    "Closing the QR scanner must return to the resumed shop home screen without changing the selected shop.",
+                    shopScreenRestored
+                )
 
                 scenario.onActivity { activity ->
                     val currentPortalUrl = MainActivity::class.java.getDeclaredField("portalUrl").apply {
