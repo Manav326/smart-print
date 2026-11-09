@@ -1,3 +1,4 @@
+#requires -Version 7.0
 <#
 .SYNOPSIS
 One coordinated SmartPrint QA run for Web, Android and Windows.
@@ -203,10 +204,10 @@ function Get-GhRun {
         return $run
     }
 
-    $runJson = & $gh.Source run list --repo $repository --workflow ci.yml --commit $sourceCommit --status success --json databaseId,headSha,status,conclusion,url,workflowName,headBranch,number,createdAt --limit 30
+    $runJson = & $gh.Source run list --repo $repository --workflow ci.yml --commit $sourceCommit --status completed --json databaseId,headSha,status,conclusion,url,workflowName,headBranch,number,createdAt --limit 30
     if ($LASTEXITCODE -ne 0) { throw "Could not list successful CI runs for commit $sourceCommit." }
     $runs = @($runJson | ConvertFrom-Json -ErrorAction Stop)
-    $matches = @($runs | Where-Object { [string]$_.headSha -eq $sourceCommit -and [string]$_.conclusion -eq "success" })
+    $matches = @($runs | Where-Object { [string]$_.headSha -eq $sourceCommit -and [string]$_.workflowName -eq "CI" -and [string]$_.status -eq "completed" -and [string]$_.conclusion -eq "success" })
     if ($matches.Count -eq 0) { throw "No successful CI run exists for this exact commit ($sourceCommit). Wait for CI to pass or supply a matching -WorkflowRunId. Pull mode will not use artifacts from an older commit." }
     return ($matches | Sort-Object { [DateTime]$_.createdAt } -Descending | Select-Object -First 1)
 }
@@ -277,7 +278,25 @@ function Invoke-PhotoStudioSuite {
     $arguments = @("-Platform", $platform, "-SkipInstall", "-ArtifactDirectory", (Join-Path $runDirectory "photo-studio"))
     if (-not $Headless) { $arguments += "-Headed" }
     if ($Mode -eq "Pull") { $arguments += "-SkipBuild" }
-    & $scriptPath @arguments
+
+    $previousBase = [Environment]::GetEnvironmentVariable("SMARTPRINT_PHOTO_STUDIO_BASE_URL", "Process")
+    $fixtureServer = $null
+    try {
+        if ($Mode -eq "Pull") {
+            $fixtureServer = Start-StaticPortalServer $script:photoStudioQaDirectory 4173 "photo-studio-qa-fixture-server"
+            $env:SMARTPRINT_PHOTO_STUDIO_BASE_URL = "http://127.0.0.1:4173"
+        } else {
+            Remove-Item Env:SMARTPRINT_PHOTO_STUDIO_BASE_URL -ErrorAction SilentlyContinue
+        }
+        & $scriptPath @arguments
+        if ($LASTEXITCODE -ne 0) { throw "Photo Studio logic/browser acceptance suite failed." }
+    } finally {
+        [Environment]::SetEnvironmentVariable("SMARTPRINT_PHOTO_STUDIO_BASE_URL", $previousBase, "Process")
+        if ($fixtureServer -and -not $fixtureServer.HasExited) {
+            $fixtureServer.Kill($true)
+            $fixtureServer.WaitForExit(5000) | Out-Null
+        }
+    }
 }
 
 function Invoke-WebProductionArtifactTest([string]$DistDirectory) {
@@ -388,7 +407,7 @@ function Resolve-AndroidDeviceIfNeeded {
 }
 
 $originalEnvironment = @{}
-$environmentNames = @("SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL","SMARTPRINT_MIXED_BATCH_REFUND_HEADED","SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE","SMARTPRINT_WEBVIEW2_DEBUG_PORT","VITE_API_BASE_URL","CARGO_TARGET_DIR","WEBVIEW2_USER_DATA_FOLDER","VITE_ENABLE_PHOTO_STUDIO_QA")
+$environmentNames = @("SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL","SMARTPRINT_MIXED_BATCH_REFUND_HEADED","SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE","SMARTPRINT_PHOTO_STUDIO_BASE_URL","SMARTPRINT_WEBVIEW2_DEBUG_PORT","VITE_API_BASE_URL","CARGO_TARGET_DIR","WEBVIEW2_USER_DATA_FOLDER","VITE_ENABLE_PHOTO_STUDIO_QA")
 foreach ($name in $environmentNames) { $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process") }
 
 try {
@@ -410,6 +429,14 @@ try {
             $webDir = Download-CIArtifact "smart-print-web-production"
             $null = Test-CIArtifactManifest $webDir "web"
             $script:webArtifactDirectory = $webDir
+        }
+        if ($Platforms -contains "Web" -or $Platforms -contains "Windows") {
+            $webQaDir = Download-CIArtifact "smart-print-web-photo-studio-qa"
+            $null = Test-CIArtifactManifest $webQaDir "webqa"
+            if (-not (Test-Path -LiteralPath (Join-Path $webQaDir "tests/photo-studio.browser.html") -PathType Leaf)) {
+                throw "Pulled Web QA artifact does not contain the Photo Studio fixture."
+            }
+            $script:photoStudioQaDirectory = $webQaDir
         }
         if ($Platforms -contains "Android") {
             $androidDir = Download-CIArtifact "smart-print-android-device-qa"
