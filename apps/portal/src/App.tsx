@@ -22,14 +22,14 @@ import {
   ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
-  createShopPhotoJob, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData,
+  createShopPhotoJob, createShopSubscriptionOrder, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, getShopSubscription, getShopSubscriptionCheckoutOptions, getShopSubscriptionPaymentStatus, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings,
   updateShopOwnerAccount, updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
-  verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type CustomerPhotoPricing, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
+  verifyShopPayment, verifyShopSubscriptionPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type CustomerPhotoPricing, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
-  type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
+  type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary, type ShopSubscriptionPlan,
   type UploadedPrintJob, type CustomerPrintRequestSettings
 } from "./api";
 import {
@@ -1586,7 +1586,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
-          {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
+          {active === "Subscription" && subscription && <SubscriptionPage summary={subscription} token={tokens.accessToken} onApplied={async () => { setSubscription(await getShopSubscription(tokens.accessToken)); }}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
           {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onCreatePhotoOrder={()=>setShopPhotoOrderOpen(true)} onSearch={searchPrintQueue} onPreview={previewJob} onPreviewOutput={job=>void previewJob(job,true,"output")} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onUpdateSettings={updatePrintJobSettings} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
@@ -3222,15 +3222,190 @@ function PrintKindTag({printKind,count}:{printKind?:string|null;count?:number}) 
   return <span className={`print-kind-tag print-kind-tag--${isPhoto?"photo":"document"}`} title={isPhoto?"Photo printing job":"Document printing job"}>{label}{countLabel}</span>;
 }
 function initials(value:string) { return value.trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()||"").join("") || "SP"; }
-function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
+type RazorpayCheckoutResponse = {
+  razorpay_payment_id: string;
+  razorpay_order_id: string;
+  razorpay_signature: string;
+};
+
+type RazorpayCheckoutOptions = {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  handler: (response: RazorpayCheckoutResponse) => void | Promise<void>;
+  modal?: { ondismiss?: () => void };
+  theme?: { color: string };
+};
+
+type RazorpayCheckoutInstance = {
+  open: () => void;
+  on: (event: "payment.failed", handler: (response: { error?: { description?: string; reason?: string } }) => void) => void;
+};
+
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayCheckoutOptions) => RazorpayCheckoutInstance;
+  }
+}
+
+let razorpayCheckoutScript: Promise<void> | null = null;
+
+function loadRazorpayCheckout(): Promise<void> {
+  if (window.Razorpay) return Promise.resolve();
+  if (razorpayCheckoutScript) return razorpayCheckoutScript;
+
+  razorpayCheckoutScript = new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-smartprint-razorpay="true"]');
+    const script = existing ?? document.createElement("script");
+    script.src = "https://checkout.razorpay.com/v1/checkout.js";
+    script.async = true;
+    script.dataset.smartprintRazorpay = "true";
+    script.onload = () => window.Razorpay ? resolve() : reject(new Error("Razorpay Checkout did not initialise."));
+    script.onerror = () => {
+      razorpayCheckoutScript = null;
+      reject(new Error("Could not load the secure Razorpay Checkout window."));
+    };
+    if (!existing) document.head.appendChild(script);
+  });
+  return razorpayCheckoutScript;
+}
+
+function SubscriptionPage({
+  summary, token, onApplied
+}: {
+  summary: ShopSubscriptionSummary;
+  token: string;
+  onApplied: () => Promise<void>;
+}) {
   const { subscription, plan, entitlements, usage } = summary;
   const status = subscription.status.toLowerCase();
   const statusTone = status === "active" ? "tone-success" : status === "trial" ? "tone-warning" : "tone-neutral";
   const planName = plan?.name ?? (subscription.planCode === "TRIAL" ? "Trial plan" : subscription.planCode);
   const periodStart = formatIstDate(subscription.periodStartUtc);
   const periodEnd = formatIstDate(subscription.periodEndUtc);
+  const [availablePlans, setAvailablePlans] = useState<ShopSubscriptionPlan[]>([]);
+  const [checkoutAvailable, setCheckoutAvailable] = useState(false);
+  const [plansLoading, setPlansLoading] = useState(true);
+  const [plansError, setPlansError] = useState("");
+  const [checkoutKey, setCheckoutKey] = useState("");
+  const [paymentMessage, setPaymentMessage] = useState("");
+  const [paymentMessageTone, setPaymentMessageTone] = useState<"info" | "success" | "error">("info");
+  const checkoutBusy = useRef(false);
+
   const price = (amount: number | null | undefined, currency: string) =>
     amount == null ? "Not configured" : `${currency} ${(amount / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  useEffect(() => {
+    let active = true;
+    setPlansLoading(true);
+    getShopSubscriptionCheckoutOptions(token).then(result => {
+      if (!active) return;
+      setAvailablePlans(result.plans);
+      setCheckoutAvailable(result.checkoutAvailable);
+      setPlansError("");
+    }).catch(exception => {
+      if (!active) return;
+      setPlansError(exception instanceof Error ? exception.message : "Could not load published subscription plans.");
+    }).finally(() => {
+      if (active) setPlansLoading(false);
+    });
+    return () => { active = false; };
+  }, [token]);
+
+  const completePayment = async (
+    orderPaymentId: string,
+    response: RazorpayCheckoutResponse
+  ) => {
+    if (response.razorpay_order_id !== orderPaymentId) {
+      setPaymentMessage("The checkout response did not match the order created for this subscription. No access has been changed.");
+      setPaymentMessageTone("error");
+      return;
+    }
+
+    try {
+      setPaymentMessage("Verifying your payment directly with Razorpay…");
+      setPaymentMessageTone("info");
+      let status = await verifyShopSubscriptionPayment(token, {
+        orderId: response.razorpay_order_id,
+        paymentId: response.razorpay_payment_id,
+        signature: response.razorpay_signature
+      });
+
+      for (let attempt = 0; status.status !== "Applied" && status.status !== "Failed" && attempt < 12; attempt++) {
+        await new Promise(resolve => window.setTimeout(resolve, 1500));
+        status = await getShopSubscriptionPaymentStatus(token, orderPaymentId);
+      }
+
+      if (status.status === "Applied") {
+        await onApplied();
+        setPaymentMessage(`${status.planName} is active for this shop. Your ${status.billingInterval.toLowerCase()} subscription payment was verified.`);
+        setPaymentMessageTone("success");
+      } else if (status.status === "Failed") {
+        setPaymentMessage("Razorpay reported that this payment failed. Your current subscription has not been changed.");
+        setPaymentMessageTone("error");
+      } else {
+        setPaymentMessage("Payment has been received by Razorpay but is still being confirmed. This page will not activate the plan until capture is verified. You can safely return later and check your subscription status.");
+        setPaymentMessageTone("info");
+      }
+    } catch (exception) {
+      setPaymentMessage(exception instanceof Error ? exception.message : "Payment verification is still pending. Your shop subscription has not been changed by the browser.");
+      setPaymentMessageTone("error");
+    } finally {
+      checkoutBusy.current = false;
+      setCheckoutKey("");
+    }
+  };
+
+  const beginCheckout = async (selectedPlan: ShopSubscriptionPlan, interval: "Monthly" | "Annual") => {
+    if (checkoutBusy.current) return;
+    checkoutBusy.current = true;
+    const busyKey = `${selectedPlan.id}:${interval}`;
+    setCheckoutKey(busyKey);
+    setPaymentMessage("");
+    try {
+      const order = await createShopSubscriptionOrder(token, {
+        planVersionId: selectedPlan.id,
+        billingInterval: interval,
+        idempotencyKey: crypto.randomUUID()
+      });
+      await loadRazorpayCheckout();
+      if (!window.Razorpay) throw new Error("Razorpay Checkout is unavailable in this browser.");
+
+      const checkout = new window.Razorpay({
+        key: order.keyId,
+        amount: order.amountMinor,
+        currency: order.currency,
+        name: "SmartPrint by QuantaEdge",
+        description: `${order.planName} · ${order.billingInterval} subscription`,
+        order_id: order.orderId,
+        theme: { color: "#536dfe" },
+        handler: response => { void completePayment(order.orderId, response); },
+        modal: {
+          ondismiss: () => {
+            if (checkoutBusy.current) {
+              checkoutBusy.current = false;
+              setCheckoutKey("");
+            }
+          }
+        }
+      });
+      checkout.on("payment.failed", response => {
+        checkoutBusy.current = false;
+        setCheckoutKey("");
+        setPaymentMessage(response.error?.description || "Razorpay could not complete this payment. Your subscription has not been changed.");
+        setPaymentMessageTone("error");
+      });
+      checkout.open();
+    } catch (exception) {
+      checkoutBusy.current = false;
+      setCheckoutKey("");
+      setPaymentMessage(exception instanceof Error ? exception.message : "Could not start Razorpay Checkout.");
+      setPaymentMessageTone("error");
+    }
+  };
 
   return (
     <section className="subscription-workspace">
@@ -3253,7 +3428,7 @@ function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
             <div><span>Annual plan price</span><strong>{price(plan?.annualPriceMinor, plan?.currency ?? "INR")}</strong></div>
           </div>
           {!entitlements.isAccessActive && (
-            <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>This trial or subscription is no longer active. New print requests are paused. Contact SmartPrint by QuantaEdge support to restore access.</span></div>
+            <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>This trial or subscription is no longer active. New print requests are paused. Choose a published plan below or contact SmartPrint by QuantaEdge support.</span></div>
           )}
           {entitlements.isLegacyUnconfigured && entitlements.isAccessActive && (
             <div className="subscription-legacy-note"><ShieldCheck size={15}/><span>This subscription predates plan assignment. Existing shop access is being preserved until its terms are explicitly assigned.</span></div>
@@ -3269,10 +3444,48 @@ function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
           </div>
           <div className="subscription-upgrade-note">
             <CreditCard size={15}/>
-            <span>Plan changes and subscription billing are managed by the SmartPrint by QuantaEdge platform team. Customer print payments remain separate and continue to be handled by your shop.</span>
+            <span>Subscription billing is for your shop’s SmartPrint plan only. Customer print payments remain separate and continue to be handled by your shop.</span>
           </div>
         </section>
       </div>
+
+      <section className="panel subscription-checkout-panel">
+        <div className="subscription-usage-heading">
+          <div><h2>Choose a subscription plan</h2><p>Published plan prices are confirmed by SmartPrint before a Razorpay order is created.</p></div>
+          <span className="subscription-updated">One-time checkout · no automatic debit</span>
+        </div>
+        {plansLoading && <div className="subscription-checkout-state">Loading published plans…</div>}
+        {!plansLoading && plansError && <div className="subscription-checkout-state tone-error">{plansError}</div>}
+        {!plansLoading && !plansError && availablePlans.length === 0 && (
+          <div className="subscription-checkout-state">No paid plan versions are currently published for online checkout. Your existing subscription and admin-managed assignment remain available.</div>
+        )}
+        {availablePlans.length > 0 && (
+          <div className="subscription-plan-grid">
+            {availablePlans.map(option => (
+              <article className={`subscription-purchase-card ${plan?.id === option.id ? "is-current" : ""}`} key={option.id}>
+                <div className="subscription-purchase-card-top">
+                  <div><span className="subscription-eyebrow">{option.code}</span><h3>{option.name}</h3></div>
+                  <span className="subscription-plan-version">v{option.version}</span>
+                </div>
+                {option.description && <p className="subscription-plan-description">{option.description}</p>}
+                <div className="subscription-purchase-prices">
+                  {option.monthlyPriceMinor != null && option.monthlyPriceMinor > 0 && (
+                    <div><span>Monthly</span><strong>{price(option.monthlyPriceMinor, option.currency)}</strong><button type="button" className="btn btn-primary" disabled={!checkoutAvailable || checkoutKey !== ""} onClick={() => void beginCheckout(option, "Monthly")}>{checkoutKey === `${option.id}:Monthly` ? "Opening checkout…" : "Pay monthly"}</button></div>
+                  )}
+                  {option.annualPriceMinor != null && option.annualPriceMinor > 0 && (
+                    <div><span>Annual</span><strong>{price(option.annualPriceMinor, option.currency)}</strong><button type="button" className="btn btn-primary" disabled={!checkoutAvailable || checkoutKey !== ""} onClick={() => void beginCheckout(option, "Annual")}>{checkoutKey === `${option.id}:Annual` ? "Opening checkout…" : "Pay annually"}</button></div>
+                  )}
+                </div>
+                {plan?.id === option.id && <span className="subscription-current-plan-label">Currently assigned version</span>}
+              </article>
+            ))}
+          </div>
+        )}
+        {!checkoutAvailable && !plansLoading && (
+          <div className="subscription-checkout-state">Online checkout is not configured yet. Contact SmartPrint support; the platform-admin subscription assignment remains available.</div>
+        )}
+        {paymentMessage && <div className={`subscription-payment-message tone-${paymentMessageTone}`} role="status" aria-live="polite">{paymentMessage}</div>}
+      </section>
 
       <section className="panel subscription-usage-panel">
         <div className="subscription-usage-heading">
