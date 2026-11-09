@@ -53,6 +53,8 @@ class QrScannerActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_RAW_VALUE = "qrtoprint.qr.raw_value"
         const val EXTRA_SCAN_PURPOSE = "smartprint.qr.scan_purpose"
+        const val EXTRA_QA_PAUSE_CAMERA = "smartprint.qr.qa_pause_camera"
+        const val QA_CAMERA_PAUSED_LABEL = "Camera preview paused for QR UI verification."
     }
 
     private lateinit var permissionLauncher: ActivityResultLauncher<String>
@@ -72,6 +74,13 @@ class QrScannerActivity : AppCompatActivity() {
     private var cameraBindInProgress = false
     private var permissionWasRequested = false
     private var torchEnabled = false
+
+    private fun isQaCameraPaused(): Boolean {
+        val localQaPackage = packageName == "com.quantaedge.smartprint.localqa" ||
+            packageName.startsWith("com.quantaedge.smartprint.localqa.")
+        return BuildConfig.DEBUG && localQaPackage &&
+            intent.getBooleanExtra(EXTRA_QA_PAUSE_CAMERA, false)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         SmartPrintThemePreference.apply(this)
@@ -98,14 +107,45 @@ class QrScannerActivity : AppCompatActivity() {
         )
 
         buildScannerUi()
-        if (hasCameraPermission()) bindCamera() else showPermissionPanel()
+        when {
+            isQaCameraPaused() -> showQaCameraPausedPanel()
+            hasCameraPermission() -> bindCamera()
+            else -> showPermissionPanel()
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        if (::previewHost.isInitialized && hasCameraPermission() && camera == null && !cameraBindInProgress) {
+        if (::previewHost.isInitialized && !isQaCameraPaused() &&
+            hasCameraPermission() && camera == null && !cameraBindInProgress
+        ) {
             bindCamera()
         }
+    }
+
+    private fun showQaCameraPausedPanel() {
+        camera = null
+        previewHost.removeAllViews()
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+        }
+        panel.addView(label(
+            QA_CAMERA_PAUSED_LABEL,
+            14,
+            getColor(R.color.qp_muted),
+            true
+        ).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+        })
+        previewHost.addView(panel, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        ))
+        torchButton.isEnabled = false
+        statusText.text = "Camera is paused by isolated QA verification."
     }
 
     override fun onDestroy() {

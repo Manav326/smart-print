@@ -460,6 +460,9 @@ export interface ShopPayment {
   printJobId: string;
   jobNumber: string;
   documentName: string;
+  origin?: "CUSTOMER_QR" | "SHOP_OWNER" | string;
+  recipientName?: string | null;
+  recipientPhone?: string | null;
   batchPaymentId?: string | null;
   batchFileCount?: number | null;
   method: "UPI" | "CASH";
@@ -647,6 +650,7 @@ export interface ShopCustomerJob {
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -689,6 +693,74 @@ export function getShopCustomerHistory(token: string, customerId: string, take =
     {},
     token
   );
+}
+
+export interface ShopPhotoJobResult {
+  job: {
+    id: string;
+    jobNumber: string;
+    status: string;
+    origin: "SHOP_OWNER" | string;
+    recipientName: string;
+    recipientPhone?: string | null;
+    customerUserId?: string | null;
+    printKind: "PHOTO" | string;
+    photoSizeCode: string;
+    photoCount: number;
+    photosPerPage: number;
+    pageCount: number;
+    photoUnitPriceMinorSnapshot: number;
+    quotedAmountMinor: number;
+    currency: string;
+    quoteExpiresUtc: string;
+    createdUtc: string;
+  };
+  payment: {
+    id: string;
+    method: "UPI" | "CASH";
+    status: string;
+    amountMinor: number;
+    currency: string;
+    upiIdSnapshot?: string | null;
+    payeeNameSnapshot?: string | null;
+  };
+  document: {
+    id: string;
+    originalFileName: string;
+    mediaType: string;
+    sizeBytes: number;
+    sha256: string;
+    pageSizesJson: string;
+  };
+  duplicateRequest: boolean;
+}
+
+export async function createShopPhotoJob(token: string, file: File, values: {
+  photoSizeCode: string;
+  photoCount: number;
+  photosPerPage: number;
+  recipientType: "EXISTING_CUSTOMER" | "WALK_IN";
+  customerUserId?: string;
+  recipientName?: string;
+  recipientPhone?: string;
+  paymentMethod: "UPI" | "CASH";
+  idempotencyKey: string;
+}) {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  form.append("photoSizeCode", values.photoSizeCode);
+  form.append("photoCount", String(values.photoCount));
+  form.append("photosPerPage", String(values.photosPerPage));
+  form.append("recipientType", values.recipientType);
+  form.append("paymentMethod", values.paymentMethod);
+  form.append("idempotencyKey", values.idempotencyKey);
+  if (values.customerUserId) form.append("customerUserId", values.customerUserId);
+  if (values.recipientName) form.append("recipientName", values.recipientName);
+  if (values.recipientPhone) form.append("recipientPhone", values.recipientPhone);
+  return apiRequest<ShopPhotoJobResult>("/api/v1/shop/photo-jobs", {
+    method: "POST",
+    body: form
+  }, token);
 }
 
 export function getShopReportSummary(token: string, days: 7 | 30 | 90) {
@@ -907,6 +979,10 @@ export interface ShopPrintJob {
   batchGroupName?: string | null;
   batchName?: string | null;
   rejectedPageNumbersJson?: string;
+  origin?: "CUSTOMER_QR" | "SHOP_OWNER" | string;
+  customerUserId?: string | null;
+  recipientName?: string | null;
+  recipientPhone?: string | null;
   jobNumber: string;
   status: string;
   pageCount: number;
@@ -920,6 +996,7 @@ export interface ShopPrintJob {
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -978,6 +1055,7 @@ export interface UploadedPrintJob {
     printKind?: string;
     photoSizeCode?: string | null;
     photoCount?: number;
+    photosPerPage?: number | null;
     photoUnitPriceMinorSnapshot?: number;
   };
   document: { id: string; originalFileName: string; mediaType: string; sizeBytes: number; sha256: string; pageSizesJson: string };
@@ -998,6 +1076,7 @@ export interface PrintQuoteResult {
   printKind?: "DOCUMENT" | "PHOTO";
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinor?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -1442,6 +1521,7 @@ export interface CustomerJobStatus {
   printKind?: string;
   photoSizeCode?: string | null;
   photoCount?: number;
+  photosPerPage?: number | null;
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -1816,6 +1896,7 @@ export function replaceShopPhotoDocument(
     printKind: "PHOTO";
     photoSizeCode: string;
     photoCount: number;
+    photosPerPage: number;
     photoUnitPriceMinorSnapshot: number;
     quotedAmountMinor: number;
     pricingVersion: number;

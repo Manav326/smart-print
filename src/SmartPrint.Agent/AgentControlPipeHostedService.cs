@@ -19,10 +19,28 @@ public sealed class AgentControlPipeHostedService(
     AgentCredentialStore credentialStore,
     LocalAgentApiState localAgentApiState,
     LocalNetworkManager localNetworkManager,
-    AgentRuntimeReadiness runtimeReadiness) : BackgroundService
+    AgentRuntimeReadiness runtimeReadiness,
+    string? pipeNameOverride = null) : BackgroundService
 {
     public const string PipeName = "QRtoPrint.SmartPrint.Agent.Control";
     public const string PipePath = @"\\.\pipe\" + PipeName;
+
+    private readonly string pipePath = @"\\.\pipe\" + ResolvePipeName(pipeNameOverride);
+
+    private static string ResolvePipeName(string? requestedName)
+    {
+        if (string.IsNullOrWhiteSpace(requestedName))
+            return PipeName;
+
+        if (requestedName.Length > 200 ||
+            !requestedName.All(character =>
+                char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_'))
+        {
+            throw new ArgumentException("The SmartPrint control pipe name contains unsupported characters.", nameof(requestedName));
+        }
+
+        return requestedName;
+    }
     private const int MaximumRequestBytes = 4096;
     private static readonly JsonSerializerOptions PipeJsonOptions = new(JsonSerializerDefaults.Web);
 
@@ -38,7 +56,7 @@ public sealed class AgentControlPipeHostedService(
         {
             try
             {
-                await using var pipe = CreatePipe();
+                await using var pipe = CreatePipe(pipePath);
                 await pipe.WaitForConnectionAsync(stoppingToken);
                 using var requestTimeout = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 requestTimeout.CancelAfter(TimeSpan.FromSeconds(20));
@@ -86,7 +104,7 @@ public sealed class AgentControlPipeHostedService(
         uint defaultTimeout,
         ref NativeSecurityAttributes securityAttributes);
 
-    private static NamedPipeServerStream CreatePipe()
+    private static NamedPipeServerStream CreatePipe(string pipePath)
     {
         var security = new PipeSecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
@@ -122,7 +140,7 @@ public sealed class AgentControlPipeHostedService(
             var openMode = PipeAccessDuplex | FileFlagOverlapped |
                 (isFirstPipeInstance ? PipeFirstInstance : 0u);
             var handle = CreateNamedPipeNative(
-                PipePath,
+                pipePath,
                 openMode,
                 PipeRejectRemoteClients,
                 maxInstances: 1,

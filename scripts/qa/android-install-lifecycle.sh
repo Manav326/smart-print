@@ -1,6 +1,42 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  cat <<'HELP'
+Usage: bash scripts/qa/android-install-lifecycle.sh <APK_N> <APK_N_PLUS_1> [--help|-h]
+
+Arguments:
+  APK_N         First debug/QA APK. Must be signed with the same test key as N+1.
+  APK_N_PLUS_1  Higher-version APK signed with the same test key.
+
+Required tools/environment:
+  adb connected to one disposable Android emulator;
+  ANDROID_HOME or ANDROID_SDK_ROOT with build-tools 36.0.0 (aapt/apksigner);
+  keytool and curl; RUNNER_TEMP (optional, defaults to /tmp).
+
+Scenarios:
+  1. Fresh install and seed private/exported document fixtures.
+  2. Same-version reinstall preserves private and exported files.
+  3. N -> N+1 upgrade preserves both files.
+  4. Downgrade is rejected and existing app/data survive.
+  5. Different signing certificate is rejected without replacement.
+  6. Uninstall removes private app data but preserves exported file.
+  7. Fresh reinstall starts with empty private data.
+  8. Verify and install the configured production release APK versions in place.
+
+DESTRUCTIVE SAFETY WARNING:
+This helper begins by running adb uninstall for package
+com.quantaedge.smartprint, then installs test and production APKs. It is only
+for disposable CI/emulator state. Never run it on your personal phone, a
+shop device, or a device containing customer documents.
+HELP
+  exit 0
+fi
+if [[ $# -ne 2 ]]; then
+  echo "Usage: bash scripts/qa/android-install-lifecycle.sh <APK_N> <APK_N_PLUS_1> [--help|-h]" >&2
+  exit 2
+fi
+
 PACKAGE="com.quantaedge.smartprint"
 BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0"
 APKSIGNER="$BUILD_TOOLS/apksigner"
@@ -51,10 +87,16 @@ apk_certificate() {
     tr '[:upper:]' '[:lower:]'
 }
 
-echo "Waiting for the disposable Android emulator..."
+echo "[QA-STEP-START] Android package lifecycle | wait for the disposable emulator to boot and respond."
 adb wait-for-device
-for _ in $(seq 1 30); do
-  if [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == "1" ]]; then break; fi
+for attempt in $(seq 1 30); do
+  if [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == "1" ]]; then
+    echo "[QA-STEP-END] Android emulator boot complete | attempts=$attempt"
+    break
+  fi
+  if (( attempt == 1 || attempt % 5 == 0 )); then
+    echo "[QA-PROGRESS] Android emulator boot | attempt=$attempt/30 | waited=$((attempt * 2))s"
+  fi
   sleep 2
 done
 [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == "1" ]] || fail "Android emulator did not finish booting."
@@ -145,14 +187,55 @@ echo "PASS: Fresh install starts with empty private data; exported file remains.
 # check protects customer-owned documents only; shop sessions remain scoped by
 # station code so the customer can switch to another shop at any time.
 echo "8/8 Testing two real production-signed releases..."
-curl --fail --location --silent --show-error \
-  "https://github.com/Manav326/QRtoPrint/releases/download/v0.1.9/SmartPrint-Android.apk" \
-  --output "$PROD_V1"
-curl --fail --location --silent --show-error \
-  "https://github.com/Manav326/QRtoPrint/releases/download/v0.1.10/SmartPrint-Android.apk" \
-  --output "$PROD_V2"
-require_file "$PROD_V1"
-require_file "$PROD_V2"
+
+download_release_apk() {
+  local release_tag="$1"
+  local destination="$2"
+  local api_base="https://api.github.com/repos/Manav326/smart-print"
+  local release_metadata asset_record asset_id asset_size downloaded_size
+
+  [[ -n "${GH_TOKEN:-}" ]] || fail "GH_TOKEN is required to download production release assets through the GitHub API."
+  command -v jq >/dev/null 2>&1 || fail "jq is required to resolve GitHub release asset metadata."
+
+  echo "[QA-PROGRESS] Resolving $release_tag production APK from GitHub release metadata..."
+  release_metadata="$(curl --fail --location --silent --show-error \
+    --retry 5 --retry-delay 3 --retry-max-time 120 \
+    --connect-timeout 20 --max-time 180 \
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: Bearer $GH_TOKEN" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$api_base/releases/tags/$release_tag")"
+
+  asset_record="$(jq -ce --arg name "SmartPrint-Android.apk" '
+    [.assets[] | select(.name == $name and .state == "uploaded")] |
+    if length == 1 then .[0] else error("Expected exactly one uploaded Android APK release asset") end
+  ' <<<"$release_metadata")" || fail "Could not resolve exactly one uploaded Android APK for $release_tag."
+  asset_id="$(jq -er '.id | select(type == "number" and . > 0)' <<<"$asset_record")" ||
+    fail "The $release_tag Android release asset has no valid GitHub asset ID."
+  asset_size="$(jq -er '.size | select(type == "number" and . > 0)' <<<"$asset_record")" ||
+    fail "The $release_tag Android release asset has no valid expected size."
+
+  echo "[QA-PROGRESS] Downloading $release_tag Android APK through GitHub release asset API (asset=$asset_id, expected_bytes=$asset_size)..."
+  # The browser_download_url path returned persistent HTTP 504 for v0.1.10.
+  # Resolve the immutable asset ID and request the binary API representation;
+  # the API issues a short-lived asset URL for the actual download.
+  curl --fail --location --silent --show-error \
+    --retry 5 --retry-delay 3 --retry-max-time 180 \
+    --connect-timeout 20 --max-time 240 \
+    -H "Accept: application/octet-stream" \
+    -H "Authorization: Bearer $GH_TOKEN" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$api_base/releases/assets/$asset_id" --output "$destination"
+
+  require_file "$destination"
+  downloaded_size="$(wc -c <"$destination" | tr -d '[:space:]')"
+  [[ "$downloaded_size" == "$asset_size" ]] ||
+    fail "$release_tag Android APK download is incomplete: expected $asset_size bytes, received $downloaded_size."
+  echo "[QA-PROGRESS] Verified $release_tag APK download size: $downloaded_size bytes."
+}
+
+download_release_apk "v0.1.9" "$PROD_V1"
+download_release_apk "v0.1.10" "$PROD_V2"
 prod_cert_v1="$(apk_certificate "$PROD_V1")"
 prod_cert_v2="$(apk_certificate "$PROD_V2")"
 [[ -n "$prod_cert_v1" && "$prod_cert_v1" == "$prod_cert_v2" ]] ||

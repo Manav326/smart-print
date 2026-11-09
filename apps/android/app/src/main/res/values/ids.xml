@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="smartprint_native_root" type="id" />
+    <item name="smartprint_nav_home" type="id" />
+    <item name="smartprint_nav_files" type="id" />
+    <item name="smartprint_home_heading" type="id" />
+    <item name="smartprint_files_heading" type="id" />
+</resources>

@@ -1,8 +1,65 @@
+<#
+.SYNOPSIS
+Exercise SmartPrint Windows installer install, upgrade, rollback and uninstall scenarios.
+
+.DESCRIPTION
+Runs a destructive lifecycle test against two versioned SmartPrint Windows
+installers. It seeds synthetic machine identity, network preference and
+encrypted local-queue fixtures; creates a secondary Microsoft Print to PDF
+queue; then installs/reinstalls/upgrades/rolls back/uninstalls the Agent and
+verifies the test-owned data is preserved or removed as expected.
+
+SAFETY: this script installs and uninstalls the SmartPrint Agent, registers
+Windows services/firewall rules, writes under ProgramData/Program Files, and
+creates/removes a printer queue. Run it only on a disposable Windows VM or
+isolated CI runner with Administrator rights. Do not run it on your everyday
+shop computer or a machine with real print jobs in its queue.
+
+.PARAMETER Help
+Show this guide without modifying Windows services, ProgramData, printers or
+firewall rules.
+
+.PARAMETER InstallerV1
+Path to the earlier-version Windows setup executable (upgrade source).
+
+.PARAMETER InstallerV2
+Path to the later-version Windows setup executable (upgrade target).
+
+.EXAMPLE
+.\scripts\qa\windows-installer-lifecycle.ps1 -Help
+Show test scenarios and safety requirements without running installers.
+
+.EXAMPLE
+.\scripts\qa\windows-installer-lifecycle.ps1 -InstallerV1 'artifacts/SmartPrint-v1.exe' -InstallerV2 'artifacts/SmartPrint-v2.exe'
+Run the complete lifecycle against two test setup packages on a disposable
+elevated Windows VM.
+
+.NOTES
+The script owns and removes only the fixtures and resources it creates. It
+does not intentionally change the pre-existing default printer. It must run
+elevated because service, firewall and machine-wide printer operations are
+required.
+#>
+
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)][string]$InstallerV1,
-    [Parameter(Mandatory = $true)][string]$InstallerV2
+    [switch]$Help,
+    [string]$InstallerV1 = "",
+    [string]$InstallerV2 = ""
 )
+
+if ($Help) {
+    Get-Help -Name $PSCommandPath -Full | Out-String -Width 180 | Write-Host
+    exit 0
+}
+foreach ($entry in @(@{Name="InstallerV1";Path=$InstallerV1}, @{Name="InstallerV2";Path=$InstallerV2})) {
+    if ([string]::IsNullOrWhiteSpace($entry.Path)) {
+        throw ("-" + $entry.Name + " is required. Run this script with -Help to see usage examples.")
+    }
+    if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) {
+        throw ("-" + $entry.Name + " does not exist: " + $entry.Path)
+    }
+}
 
 $ErrorActionPreference = "Stop"
 $serviceName = "QRtoPrintSmartPrintAgent"
@@ -25,27 +82,36 @@ $ownsInstall = $false
 $ownsPrinter = $false
 $ownsTask = $false
 
+$script:caseNumber = 0
 function Add-Result([string]$Name, [string]$Status, [string]$Detail) {
     $results.Add([pscustomobject]@{ Name = $Name; Status = $Status; Detail = $Detail })
+    $stamp = Get-Date -Format "HH:mm:ss"
     if ($Status -eq "PASS") {
-        Write-Host "PASS: $Name - $Detail" -ForegroundColor Green
+        Write-Host "[QA-RESULT] $stamp | PASS: $Name - $Detail" -ForegroundColor Green
     }
     elseif ($Status -eq "SKIP") {
-        Write-Host "SKIP: $Name - $Detail" -ForegroundColor Yellow
+        Write-Host "[QA-RESULT] $stamp | SKIP: $Name - $Detail" -ForegroundColor Yellow
     }
     else {
-        Write-Host "FAIL: $Name - $Detail" -ForegroundColor Red
+        Write-Host "[QA-RESULT] $stamp | FAIL: $Name - $Detail" -ForegroundColor Red
     }
 }
 
 function Invoke-Check([string]$Name, [scriptblock]$Action) {
+    $script:caseNumber += 1
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-Host ("[QA-CASE-START] {0:00} | {1} | {2}" -f $script:caseNumber, (Get-Date -Format "HH:mm:ss"), $Name) -ForegroundColor Cyan
     try {
         & $Action
+        $timer.Stop()
         Add-Result $Name "PASS" "All assertions passed."
+        Write-Host ("[QA-CASE-END] {0:00} | PASS | elapsed={1:n1}s | {2}" -f $script:caseNumber, $timer.Elapsed.TotalSeconds, $Name) -ForegroundColor Green
         return $true
     }
     catch {
+        $timer.Stop()
         Add-Result $Name "FAIL" $_.Exception.Message
+        Write-Host ("[QA-CASE-END] {0:00} | FAIL | elapsed={1:n1}s | {2}" -f $script:caseNumber, $timer.Elapsed.TotalSeconds, $Name) -ForegroundColor Red
         return $false
     }
 }
@@ -55,8 +121,14 @@ function Assert-True([bool]$Condition, [string]$Message) {
 }
 
 function Wait-Service([ValidateSet("Running", "Stopped", "Absent")][string]$State, [int]$TimeoutSeconds = 45) {
+    Write-Host "[QA-WAIT] Agent Windows service -> $State (timeout $TimeoutSeconds seconds)." -ForegroundColor DarkCyan
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $poll = 0
     do {
+        $poll++
+        if ($poll -eq 1 -or $poll % 10 -eq 0) {
+            Write-Host "[QA-PROGRESS] Agent service state | target=$State | poll=$poll | elapsed=$($poll)s." -ForegroundColor DarkCyan
+        }
         $service = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
         if ($State -eq "Absent" -and -not $service) { return }
         if ($State -eq "Stopped" -and $service -and $service.Status -eq "Stopped") { return }
@@ -69,6 +141,7 @@ function Wait-Service([ValidateSet("Running", "Stopped", "Absent")][string]$Stat
 }
 
 function Invoke-Setup([string]$Path) {
+    Write-Host "[QA-ACTION] Execute installer: $Path" -ForegroundColor Cyan
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
         throw "Installer not found: $Path"
     }
@@ -104,9 +177,15 @@ function Get-ServiceBinaryPath {
 }
 
 function Wait-LocalApiReady([int]$TimeoutSeconds = 45) {
+    Write-Host "[QA-WAIT] Agent local API and preserved device identity (timeout $TimeoutSeconds seconds)." -ForegroundColor DarkCyan
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $uri = "http://127.0.0.1:17842/api/v1/local/status"
+    $poll = 0
     do {
+        $poll++
+        if ($poll -eq 1 -or $poll % 10 -eq 0) {
+            Write-Host "[QA-PROGRESS] Agent local API and identity readiness | poll=$poll | elapsed=$($poll)s." -ForegroundColor DarkCyan
+        }
         try {
             $status = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec 3
             if ($status.status -eq "LOCAL_ENDPOINT_READY" -and
@@ -132,6 +211,7 @@ function Assert-ServiceVersion([string]$ExpectedVersion) {
 }
 
 function Invoke-Fixture([string]$Mode) {
+    Write-Host "[QA-ACTION] Run isolated Agent data-preservation fixture: mode=$Mode" -ForegroundColor Cyan
     & dotnet run --project $fixtureProject --configuration Release -- $Mode | ForEach-Object { Write-Host $_ }
     if ($LASTEXITCODE -ne 0) { throw "Lifecycle fixture '$Mode' failed with exit code $LASTEXITCODE." }
 }
@@ -156,6 +236,7 @@ function Add-QueueFixture {
 }
 
 function Assert-SystemCanDiscoverFixturePrinter {
+    Write-Host "[QA-ACTION] Verify Agent printer discovery as LocalSystem using the temporary lifecycle queue." -ForegroundColor Cyan
     $taskName = "SmartPrintLifecycleSystemPrinterProbe"
     $resultPath = Join-Path $env:RUNNER_TEMP "smartprint-system-printer-probe.txt"
     $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
@@ -171,7 +252,12 @@ function Assert-SystemCanDiscoverFixturePrinter {
         $script:ownsTask = $true
         Start-ScheduledTask -TaskName $taskName
         $deadline = (Get-Date).AddSeconds(40)
+        $poll = 0
         while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
+            $poll++
+            if ($poll -eq 1 -or $poll % 10 -eq 0) {
+                Write-Host "[QA-PROGRESS] LocalSystem printer discovery task | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
+            }
             Start-Sleep -Milliseconds 500
         }
         Assert-True (Test-Path -LiteralPath $resultPath) "The LocalSystem printer-discovery task did not produce a result."
@@ -217,6 +303,7 @@ $servicePathAfterFirstInstall = $null
 $v2Installed = $false
 
 try {
+    Write-Host "[QA-PREFLIGHT] Confirming this runner has no existing SmartPrint install, Agent service, fixture printer, task, firewall rule, or machine data to overwrite." -ForegroundColor Cyan
     Assert-True (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) "Refusing to test on a runner that already has the SmartPrint Agent service."
     Assert-True (-not (Test-Path -LiteralPath $installRoot)) "Refusing to test on a runner that already has a SmartPrint installation directory."
     Assert-True (-not (Get-Printer -Name $testPrinterName -ErrorAction SilentlyContinue)) "Refusing to overwrite an existing printer queue named '$testPrinterName'."
@@ -465,6 +552,7 @@ catch {
     Add-Result "Lifecycle harness" "FAIL" $_.Exception.Message
 }
 finally {
+    Write-Host "[QA-CLEANUP] Cleaning only fixtures and installation resources created by this lifecycle run." -ForegroundColor DarkCyan
     if ($ownsInstall) {
         try { Invoke-Uninstall } catch { Write-Warning "Final uninstall cleanup: $($_.Exception.Message)" }
     }

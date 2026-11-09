@@ -36,7 +36,12 @@ async function start() {
     window.history.replaceState(null, "", "/shop");
   }
 
-  ReactDOM.createRoot(document.getElementById("root")!).render(
+  const root = document.getElementById("smartprint-desktop-root");
+  if (!root) {
+    throw new Error("SmartPrint Desktop could not find #smartprint-desktop-root.");
+  }
+
+  ReactDOM.createRoot(root).render(
     <React.StrictMode><App /></React.StrictMode>
   );
 }

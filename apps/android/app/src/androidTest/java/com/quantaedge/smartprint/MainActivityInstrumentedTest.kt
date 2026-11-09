@@ -1,12 +1,19 @@
 package com.quantaedge.smartprint
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.ValueCallback
 import android.webkit.WebSettings
 import android.webkit.WebView
+import java.io.ByteArrayInputStream
+import android.webkit.WebViewClient
+import android.webkit.WebResourceResponse
+import android.webkit.WebResourceRequest
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -65,8 +72,9 @@ class MainActivityInstrumentedTest {
     }
 
     private fun openFilesTab() {
-        // Target the actual menu item, then verify that the Files screen is visible.
+        // Target the actual menu item, then verify both user-facing content and its stable QA landmark.
         openNavigationDestination(2, "New folder")
+        onView(withId(R.id.smartprint_files_heading)).check(matches(isDisplayed()))
     }
 
     @Test
@@ -355,9 +363,185 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun acceptedShopQrIsSavedAsTheSelectedShopAndOpenedInTheWebView() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val shopPreferences = context.getSharedPreferences(
+            "smartprint.customer.last-shop",
+            Context.MODE_PRIVATE
+        )
+        val previousPreferences = shopPreferences.all.toMap()
+        shopPreferences.edit().clear().commit()
+
+        // Keep production QR trust rules strict: the emulator's isolated Photo Studio
+        // fixture origin is loopback and must not be accepted as a real shop QR.
+        val serviceOrigin = "https://service.smartprint.example"
+        val stationUrl = serviceOrigin + "/s/" + "Q".repeat(32)
+        val stationHost = Uri.parse(stationUrl).host.orEmpty()
+        val acceptedRoute = QrScanRoutingPolicy.route(
+            rawValue = stationUrl,
+            purpose = QrScanPurpose.SHOP_CONNECTION,
+            expectedServiceUrl = serviceOrigin,
+            allowLocalDevelopment = false
+        ) as? QrScanRoute.ConnectToShop
+            ?: throw AssertionError("The synthetic production-origin station QR must pass the configured-origin routing policy: station=$stationUrl")
+        assertEquals("The QR routing policy must preserve the canonical station URL.", stationUrl, acceptedRoute.link.url)
+        val pageLoaded = CountDownLatch(1)
+        val requestedWebViewUrl = AtomicReference<String>()
+        val interceptedMainFrameUrl = AtomicReference<String>()
+        val pageStartedUrl = AtomicReference<String>()
+        val pageFinishedUrl = AtomicReference<String>()
+        val mainFrameLoadError = AtomicReference<String>()
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
+                        .apply { isAccessible = true }
+                        .invoke(activity) as WebView
+                    webView.webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView,
+                            request: WebResourceRequest
+                        ): WebResourceResponse? {
+                            if (!request.isForMainFrame) return null
+                            interceptedMainFrameUrl.set(request.url.toString())
+                            val html = "<!doctype html><html><head><title>SmartPrint QR handoff QA</title></head><body>Station link received</body></html>"
+                            return WebResourceResponse(
+                                "text/html",
+                                "UTF-8",
+                                200,
+                                "OK",
+                                mapOf("Cache-Control" to "no-store"),
+                                ByteArrayInputStream(html.toByteArray(Charsets.UTF_8))
+                            )
+                        }
+
+                        override fun onPageStarted(view: WebView, url: String, favicon: Bitmap?) {
+                            pageStartedUrl.set(url)
+                        }
+
+                        override fun onPageFinished(view: WebView, url: String) {
+                            pageFinishedUrl.set(url)
+                            if (url == stationUrl) pageLoaded.countDown()
+                        }
+
+                        override fun onReceivedError(
+                            view: WebView,
+                            request: WebResourceRequest,
+                            error: android.webkit.WebResourceError
+                        ) {
+                            if (request.isForMainFrame) {
+                                mainFrameLoadError.set("${error.errorCode}: ${error.description}")
+                            }
+                        }
+                    }
+
+                    // Exercise the same post-validation handoff used by the accepted
+                    // QR route. The routing policy above remains pinned to HTTPS.
+                    MainActivity::class.java.getDeclaredMethod(
+                        "confirmShop",
+                        StationQrLink::class.java
+                    ).apply { isAccessible = true }
+                        .invoke(activity, acceptedRoute.link)
+                    requestedWebViewUrl.set(webView.url)
+                }
+
+                val pageFinished = pageLoaded.await(20, TimeUnit.SECONDS)
+                assertTrue(
+                    "The accepted station URL must finish loading in the SmartPrint WebView. " +
+                        "intercepted=${interceptedMainFrameUrl.get()}, " +
+                        "started=${pageStartedUrl.get()}, finished=${pageFinishedUrl.get()}, " +
+                        "loadError=${mainFrameLoadError.get()}, requested=${requestedWebViewUrl.get()}",
+                    pageFinished
+                )
+
+                scenario.onActivity { activity ->
+                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
+                        .apply { isAccessible = true }
+                        .invoke(activity) as WebView
+                    val savedUrl = MainActivity::class.java.getDeclaredField("portalUrl")
+                        .apply { isAccessible = true }
+                        .get(activity) as? String
+                    val savedHost = MainActivity::class.java.getDeclaredField("portalHost")
+                        .apply { isAccessible = true }
+                        .get(activity) as? String
+
+                    assertEquals(stationUrl, savedUrl)
+                    assertEquals(stationHost, savedHost)
+                    assertEquals(stationUrl, shopPreferences.getString("portalUrl", null))
+                    assertEquals(stationHost, shopPreferences.getString("portalHost", null))
+                    assertTrue("The selected shop WebView must be visible.", webView.isShown)
+                    assertEquals(
+                        "The accepted station URL must be loaded into the existing SmartPrint WebView.",
+                        stationUrl,
+                        webView.url
+                    )
+                    assertEquals(
+                        "The URL ends at the public station code.",
+                        "Q".repeat(32),
+                        Uri.parse(webView.url).lastPathSegment
+                    )
+                    assertTrue(
+                        "The public station URL must not contain a customer session secret.",
+                        !webView.url.orEmpty().contains("sessionToken", ignoreCase = true)
+                    )
+                }
+            }
+        } finally {
+            val editor = shopPreferences.edit().clear()
+            previousPreferences.forEach { (key, value) ->
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                }
+            }
+            editor.commit()
+        }
+    }
+    @Test
+    fun launcherIntentOpensMainActivityAndInflatesSmartPrintShell() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val launcherIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+            ?: throw AssertionError("SmartPrint must be discoverable through an Android launcher intent.")
+
+        assertEquals(android.content.Intent.ACTION_MAIN, launcherIntent.action)
+        assertTrue(
+            "The app's launch intent must include CATEGORY_LAUNCHER.",
+            launcherIntent.hasCategory(android.content.Intent.CATEGORY_LAUNCHER)
+        )
+        assertEquals(
+            "The launcher must resolve to MainActivity.",
+            MainActivity::class.java.name,
+            launcherIntent.component?.className
+        )
+
+        ActivityScenario.launch<MainActivity>(launcherIntent).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue("MainActivity must remain open after launcher startup.", !activity.isFinishing)
+                assertTrue("MainActivity must not be destroyed during startup.", !activity.isDestroyed)
+
+                val nativeRoot = activity.findViewById<ViewGroup>(R.id.smartprint_native_root)
+                    ?: throw AssertionError("The launcher must inflate #smartprint_native_root.")
+                assertTrue("#smartprint_native_root must be visible after launcher startup.", nativeRoot.isShown)
+                assertTrue("#smartprint_native_root must contain the native SmartPrint shell.", nativeRoot.childCount > 0)
+
+                val toolbar = MainActivity::class.java.getDeclaredField("toolbar")
+                    .apply { isAccessible = true }
+                    .get(activity) as com.google.android.material.appbar.MaterialToolbar
+                assertEquals("SmartPrint", toolbar.title.toString())
+            }
+        }
+    }
+
+    @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))
+            onView(withId(R.id.smartprint_home_heading)).check(matches(isDisplayed()))
             onView(withText("Recent")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
             onView(withText("Choose from phone")).check(matches(isDisplayed()))
@@ -366,6 +550,10 @@ class MainActivityInstrumentedTest {
                 val customBar = MainActivity::class.java.getDeclaredField("bottomNavigationContent").apply {
                     isAccessible = true
                 }.get(activity) as LinearLayout
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_native_root))
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_nav_home))
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_nav_files))
+                assertNotNull(activity.findViewById<View>(R.id.smartprint_home_heading))
                 assertEquals(4, customBar.childCount)
                 val labels = (0 until customBar.childCount).map { index ->
                     (customBar.getChildAt(index) as LinearLayout).getChildAt(1)
@@ -771,11 +959,25 @@ class MainActivityInstrumentedTest {
             "smartprint.customer.last-shop",
             Context.MODE_PRIVATE
         )
+        val qaPreferences = context.getSharedPreferences(
+            "smartprint.qa.instrumentation",
+            Context.MODE_PRIVATE
+        )
+        val previousPauseCamera = qaPreferences.getBoolean("pauseQrCameraForPurposeTest", false)
         val previousPreferences = shopPreferences.all.toMap()
         val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "S".repeat(32)
         val stationHost = Uri.parse(stationUrl).host.orEmpty()
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
 
         try {
+            // This test verifies the Wi-Fi-check menu entry and scanner purpose, not
+            // camera recognition. A physical phone can see an unrelated QR nearby and
+            // correctly finish scanning before Espresso inspects the instruction.
+            // This verifies the Wi-Fi-check entry point and purpose, not camera
+            // recognition. Pause only the local-QA camera so an unrelated QR code
+            // in the physical environment cannot finish the scanner before inspection.
+            qaPreferences.edit().putBoolean("pauseQrCameraForPurposeTest", true).commit()
+
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
                     shopPreferences.edit()
@@ -801,12 +1003,95 @@ class MainActivityInstrumentedTest {
                     }.invoke(activity)
                 }
 
-                onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
-                onView(withText("Check shop Wi-Fi")).perform(click())
-                onView(withText("Scan the temporary phone-check QR shown on the shop computer."))
-                    .check(matches(isDisplayed()))
-                onView(withContentDescription("Close QR scanner")).perform(click())
-                onView(withText("Wi-Fi Check Test Shop")).check(matches(isDisplayed()))
+                val scannerMonitor = instrumentation.addMonitor(
+                    QrScannerActivity::class.java.name,
+                    null,
+                    false
+                )
+                try {
+                    onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
+                    onView(withText("Check shop Wi-Fi")).perform(click())
+
+                    val launched = instrumentation.waitForMonitorWithTimeout(scannerMonitor, 10_000)
+                    val scannerActivity = launched as? QrScannerActivity
+                        ?: throw AssertionError("The Check shop Wi-Fi action did not launch QrScannerActivity.")
+
+                    assertEquals(
+                        "The connected-shop Wi-Fi action must launch the Wi-Fi-readiness scan purpose.",
+                        "wifi_readiness",
+                        scannerActivity.intent.getStringExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE)
+                    )
+
+                    val inspection = AtomicReference<Pair<Boolean, Boolean>?>(null)
+                    scannerActivity.runOnUiThread {
+                        fun containsVisibleText(view: View, expected: String): Boolean {
+                            if (view is android.widget.TextView &&
+                                view.isShown &&
+                                view.text?.toString() == expected
+                            ) return true
+                            if (view is ViewGroup) {
+                                for (index in 0 until view.childCount) {
+                                    if (containsVisibleText(view.getChildAt(index), expected)) return true
+                                }
+                            }
+                            return false
+                        }
+                        inspection.set(
+                            containsVisibleText(
+                                scannerActivity.window.decorView,
+                                "Scan the temporary phone-check QR shown on the shop computer."
+                            ) to containsVisibleText(
+                                scannerActivity.window.decorView,
+                                QrScannerActivity.QA_CAMERA_PAUSED_LABEL
+                            )
+                        )
+                    }
+                    instrumentation.waitForIdleSync()
+                    val visibleState = inspection.get()
+                        ?: throw AssertionError("The QR scanner view hierarchy was not inspected.")
+                    assertTrue(
+                        "The Wi-Fi scanner must display the temporary phone-check QR instruction.",
+                        visibleState.first
+                    )
+                    assertTrue(
+                        "The isolated QA scanner must display its camera-paused state.",
+                        visibleState.second
+                    )
+
+                    onView(withContentDescription("Close QR scanner")).perform(click())
+                } finally {
+                    instrumentation.removeMonitor(scannerMonitor)
+                }
+
+                // Closing the native camera Activity can leave the underlying app window
+                // temporarily without focus on some OEM builds. Check the actual resumed
+                // MainActivity view hierarchy rather than relying on Espresso root focus.
+                var shopScreenRestored = false
+                val restoreDeadline = System.currentTimeMillis() + 10_000
+                while (!shopScreenRestored && System.currentTimeMillis() < restoreDeadline) {
+                    instrumentation.waitForIdleSync()
+                    scenario.onActivity { activity ->
+                        fun containsVisibleShopName(view: View): Boolean {
+                            if (view is android.widget.TextView &&
+                                view.text?.toString() == "Wi-Fi Check Test Shop" && view.isShown
+                            ) return true
+                            if (view is ViewGroup) {
+                                for (index in 0 until view.childCount) {
+                                    if (containsVisibleShopName(view.getChildAt(index))) return true
+                                }
+                            }
+                            return false
+                        }
+                        shopScreenRestored = activity.lifecycle.currentState.isAtLeast(
+                            androidx.lifecycle.Lifecycle.State.RESUMED
+                        ) && containsVisibleShopName(activity.window.decorView)
+                    }
+                    if (!shopScreenRestored) Thread.sleep(100)
+                }
+                assertTrue(
+                    "Closing the QR scanner must return to the resumed shop home screen without changing the selected shop.",
+                    shopScreenRestored
+                )
 
                 scenario.onActivity { activity ->
                     val currentPortalUrl = MainActivity::class.java.getDeclaredField("portalUrl").apply {
@@ -819,20 +1104,25 @@ class MainActivityInstrumentedTest {
                 }
             }
         } finally {
-            val editor = shopPreferences.edit().clear()
-            previousPreferences.forEach { (key, value) ->
-                when (value) {
-                    is String -> editor.putString(key, value)
-                    is Boolean -> editor.putBoolean(key, value)
-                    is Int -> editor.putInt(key, value)
-                    is Long -> editor.putLong(key, value)
-                    is Float -> editor.putFloat(key, value)
-                    is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+            try {
+                qaPreferences.edit().putBoolean("pauseQrCameraForPurposeTest", previousPauseCamera).commit()
+            } finally {
+                val editor = shopPreferences.edit().clear()
+                previousPreferences.forEach { (key, value) ->
+                    when (value) {
+                        is String -> editor.putString(key, value)
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Long -> editor.putLong(key, value)
+                        is Float -> editor.putFloat(key, value)
+                        is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                    }
                 }
+                editor.commit()
             }
-            editor.commit()
         }
     }
+
 }
 
 @RunWith(AndroidJUnit4::class)

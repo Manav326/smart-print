@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound,
@@ -22,7 +22,7 @@ import {
   ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
   createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
-  downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData,
+  createShopPhotoJob, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings,
@@ -223,6 +223,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     job:ShopPrintJob;
     returnPreview:{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean};
   }|null>(null);
+  const [shopPhotoOrderOpen,setShopPhotoOrderOpen]=useState(false);
+  const [shopPhotoOrderDraft,setShopPhotoOrderDraft]=useState<ShopPhotoOrderDraft|null>(null);
+  const [shopPhotoOrderReceipt,setShopPhotoOrderReceipt]=useState<Awaited<ReturnType<typeof createShopPhotoJob>>|null>(null);
   const [refundJob, setRefundJob] = useState<ShopPrintJob | null>(null);
   const [batchReviewJobs, setBatchReviewJobs] = useState<ShopPrintJob[] | null>(null);
   const [batchReviewDecisions, setBatchReviewDecisions] = useState<Record<string, boolean>>({});
@@ -1195,6 +1198,32 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
   }
 
+  async function applyShopCreatedPhotoStudio(sheets:PreparedPhotoSheet[]){
+    const draft=shopPhotoOrderDraft;
+    if(!draft||sheets.length!==1)throw new Error("Prepare exactly one multi-page A4 photo sheet before creating this order.");
+    const sheet=sheets[0];
+    setBusyJobId("shop-photo-create");
+    setError("");
+    try{
+      const result=await createShopPhotoJob(tokens.accessToken,sheet.file,{
+        photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,
+        recipientType:draft.recipientType,customerUserId:draft.customerUserId,
+        recipientName:draft.recipientName,recipientPhone:draft.recipientPhone,
+        paymentMethod:draft.paymentMethod,idempotencyKey:draft.idempotencyKey
+      });
+      setShopPhotoOrderDraft(null);
+      setShopPhotoOrderReceipt(result);
+      const amount=formatMoney(result.job.quotedAmountMinor,result.job.currency);
+      const paymentNote=result.payment.method==="UPI"
+        ? `UPI payment is pending. Collect at ${result.payment.upiIdSnapshot||"the shop's configured UPI ID"} and verify actual credit in your UPI/bank app before authorising print.`
+        : "Cash payment is pending. Mark received only after cash is physically collected.";
+      setToast(`Photo order ${result.job.jobNumber} created for ${result.job.recipientName} · ${amount}. ${paymentNote}`);
+      await reload();
+    }catch(exception){
+      throw exception instanceof Error?exception:new Error("Could not create the shop photo order. Your original photo is unchanged; retry safely.");
+    }finally{setBusyJobId(null);}
+  }
+
   async function openShopPhotoStudioForJob(job:ShopPrintJob){
     setBusyJobId(job.id);setError("");
     try{
@@ -1253,7 +1282,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       await reload();
       const blob=await downloadShopDocument(tokens.accessToken,editor.job.id,"original");
       const previewBlob=blob.type==="application/pdf"?blob:new Blob([blob],{type:"application/pdf"});
-      const savedJob:ShopPrintJob={...editor.job,printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
+      const savedJob:ShopPrintJob={...editor.job,printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
       setPreview({name:sheet.file.name,url:URL.createObjectURL(previewBlob),blob:previewBlob,mediaType:"application/pdf",job:savedJob,readOnly:true});
     }catch{
       setError("The A4 photo PDF was saved to the existing print job, but the queue could not refresh its preview. Refresh the queue before approving or printing.");
@@ -1560,7 +1589,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           {active === "Subscription" && subscription && <SubscriptionPage summary={subscription}/>}
           {active === "Payments" && paymentSettings && <PaymentsPage settings={paymentSettings} payments={payments} refunds={refunds} onSave={savePaymentSettings} onVerify={verifyPayment} onReject={rejectPayment} busy={busy} busyJobId={busyJobId}/>}
           {active === "Settings" && profile && <SettingsPage profile={profile} onSave={saveProfile} busy={busy}/>}
-          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onSearch={searchPrintQueue} onPreview={previewJob} onPreviewOutput={job=>void previewJob(job,true,"output")} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onUpdateSettings={updatePrintJobSettings} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
+          {active === "Print Queue" && <PrintQueuePage jobs={printJobs} printers={printers} agentDevices={agentDevices} searchQuery={queueSearch} loadingBatchId={batchReviewLoadingId} onCreatePhotoOrder={()=>setShopPhotoOrderOpen(true)} onSearch={searchPrintQueue} onPreview={previewJob} onPreviewOutput={job=>void previewJob(job,true,"output")} onApprove={approveJob} onReject={rejectJob} onRefund={job=>setRefundJob(job)} onReviewBatch={openBatchReview} onHistory={viewJobHistory} onAssignPrinter={assignPrinter} onUpdateSettings={updatePrintJobSettings} onDispatch={dispatchPrintJob} onConfirmOutput={confirmPrintedOutput} onRetryPdfExport={retryPdfExport} onRefresh={refreshPrintQueue} onLoadOlder={loadOlderQueueJobs} hasMoreJobs={hasMoreQueueJobs} loadingOlderJobs={loadingOlderQueueJobs} busyJobId={busyJobId}/>} 
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
@@ -1575,6 +1604,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={(acceptedIds,pdfBrandingEnabled)=>void applyBatchReview(batchReviewJobs,acceptedIds,pdfBrandingEnabled)}/>} 
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} isSavedOutput={preview.isSavedOutput} focusEditOnMount={focusShopPhotoEdit} onEditPhoto={preview.mediaType.startsWith("image/")&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); setFocusShopPhotoEdit(false); }}/>} 
       {shopPhotoStudio && <PhotoStudio source={shopPhotoStudio.source} mode="shop" dark={dark} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={cancelShopPhotoStudio} onApply={applyShopPhotoStudio}/>} 
+      {shopPhotoOrderReceipt&&<ShopPhotoOrderReceipt receipt={shopPhotoOrderReceipt} onClose={()=>setShopPhotoOrderReceipt(null)} onOpenPayments={()=>{setShopPhotoOrderReceipt(null);navAction("Payments");}}/>}
+      {shopPhotoOrderOpen&&<ShopPhotoOrderModal token={tokens.accessToken} paymentSettings={paymentSettings} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onClose={()=>setShopPhotoOrderOpen(false)} onContinue={draft=>{setShopPhotoOrderOpen(false);setShopPhotoOrderDraft(draft);}}/>}
+      {shopPhotoOrderDraft&&<PhotoStudio source={shopPhotoOrderDraft.source} mode="shop-create" dark={dark} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={()=>setShopPhotoOrderDraft(null)} onApply={applyShopCreatedPhotoStudio}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
       {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
       {actionDialog && <Modal title={actionDialog.title} subtitle="This action will be recorded against your shop account." onClose={closeActionDialog}>
@@ -1583,6 +1615,147 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       </Modal>}
     </div>
   );
+}
+
+type ShopPhotoOrderDraft = {
+  source:File; recipientType:"EXISTING_CUSTOMER"|"WALK_IN"; customerUserId?:string;
+  recipientName?:string; recipientPhone?:string; paymentMethod:"UPI"|"CASH"; idempotencyKey:string;
+};
+
+function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
+  receipt:Awaited<ReturnType<typeof createShopPhotoJob>>;
+  onClose:()=>void;
+  onOpenPayments:()=>void;
+}) {
+  const {job,payment}=receipt;
+  const amount=formatMoney(payment.amountMinor,payment.currency);
+  const upiIntent=payment.method==="UPI"&&payment.status!=="VERIFIED"
+    ? buildCustomerUpiIntent({
+        upiId:payment.upiIdSnapshot,
+        payeeName:payment.payeeNameSnapshot,
+        amountMinor:payment.amountMinor,
+        currency:payment.currency,
+        transactionReference:job.jobNumber,
+        description:`SmartPrint photo order ${job.jobNumber}`
+      })
+    : null;
+  return <Modal title="Photo order created" subtitle={`Job ${job.jobNumber} · ${job.recipientName}`} onClose={onClose}>
+    <div className="photo-order-receipt">
+      <div className="photo-order-receipt-summary">
+        <span>Server-calculated amount</span><strong>{amount}</strong>
+        <small>{job.photoCount} photos · {job.photoSizeCode} · {job.pageCount} A4 page(s)</small>
+      </div>
+      {payment.status==="VERIFIED"
+        ? <div className="file-review-note"><Check size={16}/><span>Payment is already verified. Continue from the Print Queue to assign a printer and explicitly dispatch the job.</span></div>
+        : payment.method==="UPI"
+          ? <div className="photo-order-upi">
+              {upiIntent?<QRCode value={upiIntent} size={184} level="M"/>:<p className="form-error">A UPI QR could not be prepared from the saved shop payment details. Open Payments and check the configured UPI ID.</p>}
+              <strong>{payment.payeeNameSnapshot||"Shop payment"}</strong>
+              <span>{payment.upiIdSnapshot||"UPI ID not available"}</span>
+              <small>Payment pending · Ask the customer to scan and pay the exact amount. Verify the actual credit in your UPI/bank app; this QR does not confirm payment.</small>
+            </div>
+          : <div className="file-review-note"><Wallet size={16}/><span>Cash payment pending. Collect {amount} at the counter and mark it received only after the cash is physically in the shop.</span></div>}
+      <div className="form-hint">The job is already in your Print Queue. It cannot be dispatched until payment has been manually verified. Printing must then be started explicitly.</div>
+      <div className="modal-actions">
+        <button type="button" className="secondary-button" onClick={onClose}>Done</button>
+        <button type="button" className="primary-button" onClick={onOpenPayments}>Open Payments <ArrowRight size={15}/></button>
+      </div>
+    </div>
+  </Modal>;
+}
+
+function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContinue}:{
+  token:string; paymentSettings:ShopPaymentSettings|null; photoPrices:Record<string,number>;
+  onClose:()=>void; onContinue:(draft:ShopPhotoOrderDraft)=>void;
+}) {
+  const [file,setFile]=useState<File|null>(null);
+  const [recipientType,setRecipientType]=useState<"EXISTING_CUSTOMER"|"WALK_IN">("EXISTING_CUSTOMER");
+  const [customers,setCustomers]=useState<ShopCustomer[]>([]);
+  const [customerSearch,setCustomerSearch]=useState("");
+  const [selectedCustomerId,setSelectedCustomerId]=useState("");
+  const [loadingCustomers,setLoadingCustomers]=useState(false);
+  const [customerError,setCustomerError]=useState("");
+  const [recipientName,setRecipientName]=useState("");
+  const [recipientPhone,setRecipientPhone]=useState("");
+  const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentSettings?.cashEnabled?"CASH":"UPI");
+  const [error,setError]=useState("");
+
+  async function searchCustomers(search=customerSearch) {
+    setLoadingCustomers(true);setCustomerError("");
+    try {
+      const page=await getShopCustomers(token,{search,page:1,pageSize:20});
+      setCustomers(page.items);
+      if(selectedCustomerId&&!page.items.some(item=>item.id===selectedCustomerId))setSelectedCustomerId("");
+    } catch(exception) {
+      setCustomerError(exception instanceof Error?exception.message:"Could not load this shop's customers.");
+    } finally {setLoadingCustomers(false);}
+  }
+  useEffect(()=>{void searchCustomers("");},[token]);
+
+  const enabledPhotoSizes=Object.values(photoPrices).some(rate=>rate>0);
+  const hasPaymentMethod=!!(paymentSettings?.upiEnabled||paymentSettings?.cashEnabled);
+  const selectedPaymentEnabled=paymentMethod==="UPI"?!!paymentSettings?.upiEnabled:!!paymentSettings?.cashEnabled;
+  const selectedCustomer=customers.find(item=>item.id===selectedCustomerId);
+  const canContinue=!!file&&enabledPhotoSizes&&selectedPaymentEnabled&&
+    (recipientType==="EXISTING_CUSTOMER"?!!selectedCustomer:recipientName.trim().length>0);
+
+  function selectFile(event:ChangeEvent<HTMLInputElement>) {
+    const candidate=event.currentTarget.files?.[0]??null;setError("");
+    if(!candidate){setFile(null);return;}
+    const extension=candidate.name.toLowerCase().split(".").pop();
+    const inferredType=candidate.type==="image/png"||candidate.type==="image/jpeg"
+      ?candidate.type
+      :extension==="png"?"image/png":extension==="jpg"||extension==="jpeg"?"image/jpeg":"";
+    if(!["image/jpeg","image/png"].includes(inferredType)){
+      setFile(null);setError("Choose a JPG, JPEG or PNG image. Other formats are not supported by Photo Studio.");event.currentTarget.value="";return;
+    }
+    if(candidate.size<=0||candidate.size>20*1024*1024){
+      setFile(null);setError("The original photo must be between 1 byte and 20 MB.");event.currentTarget.value="";return;
+    }
+    setFile(candidate.type===inferredType?candidate:new File([candidate],candidate.name,{type:inferredType,lastModified:candidate.lastModified}));
+  }
+
+  function submit(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();setError("");
+    if(!file){setError("Choose a photo before opening Photo Studio.");return;}
+    if(!enabledPhotoSizes){setError("Configure at least one photo size and per-photo rate in Pricing first.");return;}
+    if(!selectedPaymentEnabled){setError("Choose a payment method currently enabled by this shop.");return;}
+    if(recipientType==="EXISTING_CUSTOMER"&&!selectedCustomer){setError("Choose a customer already known to this shop.");return;}
+    if(recipientType==="WALK_IN"&&!recipientName.trim()){setError("Enter the walk-in customer's name.");return;}
+    onContinue({
+      source:file,recipientType,
+      customerUserId:recipientType==="EXISTING_CUSTOMER"?selectedCustomer!.id:undefined,
+      recipientName:recipientType==="WALK_IN"?recipientName.trim():undefined,
+      recipientPhone:recipientType==="WALK_IN"?recipientPhone.trim()||undefined:undefined,
+      paymentMethod,idempotencyKey:crypto.randomUUID()
+    });
+  }
+
+  return <Modal title="New photo order" subtitle="Upload a shop-owned original, prepare its A4 photo sheets and create one shop-scoped print job." onClose={onClose}>
+    <form className="modal-form" onSubmit={submit}>
+      <label>Original photo<input aria-label="Choose original photo" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onChange={selectFile}/></label>
+      {file&&<div className="file-review-note"><ImageIcon size={16}/><span>{file.name} · {(file.size/1024/1024).toFixed(2)} MB. The original is not modified.</span></div>}
+      <label>Order for<select value={recipientType} onChange={event=>setRecipientType(event.currentTarget.value as "EXISTING_CUSTOMER"|"WALK_IN")}><option value="EXISTING_CUSTOMER">Existing customer of this shop</option><option value="WALK_IN">Walk-in customer</option></select></label>
+      {recipientType==="EXISTING_CUSTOMER"&&<>
+        <label>Find a customer<div className="queue-search-form"><input aria-label="Search shop customers" value={customerSearch} onChange={event=>setCustomerSearch(event.currentTarget.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();void searchCustomers();}}} placeholder="Name or email"/><button type="button" className="secondary-button" onClick={()=>void searchCustomers()} disabled={loadingCustomers}>{loadingCustomers?"Searching…":"Search"}</button></div></label>
+        <label>Select customer<select aria-label="Select shop customer" value={selectedCustomerId} onChange={event=>setSelectedCustomerId(event.currentTarget.value)}><option value="">Choose a customer</option>{customers.map(customer=><option key={customer.id} value={customer.id}>{customer.displayName} · {customer.maskedEmail}</option>)}</select></label>
+        {customerError&&<p className="form-error" role="alert">{customerError}</p>}
+        {!loadingCustomers&&!customerError&&customers.length===0&&<p className="form-hint">No customers found for this shop. Choose Walk-in customer when appropriate.</p>}
+        {selectedCustomer&&<p className="form-hint">This order will be linked to {selectedCustomer.displayName}'s account and shop history. No customer login or QR session will be created.</p>}
+      </>}
+      {recipientType==="WALK_IN"&&<>
+        <label>Walk-in customer name<input value={recipientName} maxLength={160} onChange={event=>setRecipientName(event.currentTarget.value)} placeholder="Customer name" required/></label>
+        <label>Contact number (optional)<input type="tel" maxLength={40} value={recipientPhone} onChange={event=>setRecipientPhone(event.currentTarget.value)} placeholder="Phone number"/></label>
+        <p className="form-hint">A walk-in is saved only as a recipient on this shop's job. No global customer account is created.</p>
+      </>}
+      <label>Payment method<select aria-label="Photo order payment method" value={paymentMethod} onChange={event=>setPaymentMethod(event.currentTarget.value as "UPI"|"CASH")}>{paymentSettings?.upiEnabled&&<option value="UPI">UPI · verify receipt manually</option>}{paymentSettings?.cashEnabled&&<option value="CASH">Cash at counter · mark received manually</option>}</select></label>
+      <p className="form-hint">Payment will be recorded as pending. This action does not verify payment or start printing. The shop must verify the actual money received and explicitly dispatch the job.</p>
+      {!enabledPhotoSizes&&<p className="form-error" role="alert">No photo sizes are priced. Configure Photo Printing under Pricing before creating an order.</p>}
+      {!hasPaymentMethod&&<p className="form-error" role="alert">No payment method is enabled. Configure UPI or cash under Payment Settings.</p>}
+      {error&&<p className="form-error" role="alert">{error}</p>}
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={!canContinue}>Open Photo Studio <ArrowRight size={15}/></button></div>
+    </form>
+  </Modal>;
 }
 
 function CustomersPage({ token }: { token: string }) {
@@ -1743,7 +1916,7 @@ function CustomersPage({ token }: { token: string }) {
                             <Status label={prettyStatus(job.status)} tone={tone}/>
                           </div>
                           <div className="customer-history-facts">
-                            <span>{job.printKind==="PHOTO"?`Photo sheet · ${job.photoCount??0} × ${job.photoSizeCode??"photo"} · ${job.pageCount} A4 pages`:`${job.pageCount} pages · ${job.copies} copies`}</span>
+                            <span>{job.printKind==="PHOTO"?`Photo sheet · ${job.photoCount??0} × ${job.photoSizeCode??"photo"} · ${job.photosPerPage??"layout not recorded"} per A4 page · ${job.pageCount} A4 pages`:`${job.pageCount} pages · ${job.copies} copies`}</span>
                             <strong>{formatMoney(job.quotedAmountMinor, job.currency)}</strong>
                           </div>
                           {job.payment && <div className="customer-history-payment">
@@ -1888,7 +2061,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
           <div className="panel-heading"><div><h2>Customer activity</h2><p>Recent uploads and quote requests from your QR stations</p></div><span className="neutral-chip">{printJobs.length} recent jobs</span></div>
           {printJobs.length===0 ? <div className="activity-empty-content"><div className="activity-empty-art"><div className="activity-art-sheet"><FileText size={25}/><i/><i/><i/></div><div className="activity-art-printer"><Printer size={27}/></div><span className="activity-art-spark">✦</span></div><h3>Ready when your first customer is</h3><p>Set your prices and share a QR station. Customer uploads will appear here as soon as they arrive.</p><button className="text-action" onClick={() => onNavigate(printers.length ? "QR Stations" : "Printers")}>{printers.length ? "Open QR stations" : "Add your first printer"} <span>→</span></button></div> :
             <div className="activity-job-list">
-              {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.pageCount} pages`}</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/><small>{formatIstTime(job.createdUtc)}</small></div></div>)}
+              {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.photosPerPage??"layout not recorded"} per A4 page · ${job.pageCount} A4 pages` : `${job.pageCount} pages`}</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/><small>{formatIstTime(job.createdUtc)}</small></div></div>)}
               <button className="text-action" onClick={()=>onNavigate("Print Queue")}>Open print queue <span>→</span></button>
             </div>}
         </section>
@@ -2271,17 +2444,17 @@ function PricingPage({ pricing, onSave, busy }: {
     }}>
       <div className="pricing-group-heading"><strong>Single-sided printing</strong><span>Price per A4 printed side</span></div>
       <div className="pricing-input-grid">
-        <label>Black & white <span className="price-input-wrap"><span>₹</span><input type="number" min="0.01" max="1000" step="0.01" value={mono} onChange={e=>setMono(e.target.value)} required/></span></label>
-        <label>Colour <span className="price-input-wrap"><span>₹</span><input type="number" min="0.01" max="1000" step="0.01" value={colour} onChange={e=>setColour(e.target.value)} required/></span></label>
+        <label htmlFor="pricing-mono-per-side">Black & white <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0.01" max="1000" step="0.01" aria-label="Black & white" id="pricing-mono-per-side" value={mono} onChange={e=>setMono(e.target.value)} required/></span></label>
+        <label htmlFor="pricing-colour-per-side">Colour <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0.01" max="1000" step="0.01" aria-label="Colour" id="pricing-colour-per-side" value={colour} onChange={e=>setColour(e.target.value)} required/></span></label>
       </div>
       <div className="pricing-group-heading"><strong>Double-sided printing</strong><span>Price per physical A4 sheet (two sides)</span></div>
       <div className="pricing-input-grid">
-        <label>Black & white duplex <span className="price-input-wrap"><span>₹</span><input type="number" min="0" max="1000" step="0.01" value={monoDuplex} onChange={e=>setMonoDuplex(e.target.value)}/></span></label>
-        <label>Colour duplex <span className="price-input-wrap"><span>₹</span><input type="number" min="0" max="1000" step="0.01" value={colourDuplex} onChange={e=>setColourDuplex(e.target.value)}/></span></label>
+        <label htmlFor="pricing-mono-duplex">Black & white duplex <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Black & white duplex" id="pricing-mono-duplex" value={monoDuplex} onChange={e=>setMonoDuplex(e.target.value)}/></span></label>
+        <label htmlFor="pricing-colour-duplex">Colour duplex <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Colour duplex" id="pricing-colour-duplex" value={colourDuplex} onChange={e=>setColourDuplex(e.target.value)}/></span></label>
       </div>
       <div className="pricing-group-heading"><strong>Minimum order</strong><span>Applied if the calculated print total is lower</span></div>
-      <label>Minimum job charge <span className="price-input-wrap minimum-price"><span>₹</span><input type="number" min="0" max="100000" step="0.01" value={minimum} onChange={e=>setMinimum(e.target.value)}/></span></label>
-      <div className="pricing-group-heading"><strong>Photo printing</strong><span>Price per finished photo · ₹0 disables a size</span></div><div className="pricing-input-grid photo-pricing-grid"><label>35 × 45 mm <span className="price-input-wrap"><span>₹</span><input type="number" min="0" step="0.01" value={photo35x45} onChange={e=>setPhoto35x45(e.target.value)}/></span></label><label>25 × 35 mm <span className="price-input-wrap"><span>₹</span><input type="number" min="0" step="0.01" value={photo25x35} onChange={e=>setPhoto25x35(e.target.value)}/></span></label><label>2 × 2 inch <span className="price-input-wrap"><span>₹</span><input type="number" min="0" step="0.01" value={photo2x2} onChange={e=>setPhoto2x2(e.target.value)}/></span></label><label>4 × 6 inch <span className="price-input-wrap"><span>₹</span><input type="number" min="0" step="0.01" value={photo4x6} onChange={e=>setPhoto4x6(e.target.value)}/></span></label></div><div className="settings-summary"><ShieldCheck size={16}/><span>Photo rates are per finished photo, not per A4 sheet. The quote records the rate used.</span></div>
+      <label htmlFor="pricing-minimum-charge">Minimum job charge <span className="price-input-wrap minimum-price"><span aria-hidden="true">₹</span><input type="number" min="0" max="100000" step="0.01" aria-label="Minimum job charge" id="pricing-minimum-charge" value={minimum} onChange={e=>setMinimum(e.target.value)}/></span></label>
+      <div className="pricing-group-heading"><strong>Photo printing</strong><span>Price per finished photo · ₹0 disables a size</span></div><div className="pricing-input-grid photo-pricing-grid"><label htmlFor="pricing-photo-35x45">35 × 45 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="35 × 45 mm" id="pricing-photo-35x45" value={photo35x45} onChange={e=>setPhoto35x45(e.target.value)}/></span></label><label htmlFor="pricing-photo-25x35">25 × 35 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="25 × 35 mm" id="pricing-photo-25x35" value={photo25x35} onChange={e=>setPhoto25x35(e.target.value)}/></span></label><label htmlFor="pricing-photo-2x2">2 × 2 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="2 × 2 inch" id="pricing-photo-2x2" value={photo2x2} onChange={e=>setPhoto2x2(e.target.value)}/></span></label><label htmlFor="pricing-photo-4x6">4 × 6 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="4 × 6 inch" id="pricing-photo-4x6" value={photo4x6} onChange={e=>setPhoto4x6(e.target.value)}/></span></label></div><div className="settings-summary"><ShieldCheck size={16}/><span>Photo rates are per finished photo, not per A4 sheet. The quote records the rate used.</span></div>
       <div className="settings-summary"><ShieldCheck size={16}/><span>Customer payment gateway setup is separate and is not active yet. This screen configures print quotations only; no money is collected here.</span></div>
       <div className="settings-actions"><button className="primary-button" disabled={busy||!valid||toMinor(mono)<=0||toMinor(colour)<=0}>{busy?<span className="button-spinner"/>:"Save print prices"}</button></div>
     </form>
@@ -2318,17 +2491,17 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
     <section className="panel payment-settings-panel">
       <div className="collection-header"><div><h2>Shop payment methods</h2><p>Customer print payments go directly to your own UPI account or are received at your counter.</p></div><span className="setup-count">{(upiEnabled?1:0)+(cashEnabled?1:0)} enabled</span></div>
       <div className="payment-method-card">
-        <div className="payment-method-heading"><div className="payment-method-icon"><Wallet size={19}/></div><div><strong>UPI · QR and payment app</strong><small>Configure your shop's own UPI ID. Payments are not auto-verified.</small></div><label className="switch"><input type="checkbox" checked={upiEnabled} onChange={event=>setUpiEnabled(event.target.checked)}/><span/></label></div>
+        <div className="payment-method-heading"><div className="payment-method-icon"><Wallet size={19}/></div><div><strong>UPI · QR and payment app</strong><small>Configure your shop's own UPI ID. Payments are not auto-verified.</small></div><label className="switch"><input id="payment-upi-enabled" type="checkbox" aria-label="Enable UPI QR and payment app" checked={upiEnabled} onChange={event=>setUpiEnabled(event.target.checked)}/><span aria-hidden="true"/></label></div>
         {upiEnabled&&<div className="payment-settings-fields">
           <label>Shop UPI ID<input value={upiId} onChange={event=>setUpiId(event.target.value)} placeholder="yourshop@bank"/></label>
           <label>Payee / business name<input value={payeeName} onChange={event=>setPayeeName(event.target.value)} maxLength={120} placeholder="Name shown in customer's UPI app"/></label>
         </div>}
       </div>
       <div className="payment-method-card">
-        <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>Cash at counter</strong><small>{cashEnabled?"Enabled · customers can pay at the counter.":"Disabled · customers will not see cash at the counter."}</small></div><label className="switch"><input type="checkbox" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span/></label></div>
+        <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>Cash at counter</strong><small>{cashEnabled?"Enabled · customers can pay at the counter.":"Disabled · customers will not see cash at the counter."}</small></div><label className="switch"><input id="payment-cash-enabled" type="checkbox" aria-label="Enable cash at counter" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span aria-hidden="true"/></label></div>
       </div>
       <div className="payment-method-card instant-payment-setting">
-        <div className="payment-method-heading"><div className="payment-method-icon"><Zap size={19}/></div><div><strong>Instant payment after upload</strong><small>Customers can pay as soon as the rate-card quote is calculated, without a separate shop pre-approval. Once payment starts, file decisions are locked; after payment is verified, refund rejected files before printer handoff.</small></div><label className="switch"><input type="checkbox" checked={instantPaymentEnabled} onChange={event=>setInstantPaymentEnabled(event.target.checked)}/><span/></label></div>
+        <div className="payment-method-heading"><div className="payment-method-icon"><Zap size={19}/></div><div><strong>Instant payment after upload</strong><small>Customers can pay as soon as the rate-card quote is calculated, without a separate shop pre-approval. Once payment starts, file decisions are locked; after payment is verified, refund rejected files before printer handoff.</small></div><label className="switch"><input id="payment-instant-enabled" type="checkbox" aria-label="Enable instant payment after upload" checked={instantPaymentEnabled} onChange={event=>setInstantPaymentEnabled(event.target.checked)}/><span aria-hidden="true"/></label></div>
         <p className="instant-payment-setting-note">Requires your print rate card and at least one payment method. UPI references and cash are still verified by the shop before printing. Leave this off when you want to review and approve every quote before customers can pay.</p>
       </div>
       <div className="payment-security-note"><ShieldCheck size={16}/><span>SmartPrint by QuantaEdge does not receive, hold or route your customer print revenue. Verify every UPI reference against your own bank/UPI app; cash must be physically received. SmartPrint platform subscription charges are billed separately.</span></div>
@@ -2339,6 +2512,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
       {payments.length===0?<EmptyModule icon={<Wallet size={24}/>} title="No print payments yet" text="When customers choose UPI or cash for a shop-approved job, the payment attempt will appear here."/>:
       <div className="payment-record-list">{payments.map(payment=><article className="payment-record" key={payment.id}>
         <div className="payment-record-head"><div><strong>{payment.batchPaymentId?(`Batch checkout · ${payment.batchFileCount??1} files`):payment.jobNumber}</strong><small>{payment.documentName}</small></div><div className="payment-record-amount-wrap"><div className="payment-record-amount">{formatMoney(payment.amountMinor,payment.currency)}</div>{(payment.refundedAmountMinor??0)>0&&<small className="payment-record-refund-summary">Refund recorded: {formatMoney(payment.refundedAmountMinor??0,payment.currency)} · Net retained: {formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</small>}</div></div>
+        {payment.origin==="SHOP_OWNER"&&<div className="payment-reference-details"><span>Shop-created order recipient</span><strong>{payment.recipientName||"Walk-in"}{payment.recipientPhone?" · "+payment.recipientPhone:""}</strong><small>This photo order was created in the shop workspace, not uploaded through a customer QR session.</small></div>}
         <div className="payment-record-meta"><span>{payment.method}</span><span>{formatIstDateTime(payment.createdUtc)}</span><Status label={payment.status.replaceAll("_"," ")} tone={payment.status==="VERIFIED"?"green":payment.status==="REJECTED"?"red":payment.status==="CUSTOMER_REPORTED"||payment.status==="CASH_AWAITING_PAYMENT"?"amber":"slate"}/></div>
         {payment.method==="UPI"&&<div className="payment-reference-details"><span>Transaction reference</span><strong>{payment.paymentReference||"Customer has not submitted a reference"}</strong><small>Payee snapshot: {payment.payeeNameSnapshot||"Not recorded"} · {payment.upiIdSnapshot||"No UPI ID snapshot"}</small></div>}
         {payment.rejectionReason&&<div className="payment-rejection-note">Reason: {payment.rejectionReason}</div>}
@@ -2358,12 +2532,13 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   </div>;
 }
 
-function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onSearch, onPreview, onPreviewOutput, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onUpdateSettings, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
+function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatchId, onCreatePhotoOrder, onSearch, onPreview, onPreviewOutput, onApprove, onReject, onRefund, onReviewBatch, onHistory, onAssignPrinter, onUpdateSettings, onDispatch, onConfirmOutput, onRetryPdfExport, onRefresh, onLoadOlder, hasMoreJobs, loadingOlderJobs, busyJobId }: {
   jobs: ShopPrintJob[];
   printers: PrinterDevice[];
   agentDevices: AgentDevice[];
   searchQuery: string;
   loadingBatchId: string | null;
+  onCreatePhotoOrder:()=>void;
   onSearch: (query: string) => Promise<void>;
   onPreview: (job: ShopPrintJob) => void;
   onPreviewOutput: (job: ShopPrintJob) => void;
@@ -2426,7 +2601,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   const queueBatches=Array.from(batchMap.values());
 
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Customer print jobs</h2><p>Review files individually; one printer is used for the whole batch.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="collection-header"><div><h2>Print jobs</h2><p>Customer QR uploads and shop-created photo orders use the same review, payment and printing queue.</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><button className="primary-button" type="button" onClick={onCreatePhotoOrder}><ImageIcon size={14}/> New photo order</button><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, customer, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>Auto refresh</strong><small>{autoRefresh?"On":"Off"}</small></label>
       <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
@@ -2529,7 +2704,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
@@ -2688,7 +2863,7 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,isSavedOutp
   const previewSummary = isSavedOutput
     ? "Final PDF export saved by this shop. This is the actual output file; the uploaded original remains separate and unchanged."
     : job.printKind==="PHOTO"
-      ? `${job.photoCount??0} ${photoDimensions[job.photoSizeCode??""]??job.photoSizeCode??""} photos · ${job.pageCount} A4 PDF page(s). Preview displays the complete prepared file.`
+      ? `${job.photoCount??0} ${photoDimensions[job.photoSizeCode??""]??job.photoSizeCode??""} photos · ${job.photosPerPage??"Layout density not recorded"} per A4 page · ${job.pageCount} A4 PDF page(s). Preview displays the complete prepared file.`
       : `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
   const subtitle = isSavedOutput ? "Saved PDF output · Read-only preview" : readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary;
   return <Modal title={name} subtitle={subtitle} onClose={onClose}>
@@ -4817,7 +4992,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
-            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{item.document.originalFileName}</strong><PrintKindTag printKind={(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?"PHOTO":"DOCUMENT"}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${item.job.pageCount} A4 pages`:`${item.job.pageCount} pages × ${printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies = ${item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} pages requested · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
+            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{item.document.originalFileName}</strong><PrintKindTag printKind={(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?"PHOTO":"DOCUMENT"}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${item.job.pageCount} pages × ${printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies = ${item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} pages requested · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
               tone={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"amber":
@@ -4837,7 +5012,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
       <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchDocumentSourcePages} document pages · {batchPhotoCount} photos · {batchPrintedPages} output pages/sheets</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{entry.item.document.originalFileName}<PrintKindTag printKind={entry.quote!.printKind}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
+      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{entry.item.document.originalFileName}<PrintKindTag printKind={entry.quote!.printKind}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
       <div className="customer-batch-print-breakdown">
         {batchMonoPrintedPages>0&&<div><span>B&W · {batchMonoPrintedPages} document pages</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
         {batchColourPrintedPages>0&&<div><span>Colour · {batchColourPrintedPages} document pages</span><strong>{formatMoney(batchColourAmount,quoteEntries[0].quote!.currency)}</strong></div>}

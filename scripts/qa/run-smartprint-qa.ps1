@@ -1,15 +1,382 @@
+<#
+.SYNOPSIS
+Run SmartPrint's local acceptance suite or a selected QA mode.
+
+.DESCRIPTION
+This is the main Windows QA entry point. With no switches it runs the full
+local QA workflow against the configured local Docker/Compose environment:
+real local PostgreSQL and API, real browser workflows, Photo Studio browser
+acceptance, logic regression tests, and local Windows Desktop/Android native
+acceptance where the required tools/devices are available.
+
+Use -E2EOnly to avoid the full application/native rebuild path. E2E-only mode
+uses the existing local PostgreSQL data volume and Agent. By default it may
+refresh only the API and Portal containers. Add -ReuseRunningStack when all
+required containers are already healthy and must not be rebuilt or restarted.
+
+The published-app checks are an optional extra. -TestPublishedApps checks the
+website-published Windows and Android assets and the installed apps. It does
+not silently update an already-installed Android app. Use -AndroidAppOnly for
+a standalone Android release check; -InstallPublishedAndroidApk is explicit
+consent to update an existing Android package in place. No uninstall or data
+clear fallback is attempted.
+
+The local native Android path is different from published-app testing:
+-LocalAndroidDeviceSerial targets one explicitly selected phone with the
+side-by-side .localqa package. It does not replace the production app.
+
+.PARAMETER Help
+Show this complete guide and exit before checking dependencies or changing
+source, containers, devices, or installed apps. PowerShell's -? help is also
+available.
+
+.PARAMETER SkipUnitTests
+Skip the Portal, API and Agent logic/unit regression suites. Live browser E2E,
+Photo Studio browser acceptance, and the selected native/published-app checks
+still run.
+
+.PARAMETER SkipPlaywrightInstall
+Do not install the pinned Playwright/Chromium package. The exact Playwright
+version configured in scripts/qa/smartprint-qa.config.json must already exist
+in the local npm cache, including its Chromium browser.
+
+.PARAMETER E2EOnly
+Run the local real-data browser/API E2E path without building/testing the
+native Windows Desktop or local Android app. Without -ReuseRunningStack the
+script may refresh only API and Portal; PostgreSQL data and Agent are
+preserved.
+
+.PARAMETER PullLatest
+Fetch the current local branch's origin tracking branch and fast-forward only.
+Valid only with -E2EOnly. It never switches branches, resets, rebases or
+force-updates. If origin is ahead and the working tree has local changes, it
+refuses the update and preserves those changes. With -ReuseRunningStack it
+continues only when the fetched changes do not require an app/runtime refresh.
+
+.PARAMETER ReuseRunningStack
+Use the existing running PostgreSQL, API, Portal and Agent containers without
+building or restarting them. Valid only with -E2EOnly. Every required service
+must already be running and healthy.
+
+.PARAMETER TestPublishedApps
+Add checks for the website-published Windows installer and Android APK,
+including release metadata/download verification and safe installed-app
+acceptance. This can be combined with the default full mode or -E2EOnly.
+It cannot be combined with -AndroidAppOnly.
+
+.PARAMETER AndroidAppOnly
+Run only the website-published Android app acceptance path. Local Docker,
+PostgreSQL, API/Portal E2E, Windows Desktop and the local native app suite are
+not run. This is a standalone mode and cannot be combined with -E2EOnly,
+-PullLatest, -ReuseRunningStack or -TestPublishedApps.
+
+.PARAMETER AndroidDeviceSerial
+Exact ADB serial from 'adb devices'. Valid only with -AndroidAppOnly. An
+explicit serial allows targeting that specific physical phone. Without it,
+the helper auto-targets only when exactly one Android emulator is online;
+physical devices and ambiguous multiple-device setups are skipped.
+
+.PARAMETER InstallPublishedAndroidApk
+Explicitly authorise an in-place update of an already-installed Android app
+when its version differs from the verified website-published APK. Valid only
+with -AndroidAppOnly. Uses Android package-manager update semantics; it does
+not uninstall the app or clear app data. Without this switch, a mismatched
+existing install is left untouched and the update check is reported skipped.
+
+.PARAMETER LocalAndroidDeviceSerial
+Exact ADB serial for the local native Android QA path in the full local run.
+The runner builds and tests the separate com.quantaedge.smartprint.localqa
+package side-by-side with the production package. It never targets an
+unspecified phone when multiple devices are connected. Valid only for the
+full local mode; it cannot be combined with -AndroidAppOnly or -E2EOnly.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1
+Run the full local acceptance suite. This is the normal comprehensive local
+QA command.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -Help
+Print this guide without running any tests or changing anything.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -E2EOnly
+Run local browser/API E2E and Photo Studio browser acceptance. The existing
+database and Agent are preserved; API and Portal may be refreshed.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -E2EOnly -ReuseRunningStack
+Run E2E against an already-running healthy local stack without rebuilding or
+restarting its containers.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -E2EOnly -PullLatest
+Fetch and fast-forward the current branch first, then run E2E. The update is
+refused when newer upstream changes would overwrite local working-tree edits.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -SkipUnitTests
+Run the remaining full QA workflow while skipping the Portal/API/Agent
+logic-unit suites. Live E2E and Photo Studio browser acceptance still run.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -SkipPlaywrightInstall
+Reuse the already-installed pinned Playwright/Chromium package from the npm
+cache. This fails rather than downloading when the pinned package is absent.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -TestPublishedApps
+Add official website-published Windows and Android release checks to the
+normal local QA run. Existing installed apps are not silently upgraded.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -LocalAndroidDeviceSerial 'R58M123456A'
+Run full local QA and explicitly target the named physical Android device for
+the side-by-side .localqa native-app tests. Obtain the serial from adb devices.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -AndroidAppOnly
+Run only the published Android app check. With exactly one online emulator,
+the helper selects that emulator automatically.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -AndroidAppOnly -AndroidDeviceSerial 'R58M123456A'
+Run only the published Android app acceptance against the explicitly named
+physical phone.
+
+.EXAMPLE
+.\scripts\qa\run-smartprint-qa.ps1 -AndroidAppOnly -AndroidDeviceSerial 'R58M123456A' -InstallPublishedAndroidApk
+Explicitly allow an in-place update to the published APK on that phone when
+the installed version differs. No uninstall or data clear is attempted.
+
+.NOTES
+Run this script from a Windows PowerShell session in the repository checkout.
+The full local run requires the configured .env.local, Docker Desktop/Compose,
+Node.js version from the central QA config, and the Windows build tools used
+by the native app checks. Android checks additionally require Android SDK,
+ADB/Gradle, and an authorised emulator or explicitly selected phone.
+
+Target is controlled by scripts/qa/smartprint-qa.config.json and the local
+.env.local. The local E2E suite is restricted to the configured loopback
+origin; it is not a production data test. Actual paper output, USB/Wi-Fi
+printer behavior and physical print geometry still need owner hardware
+acceptance.
+
+Combination rules:
+- -PullLatest requires -E2EOnly.
+- -ReuseRunningStack requires -E2EOnly.
+- -PullLatest plus -ReuseRunningStack is allowed only if fetched changes do
+  not require an application/runtime refresh.
+- -AndroidDeviceSerial and -InstallPublishedAndroidApk require -AndroidAppOnly.
+- -LocalAndroidDeviceSerial is for full local QA only; it is incompatible with
+  -E2EOnly and -AndroidAppOnly.
+- -AndroidAppOnly is incompatible with -E2EOnly, -PullLatest,
+  -ReuseRunningStack and -TestPublishedApps.
+#>
+
 [CmdletBinding()]
 param(
+    [switch]$Help,
     [switch]$SkipUnitTests,
-    [switch]$SkipPlaywrightInstall
+    [switch]$SkipPlaywrightInstall,
+    [switch]$E2EOnly,
+    [switch]$PullLatest,
+    [switch]$ReuseRunningStack,
+    [switch]$TestPublishedApps,
+    [switch]$AndroidAppOnly,
+    [string]$AndroidDeviceSerial = "",
+    [switch]$InstallPublishedAndroidApk,
+    [string]$LocalAndroidDeviceSerial = ""
 )
 
+if ($Help) {
+    Get-Help -Name $PSCommandPath -Full | Out-String -Width 180 | Write-Host
+    exit 0
+}
+
 $ErrorActionPreference = "Stop"
+if ($InstallPublishedAndroidApk -and -not $AndroidAppOnly) {
+    throw "-InstallPublishedAndroidApk can only be used with -AndroidAppOnly."
+}
+if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial) -and -not $AndroidAppOnly) {
+    throw "-AndroidDeviceSerial can only be used with -AndroidAppOnly."
+}
+if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial) -and $AndroidDeviceSerial -notmatch '^[A-Za-z0-9._:-]{1,128}$') {
+    throw "-AndroidDeviceSerial contains unsupported characters. Copy the exact serial shown by 'adb devices'."
+}
+if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial) -and ($AndroidAppOnly -or $E2EOnly)) {
+    throw "-LocalAndroidDeviceSerial is for the full local QA run; it cannot be combined with -AndroidAppOnly or -E2EOnly."
+}
+if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial) -and $LocalAndroidDeviceSerial -notmatch '^[A-Za-z0-9._:-]{1,128}$') {
+    throw "-LocalAndroidDeviceSerial contains unsupported characters. Copy the exact serial shown by 'adb devices'."
+}
+if ($AndroidAppOnly -and ($E2EOnly -or $PullLatest -or $ReuseRunningStack -or $TestPublishedApps)) {
+    throw "-AndroidAppOnly is a standalone mode. Do not combine it with -E2EOnly, -PullLatest, -ReuseRunningStack or -TestPublishedApps."
+}
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $repoRoot
 
-$target = "http://127.0.0.1:3000"
-$canonicalPublicUrl = "https://smartprint.quantaedge.in"
+$pullChangedPaths = @()
+$pulledLatest = $false
+$requiresAppRefresh = $true
+$sourceRevision = $null
+if ($PullLatest) {
+    if (-not $E2EOnly) { throw "-PullLatest is supported only with -E2EOnly." }
+    $git = Get-Command git.exe -ErrorAction SilentlyContinue
+    if (-not $git) { $git = Get-Command git -ErrorAction Stop }
+    $activeBranch = (& $git.Source "branch" "--show-current").Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($activeBranch)) {
+        throw "-PullLatest requires an attached local branch; detached HEAD is not supported."
+    }
+    $expectedBranch = $activeBranch
+    $beforePull = (& $git.Source "rev-parse" "HEAD").Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $beforePull) { throw "Could not resolve the current source revision." }
+    & $git.Source "fetch" "--no-tags" "origin" $expectedBranch
+    if ($LASTEXITCODE -ne 0) { throw "Git fetch failed. Existing files and containers were left unchanged." }
+    $upstreamRef = "refs/remotes/origin/$expectedBranch"
+    $upstreamRevision = (& $git.Source "rev-parse" $upstreamRef).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $upstreamRevision) { throw "Could not resolve origin/$expectedBranch after fetch." }
+    if ($beforePull -ne $upstreamRevision) {
+        # A dirty tree is harmless when GitHub has no newer commit. If an update
+        # is actually needed, refuse before merge so tracked and untracked user
+        # files remain exactly where they are.
+        $workingTree = @(& $git.Source "status" "--porcelain" "--untracked-files=all")
+        if ($LASTEXITCODE -ne 0) { throw "Could not verify the Git working tree; no merge was attempted." }
+        if ($workingTree.Count -gt 0) {
+            throw "GitHub has newer commits, but the working tree contains local changes. No merge was attempted; all local files were preserved."
+        }
+        $pullChangedPaths = @(& $git.Source "diff" "--name-only" "--diff-filter=ACDMRT" "$beforePull..$upstreamRevision")
+        if ($LASTEXITCODE -ne 0) { throw "Could not classify the pulled changes; no merge was attempted." }
+        & $git.Source "merge" "--ff-only" $upstreamRef
+        if ($LASTEXITCODE -ne 0) { throw "The update is not a fast-forward. No reset, rebase, or force update was attempted." }
+    } else {
+        # A no-op fetch may preserve local QA/doc edits, but never test stale containers against dirty app source.
+        $localTrackedChanges = @(& $git.Source "diff" "--name-only" "HEAD" "--")
+        if ($LASTEXITCODE -ne 0) { throw "Could not inspect local tracked changes; no container operation was attempted." }
+        $localRuntimeChanges = @($localTrackedChanges | Where-Object {
+            $normalisedPath = ([string]$_).Replace([char]92, [char]47)
+            $parts = $normalisedPath.Split("/")
+            $isAppTest = $parts.Length -ge 3 -and $parts[0] -eq "apps" -and $parts[2] -eq "tests"
+            $qaOrDocsOnly = $normalisedPath.StartsWith("scripts/qa/") -or
+                $normalisedPath.StartsWith("docs/") -or
+                $normalisedPath.StartsWith(".github/") -or
+                $normalisedPath.StartsWith("tests/") -or
+                $isAppTest -or
+                $normalisedPath.EndsWith(".md") -or
+                $normalisedPath.EndsWith(".example")
+            -not $qaOrDocsOnly
+        })
+        if ($localRuntimeChanges.Count -gt 0) {
+            throw ("GitHub is current, but tracked application/runtime files are modified: " +
+                ($localRuntimeChanges -join ", ") +
+                ". No merge or container operation was attempted; preserve these edits and reconcile them before QA.")
+        }
+        Write-Host "Local source is already at the GitHub branch head. QA/docs-only tracked edits and unrelated untracked files are preserved; no merge is needed." -ForegroundColor Green
+    }
+    $sourceRevision = (& $git.Source "rev-parse" "HEAD").Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $sourceRevision) { throw "Could not verify the resulting source revision." }
+    $pulledLatest = $true
+    $runtimeChanges = @($pullChangedPaths | Where-Object {
+        $normalisedPath = ([string]$_).Replace([char]92, [char]47)
+        $qaOrDocsOnly = $normalisedPath -match '^(scripts/qa/|docs/|\.github/|tests/|apps/[^/]+/tests/)' -or
+            $normalisedPath -match '\.md$'
+        -not $qaOrDocsOnly
+    })
+    $requiresAppRefresh = $runtimeChanges.Count -gt 0
+    $decision = if ($requiresAppRefresh) { "application/runtime change: refresh API and Portal" } else { "QA scripts/tests/docs only: reuse running containers" }
+    Write-Host ("Pulled source revision: " + $sourceRevision.Substring(0, [Math]::Min(12, $sourceRevision.Length))) -ForegroundColor Green
+    Write-Host ("Changed files: " + $pullChangedPaths.Count + " | " + $decision) -ForegroundColor Cyan
+    $pullChangedPaths | ForEach-Object { Write-Host ("  " + $_) }
+}
+if ($ReuseRunningStack -and -not $E2EOnly) { throw "-ReuseRunningStack requires -E2EOnly." }
+if ($PullLatest -and $ReuseRunningStack -and $requiresAppRefresh) {
+    throw "Application/runtime files changed in the pull. Refusing to test stale containers in reuse-only mode."
+}
+
+$qaConfigPath = Join-Path $PSScriptRoot "smartprint-qa.config.json"
+if (-not (Test-Path -LiteralPath $qaConfigPath -PathType Leaf)) {
+    throw "The central SmartPrint QA configuration is missing: $qaConfigPath"
+}
+try {
+    $qaConfig = Get-Content -LiteralPath $qaConfigPath -Raw | ConvertFrom-Json -ErrorAction Stop
+} catch {
+    throw "The central SmartPrint QA configuration is invalid: $($_.Exception.Message)"
+}
+if ($qaConfig.schemaVersion -ne 1) { throw "Unsupported SmartPrint QA configuration schema version." }
+
+try {
+    $publicUri = [Uri]$qaConfig.origins.public
+    $localUri = [Uri]$qaConfig.origins.local
+    $androidEmulatorUri = [Uri]$qaConfig.origins.androidEmulator
+    $minimumNodeVersion = [Version]$qaConfig.runtime.minimumNodeVersion
+} catch {
+    throw "The central SmartPrint QA configuration contains an invalid origin or runtime version: $($_.Exception.Message)"
+}
+
+if (-not $publicUri.IsAbsoluteUri -or $publicUri.Scheme -ne "https" -or
+    -not [string]::IsNullOrEmpty($publicUri.UserInfo) -or
+    -not [string]::IsNullOrEmpty($publicUri.Query) -or
+    -not [string]::IsNullOrEmpty($publicUri.Fragment) -or $publicUri.AbsolutePath -ne "/") {
+    throw "QA public origin must be a plain HTTPS origin without credentials, path, query or fragment."
+}
+if (-not $localUri.IsAbsoluteUri -or $localUri.Scheme -ne "http" -or -not $localUri.IsLoopback -or
+    -not [string]::IsNullOrEmpty($localUri.UserInfo) -or
+    -not [string]::IsNullOrEmpty($localUri.Query) -or
+    -not [string]::IsNullOrEmpty($localUri.Fragment) -or $localUri.AbsolutePath -ne "/") {
+    throw "QA local origin must be a loopback HTTP origin without credentials, path, query or fragment."
+}
+if (-not $androidEmulatorUri.IsAbsoluteUri -or $androidEmulatorUri.Scheme -ne "http" -or
+    $androidEmulatorUri.Host -ne "10.0.2.2" -or $androidEmulatorUri.AbsolutePath -ne "/" -or
+    -not [string]::IsNullOrEmpty($androidEmulatorUri.Query) -or -not [string]::IsNullOrEmpty($androidEmulatorUri.Fragment)) {
+    throw "QA Android emulator origin must use the Android emulator host 10.0.2.2."
+}
+
+$target = $localUri.GetLeftPart([UriPartial]::Authority)
+$canonicalPublicUrl = $publicUri.GetLeftPart([UriPartial]::Authority)
+$androidEmulatorOrigin = $androidEmulatorUri.GetLeftPart([UriPartial]::Authority)
+$composeProjectName = [string]$qaConfig.composeProjectName
+$playwrightVersion = [string]$qaConfig.runtime.playwrightVersion
+if ($composeProjectName -notmatch '^[a-z0-9][a-z0-9_-]{1,62}$') { throw "Invalid Compose project name in the QA configuration." }
+if ($playwrightVersion -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid Playwright version in the QA configuration." }
+if ($minimumNodeVersion -lt [Version]"22.6.0") { throw "The configured Node.js minimum cannot be lower than 22.6.0." }
+
+foreach ($downloadPath in @($qaConfig.downloads.statusPath, $qaConfig.downloads.windowsPath, $qaConfig.downloads.androidPath)) {
+    if ([string]$downloadPath -notmatch '^/downloads/[a-z]+$') { throw "Invalid public download path in the QA configuration." }
+}
+foreach ($assetName in @($qaConfig.downloads.windowsAssetName, $qaConfig.downloads.androidAssetName)) {
+    if ([string]$assetName -notmatch '^[A-Za-z0-9._-]+$') { throw "Invalid public download asset name in the QA configuration." }
+}
+if ([long]$qaConfig.downloads.maxTransferBytes -lt 1 -or [long]$qaConfig.downloads.maxTransferBytes -gt 536870912) {
+    throw "Public download QA transfer limit must be between 1 byte and 512 MiB."
+}
+
+$windowsAppConfig = $qaConfig.apps.windows
+$androidAppConfig = $qaConfig.apps.android
+foreach ($value in @($windowsAppConfig.installDirectoryName,$windowsAppConfig.executableName,$windowsAppConfig.agentServiceName,$windowsAppConfig.programDataDirectoryName,$windowsAppConfig.agentIdentityFileName)) {
+    if ([string]$value -notmatch '^[A-Za-z0-9][A-Za-z0-9._ -]{0,63}$') { throw "Invalid Windows app identity in central QA configuration." }
+}
+if ([IO.Path]::GetFileName([string]$windowsAppConfig.executableName) -ne [string]$windowsAppConfig.executableName -or
+    -not ([string]$windowsAppConfig.executableName).EndsWith(".exe",[StringComparison]::OrdinalIgnoreCase)) {
+    throw "Windows executable name must be a simple .exe filename."
+}
+if ([int]$windowsAppConfig.smokeTimeoutSeconds -lt 10 -or [int]$windowsAppConfig.smokeTimeoutSeconds -gt 120) {
+    throw "Windows smoke timeout must be 10 to 120 seconds."
+}
+foreach ($idName in @("nativeRoot","homeNavigation","filesNavigation","homeHeading","filesHeading")) {
+    $resourceId = [string]$androidAppConfig.uiAutomationIds.$idName
+    if ($resourceId -notmatch '^[a-z][a-z0-9_]{2,63}$') {
+        throw "Invalid Android UI automation resource ID '$idName' in central QA configuration."
+    }
+}
+if ([string]$androidAppConfig.applicationId -notmatch '^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$') { throw "Invalid Android application ID." }
+try { [void][regex]::new([string]$androidAppConfig.emulatorSerialPattern) } catch { throw "Invalid emulator serial pattern." }
+foreach ($timeoutName in @("launchTimeoutSeconds","uiNavigationTimeoutSeconds")) {
+    $timeoutValue = [int]$androidAppConfig.$timeoutName
+    if ($timeoutValue -lt 5 -or $timeoutValue -gt 120) { throw "Android $timeoutName must be between 5 and 120 seconds." }
+}
+if ([int]$androidAppConfig.crashLogLineCount -lt 50 -or [int]$androidAppConfig.crashLogLineCount -gt 2000) {
+    throw "Android crashLogLineCount must be between 50 and 2000."
+}
 $runStamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $runSuffix = [Guid]::NewGuid().ToString("N").Substring(0, 8)
 $runId = "local-" + $runStamp + "-" + $runSuffix
@@ -19,6 +386,7 @@ $logDirectory = Join-Path $artifactRoot "logs"
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
 
 $results = [System.Collections.Generic.List[object]]::new()
+$script:qaStepNumber = 0
 $fatalError = $null
 $exitCode = 0
 
@@ -51,7 +419,11 @@ function Invoke-QAStep {
         [Parameter(Mandatory)][string]$LogName,
         [Parameter(Mandatory)][scriptblock]$Action
     )
-    Write-Host ([Environment]::NewLine + "=== " + $Name + " ===") -ForegroundColor Cyan
+    $script:qaStepNumber += 1
+    $stepTimer = [System.Diagnostics.Stopwatch]::StartNew()
+    $stepLabel = "[QA-STEP-START] {0:00} | {1} | {2}" -f $script:qaStepNumber, (Get-Date -Format "HH:mm:ss"), $Name
+    Write-Host ([Environment]::NewLine + $stepLabel) -ForegroundColor Cyan
+    Write-Host ("[QA-STEP-ACTION] Log: " + $LogName) -ForegroundColor DarkCyan
     $logPath = Join-Path $logDirectory $LogName
     $stepExit = 0
     $previousErrorActionPreference = $ErrorActionPreference
@@ -72,9 +444,93 @@ function Invoke-QAStep {
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
     }
+    $stepTimer.Stop()
     $stepStatus = if ($stepExit -eq 0) { "PASS" } else { "FAIL" }
-    Add-QAResult -Name $Name -Status $stepStatus -Detail ("Exit code " + $stepExit) -Log (Join-Path "logs" $LogName)
+    Write-Host ("[QA-STEP-END] {0} | {1} | exit={2} | elapsed={3:n1}s" -f (Get-Date -Format "HH:mm:ss"), $stepStatus, $stepExit, $stepTimer.Elapsed.TotalSeconds) -ForegroundColor $(if ($stepStatus -eq "PASS") { "Green" } else { "Red" })
+    Add-QAResult -Name $Name -Status $stepStatus -Detail ("Exit code " + $stepExit + "; elapsed " + [Math]::Round($stepTimer.Elapsed.TotalSeconds, 1) + "s") -Log (Join-Path "logs" $LogName)
     return ($stepExit -eq 0)
+}
+
+function Invoke-PhotoStudioBrowserAcceptance {
+    param([Parameter(Mandatory)]$Node)
+
+    $suite = Join-Path $repoRoot "apps/portal/tests/theme-responsive.browser.mjs"
+    $env:SMARTPRINT_E2E_BASE_URL = "http://127.0.0.1:4173"
+    $env:SMARTPRINT_DESKTOP_E2E_URL = "http://127.0.0.1:1420"
+    $env:RESPONSIVE_ARTIFACT_DIR = Join-Path $artifactRelative "photo-studio-browser"
+
+    $packageManagerOk = Invoke-QAStep -Name "Resolve pinned pnpm and prepare portal/Desktop Vite workspace dependencies" -LogName "photo-studio-workspace-dependencies.log" -Action {
+        $manifestPath = Join-Path $repoRoot "package.json"
+        if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "The workspace package.json is missing." }
+        $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+        if ([string]$manifest.packageManager -notmatch '^pnpm@(?<version>\d+\.\d+\.\d+)$') {
+            throw "The root package.json must pin pnpm to an exact version."
+        }
+        $requiredPnpmVersion = $Matches.version
+
+        $corepack = Get-Command "corepack" -CommandType Application -ErrorAction SilentlyContinue
+        if ($corepack) {
+            $script:photoStudioPackageManager = $corepack
+            $versionArgs = @("pnpm", "--version")
+            $installPrefix = @("pnpm")
+            $env:SMARTPRINT_PNPM_COMMAND = "corepack"
+            $env:SMARTPRINT_PNPM_PREFIX = "pnpm"
+        } else {
+            $pnpm = Get-Command "pnpm" -CommandType Application -ErrorAction SilentlyContinue
+            if (-not $pnpm) { throw "Neither Corepack nor pnpm is available. Install the workspace-pinned package manager or use the documented local setup." }
+            $script:photoStudioPackageManager = $pnpm
+            $versionArgs = @("--version")
+            $installPrefix = @()
+            $env:SMARTPRINT_PNPM_COMMAND = "pnpm"
+            $env:SMARTPRINT_PNPM_PREFIX = ""
+        }
+
+        $actualPnpmVersion = (& $script:photoStudioPackageManager.Source @versionArgs | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or $actualPnpmVersion -ne $requiredPnpmVersion) {
+            throw "The browser visual suite requires pnpm $requiredPnpmVersion; resolved version was '$actualPnpmVersion'."
+        }
+        Write-Host "Pinned workspace package manager: pnpm $actualPnpmVersion"
+
+        $workspaceManifest = Join-Path $repoRoot "pnpm-workspace.yaml"
+        $lockFile = Join-Path $repoRoot "pnpm-lock.yaml"
+        if (-not (Test-Path -LiteralPath $workspaceManifest -PathType Leaf) -or -not (Test-Path -LiteralPath $lockFile -PathType Leaf)) {
+            throw "The pinned pnpm workspace manifest or lock file is missing."
+        }
+        $installArgs = @($installPrefix) + @(
+            "install", "--frozen-lockfile", "--prefer-offline",
+            "--filter", "@smart-print/portal...",
+            "--filter", "@smart-print/desktop..."
+        )
+        & $script:photoStudioPackageManager.Source @installArgs
+        if ($LASTEXITCODE -ne 0) { throw "Pinned portal/Desktop workspace dependency preparation failed." }
+        Write-Host "Portal and Desktop Vite dependencies are ready from the frozen workspace lock file."
+    }
+    if (-not $packageManagerOk) { return $false }
+
+    $syntaxOk = Invoke-QAStep -Name "Validate isolated browser visual and Photo Studio acceptance suite syntax" -LogName "photo-studio-browser-syntax.log" -Action {
+        if (-not (Test-Path -LiteralPath $suite -PathType Leaf)) {
+            throw "The isolated browser visual suite is missing: $suite"
+        }
+        & $Node.Source "--check" $suite
+    }
+    if (-not $syntaxOk) { return $false }
+
+    $browserOk = Invoke-QAStep -Name "Local Chromium visual and exhaustive Photo Studio browser acceptance (synthetic fixture; no live API, payments or print dispatch)" -LogName "photo-studio-browser.log" -Action {
+        foreach ($port in @(4173, 1420)) {
+            $probe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, [int]$port)
+            try {
+                $probe.Start()
+            } catch {
+                throw "Required isolated browser QA port $port is already in use. The existing process was left untouched; close its owner or choose another approved setup before retrying."
+            } finally {
+                $probe.Stop()
+            }
+        }
+        Write-Host "[QA-SUITE-START] Isolated Chromium visual matrix: responsive routes, light/dark, customer/shop Photo Studio tools, A4 PDF raster geometry, pagination, failure recovery and Windows Desktop WebView viewport." -ForegroundColor Cyan
+        Write-Host "[QA-SUITE-SAFETY] Synthetic photo fixture only; API requests are intercepted with 503 responses. No live customer data, payment, refund, print job or physical dispatch." -ForegroundColor Yellow
+        & $Node.Source $suite
+    }
+    return $browserOk
 }
 
 function Test-LocalSmartPrint {
@@ -226,17 +682,18 @@ function Set-QAProcessEnvironment {
 }
 
 function Install-OrLocatePlaywright {
+    param([switch]$ForceSkipInstall)
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if (-not $npm) { $npm = Get-Command npm -ErrorAction Stop }
 
-    if (-not $SkipPlaywrightInstall) {
+    if (-not $SkipPlaywrightInstall -and -not $ForceSkipInstall) {
         # Capture npm's browser-download output so PowerShell does not return
         # those progress lines as part of this function's module-path result.
-        $installOutput = @(& $npm.Source "exec" "--yes" "--package=playwright@1.56.1" "--" "playwright" "install" "chromium" 2>&1)
+        $installOutput = @(& $npm.Source "exec" "--yes" "--package=playwright@$playwrightVersion" "--" "playwright" "install" "chromium" 2>&1)
         $installExitCode = $LASTEXITCODE
         if ($installExitCode -ne 0) {
             $installOutput | ForEach-Object { Write-Host $_ }
-            throw "Playwright 1.56.1 Chromium installation failed with exit code $installExitCode."
+            throw "Playwright $playwrightVersion Chromium installation failed with exit code $installExitCode."
         }
     }
 
@@ -256,30 +713,36 @@ function Install-OrLocatePlaywright {
             continue
         }
         $packageInfo = Get-Content -LiteralPath $packageJson -Raw | ConvertFrom-Json
-        if ($packageInfo.version -eq "1.56.1") {
+        if ($packageInfo.version -eq $playwrightVersion) {
             $module = $possible
             break
         }
     }
-    if (-not $module) { throw "Pinned Playwright 1.56.1 was not found under $npxRoot." }
+    if (-not $module) { throw "Pinned Playwright $playwrightVersion was not found under $npxRoot." }
     return $module
 }
 
 $environmentNames = @(
-    "PLAYWRIGHT_MODULE_DIR", "SMARTPRINT_QA_BASE_URL", "SMARTPRINT_QA_RUN_ID", "SMARTPRINT_QA_ARTIFACT_DIR",
+    "PLAYWRIGHT_MODULE_DIR", "SMARTPRINT_LOCAL_ORIGIN", "SMARTPRINT_QA_BASE_URL", "SMARTPRINT_QA_RUN_ID", "SMARTPRINT_QA_ARTIFACT_DIR",
     "SMARTPRINT_QA_SHOP1_EMAIL", "SMARTPRINT_QA_SHOP1_PASSWORD", "SMARTPRINT_QA_SHOP1_NAME",
     "SMARTPRINT_QA_SHOP2_EMAIL", "SMARTPRINT_QA_SHOP2_PASSWORD", "SMARTPRINT_QA_SHOP2_NAME",
     "SMARTPRINT_QA_ADMIN_EMAIL", "SMARTPRINT_QA_ADMIN_PASSWORD", "SMARTPRINT_QA_ADMIN_NAME",
     "SMARTPRINT_QA_CUSTOMER_EMAIL", "SMARTPRINT_QA_CUSTOMER_PASSWORD", "SMARTPRINT_QA_CUSTOMER_NAME",
     "QRTP_PLATFORM_ADMIN_EMAIL", "QRTP_PLATFORM_ADMIN_NAME", "QRTP_PLATFORM_ADMIN_PASSWORD",
-    "SMARTPRINT_TEST_POSTGRES", "SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION", "SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION"
+    "SMARTPRINT_TEST_POSTGRES", "SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION", "SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION",
+    "SMARTPRINT_E2E_BASE_URL", "SMARTPRINT_DESKTOP_E2E_URL", "RESPONSIVE_ARTIFACT_DIR", "SMARTPRINT_PNPM_COMMAND", "SMARTPRINT_PNPM_PREFIX"
 )
 $originalEnvironment = @{}
 foreach ($name in $environmentNames) {
     $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
 }
+$env:SMARTPRINT_LOCAL_ORIGIN = $target
 
-Write-Host "SMARTPRINT LOCAL REAL-DATA ACCEPTANCE TEST" -ForegroundColor Green
+if ($AndroidAppOnly) {
+    Write-Host "SMARTPRINT ANDROID-ONLY RELEASE ACCEPTANCE TEST" -ForegroundColor Green
+} else {
+    Write-Host "SMARTPRINT LOCAL REAL-DATA ACCEPTANCE TEST" -ForegroundColor Green
+}
 $gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
 if (-not $gitCommand) { $gitCommand = Get-Command git -ErrorAction SilentlyContinue }
 if ($gitCommand) {
@@ -290,25 +753,204 @@ if ($gitCommand) {
         Write-Host "Local source revision: unavailable (not a Git checkout)" -ForegroundColor Yellow
     }
 }
-Write-Host "Only browser/API target: $target"
-Write-Host "QR and public links use: $canonicalPublicUrl"
-Write-Host "Playwright uses the local Docker API and local PostgreSQL. No production database is used."
-Write-Host "No mocked API routes, synthetic JWTs, real customer data or real payment verification."
+if ($AndroidAppOnly) {
+    Write-Host "APK source: $canonicalPublicUrl (release metadata and APK download only)"
+    Write-Host "Local website UI/API E2E, Windows QA, Docker and PostgreSQL suites: NOT RUN"
+} else {
+    Write-Host "Only browser/API target: $target"
+    Write-Host "QR and public links use: $canonicalPublicUrl"
+    Write-Host "Playwright uses the local Docker API and local PostgreSQL. No production database is used."
+    Write-Host "No mocked API routes, synthetic JWTs, real customer data or real payment verification."
+}
 Write-Host "Evidence directory: $artifactRoot"
 
 try {
-    if ($env:OS -ne "Windows_NT") { throw "This runner is designed for Windows PowerShell on the local shop/deployment machine." }
+    if ($AndroidAppOnly) {
+        if ($env:OS -ne "Windows_NT") { throw "Android-only published-app QA is designed for Windows PowerShell." }
+        $publishedAppScript = Join-Path $PSScriptRoot "test-published-apps.ps1"
+        if (-not (Test-Path -LiteralPath $publishedAppScript -PathType Leaf)) {
+            Add-QAResult -Name "Android-only published app QA" -Status "FAIL" -Detail "Missing helper: $publishedAppScript"
+            $exitCode = 1
+        } else {
+            $androidOnlyOk = Invoke-QAStep -Name "Download and acceptance-test the website-published Android APK only" -LogName "android-published-app.log" -Action {
+                & $publishedAppScript -AndroidOnly -PublicOrigin $canonicalPublicUrl -OutputDirectory (Join-Path $artifactRoot "android-published-app") -ConfigPath $qaConfigPath -AndroidDeviceSerial $AndroidDeviceSerial -InstallPublishedAndroidApk:$InstallPublishedAndroidApk
+            }
+            if (-not $androidOnlyOk) { $exitCode = 1 }
+        }
+    } else {
+        if ($env:OS -ne "Windows_NT") { throw "This runner is designed for Windows PowerShell on the local shop/deployment machine." }
     $node = Get-Command node.exe -ErrorAction SilentlyContinue
     if (-not $node) { $node = Get-Command node -ErrorAction Stop }
     $nodeVersion = (& $node.Source --version).Trim()
-    $nodeVersionMatch = [regex]::Match($nodeVersion, '^v(?<major>\d+)\.(?<minor>\d+)\.')
-    $nodeMajor = if ($nodeVersionMatch.Success) { [int]$nodeVersionMatch.Groups["major"].Value } else { 0 }
-    $nodeMinor = if ($nodeVersionMatch.Success) { [int]$nodeVersionMatch.Groups["minor"].Value } else { 0 }
-    if (-not $nodeVersionMatch.Success -or $nodeMajor -lt 22 -or ($nodeMajor -eq 22 -and $nodeMinor -lt 6)) {
-        throw "Node.js 22.6 or newer is required for the built-in TypeScript strip-types test runner. Found $nodeVersion."
+    $nodeVersionMatch = [regex]::Match($nodeVersion, '^v(?<version>\d+\.\d+\.\d+)')
+    $nodeActualVersion = if ($nodeVersionMatch.Success) { [Version]$nodeVersionMatch.Groups["version"].Value } else { [Version]"0.0.0" }
+    if (-not $nodeVersionMatch.Success -or $nodeActualVersion -lt $minimumNodeVersion) {
+        throw "Node.js $minimumNodeVersion or newer is required for the built-in TypeScript strip-types test runner. Found $nodeVersion."
     }
     Add-QAResult -Name "Node.js runtime" -Status "PASS" -Detail $nodeVersion
 
+    if ($E2EOnly) {
+        $reuseExistingStack = $ReuseRunningStack -or ($PullLatest -and -not $requiresAppRefresh)
+        if ($reuseExistingStack) {
+            Write-Host "E2E-only reuse mode: no Docker build, container restart, or dependency recreation. Running PostgreSQL, API, Portal and Agent are reused." -ForegroundColor Green
+        } else {
+            Write-Host "E2E-only refresh mode: only API and Portal images/containers may be rebuilt/refreshed. PostgreSQL, its data volume, QA identities and Agent are preserved." -ForegroundColor Yellow
+        }
+
+        $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
+        if (-not $docker) { $docker = Get-Command docker -ErrorAction Stop }
+        & $docker.Source compose version | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Docker Compose v2 is required for the targeted API/Portal refresh." }
+        & $docker.Source info | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Docker Desktop engine is not running." }
+
+        $envPath = Join-Path $repoRoot ".env.local"
+        $composeFile = Join-Path $repoRoot "compose.local.yml"
+        if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) { throw "E2E-only mode requires the existing .env.local file." }
+        if (-not (Test-Path -LiteralPath $composeFile -PathType Leaf)) { throw "E2E-only mode requires compose.local.yml." }
+
+            $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
+        $composeConfigArgs = $composeBaseArgs + @("config", "--quiet")
+        $configOk = Invoke-QAStep -Name "Validate existing local Compose configuration" -LogName "compose-config.log" -Action {
+            & $docker.Source @composeConfigArgs
+        }
+        if (-not $configOk) { throw "Existing local Compose configuration is invalid." }
+
+        & $docker.Source network inspect "cloudflare-edge" *> $null
+        if ($LASTEXITCODE -ne 0) { throw "The existing shared cloudflare-edge Docker network is unavailable. E2E-only mode will not create or replace it." }
+
+        $dbListArgs = $composeBaseArgs + @("ps", "-q", "db")
+        $dbContainerIdBefore = (& $docker.Source @dbListArgs | Out-String).Trim()
+        if (-not $dbContainerIdBefore) { throw "The existing smart-print PostgreSQL container was not found. E2E-only mode will not create a database." }
+        $dbStateBefore = (& $docker.Source inspect --format "{{.State.Status}}" $dbContainerIdBefore).Trim()
+        if ($LASTEXITCODE -ne 0 -or $dbStateBefore -ne "running") {
+            throw "The existing PostgreSQL container is not running; no attempt will be made to recreate it."
+        }
+
+        foreach ($service in @("api", "portal")) {
+            $serviceListArgs = $composeBaseArgs + @("ps", "-q", $service)
+            $containerId = (& $docker.Source @serviceListArgs | Out-String).Trim()
+            if (-not $containerId) { throw "The existing $service container was not found. E2E-only mode will not create missing stack services." }
+            $serviceState = (& $docker.Source inspect --format "{{.State.Status}}" $containerId).Trim()
+            if ($LASTEXITCODE -ne 0 -or $serviceState -ne "running") {
+                throw "The existing $service container is not running. Reuse mode will not start or replace it."
+            }
+        }
+
+        if (-not $reuseExistingStack) {
+        $buildArgs = $composeBaseArgs + @("build", "api", "portal")
+        $buildOk = Invoke-QAStep -Name "Build only SmartPrint API and Portal images" -LogName "targeted-app-image-build.log" -Action {
+            & $docker.Source @buildArgs
+        }
+        if (-not $buildOk) { throw "The targeted API/Portal image build failed. Existing containers and PostgreSQL were not replaced." }
+
+        $refreshArgs = $composeBaseArgs + @("up", "-d", "--no-deps", "api", "portal")
+        $refreshOk = Invoke-QAStep -Name "Refresh only API and Portal containers (no dependencies, no orphan removal)" -LogName "targeted-app-refresh.log" -Action {
+            & $docker.Source @refreshArgs
+        }
+        if (-not $refreshOk) { throw "API/Portal refresh failed. PostgreSQL was excluded from the Compose up operation." }
+
+        $dbContainerIdAfter = (& $docker.Source @dbListArgs | Out-String).Trim()
+        if ($dbContainerIdAfter -ne $dbContainerIdBefore) {
+            throw "PostgreSQL container identity changed during the targeted refresh. Stop QA and inspect the existing database before proceeding."
+        }
+        Add-QAResult -Name "PostgreSQL container preserved during API/Portal refresh" -Status "PASS" -Detail "The existing database container ID is unchanged."
+        } else {
+            $dbContainerIdAfter = (& $docker.Source @dbListArgs | Out-String).Trim()
+            if ($dbContainerIdAfter -ne $dbContainerIdBefore) {
+                throw "PostgreSQL container identity changed during reuse preflight. Stop QA and inspect the existing database before proceeding."
+            }
+            $changedSummary = if ($pullChangedPaths.Count -eq 0) { "No new files were pulled." } else { "Only QA scripts, tests, or documentation changed." }
+            Add-QAResult -Name "Reused existing API/Portal containers without building or restarting" -Status "PASS" -Detail $changedSummary
+        }
+
+        $runtimeReady = $false
+        if ($reuseExistingStack) {
+            $runtimeReady = Test-LocalSmartPrint
+            if (-not $runtimeReady) {
+                throw "The existing Portal/API stack is not healthy or cannot reach PostgreSQL. Reuse mode will not restart or repair containers automatically."
+            }
+            Add-QAResult -Name "Existing local Portal/API and PostgreSQL readiness" -Status "PASS" -Detail "Reused running services; HTTP 200 and database connected."
+        } else {
+            for ($attempt = 1; $attempt -le 45; $attempt++) {
+                try {
+                    $portalResponse = Invoke-WebRequest -Uri "$target/" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                    $liveResponse = Invoke-WebRequest -Uri "$target/health/live" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                    $readyResponse = Invoke-WebRequest -Uri "$target/health/ready" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                    $ready = $readyResponse.Content | ConvertFrom-Json -ErrorAction Stop
+                    if ($portalResponse.StatusCode -eq 200 -and $liveResponse.StatusCode -eq 200 -and
+                        $readyResponse.StatusCode -eq 200 -and $ready.database -eq "connected") {
+                        $runtimeReady = $true
+                        break
+                    }
+                } catch {
+                    Start-Sleep -Seconds 2
+                }
+            }
+            if (-not $runtimeReady) { throw "The refreshed API/Portal did not become healthy with PostgreSQL connected. Review targeted-app-refresh.log and runtime logs." }
+            Add-QAResult -Name "Refreshed local Portal/API and existing PostgreSQL readiness" -Status "PASS" -Detail "HTTP 200; database connected."
+        }
+
+        $accountsFile = Join-Path $repoRoot ".secrets\smartprint-qa\qa-accounts.dpapi.json"
+        if (-not (Test-Path -LiteralPath $accountsFile -PathType Leaf)) {
+            throw "E2E-only mode requires the existing DPAPI QA identity file: $accountsFile. It will not create or bootstrap accounts."
+        }
+        $accounts = Get-OrCreateQAAccounts
+        Set-QAProcessEnvironment $accounts
+
+        $script:playwrightModule = $null
+        $playwrightOk = Invoke-QAStep -Name "Locate pinned Playwright $playwrightVersion for E2E-only run" -LogName "playwright-install.log" -Action {
+            $script:playwrightModule = Install-OrLocatePlaywright -ForceSkipInstall:$reuseExistingStack
+            if (-not $script:playwrightModule) { throw "Playwright module resolution failed." }
+            Write-Host ("Pinned Playwright module: " + $script:playwrightModule)
+        }
+        if (-not $playwrightOk -or -not $script:playwrightModule) { throw "Playwright is not ready." }
+        $env:PLAYWRIGHT_MODULE_DIR = $script:playwrightModule
+
+        $liveSuite = Join-Path $PSScriptRoot "smartprint-local-e2e.mjs"
+        if (-not (Test-Path -LiteralPath $liveSuite -PathType Leaf)) { throw "Local E2E suite is missing: $liveSuite" }
+        $syntaxOk = Invoke-QAStep -Name "Validate local Playwright suite JavaScript syntax" -LogName "playwright-syntax-check.log" -Action {
+            & $node.Source "--check" $liveSuite
+        }
+        if (-not $syntaxOk) { throw "The local Playwright suite has a syntax error. Review logs/playwright-syntax-check.log." }
+
+        $qaHarnessPreflightOk = Invoke-QAStep -Name "Validate QA harness modules and run existing prerequisite/isolation/HTTP audit tests" -LogName "qa-harness-preflight-tests.log" -Action {
+            $qaModuleFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.mjs" -File)
+            if ($qaModuleFiles.Count -eq 0) { throw "No QA JavaScript modules were found for syntax validation." }
+            foreach ($qaModule in $qaModuleFiles) {
+                & $node.Source "--check" $qaModule.FullName
+                if ($LASTEXITCODE -ne 0) { throw "QA module syntax validation failed: $($qaModule.Name)" }
+            }
+
+            $qaUnitTests = @(
+                (Join-Path $PSScriptRoot "live-node-test-reporter.test.mjs"),
+                (Join-Path $PSScriptRoot "production-qa-plan.test.mjs"),
+                (Join-Path $PSScriptRoot "smartprint-qa-config.test.mjs"),
+                (Join-Path $PSScriptRoot "local-e2e-http-audit.test.mjs"),
+                (Join-Path $PSScriptRoot "local-e2e-prerequisites.test.mjs")
+            )
+            $missingQaUnitTests = @($qaUnitTests | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+            if ($missingQaUnitTests.Count -gt 0) {
+                throw "QA harness regression tests are missing: $($missingQaUnitTests -join ', ')"
+            }
+            $qaTestArgs = @("--test", "--test-concurrency=1", "--test-reporter=./scripts/qa/live-node-test-reporter.mjs") + $qaUnitTests
+            & $node.Source @qaTestArgs
+            if ($LASTEXITCODE -ne 0) { throw "QA harness regression tests failed." }
+        }
+        if (-not $qaHarnessPreflightOk) {
+            throw "QA harness preflight failed; the live browser suite was not started."
+        }
+
+        $e2eOk = Invoke-QAStep -Name "Real local Playwright E2E using the existing stack and QA identities" -LogName "local-real-data-e2e.log" -Action {
+            & $node.Source $liveSuite
+        }
+        if (-not $e2eOk) { $exitCode = 1 }
+
+        $photoStudioBrowserOk = Invoke-PhotoStudioBrowserAcceptance -Node $node
+        if (-not $photoStudioBrowserOk) { $exitCode = 1 }
+
+        Add-QAResult -Name "Portal/API/Agent/Android build and unit suites" -Status "SKIPPED" -Detail "E2E-only mode deliberately skips builds, platform unit tests, and device tests."
+    } else {
     $docker = Get-Command docker.exe -ErrorAction SilentlyContinue
     if (-not $docker) { $docker = Get-Command docker -ErrorAction Stop }
     & $docker.Source compose version | Out-Null
@@ -360,7 +1002,6 @@ try {
 
     # Pin this stack to its own namespace even when the calling shell or
     # .env.local defines COMPOSE_PROJECT_NAME for QuantaEdge infrastructure.
-    $composeProjectName = "qrtoprint-local"
     $composeBaseArgs = @("compose", "--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
     $configArgs = $composeBaseArgs + @("config", "--quiet")
     $configOk = Invoke-QAStep -Name "Validate local SmartPrint Compose configuration (project: $composeProjectName)" -LogName "compose-config.log" -Action {
@@ -441,13 +1082,14 @@ try {
         $healthRouteStart = $apiProgram.IndexOf('app.MapGet("/health/live"')
         $healthRouteAnonymousMarker = $apiProgram.IndexOf('})).AllowAnonymous();', $healthRouteStart)
         $healthRouteIsAnonymous = $healthRouteStart -ge 0 -and $healthRouteAnonymousMarker -ge $healthRouteStart
-        $loopbackCorsIsAllowed = $localCompose.Contains('Cors__AllowedOrigins__2: "http://127.0.0.1:3000"')
+        $expectedCorsOriginLine = 'Cors__AllowedOrigins__2: "${SMARTPRINT_LOCAL_ORIGIN:-' + $target + '}"'
+        $loopbackCorsIsAllowed = $localCompose.Contains($expectedCorsOriginLine)
         $portalUsesOfflineFonts = -not $publicLandingCss.Contains("fonts.googleapis.com") -and
             -not $publicLandingCss.Contains("fonts.gstatic.com")
         if (-not $healthRouteIsAnonymous -or -not $loopbackCorsIsAllowed -or -not $portalUsesOfflineFonts) {
-            throw "This checkout is missing the local health/CORS/offline-font fixes. No E2E browser test was started. Run 'git pull --ff-only origin main' and retry."
+            throw "This checkout is missing the local health/CORS/offline-font fixes or its CORS fallback does not match the central QA origin. No E2E browser test was started."
         }
-        Write-Host "Verified source preflight: anonymous API liveness, 127.0.0.1 CORS and no external Google Fonts."
+        Write-Host ("Verified source preflight: anonymous API liveness, " + $target + " CORS and no external Google Fonts.")
         if ($rootManifest.name -ne "smart-print" -or
             $portalManifest.name -ne "@smart-print/portal" -or
             $desktopManifest.name -ne "@smart-print/desktop" -or
@@ -566,7 +1208,7 @@ try {
         $corsArgs = $composeBaseArgs + @(
             "exec", "-T", "api", "curl", "--noproxy", "*", "--silent", "--show-error",
             "--dump-header", "-", "--output", "/dev/null", "--request", "OPTIONS",
-            "--header", "Origin: http://127.0.0.1:3000",
+            "--header", "Origin: $target",
             "--header", "Access-Control-Request-Method: POST",
             "--header", "Access-Control-Request-Headers: content-type,authorization,idempotency-key,x-print-batch-id",
             "http://portal/api/v1/auth/register-customer"
@@ -576,7 +1218,7 @@ try {
         $corsHeaders = $corsOutput -join [Environment]::NewLine
         $preflightStatusIs204 = $corsHeaders -match 'HTTP/.+ 204'
         $allowedOriginHeaderFound = $corsHeaders.IndexOf(
-            "Access-Control-Allow-Origin: http://127.0.0.1:3000",
+            "Access-Control-Allow-Origin: $target",
             [StringComparison]::OrdinalIgnoreCase
         ) -ge 0
         if (-not $preflightStatusIs204 -or -not $allowedOriginHeaderFound) {
@@ -616,7 +1258,7 @@ try {
     if (-not $bootstrapOk) { throw "Local platform administrator bootstrap failed." }
 
     $script:playwrightModule = $null
-    $playwrightOk = Invoke-QAStep -Name "Install and locate pinned Playwright 1.56.1 with Chromium" -LogName "playwright-install.log" -Action {
+    $playwrightOk = Invoke-QAStep -Name "Install and locate pinned Playwright $playwrightVersion with Chromium" -LogName "playwright-install.log" -Action {
         $script:playwrightModule = Install-OrLocatePlaywright
         if (-not $script:playwrightModule) { throw "Playwright module resolution failed." }
         Write-Host ("Pinned Playwright module: " + $script:playwrightModule)
@@ -636,6 +1278,9 @@ try {
     }
     if (-not $e2eOk) { $exitCode = 1 }
 
+    $photoStudioBrowserOk = Invoke-PhotoStudioBrowserAcceptance -Node $node
+    if (-not $photoStudioBrowserOk) { $exitCode = 1 }
+
     if ($SkipUnitTests) {
         Add-QAResult -Name "Existing portal/API/Agent logic suites" -Status "SKIPPED" -Detail "Skipped by -SkipUnitTests."
     } else {
@@ -654,7 +1299,7 @@ try {
         $missingPortalTests = @($portalTests | Where-Object { -not (Test-Path -LiteralPath (Join-Path $repoRoot $_) -PathType Leaf) })
         if ($missingPortalTests.Count -eq 0) {
             $portalOk = Invoke-QAStep -Name "Existing portal logic regression tests (separate from live API E2E)" -LogName "portal-logic-tests.log" -Action {
-                & $node.Source "--experimental-strip-types" "--test" @portalTests
+                & $node.Source "--experimental-strip-types" "--test" "--test-concurrency=1" "--test-reporter=./scripts/qa/live-node-test-reporter.mjs" @portalTests
             }
             if (-not $portalOk) { $exitCode = 1 }
         } else {
@@ -667,7 +1312,8 @@ try {
         if ($dotnet) {
             $env:SMARTPRINT_TEST_POSTGRES = $null
             $apiTestOk = Invoke-QAStep -Name "Existing SmartPrint API unit/regression tests (destructive migration DB test disabled)" -LogName "api-dotnet-tests.log" -Action {
-                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=minimal"
+                Write-Host "[QA-SUITE-START] API .NET tests | xUnit verbose reporter announces each case start/end; StopOnFail=false." -ForegroundColor Cyan
+                & $dotnet.Source "test" "tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal" "--" "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
             }
             if (-not $apiTestOk) { $exitCode = 1 }
 
@@ -685,7 +1331,8 @@ try {
             }
             $env:SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION = $null
             $agentTestOk = Invoke-QAStep -Name "Existing SmartPrint Windows Agent unit/regression tests and optional virtual spooler integration" -LogName "agent-dotnet-tests.log" -Action {
-                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=minimal"
+                Write-Host "[QA-SUITE-START] Windows Agent .NET tests | xUnit verbose reporter announces each case start/end; StopOnFail=false." -ForegroundColor Cyan
+                & $dotnet.Source "test" "tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj" "--configuration" "Release" "--logger" "console;verbosity=normal" "--" "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
             }
             if (-not $agentTestOk) { $exitCode = 1 }
             if ($pdfPrinterAvailable -and $agentTestOk) {
@@ -708,15 +1355,25 @@ try {
         if (-not $gradle -or [string]::IsNullOrWhiteSpace($sdkRoot) -or -not (Test-Path -LiteralPath $sdkRoot -PathType Container)) {
             Add-QAResult -Name "Android local JVM and emulator suites" -Status "SKIPPED" -Detail "System Gradle and Android SDK are required; the script will not install to physical phones."
         } else {
-            $androidBuildArgs = @(
-                "--no-daemon", "-p", "apps/android",
-                "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
-                ":app:testDebugUnitTest", ":app:assembleDebug"
+            $androidUnitTestArgs = @(
+                "--no-daemon", "--console=plain", "-p", "apps/android",
+                "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
+                ":app:testDebugUnitTest"
             )
-            $androidBuildOk = Invoke-QAStep -Name "Android native JVM tests and local-portal debug APK build" -LogName "android-unit-build.log" -Action {
+            $androidUnitTestsOk = Invoke-QAStep -Name "Android native JVM unit tests against the local portal configuration" -LogName "android-unit-tests.log" -Action {
+                & $gradle.Source @androidUnitTestArgs
+            }
+            if (-not $androidUnitTestsOk) { $exitCode = 1 }
+
+            $androidBuildArgs = @(
+                "--no-daemon", "--console=plain", "-p", "apps/android",
+                "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
+                ":app:assembleDebug"
+            )
+            $androidApkBuildOk = Invoke-QAStep -Name "Build Android debug APK for emulator acceptance" -LogName "android-apk-build.log" -Action {
                 & $gradle.Source @androidBuildArgs
             }
-            if (-not $androidBuildOk) { $exitCode = 1 }
+            if (-not $androidApkBuildOk) { $exitCode = 1 }
 
             $adb = Get-Command adb.exe -ErrorAction SilentlyContinue
             if (-not $adb) { $adb = Get-Command adb -ErrorAction SilentlyContinue }
@@ -736,17 +1393,17 @@ try {
                 $emulatorDevices = @()
             }
 
-            if ($androidBuildOk -and $emulatorDevices.Count -eq 1 -and $connectedDevices.Count -eq 1) {
+            if ($androidApkBuildOk -and $emulatorDevices.Count -eq 1 -and $connectedDevices.Count -eq 1) {
                 $instrumentationArgs = @(
-                    "--no-daemon", "-p", "apps/android",
-                    "-PsmartPrintServiceUrl=http://10.0.2.2:3000",
-                    ":app:connectedDebugAndroidTest"
+                    "--no-daemon", "--console=plain", "-p", "apps/android",
+                    "-PsmartPrintServiceUrl=$androidEmulatorOrigin",
+                    "--info", ":app:connectedDebugAndroidTest"
                 )
                 $androidUiOk = Invoke-QAStep -Name "Android emulator instrumentation tests against local SmartPrint portal" -LogName "android-emulator-tests.log" -Action {
                     & $gradle.Source @instrumentationArgs
                 }
                 if (-not $androidUiOk) { $exitCode = 1 }
-            } elseif ($androidBuildOk) {
+            } elseif ($androidApkBuildOk) {
                 $deviceReason = if ($connectedDevices.Count -eq 0) {
                     "No Android emulator is online."
                 } elseif ($connectedDevices.Count -gt 1) {
@@ -757,6 +1414,47 @@ try {
                 Add-QAResult -Name "Android emulator instrumentation suite" -Status "SKIPPED" -Detail $deviceReason
             }
         }
+    }
+    }
+
+    if (-not $E2EOnly) {
+        $nativeAppsScript = Join-Path $PSScriptRoot "run-smartprint-native-local.ps1"
+        if (-not (Test-Path -LiteralPath $nativeAppsScript -PathType Leaf)) {
+            Add-QAResult -Name "Local native Windows Desktop and Android QA" -Status "FAIL" -Detail "Missing local native QA runner: $nativeAppsScript"
+            $exitCode = 1
+        } else {
+            $nativeOutputDirectory = Join-Path $artifactRoot "native-local"
+            $nativeArgs = @(
+                "-PublicOrigin", $canonicalPublicUrl,
+                "-LocalPortalOrigin", $target,
+                "-OutputDirectory", $nativeOutputDirectory
+            )
+            if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial)) {
+                $nativeArgs += @("-AndroidDeviceSerial", $LocalAndroidDeviceSerial)
+            }
+            $nativeAppsOk = Invoke-QAStep -Name "Local Windows Desktop native tests and Android side-by-side device acceptance (no public release downloads)" -LogName "native-local-apps.log" -Action {
+                & $nativeAppsScript @nativeArgs
+            }
+            if (-not $nativeAppsOk) { $exitCode = 1 }
+        }
+    } else {
+        Add-QAResult -Name "Local native Windows Desktop and Android QA" -Status "SKIPPED" -Detail "E2E-only mode deliberately skips native application builds and device acceptance."
+    }
+
+    if ($TestPublishedApps) {
+        $publishedAppScript = Join-Path $PSScriptRoot "test-published-apps.ps1"
+        if (-not (Test-Path -LiteralPath $publishedAppScript -PathType Leaf)) {
+            Add-QAResult -Name "Published Windows/Android optional QA" -Status "FAIL" -Detail "Missing helper: $publishedAppScript"
+            $exitCode = 1
+        } else {
+            $publishedAppsOk = Invoke-QAStep -Name "Official website Windows installer and Android APK acceptance" -LogName "published-apps.log" -Action {
+                & $publishedAppScript -PublicOrigin $canonicalPublicUrl -OutputDirectory (Join-Path $artifactRoot "published-apps") -ConfigPath $qaConfigPath
+            }
+            if (-not $publishedAppsOk) { $exitCode = 1 }
+        }
+    } else {
+        Write-Host "Optional published Windows/Android app QA was not requested. Pass -TestPublishedApps to enable it." -ForegroundColor DarkCyan
+    }
     }
 }
 catch {
@@ -772,8 +1470,19 @@ finally {
 
     $summary = [PSCustomObject]@{
         product = "SmartPrint"
-        environment = "LOCAL_DOCKER_POSTGRES_REAL_API"
-        target = $target
+        sourceRevision = if ($sourceRevision) { $sourceRevision } else { $null }
+        pulledLatestFromGitHub = $pulledLatest
+        changedFilesFromPull = @($pullChangedPaths)
+        applicationRefreshRequiredByPull = if ($pulledLatest) { $requiresAppRefresh } else { $null }
+        reusedExistingAppContainers = if ($E2EOnly) { $reuseExistingStack } else { $null }
+        publishedAppsTestRequested = [bool]($TestPublishedApps -or $AndroidAppOnly)
+        androidAppOnly = [bool]$AndroidAppOnly
+        androidDeviceSerial = if (-not [string]::IsNullOrWhiteSpace($AndroidDeviceSerial)) { $AndroidDeviceSerial } else { $null }
+        localAndroidDeviceSerial = if (-not [string]::IsNullOrWhiteSpace($LocalAndroidDeviceSerial)) { $LocalAndroidDeviceSerial } else { $null }
+        localNativeAppsTestIncluded = (-not [bool]$AndroidAppOnly -and -not [bool]$E2EOnly)
+        webE2eExecuted = -not [bool]$AndroidAppOnly
+        environment = if ($AndroidAppOnly) { "PUBLISHED_ANDROID_APP_ONLY" } else { "LOCAL_DOCKER_POSTGRES_REAL_API" }
+        target = if ($AndroidAppOnly) { $canonicalPublicUrl } else { $target }
         runId = $runId
         startedLocal = $runStamp
         completedUtc = [DateTime]::UtcNow.ToString("o")

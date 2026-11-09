@@ -933,12 +933,13 @@ customerApi.MapGet("/jobs", async (
 
     var jobs = await (
         from job in db.PrintJobs.AsNoTracking()
-        join session in db.CustomerPrintSessions.AsNoTracking()
-            on new { job.TenantId, SessionId = job.CustomerSessionId }
-            equals new { session.TenantId, SessionId = session.Id }
         join profile in db.ShopProfiles.AsNoTracking()
             on job.TenantId equals profile.TenantId
-        where session.CustomerUserId == customerId
+        where job.CustomerUserId == customerId ||
+              (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                  session.TenantId == job.TenantId &&
+                  session.Id == job.CustomerSessionId &&
+                  session.CustomerUserId == customerId))
         orderby job.CreatedUtc descending
         select new
         {
@@ -1000,14 +1001,15 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
     // A signed-in customer owns the order through the customer identity attached
     // to the originating session. Do not require that the short-lived QR session
     // remains active: history tracking must survive app restarts and session expiry.
-    var ownedJob = await (
-        from trackedPrintJob in db.PrintJobs.AsNoTracking()
-        join session in db.CustomerPrintSessions.AsNoTracking()
-            on new { trackedPrintJob.TenantId, SessionId = trackedPrintJob.CustomerSessionId }
-            equals new { session.TenantId, SessionId = session.Id }
-        where trackedPrintJob.Id == jobId && session.CustomerUserId == customerId
-        select new { trackedPrintJob.TenantId, SessionId = session.Id }
-    ).SingleOrDefaultAsync(ct);
+    var ownedJob = await db.PrintJobs.AsNoTracking()
+        .Where(trackedPrintJob => trackedPrintJob.Id == jobId &&
+            (trackedPrintJob.CustomerUserId == customerId ||
+             (trackedPrintJob.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                 session.TenantId == trackedPrintJob.TenantId &&
+                 session.Id == trackedPrintJob.CustomerSessionId &&
+                 session.CustomerUserId == customerId))))
+        .Select(trackedPrintJob => new { trackedPrintJob.TenantId })
+        .SingleOrDefaultAsync(ct);
 
     if (ownedJob is null)
     {
@@ -1016,7 +1018,11 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
 
     var jobStatus = await db.PrintJobs.AsNoTracking()
         .Where(item => item.Id == jobId && item.TenantId == ownedJob.TenantId &&
-                       item.CustomerSessionId == ownedJob.SessionId)
+            (item.CustomerUserId == customerId ||
+             (item.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                 session.TenantId == item.TenantId &&
+                 session.Id == item.CustomerSessionId &&
+                 session.CustomerUserId == customerId))))
         .Select(item => new
         {
             item.Id,
@@ -1033,6 +1039,7 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.PrintKind,
             item.PhotoSizeCode,
             item.PhotoCount,
+            item.PhotosPerPage,
             item.Currency,
             item.QuotedAmountMinor,
             item.RejectedPageNumbersJson,
@@ -1909,13 +1916,27 @@ shop.MapGet("/customers", async (
     var customerIds = customers.Select(item => item.CustomerId).ToArray();
     var jobStatistics = await (
         from job in db.PrintJobs.AsNoTracking()
-        join session in db.CustomerPrintSessions.AsNoTracking()
-            on new { job.TenantId, SessionId = job.CustomerSessionId }
-            equals new { session.TenantId, SessionId = session.Id }
         where job.TenantId == tenantId &&
-              session.CustomerUserId != null &&
-              customerIds.Contains(session.CustomerUserId.Value)
-        group job by session.CustomerUserId!.Value into customerJobs
+              ((job.CustomerUserId != null && customerIds.Contains(job.CustomerUserId.Value)) ||
+               (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                   session.TenantId == tenantId &&
+                   session.Id == job.CustomerSessionId &&
+                   session.CustomerUserId != null &&
+                   customerIds.Contains(session.CustomerUserId.Value))))
+        select new
+        {
+            CustomerId = job.CustomerUserId ?? db.CustomerPrintSessions
+                .Where(session => session.TenantId == tenantId && session.Id == job.CustomerSessionId)
+                .Select(session => session.CustomerUserId)
+                .FirstOrDefault(),
+            job.Status,
+            job.OutputType,
+            job.OutputCompletedUtc,
+            job.OutputConfirmedUtc,
+            job.CreatedUtc
+        } into customerJob
+        where customerJob.CustomerId != null
+        group customerJob by customerJob.CustomerId!.Value into customerJobs
         select new
         {
             CustomerId = customerJobs.Key,
@@ -1986,13 +2007,15 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
     var boundedTake = Math.Clamp(take ?? 50, 1, 100);
     var customerJobs =
         from job in db.PrintJobs.AsNoTracking()
-        join session in db.CustomerPrintSessions.AsNoTracking()
-            on new { job.TenantId, SessionId = job.CustomerSessionId }
-            equals new { session.TenantId, SessionId = session.Id }
         join document in db.PrintDocuments.AsNoTracking()
             on new { job.TenantId, PrintJobId = job.Id }
             equals new { document.TenantId, document.PrintJobId }
-        where job.TenantId == tenantId && session.CustomerUserId == customerId
+        where job.TenantId == tenantId &&
+              (job.CustomerUserId == customerId ||
+               (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                   session.TenantId == tenantId &&
+                   session.Id == job.CustomerSessionId &&
+                   session.CustomerUserId == customerId)))
         select new
         {
             job.Id,
@@ -2007,6 +2030,7 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
+        job.PhotosPerPage,
             job.PhotoUnitPriceMinorSnapshot,
             job.Currency,
             job.QuotedAmountMinor,
@@ -2089,6 +2113,10 @@ shop.MapGet("/print-jobs", async (
             job.BatchName,
             job.RejectedPageNumbersJson,
             job.PdfBrandingEnabled,
+            job.Origin,
+            job.CustomerUserId,
+            job.RecipientName,
+            job.RecipientPhone,
             job.JobNumber,
             job.Status,
             job.PageCount,
@@ -2101,6 +2129,7 @@ shop.MapGet("/print-jobs", async (
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
+        job.PhotosPerPage,
             job.PhotoUnitPriceMinorSnapshot,
             job.Currency,
             job.QuotedAmountMinor,
@@ -2195,6 +2224,8 @@ shop.MapGet("/print-jobs", async (
             job.JobNumber.ToLower().Contains(normalizedSearch) ||
             (job.BatchName != null && job.BatchName.ToLower().Contains(normalizedSearch)) ||
             (job.BatchGroupName != null && job.BatchGroupName.ToLower().Contains(normalizedSearch)) ||
+            (job.RecipientName != null && job.RecipientName.ToLower().Contains(normalizedSearch)) ||
+            (job.RecipientPhone != null && job.RecipientPhone.ToLower().Contains(normalizedSearch)) ||
             job.Document.OriginalFileName.ToLower().Contains(normalizedSearch) ||
             (job.PrinterName != null && job.PrinterName.ToLower().Contains(normalizedSearch)));
     }
@@ -2209,6 +2240,440 @@ shop.MapGet("/print-jobs", async (
 });
 
 
+
+
+shop.MapPost("/photo-jobs", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    DocumentStorage storage,
+    TenantEntitlementService entitlements,
+    HttpContext context,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+        return Results.Forbid();
+
+    if (!context.Request.HasFormContentType)
+        return Results.BadRequest(new { code = "photo_order_form_required", message = "Select a photo, prepare its A4 sheet and save the photo order." });
+
+    var form = await context.Request.ReadFormAsync(ct);
+    if (form.Files.Count != 1)
+        return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Save exactly one prepared multi-page A4 photo PDF." });
+
+    if (!Guid.TryParse(form["idempotencyKey"].FirstOrDefault(), out var requestKey))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["idempotencyKey"] = ["Refresh this form and retry with its original request key."]
+        });
+    var idempotencyKey = $"SHOP-PHOTO-{requestKey:N}";
+    var paymentMethod = form["paymentMethod"].FirstOrDefault();
+    if (paymentMethod is not ("UPI" or "CASH"))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["paymentMethod"] = ["Choose UPI or cash at counter."]
+        });
+
+    var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
+    if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
+        !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
+        photoCount is < 1 or > 100 ||
+        !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
+        photosPerPage < 1 ||
+        photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["photoDetails"] = ["Choose a supported photo size, 1–100 photos and a valid photos-per-page layout."]
+        });
+    }
+
+    var recipientType = form["recipientType"].FirstOrDefault();
+    Guid? customerUserId = null;
+    string recipientName;
+    string? recipientPhone = null;
+
+    if (recipientType == "EXISTING_CUSTOMER")
+    {
+        if (!Guid.TryParse(form["customerUserId"].FirstOrDefault(), out var selectedCustomerId))
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["customerUserId"] = ["Choose a customer from this shop's customer list."]
+            });
+
+        var customer = await db.Users.AsNoTracking()
+            .Where(user => user.Id == selectedCustomerId &&
+                           user.TenantId == null &&
+                           db.CustomerPrintSessions.Any(session =>
+                               session.TenantId == tenantId && session.CustomerUserId == user.Id))
+            .Select(user => new { user.Id, user.DisplayName, user.PhoneNumber })
+            .SingleOrDefaultAsync(ct);
+
+        if (customer is null)
+            return Results.NotFound(new { code = "shop_customer_not_found", message = "That customer is not associated with this shop. Refresh the customer list and choose again." });
+
+        customerUserId = customer.Id;
+        recipientName = customer.DisplayName.Trim();
+        recipientPhone = string.IsNullOrWhiteSpace(customer.PhoneNumber) ? null : customer.PhoneNumber.Trim();
+    }
+    else if (recipientType == "WALK_IN")
+    {
+        recipientName = form["recipientName"].FirstOrDefault()?.Trim() ?? string.Empty;
+        recipientPhone = form["recipientPhone"].FirstOrDefault()?.Trim();
+        if (recipientName.Length is < 1 or > 160)
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["recipientName"] = ["Enter the walk-in customer's name (up to 160 characters)."]
+            });
+        if (string.IsNullOrWhiteSpace(recipientPhone)) recipientPhone = null;
+        if (recipientPhone is { Length: > 40 } ||
+            recipientPhone is not null && recipientPhone.Any(character =>
+                !char.IsDigit(character) && character is not ('+' or '(' or ')' or '-' or ' ')))
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["recipientPhone"] = ["Enter a valid contact number using digits and common phone punctuation, or leave it blank."]
+            });
+    }
+    else
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["recipientType"] = ["Choose an existing customer or a walk-in customer."]
+        });
+    }
+
+    var upload = form.Files[0];
+    if (upload.Length is <= 0 or > 20 * 1024 * 1024 ||
+        !string.Equals(Path.GetExtension(upload.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+    {
+        return Results.UnprocessableEntity(new
+        {
+            code = "photo_sheet_invalid",
+            message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB."
+        });
+    }
+
+    var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    StoredDocument? stored = null;
+
+    async Task CleanupUncommittedStorageAsync()
+    {
+        if (stored is null) return;
+        var storageKey = stored.StorageKey;
+        bool referencedByCommittedDocument;
+        try
+        {
+            referencedByCommittedDocument = await db.PrintDocuments.AsNoTracking()
+                .AnyAsync(item => item.TenantId == tenantId && item.StorageKey == storageKey, ct);
+        }
+        catch
+        {
+            // A database outcome that cannot be checked is uncertain. Retain the
+            // encrypted file rather than risk deleting a committed print document.
+            return;
+        }
+
+        if (!referencedByCommittedDocument)
+            await storage.DeleteAsync(storageKey);
+        stored = null;
+    }
+
+    try
+    {
+        var now = DateTimeOffset.UtcNow;
+        var documentId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var jobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}";
+        var outputName = $"photo-sheet-{jobNumber}.pdf";
+
+        try
+        {
+            await using var input = upload.OpenReadStream();
+            stored = await storage.ValidateAndStoreAsync(tenantId, documentId, outputName, input, upload.Length, ct);
+        }
+        catch (DocumentValidationException exception)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
+        }
+
+        if (stored.Analysis.PageCount != expectedPageCount ||
+            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount))
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_sheet_layout_invalid",
+                message = $"The prepared file must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page 2480 × 3508 raster. Check the sheet preview and prepare it again."
+            });
+        }
+
+        var existingJob = await db.PrintJobs.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IdempotencyKey == idempotencyKey, ct);
+        if (existingJob is not null)
+        {
+            var existingDocument = await db.PrintDocuments.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.PrintJobId == existingJob.Id, ct);
+            var existingPayment = await db.PrintPayments.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.PrintJobId == existingJob.Id)
+                .OrderByDescending(item => item.CreatedUtc)
+                .Select(item => new { item.Id, item.Method, item.Status, item.AmountMinor, item.Currency, item.UpiIdSnapshot, item.PayeeNameSnapshot })
+                .FirstOrDefaultAsync(ct);
+            var isSameRequest = existingDocument is not null && existingPayment is not null &&
+                existingPayment.Method == paymentMethod &&
+                existingJob.Origin == "SHOP_OWNER" &&
+                existingJob.CustomerUserId == customerUserId &&
+                existingJob.RecipientName == recipientName &&
+                existingJob.RecipientPhone == recipientPhone &&
+                existingJob.PrintKind == "PHOTO" &&
+                existingJob.PhotoSizeCode == photoSizeCode &&
+                existingJob.PhotoCount == photoCount &&
+                existingJob.PhotosPerPage == photosPerPage &&
+                string.Equals(existingDocument.Sha256, stored.Sha256, StringComparison.OrdinalIgnoreCase);
+
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+
+            if (!isSameRequest)
+                return Results.Conflict(new { code = "idempotency_key_reused", message = "This request key already belongs to a different photo order. Start a new photo order instead of changing its original." });
+
+            return Results.Ok(new
+            {
+                Job = new
+                {
+                    existingJob.Id,
+                    existingJob.JobNumber,
+                    existingJob.Status,
+                    existingJob.Origin,
+                    existingJob.RecipientName,
+                    existingJob.RecipientPhone,
+                    existingJob.CustomerUserId,
+                    existingJob.PrintKind,
+                    existingJob.PhotoSizeCode,
+                    existingJob.PhotoCount,
+                    existingJob.PhotosPerPage,
+                    existingJob.PageCount,
+                    existingJob.PhotoUnitPriceMinorSnapshot,
+                    existingJob.QuotedAmountMinor,
+                    existingJob.Currency,
+                    existingJob.QuoteExpiresUtc,
+                    existingJob.CreatedUtc
+                },
+                Document = new
+                {
+                    existingDocument!.Id,
+                    existingDocument.OriginalFileName,
+                    existingDocument.MediaType,
+                    existingDocument.SizeBytes,
+                    existingDocument.Sha256,
+                    existingDocument.PageSizesJson
+                },
+                Payment = existingPayment,
+                DuplicateRequest = true
+            });
+        }
+
+        var pricing = await db.ShopPricingProfiles.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
+        if (pricing is null)
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure the shop's photo sizes and per-photo prices before creating a photo order." });
+        }
+
+        long unitPrice;
+        long amount;
+        try
+        {
+            unitPrice = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
+            amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
+        }
+
+        var paymentSettings = await db.ShopPaymentProfiles.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
+        if (paymentSettings is null ||
+            (paymentMethod == "UPI" && (!paymentSettings.UpiEnabled || string.IsNullOrWhiteSpace(paymentSettings.UpiId))) ||
+            (paymentMethod == "CASH" && !paymentSettings.CashEnabled))
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = "payment_method_unavailable", message = "The selected payment method is not enabled for this shop. Update Payment Settings and try again." });
+        }
+
+        await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+        if (!quota.Allowed)
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            stored = null;
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+        }
+
+        var job = new PrintJob
+        {
+            Id = jobId,
+            TenantId = tenantId,
+            QrStationId = null,
+            CustomerSessionId = null,
+            CustomerUserId = customerUserId,
+            Origin = "SHOP_OWNER",
+            RecipientName = recipientName,
+            RecipientPhone = recipientPhone,
+            JobNumber = jobNumber,
+            Status = paymentMethod == "UPI" ? "AWAITING_CUSTOMER_PAYMENT" : "AWAITING_COUNTER_PAYMENT",
+            IdempotencyKey = idempotencyKey,
+            PageCount = expectedPageCount,
+            Copies = 1,
+            ColourMode = "Colour",
+            PaperSize = "A4",
+            IsDuplex = false,
+            Orientation = "AUTO",
+            PrintKind = "PHOTO",
+            PhotoSizeCode = photoSizeCode,
+            PhotoCount = photoCount,
+            PhotosPerPage = photosPerPage,
+            PhotoUnitPriceMinorSnapshot = unitPrice,
+            PricingVersion = pricing.Version,
+            QuoteExpiresUtc = now.AddMinutes(30),
+            Currency = "INR",
+            QuotedAmountMinor = amount,
+            PageRefundAllocationsJson = JsonSerializer.Serialize(
+                PricingCalculator.CalculatePhotoPageRefundAllocations(photoCount, photoSizeCode, photosPerPage, unitPrice)),
+            CreatedUtc = now,
+            UpdatedUtc = now
+        };
+        var document = new PrintDocument
+        {
+            Id = documentId,
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            OriginalFileName = outputName,
+            MediaType = stored.Analysis.MediaType,
+            FileExtension = stored.Analysis.Extension,
+            SizeBytes = stored.SizeBytes,
+            Sha256 = stored.Sha256,
+            StorageKey = stored.StorageKey,
+            StorageMode = "CLOUD",
+            PageSizesJson = stored.Analysis.PageSizesJson,
+            CreatedUtc = now
+        };
+
+        db.PrintJobs.Add(job);
+        db.PrintDocuments.Add(document);
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = null,
+            NewStatus = job.Status,
+            ActorType = "ShopUser",
+            ActorId = GetActorId(principal),
+            ReasonCode = "SHOP_PHOTO_ORDER_CREATED_AWAITING_PAYMENT",
+            CreatedUtc = now
+        });
+        var payment = new PrintPayment
+        {
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            Method = paymentMethod,
+            Status = paymentMethod == "UPI" ? "AWAITING_CUSTOMER_PAYMENT" : "CASH_AWAITING_PAYMENT",
+            AmountMinor = amount,
+            Currency = job.Currency,
+            UpiIdSnapshot = paymentMethod == "UPI" ? paymentSettings.UpiId : null,
+            PayeeNameSnapshot = paymentMethod == "UPI" ? paymentSettings.PayeeName : null,
+            CreatedUtc = now,
+            UpdatedUtc = now
+        };
+        db.PrintPayments.Add(payment);
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = job.Status,
+            NewStatus = job.Status,
+            ActorType = "ShopUser",
+            ActorId = GetActorId(principal),
+            ReasonCode = paymentMethod == "UPI" ? "SHOP_PHOTO_UPI_PAYMENT_PENDING" : "SHOP_PHOTO_CASH_PAYMENT_PENDING",
+            CreatedUtc = now
+        });
+
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
+        return Results.Created($"/api/v1/shop/print-jobs/{job.Id}", new
+        {
+            Job = new
+            {
+                job.Id,
+                job.JobNumber,
+                job.Status,
+                job.Origin,
+                job.RecipientName,
+                job.RecipientPhone,
+                job.CustomerUserId,
+                job.PrintKind,
+                job.PhotoSizeCode,
+                job.PhotoCount,
+                job.PhotosPerPage,
+                job.PageCount,
+                job.PhotoUnitPriceMinorSnapshot,
+                job.QuotedAmountMinor,
+                job.Currency,
+                job.QuoteExpiresUtc,
+                job.CreatedUtc
+            },
+            Payment = new { payment.Id, payment.Method, payment.Status, payment.AmountMinor, payment.Currency, payment.UpiIdSnapshot, payment.PayeeNameSnapshot },
+            Document = new
+            {
+                document.Id,
+                document.OriginalFileName,
+                document.MediaType,
+                document.SizeBytes,
+                document.Sha256,
+                document.PageSizesJson
+            },
+            DuplicateRequest = false
+        });
+    }
+    catch (DbUpdateException)
+    {
+        await transaction.RollbackAsync(ct);
+        await CleanupUncommittedStorageAsync();
+
+        // A concurrent request may have won the unique (TenantId, IdempotencyKey)
+        // insert. Do not create another job/payment or surface a generic 500.
+        var concurrentJobExists = await db.PrintJobs.AsNoTracking().AnyAsync(
+            item => item.TenantId == tenantId && item.IdempotencyKey == idempotencyKey, ct);
+        if (concurrentJobExists)
+            return Results.Conflict(new
+            {
+                code = "photo_order_created_concurrently",
+                message = "This photo order was submitted at the same time in another window. Refresh the Print Queue; retry with the same request key to retrieve the created order."
+            });
+        throw;
+    }
+    catch
+    {
+        await transaction.RollbackAsync(ct);
+        await CleanupUncommittedStorageAsync();
+        throw;
+    }
+})
+.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.RequireRateLimiting("document-upload");
 
 shop.MapGet("/reports/summary", async (
     ClaimsPrincipal principal,
@@ -3178,6 +3643,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     job.PrintKind = "PHOTO";
     job.PhotoSizeCode = photoSizeCode;
     job.PhotoCount = photoCount;
+    job.PhotosPerPage = photosPerPage;
     job.PhotoUnitPriceMinorSnapshot = unitPrice;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
@@ -3229,6 +3695,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         job.PrintKind,
         job.PhotoSizeCode,
         job.PhotoCount,
+        job.PhotosPerPage,
         job.PhotoUnitPriceMinorSnapshot,
         job.QuotedAmountMinor,
         job.PricingVersion,
@@ -3970,7 +4437,16 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
     {
         await tx.RollbackAsync(ct);
         var raced = await db.PrintRefunds.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId && x.IdempotencyKey == key, ct);
-        if (raced is not null) return Results.Ok(new { raced.Id, raced.PrintJobId, raced.PrintPaymentId, raced.AmountMinor, raced.Currency, raced.Method, raced.Status, raced.Reference, raced.Reason, raced.RefundedUtc, DuplicateRequest = true });
+        if (raced is not null)
+        {
+            if (raced.PrintJobId != jobId)
+                return Results.Conflict(new
+                {
+                    code = "refund_idempotency_key_reused",
+                    message = "This refund request key is already associated with another print file."
+                });
+            return Results.Ok(new { raced.Id, raced.PrintJobId, raced.PrintPaymentId, raced.AmountMinor, raced.Currency, raced.Method, raced.Status, raced.Reference, raced.Reason, raced.RefundedUtc, DuplicateRequest = true });
+        }
         throw;
     }
     return Results.Created($"/api/v1/shop/refunds/{refund.Id}", new { refund.Id, refund.PrintJobId, refund.PrintPaymentId, job.JobNumber,
@@ -5454,6 +5930,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.PageCount == request.PageCount &&
         job.PhotoSizeCode == request.PhotoSizeCode &&
         job.PhotoCount == request.PhotoCount &&
+        job.PhotosPerPage == request.PhotosPerPage &&
         string.Equals(
             job.PageRefundAllocationsJson,
             JsonSerializer.Serialize(PricingCalculator.CalculatePhotoPageRefundAllocations(
@@ -5479,6 +5956,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
                 job.PrintKind,
                 job.PhotoSizeCode,
                 job.PhotoCount,
+        job.PhotosPerPage,
                 job.PhotoUnitPriceMinorSnapshot,
                 job.QuotedAmountMinor,
                 job.PricingVersion,
@@ -5568,6 +6046,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     job.PrintKind = "PHOTO";
     job.PhotoSizeCode = request.PhotoSizeCode;
     job.PhotoCount = request.PhotoCount;
+    job.PhotosPerPage = request.PhotosPerPage;
     job.PhotoUnitPriceMinorSnapshot = unitPrice;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
@@ -5600,6 +6079,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.PrintKind,
         job.PhotoSizeCode,
         job.PhotoCount,
+        job.PhotosPerPage,
         job.PhotoUnitPriceMinorSnapshot,
         job.QuotedAmountMinor,
         job.PricingVersion,
@@ -6022,6 +6502,9 @@ shop.MapGet("/payments", async (
             payment.PrintJobId,
             job.JobNumber,
             DocumentName = document.OriginalFileName,
+            job.Origin,
+            job.RecipientName,
+            job.RecipientPhone,
             BatchPaymentId = (Guid?)null,
             BatchFileCount = (int?)null,
             payment.Method,
@@ -6063,6 +6546,9 @@ shop.MapGet("/payments", async (
             payment.PrintJobId,
             job.JobNumber,
             DocumentName = document.OriginalFileName,
+            job.Origin,
+            job.RecipientName,
+            job.RecipientPhone,
             BatchPaymentId = (Guid?)batchPayment.Id,
             BatchFileCount = (int?)null,
             batchPayment.Method,
@@ -6095,6 +6581,9 @@ shop.MapGet("/payments", async (
                 first.PrintJobId,
                 JobNumber = "Batch · " + first.JobNumber,
                 DocumentName = documentSummary,
+                first.Origin,
+                first.RecipientName,
+                first.RecipientPhone,
                 first.BatchPaymentId,
                 BatchFileCount = (int?)group.Count(),
                 first.Method,
@@ -8034,6 +8523,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.PrintKind = "DOCUMENT";
             job.PhotoSizeCode = null;
             job.PhotoCount = 0;
+            job.PhotosPerPage = null;
             job.PhotoUnitPriceMinorSnapshot = 0;
         }
 
@@ -8081,6 +8571,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
+        job.PhotosPerPage,
             PhotoUnitPriceMinor = photoUnitPriceMinor,
             job.Currency,
             job.QuotedAmountMinor,
@@ -9010,6 +9501,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.PrintKind,
             item.PhotoSizeCode,
             item.PhotoCount,
+            item.PhotosPerPage,
             item.PhotoUnitPriceMinorSnapshot,
             item.Currency,
             item.QuotedAmountMinor,
@@ -9344,10 +9836,9 @@ static bool IsTenantRecoveryOperation(
     bool shopOperations,
     bool allowPaidJobClaimsWhileSuspended = false)
 {
-    if (HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsHead(context.Request.Method))
-        return true;
-
     var path = context.Request.Path.Value ?? string.Empty;
+    if (TenantAccessRules.IsReadRecoveryOperation(context.Request.Method, path, shopOperations))
+        return true;
     if (!shopOperations && allowPaidJobClaimsWhileSuspended &&
         HttpMethods.IsPost(context.Request.Method) &&
         (path.EndsWith("/jobs/claim", StringComparison.OrdinalIgnoreCase) ||

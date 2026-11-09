@@ -7,7 +7,9 @@ RUN corepack enable && corepack prepare pnpm@10.18.0 --activate
 COPY . .
 RUN pnpm install --frozen-lockfile
 ARG VITE_API_BASE_URL=
+ARG VITE_ENABLE_PHOTO_STUDIO_QA=false
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_ENABLE_PHOTO_STUDIO_QA=${VITE_ENABLE_PHOTO_STUDIO_QA}
 RUN pnpm --filter @smart-print/portal build
 
 FROM nginx:alpine AS runtime

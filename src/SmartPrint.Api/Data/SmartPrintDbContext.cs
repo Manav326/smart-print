@@ -303,6 +303,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.ToTable("PrintJobs", table =>
             {
                 table.HasCheckConstraint("CK_PrintJobs_PrintKind", "\"PrintKind\" IN ('DOCUMENT', 'PHOTO')");
+                table.HasCheckConstraint("CK_PrintJobs_Origin", "\"Origin\" IN ('CUSTOMER_QR', 'SHOP_OWNER')");
                 table.HasCheckConstraint(
                     "CK_PrintJobs_PhotoQuoteSnapshot",
                     "(\"PrintKind\" = 'DOCUMENT' AND \"PhotoSizeCode\" IS NULL AND \"PhotoCount\" = 0 AND \"PhotoUnitPriceMinorSnapshot\" = 0) OR (\"PrintKind\" = 'PHOTO' AND \"PhotoSizeCode\" IN ('35x45', '25x35', '2x2', '4x6') AND \"PhotoCount\" BETWEEN 1 AND 100 AND \"PhotoUnitPriceMinorSnapshot\" > 0)");
@@ -314,6 +315,9 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.Property(x => x.JobNumber).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Origin).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.RecipientName).HasMaxLength(160);
+            entity.Property(x => x.RecipientPhone).HasMaxLength(40);
             entity.Property(x => x.BatchGroupName).HasMaxLength(PrintBatchGroupRules.MaximumNameLength);
             entity.Property(x => x.BatchName).HasMaxLength(PrintBatchNameRules.MaximumNameLength);
             entity.Property(x => x.Status).HasMaxLength(40).IsRequired();
@@ -341,12 +345,14 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.PageRefundAllocationsJson).HasColumnType("jsonb").HasDefaultValue("[]").IsRequired();
             entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
             entity.HasIndex(x => new { x.TenantId, x.BatchId });
+            entity.HasIndex(x => new { x.TenantId, x.CustomerUserId });
             entity.HasIndex(x => new { x.TenantId, x.IdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.JobNumber }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.Status, x.PrinterDeviceId, x.AgentLeaseExpiresUtc });
             entity.HasIndex(x => new { x.TenantId, x.ClaimedByAgentDeviceId, x.Status });
             entity.HasIndex(x => new { x.TenantId, x.Status, x.PrintDispatchLeaseExpiresUtc });
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.CustomerUserId).OnDelete(DeleteBehavior.SetNull);
             entity.HasOne<CustomerPrintSession>().WithMany()
                 .HasForeignKey(x => new { x.TenantId, x.CustomerSessionId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })

@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "origins": {
+    "public": "https://smartprint.quantaedge.in",
+    "local": "http://127.0.0.1:3000",
+    "androidEmulator": "http://10.0.2.2:3000"
+  },
+  "composeProjectName": "smart-print",
+  "runtime": {
+    "minimumNodeVersion": "22.6.0",
+    "playwrightVersion": "1.56.1"
+  },
+  "downloads": {
+    "statusPath": "/downloads/status",
+    "windowsPath": "/downloads/windows",
+    "androidPath": "/downloads/android",
+    "windowsAssetName": "SmartPrint-Windows-Setup.exe",
+    "androidAssetName": "SmartPrint-Android.apk",
+    "maxTransferBytes": 268435456
+  },
+  "apps": {
+    "windows": {
+      "installDirectoryName": "SmartPrint",
+      "executableName": "SmartPrint.Desktop.exe",
+      "agentServiceName": "QRtoPrintSmartPrintAgent",
+      "programDataDirectoryName": "QRtoPrint",
+      "agentIdentityFileName": "agent.identity",
+      "smokeTimeoutSeconds": 45,
+      "webViewDevToolsPort": 9237,
+      "nativeExecutableName": "smartprint-desktop.exe"
+    },
+    "android": {
+      "applicationId": "com.quantaedge.smartprint",
+      "emulatorSerialPattern": "^emulator-\\d+\\s+device(?:\\s|$)",
+      "launchTimeoutSeconds": 25,
+      "uiNavigationTimeoutSeconds": 10,
+      "crashLogLineCount": 300,
+      "uiAutomationIds": {
+        "nativeRoot": "smartprint_native_root",
+        "homeNavigation": "smartprint_nav_home",
+        "filesNavigation": "smartprint_nav_files",
+        "homeHeading": "smartprint_home_heading",
+        "filesHeading": "smartprint_files_heading"
+      },
+      "localQaApplicationId": "com.quantaedge.smartprint.localqa",
+      "launcherActivity": "com.quantaedge.smartprint.MainActivity"
+    }
+  }
+}

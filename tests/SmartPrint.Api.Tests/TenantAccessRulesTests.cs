@@ -24,4 +24,18 @@ public sealed class TenantAccessRulesTests
     [InlineData("Pending", false)]
     public void RequiresAnExactActiveStatusIgnoringOnlyLetterCase(string? status, bool expected)
         => Assert.Equal(expected, TenantAccessRules.IsActive(status));
+
+    [Theory]
+    [InlineData("GET", "/api/v1/shop/profile", true, false)]
+    [InlineData("HEAD", "/api/v1/shop/profile", true, false)]
+    [InlineData("GET", "/api/v1/shop/profile/", true, false)]
+    [InlineData("GET", "/api/v1/shop/print-jobs", true, true)]
+    [InlineData("GET", "/api/v1/shop/payments", true, true)]
+    [InlineData("HEAD", "/api/v1/shop/refunds", true, true)]
+    [InlineData("GET", "/api/v1/shop/profile", false, true)]
+    [InlineData("POST", "/api/v1/shop/print-jobs", true, false)]
+    [InlineData("DELETE", "/api/v1/shop/profile", true, false)]
+    public void SuspendedShopRecoveryReadsExcludeTheShopProfile(
+        string method, string path, bool shopWorkspace, bool expected)
+        => Assert.Equal(expected, TenantAccessRules.IsReadRecoveryOperation(method, path, shopWorkspace));
 }

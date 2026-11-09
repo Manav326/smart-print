@@ -1,0 +1,449 @@
+<#
+.SYNOPSIS
+Run the SmartPrint Photo Studio Android WebView instrumentation on one physical phone or emulator.
+#>
+[CmdletBinding()]
+param(
+    [switch]$Help,
+    [switch]$Build,
+    [string]$ApplicationApkPath = "",
+    [string]$InstrumentationApkPath = "",
+    [string]$ApplicationId = "com.quantaedge.smartprint.localqa",
+    [string]$FixtureDirectory = "",
+    [string]$DeviceSerial = "",
+    [switch]$RunJVMTests,
+    [string]$OutputDirectory = "artifacts/android-device-qa-local"
+)
+if ($Help) {
+    Write-Host @"
+Usage:
+  .\scripts\qa\run-smartprint-android-device-tests.ps1 -Build [-DeviceSerial SERIAL]
+  .\scripts\qa\run-smartprint-android-device-tests.ps1 -ApplicationApkPath APP.apk -InstrumentationApkPath TEST.apk -ApplicationId ID -FixtureDirectory DIR [-RunJVMTests] [-DeviceSerial SERIAL]
+
+-Build builds the isolated QA APK pair, fixture and JVM tests.
+-RunJVMTests runs the complete JVM unit suite against the current source before
+  the supplied prebuilt APKs are installed. Pull mode uses this for source coverage.
+For repeatable Espresso input, the runner captures the device's three animation scales,
+temporarily sets them to zero, and restores their exact original values after testing.
+Only the isolated com.quantaedge.smartprint.localqa[.*] package is installed. The production com.quantaedge.smartprint package is never uninstalled, updated or data-cleared.
+"@
+    exit 0
+}
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
+Set-Location $repoRoot
+if ($ApplicationId -notmatch '^com\.quantaedge\.smartprint\.localqa(?:\.[a-z0-9]+)*$') {
+    throw "ApplicationId must remain under com.quantaedge.smartprint.localqa. Production package targeting is forbidden."
+}
+if ($Build -and ($ApplicationApkPath -or $InstrumentationApkPath)) { throw "-Build cannot be combined with prebuilt APK paths." }
+if (-not $Build -and (-not $ApplicationApkPath -or -not $InstrumentationApkPath -or -not $FixtureDirectory)) {
+    throw "Supply -Build or all of -ApplicationApkPath, -InstrumentationApkPath and -FixtureDirectory. APKs are never built implicitly."
+}
+if ($DeviceSerial -and $DeviceSerial -notmatch '^[A-Za-z0-9._:-]{1,128}$') { throw "Invalid Android device serial." }
+
+$outputRoot = if ([IO.Path]::IsPathRooted($OutputDirectory)) { [IO.Path]::GetFullPath($OutputDirectory) } else { [IO.Path]::GetFullPath((Join-Path $repoRoot $OutputDirectory)) }
+New-Item -ItemType Directory -Force -Path $outputRoot | Out-Null
+$serverProcess = $null
+$reverseCreated = $false
+$adb = $null
+$serial = $null
+$results = [System.Collections.Generic.List[object]]::new()
+$script:animationSettingNames = @(
+    "window_animation_scale",
+    "transition_animation_scale",
+    "animator_duration_scale"
+)
+$script:originalAnimationSettings = [ordered]@{}
+$script:animationSettingsCaptured = $false
+$startedUtc = [DateTime]::UtcNow
+
+function Add-Result([string]$Name, [string]$Status, [string]$Detail) {
+    $results.Add([PSCustomObject]@{ name = $Name; status = $Status; detail = $Detail })
+    $colour = if ($Status -eq "PASS") { "Green" } elseif ($Status -eq "FAIL") { "Red" } else { "Yellow" }
+    Write-Host ("[ANDROID-QA] {0} | {1} | {2}" -f $Status, $Name, $Detail) -ForegroundColor $colour
+}
+
+function Restore-AndroidAnimationSettings {
+    if (-not $script:animationSettingsCaptured) { return }
+    if (-not $script:adb -or -not $script:serial) {
+        throw "Cannot restore Android animation settings because the selected ADB device is unavailable."
+    }
+
+    $failures = [System.Collections.Generic.List[string]]::new()
+    foreach ($settingName in $script:animationSettingNames) {
+        $previous = [string]$script:originalAnimationSettings[$settingName]
+        if ($previous -eq "null") {
+            $restoreOutput = @(& $script:adb -s $script:serial shell settings delete global $settingName 2>&1)
+        } else {
+            $restoreOutput = @(& $script:adb -s $script:serial shell settings put global $settingName $previous 2>&1)
+        }
+        $restoreExit = $LASTEXITCODE
+        if ($restoreExit -ne 0) {
+            [void]$failures.Add("$settingName restore failed (exit=$restoreExit): $($restoreOutput -join ' ')")
+            continue
+        }
+
+        $verifyOutput = @(& $script:adb -s $script:serial shell settings get global $settingName 2>&1)
+        $verifyExit = $LASTEXITCODE
+        $actual = ($verifyOutput -join "").Trim()
+        if ($verifyExit -ne 0 -or $actual -ne $previous) {
+            [void]$failures.Add("$settingName expected '$previous' after restoration but found '$actual' (exit=$verifyExit).")
+        }
+    }
+
+    if ($failures.Count -gt 0) {
+        throw ("Could not restore all Android animation settings: " + ($failures -join " | "))
+    }
+
+    $script:animationSettingsCaptured = $false
+    Add-Result "Restore Android animation settings" "PASS" "Restored and verified the phone's original window, transition and animator scales."
+}
+
+function Resolve-Sdk {
+    foreach ($candidate in @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT, (Join-Path $env:LOCALAPPDATA "Android\Sdk"))) {
+        if ($candidate -and (Test-Path -LiteralPath (Join-Path $candidate "platform-tools\adb.exe") -PathType Leaf)) {
+            $root = (Resolve-Path -LiteralPath $candidate).Path
+            $env:ANDROID_HOME = $root
+            $env:ANDROID_SDK_ROOT = $root
+            return $root
+        }
+    }
+    throw "Android SDK Platform-Tools were not found. Install Android SDK Platform-Tools through Android Studio > Tools > SDK Manager."
+}
+
+function Resolve-Gradle {
+    $cached = Join-Path $env:LOCALAPPDATA "SmartPrint\qa-tools\gradle-8.13\bin\gradle.bat"
+    if (Test-Path -LiteralPath $cached -PathType Leaf) {
+        $cachedVersion = (& $cached --version 2>&1 | Out-String)
+        if ($LASTEXITCODE -eq 0 -and $cachedVersion -match '(?m)^Gradle\s+8\.13(?:\s|$)') { return $cached }
+        Write-Warning "The cached Gradle launcher is not a usable 8.13 distribution; resolving a verified copy."
+    }
+    foreach ($name in @("gradle.bat", "gradle")) {
+        $command = Get-Command $name -ErrorAction SilentlyContinue
+        if ($command -and $command.Source) {
+            $version = (& $command.Source --version 2>&1 | Out-String)
+            if ($LASTEXITCODE -eq 0 -and $version -match '(?m)^Gradle\s+8\.13(?:\s|$)') { return $command.Source }
+        }
+    }
+    $root = Join-Path $env:LOCALAPPDATA "SmartPrint\qa-tools"
+    $temp = Join-Path $env:TEMP ("smartprint-gradle-" + [Guid]::NewGuid().ToString("N"))
+    $zip = Join-Path $temp "gradle-8.13-bin.zip"
+    $expected = "20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78"
+    try {
+        New-Item -ItemType Directory -Force -Path $temp | Out-Null
+        $oldProgress = $ProgressPreference
+        $ProgressPreference = "SilentlyContinue"
+        try { Invoke-WebRequest "https://services.gradle.org/distributions/gradle-8.13-bin.zip" -OutFile $zip -ErrorAction Stop }
+        finally { $ProgressPreference = $oldProgress }
+        if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw "Gradle 8.13 checksum mismatch." }
+        Expand-Archive $zip -DestinationPath $temp -Force
+        New-Item -ItemType Directory -Force -Path $root | Out-Null
+        $target = Join-Path $root "gradle-8.13"
+        if (Test-Path $target) { Remove-Item $target -Recurse -Force }
+        Move-Item (Join-Path $temp "gradle-8.13") $target
+        return (Join-Path $target "bin\gradle.bat")
+    } finally {
+        if (Test-Path $temp) { Remove-Item $temp -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Get-FreeLoopbackPort {
+    $listener = [System.Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    try {
+        $listener.Start()
+        return [int]$listener.LocalEndpoint.Port
+    } finally {
+        $listener.Stop()
+    }
+}
+
+try {
+    Write-Host "SmartPrint Android Photo Studio physical-device QA" -ForegroundColor Green
+    Write-Host "Production package com.quantaedge.smartprint will not be modified."
+    $sdk = Resolve-Sdk
+    $adb = Join-Path $sdk "platform-tools\adb.exe"
+    if (-not (Test-Path -LiteralPath (Join-Path $sdk "platforms\android-36\android.jar") -PathType Leaf)) {
+        throw "Android SDK Platform 36 is missing. Install platforms;android-36 through Android Studio SDK Manager."
+    }
+    $aapt = Join-Path $sdk "build-tools\36.0.0\aapt.exe"
+    if (-not (Test-Path $aapt -PathType Leaf)) { throw "Android Build-Tools 36.0.0/aapt.exe is missing." }
+
+    if ($Build) {
+        $gradle = Resolve-Gradle
+        if (-not (Get-Command pnpm.cmd -ErrorAction SilentlyContinue)) { throw "pnpm.cmd is required for the QA fixture build." }
+        $env:VITE_ENABLE_PHOTO_STUDIO_QA = "true"
+        & pnpm.cmd --filter @smart-print/portal build
+        if ($LASTEXITCODE -ne 0) { throw "QA-only Photo Studio fixture build failed." }
+        $FixtureDirectory = Join-Path $repoRoot "apps/portal/dist"
+        if (-not (Test-Path (Join-Path $FixtureDirectory "tests/photo-studio.browser.html"))) { throw "QA fixture page was not emitted by the portal build." }
+
+        $gradleArgs = @("--no-daemon", "--console=plain", "-p", "apps/android",
+            "-PsmartPrintServiceUrl=http://127.0.0.1:3000",
+            "-PsmartPrintLocalQa=true",
+            "-PsmartPrintQaApplicationId=$ApplicationId",
+            "-PsmartPrintPhotoStudioQaEnabled=true",
+            ":app:testDebugUnitTest", ":app:assembleDebug", ":app:assembleDebugAndroidTest")
+        & $gradle @gradleArgs
+        if ($LASTEXITCODE -ne 0) { throw "Android JVM tests or QA APK build failed." }
+        $ApplicationApkPath = Join-Path $repoRoot "apps/android/app/build/outputs/apk/debug/app-debug.apk"
+        $InstrumentationApkPath = Join-Path $repoRoot "apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+        $localBundle = Join-Path $outputRoot "built-artifacts"
+        New-Item -ItemType Directory -Force -Path $localBundle | Out-Null
+        Copy-Item $ApplicationApkPath (Join-Path $localBundle "SmartPrint-Android-LocalQA.apk") -Force
+        Copy-Item $InstrumentationApkPath (Join-Path $localBundle "SmartPrint-Android-LocalQA-Test.apk") -Force
+        Copy-Item $FixtureDirectory (Join-Path $localBundle "fixture") -Recurse -Force
+        Add-Result "Android build" "PASS" "Built the isolated app/test APK pair and QA fixture by explicit request."
+    } else {
+        $ApplicationApkPath = (Resolve-Path $ApplicationApkPath -ErrorAction Stop).Path
+        $InstrumentationApkPath = (Resolve-Path $InstrumentationApkPath -ErrorAction Stop).Path
+        $FixtureDirectory = (Resolve-Path $FixtureDirectory -ErrorAction Stop).Path
+        Add-Result "Android build" "PASS" "Prebuilt artifacts selected; Gradle was not invoked."
+    }
+
+    if ($RunJVMTests -and -not $Build) {
+        $gradle = Resolve-Gradle
+        & $gradle --no-daemon --console=plain -p apps/android -PsmartPrintServiceUrl=http://127.0.0.1:3000 :app:testDebugUnitTest
+        if ($LASTEXITCODE -ne 0) { throw "Android JVM unit tests failed." }
+        Add-Result "Android JVM unit tests" "PASS" "Ran the complete Android JVM suite against the current source commit."
+    }
+
+    $appBadging = (& $aapt dump badging $ApplicationApkPath 2>&1) -join [Environment]::NewLine
+    if ($LASTEXITCODE -ne 0 -or $appBadging -notmatch ("(?m)^package:\s+name='" + [regex]::Escape($ApplicationId) + "'")) { throw "App APK does not match the expected isolated package $ApplicationId." }
+    $testPackage = "$ApplicationId.test"
+    $testBadging = (& $aapt dump badging $InstrumentationApkPath 2>&1) -join [Environment]::NewLine
+    if ($LASTEXITCODE -ne 0 -or $testBadging -notmatch ("(?m)^package:\s+name='" + [regex]::Escape($testPackage) + "'")) { throw "Instrumentation APK does not match the expected package $testPackage." }
+    if (-not (Test-Path (Join-Path $FixtureDirectory "tests/photo-studio.browser.html"))) { throw "Photo Studio QA fixture is missing from $FixtureDirectory." }
+
+    $deviceLines = @(& $adb devices -l 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "adb devices failed: $($deviceLines -join ' ')" }
+    $online = @()
+    foreach ($line in $deviceLines) {
+        if ($line -match '^\s*(?<serial>\S+)\s+device(?:\s|$)') { $online += $Matches.serial }
+    }
+    if ($DeviceSerial) {
+        if (@($online | Where-Object { $_ -ceq $DeviceSerial }).Count -ne 1) { throw "Selected device $DeviceSerial is not authorized/online." }
+        $serial = $DeviceSerial
+    } elseif ($online.Count -eq 1) {
+        $serial = $online[0]
+    } elseif ($online.Count -eq 0) {
+        throw "No authorized Android phone was detected. Connect USB debugging, unlock the phone and accept its RSA authorization prompt."
+    } else {
+        throw "Multiple Android devices are online: $($online -join ', '). Re-run with -DeviceSerial <serial>."
+    }
+
+    $model = (& $adb -s $serial shell getprop ro.product.model 2>&1) -join " "
+    Write-Host "Selected Android device: $model ($serial)" -ForegroundColor Green
+    Write-Host "Keep the phone unlocked and its screen visible during instrumentation." -ForegroundColor Cyan
+    & $adb -s $serial shell input keyevent KEYCODE_WAKEUP 2>$null | Out-Null
+
+    # The app's QA BuildConfig remains 127.0.0.1:3000 on the phone. Reverse
+    # that device-side port to a dynamically chosen laptop port so an existing
+    # local Portal/API stack on host port 3000 is never interrupted.
+    $fixtureHostPort = Get-FreeLoopbackPort
+    $reverse = @(& $adb -s $serial reverse --list 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "Could not inspect ADB reverse mappings." }
+    $mapped = @($reverse | Where-Object { $_ -match '\btcp:3000\b' })
+    if ($mapped.Count -gt 0) {
+        if (-not ($mapped | Where-Object { $_ -match ('\btcp:3000\s+tcp:' + $fixtureHostPort + '\b') })) {
+            throw "The phone already has a tcp:3000 reverse mapping. QA will not replace it; inspect with 'adb -s $serial reverse --list'."
+        }
+    } else {
+        $result = @(& $adb -s $serial reverse tcp:3000 ("tcp:" + $fixtureHostPort) 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "adb reverse failed: $($result -join ' ')" }
+        $reverseCreated = $true
+    }
+
+    $node = Get-Command node.exe -ErrorAction Stop
+    $serverScript = Join-Path $PSScriptRoot "serve-static-portal.mjs"
+    $serverOut = Join-Path $outputRoot "android-fixture-server.stdout.log"
+    $serverErr = Join-Path $outputRoot "android-fixture-server.stderr.log"
+    $serverArgs = '"{0}" "{1}" {2}' -f $serverScript, $FixtureDirectory, $fixtureHostPort
+    $serverProcess = Start-Process -FilePath $node.Source -ArgumentList $serverArgs -WorkingDirectory $repoRoot -PassThru -WindowStyle Hidden -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr
+    $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    $fixtureReady = $false
+    while ([DateTime]::UtcNow -lt $deadline) {
+        if ($serverProcess.HasExited) { Get-Content $serverOut, $serverErr -ErrorAction SilentlyContinue; throw "QA fixture server exited with code $($serverProcess.ExitCode)." }
+        try {
+            $response = Invoke-WebRequest ("http://127.0.0.1:{0}/tests/photo-studio.browser.html" -f $fixtureHostPort) -TimeoutSec 2
+            if ($response.StatusCode -eq 200) { $fixtureReady = $true; break }
+        } catch { Start-Sleep -Milliseconds 500 }
+    }
+    if (-not $fixtureReady) { throw "QA fixture did not become ready on laptop port $fixtureHostPort." }
+    Write-Host ("Android fixture server uses laptop port {0}; the phone accesses it as 127.0.0.1:3000 via adb reverse." -f $fixtureHostPort) -ForegroundColor DarkCyan
+
+    $prodPackage = "com.quantaedge.smartprint"
+    $prodBefore = @(& $adb -s $serial shell pm path $prodPackage 2>&1)
+    $prodInstalledBefore = ($LASTEXITCODE -eq 0 -and ($prodBefore -join " ") -match "package:")
+    $appInstall = @(& $adb -s $serial install -r $ApplicationApkPath 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "The isolated QA app could not be installed: $($appInstall -join ' ')." }
+    $testInstall = @(& $adb -s $serial install -r -t $InstrumentationApkPath 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "The instrumentation APK could not be installed: $($testInstall -join ' ')." }
+    Add-Result "Install isolated QA app" "PASS" "Installed $ApplicationId side-by-side. No production app package was updated or removed."
+
+    # Espresso computes tap coordinates from the current window bounds. On physical
+    # phones, system animations can move those bounds between scrollTo() and event
+    # injection. Mirror CI's zero-animation setup while preserving the exact original
+    # settings for unconditional restoration below.
+    foreach ($settingName in $script:animationSettingNames) {
+        $readOutput = @(& $adb -s $serial shell settings get global $settingName 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "Could not read animation setting for $($settingName): $($readOutput -join ' ')" }
+        $value = ($readOutput -join "").Trim()
+        if ($value -ne "null") {
+            $parsedScale = 0.0
+            $validScale = [double]::TryParse(
+                $value,
+                [System.Globalization.NumberStyles]::Float,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsedScale
+            )
+            if (-not $validScale) {
+                throw "Android returned unexpected value '$value' for animation setting $settingName; refusing to overwrite it."
+            }
+        }
+        $script:originalAnimationSettings[$settingName] = $value
+    }
+    $script:animationSettingsCaptured = $true
+    foreach ($settingName in $script:animationSettingNames) {
+        $setOutput = @(& $adb -s $serial shell settings put global $settingName 0 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "Could not temporarily disable animation setting for $($settingName): $($setOutput -join ' ')" }
+        $verifyOutput = @(& $adb -s $serial shell settings get global $settingName 2>&1)
+        $verifyExit = $LASTEXITCODE
+        $verifyValue = ($verifyOutput -join "").Trim()
+        $verifyNumber = 1.0
+        $verifyIsZero = [double]::TryParse(
+            $verifyValue,
+            [System.Globalization.NumberStyles]::Float,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [ref]$verifyNumber
+        ) -and $verifyNumber -eq 0
+        if ($verifyExit -ne 0 -or -not $verifyIsZero) {
+            throw "Animation setting $settingName did not become zero (actual='$verifyValue')."
+        }
+    }
+    Add-Result "Prepare deterministic Android input" "PASS" "Temporarily disabled window, transition and animator scales; their original values are captured for restoration."
+
+    $instrumentations = @(& $adb -s $serial shell pm list instrumentation 2>&1)
+    $component = "$testPackage/androidx.test.runner.AndroidJUnitRunner"
+    if ($LASTEXITCODE -ne 0 -or -not ($instrumentations -match [regex]::Escape($component))) { throw "Android did not register instrumentation component $component." }
+
+    $logPath = Join-Path $outputRoot "android-physical-device-instrumentation.txt"
+    Write-Host "Starting Android Photo Studio WebView instrumentation..." -ForegroundColor Cyan
+    $outputLines = [System.Collections.Generic.List[string]]::new()
+    $currentTestName = ""
+    $currentTestNumber = 0
+    $totalTestCount = 0
+    Write-Host "[ANDROID-TEST] Waiting for the instrumentation runner to report its test plan..." -ForegroundColor DarkCyan
+
+    # Do not collect am instrument into an array: that buffers all 44+ test events
+    # until the process exits. Stream named test start/result events as adb emits them,
+    # while retaining the complete raw runner transcript for diagnostics.
+    & $adb -s $serial shell am instrument -w -r $component 2>&1 | ForEach-Object {
+        $line = [string]$_
+        [void]$outputLines.Add($line)
+
+        if ($line -match "^INSTRUMENTATION_STATUS:\s*numtests=(\d+)") {
+            $totalTestCount = [int]$Matches[1]
+        } elseif ($line -match "^INSTRUMENTATION_STATUS:\s*current=(\d+)") {
+            $currentTestNumber = [int]$Matches[1]
+        } elseif ($line -match "^INSTRUMENTATION_STATUS:\s*test=(.+)$") {
+            $currentTestName = $Matches[1].Trim()
+        } elseif ($line -match "^INSTRUMENTATION_STATUS_CODE:\s*(-?\d+)") {
+            $statusCode = [int]$Matches[1]
+            $progress = if ($totalTestCount -gt 0) { "$currentTestNumber/$totalTestCount" } else { "$currentTestNumber/?" }
+            switch ($statusCode) {
+                1 {
+                    Write-Host ("[ANDROID-TEST {0}] START | {1}" -f $progress, $currentTestName) -ForegroundColor Cyan
+                }
+                0 {
+                    Write-Host ("[ANDROID-TEST {0}] PASS  | {1}" -f $progress, $currentTestName) -ForegroundColor Green
+                }
+                -2 {
+                    Write-Host ("[ANDROID-TEST {0}] FAIL  | {1}" -f $progress, $currentTestName) -ForegroundColor Red
+                }
+                -1 {
+                    Write-Host ("[ANDROID-TEST {0}] ERROR | {1}" -f $progress, $currentTestName) -ForegroundColor Red
+                }
+            }
+        }
+    }
+    $instrumentExit = $LASTEXITCODE
+    $text = $outputLines -join [Environment]::NewLine
+    $text | Set-Content -LiteralPath $logPath -Encoding UTF8
+    Write-Host ("[ANDROID-TEST] Instrumentation process exited with code {0}; raw transcript: {1}" -f $instrumentExit, $logPath) -ForegroundColor DarkCyan
+    $requiredCases = @(
+        "customerPhotoStudioRunsInsideAndroidWebViewAndProducesExactMultiPagePdf",
+        "shopOwnerCanEditAnExistingPhotoJobInsideAndroidWebViewAndSaveReplacementPdf",
+        "androidSystemBackClosesPhotoStudioBeforeLeavingTheCustomerStation",
+        "photoStudioModalStateAndSecureFlagSurviveActivityRecreation"
+    )
+    $missing = @($requiredCases | Where-Object { -not $text.Contains($_) })
+    $ok = [regex]::Match($text, '(?m)^\s*OK\s+\((\d+)\s+tests?\)\s*$')
+    if ($instrumentExit -ne 0 -or $text -match '(?i)FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|shortMsg=' -or -not $ok.Success -or [int]$ok.Groups[1].Value -lt 4 -or $missing.Count -gt 0) {
+        throw ("Android instrumentation failed or omitted required cases. Missing: " + ($missing -join ', ') + ". Review " + $logPath + [Environment]::NewLine + $text)
+    }
+    if ($prodInstalledBefore) {
+        $prodAfter = @(& $adb -s $serial shell pm path $prodPackage 2>&1)
+        if ($LASTEXITCODE -ne 0 -or ($prodAfter -join " ") -notmatch "package:") { throw "Production package disappeared after QA; no QA command targeted it." }
+    }
+    Restore-AndroidAnimationSettings
+    Add-Result "Android Photo Studio WebView instrumentation" "PASS" "All four required cases passed on $serial."
+    Add-Result "Preserve production Android app" "PASS" "No install, uninstall or clear-data operation targeted $prodPackage."
+
+    $summary = [PSCustomObject]@{
+        product = "SmartPrint"
+        scope = "ANDROID_PHYSICAL_DEVICE_PHOTO_STUDIO"
+        deviceSerial = $serial
+        applicationId = $ApplicationId
+        productionPackageUntouched = $true
+        buildRequested = [bool]$Build
+        appApkSha256 = (Get-FileHash $ApplicationApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        testApkSha256 = (Get-FileHash $InstrumentationApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        result = "PASS"
+        startedUtc = $startedUtc.ToString("o")
+        completedUtc = [DateTime]::UtcNow.ToString("o")
+        results = @($results)
+        instrumentationLog = $logPath
+        deviceAnimationSettingsRestored = (-not $script:animationSettingsCaptured)
+    }
+    $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot "summary.json") -Encoding UTF8
+    Write-Host "Android physical-device QA PASSED. Evidence: $outputRoot" -ForegroundColor Green
+}
+catch {
+    Add-Result "Android physical-device QA" "FAIL" $_.Exception.Message
+    $failure = [PSCustomObject]@{
+        product = "SmartPrint"; scope = "ANDROID_PHYSICAL_DEVICE_PHOTO_STUDIO"
+        deviceSerial = $serial; applicationId = $ApplicationId; result = "FAIL"
+        completedUtc = [DateTime]::UtcNow.ToString("o"); results = @($results)
+        error = $_.Exception.Message
+    }
+    $failure | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot "failure.json") -Encoding UTF8
+    throw
+}
+finally {
+    if ($script:animationSettingsCaptured) {
+        try {
+            Restore-AndroidAnimationSettings
+        } catch {
+            Add-Result "Restore Android animation settings" "FAIL" $_.Exception.Message
+            Write-Warning "The phone's original animation settings could not be fully restored automatically. Review the original values recorded in this QA transcript."
+        }
+    }
+    $failurePath = Join-Path $outputRoot "failure.json"
+    if (Test-Path -LiteralPath $failurePath -PathType Leaf) {
+        try {
+            $failurePayload = Get-Content -LiteralPath $failurePath -Raw | ConvertFrom-Json
+            $failurePayload.results = @($results)
+            $failurePayload | Add-Member -NotePropertyName deviceAnimationSettingsRestored -NotePropertyValue (-not $script:animationSettingsCaptured) -Force
+            $failurePayload | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $failurePath -Encoding UTF8
+        } catch {
+            Write-Warning "Could not refresh failure.json with final device-settings restoration status: $($_.Exception.Message)"
+        }
+    }
+    if ($reverseCreated -and $adb -and $serial) { & $adb -s $serial reverse --remove tcp:3000 2>$null | Out-Null }
+    if ($serverProcess -and -not $serverProcess.HasExited) {
+        $serverProcess.Kill($true)
+        $serverProcess.WaitForExit(5000) | Out-Null
+    }
+}

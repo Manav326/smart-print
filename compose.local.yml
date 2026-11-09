@@ -1,5 +1,5 @@
- # The legacy project name is intentionally retained so existing QA volumes stay attached.
-name: qrtoprint-local
+ # SmartPrint runtime identity. Explicit volume names preserve the existing local database and documents during the project rename.
+name: smart-print
 
 services:
   db:
@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-qrtoprint}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qrtoprint-local-only-db-password}
     volumes:
-      - qrtoprint_local_database:/var/lib/postgresql/data
+      - smart_print_database:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qrtoprint} -d ${POSTGRES_DB:-qrtoprint}"]
       interval: 10s
@@ -42,11 +42,11 @@ services:
       PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:-Manav326/smart-print}
       Cors__AllowedOrigins__0: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env.local}
       Cors__AllowedOrigins__1: "http://localhost:3000"
-      Cors__AllowedOrigins__2: "http://127.0.0.1:3000"
+      Cors__AllowedOrigins__2: "${SMARTPRINT_LOCAL_ORIGIN:-http://127.0.0.1:3000}"
     # Keep the API private to the Compose network. The portal proxies /api and /health
     # to smart-print-api:8080; publishing host port 8080 would collide with other local products.
     volumes:
-      - qrtoprint_local_documents:/var/lib/qrtoprint/documents
+      - smart_print_documents:/var/lib/qrtoprint/documents
     depends_on:
       db:
         condition: service_healthy
@@ -64,6 +64,7 @@ services:
       dockerfile: apps/portal/Dockerfile
       args:
         VITE_API_BASE_URL: ""
+        VITE_ENABLE_PHOTO_STUDIO_QA: "true"
     restart: unless-stopped
     ports:
       - "127.0.0.1:3000:80"
@@ -83,8 +84,15 @@ services:
       start_period: 10s
 
 volumes:
-  qrtoprint_local_database:
-  qrtoprint_local_documents:
+  # These are the existing persistent data volumes from the pre-rename stack.
+  # Mark them external so Compose reuses them regardless of the new project name
+  # and does not try to adopt/recreate data owned by the old Compose project.
+  smart_print_database:
+    external: true
+    name: qrtoprint-local_qrtoprint_local_database
+  smart_print_documents:
+    external: true
+    name: qrtoprint-local_qrtoprint_local_documents
 
 networks:
   cloudflare-edge:

@@ -6,7 +6,7 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env.local"
 $composeFile = Join-Path $repoRoot "compose.local.yml"
 # Never inherit COMPOSE_PROJECT_NAME from the caller: this is an isolated app stack.
-$composeProjectName = "qrtoprint-local"
+$composeProjectName = "smart-print"
 $composeBaseArgs = @("--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
 $exampleEnvPath = Join-Path $repoRoot ".env.example"
 
