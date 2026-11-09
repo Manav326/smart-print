@@ -60,6 +60,118 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
+    public async Task AmbiguousProviderCreateResponseIsReconciledByReceiptWithoutCreatingADuplicate()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            fixture.Razorpay.LoseCreateOrderResponseAfterCreating = true;
+
+            var order = await fixture.CreateOrderAsync("ambiguous-provider-response");
+
+            Assert.StartsWith("order_test_", order.OrderId);
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal("CREATED", (await fixture.Db.ShopSubscriptionPayments.SingleAsync()).Status);
+            Assert.Equal(order.OrderId, (await fixture.Db.ShopSubscriptionPayments.SingleAsync()).RazorpayOrderId);
+        });
+    }
+
+    [Fact]
+    public async Task UnknownProviderCreateOutcomeCanBeResumedAfterReceiptReconciliation()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            fixture.Razorpay.LoseCreateOrderResponseAfterCreating = true;
+            fixture.Razorpay.HideOrdersFromReceiptLookup = true;
+
+            var exception = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.CreateOrderAsync("unknown-provider-response"));
+
+            Assert.Equal("subscription_order_confirmation_pending", exception.Code);
+            var payment = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
+            Assert.Equal("CREATION_UNKNOWN", payment.Status);
+            Assert.StartsWith("pending_", payment.RazorpayOrderId);
+
+            fixture.Razorpay.HideOrdersFromReceiptLookup = false;
+            var resumed = await fixture.Service.ResumeOrderAsync(
+                fixture.TenantId, payment.Id, CancellationToken.None);
+
+            Assert.StartsWith("order_test_", resumed.OrderId);
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal("CREATED", (await fixture.Db.ShopSubscriptionPayments.SingleAsync()).Status);
+        });
+    }
+
+    [Fact]
+    public async Task ResumeReturnsTheExistingOrderWithoutCreatingAnotherProviderOrder()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var order = await fixture.CreateOrderAsync("resume-existing-order");
+            var payment = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
+
+            var resumed = await fixture.Service.ResumeOrderAsync(
+                fixture.TenantId, payment.Id, CancellationToken.None);
+
+            Assert.Equal(order.OrderId, resumed.OrderId);
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
+        });
+    }
+
+    [Fact]
+    public async Task SubscriptionOrderAboveOneLakhRupeesIsRejectedBeforeProviderCall()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var version = await fixture.Db.SubscriptionPlanVersions.SingleAsync(
+                item => item.Id == fixture.PlanVersionId);
+            version.MonthlyPriceMinor = RazorpaySubscriptionPaymentRules.MaximumOrderAmountMinor + 1;
+            await fixture.Db.SaveChangesAsync();
+
+            var exception = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.CreateOrderAsync("amount-over-provider-limit"));
+
+            Assert.Equal("subscription_amount_exceeds_provider_limit", exception.Code);
+            Assert.Equal(0, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal(0, await fixture.Db.ShopSubscriptionPayments.CountAsync());
+        });
+    }
+
+    [Fact]
+    public async Task SamePlanRenewalStartsAfterUnusedCurrentPeriodInsteadOfLosingIt()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+            var preservedEnd = DateTimeOffset.UtcNow.AddDays(20);
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanCode = "PRO",
+                Status = "Active",
+                BillingInterval = "Monthly",
+                PeriodStartUtc = DateTimeOffset.UtcNow.AddDays(-10),
+                PeriodEndUtc = preservedEnd,
+                CreatedUtc = DateTimeOffset.UtcNow
+            });
+            await fixture.Db.SaveChangesAsync();
+
+            var order = await fixture.CreateOrderAsync("same-plan-renewal");
+            var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
+            var verified = await fixture.Service.VerifyCheckoutAsync(
+                fixture.TenantId, order.OrderId, paymentId,
+                CheckoutSignature(order.OrderId, paymentId), CancellationToken.None);
+
+            var renewed = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.Id == verified.SubscriptionId);
+
+            Assert.Equal(preservedEnd, renewed.PeriodStartUtc);
+            Assert.Equal(preservedEnd.AddMonths(1), renewed.PeriodEndUtc);
+        });
+    }
+
+    [Fact]
     public async Task SameClientRequestIdReusesTheServerCreatedRazorpayOrder()
     {
         await WithPostgresAsync(async fixture =>
@@ -580,6 +692,8 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
         public int GetPaymentCalls { get; private set; }
         public string PaymentStatus { get; set; } = "captured";
         public long ActualAmountOffsetMinor { get; set; }
+        public bool LoseCreateOrderResponseAfterCreating { get; set; }
+        public bool HideOrdersFromReceiptLookup { get; set; }
 
         public string PaymentIdFor(string orderId) =>
             payments.Single(item => item.Value.OrderId == orderId).Key;
@@ -596,17 +710,45 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
                 using var document = JsonDocument.Parse(body);
                 var amount = document.RootElement.GetProperty("amount").GetInt64();
                 var currency = document.RootElement.GetProperty("currency").GetString() ?? "INR";
+                var receipt = document.RootElement.GetProperty("receipt").GetString() ?? string.Empty;
+                var notes = document.RootElement.GetProperty("notes");
+                var subscriptionPaymentId = notes.GetProperty("subscription_payment_id").GetString() ?? string.Empty;
                 var number = Interlocked.Increment(ref nextOrder);
                 var orderId = "order_test_" + number;
                 var paymentId = "pay_test_" + number;
-                payments[paymentId] = new PaymentRecord(orderId, amount, currency);
+                payments[paymentId] = new PaymentRecord(orderId, amount, currency, receipt, subscriptionPaymentId);
+                if (LoseCreateOrderResponseAfterCreating)
+                    return Json(HttpStatusCode.InternalServerError, new { error = new { description = "Simulated lost create-order response." } });
                 return Json(HttpStatusCode.OK, new
                 {
                     id = orderId,
                     amount,
                     currency,
-                    status = "created"
+                    status = "created",
+                    notes = new { subscription_payment_id = subscriptionPaymentId }
                 });
+            }
+
+            if (request.Method == HttpMethod.Get && path == "/v1/orders")
+            {
+                if (HideOrdersFromReceiptLookup)
+                    return Json(HttpStatusCode.OK, new { items = Array.Empty<object>() });
+                var query = request.RequestUri?.Query ?? string.Empty;
+                var receipt = query.StartsWith("?receipt=", StringComparison.Ordinal)
+                    ? Uri.UnescapeDataString(query["?receipt=".Length..])
+                    : string.Empty;
+                var items = payments.Values
+                    .Where(item => item.Receipt == receipt)
+                    .Select(item => new
+                    {
+                        id = item.OrderId,
+                        amount = item.AmountMinor,
+                        currency = item.Currency,
+                        status = "created",
+                        notes = new { subscription_payment_id = item.SubscriptionPaymentId }
+                    })
+                    .ToArray();
+                return Json(HttpStatusCode.OK, new { items });
             }
 
             if (request.Method == HttpMethod.Get && path.StartsWith("/v1/payments/", StringComparison.Ordinal))
@@ -635,6 +777,11 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
                 Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
             };
 
-        private sealed record PaymentRecord(string OrderId, long AmountMinor, string Currency);
+        private sealed record PaymentRecord(
+            string OrderId,
+            long AmountMinor,
+            string Currency,
+            string Receipt,
+            string SubscriptionPaymentId);
     }
 }
