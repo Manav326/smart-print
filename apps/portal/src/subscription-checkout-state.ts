@@ -64,7 +64,7 @@ export function subscriptionPaymentStatusMessage(status: string): string {
     case "CAPTURED_REVIEW_REQUIRED":
       return "Razorpay confirmed your payment. SmartPrint support must review the plan assignment before access is activated.";
     case "FAILED":
-      return "This payment attempt failed. You can safely retry the same order.";
+      return "This payment attempt failed. You can safely try again by retrying the same order.";
     case "CREATED":
       return "Payment order is ready. Continue checkout to activate the subscription.";
     case "CREATING":
