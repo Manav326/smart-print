@@ -410,6 +410,19 @@ function Invoke-WindowsArtifactTests([string]$DesktopDirectory, [string]$ModeFor
     $productionHash = (Get-FileHash -LiteralPath $productionExe -Algorithm SHA256).Hash.ToLowerInvariant()
     Write-Host ("Verified production Windows executable package: {0} ({1} bytes, SHA-256 {2}). It is not launched locally because it is compiled with the configured service origin." -f $productionInfo.FullName, $productionInfo.Length, $productionHash) -ForegroundColor DarkCyan
 
+    $desktopProcessNames = @("SmartPrint.Desktop.exe", "smartprint-desktop.exe", "SmartPrint.Desktop.QA.exe")
+    try {
+        $existingDesktopProcesses = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop |
+            Where-Object { $desktopProcessNames -contains $_.Name })
+    } catch {
+        throw "Could not safely inspect running SmartPrint Desktop sessions. Refusing to launch another QA window."
+    }
+    if ($existingDesktopProcesses.Count -gt 0) {
+        $processSummary = $existingDesktopProcesses | ForEach-Object { "$($_.Name) PID=$($_.ProcessId)" }
+        throw ("A SmartPrint Desktop session is already running: " + ($processSummary -join ", ") +
+            ". Close it manually and rerun Windows QA. The coordinator will not close, replace or take over an active session.")
+    }
+
     $mixed = Join-Path $PSScriptRoot "mixed-batch-refund-test.ps1"
     $qaConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot "smartprint-qa.config.json") -Raw | ConvertFrom-Json -ErrorAction Stop
     $debugPort = [int]$qaConfig.apps.windows.webViewDevToolsPort
