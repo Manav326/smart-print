@@ -3,6 +3,9 @@ import test from "node:test";
 import {
   formatSubscriptionAmount,
   getPaidBillingIntervals,
+  isUnsettledSubscriptionPayment,
+  subscriptionPaymentActionLabel,
+  subscriptionPaymentStatusLabel,
   subscriptionPaymentStatusMessage
 } from "../src/subscription-checkout-state.ts";
 
@@ -37,6 +40,22 @@ test("both unset prices produce no checkout choices", () => {
 test("subscription plan price is formatted from paise in Indian currency format", () => {
   assert.equal(formatSubscriptionAmount(49900, "INR"), "₹499.00");
   assert.equal(formatSubscriptionAmount(125050, "INR"), "₹1,250.50");
+});
+
+test("only unresolved payment states block a new subscription order", () => {
+  assert.equal(isUnsettledSubscriptionPayment("CREATING"), true);
+  assert.equal(isUnsettledSubscriptionPayment("CREATION_UNKNOWN"), true);
+  assert.equal(isUnsettledSubscriptionPayment("CREATED"), true);
+  assert.equal(isUnsettledSubscriptionPayment("FAILED"), true);
+  assert.equal(isUnsettledSubscriptionPayment("CAPTURED_REVIEW_REQUIRED"), true);
+  assert.equal(isUnsettledSubscriptionPayment("CAPTURED"), false);
+});
+
+test("pending subscription payments expose an action appropriate to their recovery state", () => {
+  assert.equal(subscriptionPaymentActionLabel("CREATED"), "Continue payment");
+  assert.equal(subscriptionPaymentActionLabel("FAILED"), "Retry payment");
+  assert.equal(subscriptionPaymentActionLabel("CREATION_UNKNOWN"), "Check order status");
+  assert.equal(subscriptionPaymentStatusLabel("CREATION_UNKNOWN"), "Confirmation pending");
 });
 
 test("captured payment is reported as verified and active", () => {
