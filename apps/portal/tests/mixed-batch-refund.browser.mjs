@@ -158,12 +158,23 @@ async function waitForServer(child) {
 
 async function waitForNativeApplicationPage(page, phase, { requireAuthenticatedShell = true } = {}) {
   const expectedPort = new URL(baseUrl).port || "80";
+  const prebuiltNativeExecutable = Boolean(process.env.SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE);
   try {
-    // CDP can attach before the Tauri WebView has navigated away from about:blank.
-    await page.waitForURL(
-      url => url.protocol === "http:" && url.port === expectedPort,
-      { timeout: 60_000 }
-    );
+    // Tauri dev uses the explicit Vite port. A packaged/CI QA executable uses
+    // the app's bundled tauri.localhost origin instead, so in prebuilt mode
+    // wait for the real Tauri bridge rather than incorrectly requiring :1420.
+    if (!prebuiltNativeExecutable) {
+      await page.waitForURL(
+        url => url.protocol === "http:" && url.port === expectedPort,
+        { timeout: 60_000 }
+      );
+    } else {
+      await page.waitForFunction(
+        () => location.protocol !== "about:" && location.protocol !== "devtools:",
+        null,
+        { timeout: 60_000 }
+      );
+    }
     await page.waitForFunction(
       () => typeof window.__TAURI_INTERNALS__?.invoke === "function",
       null,
@@ -488,9 +499,15 @@ try {
     const expectedPort = new URL(baseUrl).port;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       const pages = context.pages();
+      const prebuiltNativeExecutable = Boolean(process.env.SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE);
       page = pages.find(candidate => {
-        try { return new URL(candidate.url()).port === expectedPort; }
-        catch { return false; }
+        try {
+          if (prebuiltNativeExecutable) {
+            const url = new URL(candidate.url());
+            return url.protocol !== "about:" && url.protocol !== "devtools:";
+          }
+          return new URL(candidate.url()).port === expectedPort;
+        } catch { return false; }
       }) || pages[0] || null;
       if (page) break;
       await new Promise(resolve => setTimeout(resolve, 500));
