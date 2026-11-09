@@ -200,6 +200,7 @@ function Get-GhRun {
         if ($LASTEXITCODE -ne 0) { throw "Could not read GitHub Actions run $WorkflowRunId." }
         $run = $runJson | ConvertFrom-Json -ErrorAction Stop
         if ([string]$run.headSha -ne $sourceCommit) { throw "Run $WorkflowRunId belongs to commit $($run.headSha), not this checkout ($sourceCommit). No artifact was downloaded." }
+        if ([string]$run.workflowName -ne "CI") { throw "Run $WorkflowRunId is '$($run.workflowName)', not the SmartPrint CI workflow." }
         if ([string]$run.status -ne "completed" -or [string]$run.conclusion -ne "success") { throw "Run $WorkflowRunId is not fully successful (status=$($run.status), conclusion=$($run.conclusion))." }
         return $run
     }
@@ -242,7 +243,7 @@ function Test-CIArtifactManifest([string]$Directory, [string]$ExpectedPlatform) 
         if ([IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\\/])\.\.([\\/]|$)') { throw "Unsafe artifact manifest path: $relative" }
         $filePath = [IO.Path]::GetFullPath((Join-Path $Directory $relative))
         if (-not $filePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw "Artifact manifest path escaped its extraction directory: $relative" }
-        if (-not $listedPaths.Add($relative.Replace([IO.Path]::DirectorySeparatorChar, "/"))) { throw "Duplicate path in artifact manifest: $relative" }
+        if (-not $listedPaths.Add($relative.Replace([string][IO.Path]::DirectorySeparatorChar, "/"))) { throw "Duplicate path in artifact manifest: $relative" }
         if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) { throw "Artifact file is missing: $relative" }
         $item = Get-Item -LiteralPath $filePath
         if ([long]$item.Length -ne [long]$entry.bytes) { throw "Artifact file size mismatch: $relative" }
@@ -250,7 +251,7 @@ function Test-CIArtifactManifest([string]$Directory, [string]$ExpectedPlatform) 
         if ($hash -ne [string]$entry.sha256) { throw "Artifact SHA-256 mismatch: $relative" }
     }
     $actualPaths = @(Get-ChildItem -LiteralPath $Directory -File -Recurse | ForEach-Object {
-        $_.FullName.Substring($root.Length).Replace([IO.Path]::DirectorySeparatorChar, "/")
+        $_.FullName.Substring($root.Length).Replace([string][IO.Path]::DirectorySeparatorChar, "/")
     } | Where-Object { $_ -ne "qa-artifact-manifest.json" })
     foreach ($actualPath in $actualPaths) {
         if (-not $listedPaths.Contains($actualPath)) { throw "Artifact contains an unmanifested file: $actualPath" }
