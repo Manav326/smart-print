@@ -401,7 +401,8 @@ function Invoke-WindowsArtifactTests([string]$DesktopDirectory, [string]$ModeFor
     $mixed = Join-Path $PSScriptRoot "mixed-batch-refund-test.ps1"
     $qaConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot "smartprint-qa.config.json") -Raw | ConvertFrom-Json -ErrorAction Stop
     $debugPort = [int]$qaConfig.apps.windows.webViewDevToolsPort
-    & $mixed -Platform Windows -SkipInstall -Headed:$(-not $Headless) -NativeExecutablePath $qaExe -WebView2DebugPort $debugPort -ArtifactDirectory (Join-Path $runDirectory "windows-mixed-batch")
+    $mixedPlatform = if ($ModeForTest -eq "Pull") { "NativeWindows" } else { "Windows" }
+    & $mixed -Platform $mixedPlatform -SkipInstall -Headed:$(-not $Headless) -NativeExecutablePath $qaExe -WebView2DebugPort $debugPort -ArtifactDirectory (Join-Path $runDirectory "windows-mixed-batch")
     if ($LASTEXITCODE -ne 0) { throw "Windows native WebView2 mixed-batch acceptance failed." }
 }
 
@@ -482,8 +483,8 @@ try {
         if ($WorkflowRunId) { throw "-WorkflowRunId is only valid with -Mode Pull." }
     }
 
-    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot "node_modules") -PathType Container)) {
-        Invoke-QAStep "Shared" "Install locked Node dependencies once" {
+    if ($Mode -eq "Build" -and -not (Test-Path -LiteralPath (Join-Path $repoRoot "node_modules") -PathType Container)) {
+        Invoke-QAStep "Shared" "Install locked Node dependencies for the selected local builds" {
             & pnpm.cmd install --frozen-lockfile
         } -Evidence (Join-Path $runDirectory "pnpm-install.log") | Out-Null
     }
