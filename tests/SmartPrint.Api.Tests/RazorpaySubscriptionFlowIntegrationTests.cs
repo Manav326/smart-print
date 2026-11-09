@@ -280,6 +280,28 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
+    public async Task ConcurrentDifferentClientRequestIdsShareOneUnsettledOrder()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            await using var secondDb = fixture.CreateAdditionalDbContext();
+            var secondService = fixture.CreateService(secondDb);
+
+            var results = await Task.WhenAll(
+                fixture.Service.CreateOrderAsync(
+                    fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
+                    "Monthly", "parallel-request-one", CancellationToken.None),
+                secondService.CreateOrderAsync(
+                    fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
+                    "Monthly", "parallel-request-two", CancellationToken.None));
+
+            Assert.Equal(results[0].OrderId, results[1].OrderId);
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal(1, await fixture.Db.ShopSubscriptionPayments.CountAsync());
+        });
+    }
+
+    [Fact]
     public async Task DifferentPlanCannotCreateASecondOrderWhileFirstPaymentIsUnsettled()
     {
         await WithPostgresAsync(async fixture =>
@@ -511,6 +533,23 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
             Db.AddRange(tenant, owner, plan, version, trial);
             await Db.SaveChangesAsync();
         }
+
+        public SmartPrintDbContext CreateAdditionalDbContext()
+        {
+            var scopedConnection = new NpgsqlConnectionStringBuilder(rootConnectionString)
+            {
+                SearchPath = schemaName
+            }.ConnectionString;
+            var options = new DbContextOptionsBuilder<SmartPrintDbContext>()
+                .UseNpgsql(scopedConnection, npgsql => npgsql.MigrationsAssembly(
+                    typeof(InitialPlatform).Assembly.GetName().Name))
+                .ReplaceService<IMigrationsIdGenerator, LegacyCompatibleMigrationsIdGenerator>()
+                .Options;
+            return new SmartPrintDbContext(options);
+        }
+
+        public SubscriptionRazorpayService CreateService(SmartPrintDbContext context) =>
+            new(context, httpClient, configuration);
 
         public Task<ShopSubscriptionPaymentOrderResponse> CreateOrderAsync(string? clientRequestId = null) =>
             Service.CreateOrderAsync(

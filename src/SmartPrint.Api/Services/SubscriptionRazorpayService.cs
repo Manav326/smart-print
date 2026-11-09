@@ -75,7 +75,7 @@ public sealed class SubscriptionRazorpayService(
         }
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var lockKey = $"shop-subscription-request:{tenantId:N}:{requestId}";
+        var lockKey = $"shop-subscription-order-create:{tenantId:N}";
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(5, hashtext({lockKey}))", cancellationToken);
 
