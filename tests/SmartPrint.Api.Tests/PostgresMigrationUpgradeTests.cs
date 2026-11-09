@@ -43,6 +43,92 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Equal(30, settings.AgentCompletedDocumentRetentionDays);
         Assert.Equal(30, settings.PendingLocalUploadRetentionDays);
         Assert.True(settings.AllowPaidJobClaimsWhenSuspended);
+
+        // Exercise the new subscription-payment schema against the real PostgreSQL migration.
+        var paymentTenant = new Tenant
+        {
+            Slug = $"razorpay-payment-{Guid.NewGuid():N}"[..30],
+            BusinessName = "Razorpay subscription test shop"
+        };
+        var paymentPlan = new SubscriptionPlan
+        {
+            Code = $"RZPY_{Guid.NewGuid():N}"[..20].ToUpperInvariant(),
+            Name = "Razorpay test plan",
+            IsActive = true
+        };
+        var paymentPlanVersion = new SubscriptionPlanVersion
+        {
+            PlanId = paymentPlan.Id,
+            Version = 1,
+            Status = "Published",
+            Currency = "INR",
+            MonthlyPriceMinor = 49900,
+            AnnualPriceMinor = 499900,
+            CloudAssistedPrintingEnabled = true
+        };
+        db.AddRange(paymentTenant, paymentPlan, paymentPlanVersion);
+        await db.SaveChangesAsync();
+
+        var razorpayOrderId = $"order_{Guid.NewGuid():N}";
+        var razorpayPayment = new ShopSubscriptionPayment
+        {
+            TenantId = paymentTenant.Id,
+            PlanVersionId = paymentPlanVersion.Id,
+            PlanCode = paymentPlan.Code,
+            PlanName = paymentPlan.Name,
+            BillingInterval = "Monthly",
+            AmountMinor = 49900,
+            Currency = "INR",
+            IdempotencyKey = $"razorpay-order-{Guid.NewGuid():N}",
+            RazorpayOrderId = razorpayOrderId,
+            Status = "Pending"
+        };
+        var webhookEventId = $"evt_{Guid.NewGuid():N}";
+        db.AddRange(
+            razorpayPayment,
+            new RazorpayWebhookEvent
+            {
+                EventId = webhookEventId,
+                EventType = "payment.captured",
+                RazorpayOrderId = razorpayOrderId,
+                RazorpayPaymentId = null,
+                Status = "Pending"
+            });
+        await db.SaveChangesAsync();
+
+        await using (var duplicateOrderContext = new SmartPrintDbContext(options))
+        {
+            duplicateOrderContext.ShopSubscriptionPayments.Add(new ShopSubscriptionPayment
+            {
+                TenantId = paymentTenant.Id,
+                PlanVersionId = paymentPlanVersion.Id,
+                PlanCode = paymentPlan.Code,
+                PlanName = paymentPlan.Name,
+                BillingInterval = "Monthly",
+                AmountMinor = 49900,
+                Currency = "INR",
+                IdempotencyKey = $"other-key-{Guid.NewGuid():N}",
+                RazorpayOrderId = razorpayOrderId,
+                Status = "Pending"
+            });
+            await Assert.ThrowsAsync<DbUpdateException>(() => duplicateOrderContext.SaveChangesAsync());
+        }
+
+        await using (var duplicateWebhookContext = new SmartPrintDbContext(options))
+        {
+            duplicateWebhookContext.RazorpayWebhookEvents.Add(new RazorpayWebhookEvent
+            {
+                EventId = webhookEventId,
+                EventType = "payment.captured",
+                RazorpayOrderId = razorpayOrderId,
+                Status = "Pending"
+            });
+            await Assert.ThrowsAsync<DbUpdateException>(() => duplicateWebhookContext.SaveChangesAsync());
+        }
+
+        Assert.Contains(
+            "202611100001_AddRazorpayShopSubscriptionPayments",
+            await db.Database.GetAppliedMigrationsAsync());
         Assert.Contains(
             "202611010003_AddPlatformOperationalSettings",
             await db.Database.GetAppliedMigrationsAsync());
