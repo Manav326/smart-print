@@ -361,7 +361,7 @@ public sealed class RazorpaySubscriptionPaymentService(
 
         try
         {
-            if (eventType is "payment.captured" or "payment.authorized" &&
+            if ((eventType is "payment.captured" or "payment.authorized") &&
                 !string.IsNullOrWhiteSpace(orderId) &&
                 !string.IsNullOrWhiteSpace(paymentId))
             {
@@ -377,7 +377,7 @@ public sealed class RazorpaySubscriptionPaymentService(
             else if (eventType == "payment.failed" &&
                      !string.IsNullOrWhiteSpace(orderId))
             {
-                await MarkPaymentFailedAsync(orderId, ct);
+                await MarkPaymentFailedAsync(orderId, paymentId, ct);
             }
 
             webhookEvent.Status = "Processed";
@@ -388,10 +388,8 @@ public sealed class RazorpaySubscriptionPaymentService(
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            webhookEvent.Status = "Pending";
-            webhookEvent.LastError = exception.GetType().Name;
-            webhookEvent.ProcessedUtc = null;
-            await db.SaveChangesAsync(CancellationToken.None);
+            // The inbox row was durably saved as Pending before processing.
+            // Leave it untouched so a Razorpay retry can safely re-run the event.
             throw new RazorpayPaymentException(
                 "webhook_processing_failed",
                 "The payment webhook was received but could not yet be reconciled. Razorpay should retry this event.",
@@ -422,6 +420,12 @@ public sealed class RazorpaySubscriptionPaymentService(
                 $"SELECT * FROM \"ShopSubscriptionPayments\" WHERE \"Id\" = {paymentRecordId} FOR UPDATE")
             .ToListAsync(ct);
         var payment = locked.SingleOrDefault();
+        if (payment is not null)
+        {
+            // This context may already be tracking a stale copy from checkout verification.
+            // Refresh under the row lock before deciding whether activation already occurred.
+            await db.Entry(payment).ReloadAsync(ct);
+        }
         if (payment is null || payment.Status is "Applied" or "Captured")
         {
             await transaction.CommitAsync(ct);
@@ -460,6 +464,8 @@ public sealed class RazorpaySubscriptionPaymentService(
             await transaction.RollbackAsync(ct);
             return;
         }
+        // Checkout verification may have loaded this entity before waiting for the lock.
+        await db.Entry(payment).ReloadAsync(ct);
         if (payment.Status == "Applied")
         {
             await transaction.CommitAsync(ct);
@@ -554,7 +560,7 @@ public sealed class RazorpaySubscriptionPaymentService(
         await transaction.CommitAsync(ct);
     }
 
-    private async Task MarkPaymentFailedAsync(string orderId, CancellationToken ct)
+    private async Task MarkPaymentFailedAsync(string orderId, string? paymentId, CancellationToken ct)
     {
         var payment = await db.ShopSubscriptionPayments.AsNoTracking()
             .SingleOrDefaultAsync(item => item.RazorpayOrderId == orderId, ct);
@@ -568,12 +574,19 @@ public sealed class RazorpaySubscriptionPaymentService(
                 $"SELECT * FROM \"ShopSubscriptionPayments\" WHERE \"Id\" = {payment.Id} FOR UPDATE")
             .ToListAsync(ct);
         var row = locked.SingleOrDefault();
-        if (row is null || row.Status is "Applied" or "Captured")
+        if (row is not null)
+        {
+            await db.Entry(row).ReloadAsync(ct);
+        }
+        if (row is null || row.Status is "Applied" or "Captured" ||
+            (row.RazorpayPaymentId is not null &&
+             !string.Equals(row.RazorpayPaymentId, paymentId, StringComparison.Ordinal)))
         {
             await transaction.CommitAsync(ct);
             return;
         }
 
+        row.RazorpayPaymentId = paymentId;
         row.Status = "Failed";
         row.FailureCode = "razorpay_payment_failed";
         row.UpdatedUtc = DateTimeOffset.UtcNow;
