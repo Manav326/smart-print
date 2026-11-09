@@ -1021,13 +1021,27 @@ public sealed class SubscriptionRazorpayService(
     {
         // A timeout handler must never overwrite a state already advanced by a
         // concurrent resume, payment callback or webhook.
-        await db.ShopSubscriptionPayments
+        var updatedUtc = DateTimeOffset.UtcNow;
+        var updated = await db.ShopSubscriptionPayments
             .Where(item => item.Id == paymentId && item.Status == "CREATING")
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(item => item.Status, "CREATION_UNKNOWN")
-                    .SetProperty(item => item.UpdatedUtc, DateTimeOffset.UtcNow),
+                    .SetProperty(item => item.UpdatedUtc, updatedUtc),
                 cancellationToken);
+
+        if (updated > 0)
+        {
+            // ExecuteUpdateAsync bypasses the change tracker. Keep this scoped context
+            // consistent, but only after the conditional database update actually won.
+            var tracked = db.ChangeTracker.Entries<ShopSubscriptionPayment>()
+                .SingleOrDefault(entry => entry.Entity.Id == paymentId);
+            if (tracked is not null)
+            {
+                tracked.Entity.Status = "CREATION_UNKNOWN";
+                tracked.Entity.UpdatedUtc = updatedUtc;
+            }
+        }
     }
 
     private async Task<JsonObject> SendRazorpayRequestAsync(
