@@ -140,8 +140,10 @@ export default function ShopSubscriptionCheckout({
   }
 
   async function refreshData(showSpinner = false): Promise<ShopSubscriptionPaymentRecord[] | null> {
-    if (showSpinner) setRefreshing(true);
-    setError("");
+    if (showSpinner) {
+      setRefreshing(true);
+      setError("");
+    }
 
     const [plansResult, paymentsResult] = await Promise.allSettled([
       getShopSubscriptionPlans(token),
@@ -348,6 +350,7 @@ export default function ShopSubscriptionCheckout({
       {error && <div className="inline-error subscription-payment-message" role="alert"><AlertCircle size={15}/><span>{error}</span></div>}
       {notice && <div className="inline-success subscription-payment-message" role="status"><CheckCircle2 size={15}/><span>{notice}</span></div>}
       {historyError && <div className="inline-error subscription-payment-message" role="status"><AlertCircle size={15}/><span>{historyError}</span></div>}
+      {planError && plans.length > 0 && <div className="inline-error subscription-payment-message" role="status"><AlertCircle size={15}/><span>Could not refresh the published plan list. Existing plan choices remain visible.</span></div>}
 
       {pendingPayment && (
         <div className="inline-error subscription-payment-message" role="status">
