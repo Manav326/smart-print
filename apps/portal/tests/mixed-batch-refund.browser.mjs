@@ -330,7 +330,7 @@ async function installApiRoutes(page) {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     const method = request.method().toUpperCase();
-    apiRequests.push({ method, path });
+    apiRequests.push({ method, path, origin: new URL(request.url()).origin });
 
     if (method === "GET" && path === "/api/v1/shop/profile") return json(route, shopProfile);
     if (method === "GET" && path === "/api/v1/shop/pricing") return json(route, pricing);
@@ -656,14 +656,37 @@ try {
 
   const firstPdfRequest = refundRequests.find(item => item.jobId === pdfJob.id);
   assert.ok(firstPdfRequest?.idempotencyKey);
-  duplicateReplay = await page.evaluate(async ({ jobId, token, requestBody }) => {
-    const response = await fetch("/api/v1/shop/print-jobs/" + jobId + "/refund", {
+  // Replay against the same API origin that accepted the original UI refund.
+  // In Tauri, the page origin is a bundled app origin (tauri.localhost), while
+  // apiBase may be the configured Agent/API origin. A relative fetch would hit
+  // the Tauri asset handler and can return index.html instead of API JSON.
+  const refundApiRequest = apiRequests
+    .filter(item => item.method === "POST" && /\/refund$/.test(item.path))
+    .at(-1);
+  assert.ok(refundApiRequest?.origin, "The original UI refund API origin was not captured.");
+  duplicateReplay = await page.evaluate(async ({ apiOrigin, jobId, token, requestBody }) => {
+    const endpoint = new URL("/api/v1/shop/print-jobs/" + jobId + "/refund", apiOrigin).toString();
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
       body: JSON.stringify(requestBody)
     });
-    return { status: response.status, body: await response.json() };
+    const rawBody = await response.text();
+    let body;
+    try {
+      body = rawBody ? JSON.parse(rawBody) : null;
+    } catch {
+      throw new Error(
+        "Idempotent refund retry expected JSON but received a non-JSON response. " +
+        "URL=" + response.url +
+        " status=" + response.status +
+        " contentType=" + (response.headers.get("content-type") || "(missing)") +
+        " bodyPrefix=" + rawBody.slice(0, 160)
+      );
+    }
+    return { status: response.status, body };
   }, {
+    apiOrigin: refundApiRequest.origin,
     jobId: pdfJob.id,
     token: SHOP_TOKEN,
     requestBody: {
