@@ -651,8 +651,11 @@ finally {
 if ($summary.result -ne "PASS") { exit 1 }
 ) { throw "The current checkout did not resolve to a full Git commit SHA." }
 if ($Mode -eq "Pull") {
-    $trackedChanges = @(& git diff --name-only HEAD --) + @(& git diff --cached --name-only)
-    if ($LASTEXITCODE -ne 0) { throw "Could not verify the tracked working tree before Pull mode." }
+    $unstagedChanges = @(& git diff --name-only HEAD --)
+    if ($LASTEXITCODE -ne 0) { throw "Could not inspect unstaged tracked changes before Pull mode." }
+    $stagedChanges = @(& git diff --cached --name-only)
+    if ($LASTEXITCODE -ne 0) { throw "Could not inspect staged tracked changes before Pull mode." }
+    $trackedChanges = @($unstagedChanges + $stagedChanges | Select-Object -Unique)
     if ($trackedChanges.Count -gt 0) {
         throw ("Pull mode tests the exact committed CI build. Tracked local changes are present: " +
             (($trackedChanges | Select-Object -Unique) -join ", ") +
