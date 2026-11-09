@@ -63,7 +63,7 @@ const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
 const sectionGroups: { label: string; items: Section[] }[] = [
   { label: "DAILY WORK", items: ["Order Journey", "Overview", "Print Queue", "Customers"] },
   { label: "DEVICES & CONNECTIVITY", items: ["Printers", "QR Stations", "Print Agent"] },
-  { label: "BUSINESS", items: ["Pricing", "Payments"] },
+  { label: "BUSINESS", items: ["Pricing", "Subscription", "Payments"] },
   { label: "INSIGHTS", items: ["Reports"] }
 ];
 
@@ -3544,7 +3544,7 @@ function pageDescription(section:Section) {
     "QR Stations":"Create secure customer entry points for each counter.",
     "Print Agent":"Pair the Windows computer that hosts your installed printers.",
     "Pricing":"Set your mono, colour and duplex rates.",
-    "Subscription":"Review your assigned plan, entitlement limits and current usage.",
+    "Subscription":"Review your assigned plan, choose a published plan and manage your subscription billing.",
     "Payments":"Configure your shop's payment methods and verify customer print payments.",
     "Customers":"View customer activity and print history.",
     "Reports":"Understand print volume, shop revenue and performance.",
