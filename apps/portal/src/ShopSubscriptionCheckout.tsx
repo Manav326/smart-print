@@ -5,6 +5,7 @@ import {
   getShopSubscriptionPayments,
   getShopSubscriptionPlans,
   getShopSubscription,
+  resumeShopSubscriptionPaymentOrder,
   verifyShopSubscriptionPayment,
   type ShopSubscriptionPaymentRecord,
   type ShopSubscriptionPlanOption,
@@ -13,8 +14,11 @@ import {
 import {
   formatSubscriptionAmount,
   getPaidBillingIntervals,
-  type SubscriptionBillingInterval,
-  subscriptionPaymentStatusMessage
+  isUnsettledSubscriptionPayment,
+  subscriptionPaymentActionLabel,
+  subscriptionPaymentStatusLabel,
+  subscriptionPaymentStatusMessage,
+  type SubscriptionBillingInterval
 } from "./subscription-checkout-state";
 
 type RazorpaySuccess = {
@@ -53,26 +57,39 @@ function ensureRazorpayCheckout(): Promise<void> {
   if (checkoutScriptPromise) return checkoutScriptPromise;
 
   const loading = new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>('script[data-smartprint-razorpay="true"]');
-    if (existing) {
-      if (existing.dataset.loaded === "true") {
-        reject(new Error("Razorpay Checkout did not initialize."));
+    let script = document.querySelector<HTMLScriptElement>('script[data-smartprint-razorpay="true"]');
+    if (script?.dataset.failed === "true") {
+      script.remove();
+      script = null;
+    }
+
+    if (script) {
+      if (script.dataset.loaded === "true") {
+        reject(new Error("Razorpay Checkout did not initialize. Reload the page and try again."));
         return;
       }
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Razorpay Checkout could not be loaded.")), { once: true });
+      script.addEventListener("load", () => {
+        if (window.Razorpay) resolve();
+        else reject(new Error("Razorpay Checkout did not initialize."));
+      }, { once: true });
+      script.addEventListener("error", () => reject(new Error("Razorpay Checkout could not be loaded.")), { once: true });
       return;
     }
 
-    const script = document.createElement("script");
+    script = document.createElement("script");
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.async = true;
     script.dataset.smartprintRazorpay = "true";
     script.onload = () => {
-      script.dataset.loaded = "true";
-      resolve();
+      script!.dataset.loaded = "true";
+      if (window.Razorpay) resolve();
+      else reject(new Error("Razorpay Checkout did not initialize."));
     };
-    script.onerror = () => reject(new Error("Razorpay Checkout could not be loaded. Check your connection and try again."));
+    script.onerror = () => {
+      script!.dataset.failed = "true";
+      script!.remove();
+      reject(new Error("Razorpay Checkout could not be loaded. Check your connection and try again."));
+    };
     document.head.appendChild(script);
   });
 
@@ -88,6 +105,8 @@ function priceFor(plan: ShopSubscriptionPlanOption, interval: SubscriptionBillin
   return interval === "Monthly" ? plan.monthlyPriceMinor : plan.annualPriceMinor;
 }
 
+const statusPollDelays = [1500, 3000, 5000, 8000];
+
 export default function ShopSubscriptionCheckout({
   token,
   onSubscriptionUpdated
@@ -100,35 +119,164 @@ export default function ShopSubscriptionCheckout({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [busyOption, setBusyOption] = useState<string | null>(null);
+  const [planError, setPlanError] = useState("");
+  const [historyError, setHistoryError] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const paymentsRef = useRef<ShopSubscriptionPaymentRecord[]>([]);
   const requestIds = useRef(new Map<string, string>());
+  const pollSequence = useRef(0);
+  const mounted = useRef(true);
 
-  async function refreshData(showSpinner = false) {
-    if (showSpinner) setRefreshing(true);
-    setError("");
+  async function refreshSubscriptionSummary() {
     try {
-      const [nextPlans, nextPayments, summary] = await Promise.all([
-        getShopSubscriptionPlans(token),
-        getShopSubscriptionPayments(token),
-        getShopSubscription(token)
-      ]);
-      setPlans(nextPlans);
-      setPayments(nextPayments);
-      onSubscriptionUpdated(summary);
-    } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not refresh subscription payment status.");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      const summary = await getShopSubscription(token);
+      if (mounted.current) onSubscriptionUpdated(summary);
+    } catch {
+      if (mounted.current) {
+        setNotice("Your payment is verified. The subscription summary could not be refreshed just now; use Refresh status to update the page.");
+      }
     }
   }
 
+  async function refreshData(showSpinner = false): Promise<ShopSubscriptionPaymentRecord[] | null> {
+    if (showSpinner) setRefreshing(true);
+    setError("");
+
+    const [plansResult, paymentsResult] = await Promise.allSettled([
+      getShopSubscriptionPlans(token),
+      getShopSubscriptionPayments(token)
+    ]);
+
+    if (plansResult.status === "fulfilled") {
+      setPlans(plansResult.value);
+      setPlanError("");
+    } else {
+      setPlanError(plansResult.reason instanceof Error
+        ? plansResult.reason.message
+        : "Published subscription plans could not be loaded. Please try again.");
+    }
+
+    let latestPayments: ShopSubscriptionPaymentRecord[] | null = null;
+    if (paymentsResult.status === "fulfilled") {
+      latestPayments = paymentsResult.value;
+      paymentsRef.current = latestPayments;
+      setPayments(latestPayments);
+      setHistoryError("");
+    } else {
+      setHistoryError(paymentsResult.reason instanceof Error
+        ? paymentsResult.reason.message
+        : "Payment history could not be refreshed. Your plan choices are still available.");
+    }
+
+    setLoading(false);
+    setRefreshing(false);
+    return latestPayments;
+  }
+
   useEffect(() => {
+    mounted.current = true;
     void refreshData();
+    // Warm the checkout script while the owner reviews plans, before any payable order is created.
+    void ensureRazorpayCheckout().catch(() => undefined);
+    return () => {
+      mounted.current = false;
+      pollSequence.current += 1;
+    };
     // The current token identifies the shop session; do not create another payment session on refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  async function pollPaymentStatus(reference: string, matchByRecordId = false) {
+    const sequence = ++pollSequence.current;
+    for (const delay of statusPollDelays) {
+      await new Promise(resolve => window.setTimeout(resolve, delay));
+      if (!mounted.current || sequence !== pollSequence.current) return;
+
+      await refreshData();
+      const payment = paymentsRef.current.find(item =>
+        matchByRecordId ? item.id === reference : item.razorpayOrderId === reference
+      );
+      if (!payment) continue;
+
+      if (payment.status === "CAPTURED") {
+        setNotice(subscriptionPaymentStatusMessage(payment.status));
+        await refreshSubscriptionSummary();
+        return;
+      }
+      if (payment.status === "FAILED" || payment.status === "CAPTURED_REVIEW_REQUIRED") {
+        setNotice(subscriptionPaymentStatusMessage(payment.status));
+        return;
+      }
+    }
+
+    if (mounted.current && sequence === pollSequence.current) {
+      setNotice("Payment status is still being confirmed. SmartPrint will not activate access until Razorpay capture is verified. You can safely use Refresh status to check again.");
+    }
+  }
+
+  async function openRazorpayCheckout(
+    order: Awaited<ReturnType<typeof createShopSubscriptionPaymentOrder>>,
+    optionKey: string,
+    paymentRecordId?: string
+  ) {
+    if (!window.Razorpay) throw new Error("Razorpay Checkout is unavailable in this browser.");
+
+    const checkout = new window.Razorpay({
+      key: order.keyId,
+      amount: order.amountMinor,
+      currency: order.currency,
+      name: "SmartPrint by QuantaEdge",
+      description: order.planName + " · " + order.billingInterval + " subscription",
+      order_id: order.orderId,
+      theme: { color: "#7662E8" },
+      handler: async response => {
+        if (response.razorpay_order_id && response.razorpay_order_id !== order.orderId) {
+          setError("The payment response did not match the subscription order. SmartPrint has not activated the plan.");
+          setBusyOption(null);
+          void pollPaymentStatus(paymentRecordId ?? order.orderId, Boolean(paymentRecordId));
+          return;
+        }
+
+        try {
+          const verified = await verifyShopSubscriptionPayment(token, {
+            orderId: order.orderId,
+            paymentId: response.razorpay_payment_id,
+            signature: response.razorpay_signature
+          });
+          setNotice(subscriptionPaymentStatusMessage(verified.status));
+          if (verified.status === "CAPTURED") {
+            requestIds.current.delete(optionKey);
+            await refreshData();
+            await refreshSubscriptionSummary();
+          } else {
+            await refreshData();
+            void pollPaymentStatus(paymentRecordId ?? order.orderId, Boolean(paymentRecordId));
+          }
+        } catch (exception) {
+          setNotice("Razorpay returned a payment response, but SmartPrint could not complete immediate verification. Paid access remains protected while the webhook and status checks reconcile the payment.");
+          setError(exception instanceof Error ? exception.message : "Immediate payment verification could not be completed.");
+          void pollPaymentStatus(paymentRecordId ?? order.orderId, Boolean(paymentRecordId));
+        } finally {
+          setBusyOption(null);
+        }
+      },
+      modal: {
+        ondismiss: () => {
+          setBusyOption(null);
+          setNotice("Checkout was closed. No subscription access was granted. SmartPrint is checking whether a payment completed before the window closed.");
+          void pollPaymentStatus(paymentRecordId ?? order.orderId, Boolean(paymentRecordId));
+        }
+      }
+    });
+
+    checkout.on("payment.failed", response => {
+      setBusyOption(null);
+      setError(response.error?.description || "Razorpay could not complete this payment. You can retry the same order.");
+      void pollPaymentStatus(paymentRecordId ?? order.orderId, Boolean(paymentRecordId));
+    });
+    checkout.open();
+  }
 
   async function startCheckout(plan: ShopSubscriptionPlanOption, interval: SubscriptionBillingInterval) {
     const optionKey = plan.id + "|" + interval;
@@ -138,6 +286,9 @@ export default function ShopSubscriptionCheckout({
     setError("");
     setNotice("");
     try {
+      // Ensure the checkout script is ready before creating a provider order. This avoids
+      // leaving an unpaid order behind when the script cannot load on the owner's device.
+      await ensureRazorpayCheckout();
       const clientRequestId = requestIds.current.get(optionKey) ?? crypto.randomUUID();
       requestIds.current.set(optionKey, clientRequestId);
       const order = await createShopSubscriptionPaymentOrder(token, {
@@ -145,67 +296,41 @@ export default function ShopSubscriptionCheckout({
         billingInterval: interval,
         clientRequestId
       });
-
       if (order.provider.toLowerCase() !== "razorpay" || !order.keyId || !order.orderId) {
         throw new Error("SmartPrint did not return a valid Razorpay checkout order.");
       }
-
-      await ensureRazorpayCheckout();
-      if (!window.Razorpay) {
-        throw new Error("Razorpay Checkout is unavailable in this browser.");
-      }
-
-      const checkout = new window.Razorpay({
-        key: order.keyId,
-        amount: order.amountMinor,
-        currency: order.currency,
-        name: "SmartPrint by QuantaEdge",
-        description: order.planName + " · " + interval + " subscription",
-        order_id: order.orderId,
-        theme: { color: "#7662E8" },
-        handler: async response => {
-          if (response.razorpay_order_id && response.razorpay_order_id !== order.orderId) {
-            setError("The payment response did not match the subscription order. SmartPrint has not activated the plan.");
-            setBusyOption(null);
-            return;
-          }
-
-          try {
-            const verified = await verifyShopSubscriptionPayment(token, {
-              orderId: order.orderId,
-              paymentId: response.razorpay_payment_id,
-              signature: response.razorpay_signature
-            });
-            setNotice(subscriptionPaymentStatusMessage(verified.status));
-            if (verified.status === "CAPTURED") requestIds.current.delete(optionKey);
-            await refreshData();
-          } catch (exception) {
-            setNotice("Razorpay returned a payment response, but SmartPrint could not complete the immediate verification request. Access remains protected until the backend verifies capture. You can refresh payment status; the Razorpay webhook will also reconcile a completed payment.");
-            setError(exception instanceof Error ? exception.message : "Immediate payment verification could not be completed.");
-            try { await refreshData(); } catch { /* The message above keeps the recovery path visible. */ }
-          } finally {
-            setBusyOption(null);
-          }
-        },
-        modal: {
-          ondismiss: () => {
-            setBusyOption(null);
-            setNotice("Checkout was closed. No subscription access was granted. You can try again at any time.");
-          }
-        }
-      });
-
-      checkout.on("payment.failed", response => {
-        setBusyOption(null);
-        setError(response.error?.description || "Razorpay could not complete this payment. You can try again.");
-        void refreshData();
-      });
-      checkout.open();
+      await openRazorpayCheckout(order, optionKey);
     } catch (exception) {
       setBusyOption(null);
       setError(exception instanceof Error ? exception.message : "Could not start Razorpay checkout.");
+      void refreshData();
     }
   }
+
+  async function resumePendingPayment(payment: ShopSubscriptionPaymentRecord) {
+    if (busyOption) return;
+
+    setBusyOption("pending:" + payment.id);
+    setError("");
+    setNotice("");
+    try {
+      await ensureRazorpayCheckout();
+      const order = await resumeShopSubscriptionPaymentOrder(token, payment.id);
+      if (order.provider.toLowerCase() !== "razorpay" || !order.keyId || !order.orderId) {
+        throw new Error("SmartPrint did not return a resumable Razorpay order.");
+      }
+      await openRazorpayCheckout(order, "pending:" + payment.id, payment.id);
+    } catch (exception) {
+      setBusyOption(null);
+      setError(exception instanceof Error ? exception.message : "Could not resume the existing payment.");
+      await refreshData();
+      if (payment.status === "CREATING" || payment.status === "CREATION_UNKNOWN") {
+        void pollPaymentStatus(payment.id, true);
+      }
+    }
+  }
+
+  const pendingPayment = payments.find(payment => isUnsettledSubscriptionPayment(payment.status));
 
   return (
     <section className="panel subscription-payment-panel" aria-labelledby="subscription-payment-heading">
@@ -222,9 +347,39 @@ export default function ShopSubscriptionCheckout({
 
       {error && <div className="inline-error subscription-payment-message" role="alert"><AlertCircle size={15}/><span>{error}</span></div>}
       {notice && <div className="inline-success subscription-payment-message" role="status"><CheckCircle2 size={15}/><span>{notice}</span></div>}
+      {historyError && <div className="inline-error subscription-payment-message" role="status"><AlertCircle size={15}/><span>{historyError}</span></div>}
+
+      {pendingPayment && (
+        <div className="inline-error subscription-payment-message" role="status">
+          <Clock3 size={16}/>
+          <span>
+            <strong>Existing subscription payment needs your attention.</strong>{" "}
+            {pendingPayment.planCode} · {pendingPayment.billingInterval} · {formatSubscriptionAmount(pendingPayment.amountMinor, pendingPayment.currency)} — {subscriptionPaymentStatusMessage(pendingPayment.status)}{" "}
+            {pendingPayment.status === "CAPTURED_REVIEW_REQUIRED"
+              ? "Do not pay again. SmartPrint support must finish reviewing this payment."
+              : "Continue this exact order to avoid creating a duplicate charge. Unpaid Razorpay orders cannot be cancelled from this page."}
+          </span>
+          {pendingPayment.status !== "CAPTURED_REVIEW_REQUIRED" && (
+            <button
+              type="button"
+              className="secondary-button small"
+              onClick={() => void resumePendingPayment(pendingPayment)}
+              disabled={Boolean(busyOption)}
+            >
+              {busyOption === "pending:" + pendingPayment.id ? <span className="button-spinner"/> : <CreditCard size={14}/>}
+              {subscriptionPaymentActionLabel(pendingPayment.status)}
+            </button>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <div className="platform-loading-inline"><span className="button-spinner"/> Loading published plans…</div>
+      ) : planError && plans.length === 0 ? (
+        <div className="inline-error subscription-payment-message" role="alert">
+          <AlertCircle size={15}/><span>Published plans could not be loaded: {planError}</span>
+          <button type="button" className="secondary-button small" onClick={() => void refreshData(true)} disabled={refreshing}>Try again</button>
+        </div>
       ) : plans.length === 0 ? (
         <div className="subscription-payment-empty">There are no published paid plans available right now. Please contact SmartPrint support.</div>
       ) : (
@@ -260,7 +415,7 @@ export default function ShopSubscriptionCheckout({
                         type="button"
                         className="primary-button subscription-payment-button"
                         onClick={() => void startCheckout(plan, interval)}
-                        disabled={Boolean(busyOption)}
+                        disabled={Boolean(busyOption) || Boolean(pendingPayment)}
                       >
                         {busyOption === key ? <span className="button-spinner"/> : <CreditCard size={15}/>}
                         <span>
@@ -286,7 +441,7 @@ export default function ShopSubscriptionCheckout({
                 <strong>{payment.planCode} · {payment.billingInterval}</strong>
                 <small>{new Date(payment.createdUtc).toLocaleString("en-IN")}</small>
               </div>
-              <span className={"subscription-payment-history-status " + payment.status.toLowerCase()}>{payment.status.replace(/_/g, " ")}</span>
+              <span className={"subscription-payment-history-status " + payment.status.toLowerCase()}>{subscriptionPaymentStatusLabel(payment.status)}</span>
               <strong>{formatSubscriptionAmount(payment.amountMinor, payment.currency)}</strong>
             </div>
           ))}
@@ -294,7 +449,7 @@ export default function ShopSubscriptionCheckout({
       )}
 
       <div className="subscription-payment-footnote">
-        Razorpay confirms the payment directly with SmartPrint before paid features are enabled. A duplicate or delayed webhook cannot activate the same subscription twice.
+        Monthly and annual subscriptions are one-time payments, not automatic renewals. SmartPrint will not charge your shop again automatically; renew manually from this page. Paid features are enabled only after Razorpay capture is verified.
       </div>
     </section>
   );
