@@ -4,9 +4,9 @@ import { lstat, readdir, readFile, writeFile } from "node:fs/promises";
 import { resolve, relative, sep } from "node:path";
 
 const [rootArg, platformArg] = process.argv.slice(2);
-const allowedPlatforms = new Set(["web", "android", "windows"]);
+const allowedPlatforms = new Set(["web", "webqa", "android", "windows"]);
 if (!rootArg || !allowedPlatforms.has(platformArg)) {
-  console.error("Usage: node scripts/qa/create-qa-artifact-manifest.mjs <artifact-directory> <web|android|windows>");
+  console.error("Usage: node scripts/qa/create-qa-artifact-manifest.mjs <artifact-directory> <web|webqa|android|windows>");
   process.exit(2);
 }
 const root = resolve(rootArg);

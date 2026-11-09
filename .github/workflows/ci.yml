@@ -135,14 +135,16 @@ jobs:
 
       - name: Build isolated Photo Studio QA fixture artifact
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        shell: bash
         env:
           VITE_ENABLE_PHOTO_STUDIO_QA: "true"
         run: |
+          set -euo pipefail
           pnpm --filter @smart-print/portal build
-          if ($LASTEXITCODE -ne 0) { throw "The isolated Photo Studio QA fixture build failed." }
-          if (-not (Test-Path -LiteralPath "apps/portal/dist/tests/photo-studio.browser.html")) {
-            throw "The QA-only Photo Studio browser fixture was not emitted."
-          }
+          if [[ ! -f apps/portal/dist/tests/photo-studio.browser.html ]]; then
+            echo "The QA-only Photo Studio browser fixture was not emitted." >&2
+            exit 1
+          fi
       - name: Package exact-commit Photo Studio QA fixture
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         shell: bash
