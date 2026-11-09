@@ -326,6 +326,7 @@ export default function ShopSubscriptionCheckout({
       setBusyOption(null);
       setError(exception instanceof Error ? exception.message : "Could not resume the existing payment.");
       await refreshData();
+      await refreshSubscriptionSummary();
       if (payment.status === "CREATING" || payment.status === "CREATION_UNKNOWN") {
         void pollPaymentStatus(payment.id, true);
       }
@@ -418,7 +419,7 @@ export default function ShopSubscriptionCheckout({
                         type="button"
                         className="primary-button subscription-payment-button"
                         onClick={() => void startCheckout(plan, interval)}
-                        disabled={Boolean(busyOption) || Boolean(pendingPayment)}
+                        disabled={Boolean(busyOption) || Boolean(pendingPayment) || Boolean(historyError)}
                       >
                         {busyOption === key ? <span className="button-spinner"/> : <CreditCard size={15}/>}
                         <span>
