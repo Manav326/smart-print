@@ -236,16 +236,27 @@ function Test-CIArtifactManifest([string]$Directory, [string]$ExpectedPlatform) 
     if ([string]$manifest.workflowRunId -ne [string]$script:workflowRun.databaseId) { throw "Artifact workflow run ID does not match the selected CI run." }
     if (@($manifest.files).Count -eq 0) { throw "Artifact manifest has an empty file list." }
 
+    $listedPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($entry in $manifest.files) {
         $relative = ([string]$entry.path).Replace("/", [IO.Path]::DirectorySeparatorChar)
         if ([IO.Path]::IsPathRooted($relative) -or $relative -match '(^|[\\/])\.\.([\\/]|$)') { throw "Unsafe artifact manifest path: $relative" }
         $filePath = [IO.Path]::GetFullPath((Join-Path $Directory $relative))
         if (-not $filePath.StartsWith($root, [StringComparison]::OrdinalIgnoreCase)) { throw "Artifact manifest path escaped its extraction directory: $relative" }
+        if (-not $listedPaths.Add($relative.Replace([IO.Path]::DirectorySeparatorChar, "/"))) { throw "Duplicate path in artifact manifest: $relative" }
         if (-not (Test-Path -LiteralPath $filePath -PathType Leaf)) { throw "Artifact file is missing: $relative" }
         $item = Get-Item -LiteralPath $filePath
         if ([long]$item.Length -ne [long]$entry.bytes) { throw "Artifact file size mismatch: $relative" }
         $hash = (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($hash -ne [string]$entry.sha256) { throw "Artifact SHA-256 mismatch: $relative" }
+    }
+    $actualPaths = @(Get-ChildItem -LiteralPath $Directory -File -Recurse | ForEach-Object {
+        $_.FullName.Substring($root.Length).Replace([IO.Path]::DirectorySeparatorChar, "/")
+    } | Where-Object { $_ -ne "qa-artifact-manifest.json" })
+    foreach ($actualPath in $actualPaths) {
+        if (-not $listedPaths.Contains($actualPath)) { throw "Artifact contains an unmanifested file: $actualPath" }
+    }
+    foreach ($listedPath in $listedPaths) {
+        if ($actualPaths -notcontains $listedPath) { throw "Manifest contains a path that was not extracted: $listedPath" }
     }
     return $manifest
 }
