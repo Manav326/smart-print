@@ -342,7 +342,96 @@ try {
         return $gradleExecutable
     }
 
+    function Resolve-AndroidSdkDirectory {
+        $candidates = [System.Collections.Generic.List[string]]::new()
+
+        foreach ($configuredPath in @($env:ANDROID_HOME, $env:ANDROID_SDK_ROOT)) {
+            if (-not [string]::IsNullOrWhiteSpace($configuredPath)) {
+                $candidates.Add([Environment]::ExpandEnvironmentVariables($configuredPath.Trim().Trim('"')))
+            }
+        }
+
+        # Android Studio writes sdk.dir into this machine-local file when the
+        # project is opened there. It is intentionally not committed.
+        $localPropertiesPath = Join-Path $repoRoot "apps/android/local.properties"
+        if (Test-Path -LiteralPath $localPropertiesPath -PathType Leaf) {
+            $sdkLine = Get-Content -LiteralPath $localPropertiesPath |
+                Where-Object { $_ -match '^\s*sdk\.dir\s*=' } |
+                Select-Object -First 1
+            if ($sdkLine) {
+                $localSdkPath = (($sdkLine -split "=", 2)[1]).Trim().Trim('"')
+                $localSdkPath = $localSdkPath -replace '\\\\', '\' -replace '\\:', ':'
+                if (-not [string]::IsNullOrWhiteSpace($localSdkPath)) {
+                    $candidates.Add([Environment]::ExpandEnvironmentVariables($localSdkPath))
+                }
+            }
+        }
+
+        # Standard Android Studio Windows SDK location.
+        if (-not [string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) {
+            $candidates.Add((Join-Path $env:LOCALAPPDATA "Android\Sdk"))
+        }
+
+        # If adb is already on PATH, derive the SDK root from platform-tools.
+        $adbCommand = Get-Command adb.exe -ErrorAction SilentlyContinue
+        if ($adbCommand -and $adbCommand.Source) {
+            $platformToolsDirectory = Split-Path -Parent $adbCommand.Source
+            $candidates.Add((Split-Path -Parent $platformToolsDirectory))
+        }
+
+        $sdkRoot = $null
+        foreach ($candidate in @($candidates | Select-Object -Unique)) {
+            if (-not (Test-Path -LiteralPath $candidate -PathType Container)) { continue }
+            $looksLikeSdk = @("platforms", "platform-tools", "build-tools", "cmdline-tools", "emulator") |
+                Where-Object { Test-Path -LiteralPath (Join-Path $candidate $_) -PathType Container } |
+                Select-Object -First 1
+            if ($looksLikeSdk) {
+                $sdkRoot = (Resolve-Path -LiteralPath $candidate).Path
+                break
+            }
+        }
+
+        if (-not $sdkRoot) {
+            $defaultPath = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA "Android\Sdk" } else { "(LOCALAPPDATA is not set)" }
+            throw ("Android SDK was not found. Set ANDROID_HOME to the Android SDK Location shown in Android Studio > Tools > SDK Manager. Checked ANDROID_HOME, ANDROID_SDK_ROOT, apps/android/local.properties, and the standard path: " + $defaultPath)
+        }
+
+        # ANDROID_HOME is the recommended variable. Keep the deprecated alias
+        # consistent in this process if the user had it set to another value.
+        $env:ANDROID_HOME = $sdkRoot
+        $env:ANDROID_SDK_ROOT = $sdkRoot
+        $platformTools = Join-Path $sdkRoot "platform-tools"
+        if (Test-Path -LiteralPath $platformTools -PathType Container) {
+            $pathEntries = @($env:PATH -split [IO.Path]::PathSeparator)
+            if ($pathEntries -notcontains $platformTools) {
+                $env:PATH = $platformTools + [IO.Path]::PathSeparator + $env:PATH
+            }
+        }
+
+        Write-Host "Using Android SDK: $sdkRoot" -ForegroundColor DarkCyan
+
+        $missingPackages = [System.Collections.Generic.List[string]]::new()
+        if (-not (Test-Path -LiteralPath (Join-Path $sdkRoot "platforms\android-36\android.jar") -PathType Leaf)) {
+            $missingPackages.Add("Android SDK Platform 36 (platforms;android-36)")
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $sdkRoot "build-tools\36.0.0") -PathType Container)) {
+            $missingPackages.Add("Android SDK Build-Tools 36.0.0 (build-tools;36.0.0)")
+        }
+        if ($RunAndroidEmulator -and -not (Test-Path -LiteralPath (Join-Path $sdkRoot "platform-tools\adb.exe") -PathType Leaf)) {
+            $missingPackages.Add("Android SDK Platform-Tools (platform-tools)")
+        }
+
+        if ($missingPackages.Count -gt 0) {
+            throw ("Android SDK is configured at '" + $sdkRoot + "' but required packages are missing: " +
+                ($missingPackages -join ", ") +
+                ". Open Android Studio > Tools > SDK Manager, install these exact packages, and accept the displayed licenses.")
+        }
+
+        return $sdkRoot
+    }
+
     function Invoke-AndroidSuite {
+        $androidSdkRoot = Resolve-AndroidSdkDirectory
         if ($RunAndroidEmulator -and -not $SkipInstall -and $Platform -eq "Android") {
             Invoke-Checked "Install portal dependencies for Android WebView fixture" { pnpm install --frozen-lockfile }
         }
