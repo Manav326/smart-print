@@ -392,24 +392,43 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
-    public async Task ConcurrentDifferentClientRequestIdsShareOneUnsettledOrder()
+    public async Task ConcurrentDifferentClientRequestIdsNeverCreateTwoProviderOrders()
     {
         await WithPostgresAsync(async fixture =>
         {
             await using var secondDb = fixture.CreateAdditionalDbContext();
             var secondService = fixture.CreateService(secondDb);
 
-            var results = await Task.WhenAll(
-                fixture.Service.CreateOrderAsync(
-                    fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
-                    "Monthly", "parallel-request-one", CancellationToken.None),
-                secondService.CreateOrderAsync(
-                    fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
-                    "Monthly", "parallel-request-two", CancellationToken.None));
+            async Task<(ShopSubscriptionPaymentOrderResponse? Order, SubscriptionPaymentException? Error)> TryCreateAsync(
+                SubscriptionRazorpayService service,
+                string requestId)
+            {
+                try
+                {
+                    return (await service.CreateOrderAsync(
+                        fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
+                        "Monthly", requestId, CancellationToken.None), null);
+                }
+                catch (SubscriptionPaymentException exception)
+                {
+                    return (null, exception);
+                }
+            }
 
-            Assert.Equal(results[0].OrderId, results[1].OrderId);
+            var results = await Task.WhenAll(
+                TryCreateAsync(fixture.Service, "parallel-request-one"),
+                TryCreateAsync(secondService, "parallel-request-two"));
+
+            Assert.Contains(results, result => result.Order is not null);
             Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
             Assert.Equal(1, await fixture.Db.ShopSubscriptionPayments.CountAsync());
+
+            var created = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
+            var resumed = await fixture.Service.CreateOrderAsync(
+                fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
+                "Monthly", "parallel-request-retry", CancellationToken.None);
+            Assert.Equal(created.RazorpayOrderId, resumed.OrderId);
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
         });
     }
 
