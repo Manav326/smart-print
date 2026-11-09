@@ -453,6 +453,11 @@ jobs:
           }
           $smokeExe = Join-Path $desktopSmokeTarget "release/smartprint-desktop.exe"
           if (-not (Test-Path -LiteralPath $smokeExe)) { throw "The isolated SmartPrint desktop smoke executable was not produced." }
+          # Include a separate test-only executable with localhost CDP enabled.
+          # The production executable above remains free of remote-debugging flags.
+          Copy-Item -LiteralPath $smokeExe -Destination "artifacts/desktop/SmartPrint.Desktop.QA.exe" -Force
+          node scripts/qa/create-qa-artifact-manifest.mjs artifacts/desktop windows
+          if ($LASTEXITCODE -ne 0) { throw "Windows QA artifact manifest generation failed." }
       - name: Install and bundle the Microsoft WebView2 Evergreen Runtime
         id: webview2_runtime
         if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' }}
