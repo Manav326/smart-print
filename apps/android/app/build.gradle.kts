@@ -15,8 +15,17 @@ val smartPrintVersionCode = providers.gradleProperty("smartPrintVersionCode").or
 val smartPrintVersionName = providers.gradleProperty("smartPrintVersionName").orElse("0.1.0").get()
 val smartPrintLocalQa = providers.gradleProperty("smartPrintLocalQa").orNull?.toBooleanStrictOrNull() ?: false
 val smartPrintPhotoStudioQaEnabled = providers.gradleProperty("smartPrintPhotoStudioQaEnabled").orNull?.toBooleanStrictOrNull() ?: false
+val smartPrintQaApplicationId = providers.gradleProperty("smartPrintQaApplicationId").orNull
+    ?.trim()
+    ?.takeIf { it.isNotBlank() }
 val smartPrintApplicationId = if (smartPrintLocalQa) {
-    "com.quantaedge.smartprint.localqa"
+    val candidate = smartPrintQaApplicationId ?: "com.quantaedge.smartprint.localqa"
+    if (!candidate.matches(Regex("^com\\.quantaedge\\.smartprint\\.localqa(?:\\.[a-z0-9]+)*$"))) {
+        throw GradleException(
+            "smartPrintQaApplicationId must remain under com.quantaedge.smartprint.localqa."
+        )
+    }
+    candidate
 } else {
     "com.quantaedge.smartprint"
 }
