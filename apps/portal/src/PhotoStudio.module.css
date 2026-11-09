@@ -51,7 +51,8 @@
  .toolPanel{grid-template-columns:1fr 1fr}
  .panelHeading,.sheetSummary,.privacyNote,.lookGrid,.editorHelp,.backgroundPresets,.backgroundPreviewRow{grid-column:1/-1}
 }
-@media(max-width:390px){.toolPanel{grid-template-columns:1fr}.topbar{gap:6px;padding:0 7px}.brand{gap:7px}.brand small{letter-spacing:.75px}.topbarMeta span:last-child{display:none}.topbarMeta span{padding:4px 6px}}
+@media(max-width:520px){.toolPanel{grid-template-columns:1fr}}
+@media(max-width:390px){.topbar{gap:6px;padding:0 7px}.brand{gap:7px}.brand small{letter-spacing:.75px}.topbarMeta span:last-child{display:none}.topbarMeta span{padding:4px 6px}}
 @media(max-width:720px) and (max-height:620px){.editor{grid-template-rows:40px minmax(160px,1fr) auto}.toolPanel{max-height:26vh;gap:8px;padding:8px 10px}.canvasWorkspace{grid-template-rows:32px minmax(0,1fr) 26px}.previewCanvas{max-height:calc(100dvh - 245px)}.footer{padding:5px 8px;gap:5px}.footerHint{font-size:7.5px}.footerActions button{min-height:34px}}
 
 /* The watermark deters casual capture on web and complements native desktop protection. */
