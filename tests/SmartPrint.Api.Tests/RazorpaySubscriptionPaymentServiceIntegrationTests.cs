@@ -143,6 +143,13 @@ public sealed class RazorpaySubscriptionPaymentServiceIntegrationTests
         Assert.False(first.Duplicate);
         Assert.Equal("Processed", first.Status);
         Assert.True(duplicate.Duplicate);
+
+        var conflictingBody = $"""{"event":"payment.failed","payload":{"payment":{"entity":{"id":"{{paymentId}}","order_id":"{{order.OrderId}}"}}}}""";
+        var conflict = await Assert.ThrowsAsync<RazorpayPaymentException>(() =>
+            service.ProcessWebhookAsync(
+                conflictingBody, WebhookSignature(conflictingBody), "event-captured-001", CancellationToken.None));
+        Assert.Equal("webhook_event_id_conflict", conflict.Code);
+
         Assert.Equal(1, gateway.PaymentLookupCount);
         Assert.Equal(1, await db.TenantSubscriptions.CountAsync(item =>
             item.TenantId == fixture.TenantId && item.Status == "Active"));
