@@ -67,7 +67,7 @@ public sealed class RazorpaySubscriptionPaymentServiceIntegrationTests
         {
             if (request.Method == HttpMethod.Post)
                 return JsonResponse($$"""{"id":"order_{{fixture.OrderIdSuffix}}","amount":49900,"currency":"INR"}""");
-            return JsonResponse($"""{"id":"pay_test_001","order_id":"order_{{fixture.OrderIdSuffix}}","amount":49900,"currency":"INR","status":"captured"}""");
+            return JsonResponse($$"""{"id":"pay_test_001","order_id":"order_{{fixture.OrderIdSuffix}}","amount":49900,"currency":"INR","status":"captured"}""");
         });
         var service = CreateService(db, gateway);
         var order = await service.CreateOrderAsync(
