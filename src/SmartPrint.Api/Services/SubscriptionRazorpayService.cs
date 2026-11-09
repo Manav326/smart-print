@@ -311,8 +311,22 @@ public sealed class SubscriptionRazorpayService(
         }
 
         await PersistCreatedOrderAsync(payment.Id, orderId, cancellationToken);
-        payment.RazorpayOrderId = orderId;
-        payment.Status = "CREATED";
+        await db.Entry(payment).ReloadAsync(cancellationToken);
+        if (payment.Status == "CAPTURED")
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_already_captured",
+                "Razorpay has already captured this subscription payment. SmartPrint has reconciled it; refresh the subscription page instead of paying again.",
+                StatusCodes.Status409Conflict);
+        }
+        if (payment.Status == "CAPTURED_REVIEW_REQUIRED")
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_review_required",
+                "Razorpay captured this payment, but SmartPrint support must review it before access is activated. Do not pay again.",
+                StatusCodes.Status409Conflict);
+        }
+
         return ToOrderResponse(payment, candidatePlan.Name);
     }
 
@@ -378,8 +392,23 @@ public sealed class SubscriptionRazorpayService(
             }
 
             await PersistCreatedOrderAsync(payment.Id, reconciledOrderId, cancellationToken);
-            payment.RazorpayOrderId = reconciledOrderId;
-            payment.Status = "CREATED";
+            await db.Entry(payment).ReloadAsync(cancellationToken);
+        }
+
+        if (payment.Status == "CAPTURED")
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_already_captured",
+                "Razorpay has already captured this subscription payment. Refresh the subscription page instead of paying again.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (payment.Status == "CAPTURED_REVIEW_REQUIRED")
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_review_required",
+                "Razorpay confirmed this payment, but SmartPrint support must review it. Do not pay again.",
+                StatusCodes.Status409Conflict);
         }
 
         if (payment.Status is not ("CREATED" or "FAILED"))
