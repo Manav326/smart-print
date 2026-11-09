@@ -357,7 +357,9 @@ public sealed class SubscriptionRazorpayService(
             {
                 remoteOrder = await FetchOrderByReceiptAsync(payment, cancellationToken);
             }
-            catch (SubscriptionPaymentException)
+            catch (Exception exception) when (
+                !cancellationToken.IsCancellationRequested &&
+                exception is SubscriptionPaymentException or HttpRequestException or TaskCanceledException)
             {
                 throw new SubscriptionPaymentException(
                     "subscription_order_confirmation_pending",
