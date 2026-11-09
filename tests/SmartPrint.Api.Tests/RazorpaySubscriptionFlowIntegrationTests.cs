@@ -110,10 +110,11 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
             var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
             fixture.Razorpay.ReturnCapturedPaymentOnOrderLookup = true;
 
+            var storedPayment = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
             var exception = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
                 fixture.Service.ResumeOrderAsync(
                     fixture.TenantId,
-                    (await fixture.Db.ShopSubscriptionPayments.SingleAsync()).Id,
+                    storedPayment.Id,
                     CancellationToken.None));
 
             Assert.Equal("subscription_payment_already_captured", exception.Code);
