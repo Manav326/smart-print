@@ -109,3 +109,8 @@
 
 /* Keep the panel title and its explanatory copy on distinct readable lines. */
 .panelHeading > div { display:grid; gap:6px; min-width:0; }
+
+/* Keep mobile slider thumbs outside Android's left/right system gesture zones. */
+@media(max-width:720px){
+ .rangeControl input[type=range]{width:calc(100% - 128px);margin-inline:64px}
+}
