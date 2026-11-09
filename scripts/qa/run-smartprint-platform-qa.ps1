@@ -87,6 +87,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 Set-Location $repoRoot
+$script:powerShellExecutable = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+if (-not $script:powerShellExecutable) { $script:powerShellExecutable = Get-Command pwsh -ErrorAction Stop }
 $repository = "Manav326/smart-print"
 
 function Select-PlatformsInteractive {
@@ -309,8 +311,8 @@ function Invoke-PhotoStudioSuite {
         } else {
             Remove-Item Env:SMARTPRINT_PHOTO_STUDIO_BASE_URL -ErrorAction SilentlyContinue
         }
-        & $scriptPath @arguments
-        if ($LASTEXITCODE -ne 0) { throw "Photo Studio logic/browser acceptance suite failed." }
+        & $script:powerShellExecutable.Source -NoProfile -File $scriptPath @arguments
+        if ($LASTEXITCODE -ne 0) { throw "Photo Studio logic/browser acceptance suite failed (child PowerShell exit $LASTEXITCODE)." }
     } finally {
         [Environment]::SetEnvironmentVariable("SMARTPRINT_PHOTO_STUDIO_BASE_URL", $previousBase, "Process")
         if ($fixtureServer -and -not $fixtureServer.HasExited) {
@@ -328,8 +330,8 @@ function Invoke-WebProductionArtifactTest([string]$DistDirectory) {
         $env:SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL = "http://127.0.0.1:4174"
         if ($Headless) { $env:SMARTPRINT_MIXED_BATCH_REFUND_HEADED = "0" } else { $env:SMARTPRINT_MIXED_BATCH_REFUND_HEADED = "1" }
         $mixed = Join-Path $PSScriptRoot "mixed-batch-refund-test.ps1"
-        & $mixed -Platform Web -SkipInstall -Headed:$(-not $Headless) -ArtifactDirectory (Join-Path $runDirectory "web-production-acceptance")
-        if ($LASTEXITCODE -ne 0) { throw "Production Portal artifact browser acceptance failed." }
+        & $script:powerShellExecutable.Source -NoProfile -File $mixed -Platform Web -SkipInstall -Headed:$(-not $Headless) -ArtifactDirectory (Join-Path $runDirectory "web-production-acceptance")
+        if ($LASTEXITCODE -ne 0) { throw "Production Portal artifact browser acceptance failed (child PowerShell exit $LASTEXITCODE)." }
     } finally {
         [Environment]::SetEnvironmentVariable("SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL", $previousBase, "Process")
         [Environment]::SetEnvironmentVariable("SMARTPRINT_MIXED_BATCH_REFUND_HEADED", $previousHeaded, "Process")
@@ -402,8 +404,8 @@ function Invoke-WindowsArtifactTests([string]$DesktopDirectory, [string]$ModeFor
     $qaConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot "smartprint-qa.config.json") -Raw | ConvertFrom-Json -ErrorAction Stop
     $debugPort = [int]$qaConfig.apps.windows.webViewDevToolsPort
     $mixedPlatform = if ($ModeForTest -eq "Pull") { "NativeWindows" } else { "Windows" }
-    & $mixed -Platform $mixedPlatform -SkipInstall -Headed:$(-not $Headless) -NativeExecutablePath $qaExe -WebView2DebugPort $debugPort -ArtifactDirectory (Join-Path $runDirectory "windows-mixed-batch")
-    if ($LASTEXITCODE -ne 0) { throw "Windows native WebView2 mixed-batch acceptance failed." }
+    & $script:powerShellExecutable.Source -NoProfile -File $mixed -Platform $mixedPlatform -SkipInstall -Headed:$(-not $Headless) -NativeExecutablePath $qaExe -WebView2DebugPort $debugPort -ArtifactDirectory (Join-Path $runDirectory "windows-mixed-batch")
+    if ($LASTEXITCODE -ne 0) { throw "Windows native WebView2 mixed-batch acceptance failed (child PowerShell exit $LASTEXITCODE)." }
 }
 
 function Resolve-AndroidDeviceIfNeeded {
@@ -535,7 +537,8 @@ try {
             Invoke-QAStep "Android" "Build and test on the selected physical phone" {
                 $args = @("-Build","-ApplicationId","com.quantaedge.smartprint.localqa","-OutputDirectory",(Join-Path $runDirectory "android"))
                 if ($AndroidDeviceSerial) { $args += @("-DeviceSerial",$AndroidDeviceSerial) }
-                & $androidRunner @args
+                & $script:powerShellExecutable.Source -NoProfile -File $androidRunner @args
+                if ($LASTEXITCODE -ne 0) { throw "Android physical-device QA failed (child PowerShell exit $LASTEXITCODE)." }
             } -Evidence (Join-Path $runDirectory "android") | Out-Null
         } else {
             $androidDir = $script:androidArtifactDirectory
@@ -548,7 +551,8 @@ try {
                     "-FixtureDirectory",$fixture,
                     "-OutputDirectory",(Join-Path $runDirectory "android"))
                 if ($AndroidDeviceSerial) { $args += @("-DeviceSerial",$AndroidDeviceSerial) }
-                & $androidRunner @args
+                & $script:powerShellExecutable.Source -NoProfile -File $androidRunner @args
+                if ($LASTEXITCODE -ne 0) { throw "Android physical-device QA failed (child PowerShell exit $LASTEXITCODE)." }
             } -Evidence (Join-Path $runDirectory "android") | Out-Null
         }
     }
