@@ -64,7 +64,11 @@ public sealed class RazorpaySubscriptionPaymentService(
     private string WebhookSecret => configuration["Razorpay:WebhookSecret"]?.Trim() ?? string.Empty;
     private string BaseUrl => (configuration["Razorpay:BaseUrl"]?.Trim() ?? "https://api.razorpay.com/v1").TrimEnd('/');
 
-    public bool IsCheckoutConfigured => !string.IsNullOrWhiteSpace(KeyId) && !string.IsNullOrWhiteSpace(KeySecret);
+    public bool IsCheckoutConfigured =>
+        !string.IsNullOrWhiteSpace(KeyId) &&
+        !string.IsNullOrWhiteSpace(KeySecret) &&
+        IsWebhookConfigured;
+
     public bool IsWebhookConfigured => !string.IsNullOrWhiteSpace(WebhookSecret);
 
     public async Task<IReadOnlyList<object>> GetAvailablePlansAsync(CancellationToken ct)
@@ -564,7 +568,7 @@ public sealed class RazorpaySubscriptionPaymentService(
             PeriodEndUtc = periodEnd,
             Reason = $"Shop subscription payment captured and verified by Razorpay for order {payment.RazorpayOrderId}.",
             PaymentReference = snapshot.Id,
-            IdempotencyKey = $"shop-razorpay:{payment.RazorpayOrderId}",
+            IdempotencyKey = $"shop-razorpay:{payment.Id:N}",
             CreatedUtc = now
         });
 
@@ -695,7 +699,7 @@ public sealed class RazorpaySubscriptionPaymentService(
         {
             throw new RazorpayPaymentException(
                 "razorpay_not_configured",
-                "Online subscription payments are not configured yet. Contact SmartPrint support.",
+                "Razorpay key and webhook credentials must be configured before online subscription checkout can start.",
                 StatusCodes.Status503ServiceUnavailable);
         }
     }
