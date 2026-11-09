@@ -23,9 +23,9 @@ One or more of Web, Android and Windows. Omit to choose interactively.
 Build or Pull. Omit to choose interactively.
 
 .PARAMETER WorkflowRunId
-Optional exact GitHub Actions CI run ID for Pull mode. If omitted, the newest
-successful CI run for the current HEAD commit is selected. Older commits are
-never substituted.
+Optional exact push-triggered GitHub Actions CI run ID for Pull mode. If omitted,
+the newest successful push CI run for the current HEAD commit is selected.
+PR merge-result runs are not used; older commits are never substituted.
 
 .PARAMETER AndroidDeviceSerial
 Exact serial from adb devices -l. If omitted, exactly one authorized device
@@ -198,19 +198,20 @@ function Get-GhRun {
     if ($LASTEXITCODE -ne 0) { throw "GitHub CLI is not authenticated. Run 'gh auth login' and retry Pull mode." }
 
     if ($WorkflowRunId) {
-        $runJson = & $gh.Source run view $WorkflowRunId --repo $repository --json databaseId,headSha,status,conclusion,url,workflowName,headBranch,number
+        $runJson = & $gh.Source run view $WorkflowRunId --repo $repository --json databaseId,headSha,event,status,conclusion,url,workflowName,headBranch,number
         if ($LASTEXITCODE -ne 0) { throw "Could not read GitHub Actions run $WorkflowRunId." }
         $run = $runJson | ConvertFrom-Json -ErrorAction Stop
         if ([string]$run.headSha -ne $sourceCommit) { throw "Run $WorkflowRunId belongs to commit $($run.headSha), not this checkout ($sourceCommit). No artifact was downloaded." }
         if ([string]$run.workflowName -ne "CI") { throw "Run $WorkflowRunId is '$($run.workflowName)', not the SmartPrint CI workflow." }
+        if ([string]$run.event -ne "push") { throw "Run $WorkflowRunId was triggered by '$($run.event)', not a branch push. Pull mode requires artifacts built from the exact checked-out commit, not a PR merge result." }
         if ([string]$run.status -ne "completed" -or [string]$run.conclusion -ne "success") { throw "Run $WorkflowRunId is not fully successful (status=$($run.status), conclusion=$($run.conclusion))." }
         return $run
     }
 
-    $runJson = & $gh.Source run list --repo $repository --workflow ci.yml --commit $sourceCommit --status completed --json databaseId,headSha,status,conclusion,url,workflowName,headBranch,number,createdAt --limit 30
+    $runJson = & $gh.Source run list --repo $repository --workflow ci.yml --event push --commit $sourceCommit --status completed --json databaseId,headSha,event,status,conclusion,url,workflowName,headBranch,number,createdAt --limit 30
     if ($LASTEXITCODE -ne 0) { throw "Could not list successful CI runs for commit $sourceCommit." }
     $runs = @($runJson | ConvertFrom-Json -ErrorAction Stop)
-    $matches = @($runs | Where-Object { [string]$_.headSha -eq $sourceCommit -and [string]$_.workflowName -eq "CI" -and [string]$_.status -eq "completed" -and [string]$_.conclusion -eq "success" })
+    $matches = @($runs | Where-Object { [string]$_.headSha -eq $sourceCommit -and [string]$_.workflowName -eq "CI" -and [string]$_.event -eq "push" -and [string]$_.status -eq "completed" -and [string]$_.conclusion -eq "success" })
     if ($matches.Count -eq 0) { throw "No successful CI run exists for this exact commit ($sourceCommit). Wait for CI to pass or supply a matching -WorkflowRunId. Pull mode will not use artifacts from an older commit." }
     return ($matches | Sort-Object { [DateTime]$_.createdAt } -Descending | Select-Object -First 1)
 }
