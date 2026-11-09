@@ -15,6 +15,7 @@ public sealed record RazorpayWebhookPayment(
 public static class RazorpaySubscriptionPaymentRules
 {
     public const int MaximumWebhookBodyBytes = 256 * 1024;
+    public const long MaximumOrderAmountMinor = 10_000_000; // ₹1,00,000.00 in paise.
 
     public static bool VerifyCheckoutSignature(string orderId, string paymentId, string? signature, string secret)
     {
