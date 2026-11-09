@@ -49,6 +49,8 @@ public sealed class AddRazorpayShopSubscriptionPayments : Migration
                 WHERE "RazorpayPaymentId" IS NOT NULL;
             CREATE INDEX "IX_ShopSubscriptionPayments_TenantId_CreatedUtc"
                 ON "ShopSubscriptionPayments" ("TenantId", "CreatedUtc" DESC);
+            CREATE INDEX "IX_ShopSubscriptionPayments_AppliedSubscriptionId"
+                ON "ShopSubscriptionPayments" ("AppliedSubscriptionId");
 
             CREATE TABLE "RazorpayWebhookEvents" (
                 "Id" uuid NOT NULL PRIMARY KEY,
@@ -80,6 +82,7 @@ public sealed class AddRazorpayShopSubscriptionPayments : Migration
             END $$;
 
             DROP TABLE IF EXISTS "RazorpayWebhookEvents";
+            DROP INDEX IF EXISTS "IX_ShopSubscriptionPayments_AppliedSubscriptionId";
             DROP TABLE IF EXISTS "ShopSubscriptionPayments";
             """);
     }
