@@ -366,6 +366,15 @@ public sealed class RazorpaySubscriptionPaymentService(
                 }
             }
         }
+        else if (!string.Equals(webhookEvent.EventType, eventType, StringComparison.Ordinal) ||
+                 !string.Equals(webhookEvent.RazorpayOrderId, orderId, StringComparison.Ordinal) ||
+                 !string.Equals(webhookEvent.RazorpayPaymentId, paymentId, StringComparison.Ordinal))
+        {
+            throw new RazorpayPaymentException(
+                "webhook_event_id_conflict",
+                "This Razorpay event identifier was already received with a different payment payload.",
+                StatusCodes.Status409Conflict);
+        }
         else if (webhookEvent.Status == "Processed")
         {
             return new RazorpayWebhookProcessingResult(true, "Processed");
