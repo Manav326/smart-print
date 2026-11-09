@@ -102,6 +102,32 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
+    public async Task ResumeReconcilesAnAlreadyCapturedProviderPaymentInsteadOfOpeningCheckoutAgain()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var order = await fixture.CreateOrderAsync("captured-before-resume");
+            var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
+            fixture.Razorpay.ReturnCapturedPaymentOnOrderLookup = true;
+
+            var exception = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.Service.ResumeOrderAsync(
+                    fixture.TenantId,
+                    (await fixture.Db.ShopSubscriptionPayments.SingleAsync()).Id,
+                    CancellationToken.None));
+
+            Assert.Equal("subscription_payment_already_captured", exception.Code);
+            var payment = await fixture.Db.ShopSubscriptionPayments.SingleAsync();
+            Assert.Equal("CAPTURED", payment.Status);
+            Assert.Equal(paymentId, payment.RazorpayPaymentId);
+            Assert.NotNull(payment.AssignedSubscriptionId);
+            Assert.Equal(2, await fixture.Db.TenantSubscriptions.CountAsync());
+            Assert.Equal(1, await fixture.Db.PlatformSubscriptionAudits.CountAsync());
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
+        });
+    }
+
+    [Fact]
     public async Task ResumeReturnsTheExistingOrderWithoutCreatingAnotherProviderOrder()
     {
         await WithPostgresAsync(async fixture =>
@@ -713,6 +739,7 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
         public long ActualAmountOffsetMinor { get; set; }
         public bool LoseCreateOrderResponseAfterCreating { get; set; }
         public bool HideOrdersFromReceiptLookup { get; set; }
+        public bool ReturnCapturedPaymentOnOrderLookup { get; set; }
 
         public string PaymentIdFor(string orderId) =>
             payments.Single(item => item.Value.OrderId == orderId).Key;
@@ -767,6 +794,31 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
                         notes = new { subscription_payment_id = item.SubscriptionPaymentId }
                     })
                     .ToArray();
+                return Json(HttpStatusCode.OK, new { items });
+            }
+
+            if (request.Method == HttpMethod.Get &&
+                path.StartsWith("/v1/orders/", StringComparison.Ordinal) &&
+                path.EndsWith("/payments", StringComparison.Ordinal))
+            {
+                if (!ReturnCapturedPaymentOnOrderLookup)
+                    return Json(HttpStatusCode.OK, new { items = Array.Empty<object>() });
+
+                var orderId = Uri.UnescapeDataString(path["/v1/orders/".Length..^"/payments".Length]);
+                var captured = payments.FirstOrDefault(item => item.Value.OrderId == orderId);
+                var items = captured.Key is null
+                    ? Array.Empty<object>()
+                    : new object[]
+                    {
+                        new
+                        {
+                            id = captured.Key,
+                            order_id = orderId,
+                            amount = captured.Value.AmountMinor,
+                            currency = captured.Value.Currency,
+                            status = PaymentStatus
+                        }
+                    };
                 return Json(HttpStatusCode.OK, new { items });
             }
 
