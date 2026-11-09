@@ -22,7 +22,7 @@ never run the lifecycle helper on a personal/shop phone with user data.
 
 Photo Studio instrumentation uses the QA-only Vite build containing
 tests/photo-studio.browser.html. The runner uses the side-by-side package ID
-com.quantaedge.smartprint.localqa and enables smartPrintPhotoStudioQaEnabled.
+a unique com.quantaedge.smartprint.localqa.ci.<run-number> package and enables smartPrintPhotoStudioQaEnabled.
 The emulator reaches the fixture through an ADB reverse mapping to
 http://127.0.0.1:3000. That loopback route is allowed only in the explicitly
 enabled com.quantaedge.smartprint.localqa debug package. The normal Portal build
@@ -44,6 +44,9 @@ set -euo pipefail
 
 : "${SMARTPRINT_PUBLIC_BASE_URL:?SMARTPRINT_PUBLIC_BASE_URL must be configured}"
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
+: "${GITHUB_RUN_NUMBER:?GITHUB_RUN_NUMBER is required for an isolated Android QA package ID}"
+: "${GITHUB_SHA:?GITHUB_SHA is required for the Android QA artifact manifest}"
+photo_studio_qa_application_id="com.quantaedge.smartprint.localqa.ci${GITHUB_RUN_NUMBER}"
 
 echo "[QA-STEP-START] Android emulator readiness | waking, unlocking and preparing device state before instrumentation."
 adb wait-for-device
@@ -95,6 +98,7 @@ echo "PASS: ADB reverse is active and the fixture is reachable on host localhost
 if gradle --no-daemon --console=plain --info -p apps/android \
   -PsmartPrintServiceUrl="$photo_studio_qa_origin" \
   -PsmartPrintLocalQa=true \
+  -PsmartPrintQaApplicationId="$photo_studio_qa_application_id" \
   -PsmartPrintPhotoStudioQaEnabled=true \
   :app:connectedDebugAndroidTest; then
   ui_test_status=0
@@ -165,6 +169,19 @@ PY
 else
   photostudio_gate_status=1
 fi
+
+# Preserve the exact QA-only app/test APK pair that passed instrumentation before
+# the later production-package lifecycle steps overwrite Gradle's debug outputs.
+echo "[QA-STEP-START] Android physical-device QA artifacts | exporting the .localqa app and instrumentation APKs..."
+qa_artifact_dir="artifacts/android-device-qa"
+mkdir -p "$qa_artifact_dir"
+qa_app_apk="apps/android/app/build/outputs/apk/debug/app-debug.apk"
+qa_test_apk="apps/android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk"
+test -s "$qa_app_apk" || { echo "::error::The passing QA app APK is missing: $qa_app_apk"; exit 1; }
+test -s "$qa_test_apk" || { echo "::error::The passing Android instrumentation APK is missing: $qa_test_apk"; exit 1; }
+cp "$qa_app_apk" "$qa_artifact_dir/SmartPrint-Android-LocalQA.apk"
+cp "$qa_test_apk" "$qa_artifact_dir/SmartPrint-Android-LocalQA-Test.apk"
+node scripts/qa/create-qa-artifact-manifest.mjs "$qa_artifact_dir" android
 
 echo "[QA-STEP-START] Android package lifecycle | building isolated APK N for install/upgrade validation..."
 gradle --no-daemon --console=plain -p apps/android -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" -PsmartPrintVersionCode=9100 -PsmartPrintVersionName="lifecycle-n" :app:assembleDebug
