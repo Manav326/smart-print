@@ -67,7 +67,7 @@ public sealed class RazorpaySubscriptionPaymentServiceIntegrationTests
         {
             if (request.Method == HttpMethod.Post)
                 return JsonResponse($$"""{"id":"order_{{fixture.OrderIdSuffix}}","amount":49900,"currency":"INR"}""");
-            return JsonResponse("""{"id":"pay_test_001","order_id":"order_test_001","amount":49900,"currency":"INR","status":"captured"}""");
+            return JsonResponse($"""{"id":"pay_test_001","order_id":"order_{{fixture.OrderIdSuffix}}","amount":49900,"currency":"INR","status":"captured"}""");
         });
         var service = CreateService(db, gateway);
         var order = await service.CreateOrderAsync(
@@ -83,9 +83,6 @@ public sealed class RazorpaySubscriptionPaymentServiceIntegrationTests
         Assert.Equal("invalid_payment_signature", invalidSignature.Code);
         Assert.Equal(0, gateway.PaymentLookupCount);
         Assert.Equal(0, await db.TenantSubscriptions.CountAsync(item => item.TenantId == fixture.TenantId));
-
-        gateway.PaymentResponse = JsonResponse(
-            $$"""{"id":"pay_test_001","order_id":"{{order.OrderId}}","amount":49900,"currency":"INR","status":"captured"}""");
 
         var status = await service.VerifyCheckoutAsync(
             fixture.TenantId,
@@ -338,8 +335,6 @@ public sealed class RazorpaySubscriptionPaymentServiceIntegrationTests
         public int RequestCount { get; private set; }
         public int PaymentLookupCount { get; private set; }
         public string? LastRequestBody { get; private set; }
-        public HttpResponseMessage PaymentResponse { get; set; } = JsonResponse("{}");
-
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
@@ -351,22 +346,7 @@ public sealed class RazorpaySubscriptionPaymentServiceIntegrationTests
             if (request.Content is not null)
                 LastRequestBody = await request.Content.ReadAsStringAsync(cancellationToken);
 
-            var response = responder(request, RequestCount);
-            if (request.Method == HttpMethod.Get && PaymentResponse.StatusCode == System.Net.HttpStatusCode.OK &&
-                PaymentResponse.Content.Headers.ContentLength != 2)
-            {
-                // Tests may replace the GET payload after creating the order.
-                response.Dispose();
-                return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
-                {
-                    Content = new StringContent(
-                        await PaymentResponse.Content.ReadAsStringAsync(cancellationToken),
-                        Encoding.UTF8,
-                        "application/json")
-                };
-            }
-
-            return response;
+            return responder(request, RequestCount);
         }
     }
 }
