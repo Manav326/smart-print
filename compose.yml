@@ -40,6 +40,10 @@ services:
       Database__ApplyMigrationsOnStartup: "true"
       PublicPortal__BaseUrl: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
       PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:?Set GITHUB_REPOSITORY in .env}
+      Razorpay__KeyId: ${RAZORPAY_KEY_ID:-}
+      Razorpay__KeySecret: ${RAZORPAY_KEY_SECRET:-}
+      Razorpay__WebhookSecret: ${RAZORPAY_WEBHOOK_SECRET:-}
+      Razorpay__BaseUrl: ${RAZORPAY_BASE_URL:-https://api.razorpay.com/v1}
       Cors__AllowedOrigins__0: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
     volumes:
       - qrtoprint_documents:/var/lib/qrtoprint/documents
