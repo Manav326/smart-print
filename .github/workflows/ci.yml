@@ -456,6 +456,8 @@ jobs:
           # Include a separate test-only executable with localhost CDP enabled.
           # The production executable above remains free of remote-debugging flags.
           Copy-Item -LiteralPath $smokeExe -Destination "artifacts/desktop/SmartPrint.Desktop.QA.exe" -Force
+          Get-ChildItem -Path (Join-Path $desktopSmokeTarget "release") -Filter "*.dll" -File |
+            Copy-Item -Destination "artifacts/desktop" -Force
           node scripts/qa/create-qa-artifact-manifest.mjs artifacts/desktop windows
           if ($LASTEXITCODE -ne 0) { throw "Windows QA artifact manifest generation failed." }
       - name: Install and bundle the Microsoft WebView2 Evergreen Runtime
