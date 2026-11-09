@@ -74,6 +74,7 @@ public sealed class RazorpaySubscriptionPaymentService(
             join plan in db.SubscriptionPlans.AsNoTracking() on version.PlanId equals plan.Id
             where plan.IsActive && !plan.IsSystemPlan && version.Status == "Published" &&
                   plan.Code != "TRIAL" &&
+                  version.Currency == "INR" &&
                   (version.MonthlyPriceMinor > 0 || version.AnnualPriceMinor > 0)
             orderby plan.Name, version.Version descending
             select new
