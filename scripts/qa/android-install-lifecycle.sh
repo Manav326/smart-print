@@ -191,16 +191,47 @@ echo "8/8 Testing two real production-signed releases..."
 download_release_apk() {
   local release_tag="$1"
   local destination="$2"
-  local asset_url="https://github.com/Manav326/smart-print/releases/download/$release_tag/SmartPrint-Android.apk"
+  local api_base="https://api.github.com/repos/Manav326/smart-print"
+  local release_metadata asset_record asset_id asset_size downloaded_size
 
-  echo "[QA-PROGRESS] Downloading $release_tag production APK from the canonical SmartPrint repository..."
-  # GitHub release assets occasionally return transient 5xx responses. Retry
-  # those responses, but let permanent 4xx errors fail the lifecycle gate.
-  curl --fail --location --silent --show-error \
+  [[ -n "${GH_TOKEN:-}" ]] || fail "GH_TOKEN is required to download production release assets through the GitHub API."
+  command -v jq >/dev/null 2>&1 || fail "jq is required to resolve GitHub release asset metadata."
+
+  echo "[QA-PROGRESS] Resolving $release_tag production APK from GitHub release metadata..."
+  release_metadata="$(curl --fail --location --silent --show-error \
     --retry 5 --retry-delay 3 --retry-max-time 120 \
     --connect-timeout 20 --max-time 180 \
-    "$asset_url" --output "$destination"
+    -H "Accept: application/vnd.github+json" \
+    -H "Authorization: Bearer $GH_TOKEN" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$api_base/releases/tags/$release_tag")"
+
+  asset_record="$(jq -ce --arg name "SmartPrint-Android.apk" '
+    [.assets[] | select(.name == $name and .state == "uploaded")] |
+    if length == 1 then .[0] else error("Expected exactly one uploaded Android APK release asset") end
+  ' <<<"$release_metadata")" || fail "Could not resolve exactly one uploaded Android APK for $release_tag."
+  asset_id="$(jq -er '.id | select(type == "number" and . > 0)' <<<"$asset_record")" ||
+    fail "The $release_tag Android release asset has no valid GitHub asset ID."
+  asset_size="$(jq -er '.size | select(type == "number" and . > 0)' <<<"$asset_record")" ||
+    fail "The $release_tag Android release asset has no valid expected size."
+
+  echo "[QA-PROGRESS] Downloading $release_tag Android APK through GitHub release asset API (asset=$asset_id, expected_bytes=$asset_size)..."
+  # The browser_download_url path returned persistent HTTP 504 for v0.1.10.
+  # Resolve the immutable asset ID and request the binary API representation;
+  # the API issues a short-lived asset URL for the actual download.
+  curl --fail --location --silent --show-error \
+    --retry 5 --retry-delay 3 --retry-max-time 180 \
+    --connect-timeout 20 --max-time 240 \
+    -H "Accept: application/octet-stream" \
+    -H "Authorization: Bearer $GH_TOKEN" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$api_base/releases/assets/$asset_id" --output "$destination"
+
   require_file "$destination"
+  downloaded_size="$(wc -c <"$destination" | tr -d '[:space:]')"
+  [[ "$downloaded_size" == "$asset_size" ]] ||
+    fail "$release_tag Android APK download is incomplete: expected $asset_size bytes, received $downloaded_size."
+  echo "[QA-PROGRESS] Verified $release_tag APK download size: $downloaded_size bytes."
 }
 
 download_release_apk "v0.1.9" "$PROD_V1"
