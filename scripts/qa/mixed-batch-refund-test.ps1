@@ -91,6 +91,7 @@ $previousEnv = @{}
 foreach ($name in $trackedEnvNames) { $previousEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process") }
 
 try {
+$validatedBaseUrl = ""
 if ($BaseUrl) {
     $baseUri = $null
     if (-not [Uri]::TryCreate($BaseUrl, [UriKind]::Absolute, [ref]$baseUri) -or
@@ -98,7 +99,7 @@ if ($BaseUrl) {
         $baseUri.AbsolutePath -ne "/" -or $baseUri.Query -or $baseUri.Fragment) {
         throw "-BaseUrl must be a loopback HTTP origin with no path, query or fragment."
     }
-    $env:SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL = $BaseUrl.TrimEnd("/")
+    $validatedBaseUrl = $baseUri.GetLeftPart([UriPartial]::Authority)
 }
 foreach ($mode in $modes) {
     $safeMode = if ($mode -eq "desktop") { "windows-desktop-contract" }
@@ -111,6 +112,9 @@ foreach ($mode in $modes) {
     if ($mode -eq "desktop-native" -and $NativeExecutablePath) {
         $env:SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE = $NativeExecutablePath
         $env:SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL = "http://127.0.0.1:1420"
+    } elseif ($mode -eq "web" -and $validatedBaseUrl) {
+        Remove-Item Env:SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE -ErrorAction SilentlyContinue
+        $env:SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL = $validatedBaseUrl
     } else {
         Remove-Item Env:SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE -ErrorAction SilentlyContinue
         Remove-Item Env:SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL -ErrorAction SilentlyContinue
