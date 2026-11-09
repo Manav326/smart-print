@@ -702,6 +702,20 @@ public sealed class SubscriptionRazorpayService(
             previousSubscription.Status = "Superseded";
         }
 
+        var periodStartUtc = terms.PeriodStartUtc;
+        var periodEndUtc = terms.PeriodEndUtc;
+        // A same-plan renewal extends the paid term instead of discarding unused days.
+        // A different plan remains an immediate change so upgrades are not silently delayed.
+        if (previousSubscription is { Status: "Active" } &&
+            string.Equals(previousSubscription.PlanCode, candidate.Plan.Code, StringComparison.OrdinalIgnoreCase) &&
+            previousSubscription.PeriodEndUtc > now)
+        {
+            periodStartUtc = previousSubscription.PeriodEndUtc;
+            periodEndUtc = string.Equals(terms.BillingInterval, "Annual", StringComparison.OrdinalIgnoreCase)
+                ? periodStartUtc.AddYears(1)
+                : periodStartUtc.AddMonths(1);
+        }
+
         var subscription = new TenantSubscription
         {
             TenantId = payment.TenantId,
@@ -709,8 +723,8 @@ public sealed class SubscriptionRazorpayService(
             PlanCode = candidate.Plan.Code,
             Status = terms.Status,
             BillingInterval = terms.BillingInterval,
-            PeriodStartUtc = terms.PeriodStartUtc,
-            PeriodEndUtc = terms.PeriodEndUtc,
+            PeriodStartUtc = periodStartUtc,
+            PeriodEndUtc = periodEndUtc,
             CreatedUtc = now
         };
         db.TenantSubscriptions.Add(subscription);
@@ -728,8 +742,8 @@ public sealed class SubscriptionRazorpayService(
             Status = terms.Status,
             AmountMinor = terms.AmountMinor,
             Currency = terms.Currency,
-            PeriodStartUtc = terms.PeriodStartUtc,
-            PeriodEndUtc = terms.PeriodEndUtc,
+            PeriodStartUtc = periodStartUtc,
+            PeriodEndUtc = periodEndUtc,
             Reason = "Shop subscription paid through Razorpay Checkout.",
             PaymentReference = remotePayment.PaymentId,
             IdempotencyKey = $"SHOP-RAZORPAY-{payment.Id:N}",
@@ -759,6 +773,97 @@ public sealed class SubscriptionRazorpayService(
             ReadInt64(response, "amount"),
             ReadString(response, "currency") ?? string.Empty,
             ReadString(response, "status") ?? string.Empty);
+    }
+
+    private static string ReceiptFor(ShopSubscriptionPayment payment) =>
+        "SP" + payment.Id.ToString("N")[..32];
+
+    private async Task<JsonObject?> FetchOrderByReceiptAsync(
+        ShopSubscriptionPayment payment,
+        CancellationToken cancellationToken)
+    {
+        var response = await SendRazorpayRequestAsync(
+            HttpMethod.Get,
+            "/orders?receipt=" + Uri.EscapeDataString(ReceiptFor(payment)),
+            null,
+            cancellationToken);
+        if (response["items"] is not System.Text.Json.Nodes.JsonArray items)
+            return null;
+
+        var expectedPaymentId = payment.Id.ToString("N");
+        foreach (var item in items.OfType<JsonObject>())
+        {
+            var notes = item["notes"] as JsonObject;
+            if (string.Equals(
+                    ReadString(notes, "subscription_payment_id"),
+                    expectedPaymentId,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return item;
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsValidCreatedOrder(
+        ShopSubscriptionPayment payment,
+        JsonObject order,
+        out string orderId)
+    {
+        orderId = ReadString(order, "id") ?? string.Empty;
+        var remoteAmount = ReadInt64(order, "amount");
+        var remoteCurrency = ReadString(order, "currency");
+        var notes = order["notes"] as JsonObject;
+        var notedPaymentId = ReadString(notes, "subscription_payment_id");
+        return IsProviderIdentifier(orderId) &&
+               remoteAmount == payment.AmountMinor &&
+               string.Equals(remoteCurrency, payment.Currency, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(notedPaymentId, payment.Id.ToString("N"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task PersistCreatedOrderAsync(
+        Guid paymentId,
+        string orderId,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var lockKey = $"shop-subscription-order-intent:{paymentId:N}";
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(8, hashtext({lockKey}))", cancellationToken);
+
+        var stored = await db.ShopSubscriptionPayments
+            .SingleAsync(item => item.Id == paymentId, cancellationToken);
+        if (stored.Status is "CREATING" or "CREATION_UNKNOWN")
+        {
+            stored.RazorpayOrderId = orderId;
+            stored.Status = "CREATED";
+            stored.UpdatedUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        else if (!string.Equals(stored.RazorpayOrderId, orderId, StringComparison.Ordinal))
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_order_reconciliation_conflict",
+                "The existing subscription order changed during reconciliation. Contact SmartPrint support before paying.",
+                StatusCodes.Status409Conflict);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private async Task MarkOrderCreationUnknownAsync(
+        Guid paymentId,
+        CancellationToken cancellationToken)
+    {
+        var stored = await db.ShopSubscriptionPayments
+            .SingleOrDefaultAsync(item => item.Id == paymentId, cancellationToken);
+        if (stored is null || stored.Status is "CREATED" or "FAILED" or "CAPTURED" or "CAPTURED_REVIEW_REQUIRED")
+            return;
+
+        stored.Status = "CREATION_UNKNOWN";
+        stored.UpdatedUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private async Task<JsonObject> SendRazorpayRequestAsync(
