@@ -91,6 +91,47 @@ public sealed class SubscriptionPlanModelTests
             relationship.DeleteBehavior == DeleteBehavior.Restrict);
     }
 
+    [Fact]
+    public void ShopSubscriptionPaymentsAreIsolatedAndUniquelyIdempotent()
+    {
+        using var db = CreateContext();
+        var payment = db.Model.FindEntityType(typeof(ShopSubscriptionPayment));
+        Assert.NotNull(payment);
+        Assert.Equal("ShopSubscriptionPayments", payment.GetTableName());
+
+        Assert.Contains(payment.GetIndexes(), index =>
+            index.IsUnique && index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(ShopSubscriptionPayment.TenantId), nameof(ShopSubscriptionPayment.IdempotencyKey) }));
+        Assert.Contains(payment.GetIndexes(), index =>
+            index.IsUnique && index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(ShopSubscriptionPayment.RazorpayOrderId) }));
+        Assert.Contains(payment.GetIndexes(), index =>
+            index.IsUnique && index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(ShopSubscriptionPayment.RazorpayPaymentId) }));
+        Assert.Contains(payment.GetForeignKeys(), relationship =>
+            relationship.Properties.Any(property => property.Name == nameof(ShopSubscriptionPayment.TenantId)) &&
+            relationship.DeleteBehavior == DeleteBehavior.Restrict);
+        Assert.Contains(payment.GetForeignKeys(), relationship =>
+            relationship.Properties.Any(property => property.Name == nameof(ShopSubscriptionPayment.PlanVersionId)) &&
+            relationship.DeleteBehavior == DeleteBehavior.Restrict);
+        Assert.Equal(100, payment.FindProperty(nameof(ShopSubscriptionPayment.RazorpayOrderId))?.GetMaxLength());
+    }
+
+    [Fact]
+    public void WebhookInboxDeduplicatesRazorpayEventIdentifiers()
+    {
+        using var db = CreateContext();
+        var webhook = db.Model.FindEntityType(typeof(RazorpayWebhookEvent));
+        Assert.NotNull(webhook);
+        Assert.Equal("RazorpayWebhookEvents", webhook.GetTableName());
+        Assert.Contains(webhook.GetIndexes(), index =>
+            index.IsUnique && index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(RazorpayWebhookEvent.EventId) }));
+        Assert.Contains(webhook.GetIndexes(), index =>
+            !index.IsUnique && index.Properties.Select(property => property.Name)
+                .SequenceEqual(new[] { nameof(RazorpayWebhookEvent.Status), nameof(RazorpayWebhookEvent.ReceivedUtc) }));
+    }
+
     private static SmartPrintDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<SmartPrintDbContext>()
