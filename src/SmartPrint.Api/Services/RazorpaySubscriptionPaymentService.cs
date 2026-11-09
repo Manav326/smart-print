@@ -454,7 +454,8 @@ public sealed class RazorpaySubscriptionPaymentService(
         }
 
         if (string.Equals(snapshot.Status, "authorized", StringComparison.OrdinalIgnoreCase) &&
-            payment.Status != "Failed")
+            (payment.Status != "Failed" ||
+             !string.Equals(payment.RazorpayPaymentId, snapshot.Id, StringComparison.Ordinal)))
         {
             payment.Status = "Authorized";
             payment.RazorpayPaymentId = snapshot.Id;
