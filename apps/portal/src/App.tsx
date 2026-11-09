@@ -3316,10 +3316,10 @@ function SubscriptionPage({
   }, [token]);
 
   const completePayment = async (
-    orderPaymentId: string,
+    order: { paymentId: string; orderId: string },
     response: RazorpayCheckoutResponse
   ) => {
-    if (response.razorpay_order_id !== orderPaymentId) {
+    if (response.razorpay_order_id !== order.orderId) {
       setPaymentMessage("The checkout response did not match the order created for this subscription. No access has been changed.");
       setPaymentMessageTone("error");
       return;
@@ -3336,7 +3336,7 @@ function SubscriptionPage({
 
       for (let attempt = 0; status.status !== "Applied" && status.status !== "Failed" && attempt < 12; attempt++) {
         await new Promise(resolve => window.setTimeout(resolve, 1500));
-        status = await getShopSubscriptionPaymentStatus(token, orderPaymentId);
+        status = await getShopSubscriptionPaymentStatus(token, order.paymentId);
       }
 
       if (status.status === "Applied") {
@@ -3369,7 +3369,9 @@ function SubscriptionPage({
       const order = await createShopSubscriptionOrder(token, {
         planVersionId: selectedPlan.id,
         billingInterval: interval,
-        idempotencyKey: crypto.randomUUID()
+        idempotencyKey: typeof crypto.randomUUID === "function"
+          ? crypto.randomUUID()
+          : Array.from(crypto.getRandomValues(new Uint8Array(16)), value => value.toString(16).padStart(2, "0")).join("")
       });
       await loadRazorpayCheckout();
       if (!window.Razorpay) throw new Error("Razorpay Checkout is unavailable in this browser.");
@@ -3382,7 +3384,7 @@ function SubscriptionPage({
         description: `${order.planName} · ${order.billingInterval} subscription`,
         order_id: order.orderId,
         theme: { color: "#536dfe" },
-        handler: response => { void completePayment(order.orderId, response); },
+        handler: response => { void completePayment(order, response); },
         modal: {
           ondismiss: () => {
             if (checkoutBusy.current) {
