@@ -493,8 +493,7 @@ jobs:
           Copy-Item -LiteralPath $smokeExe -Destination "artifacts/desktop/SmartPrint.Desktop.QA.exe" -Force
           Get-ChildItem -Path (Join-Path $desktopSmokeTarget "release") -Filter "*.dll" -File |
             Copy-Item -Destination "artifacts/desktop" -Force
-          node scripts/qa/create-qa-artifact-manifest.mjs artifacts/desktop windows
-          if ($LASTEXITCODE -ne 0) { throw "Windows QA artifact manifest generation failed." }
+
       - name: Install and bundle the Microsoft WebView2 Evergreen Runtime
         id: webview2_runtime
         if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' }}
@@ -579,6 +578,13 @@ jobs:
           path: artifacts/mixed-batch-refund-native-windows/
           if-no-files-found: warn
           retention-days: 14
+
+      - name: Generate complete Windows QA artifact manifest
+        if: ${{ !cancelled() && steps.desktop_executable_build.outcome == 'success' && steps.webview2_runtime.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          node scripts/qa/create-qa-artifact-manifest.mjs artifacts/desktop windows
+          if ($LASTEXITCODE -ne 0) { throw "Windows QA artifact manifest generation failed." }
       - name: Upload Windows desktop package
         id: desktop_package_upload
         if: ${{ always() && steps.desktop_executable_build.outcome == 'success' }}
