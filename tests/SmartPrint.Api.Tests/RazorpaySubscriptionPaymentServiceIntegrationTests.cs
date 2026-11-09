@@ -144,7 +144,21 @@ public sealed class RazorpaySubscriptionPaymentServiceIntegrationTests
         Assert.Equal("Processed", first.Status);
         Assert.True(duplicate.Duplicate);
 
-        var conflictingBody = $"""{"event":"payment.failed","payload":{"payment":{"entity":{"id":"{{paymentId}}","order_id":"{{order.OrderId}}"}}}}""";
+        var conflictingBody = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            ["event"] = "payment.failed",
+            ["payload"] = new Dictionary<string, object>
+            {
+                ["payment"] = new Dictionary<string, object>
+                {
+                    ["entity"] = new Dictionary<string, string>
+                    {
+                        ["id"] = paymentId,
+                        ["order_id"] = order.OrderId
+                    }
+                }
+            }
+        });
         var conflict = await Assert.ThrowsAsync<RazorpayPaymentException>(() =>
             service.ProcessWebhookAsync(
                 conflictingBody, WebhookSignature(conflictingBody), "event-captured-001", CancellationToken.None));
