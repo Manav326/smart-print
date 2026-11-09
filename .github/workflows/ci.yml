@@ -132,6 +132,33 @@ jobs:
           path: artifacts/web-production/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Build isolated Photo Studio QA fixture artifact
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        env:
+          VITE_ENABLE_PHOTO_STUDIO_QA: "true"
+        run: |
+          pnpm --filter @smart-print/portal build
+          if ($LASTEXITCODE -ne 0) { throw "The isolated Photo Studio QA fixture build failed." }
+          if (-not (Test-Path -LiteralPath "apps/portal/dist/tests/photo-studio.browser.html")) {
+            throw "The QA-only Photo Studio browser fixture was not emitted."
+          }
+      - name: Package exact-commit Photo Studio QA fixture
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/web-photo-studio-qa
+          cp -R apps/portal/dist/. artifacts/web-photo-studio-qa/
+          node scripts/qa/create-qa-artifact-manifest.mjs artifacts/web-photo-studio-qa webqa
+      - name: Upload Photo Studio QA fixture for local headed testing
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: smart-print-web-photo-studio-qa
+          path: artifacts/web-photo-studio-qa/
+          if-no-files-found: error
+          retention-days: 30
       - name: Typecheck native desktop frontend
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: pnpm --filter @smart-print/desktop typecheck
