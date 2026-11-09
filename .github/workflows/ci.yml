@@ -114,6 +114,24 @@ jobs:
             exit 1
           fi
           echo "PASS: normal portal build does not publish the QA-only Photo Studio fixture"
+
+      - name: Package exact-commit production portal artifact
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/web-production
+          cp -R apps/portal/dist/. artifacts/web-production/
+          node scripts/qa/create-qa-artifact-manifest.mjs artifacts/web-production web
+
+      - name: Upload production portal artifact for local QA
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: smart-print-web-production
+          path: artifacts/web-production/
+          if-no-files-found: error
+          retention-days: 30
       - name: Typecheck native desktop frontend
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: pnpm --filter @smart-print/desktop typecheck
