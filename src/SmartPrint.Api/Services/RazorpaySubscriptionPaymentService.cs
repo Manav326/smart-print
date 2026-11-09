@@ -252,6 +252,13 @@ public sealed class RazorpaySubscriptionPaymentService(
 
         if (payment.Status == "Applied")
         {
+            if (!string.Equals(payment.RazorpayPaymentId, paymentId, StringComparison.Ordinal))
+            {
+                throw new RazorpayPaymentException(
+                    "order_already_applied_to_another_payment",
+                    "This subscription order has already been applied using a different captured payment. Contact SmartPrint support before retrying.",
+                    StatusCodes.Status409Conflict);
+            }
             return ToStatusResponse(payment);
         }
 
@@ -433,7 +440,8 @@ public sealed class RazorpaySubscriptionPaymentService(
             return;
         }
 
-        if (string.Equals(snapshot.Status, "authorized", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(snapshot.Status, "authorized", StringComparison.OrdinalIgnoreCase) &&
+            payment.Status != "Failed")
         {
             payment.Status = "Authorized";
             payment.RazorpayPaymentId = snapshot.Id;
@@ -442,6 +450,7 @@ public sealed class RazorpaySubscriptionPaymentService(
         else if (string.Equals(snapshot.Status, "failed", StringComparison.OrdinalIgnoreCase))
         {
             payment.Status = "Failed";
+            payment.RazorpayPaymentId = snapshot.Id;
             payment.FailureCode = "razorpay_payment_failed";
         }
 
@@ -469,6 +478,13 @@ public sealed class RazorpaySubscriptionPaymentService(
         await db.Entry(payment).ReloadAsync(ct);
         if (payment.Status == "Applied")
         {
+            if (!string.Equals(payment.RazorpayPaymentId, snapshot.Id, StringComparison.Ordinal))
+            {
+                throw new RazorpayPaymentException(
+                    "order_already_applied_to_another_payment",
+                    "A second Razorpay payment was reported for an order already applied to this subscription.",
+                    StatusCodes.Status409Conflict);
+            }
             await transaction.CommitAsync(ct);
             return;
         }
@@ -600,22 +616,12 @@ public sealed class RazorpaySubscriptionPaymentService(
         RazorpayPaymentSnapshot actual,
         string expectedPaymentId)
     {
-        if (!string.Equals(actual.Id, expectedPaymentId, StringComparison.Ordinal) ||
-            !RazorpaySubscriptionPaymentRules.IsCapturedPayment(
-                actual.OrderId, expected.RazorpayOrderId,
-                actual.AmountMinor, expected.AmountMinor,
-                actual.Currency, expected.Currency,
-                actual.Status) &&
-            !string.Equals(actual.Status, "authorized", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(actual.Status, "failed", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new RazorpayPaymentException(
-                "razorpay_payment_mismatch",
-                "The Razorpay payment does not match this shop's subscription order.",
-                StatusCodes.Status409Conflict);
-        }
-
-        if (!string.Equals(actual.OrderId, expected.RazorpayOrderId, StringComparison.Ordinal) ||
+        var recognizedStatus =
+            string.Equals(actual.Status, "captured", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(actual.Status, "authorized", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(actual.Status, "failed", StringComparison.OrdinalIgnoreCase);
+        if (!string.Equals(actual.Id, expectedPaymentId, StringComparison.Ordinal) || !recognizedStatus ||
+            !string.Equals(actual.OrderId, expected.RazorpayOrderId, StringComparison.Ordinal) ||
             actual.AmountMinor != expected.AmountMinor ||
             !string.Equals(actual.Currency, expected.Currency, StringComparison.OrdinalIgnoreCase))
         {
