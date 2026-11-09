@@ -14,7 +14,7 @@ Shop-owner subscription charges are a separate payment purpose from the payments
 
 The shop subscription order/payment records and webhook event inbox are separate from `PrintPayments`, `PrintBatchPayments`, shop UPI/cash settings, customer payment verification and print refunds. Existing customer print-payment routes are not repurposed.
 
-If order creation returns an ambiguous network result, SmartPrint looks up the order by its unique receipt and stored payment-intent ID before presenting checkout. An unresolved result stays in a reconciliation state; SmartPrint does not blindly create a second Razorpay order. Shop owners can resume the same pending payment from the subscription page. Because Razorpay does not expose a general cancel operation for an unpaid Order, the portal does not pretend to cancel it or silently create another payable order.
+If order creation returns an ambiguous network result, SmartPrint looks up the order by its unique receipt and stored payment-intent ID before presenting checkout. An unresolved result stays in a reconciliation state; SmartPrint does not blindly create a second Razorpay order. Shop owners can resume the same pending payment from the subscription page. Before reopening an existing order, SmartPrint fetches its payments from Razorpay and reconciles any capture, even when the webhook has not arrived. If the provider status cannot be confirmed, checkout is not reopened. Because Razorpay does not expose a general cancel operation for an unpaid Order, the portal does not pretend to cancel it or silently create another payable order.
 
 ## Server configuration
 
