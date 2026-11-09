@@ -74,184 +74,319 @@ public sealed class SubscriptionRazorpayService(
                 "Choose monthly or annual billing.");
         }
 
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var lockKey = $"shop-subscription-order-create:{tenantId:N}";
-        await db.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT pg_advisory_xact_lock(5, hashtext({lockKey}))", cancellationToken);
-
-        var existing = await db.ShopSubscriptionPayments
-            .SingleOrDefaultAsync(
-                item => item.TenantId == tenantId && item.ClientRequestId == requestId,
-                cancellationToken);
-        if (existing is not null)
+        ShopSubscriptionPayment payment;
+        SubscriptionPlan candidatePlan;
+        await using (var transaction = await db.Database.BeginTransactionAsync(cancellationToken))
         {
-            if (existing.PlanVersionId != planVersionId ||
-                !string.Equals(existing.BillingInterval, interval, StringComparison.OrdinalIgnoreCase))
+            var lockKey = $"shop-subscription-order-create:{tenantId:N}";
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(5, hashtext({lockKey}))", cancellationToken);
+
+            var existing = await db.ShopSubscriptionPayments
+                .SingleOrDefaultAsync(
+                    item => item.TenantId == tenantId && item.ClientRequestId == requestId,
+                    cancellationToken);
+            if (existing is not null)
             {
-                throw new SubscriptionPaymentException(
-                    "idempotency_key_reused",
-                    "This payment request ID was already used for a different plan or billing interval.",
-                    StatusCodes.Status409Conflict);
-            }
-
-            await transaction.CommitAsync(cancellationToken);
-            var existingPlanName = await db.SubscriptionPlans.AsNoTracking()
-                .Where(item => item.Code == existing.PlanCode)
-                .Select(item => item.Name)
-                .SingleOrDefaultAsync(cancellationToken) ?? existing.PlanCode;
-            return ToOrderResponse(existing, existingPlanName);
-        }
-
-        var tenantStatus = await db.Tenants.AsNoTracking()
-            .Where(item => item.Id == tenantId)
-            .Select(item => item.Status)
-            .SingleOrDefaultAsync(cancellationToken);
-        if (!TenantAccessRules.IsActive(tenantStatus))
-        {
-            throw new SubscriptionPaymentException(
-                "tenant_inactive",
-                "This shop is inactive. Contact SmartPrint support before purchasing a subscription.",
-                StatusCodes.Status403Forbidden);
-        }
-
-        var candidate = await (
-            from version in db.SubscriptionPlanVersions.AsNoTracking()
-            join plan in db.SubscriptionPlans.AsNoTracking() on version.PlanId equals plan.Id
-            where version.Id == planVersionId
-            select new { Plan = plan, Version = version })
-            .SingleOrDefaultAsync(cancellationToken);
-        if (candidate is null)
-        {
-            throw new SubscriptionPaymentException(
-                "plan_version_not_assignable",
-                "This published plan version or billing interval is no longer available.",
-                StatusCodes.Status409Conflict);
-        }
-
-        if (!PlatformSubscriptionAssignmentRules.TryResolve(
-                candidate.Plan,
-                candidate.Version,
-                interval,
-                DateTimeOffset.UtcNow,
-                out var terms,
-                out var errorCode,
-                paymentConfirmed: true) ||
-            terms is null)
-        {
-            throw new SubscriptionPaymentException(
-                errorCode,
-                "This published plan version or billing interval is no longer available.",
-                StatusCodes.Status409Conflict);
-        }
-
-        if (terms.AmountMinor <= 0)
-        {
-            throw new SubscriptionPaymentException(
-                "plan_does_not_require_payment",
-                "This plan interval does not require a Razorpay payment.",
-                StatusCodes.Status409Conflict);
-        }
-
-        // A browser refresh creates a new client request ID. Reuse the shop's existing
-        // unsettled order so that a second browser session cannot accidentally create
-        // another chargeable order for the same subscription purchase.
-        var pendingPayment = await db.ShopSubscriptionPayments
-            .Where(item => item.TenantId == tenantId &&
-                           (item.Status == "CREATED" ||
-                            item.Status == "FAILED" ||
-                            item.Status == "CAPTURED_REVIEW_REQUIRED"))
-            .OrderByDescending(item => item.CreatedUtc)
-            .ThenByDescending(item => item.Id)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        if (pendingPayment is not null)
-        {
-            if (pendingPayment.Status == "CAPTURED_REVIEW_REQUIRED")
-            {
-                throw new SubscriptionPaymentException(
-                    "subscription_payment_review_required",
-                    "A previous subscription payment was captured and needs SmartPrint support review. Do not pay again until it is reconciled.",
-                    StatusCodes.Status409Conflict);
-            }
-
-            if (pendingPayment.PlanVersionId != candidate.Version.Id ||
-                !string.Equals(pendingPayment.BillingInterval, terms.BillingInterval, StringComparison.OrdinalIgnoreCase))
-            {
-                throw new SubscriptionPaymentException(
-                    "subscription_payment_pending",
-                    "This shop already has an unsettled subscription payment. Complete or retry that checkout before choosing a different plan.",
-                    StatusCodes.Status409Conflict);
-            }
-
-            await transaction.CommitAsync(cancellationToken);
-            return ToOrderResponse(pendingPayment, candidate.Plan.Name);
-        }
-
-        if (!string.Equals(terms.Currency, "INR", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new SubscriptionPaymentException(
-                "unsupported_payment_currency",
-                "Razorpay subscription checkout is currently available for INR plans only.",
-                StatusCodes.Status409Conflict);
-        }
-
-        var payment = new ShopSubscriptionPayment
-        {
-            TenantId = tenantId,
-            CreatedByUserId = actorUserId,
-            PlanVersionId = candidate.Version.Id,
-            PlanCode = candidate.Plan.Code,
-            BillingInterval = terms.BillingInterval,
-            AmountMinor = terms.AmountMinor,
-            Currency = terms.Currency.ToUpperInvariant(),
-            ClientRequestId = requestId,
-            Status = "CREATING",
-            CreatedUtc = DateTimeOffset.UtcNow,
-            UpdatedUtc = DateTimeOffset.UtcNow
-        };
-
-        // The amount and currency are read only from the published plan version.
-        // No client-supplied price is accepted by this endpoint.
-        var receipt = "SP" + payment.Id.ToString("N")[..32];
-        var remoteOrder = await SendRazorpayRequestAsync(
-            HttpMethod.Post,
-            "/orders",
-            new
-            {
-                amount = payment.AmountMinor,
-                currency = payment.Currency,
-                receipt,
-                notes = new
+                if (existing.PlanVersionId != planVersionId ||
+                    !string.Equals(existing.BillingInterval, interval, StringComparison.OrdinalIgnoreCase))
                 {
-                    tenant_id = tenantId.ToString("N"),
-                    subscription_payment_id = payment.Id.ToString("N"),
-                    plan_version_id = payment.PlanVersionId.ToString("N"),
-                    billing_interval = payment.BillingInterval
+                    throw new SubscriptionPaymentException(
+                        "idempotency_key_reused",
+                        "This payment request ID was already used for a different plan or billing interval.",
+                        StatusCodes.Status409Conflict);
                 }
-            },
-            cancellationToken);
 
-        var orderId = ReadString(remoteOrder, "id");
-        var remoteAmount = ReadInt64(remoteOrder, "amount");
-        var remoteCurrency = ReadString(remoteOrder, "currency");
-        if (string.IsNullOrWhiteSpace(orderId) ||
-            remoteAmount != payment.AmountMinor ||
-            !string.Equals(remoteCurrency, payment.Currency, StringComparison.OrdinalIgnoreCase))
+                if (existing.Status is "CREATING" or "CREATION_UNKNOWN")
+                {
+                    throw new SubscriptionPaymentException(
+                        "subscription_order_confirmation_pending",
+                        "SmartPrint is still confirming the Razorpay order. Refresh payment status; do not start another payment.",
+                        StatusCodes.Status409Conflict);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+                var existingPlanName = await db.SubscriptionPlans.AsNoTracking()
+                    .Where(item => item.Code == existing.PlanCode)
+                    .Select(item => item.Name)
+                    .SingleOrDefaultAsync(cancellationToken) ?? existing.PlanCode;
+                return ToOrderResponse(existing, existingPlanName);
+            }
+
+            var tenantStatus = await db.Tenants.AsNoTracking()
+                .Where(item => item.Id == tenantId)
+                .Select(item => item.Status)
+                .SingleOrDefaultAsync(cancellationToken);
+            if (!TenantAccessRules.IsActive(tenantStatus))
+            {
+                throw new SubscriptionPaymentException(
+                    "tenant_inactive",
+                    "This shop is inactive. Contact SmartPrint support before purchasing a subscription.",
+                    StatusCodes.Status403Forbidden);
+            }
+
+            var candidate = await (
+                from version in db.SubscriptionPlanVersions.AsNoTracking()
+                join plan in db.SubscriptionPlans.AsNoTracking() on version.PlanId equals plan.Id
+                where version.Id == planVersionId
+                select new { Plan = plan, Version = version })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (candidate is null)
+            {
+                throw new SubscriptionPaymentException(
+                    "plan_version_not_assignable",
+                    "This published plan version or billing interval is no longer available.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            if (!PlatformSubscriptionAssignmentRules.TryResolve(
+                    candidate.Plan,
+                    candidate.Version,
+                    interval,
+                    DateTimeOffset.UtcNow,
+                    out var terms,
+                    out var errorCode,
+                    paymentConfirmed: true) ||
+                terms is null)
+            {
+                throw new SubscriptionPaymentException(
+                    errorCode,
+                    "This published plan version or billing interval is no longer available.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            if (terms.AmountMinor <= 0)
+            {
+                throw new SubscriptionPaymentException(
+                    "plan_does_not_require_payment",
+                    "This plan interval does not require a Razorpay payment.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            if (terms.AmountMinor > RazorpaySubscriptionPaymentRules.MaximumOrderAmountMinor)
+            {
+                throw new SubscriptionPaymentException(
+                    "subscription_amount_exceeds_provider_limit",
+                    "This plan's price is above the current Razorpay checkout limit. Contact SmartPrint support for an assisted subscription purchase.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            // Razorpay does not provide a general cancel operation for an unpaid Order.
+            // Reuse one unsettled order per shop rather than creating a second payable order.
+            var pendingPayment = await db.ShopSubscriptionPayments
+                .Where(item => item.TenantId == tenantId &&
+                               (item.Status == "CREATING" ||
+                                item.Status == "CREATION_UNKNOWN" ||
+                                item.Status == "CREATED" ||
+                                item.Status == "FAILED" ||
+                                item.Status == "CAPTURED_REVIEW_REQUIRED"))
+                .OrderByDescending(item => item.CreatedUtc)
+                .ThenByDescending(item => item.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (pendingPayment is not null)
+            {
+                if (pendingPayment.Status == "CAPTURED_REVIEW_REQUIRED")
+                {
+                    throw new SubscriptionPaymentException(
+                        "subscription_payment_review_required",
+                        "A previous subscription payment was captured and needs SmartPrint support review. Do not pay again until it is reconciled.",
+                        StatusCodes.Status409Conflict);
+                }
+
+                if (pendingPayment.PlanVersionId != candidate.Version.Id ||
+                    !string.Equals(pendingPayment.BillingInterval, terms.BillingInterval, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new SubscriptionPaymentException(
+                        "subscription_payment_pending",
+                        "This shop already has an unpaid subscription order. Continue that payment first; SmartPrint cannot cancel an unpaid Razorpay order safely.",
+                        StatusCodes.Status409Conflict);
+                }
+
+                if (pendingPayment.Status is "CREATING" or "CREATION_UNKNOWN")
+                {
+                    throw new SubscriptionPaymentException(
+                        "subscription_order_confirmation_pending",
+                        "SmartPrint is still confirming the existing Razorpay order. Use Continue payment or refresh status; do not create another order.",
+                        StatusCodes.Status409Conflict);
+                }
+
+                await transaction.CommitAsync(cancellationToken);
+                return ToOrderResponse(pendingPayment, candidate.Plan.Name);
+            }
+
+            if (!string.Equals(terms.Currency, "INR", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SubscriptionPaymentException(
+                    "unsupported_payment_currency",
+                    "Razorpay subscription checkout is currently available for INR plans only.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            payment = new ShopSubscriptionPayment
+            {
+                TenantId = tenantId,
+                CreatedByUserId = actorUserId,
+                PlanVersionId = candidate.Version.Id,
+                PlanCode = candidate.Plan.Code,
+                BillingInterval = terms.BillingInterval,
+                AmountMinor = terms.AmountMinor,
+                Currency = terms.Currency.ToUpperInvariant(),
+                ClientRequestId = requestId,
+                RazorpayOrderId = "pending_" + Guid.NewGuid().ToString("N"),
+                Status = "CREATING",
+                CreatedUtc = DateTimeOffset.UtcNow,
+                UpdatedUtc = DateTimeOffset.UtcNow
+            };
+            candidatePlan = candidate.Plan;
+
+            // Commit the durable intent before the network call. A timeout must not roll
+            // back the idempotency record and permit another provider order to be created.
+            db.ShopSubscriptionPayments.Add(payment);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+
+        var receipt = ReceiptFor(payment);
+        JsonObject? remoteOrder = null;
+        try
         {
+            remoteOrder = await SendRazorpayRequestAsync(
+                HttpMethod.Post,
+                "/orders",
+                new
+                {
+                    amount = payment.AmountMinor,
+                    currency = payment.Currency,
+                    receipt,
+                    notes = new
+                    {
+                        tenant_id = tenantId.ToString("N"),
+                        subscription_payment_id = payment.Id.ToString("N"),
+                        plan_version_id = payment.PlanVersionId.ToString("N"),
+                        billing_interval = payment.BillingInterval
+                    }
+                },
+                cancellationToken);
+        }
+        catch (Exception exception) when (
+            !cancellationToken.IsCancellationRequested &&
+            exception is SubscriptionPaymentException or HttpRequestException or TaskCanceledException)
+        {
+            // The provider may have accepted the order even when its response was lost.
+            // Look it up by the same unique receipt before deciding that creation failed.
+            try
+            {
+                remoteOrder = await FetchOrderByReceiptAsync(payment, cancellationToken);
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                remoteOrder = null;
+            }
+
+            if (remoteOrder is null)
+            {
+                await MarkOrderCreationUnknownAsync(payment.Id, cancellationToken);
+                throw new SubscriptionPaymentException(
+                    "subscription_order_confirmation_pending",
+                    "Razorpay may have received the order request, but SmartPrint could not confirm its response. No second order was created. Refresh payment status or contact support if this message remains.",
+                    StatusCodes.Status502BadGateway);
+            }
+        }
+
+        if (remoteOrder is null ||
+            !IsValidCreatedOrder(payment, remoteOrder, out var orderId))
+        {
+            await MarkOrderCreationUnknownAsync(payment.Id, cancellationToken);
             throw new SubscriptionPaymentException(
                 "razorpay_order_mismatch",
-                "Razorpay did not return an order matching the published subscription amount.",
+                "Razorpay did not return an order matching the published subscription amount. SmartPrint has held the request for reconciliation and will not create a duplicate.",
                 StatusCodes.Status502BadGateway);
         }
 
+        await PersistCreatedOrderAsync(payment.Id, orderId, cancellationToken);
         payment.RazorpayOrderId = orderId;
         payment.Status = "CREATED";
-        payment.UpdatedUtc = DateTimeOffset.UtcNow;
-        db.ShopSubscriptionPayments.Add(payment);
-        await db.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
+        return ToOrderResponse(payment, candidatePlan.Name);
+    }
 
-        return ToOrderResponse(payment, candidate.Plan.Name);
+    public async Task<ShopSubscriptionPaymentOrderResponse> ResumeOrderAsync(
+        Guid tenantId,
+        Guid paymentId,
+        CancellationToken cancellationToken)
+    {
+        EnsureApiConfigured();
+        var payment = await db.ShopSubscriptionPayments
+            .SingleOrDefaultAsync(
+                item => item.TenantId == tenantId && item.Id == paymentId,
+                cancellationToken);
+        if (payment is null)
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_not_found",
+                "The pending subscription payment was not found for this shop.",
+                StatusCodes.Status404NotFound);
+        }
+
+        if (payment.Status == "CAPTURED")
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_already_captured",
+                "This payment is already verified. Refresh your subscription status to see the active plan.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (payment.Status == "CAPTURED_REVIEW_REQUIRED")
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_review_required",
+                "Razorpay confirmed this payment, but SmartPrint support must review the plan assignment. Do not pay again.",
+                StatusCodes.Status409Conflict);
+        }
+
+        if (payment.Status is "CREATING" or "CREATION_UNKNOWN")
+        {
+            JsonObject? remoteOrder;
+            try
+            {
+                remoteOrder = await FetchOrderByReceiptAsync(payment, cancellationToken);
+            }
+            catch (SubscriptionPaymentException)
+            {
+                throw new SubscriptionPaymentException(
+                    "subscription_order_confirmation_pending",
+                    "Razorpay order confirmation is temporarily unavailable. Refresh status and retry Continue payment; do not start a new payment.",
+                    StatusCodes.Status503ServiceUnavailable);
+            }
+
+            if (remoteOrder is null ||
+                !IsValidCreatedOrder(payment, remoteOrder, out var reconciledOrderId))
+            {
+                await MarkOrderCreationUnknownAsync(payment.Id, cancellationToken);
+                throw new SubscriptionPaymentException(
+                    "subscription_order_confirmation_pending",
+                    "The existing Razorpay order is still being reconciled. No new order was created. Refresh status again or contact support if it remains pending.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            await PersistCreatedOrderAsync(payment.Id, reconciledOrderId, cancellationToken);
+            payment.RazorpayOrderId = reconciledOrderId;
+            payment.Status = "CREATED";
+        }
+
+        if (payment.Status is not ("CREATED" or "FAILED"))
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_not_resumable",
+                "This subscription payment cannot be resumed. Contact SmartPrint support before paying again.",
+                StatusCodes.Status409Conflict);
+        }
+
+        var planName = await db.SubscriptionPlans.AsNoTracking()
+            .Where(item => item.Code == payment.PlanCode)
+            .Select(item => item.Name)
+            .SingleOrDefaultAsync(cancellationToken) ?? payment.PlanCode;
+        return ToOrderResponse(payment, planName);
     }
 
     public async Task<ShopSubscriptionPaymentVerificationResponse> VerifyCheckoutAsync(
