@@ -323,6 +323,16 @@ function Build-WindowsQaExecutable([string]$ProductionExe) {
         if (-not (Test-Path -LiteralPath $qaExecutable -PathType Leaf)) { throw "The isolated Windows QA executable was not produced." }
         $destination = Join-Path $desktopOutput "SmartPrint.Desktop.QA.exe"
         Copy-Item -LiteralPath $qaExecutable -Destination $destination -Force
+        $dllSources = @(
+            (Split-Path -Parent $ProductionExe),
+            (Split-Path -Parent $qaExecutable)
+        ) | Select-Object -Unique
+        foreach ($dllSource in $dllSources) {
+            if (Test-Path -LiteralPath $dllSource -PathType Container) {
+                Get-ChildItem -LiteralPath $dllSource -Filter "*.dll" -File -ErrorAction SilentlyContinue |
+                    Copy-Item -Destination $desktopOutput -Force
+            }
+        }
         return $destination
     } finally {
         [Environment]::SetEnvironmentVariable("CARGO_TARGET_DIR", $previousCargoTarget, "Process")
@@ -357,23 +367,25 @@ function Invoke-WindowsArtifactTests([string]$DesktopDirectory, [string]$ModeFor
 }
 
 function Resolve-AndroidDeviceIfNeeded {
-    if (-not ($Platforms -contains "Android") -or $AndroidDeviceSerial) { return }
+    if (-not ($Platforms -contains "Android")) { return $null }
+    if ($AndroidDeviceSerial) { return $AndroidDeviceSerial }
     $sdk = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
     $adb = Join-Path $sdk "platform-tools\adb.exe"
-    if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) { return }
+    if (-not (Test-Path -LiteralPath $adb -PathType Leaf)) { return $null }
     $lines = @(& $adb devices -l 2>&1)
+    if ($LASTEXITCODE -ne 0) { throw "ADB could not enumerate connected devices: $($lines -join '; ')" }
     $serials = @()
     foreach ($line in $lines) {
         if ($line -match '^\s*(?<serial>\S+)\s+device(?:\s|$)') { $serials += $Matches.serial }
     }
-    if ($serials.Count -gt 1) {
-        Write-Host "More than one ADB device is connected:" -ForegroundColor Yellow
-        for ($index = 0; $index -lt $serials.Count; $index++) { Write-Host ("  {0}. {1}" -f ($index + 1), $serials[$index]) }
-        $selection = Read-Host "Enter the number of the physical phone to test"
-        $number = 0
-        if (-not [int]::TryParse($selection, [ref]$number) -or $number -lt 1 -or $number -gt $serials.Count) { throw "Invalid Android device selection." }
-        $script:AndroidDeviceSerial = $serials[$number - 1]
-    }
+    if ($serials.Count -eq 1) { return [string]$serials[0] }
+    if ($serials.Count -eq 0) { return $null }
+    Write-Host "More than one ADB device is connected:" -ForegroundColor Yellow
+    for ($index = 0; $index -lt $serials.Count; $index++) { Write-Host ("  {0}. {1}" -f ($index + 1), $serials[$index]) }
+    $selection = Read-Host "Enter the number of the physical phone to test"
+    $number = 0
+    if (-not [int]::TryParse($selection, [ref]$number) -or $number -lt 1 -or $number -gt $serials.Count) { throw "Invalid Android device selection." }
+    return [string]$serials[$number - 1]
 }
 
 $originalEnvironment = @{}
@@ -425,7 +437,8 @@ try {
         } -Evidence (Join-Path $runDirectory "pnpm-install.log") | Out-Null
     }
 
-    Resolve-AndroidDeviceIfNeeded
+    $resolvedAndroidSerial = Resolve-AndroidDeviceIfNeeded
+    if ($resolvedAndroidSerial) { $AndroidDeviceSerial = $resolvedAndroidSerial }
 
     if ($Platforms -contains "Web" -or $Platforms -contains "Windows") {
         $portalStep = Invoke-QAStep "Web/Shared UI" "Photo Studio logic and headed browser acceptance" {
