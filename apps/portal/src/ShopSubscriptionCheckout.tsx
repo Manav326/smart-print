@@ -329,11 +329,13 @@ export default function ShopSubscriptionCheckout({
     setError("");
     setNotice("");
     try {
-      await ensureRazorpayCheckout();
       const order = await resumeShopSubscriptionPaymentOrder(token, payment.id);
       if (order.provider.toLowerCase() !== "razorpay" || !order.keyId || !order.orderId) {
         throw new Error("SmartPrint did not return a resumable Razorpay order.");
       }
+      // Resolve the provider state before loading Checkout; a captured or still-unknown
+      // payment should never wait on the checkout SDK or be opened again.
+      await ensureRazorpayCheckout();
       await openRazorpayCheckout(order, "pending:" + payment.id, payment.id);
     } catch (exception) {
       setBusyOption(null);
