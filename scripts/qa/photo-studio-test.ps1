@@ -183,7 +183,13 @@ try {
         $env:PLAYWRIGHT_MODULE_DIR = $module.DirectoryName
         $env:SMARTPRINT_PHOTO_STUDIO_ARTIFACT_DIR = Join-Path $ArtifactDirectory "browser"
         $env:VITE_API_BASE_URL = ""
-        Remove-Item Env:SMARTPRINT_PHOTO_STUDIO_BASE_URL -ErrorAction SilentlyContinue
+        if ($env:SMARTPRINT_PHOTO_STUDIO_BASE_URL) {
+            $fixtureUri = [Uri]$env:SMARTPRINT_PHOTO_STUDIO_BASE_URL
+            if ($fixtureUri.Scheme -ne "http" -or -not $fixtureUri.IsLoopback -or $fixtureUri.Port -ne 4173) {
+                throw "SMARTPRINT_PHOTO_STUDIO_BASE_URL must be the loopback artifact fixture origin http://127.0.0.1:4173."
+            }
+            Write-Host ("Using the selected prebuilt Photo Studio fixture: " + $env:SMARTPRINT_PHOTO_STUDIO_BASE_URL) -ForegroundColor DarkCyan
+        }
         $env:SMARTPRINT_PHOTO_STUDIO_HEADED = if ($Headed) { "1" } else { "0" }
         New-Item -ItemType Directory -Force -Path $env:SMARTPRINT_PHOTO_STUDIO_ARTIFACT_DIR | Out-Null
         Invoke-Checked "Run Photo Studio browser acceptance (customer + shop owner + responsive)" {
