@@ -47,6 +47,7 @@ var audience = builder.Configuration["Authentication:Audience"] ?? "QRtoPrint.Cl
 
 builder.Services.AddProblemDetails();
 builder.Services.AddMemoryCache();
+builder.Services.AddHttpClient<RazorpaySubscriptionPaymentService>();
 builder.Services.AddHttpClient<PublicDownloadService>(client =>
 {
     client.Timeout = Timeout.InfiniteTimeSpan;
@@ -1103,6 +1104,8 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
 
 var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
+shop.MapShopSubscriptionPaymentEndpoints();
+app.MapRazorpaySubscriptionWebhook();
 
 shop.MapGet("/subscription", async (
     ClaimsPrincipal principal,
