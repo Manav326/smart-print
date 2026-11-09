@@ -20,6 +20,10 @@ Skips pnpm dependency installation. Use only when the lockfile dependencies are 
 .PARAMETER SkipBuild
 Skips portal and native desktop builds. Unit tests and the Android APK build still run.
 
+.PARAMETER SkipPortal
+Skips Portal unit/browser acceptance and its build. Valid with Windows mode when
+the coordinated runner has already executed the selected Web suite separately.
+
 .PARAMETER Headed
 Runs Chromium with a visible browser window for local debugging.
 
@@ -59,6 +63,7 @@ param(
     [string]$Platform = "All",
     [switch]$SkipInstall,
     [switch]$SkipBuild,
+    [switch]$SkipPortal,
     [switch]$Headed,
     [switch]$RunAndroidEmulator,
     [switch]$UseVirtualPdfPrinter,
@@ -82,6 +87,7 @@ Options:
                            Select test platforms. Default: All.
   -SkipInstall             Skip pnpm install --frozen-lockfile.
   -SkipBuild               Skip portal and Windows desktop builds.
+  -SkipPortal              Skip Portal logic/browser tests and build (Windows mode only).
   -Headed                  Show Chromium while running browser acceptance.
   -RunAndroidEmulator      Start local fixture server and execute Android WebView instrumentation.
   -UseVirtualPdfPrinter    Opt in to Microsoft Print to PDF virtual-queue tests only.
@@ -471,6 +477,9 @@ try {
     if ($UseVirtualPdfPrinter -and $Platform -notin @("All", "Windows")) {
         throw "-UseVirtualPdfPrinter can only be combined with -Platform All or -Platform Windows."
     }
+    if ($SkipPortal -and $Platform -ne "Windows") {
+        throw "-SkipPortal is valid only with -Platform Windows."
+    }
 
     Write-Host "SmartPrint Photo Studio software-only QA" -ForegroundColor Green
     Write-Host "Repository: $repoRoot"
@@ -479,7 +488,7 @@ try {
     Write-Host "Live payment submission: DISABLED"
     Write-Host "Evidence directory: $ArtifactDirectory"
 
-    if ($Platform -in @("All", "Web", "Windows")) { Invoke-PortalSuite }
+    if (-not $SkipPortal -and $Platform -in @("All", "Web", "Windows")) { Invoke-PortalSuite }
     if ($Platform -in @("All", "Windows")) { Invoke-WindowsSuite }
     if ($Platform -in @("All", "Android")) { Invoke-AndroidSuite }
 
