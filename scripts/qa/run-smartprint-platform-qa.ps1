@@ -262,7 +262,7 @@ function Test-CIArtifactManifest([string]$Directory, [string]$ExpectedPlatform) 
 }
 
 function Assert-ArtifactFiles([object]$Manifest, [string[]]$RequiredPaths, [string]$ArtifactName) {
-    $manifestPaths = @($Manifest.files | ForEach-Object { ([string]$_.path).Replace("\\", "/") })
+    $manifestPaths = @($Manifest.files | ForEach-Object { [string]$_.path })
     foreach ($requiredPath in $RequiredPaths) {
         if ($manifestPaths -notcontains $requiredPath) {
             throw "Artifact '$ArtifactName' is missing required manifested file '$requiredPath'."
