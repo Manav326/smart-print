@@ -35,6 +35,10 @@ services:
       ConnectionStrings__SmartPrint: "Host=db;Port=5432;Database=${POSTGRES_DB:-qrtoprint};Username=${POSTGRES_USER:-qrtoprint};Password=${POSTGRES_PASSWORD:-qrtoprint-local-only-db-password}"
       Authentication__SigningKey: ${AUTH_SIGNING_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      Razorpay__KeyId: ${RAZORPAY_KEY_ID:-}
+      Razorpay__KeySecret: ${RAZORPAY_KEY_SECRET:-}
+      Razorpay__WebhookSecret: ${RAZORPAY_WEBHOOK_SECRET:-}
+      Razorpay__BaseUrl: ${RAZORPAY_BASE_URL:-https://api.razorpay.com/v1}
       Documents__StorageRoot: /var/lib/qrtoprint/documents
       Database__ApplyMigrationsOnStartup: "true"
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"

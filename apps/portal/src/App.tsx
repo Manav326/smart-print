@@ -7,6 +7,7 @@ import {
 import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet } from "./PhotoStudio";
 import CustomerUpiQr from "./CustomerUpiQr";
+import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
 import { shouldBlockBatchCheckoutForExpiredQuote, shouldBlockQuoteRefreshForStatus } from "./batch-checkout-state";
 import { isCustomerBatchFinished } from "./customer-session-state";
@@ -3222,7 +3223,7 @@ function PrintKindTag({printKind,count}:{printKind?:string|null;count?:number}) 
   return <span className={`print-kind-tag print-kind-tag--${isPhoto?"photo":"document"}`} title={isPhoto?"Photo printing job":"Document printing job"}>{label}{countLabel}</span>;
 }
 function initials(value:string) { return value.trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()||"").join("") || "SP"; }
-function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
+function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscriptionSummary; token: string; onUpdated: (summary: ShopSubscriptionSummary) => void }) {
   const { subscription, plan, entitlements, usage } = summary;
   const status = subscription.status.toLowerCase();
   const statusTone = status === "active" ? "tone-success" : status === "trial" ? "tone-warning" : "tone-neutral";
@@ -3269,10 +3270,12 @@ function SubscriptionPage({ summary }: { summary: ShopSubscriptionSummary }) {
           </div>
           <div className="subscription-upgrade-note">
             <CreditCard size={15}/>
-            <span>Plan changes and subscription billing are managed by the SmartPrint by QuantaEdge platform team. Customer print payments remain separate and continue to be handled by your shop.</span>
+            <span>Manage your SmartPrint subscription securely with Razorpay. Customer print payments remain separate and continue to be handled by your shop.</span>
           </div>
         </section>
       </div>
+
+      <ShopSubscriptionCheckout token={token} onSubscriptionUpdated={onUpdated}/>
 
       <section className="panel subscription-usage-panel">
         <div className="subscription-usage-heading">

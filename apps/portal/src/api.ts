@@ -598,6 +598,89 @@ export function getShopSubscription(token: string) {
   return apiRequest<ShopSubscriptionSummary>("/api/v1/shop/subscription", {}, token);
 }
 
+export interface ShopSubscriptionPlanOption {
+  id: string;
+  planCode: string;
+  name: string;
+  description: string | null;
+  version: number;
+  currency: string;
+  monthlyPriceMinor: number | null;
+  annualPriceMinor: number | null;
+  maxPrinters: number | null;
+  maxAgentDevices: number | null;
+  maxQrStations: number | null;
+  maxMonthlyPrintJobs: number | null;
+  maxDocumentBytes: number | null;
+  cloudAssistedPrintingEnabled: boolean;
+  whiteLabelEnabled: boolean;
+  advancedReportsEnabled: boolean;
+  publishedUtc: string | null;
+}
+
+export interface ShopSubscriptionPaymentOrder {
+  provider: string;
+  orderId: string;
+  amountMinor: number;
+  currency: string;
+  keyId: string;
+  planCode: string;
+  planName: string;
+  billingInterval: string;
+}
+
+export interface ShopSubscriptionPaymentRecord {
+  id: string;
+  planCode: string;
+  billingInterval: string;
+  amountMinor: number;
+  currency: string;
+  status: string;
+  razorpayOrderId: string;
+  razorpayPaymentId: string | null;
+  createdUtc: string;
+  verifiedUtc: string | null;
+  assignedSubscriptionId: string | null;
+}
+
+export interface ShopSubscriptionPaymentVerification {
+  status: string;
+  subscriptionId: string | null;
+  periodEndUtc: string | null;
+  duplicateRequest: boolean;
+}
+
+export function getShopSubscriptionPlans(token: string) {
+  return apiRequest<ShopSubscriptionPlanOption[]>("/api/v1/shop/subscription/plans", {}, token);
+}
+
+export function getShopSubscriptionPayments(token: string) {
+  return apiRequest<ShopSubscriptionPaymentRecord[]>("/api/v1/shop/subscription/payments", {}, token);
+}
+
+export function createShopSubscriptionPaymentOrder(token: string, values: {
+  planVersionId: string;
+  billingInterval: "Monthly" | "Annual";
+  clientRequestId: string;
+}) {
+  return apiRequest<ShopSubscriptionPaymentOrder>("/api/v1/shop/subscription/payments/orders", {
+    method: "POST",
+    body: JSON.stringify(values)
+  }, token);
+}
+
+export function verifyShopSubscriptionPayment(token: string, values: {
+  orderId: string;
+  paymentId: string;
+  signature: string;
+}) {
+  return apiRequest<ShopSubscriptionPaymentVerification>("/api/v1/shop/subscription/payments/verify", {
+    method: "POST",
+    body: JSON.stringify(values)
+  }, token);
+}
+
+
 export function getShopPayments(token: string) {
   return apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token);
 }

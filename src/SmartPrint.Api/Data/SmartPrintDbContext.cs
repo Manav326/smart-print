@@ -21,6 +21,8 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<SubscriptionPlanVersion> SubscriptionPlanVersions => Set<SubscriptionPlanVersion>();
     public DbSet<PlatformSubscriptionAudit> PlatformSubscriptionAudits => Set<PlatformSubscriptionAudit>();
+    public DbSet<ShopSubscriptionPayment> ShopSubscriptionPayments => Set<ShopSubscriptionPayment>();
+    public DbSet<RazorpayWebhookEvent> RazorpayWebhookEvents => Set<RazorpayWebhookEvent>();
     public DbSet<PrinterDevice> PrinterDevices => Set<PrinterDevice>();
     public DbSet<QrStation> QrStations => Set<QrStation>();
     public DbSet<CustomerPrintSession> CustomerPrintSessions => Set<CustomerPrintSession>();
@@ -224,6 +226,43 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasOne<TenantSubscription>().WithMany().HasForeignKey(x => x.PreviousSubscriptionId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<SubscriptionPlanVersion>().WithMany().HasForeignKey(x => x.PlanVersionId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<ShopSubscriptionPayment>(entity =>
+        {
+            entity.ToTable("ShopSubscriptionPayments");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.PlanCode).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.BillingInterval).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
+            entity.Property(x => x.ClientRequestId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.RazorpayOrderId).HasMaxLength(80).IsRequired();
+            entity.Property(x => x.RazorpayPaymentId).HasMaxLength(80);
+            entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            entity.HasIndex(x => new { x.TenantId, x.ClientRequestId }).IsUnique();
+            entity.HasIndex(x => x.RazorpayOrderId).IsUnique();
+            entity.HasIndex(x => x.RazorpayPaymentId).IsUnique()
+                .HasFilter("\"RazorpayPaymentId\" IS NOT NULL");
+            entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<SubscriptionPlanVersion>().WithMany().HasForeignKey(x => x.PlanVersionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<TenantSubscription>().WithMany().HasForeignKey(x => x.AssignedSubscriptionId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<RazorpayWebhookEvent>(entity =>
+        {
+            entity.ToTable("RazorpayWebhookEvents");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.EventId).HasMaxLength(100).IsRequired();
+            entity.Property(x => x.EventType).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.RazorpayOrderId).HasMaxLength(80);
+            entity.Property(x => x.RazorpayPaymentId).HasMaxLength(80);
+            entity.Property(x => x.PayloadSha256).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(500);
+            entity.HasIndex(x => x.EventId).IsUnique();
+            entity.HasIndex(x => new { x.RazorpayOrderId, x.ReceivedUtc });
         });
 
         modelBuilder.Entity<PrinterDevice>(entity =>

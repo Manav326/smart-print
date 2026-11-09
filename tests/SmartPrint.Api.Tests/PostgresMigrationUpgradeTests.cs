@@ -67,6 +67,12 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611070001_AddPhotoSheetDensitySnapshot",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611070002_AddShopOriginatedPrintJobs",
+            await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611100001_AddRazorpayShopSubscriptions",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
