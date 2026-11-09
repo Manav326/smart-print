@@ -97,6 +97,16 @@ function Resolve-Gradle {
     }
 }
 
+function Get-FreeLoopbackPort {
+    $listener = [System.Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    try {
+        $listener.Start()
+        return [int]$listener.LocalEndpoint.Port
+    } finally {
+        $listener.Stop()
+    }
+}
+
 try {
     Write-Host "SmartPrint Android Photo Studio physical-device QA" -ForegroundColor Green
     Write-Host "Production package com.quantaedge.smartprint will not be modified."
@@ -165,13 +175,19 @@ try {
     Write-Host "Selected Android device: $model ($serial)" -ForegroundColor Green
     Write-Host "Keep the phone unlocked and its screen visible during instrumentation." -ForegroundColor Cyan
 
+    # The app's QA BuildConfig remains 127.0.0.1:3000 on the phone. Reverse
+    # that device-side port to a dynamically chosen laptop port so an existing
+    # local Portal/API stack on host port 3000 is never interrupted.
+    $fixtureHostPort = Get-FreeLoopbackPort
     $reverse = @(& $adb -s $serial reverse --list 2>&1)
     if ($LASTEXITCODE -ne 0) { throw "Could not inspect ADB reverse mappings." }
     $mapped = @($reverse | Where-Object { $_ -match '\btcp:3000\b' })
     if ($mapped.Count -gt 0) {
-        if (-not ($mapped | Where-Object { $_ -match '\btcp:3000\s+tcp:3000\b' })) { throw "The phone has a conflicting tcp:3000 mapping; it will not be replaced." }
+        if (-not ($mapped | Where-Object { $_ -match ('\btcp:3000\s+tcp:' + $fixtureHostPort + '\b') })) {
+            throw "The phone already has a tcp:3000 reverse mapping. QA will not replace it; inspect with 'adb -s $serial reverse --list'."
+        }
     } else {
-        $result = @(& $adb -s $serial reverse tcp:3000 tcp:3000 2>&1)
+        $result = @(& $adb -s $serial reverse tcp:3000 ("tcp:" + $fixtureHostPort) 2>&1)
         if ($LASTEXITCODE -ne 0) { throw "adb reverse failed: $($result -join ' ')" }
         $reverseCreated = $true
     }
@@ -180,18 +196,19 @@ try {
     $serverScript = Join-Path $PSScriptRoot "serve-static-portal.mjs"
     $serverOut = Join-Path $outputRoot "android-fixture-server.stdout.log"
     $serverErr = Join-Path $outputRoot "android-fixture-server.stderr.log"
-    $serverArgs = '"{0}" "{1}" 3000' -f $serverScript, $FixtureDirectory
+    $serverArgs = '"{0}" "{1}" {2}' -f $serverScript, $FixtureDirectory, $fixtureHostPort
     $serverProcess = Start-Process -FilePath $node.Source -ArgumentList $serverArgs -WorkingDirectory $repoRoot -PassThru -WindowStyle Hidden -RedirectStandardOutput $serverOut -RedirectStandardError $serverErr
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
     $fixtureReady = $false
     while ([DateTime]::UtcNow -lt $deadline) {
         if ($serverProcess.HasExited) { Get-Content $serverOut, $serverErr -ErrorAction SilentlyContinue; throw "QA fixture server exited with code $($serverProcess.ExitCode)." }
         try {
-            $response = Invoke-WebRequest "http://127.0.0.1:3000/tests/photo-studio.browser.html" -TimeoutSec 2
+            $response = Invoke-WebRequest ("http://127.0.0.1:{0}/tests/photo-studio.browser.html" -f $fixtureHostPort) -TimeoutSec 2
             if ($response.StatusCode -eq 200) { $fixtureReady = $true; break }
         } catch { Start-Sleep -Milliseconds 500 }
     }
-    if (-not $fixtureReady) { throw "QA fixture did not become ready at localhost:3000." }
+    if (-not $fixtureReady) { throw "QA fixture did not become ready on laptop port $fixtureHostPort." }
+    Write-Host ("Android fixture server uses laptop port {0}; the phone accesses it as 127.0.0.1:3000 via adb reverse." -f $fixtureHostPort) -ForegroundColor DarkCyan
 
     $prodPackage = "com.quantaedge.smartprint"
     $prodBefore = @(& $adb -s $serial shell pm path $prodPackage 2>&1)
