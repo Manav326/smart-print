@@ -168,7 +168,7 @@ export default function ShopSubscriptionCheckout({
     } else {
       setHistoryError(paymentsResult.reason instanceof Error
         ? paymentsResult.reason.message
-        : "Payment history could not be refreshed. Your plan choices are still available.");
+        : "Payment history could not be refreshed. Checkout is paused until SmartPrint can confirm whether a payment is already pending.");
     }
 
     setLoading(false);
@@ -196,10 +196,23 @@ export default function ShopSubscriptionCheckout({
       if (!mounted.current || sequence !== pollSequence.current) return;
 
       await refreshData();
-      const payment = paymentsRef.current.find(item =>
+      let payment = paymentsRef.current.find(item =>
         matchByRecordId ? item.id === reference : item.razorpayOrderId === reference
       );
       if (!payment) continue;
+
+      if (matchByRecordId && (payment.status === "CREATING" || payment.status === "CREATION_UNKNOWN")) {
+        // Re-check the provider receipt while the order-create response is still ambiguous.
+        // The endpoint never creates a new order; it only reconciles the existing intent.
+        try {
+          await resumeShopSubscriptionPaymentOrder(token, payment.id);
+        } catch {
+          // A still-ambiguous result is expected until Razorpay exposes the original order.
+        }
+        await refreshData();
+        payment = paymentsRef.current.find(item => item.id === reference);
+        if (!payment) continue;
+      }
 
       if (payment.status === "CAPTURED") {
         setNotice(subscriptionPaymentStatusMessage(payment.status));
