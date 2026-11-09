@@ -5,6 +5,9 @@ param(
     [string]$Platform = "All",
     [switch]$SkipInstall,
     [switch]$Help,
+    [switch]$Headed,
+    [ValidateRange(1024,65535)][int]$WebView2DebugPort = 9228,
+    [string]$NativeExecutablePath = "",
     [string]$ArtifactDirectory = "artifacts/mixed-batch-refund"
 )
 
@@ -17,7 +20,7 @@ if ($Help) {
 SmartPrint mixed-file page rejection and refund acceptance runner
 
 Usage:
-  .\scripts\qa\mixed-batch-refund-test.ps1 [-Platform All|Web|Windows|NativeWindows] [-SkipInstall] [-ArtifactDirectory path]
+  .\scripts\qa\mixed-batch-refund-test.ps1 [-Platform All|Web|Windows|NativeWindows] [-SkipInstall] [-Headed] [-NativeExecutablePath path] [-WebView2DebugPort port] [-ArtifactDirectory path]
 
 Platforms:
   Web           Runs the shop portal UI in Chromium.
@@ -36,6 +39,12 @@ live payment, printer dispatch or physical output occurs.
 
 if ($Platform -in @("All", "Windows", "NativeWindows") -and -not $IsWindows) {
     throw "The Windows desktop renderer variant must run on Windows."
+}
+if ($NativeExecutablePath -and $Platform -notin @("All", "Windows", "NativeWindows")) {
+    throw "-NativeExecutablePath is valid only for Windows/native Windows test modes."
+}
+if ($NativeExecutablePath) {
+    $NativeExecutablePath = (Resolve-Path -LiteralPath $NativeExecutablePath -ErrorAction Stop).Path
 }
 
 $runner = "apps/portal/tests/mixed-batch-refund.browser.mjs"
@@ -69,16 +78,43 @@ $modes = if ($Platform -eq "All") { @("web", "desktop", "desktop-native") }
     elseif ($Platform -eq "Windows") { @("desktop", "desktop-native") }
     else { @("web", "desktop", "desktop-native") }
 
+$trackedEnvNames = @(
+    "SMARTPRINT_MIXED_BATCH_REFUND_APP",
+    "SMARTPRINT_WEBVIEW2_DEBUG_PORT",
+    "SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR",
+    "SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE",
+    "SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL",
+    "SMARTPRINT_MIXED_BATCH_REFUND_HEADED"
+)
+$previousEnv = @{}
+foreach ($name in $trackedEnvNames) { $previousEnv[$name] = [Environment]::GetEnvironmentVariable($name, "Process") }
+
+try {
 foreach ($mode in $modes) {
     $safeMode = if ($mode -eq "desktop") { "windows-desktop-contract" }
         elseif ($mode -eq "desktop-native") { "windows-native-webview2" }
         else { "web" }
     $env:SMARTPRINT_MIXED_BATCH_REFUND_APP = $mode
-    $env:SMARTPRINT_WEBVIEW2_DEBUG_PORT = "9228"
+    $env:SMARTPRINT_WEBVIEW2_DEBUG_PORT = [string]$WebView2DebugPort
     $env:SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR = Join-Path $ArtifactDirectory $safeMode
+    if ($Headed) { $env:SMARTPRINT_MIXED_BATCH_REFUND_HEADED = "1" } else { Remove-Item Env:SMARTPRINT_MIXED_BATCH_REFUND_HEADED -ErrorAction SilentlyContinue }
+    if ($mode -eq "desktop-native" -and $NativeExecutablePath) {
+        $env:SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE = $NativeExecutablePath
+        $env:SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL = "http://127.0.0.1:1420"
+    } else {
+        Remove-Item Env:SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE -ErrorAction SilentlyContinue
+        Remove-Item Env:SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL -ErrorAction SilentlyContinue
+    }
     New-Item -ItemType Directory -Force -Path $env:SMARTPRINT_MIXED_BATCH_REFUND_ARTIFACT_DIR | Out-Null
     Write-Host "Running mixed-batch page rejection/refund acceptance: $safeMode"
     node $runner
     if ($LASTEXITCODE -ne 0) { throw "Mixed-batch page rejection/refund acceptance failed for $safeMode." }
 }
+
 Write-Host "Mixed-batch page rejection/refund acceptance completed for: $($modes -join ', ')."
+}
+finally {
+    foreach ($name in $trackedEnvNames) {
+        [Environment]::SetEnvironmentVariable($name, $previousEnv[$name], "Process")
+    }
+}
