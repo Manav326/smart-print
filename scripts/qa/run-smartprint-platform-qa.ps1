@@ -261,6 +261,15 @@ function Test-CIArtifactManifest([string]$Directory, [string]$ExpectedPlatform) 
     return $manifest
 }
 
+function Assert-ArtifactFiles([object]$Manifest, [string[]]$RequiredPaths, [string]$ArtifactName) {
+    $manifestPaths = @($Manifest.files | ForEach-Object { ([string]$_.path).Replace("\\", "/") })
+    foreach ($requiredPath in $RequiredPaths) {
+        if ($manifestPaths -notcontains $requiredPath) {
+            throw "Artifact '$ArtifactName' is missing required manifested file '$requiredPath'."
+        }
+    }
+}
+
 function Start-StaticPortalServer([string]$Directory, [int]$Port, [string]$LogPrefix) {
     $node = Get-Command node.exe -ErrorAction SilentlyContinue
     if (-not $node) { $node = Get-Command node -ErrorAction Stop }
@@ -438,12 +447,14 @@ try {
 
         if ($Platforms -contains "Web") {
             $webDir = Download-CIArtifact "smart-print-web-production"
-            $null = Test-CIArtifactManifest $webDir "web"
+            $webManifest = Test-CIArtifactManifest $webDir "web"
+            Assert-ArtifactFiles $webManifest @("index.html") "smart-print-web-production"
             $script:webArtifactDirectory = $webDir
         }
         if ($Platforms -contains "Web" -or $Platforms -contains "Windows") {
             $webQaDir = Download-CIArtifact "smart-print-web-photo-studio-qa"
-            $null = Test-CIArtifactManifest $webQaDir "webqa"
+            $webQaManifest = Test-CIArtifactManifest $webQaDir "webqa"
+            Assert-ArtifactFiles $webQaManifest @("index.html", "tests/photo-studio.browser.html") "smart-print-web-photo-studio-qa"
             if (-not (Test-Path -LiteralPath (Join-Path $webQaDir "tests/photo-studio.browser.html") -PathType Leaf)) {
                 throw "Pulled Web QA artifact does not contain the Photo Studio fixture."
             }
@@ -452,6 +463,7 @@ try {
         if ($Platforms -contains "Android") {
             $androidDir = Download-CIArtifact "smart-print-android-device-qa"
             $androidManifest = Test-CIArtifactManifest $androidDir "android"
+            Assert-ArtifactFiles $androidManifest @("SmartPrint-Android-LocalQA.apk", "SmartPrint-Android-LocalQA-Test.apk", "qa-android.json", "fixture/tests/photo-studio.browser.html") "smart-print-android-device-qa"
             $metadataPath = Join-Path $androidDir "qa-android.json"
             if (-not (Test-Path -LiteralPath $metadataPath -PathType Leaf)) { throw "Android artifact metadata is missing." }
             $androidMetadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json -ErrorAction Stop
@@ -461,7 +473,8 @@ try {
         }
         if ($Platforms -contains "Windows") {
             $windowsDir = Download-CIArtifact "smart-print-desktop-win-x64"
-            $null = Test-CIArtifactManifest $windowsDir "windows"
+            $windowsManifest = Test-CIArtifactManifest $windowsDir "windows"
+            Assert-ArtifactFiles $windowsManifest @("SmartPrint.Desktop.exe", "SmartPrint.Desktop.QA.exe") "smart-print-desktop-win-x64"
             $script:windowsArtifactDirectory = $windowsDir
         }
     } else {
