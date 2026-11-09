@@ -706,7 +706,8 @@ public sealed class SubscriptionRazorpayService(
         var periodEndUtc = terms.PeriodEndUtc;
         // A same-plan renewal extends the paid term instead of discarding unused days.
         // A different plan remains an immediate change so upgrades are not silently delayed.
-        if (previousSubscription is { Status: "Active" } &&
+        if (previousSubscription is not null &&
+            string.Equals(previousStatus, "Active", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(previousSubscription.PlanCode, candidate.Plan.Code, StringComparison.OrdinalIgnoreCase) &&
             previousSubscription.PeriodEndUtc > now)
         {
