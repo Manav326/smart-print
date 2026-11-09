@@ -43,6 +43,7 @@ android {
         // Local physical-device QA installs side-by-side with the customer app.
         // It must never replace the production-signed package or clear its data.
         applicationId = smartPrintApplicationId
+        testApplicationId = "$smartPrintApplicationId.test"
         minSdk = 26
         targetSdk = 36
         versionCode = smartPrintVersionCode
