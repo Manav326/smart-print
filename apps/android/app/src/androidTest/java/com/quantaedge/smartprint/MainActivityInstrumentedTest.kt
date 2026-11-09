@@ -1130,6 +1130,10 @@ class MainActivityInstrumentedTest {
         }
     }
 
+}
+
+@RunWith(AndroidJUnit4::class)
+class QrScannerPermissionInstrumentedTest {
     @Test
     fun explainsCameraPermissionBeforeStartingTheScanner() {
         // The CI emulator installs this app with runtime permissions denied.

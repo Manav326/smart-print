@@ -290,7 +290,41 @@ try {
         $readOutput = @(& $adb -s $serial shell settings get global $settingName 2>&1)
         if ($LASTEXITCODE -ne 0) { throw "Could not read animation setting for $($settingName): $($readOutput -join ' ')" }
         $value = ($readOutput -join "").Trim()
-        if ($value -notmatch '^(?:null|[0-9]+(?:\.[0-9]+)?)
+        if ($value -ne "null") {
+            $parsedScale = 0.0
+            $validScale = [double]::TryParse(
+                $value,
+                [System.Globalization.NumberStyles]::Float,
+                [System.Globalization.CultureInfo]::InvariantCulture,
+                [ref]$parsedScale
+            )
+            if (-not $validScale) {
+                throw "Android returned unexpected value '$value' for animation setting $settingName; refusing to overwrite it."
+            }
+        }
+        $script:originalAnimationSettings[$settingName] = $value
+    }
+    $script:animationSettingsCaptured = $true
+    foreach ($settingName in $script:animationSettingNames) {
+        $setOutput = @(& $adb -s $serial shell settings put global $settingName 0 2>&1)
+        if ($LASTEXITCODE -ne 0) { throw "Could not temporarily disable animation setting for $($settingName): $($setOutput -join ' ')" }
+        $verifyOutput = @(& $adb -s $serial shell settings get global $settingName 2>&1)
+        $verifyExit = $LASTEXITCODE
+        $verifyValue = ($verifyOutput -join "").Trim()
+        $verifyNumber = 1.0
+        $verifyIsZero = [double]::TryParse(
+            $verifyValue,
+            [System.Globalization.NumberStyles]::Float,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [ref]$verifyNumber
+        ) -and $verifyNumber -eq 0
+        if ($verifyExit -ne 0 -or -not $verifyIsZero) {
+            throw "Animation setting $settingName did not become zero (actual='$verifyValue')."
+        }
+    }
+    Add-Result "Prepare deterministic Android input" "PASS" "Temporarily disabled window, transition and animator scales; their original values are captured for restoration."
+
+    $instrumentations = @(& $adb -s $serial shell pm list instrumentation 2>&1)
     $component = "$testPackage/androidx.test.runner.AndroidJUnitRunner"
     if ($LASTEXITCODE -ne 0 -or -not ($instrumentations -match [regex]::Escape($component))) { throw "Android did not register instrumentation component $component." }
 
@@ -407,126 +441,6 @@ finally {
             Write-Warning "Could not refresh failure.json with final device-settings restoration status: $($_.Exception.Message)"
         }
     }
-    if ($reverseCreated -and $adb -and $serial) { & $adb -s $serial reverse --remove tcp:3000 2>$null | Out-Null }
-    if ($serverProcess -and -not $serverProcess.HasExited) {
-        $serverProcess.Kill($true)
-        $serverProcess.WaitForExit(5000) | Out-Null
-    }
-}
-) {
-            throw "Android returned unexpected value '$value' for animation setting $settingName; refusing to overwrite it."
-        }
-        $script:originalAnimationSettings[$settingName] = $value
-    }
-    $script:animationSettingsCaptured = $true
-    foreach ($settingName in $script:animationSettingNames) {
-        $setOutput = @(& $adb -s $serial shell settings put global $settingName 0 2>&1)
-        if ($LASTEXITCODE -ne 0) { throw "Could not temporarily disable animation setting for $($settingName): $($setOutput -join ' ')" }
-        $verifyOutput = @(& $adb -s $serial shell settings get global $settingName 2>&1)
-        $verifyExit = $LASTEXITCODE
-        $verifyValue = ($verifyOutput -join "").Trim()
-        if ($verifyExit -ne 0 -or $verifyValue -notin @("0", "0.0")) {
-            throw "Animation setting $settingName did not become zero (actual='$verifyValue')."
-        }
-    }
-    Add-Result "Prepare deterministic Android input" "PASS" "Temporarily disabled window, transition and animator scales; the exact original values are captured for restoration."
-
-    $instrumentations = @(& $adb -s $serial shell pm list instrumentation 2>&1)
-    $component = "$testPackage/androidx.test.runner.AndroidJUnitRunner"
-    if ($LASTEXITCODE -ne 0 -or -not ($instrumentations -match [regex]::Escape($component))) { throw "Android did not register instrumentation component $component." }
-
-    $logPath = Join-Path $outputRoot "android-physical-device-instrumentation.txt"
-    Write-Host "Starting Android Photo Studio WebView instrumentation..." -ForegroundColor Cyan
-    $outputLines = [System.Collections.Generic.List[string]]::new()
-    $currentTestName = ""
-    $currentTestNumber = 0
-    $totalTestCount = 0
-    Write-Host "[ANDROID-TEST] Waiting for the instrumentation runner to report its test plan..." -ForegroundColor DarkCyan
-
-    # Do not collect am instrument into an array: that buffers all 44+ test events
-    # until the process exits. Stream named test start/result events as adb emits them,
-    # while retaining the complete raw runner transcript for diagnostics.
-    & $adb -s $serial shell am instrument -w -r $component 2>&1 | ForEach-Object {
-        $line = [string]$_
-        [void]$outputLines.Add($line)
-
-        if ($line -match "^INSTRUMENTATION_STATUS:\s*numtests=(\d+)") {
-            $totalTestCount = [int]$Matches[1]
-        } elseif ($line -match "^INSTRUMENTATION_STATUS:\s*current=(\d+)") {
-            $currentTestNumber = [int]$Matches[1]
-        } elseif ($line -match "^INSTRUMENTATION_STATUS:\s*test=(.+)$") {
-            $currentTestName = $Matches[1].Trim()
-        } elseif ($line -match "^INSTRUMENTATION_STATUS_CODE:\s*(-?\d+)") {
-            $statusCode = [int]$Matches[1]
-            $progress = if ($totalTestCount -gt 0) { "$currentTestNumber/$totalTestCount" } else { "$currentTestNumber/?" }
-            switch ($statusCode) {
-                1 {
-                    Write-Host ("[ANDROID-TEST {0}] START | {1}" -f $progress, $currentTestName) -ForegroundColor Cyan
-                }
-                0 {
-                    Write-Host ("[ANDROID-TEST {0}] PASS  | {1}" -f $progress, $currentTestName) -ForegroundColor Green
-                }
-                -2 {
-                    Write-Host ("[ANDROID-TEST {0}] FAIL  | {1}" -f $progress, $currentTestName) -ForegroundColor Red
-                }
-                -1 {
-                    Write-Host ("[ANDROID-TEST {0}] ERROR | {1}" -f $progress, $currentTestName) -ForegroundColor Red
-                }
-            }
-        }
-    }
-    $instrumentExit = $LASTEXITCODE
-    $text = $outputLines -join [Environment]::NewLine
-    $text | Set-Content -LiteralPath $logPath -Encoding UTF8
-    Write-Host ("[ANDROID-TEST] Instrumentation process exited with code {0}; raw transcript: {1}" -f $instrumentExit, $logPath) -ForegroundColor DarkCyan
-    $requiredCases = @(
-        "customerPhotoStudioRunsInsideAndroidWebViewAndProducesExactMultiPagePdf",
-        "shopOwnerCanEditAnExistingPhotoJobInsideAndroidWebViewAndSaveReplacementPdf",
-        "androidSystemBackClosesPhotoStudioBeforeLeavingTheCustomerStation",
-        "photoStudioModalStateAndSecureFlagSurviveActivityRecreation"
-    )
-    $missing = @($requiredCases | Where-Object { -not $text.Contains($_) })
-    $ok = [regex]::Match($text, '(?m)^\s*OK\s+\((\d+)\s+tests?\)\s*$')
-    if ($instrumentExit -ne 0 -or $text -match '(?i)FAILURES!!!|INSTRUMENTATION_FAILED|Process crashed|shortMsg=' -or -not $ok.Success -or [int]$ok.Groups[1].Value -lt 4 -or $missing.Count -gt 0) {
-        throw ("Android instrumentation failed or omitted required cases. Missing: " + ($missing -join ', ') + ". Review " + $logPath + [Environment]::NewLine + $text)
-    }
-    if ($prodInstalledBefore) {
-        $prodAfter = @(& $adb -s $serial shell pm path $prodPackage 2>&1)
-        if ($LASTEXITCODE -ne 0 -or ($prodAfter -join " ") -notmatch "package:") { throw "Production package disappeared after QA; no QA command targeted it." }
-    }
-    Add-Result "Android Photo Studio WebView instrumentation" "PASS" "All four required cases passed on $serial."
-    Add-Result "Preserve production Android app" "PASS" "No install, uninstall or clear-data operation targeted $prodPackage."
-
-    $summary = [PSCustomObject]@{
-        product = "SmartPrint"
-        scope = "ANDROID_PHYSICAL_DEVICE_PHOTO_STUDIO"
-        deviceSerial = $serial
-        applicationId = $ApplicationId
-        productionPackageUntouched = $true
-        buildRequested = [bool]$Build
-        appApkSha256 = (Get-FileHash $ApplicationApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        testApkSha256 = (Get-FileHash $InstrumentationApkPath -Algorithm SHA256).Hash.ToLowerInvariant()
-        result = "PASS"
-        startedUtc = $startedUtc.ToString("o")
-        completedUtc = [DateTime]::UtcNow.ToString("o")
-        results = @($results)
-        instrumentationLog = $logPath
-    }
-    $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot "summary.json") -Encoding UTF8
-    Write-Host "Android physical-device QA PASSED. Evidence: $outputRoot" -ForegroundColor Green
-}
-catch {
-    Add-Result "Android physical-device QA" "FAIL" $_.Exception.Message
-    $failure = [PSCustomObject]@{
-        product = "SmartPrint"; scope = "ANDROID_PHYSICAL_DEVICE_PHOTO_STUDIO"
-        deviceSerial = $serial; applicationId = $ApplicationId; result = "FAIL"
-        completedUtc = [DateTime]::UtcNow.ToString("o"); results = @($results)
-        error = $_.Exception.Message
-    }
-    $failure | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $outputRoot "failure.json") -Encoding UTF8
-    throw
-}
-finally {
     if ($reverseCreated -and $adb -and $serial) { & $adb -s $serial reverse --remove tcp:3000 2>$null | Out-Null }
     if ($serverProcess -and -not $serverProcess.HasExited) {
         $serverProcess.Kill($true)
