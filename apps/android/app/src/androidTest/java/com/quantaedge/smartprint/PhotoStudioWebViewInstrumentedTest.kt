@@ -49,9 +49,10 @@ class PhotoStudioWebViewInstrumentedTest {
     private fun waitFor(
         scenario: ActivityScenario<MainActivity>,
         expression: String,
-        description: String
+        description: String,
+        timeoutMs: Long = 20_000L
     ) {
-        val deadline = SystemClock.uptimeMillis() + 20_000
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (SystemClock.uptimeMillis() < deadline) {
             if (evaluate(scenario, "Boolean($expression)") == "true") return
             Thread.sleep(120)
@@ -749,7 +750,8 @@ class PhotoStudioWebViewInstrumentedTest {
             waitFor(
                 scenario,
                 "document.querySelector('#photo-studio-result')?.textContent.includes('application/pdf')",
-                "generated Android photo PDF"
+                "generated Android photo PDF",
+                timeoutMs = 90_000L
             )
             val resultText = evaluate(
                 scenario,

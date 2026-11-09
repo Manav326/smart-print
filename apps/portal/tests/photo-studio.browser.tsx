@@ -1,7 +1,30 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import PhotoStudio, { type PreparedPhotoSheet } from "../src/PhotoStudio";
-import { getPhotoSheetPhotoPositions, type PhotoSheetSize } from "../src/photo-studio-layout";
+import { A4_HEIGHT_PX, A4_WIDTH_PX, getPhotoSheetPhotoPositions, type PhotoSheetSize } from "../src/photo-studio-layout";
+
+function containsByteSequence(haystack: Uint8Array, needle: Uint8Array): boolean {
+  if (needle.length === 0) return true;
+  if (needle.length > haystack.length) return false;
+
+  // Boyer-Moore-Horspool keeps this exact embedded-JPEG assertion binary and
+  // avoids decoding every full-resolution JPEG into another large JS string.
+  const skip = new Uint32Array(256);
+  skip.fill(needle.length);
+  for (let index = 0; index < needle.length - 1; index++) {
+    skip[needle[index]] = needle.length - 1 - index;
+  }
+
+  let offset = 0;
+  const lastNeedleIndex = needle.length - 1;
+  while (offset <= haystack.length - needle.length) {
+    let index = lastNeedleIndex;
+    while (index >= 0 && haystack[offset + index] === needle[index]) index--;
+    if (index < 0) return true;
+    offset += skip[haystack[offset + lastNeedleIndex]] || needle.length;
+  }
+  return false;
+}
 
 const query = new URLSearchParams(window.location.search);
 const mode = query.get("mode") === "shop" ? "shop" : "customer";
@@ -170,7 +193,7 @@ function PhotoStudioBrowserFixture() {
     const pageCount = Number(pdfText.match(/\/Count (\d+)/)?.[1] ?? 0);
     const embeddedPreviewPages = await Promise.all((sheet.previewPages ?? []).map(async pageBlob => {
       const pageBytes = new Uint8Array(await pageBlob.arrayBuffer());
-      return pdfText.includes(new TextDecoder("latin1").decode(pageBytes));
+      return containsByteSequence(pdfBytes, pageBytes);
     }));
     const mediaBoxCount = (pdfText.match(/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/g) ?? []).length;
     const pdfImageSizes = [...pdfText.matchAll(/\/Width (\d+) \/Height (\d+) \/ColorSpace/g)]
@@ -189,7 +212,14 @@ function PhotoStudioBrowserFixture() {
     const pixelProbes: Array<{ page: number; slot: number; rgb: number[] }> = [];
     let finalUnusedSlotRgb: number[] | null = null;
     for (let pageIndex = 0; pageIndex < jpegPages.length; pageIndex++) {
-      const bitmap = await createImageBitmap(jpegPages[pageIndex]);
+      // The PDF itself is still asserted as an exact 300-DPI raster above.
+      // Pixel-only QA probes use a 150-DPI decode to keep memory and image-read
+      // work bounded on physical phones without weakening content checks.
+      const bitmap = await createImageBitmap(jpegPages[pageIndex], {
+        resizeWidth: Math.round(A4_WIDTH_PX / 2),
+        resizeHeight: Math.round(A4_HEIGHT_PX / 2),
+        resizeQuality: "high"
+      });
       try {
         const canvas = document.createElement("canvas");
         canvas.width = bitmap.width;

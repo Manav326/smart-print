@@ -1,6 +1,7 @@
 package com.quantaedge.smartprint
 
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.ValueCallback
@@ -961,8 +962,24 @@ class MainActivityInstrumentedTest {
         val previousPreferences = shopPreferences.all.toMap()
         val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "S".repeat(32)
         val stationHost = Uri.parse(stationUrl).host.orEmpty()
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val cameraPermissionWasGranted = context.checkSelfPermission(
+            android.Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
 
         try {
+            // This test verifies the Wi-Fi-check menu entry and scanner purpose, not
+            // camera recognition. A physical phone can see an unrelated QR nearby and
+            // correctly finish scanning before Espresso inspects the instruction.
+            // Revoke only the isolated QA package's permission for this test and
+            // restore the exact original state in finally.
+            if (cameraPermissionWasGranted) {
+                instrumentation.uiAutomation.revokeRuntimePermission(
+                    context.packageName,
+                    android.Manifest.permission.CAMERA
+                )
+            }
+
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
                     shopPreferences.edit()
@@ -988,19 +1005,73 @@ class MainActivityInstrumentedTest {
                     }.invoke(activity)
                 }
 
-                onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
-                onView(withText("Check shop Wi-Fi")).perform(click())
-                onView(withText("Scan the temporary phone-check QR shown on the shop computer."))
-                    .check(matches(isDisplayed()))
-                onView(withContentDescription("Close QR scanner")).perform(click())
+                val scannerMonitor = instrumentation.addMonitor(
+                    QrScannerActivity::class.java.name,
+                    null,
+                    false
+                )
+                try {
+                    onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
+                    onView(withText("Check shop Wi-Fi")).perform(click())
+
+                    val launched = instrumentation.waitForMonitorWithTimeout(scannerMonitor, 10_000)
+                    val scannerActivity = launched as? QrScannerActivity
+                        ?: throw AssertionError("The Check shop Wi-Fi action did not launch QrScannerActivity.")
+
+                    assertEquals(
+                        "The connected-shop Wi-Fi action must launch the Wi-Fi-readiness scan purpose.",
+                        "wifi_readiness",
+                        scannerActivity.intent.getStringExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE)
+                    )
+
+                    val inspection = AtomicReference<Pair<Boolean, Boolean>?>(null)
+                    scannerActivity.runOnUiThread {
+                        fun containsVisibleText(view: View, expected: String): Boolean {
+                            if (view is android.widget.TextView &&
+                                view.isShown &&
+                                view.text?.toString() == expected
+                            ) return true
+                            if (view is ViewGroup) {
+                                for (index in 0 until view.childCount) {
+                                    if (containsVisibleText(view.getChildAt(index), expected)) return true
+                                }
+                            }
+                            return false
+                        }
+                        inspection.set(
+                            containsVisibleText(
+                                scannerActivity.window.decorView,
+                                "Scan the temporary phone-check QR shown on the shop computer."
+                            ) to containsVisibleText(
+                                scannerActivity.window.decorView,
+                                "Camera access needed"
+                            )
+                        )
+                    }
+                    instrumentation.waitForIdleSync()
+                    val visibleState = inspection.get()
+                        ?: throw AssertionError("The QR scanner view hierarchy was not inspected.")
+                    assertTrue(
+                        "The Wi-Fi scanner must display the temporary phone-check QR instruction.",
+                        visibleState.first
+                    )
+                    assertTrue(
+                        "Camera permission should remain gated during this purpose-only UI test.",
+                        visibleState.second
+                    )
+
+                    onView(withContentDescription("Close QR scanner")).perform(click())
+                } finally {
+                    instrumentation.removeMonitor(scannerMonitor)
+                }
+
                 // Closing the native camera Activity can leave the underlying app window
-                // temporarily without focus on some OEM builds. Espresso requires window
-                // focus even when the resumed MainActivity and its restored view tree are
-                // already available, so verify the real visible home landmark directly.
+                // temporarily without focus on some OEM builds. Check the actual resumed
+                // MainActivity view hierarchy rather than relying on Espresso root focus.
                 var shopScreenRestored = false
                 val restoreDeadline = System.currentTimeMillis() + 10_000
                 while (!shopScreenRestored && System.currentTimeMillis() < restoreDeadline) {
-                    androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                    instrumentation.waitForIdleSync()
                     scenario.onActivity { activity ->
                         fun containsVisibleShopName(view: View): Boolean {
                             if (view is android.widget.TextView &&
@@ -1035,24 +1106,30 @@ class MainActivityInstrumentedTest {
                 }
             }
         } finally {
-            val editor = shopPreferences.edit().clear()
-            previousPreferences.forEach { (key, value) ->
-                when (value) {
-                    is String -> editor.putString(key, value)
-                    is Boolean -> editor.putBoolean(key, value)
-                    is Int -> editor.putInt(key, value)
-                    is Long -> editor.putLong(key, value)
-                    is Float -> editor.putFloat(key, value)
-                    is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+            try {
+                if (cameraPermissionWasGranted) {
+                    instrumentation.uiAutomation.grantRuntimePermission(
+                        context.packageName,
+                        android.Manifest.permission.CAMERA
+                    )
                 }
+            } finally {
+                val editor = shopPreferences.edit().clear()
+                previousPreferences.forEach { (key, value) ->
+                    when (value) {
+                        is String -> editor.putString(key, value)
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Long -> editor.putLong(key, value)
+                        is Float -> editor.putFloat(key, value)
+                        is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                    }
+                }
+                editor.commit()
             }
-            editor.commit()
         }
     }
-}
 
-@RunWith(AndroidJUnit4::class)
-class QrScannerPermissionInstrumentedTest {
     @Test
     fun explainsCameraPermissionBeforeStartingTheScanner() {
         // The CI emulator installs this app with runtime permissions denied.

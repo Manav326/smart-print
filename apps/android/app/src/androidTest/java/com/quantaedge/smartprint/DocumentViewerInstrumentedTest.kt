@@ -6,8 +6,13 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.pdf.PdfDocument
 import android.net.Uri
+import android.os.SystemClock
+import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.scrollTo
@@ -30,6 +35,38 @@ import java.io.FileOutputStream
 
 @RunWith(AndroidJUnit4::class)
 class DocumentViewerInstrumentedTest {
+    private fun awaitVisibleText(
+        scenario: ActivityScenario<MainActivity>,
+        expected: String,
+        timeoutMs: Long = 5_000L
+    ) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            instrumentation.waitForIdleSync()
+            var found = false
+            scenario.onActivity { activity ->
+                fun containsVisibleText(view: View): Boolean {
+                    if (view is TextView &&
+                        view.visibility == View.VISIBLE &&
+                        view.isShown &&
+                        view.text?.toString() == expected
+                    ) return true
+                    if (view is ViewGroup) {
+                        for (index in 0 until view.childCount) {
+                            if (containsVisibleText(view.getChildAt(index))) return true
+                        }
+                    }
+                    return false
+                }
+                found = containsVisibleText(activity.window.decorView)
+            }
+            if (found) return
+            SystemClock.sleep(100)
+        }
+        throw AssertionError("Expected visible native page counter '$expected' after Activity recreation.")
+    }
+
     @Test
     fun opensPdfInsideSmartPrintAndNavigatesBetweenPages() {
         val context = ApplicationProvider.getApplicationContext<Context>()
@@ -49,7 +86,7 @@ class DocumentViewerInstrumentedTest {
                 onView(withContentDescription("Next page")).perform(click())
                 onView(withText("Page 2 of 2")).check(matches(isDisplayed()))
                 it.recreate()
-                onView(withText("Page 2 of 2")).check(matches(isDisplayed()))
+                awaitVisibleText(it, "Page 2 of 2")
                 onView(withContentDescription("Previous page")).perform(click())
                 onView(withText("Page 1 of 2")).check(matches(isDisplayed()))
                 onView(withContentDescription("Back to My Files")).perform(click())
