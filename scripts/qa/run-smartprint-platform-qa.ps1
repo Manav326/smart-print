@@ -395,8 +395,8 @@ function Invoke-WindowsArtifactTests([string]$DesktopDirectory, [string]$ModeFor
     $previousProfile = [Environment]::GetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", "Process")
     try {
         $env:WEBVIEW2_USER_DATA_FOLDER = $profile
-        & $smoke -ExecutablePath $productionExe
-        if ($LASTEXITCODE -ne 0) { throw "Packaged production Windows executable failed native-window/UI smoke." }
+        & $script:powerShellExecutable.Source -NoProfile -File $smoke -ExecutablePath $productionExe
+        if ($LASTEXITCODE -ne 0) { throw "Packaged production Windows executable failed native-window/UI smoke (child PowerShell exit $LASTEXITCODE)." }
     } finally {
         [Environment]::SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", $previousProfile, "Process")
     }
