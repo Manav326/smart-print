@@ -474,8 +474,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Could not prepare the isolated desktop smoke configuration." }
           $desktopSmokeTarget = Join-Path $env:RUNNER_TEMP "smartprint-desktop-smoke-target"
           $previousCargoTargetDir = $env:CARGO_TARGET_DIR
+          $previousViteApiBaseUrl = $env:VITE_API_BASE_URL
           try {
             $env:CARGO_TARGET_DIR = $desktopSmokeTarget
+            # This is a test-only binary. It must never start with a user's
+            # real shop/API origin; all /api calls are intercepted by the
+            # synthetic Playwright fixtures after WebView2 exposes CDP.
+            $env:VITE_API_BASE_URL = "https://example.invalid"
             pnpm --filter @smart-print/desktop exec tauri build --config "$desktopSmokeConfig" --no-bundle --ci
             if ($LASTEXITCODE -ne 0) { throw "SmartPrint CI-only desktop smoke build failed." }
           }
@@ -484,6 +489,11 @@ jobs:
               Remove-Item Env:CARGO_TARGET_DIR -ErrorAction SilentlyContinue
             } else {
               $env:CARGO_TARGET_DIR = $previousCargoTargetDir
+            }
+            if ([string]::IsNullOrWhiteSpace($previousViteApiBaseUrl)) {
+              Remove-Item Env:VITE_API_BASE_URL -ErrorAction SilentlyContinue
+            } else {
+              $env:VITE_API_BASE_URL = $previousViteApiBaseUrl
             }
           }
           $smokeExe = Join-Path $desktopSmokeTarget "release/smartprint-desktop.exe"
