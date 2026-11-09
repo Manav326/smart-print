@@ -959,26 +959,24 @@ class MainActivityInstrumentedTest {
             "smartprint.customer.last-shop",
             Context.MODE_PRIVATE
         )
+        val qaPreferences = context.getSharedPreferences(
+            "smartprint.qa.instrumentation",
+            Context.MODE_PRIVATE
+        )
+        val previousPauseCamera = qaPreferences.getBoolean("pauseQrCameraForPurposeTest", false)
         val previousPreferences = shopPreferences.all.toMap()
         val stationUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/s/" + "S".repeat(32)
         val stationHost = Uri.parse(stationUrl).host.orEmpty()
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
-        val cameraPermissionWasGranted = context.checkSelfPermission(
-            android.Manifest.permission.CAMERA
-        ) == PackageManager.PERMISSION_GRANTED
 
         try {
             // This test verifies the Wi-Fi-check menu entry and scanner purpose, not
             // camera recognition. A physical phone can see an unrelated QR nearby and
             // correctly finish scanning before Espresso inspects the instruction.
-            // Revoke only the isolated QA package's permission for this test and
-            // restore the exact original state in finally.
-            if (cameraPermissionWasGranted) {
-                instrumentation.uiAutomation.revokeRuntimePermission(
-                    context.packageName,
-                    android.Manifest.permission.CAMERA
-                )
-            }
+            // This verifies the Wi-Fi-check entry point and purpose, not camera
+            // recognition. Pause only the local-QA camera so an unrelated QR code
+            // in the physical environment cannot finish the scanner before inspection.
+            qaPreferences.edit().putBoolean("pauseQrCameraForPurposeTest", true).commit()
 
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
@@ -1044,7 +1042,7 @@ class MainActivityInstrumentedTest {
                                 "Scan the temporary phone-check QR shown on the shop computer."
                             ) to containsVisibleText(
                                 scannerActivity.window.decorView,
-                                "Camera access needed"
+                                QrScannerActivity.QA_CAMERA_PAUSED_LABEL
                             )
                         )
                     }
@@ -1056,7 +1054,7 @@ class MainActivityInstrumentedTest {
                         visibleState.first
                     )
                     assertTrue(
-                        "Camera permission should remain gated during this purpose-only UI test.",
+                        "The isolated QA scanner must display its camera-paused state.",
                         visibleState.second
                     )
 
@@ -1107,12 +1105,7 @@ class MainActivityInstrumentedTest {
             }
         } finally {
             try {
-                if (cameraPermissionWasGranted) {
-                    instrumentation.uiAutomation.grantRuntimePermission(
-                        context.packageName,
-                        android.Manifest.permission.CAMERA
-                    )
-                }
+                qaPreferences.edit().putBoolean("pauseQrCameraForPurposeTest", previousPauseCamera).commit()
             } finally {
                 val editor = shopPreferences.edit().clear()
                 previousPreferences.forEach { (key, value) ->

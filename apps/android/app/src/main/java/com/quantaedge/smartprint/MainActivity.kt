@@ -2887,6 +2887,14 @@ class MainActivity : AppCompatActivity() {
     private fun scanQr(purpose: QrScanPurpose = QrScanPurpose.SHOP_CONNECTION) {
         val intent = Intent(this, QrScannerActivity::class.java)
             .putExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE, purpose.wireValue)
+        val localQaPackage = packageName == "com.quantaedge.smartprint.localqa" ||
+            packageName.startsWith("com.quantaedge.smartprint.localqa.")
+        val pauseCameraForQa = BuildConfig.DEBUG && localQaPackage &&
+            getSharedPreferences("smartprint.qa.instrumentation", MODE_PRIVATE)
+                .getBoolean("pauseQrCameraForPurposeTest", false)
+        if (pauseCameraForQa) {
+            intent.putExtra(QrScannerActivity.EXTRA_QA_PAUSE_CAMERA, true)
+        }
         scannerLauncher.launch(intent)
     }
 
