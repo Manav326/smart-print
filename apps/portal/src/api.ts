@@ -598,6 +598,68 @@ export function getShopSubscription(token: string) {
   return apiRequest<ShopSubscriptionSummary>("/api/v1/shop/subscription", {}, token);
 }
 
+export interface ShopSubscriptionCheckoutOptions {
+  checkoutAvailable: boolean;
+  plans: ShopSubscriptionPlan[];
+}
+
+export interface ShopSubscriptionOrder {
+  paymentId: string;
+  orderId: string;
+  amountMinor: number;
+  currency: string;
+  keyId: string;
+  planName: string;
+  billingInterval: string;
+  status: string;
+}
+
+export interface ShopSubscriptionPaymentStatus {
+  paymentId: string;
+  orderId: string;
+  paymentIdAtGateway: string | null;
+  amountMinor: number;
+  currency: string;
+  planCode: string;
+  planName: string;
+  billingInterval: string;
+  status: string;
+  createdUtc: string;
+  capturedUtc: string | null;
+  appliedUtc: string | null;
+  appliedSubscriptionId: string | null;
+}
+
+export function getShopSubscriptionCheckoutOptions(token: string) {
+  return apiRequest<ShopSubscriptionCheckoutOptions>("/api/v1/shop/subscription/plans", {}, token);
+}
+
+export function createShopSubscriptionOrder(token: string, values: {
+  planVersionId: string;
+  billingInterval: "Monthly" | "Annual";
+  idempotencyKey: string;
+}) {
+  return apiRequest<ShopSubscriptionOrder>("/api/v1/shop/subscription/payments/orders", {
+    method: "POST", body: JSON.stringify(values)
+  }, token);
+}
+
+export function verifyShopSubscriptionPayment(token: string, values: {
+  orderId: string;
+  paymentId: string;
+  signature: string;
+}) {
+  return apiRequest<ShopSubscriptionPaymentStatus>("/api/v1/shop/subscription/payments/verify", {
+    method: "POST", body: JSON.stringify(values)
+  }, token);
+}
+
+export function getShopSubscriptionPaymentStatus(token: string, paymentId: string) {
+  return apiRequest<ShopSubscriptionPaymentStatus>(
+    `/api/v1/shop/subscription/payments/${encodeURIComponent(paymentId)}`, {}, token
+  );
+}
+
 export function getShopPayments(token: string) {
   return apiRequest<ShopPayment[]>("/api/v1/shop/payments", {}, token);
 }
