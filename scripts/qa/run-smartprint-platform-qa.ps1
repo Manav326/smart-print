@@ -365,10 +365,12 @@ function Build-WindowsQaExecutable([string]$ProductionExe) {
 
     $smokeTarget = Join-Path $runDirectory "windows-smoke-target"
     $previousCargoTarget = [Environment]::GetEnvironmentVariable("CARGO_TARGET_DIR", "Process")
+    $previousViteApi = [Environment]::GetEnvironmentVariable("VITE_API_BASE_URL", "Process")
     try {
         $env:CARGO_TARGET_DIR = $smokeTarget
-        # Keep the exact API origin already used for the production executable.
-        # Only the WebView2 DevTools config differs between these two binaries.
+        # The isolated test binary must never contact a real shop/API origin.
+        # The real /api requests are intercepted by the local synthetic fixtures.
+        $env:VITE_API_BASE_URL = "https://example.invalid"
         & pnpm.cmd --filter @smart-print/desktop exec tauri build --config $smokeConfig --no-bundle --ci
         if ($LASTEXITCODE -ne 0) { throw "Windows WebView2 QA executable build failed." }
         $qaExecutable = Join-Path $smokeTarget "release/smartprint-desktop.exe"
@@ -388,6 +390,7 @@ function Build-WindowsQaExecutable([string]$ProductionExe) {
         return $destination
     } finally {
         [Environment]::SetEnvironmentVariable("CARGO_TARGET_DIR", $previousCargoTarget, "Process")
+        [Environment]::SetEnvironmentVariable("VITE_API_BASE_URL", $previousViteApi, "Process")
         if (Test-Path -LiteralPath $smokeConfig) { Remove-Item -LiteralPath $smokeConfig -Force -ErrorAction SilentlyContinue }
     }
 }
@@ -398,17 +401,9 @@ function Invoke-WindowsArtifactTests([string]$DesktopDirectory, [string]$ModeFor
     if (-not (Test-Path -LiteralPath $productionExe -PathType Leaf)) { throw "Windows artifact is missing SmartPrint.Desktop.exe." }
     if (-not (Test-Path -LiteralPath $qaExe -PathType Leaf)) { throw "Windows artifact is missing SmartPrint.Desktop.QA.exe." }
 
-    $smoke = Join-Path $PSScriptRoot "desktop-open-smoke.ps1"
-    $profile = Join-Path $runDirectory "windows-production-webview2-profile"
-    New-Item -ItemType Directory -Force -Path $profile | Out-Null
-    $previousProfile = [Environment]::GetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", "Process")
-    try {
-        $env:WEBVIEW2_USER_DATA_FOLDER = $profile
-        & $script:powerShellExecutable.Source -NoProfile -File $smoke -ExecutablePath $productionExe
-        if ($LASTEXITCODE -ne 0) { throw "Packaged production Windows executable failed native-window/UI smoke (child PowerShell exit $LASTEXITCODE)." }
-    } finally {
-        [Environment]::SetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER", $previousProfile, "Process")
-    }
+    $productionInfo = Get-Item -LiteralPath $productionExe
+    $productionHash = (Get-FileHash -LiteralPath $productionExe -Algorithm SHA256).Hash.ToLowerInvariant()
+    Write-Host ("Verified production Windows executable package: {0} ({1} bytes, SHA-256 {2}). It is not launched locally because it is compiled with the configured service origin." -f $productionInfo.FullName, $productionInfo.Length, $productionHash) -ForegroundColor DarkCyan
 
     $mixed = Join-Path $PSScriptRoot "mixed-batch-refund-test.ps1"
     $qaConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot "smartprint-qa.config.json") -Raw | ConvertFrom-Json -ErrorAction Stop
