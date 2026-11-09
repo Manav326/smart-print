@@ -52,9 +52,13 @@ function ensureRazorpayCheckout(): Promise<void> {
   if (window.Razorpay) return Promise.resolve();
   if (checkoutScriptPromise) return checkoutScriptPromise;
 
-  checkoutScriptPromise = new Promise((resolve, reject) => {
+  const loading = new Promise<void>((resolve, reject) => {
     const existing = document.querySelector<HTMLScriptElement>('script[data-smartprint-razorpay="true"]');
     if (existing) {
+      if (existing.dataset.loaded === "true") {
+        reject(new Error("Razorpay Checkout did not initialize."));
+        return;
+      }
       existing.addEventListener("load", () => resolve(), { once: true });
       existing.addEventListener("error", () => reject(new Error("Razorpay Checkout could not be loaded.")), { once: true });
       return;
@@ -64,15 +68,20 @@ function ensureRazorpayCheckout(): Promise<void> {
     script.src = "https://checkout.razorpay.com/v1/checkout.js";
     script.async = true;
     script.dataset.smartprintRazorpay = "true";
-    script.onload = () => resolve();
+    script.onload = () => {
+      script.dataset.loaded = "true";
+      resolve();
+    };
     script.onerror = () => reject(new Error("Razorpay Checkout could not be loaded. Check your connection and try again."));
     document.head.appendChild(script);
-  }).catch(error => {
+  });
+
+  const pending = loading.catch(error => {
     checkoutScriptPromise = null;
     throw error;
   });
-
-  return checkoutScriptPromise;
+  checkoutScriptPromise = pending;
+  return pending;
 }
 
 function priceFor(plan: ShopSubscriptionPlanOption, interval: SubscriptionBillingInterval): number | null {
