@@ -3266,6 +3266,7 @@ function loadRazorpayCheckout(): Promise<void> {
     script.onload = () => window.Razorpay ? resolve() : reject(new Error("Razorpay Checkout did not initialise."));
     script.onerror = () => {
       razorpayCheckoutScript = null;
+      script.remove();
       reject(new Error("Could not load the secure Razorpay Checkout window."));
     };
     if (!existing) document.head.appendChild(script);
@@ -3320,6 +3321,8 @@ function SubscriptionPage({
     response: RazorpayCheckoutResponse
   ) => {
     if (response.razorpay_order_id !== order.orderId) {
+      checkoutBusy.current = false;
+      setCheckoutKey("");
       setPaymentMessage("The checkout response did not match the order created for this subscription. No access has been changed.");
       setPaymentMessageTone("error");
       return;
