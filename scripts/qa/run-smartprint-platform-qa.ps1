@@ -313,10 +313,10 @@ function Build-WindowsQaExecutable([string]$ProductionExe) {
 
     $smokeTarget = Join-Path $runDirectory "windows-smoke-target"
     $previousCargoTarget = [Environment]::GetEnvironmentVariable("CARGO_TARGET_DIR", "Process")
-    $previousViteApi = [Environment]::GetEnvironmentVariable("VITE_API_BASE_URL", "Process")
     try {
         $env:CARGO_TARGET_DIR = $smokeTarget
-        $env:VITE_API_BASE_URL = ""
+        # Keep the exact API origin already used for the production executable.
+        # Only the WebView2 DevTools config differs between these two binaries.
         & pnpm.cmd --filter @smart-print/desktop exec tauri build --config $smokeConfig --no-bundle --ci
         if ($LASTEXITCODE -ne 0) { throw "Windows WebView2 QA executable build failed." }
         $qaExecutable = Join-Path $smokeTarget "release/smartprint-desktop.exe"
@@ -336,7 +336,6 @@ function Build-WindowsQaExecutable([string]$ProductionExe) {
         return $destination
     } finally {
         [Environment]::SetEnvironmentVariable("CARGO_TARGET_DIR", $previousCargoTarget, "Process")
-        [Environment]::SetEnvironmentVariable("VITE_API_BASE_URL", $previousViteApi, "Process")
         if (Test-Path -LiteralPath $smokeConfig) { Remove-Item -LiteralPath $smokeConfig -Force -ErrorAction SilentlyContinue }
     }
 }
