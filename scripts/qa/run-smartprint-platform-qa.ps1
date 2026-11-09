@@ -4,17 +4,23 @@
 One coordinated SmartPrint QA run for Web, Android and Windows.
 
 .DESCRIPTION
-Prompts for one or more platforms and one execution mode:
-  Build - builds the selected app artifacts from this checkout, then tests them.
-  Pull  - downloads artifacts from a successful GitHub CI run for this exact
-          checkout commit, verifies their commit and SHA-256 manifest, then
-          tests those artifacts without building the apps.
+Runs the complete safe automated CI matrix for the exact checkout commit and
+then performs local acceptance on the selected machine/device. Pull mode first
+requires every mandatory GitHub CI job to pass for this exact commit, validates
+artifact manifests, runs the shared QA harness, all Portal logic tests,
+responsive/browser acceptance, API/Agent/Rust/Android JVM tests, and native
+WebView2/device acceptance. CI-only destructive lifecycle and PostgreSQL
+integration tests are verified from their exact-commit CI jobs rather than
+replayed against a user's installed apps or local data.
 
-Web QA uses the production Portal dist for mixed-batch UI acceptance and the
-QA-only browser fixture for Photo Studio. Android QA runs the AndroidJUnitRunner
-instrumentation on one selected physical device or emulator. Windows QA tests
-the packaged production executable and a separate QA-only WebView2 executable;
-the production binary is never given remote-debugging flags.
+The local persistent real-data E2E suite and live-environment QA are separate
+workflows because they use persistent QA identities/data or a deployed
+environment. They are never silently run by this command.
+
+Web QA uses the production Portal artifact for mixed-batch acceptance and the
+QA-only fixture for Photo Studio. Android installs only an isolated local-QA
+package. Windows tests an isolated diagnostic WebView2 executable; the
+production executable is never given remote-debugging flags.
 
 .PARAMETER Platforms
 One or more of Web, Android and Windows. Omit to choose interactively.
@@ -64,7 +70,7 @@ Usage:
 Platforms:
   Web       Portal unit/Photo Studio browser tests plus production-dist browser acceptance.
   Android   Android JVM suite and real Android WebView instrumentation on one ADB device.
-  Windows   API/Agent tests, Rust/desktop checks, production-app smoke and native WebView2 acceptance.
+  Windows   API/Agent tests, Rust/desktop checks, renderer/native WebView2 acceptance and QA smoke.
 
 Modes:
   Build     Explicitly build selected app artifacts from this checkout, then test them.
@@ -78,7 +84,10 @@ Safety:
   - Native Windows mixed-batch tests use synthetic data and restore the prior Credential
     Manager session.
   - Pull mode refuses missing, expired, mismatched-commit or checksum-invalid artifacts.
-  - All platform results are combined in one summary.json and summary.txt.
+  - All platform and exact-commit CI job results are combined in one summary.json and summary.txt.
+  - PostgreSQL migration integration, Windows installer lifecycle and Android production-package
+    lifecycle are verified from disposable GitHub CI runners, never replayed destructively
+    against this workstation or a personal Android device.
 "@
     exit 0
 }
@@ -164,6 +173,7 @@ New-Item -ItemType Directory -Force -Path $runDirectory | Out-Null
 $script:results = [System.Collections.Generic.List[object]]::new()
 $script:workflowRun = $null
 $script:downloadRoot = $null
+$script:ciJobEvidence = @()
 $startedUtc = [DateTime]::UtcNow
 
 function Add-Result([string]$Platform, [string]$Name, [string]$Status, [string]$Detail = "", [string]$Evidence = "") {
@@ -220,12 +230,133 @@ function Get-GhRun {
         return $run
     }
 
-    $runJson = & $gh.Source run list --repo $repository --workflow ci.yml --event push --commit $sourceCommit --status completed --json databaseId,headSha,event,status,conclusion,url,workflowName,headBranch,number,createdAt --limit 30
-    if ($LASTEXITCODE -ne 0) { throw "Could not list successful CI runs for commit $sourceCommit." }
+    $runJson = & $gh.Source run list --repo $repository --workflow ci.yml --event push --commit $sourceCommit --json databaseId,headSha,event,status,conclusion,url,workflowName,headBranch,number,createdAt --limit 30
+    if ($LASTEXITCODE -ne 0) { throw "Could not list CI runs for commit $sourceCommit." }
     $runs = @($runJson | ConvertFrom-Json -ErrorAction Stop)
-    $matches = @($runs | Where-Object { [string]$_.headSha -eq $sourceCommit -and [string]$_.workflowName -eq "CI" -and [string]$_.event -eq "push" -and [string]$_.status -eq "completed" -and [string]$_.conclusion -eq "success" })
-    if ($matches.Count -eq 0) { throw "No successful CI run exists for this exact commit ($sourceCommit). Wait for CI to pass or supply a matching -WorkflowRunId. Pull mode will not use artifacts from an older commit." }
-    return ($matches | Sort-Object { [DateTime]$_.createdAt } -Descending | Select-Object -First 1)
+    $matches = @($runs | Where-Object { [string]$_.headSha -eq $sourceCommit -and [string]$_.workflowName -eq "CI" -and [string]$_.event -eq "push" })
+    if ($matches.Count -eq 0) { throw "No push-triggered CI run exists for this exact commit ($sourceCommit). Pull mode will not use artifacts from an older commit." }
+    $latest = $matches | Sort-Object { [DateTime]$_.createdAt } -Descending | Select-Object -First 1
+    if ([string]$latest.status -ne "completed" -or [string]$latest.conclusion -ne "success") {
+        throw "The latest CI run for exact commit $sourceCommit is not green (run=$($latest.databaseId), status=$($latest.status), conclusion=$($latest.conclusion)). Pull mode will not fall back to an older successful run."
+    }
+    return $latest
+}
+
+function Assert-RequiredCIJobs([object]$Run) {
+    $gh = Get-Command gh.exe -ErrorAction SilentlyContinue
+    if (-not $gh) { $gh = Get-Command gh -ErrorAction Stop }
+    $jobEndpoint = "repos/$repository/actions/runs/$($Run.databaseId)/jobs?per_page=100"
+    $jobJson = & $gh.Source api $jobEndpoint
+    if ($LASTEXITCODE -ne 0) { throw "Could not read job-level evidence for exact-commit CI run $($Run.databaseId)." }
+    $jobResponse = $jobJson | ConvertFrom-Json -ErrorAction Stop
+    $requiredJobs = @(
+        @{ id = "portal"; coverage = "Portal logic, QA harness, Chromium Photo Studio, mixed-batch/refund, responsive/theme, typecheck and production build." },
+        @{ id = "api_dotnet"; coverage = "Windows .NET API build and unit/model regression suite." },
+        @{ id = "agent_dotnet"; coverage = "Windows .NET Agent build, unit tests, real Microsoft Print to PDF and multi-queue integration, pairing smoke." },
+        @{ id = "windows_desktop"; coverage = "Desktop frontend, Rust host tests, WebView2 launch smoke, desktop renderer and native WebView2 acceptance." },
+        @{ id = "windows_installer"; coverage = "Disposable-runner Windows install, reinstall, upgrade, rollback and uninstall lifecycle." },
+        @{ id = "dotnet"; coverage = "Required aggregate gate for every split Windows build/test job." },
+        @{ id = "postgres-integration"; coverage = "Historical PostgreSQL schema migration and operational-default integration test." },
+        @{ id = "android"; coverage = "Android JVM tests, debug APK build, emulator instrumentation and package install/upgrade/signature lifecycle." }
+    )
+    $observed = @($jobResponse.jobs)
+    $missing = [System.Collections.Generic.List[string]]::new()
+    $notGreen = [System.Collections.Generic.List[string]]::new()
+    foreach ($required in $requiredJobs) {
+        $matches = @($observed | Where-Object { [string]$_.name -eq [string]$required.id })
+        if ($matches.Count -ne 1) {
+            [void]$missing.Add($required.id)
+            $script:ciJobEvidence += [PSCustomObject]@{
+                job = $required.id; status = "MISSING"; conclusion = "unknown"; coverage = $required.coverage; url = $null
+            }
+            Add-Result "CI" ("Exact-commit CI job: " + $required.id) "FAIL" "Expected exactly one matching job in run $($Run.databaseId), found $($matches.Count)."
+            continue
+        }
+        $job = $matches[0]
+        $passed = ([string]$job.status -eq "completed" -and [string]$job.conclusion -eq "success")
+        $entry = [PSCustomObject]@{
+            job = $required.id
+            status = [string]$job.status
+            conclusion = [string]$job.conclusion
+            coverage = $required.coverage
+            url = [string]$job.html_url
+        }
+        $script:ciJobEvidence += $entry
+        if ($passed) {
+            Add-Result "CI" ("Exact-commit CI job: " + $required.id) "PASS" $required.coverage ([string]$job.html_url)
+        } else {
+            [void]$notGreen.Add("$($required.id)=$($job.status)/$($job.conclusion)")
+            Add-Result "CI" ("Exact-commit CI job: " + $required.id) "FAIL" "Job status=$($job.status), conclusion=$($job.conclusion). $($required.coverage)" ([string]$job.html_url)
+        }
+    }
+    if ($missing.Count -gt 0 -or $notGreen.Count -gt 0) {
+        throw ("Required exact-commit CI coverage is incomplete. Missing: " + ($missing -join ", ") +
+            ". Not green: " + ($notGreen -join ", ") + ". Local artifact/device acceptance will not start.")
+    }
+}
+
+function Invoke-QAHarnessRegressionSuite {
+    $node = Get-Command node.exe -ErrorAction SilentlyContinue
+    if (-not $node) { $node = Get-Command node -ErrorAction Stop }
+    $qaModules = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter "*.mjs" -File | Sort-Object Name)
+    if ($qaModules.Count -eq 0) { throw "No scripts/qa JavaScript modules were found." }
+    foreach ($module in $qaModules) {
+        & $node.Source --check $module.FullName
+        if ($LASTEXITCODE -ne 0) { throw "QA harness JavaScript syntax validation failed: $($module.Name)" }
+    }
+    $qaTests = @($qaModules | Where-Object { $_.Name -like "*.test.mjs" })
+    if ($qaTests.Count -eq 0) { throw "No QA harness *.test.mjs files were found." }
+    $testPaths = @($qaTests | ForEach-Object { $_.FullName })
+    & $node.Source --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs @testPaths
+    if ($LASTEXITCODE -ne 0) { throw "One or more QA harness regression tests failed." }
+}
+
+function Resolve-PlaywrightModuleDirectory {
+    $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
+    if (-not $npm) { $npm = Get-Command npm -ErrorAction Stop }
+    $cache = (& $npm.Source config get cache | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cache)) { throw "Could not resolve the npm cache for the pinned Playwright package." }
+    $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\.mjs$" } |
+        Select-Object -First 1
+    if (-not $module) {
+        $npx = Get-Command npx.cmd -ErrorAction SilentlyContinue
+        if (-not $npx) { $npx = Get-Command npx -ErrorAction Stop }
+        & $npx.Source --yes --package=playwright@1.56.1 playwright install chromium
+        if ($LASTEXITCODE -ne 0) { throw "Pinned Playwright/Chromium installation failed." }
+        $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\.mjs$" } |
+            Select-Object -First 1
+    }
+    if (-not $module) { throw "Could not locate the pinned Playwright 1.56.1 module." }
+    return $module.DirectoryName
+}
+
+function Invoke-ResponsiveBrowserSuite {
+    $node = Get-Command node.exe -ErrorAction SilentlyContinue
+    if (-not $node) { $node = Get-Command node -ErrorAction Stop }
+    $browserRunner = Join-Path $repoRoot "apps/portal/tests/theme-responsive.browser.mjs"
+    if (-not (Test-Path -LiteralPath $browserRunner -PathType Leaf)) { throw "Responsive/theme browser test runner is missing." }
+    & $node.Source --check $browserRunner
+    if ($LASTEXITCODE -ne 0) { throw "Responsive/theme browser test runner syntax validation failed." }
+    $previousModule = [Environment]::GetEnvironmentVariable("PLAYWRIGHT_MODULE_DIR", "Process")
+    $previousArtifact = [Environment]::GetEnvironmentVariable("RESPONSIVE_ARTIFACT_DIR", "Process")
+    $previousPnpmCommand = [Environment]::GetEnvironmentVariable("SMARTPRINT_PNPM_COMMAND", "Process")
+    $previousApiOrigin = [Environment]::GetEnvironmentVariable("VITE_API_BASE_URL", "Process")
+    try {
+        $env:PLAYWRIGHT_MODULE_DIR = Resolve-PlaywrightModuleDirectory
+        $env:RESPONSIVE_ARTIFACT_DIR = Join-Path $runDirectory "responsive-browser"
+        $env:SMARTPRINT_PNPM_COMMAND = "pnpm.cmd"
+        $env:VITE_API_BASE_URL = ""
+        New-Item -ItemType Directory -Force -Path $env:RESPONSIVE_ARTIFACT_DIR | Out-Null
+        & $node.Source $browserRunner
+        if ($LASTEXITCODE -ne 0) { throw "Responsive/theme browser acceptance failed." }
+    } finally {
+        [Environment]::SetEnvironmentVariable("PLAYWRIGHT_MODULE_DIR", $previousModule, "Process")
+        [Environment]::SetEnvironmentVariable("RESPONSIVE_ARTIFACT_DIR", $previousArtifact, "Process")
+        [Environment]::SetEnvironmentVariable("SMARTPRINT_PNPM_COMMAND", $previousPnpmCommand, "Process")
+        [Environment]::SetEnvironmentVariable("VITE_API_BASE_URL", $previousApiOrigin, "Process")
+    }
 }
 
 function Download-CIArtifact([string]$ArtifactName) {
@@ -435,12 +566,16 @@ function Invoke-WindowsArtifactTests([string]$DesktopDirectory, [string]$ModeFor
             ". Close it manually and rerun Windows QA. The coordinator will not close, replace or take over an active session.")
     }
 
+    $smoke = Join-Path $PSScriptRoot "desktop-open-smoke.ps1"
+    & $script:powerShellExecutable.Source -NoProfile -File $smoke -ExecutablePath $qaExe -RequireDevTools
+    if ($LASTEXITCODE -ne 0) { throw "Isolated Windows WebView2 desktop launch/render smoke failed (child PowerShell exit $LASTEXITCODE)." }
+
     $mixed = Join-Path $PSScriptRoot "mixed-batch-refund-test.ps1"
     $qaConfig = Get-Content -LiteralPath (Join-Path $PSScriptRoot "smartprint-qa.config.json") -Raw | ConvertFrom-Json -ErrorAction Stop
     $debugPort = [int]$qaConfig.apps.windows.webViewDevToolsPort
-    $mixedPlatform = if ($ModeForTest -eq "Pull") { "NativeWindows" } else { "Windows" }
-    & $script:powerShellExecutable.Source -NoProfile -File $mixed -Platform $mixedPlatform -SkipInstall -Headed:$(-not $Headless) -NativeExecutablePath $qaExe -WebView2DebugPort $debugPort -ArtifactDirectory (Join-Path $runDirectory "windows-mixed-batch")
-    if ($LASTEXITCODE -ne 0) { throw "Windows native WebView2 mixed-batch acceptance failed (child PowerShell exit $LASTEXITCODE)." }
+    # Always execute both desktop renderer contract and actual native WebView2 host.
+    & $script:powerShellExecutable.Source -NoProfile -File $mixed -Platform "Windows" -SkipInstall -Headed:$(-not $Headless) -NativeExecutablePath $qaExe -WebView2DebugPort $debugPort -ArtifactDirectory (Join-Path $runDirectory "windows-mixed-batch")
+    if ($LASTEXITCODE -ne 0) { throw "Windows desktop renderer/native WebView2 mixed-batch acceptance failed (child PowerShell exit $LASTEXITCODE)." }
 }
 
 function Resolve-AndroidDeviceIfNeeded {
@@ -476,7 +611,7 @@ function Resolve-AndroidDeviceIfNeeded {
 }
 
 $originalEnvironment = @{}
-$environmentNames = @("SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL","SMARTPRINT_MIXED_BATCH_REFUND_HEADED","SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE","SMARTPRINT_PHOTO_STUDIO_BASE_URL","SMARTPRINT_WEBVIEW2_DEBUG_PORT","VITE_API_BASE_URL","CARGO_TARGET_DIR","WEBVIEW2_USER_DATA_FOLDER","VITE_ENABLE_PHOTO_STUDIO_QA")
+$environmentNames = @("SMARTPRINT_MIXED_BATCH_REFUND_BASE_URL","SMARTPRINT_MIXED_BATCH_REFUND_HEADED","SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE","SMARTPRINT_PHOTO_STUDIO_BASE_URL","SMARTPRINT_WEBVIEW2_DEBUG_PORT","VITE_API_BASE_URL","CARGO_TARGET_DIR","WEBVIEW2_USER_DATA_FOLDER","VITE_ENABLE_PHOTO_STUDIO_QA","PLAYWRIGHT_MODULE_DIR","RESPONSIVE_ARTIFACT_DIR","SMARTPRINT_PNPM_COMMAND")
 foreach ($name in $environmentNames) { $originalEnvironment[$name] = [Environment]::GetEnvironmentVariable($name, "Process") }
 
 try {
@@ -490,6 +625,7 @@ try {
 
     if ($Mode -eq "Pull") {
         $script:workflowRun = Get-GhRun
+        Assert-RequiredCIJobs $script:workflowRun
         $script:downloadRoot = Join-Path $runDirectory ("ci-run-" + [string]$script:workflowRun.databaseId)
         New-Item -ItemType Directory -Force -Path $script:downloadRoot | Out-Null
         Write-Host ("Using successful CI run #{0}: {1}" -f $script:workflowRun.number, $script:workflowRun.url) -ForegroundColor Green
@@ -530,10 +666,16 @@ try {
         if ($WorkflowRunId) { throw "-WorkflowRunId is only valid with -Mode Pull." }
     }
 
-    if ($Mode -eq "Build" -and -not (Test-Path -LiteralPath (Join-Path $repoRoot "node_modules") -PathType Container)) {
-        Invoke-QAStep "Shared" "Install locked Node dependencies for the selected local builds" {
+    if (-not (Test-Path -LiteralPath (Join-Path $repoRoot "node_modules") -PathType Container)) {
+        Invoke-QAStep "Shared" "Install locked Node dependencies for complete source/browser QA" {
             & pnpm.cmd install --frozen-lockfile
         } -Evidence (Join-Path $runDirectory "pnpm-install.log") | Out-Null
+    }
+
+    if (-not (Invoke-QAStep "Shared" "All QA harness syntax checks and regression tests (*.mjs)" {
+        Invoke-QAHarnessRegressionSuite
+    } -Evidence (Join-Path $runDirectory "qa-harness"))) {
+        throw "Shared QA harness regression tests failed; platform testing cannot continue."
     }
 
     $resolvedAndroidSerial = Resolve-AndroidDeviceIfNeeded
@@ -553,6 +695,33 @@ try {
         $windowsSourceChecksPassed = [bool](Invoke-QAStep "Windows" "API/Agent, desktop frontend, Rust and native build/tests" {
             Invoke-PhotoStudioSuite -Platform "Windows" -SkipPortal:$skipPortalForWindows
         } -Evidence (Join-Path $runDirectory "windows-source-checks"))
+    }
+
+    if ($Mode -eq "Pull" -and $Platforms -contains "Web") {
+        $webSourceChecksPassed = [bool](Invoke-QAStep "Web" "Portal TypeScript typecheck for the exact source commit" {
+            & pnpm.cmd --filter @smart-print/portal typecheck
+            if ($LASTEXITCODE -ne 0) { throw "Portal TypeScript typecheck failed." }
+        } -Evidence (Join-Path $runDirectory "web-typecheck"))
+    }
+
+    if ($Mode -eq "Pull" -and $Platforms -contains "Windows") {
+        $desktopSourceChecksPassed = [bool](Invoke-QAStep "Windows" "Desktop frontend typecheck and native Rust check/tests" {
+            & pnpm.cmd --filter @smart-print/desktop typecheck
+            if ($LASTEXITCODE -ne 0) { throw "Desktop frontend typecheck failed." }
+            if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw "Rust/Cargo is required for Windows native desktop validation." }
+            $nativeManifest = Join-Path $repoRoot "apps/desktop/src-tauri/Cargo.toml"
+            cargo check --locked --manifest-path $nativeManifest
+            if ($LASTEXITCODE -ne 0) { throw "Windows native desktop cargo check failed." }
+            cargo test --locked --manifest-path $nativeManifest
+            if ($LASTEXITCODE -ne 0) { throw "Windows native desktop Rust tests failed." }
+        } -Evidence (Join-Path $runDirectory "windows-source-typecheck-rust"))
+        if (-not $desktopSourceChecksPassed) { $windowsSourceChecksPassed = $false }
+    }
+
+    if (($Platforms -contains "Web") -or ($Platforms -contains "Windows")) {
+        Invoke-QAStep "Browser" "Theme and responsive browser acceptance (all six viewport profiles)" {
+            Invoke-ResponsiveBrowserSuite
+        } -Evidence (Join-Path $runDirectory "responsive-browser") | Out-Null
     }
 
     if ($Platforms -contains "Web") {
@@ -609,6 +778,7 @@ try {
                 $args = @("-ApplicationApkPath",$appApk,"-InstrumentationApkPath",$testApk,
                     "-ApplicationId",[string]$script:androidMetadata.applicationId,
                     "-FixtureDirectory",$fixture,
+                    "-RunJVMTests",
                     "-OutputDirectory",(Join-Path $runDirectory "android"))
                 if ($AndroidDeviceSerial) { $args += @("-DeviceSerial",$AndroidDeviceSerial) }
                 & $script:powerShellExecutable.Source -NoProfile -File $androidRunner @args
@@ -635,6 +805,7 @@ finally {
         branch = $branch
         workflowRunId = if ($script:workflowRun) { [string]$script:workflowRun.databaseId } else { $null }
         workflowRunUrl = if ($script:workflowRun) { [string]$script:workflowRun.url } else { $null }
+        ciJobs = @($script:ciJobEvidence)
         startedUtc = $startedUtc.ToString("o")
         completedUtc = [DateTime]::UtcNow.ToString("o")
         result = if ($failed -gt 0 -or $blocked -gt 0) { "FAIL" } else { "PASS" }

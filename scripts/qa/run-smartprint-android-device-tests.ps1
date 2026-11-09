@@ -11,15 +11,18 @@ param(
     [string]$ApplicationId = "com.quantaedge.smartprint.localqa",
     [string]$FixtureDirectory = "",
     [string]$DeviceSerial = "",
+    [switch]$RunJVMTests,
     [string]$OutputDirectory = "artifacts/android-device-qa-local"
 )
 if ($Help) {
     Write-Host @"
 Usage:
   .\scripts\qa\run-smartprint-android-device-tests.ps1 -Build [-DeviceSerial SERIAL]
-  .\scripts\qa\run-smartprint-android-device-tests.ps1 -ApplicationApkPath APP.apk -InstrumentationApkPath TEST.apk -ApplicationId ID -FixtureDirectory DIR [-DeviceSerial SERIAL]
+  .\scripts\qa\run-smartprint-android-device-tests.ps1 -ApplicationApkPath APP.apk -InstrumentationApkPath TEST.apk -ApplicationId ID -FixtureDirectory DIR [-RunJVMTests] [-DeviceSerial SERIAL]
 
--Build explicitly builds the local QA APK pair and fixture. Without -Build, it uses only the supplied APKs and fixture; no Gradle build task is invoked.
+-Build builds the isolated QA APK pair, fixture and JVM tests.
+-RunJVMTests runs the complete JVM unit suite against the current source before
+  the supplied prebuilt APKs are installed. Pull mode uses this for source coverage.
 Only the isolated com.quantaedge.smartprint.localqa[.*] package is installed. The production com.quantaedge.smartprint package is never uninstalled, updated or data-cleared.
 "@
     exit 0
@@ -152,6 +155,13 @@ try {
         $InstrumentationApkPath = (Resolve-Path $InstrumentationApkPath -ErrorAction Stop).Path
         $FixtureDirectory = (Resolve-Path $FixtureDirectory -ErrorAction Stop).Path
         Add-Result "Android build" "PASS" "Prebuilt artifacts selected; Gradle was not invoked."
+    }
+
+    if ($RunJVMTests -and -not $Build) {
+        $gradle = Resolve-Gradle
+        & $gradle --no-daemon --console=plain -p apps/android -PsmartPrintServiceUrl=http://127.0.0.1:3000 :app:testDebugUnitTest
+        if ($LASTEXITCODE -ne 0) { throw "Android JVM unit tests failed." }
+        Add-Result "Android JVM unit tests" "PASS" "Ran the complete Android JVM suite against the current source commit."
     }
 
     $appBadging = (& $aapt dump badging $ApplicationApkPath 2>&1) -join [Environment]::NewLine

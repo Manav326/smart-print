@@ -156,24 +156,15 @@ try {
             Invoke-Checked "Install locked portal dependencies" { pnpm install --frozen-lockfile }
         }
 
-        $testFiles = @(
-            "apps/portal/tests/portal-routing.test.ts",
-            "apps/portal/tests/order-journey.test.ts",
-            "apps/portal/tests/customer-session-state.test.ts",
-            "apps/portal/tests/table-layout.test.ts",
-            "apps/portal/tests/theme-responsive.test.ts",
-            "apps/portal/tests/batch-checkout-state.test.ts",
-            "apps/portal/tests/local-upload-routing.test.ts",
-            "apps/portal/tests/print-fulfilment-flow.test.ts",
-            "apps/portal/tests/photo-studio.test.ts",
-            "apps/portal/tests/upi-payment-intent.test.ts"
-        )
-        foreach ($testFile in $testFiles) {
-            if (-not (Test-Path -LiteralPath $testFile)) { throw "Required portal regression test is missing: $testFile" }
-        }
+        $portalTestDirectory = Join-Path $repoRoot "apps/portal/tests"
+        $testFiles = @(Get-ChildItem -LiteralPath $portalTestDirectory -Filter "*.test.ts" -File |
+            Sort-Object Name | ForEach-Object {
+                $_.FullName.Substring($repoRoot.Length + 1).Replace("\", "/")
+            })
+        if ($testFiles.Count -eq 0) { throw "No Portal *.test.ts regression tests were found." }
 
-        Invoke-Checked "Run all portal unit and regression tests" {
-            node --experimental-strip-types --test @testFiles
+        Invoke-Checked "Run every Portal unit and regression test (*.test.ts)" {
+            node --experimental-strip-types --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs @testFiles
         }
 
         Invoke-Checked "Install Playwright Chromium" {

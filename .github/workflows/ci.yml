@@ -38,13 +38,13 @@ jobs:
             echo "Syntax-checking $file"
             node --check "$file"
           done
-      - name: Test local E2E prerequisite and HTTP audit helpers
+      - name: Test every QA harness regression file
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
-        run: node --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs scripts/qa/live-node-test-reporter.test.mjs scripts/qa/production-qa-plan.test.mjs scripts/qa/smartprint-qa-config.test.mjs scripts/qa/local-e2e-prerequisites.test.mjs scripts/qa/local-e2e-http-audit.test.mjs
-      - name: Test portal logic regression suite
+        run: node --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs scripts/qa/*.test.mjs
+      - name: Test every Portal logic regression file
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         run: |
-          node --experimental-strip-types --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs apps/portal/tests/portal-routing.test.ts apps/portal/tests/order-journey.test.ts apps/portal/tests/customer-session-state.test.ts apps/portal/tests/table-layout.test.ts apps/portal/tests/theme-responsive.test.ts apps/portal/tests/batch-checkout-state.test.ts apps/portal/tests/local-upload-routing.test.ts apps/portal/tests/print-fulfilment-flow.test.ts apps/portal/tests/photo-studio.test.ts apps/portal/tests/upi-payment-intent.test.ts
+          node --experimental-strip-types --test --test-concurrency=1 --test-reporter=./scripts/qa/live-node-test-reporter.mjs apps/portal/tests/*.test.ts
       - name: Install Chromium for real-browser appearance and viewport checks
         id: chromium_install
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
