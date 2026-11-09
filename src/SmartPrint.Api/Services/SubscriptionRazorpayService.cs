@@ -958,12 +958,16 @@ public sealed class SubscriptionRazorpayService(
         CancellationToken cancellationToken)
     {
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var lockKey = $"shop-subscription-order-intent:{paymentId:N}";
+        // Use the same per-order lock as checkout verification and webhook capture handling.
+        var lockKey = $"shop-subscription-order:{orderId}";
         await db.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT pg_advisory_xact_lock(8, hashtext({lockKey}))", cancellationToken);
+            $"SELECT pg_advisory_xact_lock(6, hashtext({lockKey}))", cancellationToken);
 
         var stored = await db.ShopSubscriptionPayments
             .SingleAsync(item => item.Id == paymentId, cancellationToken);
+        // This DbContext may have tracked the intent before a parallel resume/webhook
+        // reconciled it. Refresh under the lock before applying the provider order ID.
+        await db.Entry(stored).ReloadAsync(cancellationToken);
         if (stored.Status is "CREATING" or "CREATION_UNKNOWN")
         {
             stored.RazorpayOrderId = orderId;
@@ -986,14 +990,15 @@ public sealed class SubscriptionRazorpayService(
         Guid paymentId,
         CancellationToken cancellationToken)
     {
-        var stored = await db.ShopSubscriptionPayments
-            .SingleOrDefaultAsync(item => item.Id == paymentId, cancellationToken);
-        if (stored is null || stored.Status is "CREATED" or "FAILED" or "CAPTURED" or "CAPTURED_REVIEW_REQUIRED")
-            return;
-
-        stored.Status = "CREATION_UNKNOWN";
-        stored.UpdatedUtc = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(cancellationToken);
+        // A timeout handler must never overwrite a state already advanced by a
+        // concurrent resume, payment callback or webhook.
+        await db.ShopSubscriptionPayments
+            .Where(item => item.Id == paymentId && item.Status == "CREATING")
+            .ExecuteUpdateAsync(
+                setters => setters
+                    .SetProperty(item => item.Status, "CREATION_UNKNOWN")
+                    .SetProperty(item => item.UpdatedUtc, DateTimeOffset.UtcNow),
+                cancellationToken);
     }
 
     private async Task<JsonObject> SendRazorpayRequestAsync(
