@@ -200,7 +200,11 @@ function Invoke-QAStep {
     Write-Host ("=== {0}: {1} ===" -f $Platform, $Name) -ForegroundColor Cyan
     try {
         $global:LASTEXITCODE = 0
-        & $Action
+        # Most test commands write their per-test progress to the success/error streams.
+        # Several callers intentionally capture this function’s Boolean result or discard
+        # its success output. Send child streams to the host here so those callers cannot
+        # accidentally hide live test names, progress markers, or framework diagnostics.
+        & $Action *>&1 | Out-Host
         if ($null -ne $LASTEXITCODE -and [int]$LASTEXITCODE -ne 0) {
             throw "Command exited with code $LASTEXITCODE."
         }

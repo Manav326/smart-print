@@ -243,10 +243,48 @@ try {
 
     $logPath = Join-Path $outputRoot "android-physical-device-instrumentation.txt"
     Write-Host "Starting Android Photo Studio WebView instrumentation..." -ForegroundColor Cyan
-    $output = @(& $adb -s $serial shell am instrument -w -r $component 2>&1)
+    $outputLines = [System.Collections.Generic.List[string]]::new()
+    $currentTestName = ""
+    $currentTestNumber = 0
+    $totalTestCount = 0
+    Write-Host "[ANDROID-TEST] Waiting for the instrumentation runner to report its test plan..." -ForegroundColor DarkCyan
+
+    # Do not collect am instrument into an array: that buffers all 44+ test events
+    # until the process exits. Stream named test start/result events as adb emits them,
+    # while retaining the complete raw runner transcript for diagnostics.
+    & $adb -s $serial shell am instrument -w -r $component 2>&1 | ForEach-Object {
+        $line = [string]$_
+        [void]$outputLines.Add($line)
+
+        if ($line -match "^INSTRUMENTATION_STATUS:\s*numtests=(\d+)") {
+            $totalTestCount = [int]$Matches[1]
+        } elseif ($line -match "^INSTRUMENTATION_STATUS:\s*current=(\d+)") {
+            $currentTestNumber = [int]$Matches[1]
+        } elseif ($line -match "^INSTRUMENTATION_STATUS:\s*test=(.+)$") {
+            $currentTestName = $Matches[1].Trim()
+        } elseif ($line -match "^INSTRUMENTATION_STATUS_CODE:\s*(-?\d+)") {
+            $statusCode = [int]$Matches[1]
+            $progress = if ($totalTestCount -gt 0) { "$currentTestNumber/$totalTestCount" } else { "$currentTestNumber/?" }
+            switch ($statusCode) {
+                1 {
+                    Write-Host ("[ANDROID-TEST {0}] START | {1}" -f $progress, $currentTestName) -ForegroundColor Cyan
+                }
+                0 {
+                    Write-Host ("[ANDROID-TEST {0}] PASS  | {1}" -f $progress, $currentTestName) -ForegroundColor Green
+                }
+                -2 {
+                    Write-Host ("[ANDROID-TEST {0}] FAIL  | {1}" -f $progress, $currentTestName) -ForegroundColor Red
+                }
+                -1 {
+                    Write-Host ("[ANDROID-TEST {0}] ERROR | {1}" -f $progress, $currentTestName) -ForegroundColor Red
+                }
+            }
+        }
+    }
     $instrumentExit = $LASTEXITCODE
-    $text = $output -join [Environment]::NewLine
+    $text = $outputLines -join [Environment]::NewLine
     $text | Set-Content -LiteralPath $logPath -Encoding UTF8
+    Write-Host ("[ANDROID-TEST] Instrumentation process exited with code {0}; raw transcript: {1}" -f $instrumentExit, $logPath) -ForegroundColor DarkCyan
     $requiredCases = @(
         "customerPhotoStudioRunsInsideAndroidWebViewAndProducesExactMultiPagePdf",
         "shopOwnerCanEditAnExistingPhotoJobInsideAndroidWebViewAndSaveReplacementPdf",

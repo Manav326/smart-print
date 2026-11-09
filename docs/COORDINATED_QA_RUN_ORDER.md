@@ -43,7 +43,11 @@ to an older commit or a pull-request merge-result artifact.
    `com.quantaedge.smartprint.localqa[.*]` package and run instrumentation on
    the selected connected device. The production customer package and its
    data are never uninstalled, replaced or cleared by this local runner.
-9. **Unified evidence.** Write one `summary.json` and `summary.txt` with the
+9. **Live test progress.** Stream test-framework output through the coordinator
+   so nested Boolean/result handling cannot hide it. Android physical-device
+   instrumentation reports each test start and PASS/FAIL as `adb` emits events;
+   the complete raw transcript is also retained in the Android evidence folder.
+10. **Unified evidence.** Write one `summary.json` and `summary.txt` with the
    source SHA, CI run, each required CI job, every local QA step, and PASS,
    FAIL, BLOCKED or SKIPPED outcomes.
 
