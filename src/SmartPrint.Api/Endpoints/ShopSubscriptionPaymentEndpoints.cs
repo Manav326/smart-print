@@ -76,6 +76,7 @@ public static class ShopSubscriptionPaymentEndpoints
                 .Select(item => new
                 {
                     item.Id,
+                    item.PlanVersionId,
                     item.PlanCode,
                     item.BillingInterval,
                     item.AmountMinor,
@@ -90,6 +91,26 @@ public static class ShopSubscriptionPaymentEndpoints
                 .ToListAsync(ct);
 
             return Results.Ok(payments);
+        });
+
+        shop.MapPost("/subscription/payments/{paymentId:guid}/resume", async (
+            Guid paymentId,
+            ClaimsPrincipal principal,
+            SubscriptionRazorpayService payments,
+            CancellationToken ct) =>
+        {
+            if (!HasShopAccess(principal) || !TryGetTenantId(principal, out var tenantId))
+                return Results.Forbid();
+
+            try
+            {
+                var order = await payments.ResumeOrderAsync(tenantId, paymentId, ct);
+                return Results.Ok(order);
+            }
+            catch (SubscriptionPaymentException exception)
+            {
+                return PaymentProblem(exception);
+            }
         });
 
         shop.MapPost("/subscription/payments/orders", async (
