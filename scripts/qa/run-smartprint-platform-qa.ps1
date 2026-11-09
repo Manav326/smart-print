@@ -306,23 +306,28 @@ function Start-StaticPortalServer([string]$Directory, [int]$Port, [string]$LogPr
 }
 
 function Invoke-PhotoStudioSuite {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet("Web", "Windows")][string]$Platform,
+        [switch]$SkipPortal
+    )
     $scriptPath = Join-Path $PSScriptRoot "photo-studio-test.ps1"
-    $platform = if ($Platforms -contains "Windows") { "Windows" } else { "Web" }
-    $arguments = @("-Platform", $platform, "-SkipInstall", "-ArtifactDirectory", (Join-Path $runDirectory "photo-studio"))
+    $arguments = @("-Platform", $Platform, "-SkipInstall", "-ArtifactDirectory", (Join-Path $runDirectory $Platform.ToLowerInvariant()))
     if (-not $Headless) { $arguments += "-Headed" }
     if ($Mode -eq "Pull") { $arguments += "-SkipBuild" }
+    if ($SkipPortal) { $arguments += "-SkipPortal" }
 
+    $needsPhotoStudioFixture = -not $SkipPortal
     $previousBase = [Environment]::GetEnvironmentVariable("SMARTPRINT_PHOTO_STUDIO_BASE_URL", "Process")
     $fixtureServer = $null
     try {
-        if ($Mode -eq "Pull") {
-            $fixtureServer = Start-StaticPortalServer $script:photoStudioQaDirectory 4173 "photo-studio-qa-fixture-server"
+        if ($Mode -eq "Pull" -and $needsPhotoStudioFixture) {
+            $fixtureServer = Start-StaticPortalServer $script:photoStudioQaDirectory 4173 ("photo-studio-" + $Platform.ToLowerInvariant() + "-fixture-server")
             $env:SMARTPRINT_PHOTO_STUDIO_BASE_URL = "http://127.0.0.1:4173"
         } else {
             Remove-Item Env:SMARTPRINT_PHOTO_STUDIO_BASE_URL -ErrorAction SilentlyContinue
         }
         & $script:powerShellExecutable.Source -NoProfile -File $scriptPath @arguments
-        if ($LASTEXITCODE -ne 0) { throw "Photo Studio logic/browser acceptance suite failed (child PowerShell exit $LASTEXITCODE)." }
+        if ($LASTEXITCODE -ne 0) { throw "$Platform source/Photo Studio QA checks failed (child PowerShell exit $LASTEXITCODE)." }
     } finally {
         [Environment]::SetEnvironmentVariable("SMARTPRINT_PHOTO_STUDIO_BASE_URL", $previousBase, "Process")
         if ($fixtureServer -and -not $fixtureServer.HasExited) {
@@ -509,17 +514,24 @@ try {
     $resolvedAndroidSerial = Resolve-AndroidDeviceIfNeeded
     if ($resolvedAndroidSerial) { $AndroidDeviceSerial = $resolvedAndroidSerial }
 
-    $sharedPortalAndWindowsChecksPassed = $true
-    if ($Platforms -contains "Web" -or $Platforms -contains "Windows") {
-        $portalStep = Invoke-QAStep "Web/Shared UI" "Photo Studio logic and headed browser acceptance plus selected source checks" {
-            Invoke-PhotoStudioSuite
-        } -Evidence (Join-Path $runDirectory "photo-studio")
-        $sharedPortalAndWindowsChecksPassed = [bool]$portalStep
-        if (-not $portalStep) { Write-Warning "Shared source/build/browser checks failed. Independent selected platforms will continue; dependent local Build-mode app tests will be marked BLOCKED rather than using stale outputs." }
+    $webSourceChecksPassed = $true
+    $windowsSourceChecksPassed = $true
+    if ($Platforms -contains "Web") {
+        $webSourceChecksPassed = [bool](Invoke-QAStep "Web" "Portal logic tests and headed Photo Studio browser acceptance/build" {
+            Invoke-PhotoStudioSuite -Platform "Web"
+        } -Evidence (Join-Path $runDirectory "web-photo-studio"))
+    }
+    if ($Platforms -contains "Windows") {
+        # When Web is selected, it already ran the shared Portal/Photo Studio
+        # browser suite. Keep Windows API/Agent/Rust/native builds independent.
+        $skipPortalForWindows = $Platforms -contains "Web"
+        $windowsSourceChecksPassed = [bool](Invoke-QAStep "Windows" "API/Agent, desktop frontend, Rust and native build/tests" {
+            Invoke-PhotoStudioSuite -Platform "Windows" -SkipPortal:$skipPortalForWindows
+        } -Evidence (Join-Path $runDirectory "windows-source-checks"))
     }
 
     if ($Platforms -contains "Web") {
-        if ($Mode -eq "Build" -and -not $sharedPortalAndWindowsChecksPassed) {
+        if ($Mode -eq "Build" -and -not $webSourceChecksPassed) {
             Add-Result "Web" "Production Portal artifact acceptance" "BLOCKED" "The current-checkout Portal build/Photo Studio checks did not pass. Existing apps/portal/dist was not used."
         } else {
             $webDist = if ($Mode -eq "Build") { Join-Path $repoRoot "apps/portal/dist" } else { $script:webArtifactDirectory }
@@ -531,8 +543,8 @@ try {
 
     if ($Platforms -contains "Windows") {
         $windowsDirectory = $null
-        if ($Mode -eq "Build" -and -not $sharedPortalAndWindowsChecksPassed) {
-            Add-Result "Windows" "Native packaged UI acceptance" "BLOCKED" "The current-checkout Portal/Windows source checks did not pass. Existing Tauri target outputs were not used."
+        if ($Mode -eq "Build" -and -not $windowsSourceChecksPassed) {
+            Add-Result "Windows" "Native packaged UI acceptance" "BLOCKED" "Current-checkout Windows API/Agent/Rust/frontend/native source checks did not pass. Existing Tauri target outputs were not used."
         } elseif ($Mode -eq "Build") {
             $productionExe = Join-Path $repoRoot "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
             $windowsDirectory = Join-Path $runDirectory "windows"
