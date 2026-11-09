@@ -187,14 +187,24 @@ echo "PASS: Fresh install starts with empty private data; exported file remains.
 # check protects customer-owned documents only; shop sessions remain scoped by
 # station code so the customer can switch to another shop at any time.
 echo "8/8 Testing two real production-signed releases..."
-curl --fail --location --silent --show-error \
-  "https://github.com/Manav326/QRtoPrint/releases/download/v0.1.9/SmartPrint-Android.apk" \
-  --output "$PROD_V1"
-curl --fail --location --silent --show-error \
-  "https://github.com/Manav326/QRtoPrint/releases/download/v0.1.10/SmartPrint-Android.apk" \
-  --output "$PROD_V2"
-require_file "$PROD_V1"
-require_file "$PROD_V2"
+
+download_release_apk() {
+  local release_tag="$1"
+  local destination="$2"
+  local asset_url="https://github.com/Manav326/smart-print/releases/download/$release_tag/SmartPrint-Android.apk"
+
+  echo "[QA-PROGRESS] Downloading $release_tag production APK from the canonical SmartPrint repository..."
+  # GitHub release assets occasionally return transient 5xx responses. Retry
+  # those responses, but let permanent 4xx errors fail the lifecycle gate.
+  curl --fail --location --silent --show-error \
+    --retry 5 --retry-delay 3 --retry-max-time 120 \
+    --connect-timeout 20 --max-time 180 \
+    "$asset_url" --output "$destination"
+  require_file "$destination"
+}
+
+download_release_apk "v0.1.9" "$PROD_V1"
+download_release_apk "v0.1.10" "$PROD_V2"
 prod_cert_v1="$(apk_certificate "$PROD_V1")"
 prod_cert_v2="$(apk_certificate "$PROD_V2")"
 [[ -n "$prod_cert_v1" && "$prod_cert_v1" == "$prod_cert_v2" ]] ||
