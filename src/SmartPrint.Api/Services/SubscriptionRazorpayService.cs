@@ -97,20 +97,29 @@ public sealed class SubscriptionRazorpayService(
                         StatusCodes.Status409Conflict);
                 }
 
-                if (existing.Status is "CREATING" or "CREATION_UNKNOWN")
+                if (existing.Status == "CAPTURED")
                 {
                     throw new SubscriptionPaymentException(
-                        "subscription_order_confirmation_pending",
-                        "SmartPrint is still confirming the Razorpay order. Refresh payment status; do not start another payment.",
+                        "subscription_payment_already_captured",
+                        "This subscription payment has already been verified. Refresh the subscription page to see the active plan.",
                         StatusCodes.Status409Conflict);
                 }
 
-                await transaction.CommitAsync(cancellationToken);
-                var existingPlanName = await db.SubscriptionPlans.AsNoTracking()
-                    .Where(item => item.Code == existing.PlanCode)
-                    .Select(item => item.Name)
-                    .SingleOrDefaultAsync(cancellationToken) ?? existing.PlanCode;
-                return ToOrderResponse(existing, existingPlanName);
+                if (existing.Status == "CAPTURED_REVIEW_REQUIRED")
+                {
+                    throw new SubscriptionPaymentException(
+                        "subscription_payment_review_required",
+                        "This subscription payment was captured and needs SmartPrint support review. Do not pay again.",
+                        StatusCodes.Status409Conflict);
+                }
+
+                var code = existing.Status is "CREATING" or "CREATION_UNKNOWN"
+                    ? "subscription_order_confirmation_pending"
+                    : "subscription_payment_pending";
+                throw new SubscriptionPaymentException(
+                    code,
+                    "A subscription payment already exists for this request. Refresh payment status and use Continue payment or Retry payment to resume the same Razorpay order.",
+                    StatusCodes.Status409Conflict);
             }
 
             var tenantStatus = await db.Tenants.AsNoTracking()
@@ -203,16 +212,13 @@ public sealed class SubscriptionRazorpayService(
                         StatusCodes.Status409Conflict);
                 }
 
-                if (pendingPayment.Status is "CREATING" or "CREATION_UNKNOWN")
-                {
-                    throw new SubscriptionPaymentException(
-                        "subscription_order_confirmation_pending",
-                        "SmartPrint is still confirming the existing Razorpay order. Use Continue payment or refresh status; do not create another order.",
-                        StatusCodes.Status409Conflict);
-                }
-
-                await transaction.CommitAsync(cancellationToken);
-                return ToOrderResponse(pendingPayment, candidate.Plan.Name);
+                var code = pendingPayment.Status is "CREATING" or "CREATION_UNKNOWN"
+                    ? "subscription_order_confirmation_pending"
+                    : "subscription_payment_pending";
+                throw new SubscriptionPaymentException(
+                    code,
+                    "An unsettled subscription payment already exists for this shop. Refresh payment status and use Continue payment or Retry payment to resume that exact Razorpay order.",
+                    StatusCodes.Status409Conflict);
             }
 
             if (!string.Equals(terms.Currency, "INR", StringComparison.OrdinalIgnoreCase))
@@ -380,6 +386,43 @@ public sealed class SubscriptionRazorpayService(
                 "subscription_payment_not_resumable",
                 "This subscription payment cannot be resumed. Contact SmartPrint support before paying again.",
                 StatusCodes.Status409Conflict);
+        }
+
+        // A webhook or browser callback may have been lost after Razorpay captured the
+        // payment. Check the provider order before reopening checkout to avoid a second charge.
+        try
+        {
+            var capturedPayment = await FetchCapturedPaymentForOrderAsync(
+                payment.RazorpayOrderId,
+                cancellationToken);
+            if (capturedPayment is not null)
+            {
+                var reconciled = await ReconcileCapturedOrderPaymentAsync(
+                    payment.Id,
+                    capturedPayment,
+                    cancellationToken);
+                var code = reconciled.Status == "CAPTURED"
+                    ? "subscription_payment_already_captured"
+                    : "subscription_payment_review_required";
+                var message = reconciled.Status == "CAPTURED"
+                    ? "Razorpay has already captured this payment. SmartPrint has reconciled it; refresh the subscription page instead of paying again."
+                    : "Razorpay reports a captured payment that needs SmartPrint support review. Do not pay again.";
+                throw new SubscriptionPaymentException(code, message, StatusCodes.Status409Conflict);
+            }
+        }
+        catch (SubscriptionPaymentException exception) when (
+            exception.Code is "subscription_payment_already_captured" or "subscription_payment_review_required")
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            !cancellationToken.IsCancellationRequested &&
+            exception is SubscriptionPaymentException or HttpRequestException or TaskCanceledException)
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_status_unavailable",
+                "SmartPrint could not confirm whether this Razorpay order has already been paid. No new checkout was opened. Refresh status and try Continue payment again.",
+                StatusCodes.Status503ServiceUnavailable);
         }
 
         var planName = await db.SubscriptionPlans.AsNoTracking()
@@ -759,6 +802,90 @@ public sealed class SubscriptionRazorpayService(
 
         return new ShopSubscriptionPaymentVerificationResponse(
             payment.Status, subscription.Id, subscription.PeriodEndUtc, false);
+    }
+
+    private async Task<RazorpayPaymentDetails?> FetchCapturedPaymentForOrderAsync(
+        string orderId,
+        CancellationToken cancellationToken)
+    {
+        if (!IsProviderIdentifier(orderId))
+            return null;
+
+        var response = await SendRazorpayRequestAsync(
+            HttpMethod.Get,
+            "/orders/" + Uri.EscapeDataString(orderId) + "/payments",
+            null,
+            cancellationToken);
+        if (response["items"] is not System.Text.Json.Nodes.JsonArray items)
+            return null;
+
+        foreach (var item in items.OfType<JsonObject>())
+        {
+            if (!string.Equals(
+                    ReadString(item, "status"),
+                    "captured",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var paymentId = ReadString(item, "id");
+            if (!IsProviderIdentifier(paymentId))
+                continue;
+
+            var payment = await FetchPaymentAsync(paymentId!, cancellationToken);
+            if (string.Equals(payment.OrderId, orderId, StringComparison.Ordinal))
+                return payment;
+        }
+
+        return null;
+    }
+
+    private async Task<ShopSubscriptionPaymentVerificationResponse> ReconcileCapturedOrderPaymentAsync(
+        Guid paymentId,
+        RazorpayPaymentDetails remotePayment,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var orderLockKey = $"shop-subscription-order:{remotePayment.OrderId}";
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(6, hashtext({orderLockKey}))", cancellationToken);
+
+        var payment = await db.ShopSubscriptionPayments
+            .SingleOrDefaultAsync(item => item.Id == paymentId, cancellationToken);
+        if (payment is null)
+        {
+            throw new SubscriptionPaymentException(
+                "subscription_payment_not_found",
+                "The subscription payment was not found for this shop.",
+                StatusCodes.Status404NotFound);
+        }
+
+        if (!RazorpaySubscriptionPaymentRules.IsCapturedPaymentMatch(
+                payment.RazorpayOrderId,
+                payment.AmountMinor,
+                payment.Currency,
+                remotePayment.PaymentId,
+                remotePayment.OrderId,
+                remotePayment.AmountMinor,
+                remotePayment.Currency,
+                remotePayment.Status))
+        {
+            payment.Status = "CAPTURED_REVIEW_REQUIRED";
+            payment.RazorpayPaymentId = remotePayment.PaymentId;
+            payment.VerifiedUtc = DateTimeOffset.UtcNow;
+            payment.UpdatedUtc = payment.VerifiedUtc.Value;
+            var review = new ShopSubscriptionPaymentVerificationResponse(
+                payment.Status, payment.AssignedSubscriptionId, null, false);
+            await db.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return review;
+        }
+
+        var result = await ApplyCapturedPaymentAsync(payment, remotePayment, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return result;
     }
 
     private async Task<RazorpayPaymentDetails> FetchPaymentAsync(
