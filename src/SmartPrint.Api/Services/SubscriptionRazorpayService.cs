@@ -152,6 +152,41 @@ public sealed class SubscriptionRazorpayService(
                 StatusCodes.Status409Conflict);
         }
 
+        // A browser refresh creates a new client request ID. Reuse the shop's existing
+        // unsettled order so that a second browser session cannot accidentally create
+        // another chargeable order for the same subscription purchase.
+        var pendingPayment = await db.ShopSubscriptionPayments
+            .Where(item => item.TenantId == tenantId &&
+                           (item.Status == "CREATED" ||
+                            item.Status == "FAILED" ||
+                            item.Status == "CAPTURED_REVIEW_REQUIRED"))
+            .OrderByDescending(item => item.CreatedUtc)
+            .ThenByDescending(item => item.Id)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (pendingPayment is not null)
+        {
+            if (pendingPayment.Status == "CAPTURED_REVIEW_REQUIRED")
+            {
+                throw new SubscriptionPaymentException(
+                    "subscription_payment_review_required",
+                    "A previous subscription payment was captured and needs SmartPrint support review. Do not pay again until it is reconciled.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            if (pendingPayment.PlanVersionId != candidate.Version.Id ||
+                !string.Equals(pendingPayment.BillingInterval, terms.BillingInterval, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SubscriptionPaymentException(
+                    "subscription_payment_pending",
+                    "This shop already has an unsettled subscription payment. Complete or retry that checkout before choosing a different plan.",
+                    StatusCodes.Status409Conflict);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+            return ToOrderResponse(pendingPayment, candidate.Plan.Name);
+        }
+
         if (!string.Equals(terms.Currency, "INR", StringComparison.OrdinalIgnoreCase))
         {
             throw new SubscriptionPaymentException(

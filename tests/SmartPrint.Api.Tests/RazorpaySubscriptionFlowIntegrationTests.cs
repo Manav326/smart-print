@@ -258,6 +258,81 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
         });
     }
 
+    [Fact]
+    public async Task NewClientRequestIdAfterBrowserRefreshReusesTheUnsettledOrder()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var first = await fixture.CreateOrderAsync("request-before-refresh");
+            var refreshedRequest = await fixture.Service.CreateOrderAsync(
+                fixture.TenantId,
+                fixture.OwnerId,
+                fixture.PlanVersionId,
+                "Monthly",
+                "request-after-refresh",
+                CancellationToken.None);
+
+            Assert.Equal(first.OrderId, refreshedRequest.OrderId);
+            Assert.Equal(first.AmountMinor, refreshedRequest.AmountMinor);
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal(1, await fixture.Db.ShopSubscriptionPayments.CountAsync());
+        });
+    }
+
+    [Fact]
+    public async Task DifferentPlanCannotCreateASecondOrderWhileFirstPaymentIsUnsettled()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            await fixture.CreateOrderAsync("first-plan-request");
+
+            var exception = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.Service.CreateOrderAsync(
+                    fixture.TenantId,
+                    fixture.OwnerId,
+                    fixture.PlanVersionId,
+                    "Annual",
+                    "different-interval-request",
+                    CancellationToken.None));
+
+            Assert.Equal(StatusCodes.Status409Conflict, exception.StatusCode);
+            Assert.Equal("subscription_payment_pending", exception.Code);
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal(1, await fixture.Db.ShopSubscriptionPayments.CountAsync());
+        });
+    }
+
+    [Fact]
+    public async Task FailedOrderIsReusedForRetryInsteadOfCreatingAnotherChargeableOrder()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var order = await fixture.CreateOrderAsync("before-failed-attempt");
+            var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
+            var failedBody = WebhookBody(
+                "payment.failed", paymentId, order.OrderId, order.AmountMinor, "failed");
+
+            var failure = await fixture.Service.ProcessWebhookAsync(
+                failedBody,
+                WebhookSignature(failedBody),
+                "evt_subscription_retryable_failure",
+                CancellationToken.None);
+
+            var retry = await fixture.Service.CreateOrderAsync(
+                fixture.TenantId,
+                fixture.OwnerId,
+                fixture.PlanVersionId,
+                "Monthly",
+                "after-failed-attempt",
+                CancellationToken.None);
+
+            Assert.Equal("PROCESSED_FAILED", failure.Status);
+            Assert.Equal(order.OrderId, retry.OrderId);
+            Assert.Equal(1, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal("FAILED", (await fixture.Db.ShopSubscriptionPayments.SingleAsync()).Status);
+        });
+    }
+
     private static async Task WithPostgresAsync(Func<TestFixture, Task> action)
     {
         var connectionString = Environment.GetEnvironmentVariable("SMARTPRINT_TEST_POSTGRES");
