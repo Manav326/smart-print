@@ -5,7 +5,7 @@ Runs SmartPrint Photo Studio software-only tests across Web, Windows and Android
 .DESCRIPTION
 The default run executes the portal unit suite and real Chromium acceptance flow,
 Windows API/Print Agent tests without printer hardware, and Android JVM tests plus a
-debug APK build. The Android emulator WebView suite is enabled with -RunAndroidEmulator.
+debug APK build. The Android emulator WebView suite is enabled with -RunAndroidEmulator. The local runner uses the same pinned Gradle 8.13 as CI; when no matching installation or repository wrapper exists, it downloads the official distribution once, verifies its SHA-256 checksum, and caches it under LocalAppData.
 
 No test in this script submits a real payment or sends a job to a physical printer.
 The optional -UseVirtualPdfPrinter switch opts into the Windows Microsoft Print to PDF
@@ -242,18 +242,117 @@ try {
         }
     }
 
+    function Resolve-GradleExecutable {
+        param([Parameter(Mandatory = $true)][string]$RequiredVersion)
+
+        # Match GitHub Actions: it provisions Gradle 8.13 directly because this
+        # repository intentionally does not commit a Gradle Wrapper.
+        $wrapperPath = Join-Path $repoRoot "apps/android/gradlew.bat"
+        if (Test-Path -LiteralPath $wrapperPath -PathType Leaf) {
+            Write-Host "Using repository Gradle Wrapper: $wrapperPath" -ForegroundColor DarkCyan
+            return $wrapperPath
+        }
+
+        $candidatePaths = [System.Collections.Generic.List[string]]::new()
+        $gradleUserHome = if ($env:GRADLE_USER_HOME) { $env:GRADLE_USER_HOME } else { Join-Path $env:USERPROFILE ".gradle" }
+        $cachedDistributionRoot = Join-Path $gradleUserHome "wrapper\dists\gradle-$RequiredVersion-bin"
+        if (Test-Path -LiteralPath $cachedDistributionRoot -PathType Container) {
+            Get-ChildItem -LiteralPath $cachedDistributionRoot -Filter "gradle.bat" -File -Recurse -ErrorAction SilentlyContinue |
+                ForEach-Object { $candidatePaths.Add($_.FullName) }
+        }
+
+        foreach ($commandName in @("gradle.bat", "gradle")) {
+            Get-Command -Name $commandName -All -ErrorAction SilentlyContinue |
+                ForEach-Object {
+                    $commandPath = if ($_.Source) { $_.Source } elseif ($_.Path) { $_.Path } else { $null }
+                    if ($commandPath) { $candidatePaths.Add($commandPath) }
+                }
+        }
+
+        foreach ($candidate in @($candidatePaths | Select-Object -Unique)) {
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+            try {
+                $versionOutput = (& $candidate --version 2>&1 | Out-String)
+                if ($LASTEXITCODE -eq 0 -and $versionOutput -match ("(?m)^Gradle\s+" + [regex]::Escape($RequiredVersion) + "(?:\s|$)")) {
+                    Write-Host ("Using installed Gradle " + $RequiredVersion + ": " + $candidate) -ForegroundColor DarkCyan
+                    return $candidate
+                }
+            } catch {
+                # Ignore unusable Gradle launchers and continue to the pinned fallback.
+            }
+        }
+
+        # Keep the developer machine clean: cache the exact CI Gradle version
+        # under LocalAppData instead of requiring a machine-wide Gradle install.
+        $installRoot = Join-Path $env:LOCALAPPDATA "SmartPrint\qa-tools"
+        $distributionRoot = Join-Path $installRoot "gradle-$RequiredVersion"
+        $gradleExecutable = Join-Path $distributionRoot "bin\gradle.bat"
+        if (Test-Path -LiteralPath $gradleExecutable -PathType Leaf) {
+            Write-Host ("Using cached SmartPrint Gradle " + $RequiredVersion + ": " + $gradleExecutable) -ForegroundColor DarkCyan
+            return $gradleExecutable
+        }
+
+        if ($RequiredVersion -ne "8.13") {
+            throw "No Gradle $RequiredVersion installation was found. This local runner only bootstraps the CI-pinned Gradle 8.13 distribution."
+        }
+
+        $archiveName = "gradle-$RequiredVersion-bin.zip"
+        $archiveUrl = "https://services.gradle.org/distributions/$archiveName"
+        # Official SHA-256 checksum from https://gradle.org/release-checksums/
+        $expectedSha256 = "20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78"
+        $downloadRoot = Join-Path $env:TEMP ("smartprint-gradle-" + [Guid]::NewGuid().ToString("N"))
+        $archivePath = Join-Path $downloadRoot $archiveName
+        $previousProgressPreference = $ProgressPreference
+
+        try {
+            New-Item -ItemType Directory -Force -Path $downloadRoot | Out-Null
+            $ProgressPreference = "SilentlyContinue"
+            Write-Host "Downloading the CI-pinned Gradle $RequiredVersion distribution (one-time, approximately 131 MB)..." -ForegroundColor Cyan
+            Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath -ErrorAction Stop
+
+            $actualSha256 = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualSha256 -ne $expectedSha256) {
+                throw "Gradle distribution checksum mismatch. Expected $expectedSha256 but received $actualSha256. The archive will not be installed."
+            }
+
+            Expand-Archive -LiteralPath $archivePath -DestinationPath $downloadRoot -Force
+            $extractedDistribution = Join-Path $downloadRoot "gradle-$RequiredVersion"
+            $extractedExecutable = Join-Path $extractedDistribution "bin\gradle.bat"
+            if (-not (Test-Path -LiteralPath $extractedExecutable -PathType Leaf)) {
+                throw "The verified Gradle archive did not contain the expected Windows Gradle launcher."
+            }
+
+            New-Item -ItemType Directory -Force -Path $installRoot | Out-Null
+            if (Test-Path -LiteralPath $distributionRoot) {
+                Remove-Item -LiteralPath $distributionRoot -Recurse -Force
+            }
+            Move-Item -LiteralPath $extractedDistribution -Destination $distributionRoot
+            if (-not (Test-Path -LiteralPath $gradleExecutable -PathType Leaf)) {
+                throw "Gradle $RequiredVersion was extracted but its launcher is missing."
+            }
+
+            Write-Host "Verified and cached Gradle $RequiredVersion at $distributionRoot" -ForegroundColor Green
+        } finally {
+            $ProgressPreference = $previousProgressPreference
+            if (Test-Path -LiteralPath $downloadRoot) {
+                Remove-Item -LiteralPath $downloadRoot -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        return $gradleExecutable
+    }
+
     function Invoke-AndroidSuite {
         if ($RunAndroidEmulator -and -not $SkipInstall -and $Platform -eq "Android") {
             Invoke-Checked "Install portal dependencies for Android WebView fixture" { pnpm install --frozen-lockfile }
         }
-        $gradle = Join-Path $repoRoot "apps/android/gradlew.bat"
-        if (-not (Test-Path $gradle)) { throw "Android Gradle wrapper was not found at $gradle." }
+        $gradle = Resolve-GradleExecutable -RequiredVersion "8.13"
 
         Invoke-Checked "Android JVM unit tests" {
-            & $gradle --no-daemon -p apps/android "-PsmartPrintServiceUrl=$ServiceUrl" :app:testDebugUnitTest
+            & $gradle --no-daemon --console=plain -p apps/android "-PsmartPrintServiceUrl=$ServiceUrl" :app:testDebugUnitTest
         }
         Invoke-Checked "Build Android debug APK" {
-            & $gradle --no-daemon -p apps/android "-PsmartPrintServiceUrl=$ServiceUrl" :app:assembleDebug
+            & $gradle --no-daemon --console=plain -p apps/android "-PsmartPrintServiceUrl=$ServiceUrl" :app:assembleDebug
         }
 
         if ($RunAndroidEmulator) {
