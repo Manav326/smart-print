@@ -9,6 +9,12 @@ public sealed class RazorpaySubscriptionPaymentRulesTests
     private const string Secret = "test-webhook-secret";
 
     [Fact]
+    public void RazorpayOrderLimitMatchesTheSupportedOneLakhRupeeCeiling()
+    {
+        Assert.Equal(10_000_000, RazorpaySubscriptionPaymentRules.MaximumOrderAmountMinor);
+    }
+
+    [Fact]
     public void CheckoutSignatureAcceptsTheExactOrderAndPaymentPair()
     {
         const string orderId = "order_123";
