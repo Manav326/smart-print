@@ -319,6 +319,7 @@ export default function ShopSubscriptionCheckout({
       setBusyOption(null);
       setError(exception instanceof Error ? exception.message : "Could not start Razorpay checkout.");
       void refreshData();
+      void refreshSubscriptionSummary();
     }
   }
 
