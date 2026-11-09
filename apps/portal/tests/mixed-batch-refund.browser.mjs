@@ -502,13 +502,15 @@ try {
       const prebuiltNativeExecutable = Boolean(process.env.SMARTPRINT_MIXED_BATCH_REFUND_EXECUTABLE);
       page = pages.find(candidate => {
         try {
+          const url = new URL(candidate.url());
           if (prebuiltNativeExecutable) {
-            const url = new URL(candidate.url());
-            return url.protocol !== "about:" && url.protocol !== "devtools:";
+            // Packaged Tauri/WebView2 uses the built-in tauri.localhost origin,
+            // not the Vite :1420 URL used by the Tauri dev server.
+            return url.protocol === "tauri:" || url.hostname === "tauri.localhost";
           }
-          return new URL(candidate.url()).port === expectedPort;
+          return url.port === expectedPort;
         } catch { return false; }
-      }) || pages[0] || null;
+      }) || null;
       if (page) break;
       await new Promise(resolve => setTimeout(resolve, 500));
     }
