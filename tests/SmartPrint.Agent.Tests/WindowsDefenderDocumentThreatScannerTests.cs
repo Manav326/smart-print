@@ -1,3 +1,4 @@
+using System.Text;
 using SmartPrint.Documents;
 
 namespace SmartPrint.Agent.Tests;
