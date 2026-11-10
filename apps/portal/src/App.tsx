@@ -4327,7 +4327,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return;
     }
     if(files.length===0)return;
-    if(uploadMode==="LOCAL"&&!localReady) {
+    const hasNonIdDocument=files.some(candidate=>!isSmartPrintIdDocument(candidate));
+    if(uploadMode==="LOCAL"&&!localReady&&hasNonIdDocument&&!secureQueueFallbackEnabled) {
       setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
       return;
     }
@@ -4358,7 +4359,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         }
         const created=idDocument
           ? await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings)
-          : uploadMode==="LOCAL"&&localAgent
+          : uploadMode==="LOCAL"&&localReady&&localAgent
             ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings)
             : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
@@ -4921,10 +4922,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       <div className="customer-selected-files-head"><strong>{files.length} selected</strong><span>{formatBytes(files.reduce((total,item)=>total+item.size,0))} in this selection</span></div>
       <div className="customer-batch-groups">{uploadGroups.map(group=>{
         const defaults=defaultsForGroup(group.name);
+        const isIdStudioGroup=group.files.length>0&&group.files.every(isSmartPrintIdDocument);
         return <section className="customer-folder-group" key={group.name}>
           <div className="customer-folder-group-head">
             <div className="customer-folder-title"><FolderOpen size={16}/><span><strong>{group.name}</strong><small>{group.files.length} file(s)</small></span></div>
-            <div className="customer-folder-defaults">
+            {isIdStudioGroup
+              ? <small className="customer-upload-local-note">Prepared ID sheet · one colour copy · A4 portrait · single-sided. These settings are fixed to preserve the card's physical dimensions.</small>
+              : <div className="customer-folder-defaults">
               <div><span>Colour</span><div className="customer-choice-row">
                 <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
                 <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
@@ -4947,8 +4951,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                  const advancedEnabled=event.currentTarget.checked;
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),advancedEnabled}}));
                }}/><span>Advanced settings</span></label>
-            </div>
-            {defaults.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
+            </div>}
+            {!isIdStudioGroup&&defaults.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
               <label><span>Paper size</span><select value={defaults.paperSize} onChange={event=>{
                  const paperSize=event.currentTarget.value as CustomerGroupSettings["paperSize"];
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),paperSize}}));
@@ -4970,9 +4974,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
-              <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>
+              {!isSmartPrintIdDocument(selected)&&<button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
-              {own.custom&&<div className="customer-file-overrides">
+              {own.custom&&!isSmartPrintIdDocument(selected)&&<div className="customer-file-overrides">
                 <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
                    onChange={event=>{
                      const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
