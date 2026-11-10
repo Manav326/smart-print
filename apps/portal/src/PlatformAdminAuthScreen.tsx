@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldCheck } from "lucide-react";
 import ThemeToggleButton from "./ThemeToggleButton";
+import BrandLockup from "./BrandLockup";
 import {
   isPlatformAdminSession,
   signIn,
@@ -45,10 +46,7 @@ export default function PlatformAdminAuthScreen({
     <div className="auth-screen platform-admin-auth-screen">
       <div className="auth-glow auth-glow-one"/><div className="auth-glow auth-glow-two"/>
       <header className="auth-topbar">
-        <div className="brand-lockup auth-brand">
-          <div className="brand-mark"><Printer size={21}/></div>
-          <div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">PLATFORM ADMINISTRATION</div></div>
-        </div>
+        <BrandLockup className="auth-brand" subline="PLATFORM ADMINISTRATION" />
         <div className="auth-top-actions">
           <ThemeToggleButton dark={dark} onToggle={onToggleTheme}/>
           <a className="auth-home-link" href="/"><ArrowLeft size={14}/> Back to website</a>

@@ -1,3 +1,4 @@
+import BrandLockup from "./BrandLockup";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight,
@@ -147,10 +148,7 @@ export default function PlatformAdminConsole({
     <div className={`app-shell platform-admin-shell${dark ? "" : " light"}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}/>}
       <aside id="platform-navigation" className={`sidebar platform-sidebar${sidebarOpen ? " sidebar-open" : ""}`}>
-        <div className="brand-lockup">
-          <div className="brand-mark"><Printer size={21}/></div>
-          <div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div>
-        </div>
+        <BrandLockup />
         <div className="workspace-switcher platform-workspace">
           <div className="platform-shield"><ShieldCheck size={18}/></div>
           <div className="workspace-copy"><strong>Platform control</strong><span>Owner workspace</span></div>
