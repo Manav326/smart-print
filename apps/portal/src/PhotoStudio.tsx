@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   Check, ChevronLeft, ChevronRight, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
   Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette
@@ -19,6 +19,16 @@ type PhotoSize = {
 
 type LookPreset = "natural" | "warm" | "crisp" | "mono" | "custom";
 type Tool = "crop" | "look" | "sheet" | "text" | "background";
+
+type PhotoTextLayer = {
+  id: string;
+  text: string;
+  xPercent: number;
+  yPercent: number;
+  fontSizePt: number;
+  color: string;
+  bold: boolean;
+};
 
 type Adjustments = {
   brightness: number;
@@ -81,7 +91,8 @@ function drawPhotoSheetPage(
   context:CanvasRenderingContext2D,image:HTMLImageElement,canvasWidth:number,size:PhotoSize,copies:number,photosPerPage:number,pageIndex:number,
   zoom:number,focusX:number,focusY:number,adjustments:Adjustments,
   caption:{name:string;dob:string;fontSizePt:number;color:string},
-  background:{sourceColor:string|null;targetColor:string;tolerance:number},captionHeightMm:number
+  background:{sourceColor:string|null;targetColor:string;tolerance:number},captionHeightMm:number,
+  textLayers: readonly PhotoTextLayer[] = []
 ){
   const scaleX=canvasWidth/A4_WIDTH_MM,scaleY=context.canvas.height/A4_HEIGHT_MM;
   const pageStart=pageIndex*photosPerPage;
@@ -108,6 +119,23 @@ function drawPhotoSheetPage(
       lines.forEach((line,i)=>context.fillText(line,x+size.widthMm/2,y+size.heightMm+.45+i*lineHeight,size.widthMm-1.2));
       context.restore();
     }
+  }
+
+  // Text layers are placed in page-relative coordinates so the preview and the
+  // final 300-DPI A4 raster use the same position, font size and colour.
+  for (const layer of textLayers) {
+    const value = layer.text.trim().slice(0, 120);
+    if (!value) continue;
+    const xMm = layer.xPercent / 100 * A4_WIDTH_MM;
+    const yMm = layer.yPercent / 100 * A4_HEIGHT_MM;
+    const fontMm = layer.fontSizePt * 25.4 / 72;
+    context.save();
+    context.fillStyle = layer.color;
+    context.font = `${layer.bold ? "700" : "500"} ${fontMm}px Arial, sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(value, xMm, yMm, A4_WIDTH_MM - 16);
+    context.restore();
   }
   context.restore();
 }
@@ -192,6 +220,13 @@ export default function PhotoStudio({
   const [dateOfBirth,setDateOfBirth]=useState("");
   const [captionFontSizePt,setCaptionFontSizePt]=useState(6);
   const [captionColor,setCaptionColor]=useState("#202020");
+  const [textLayers,setTextLayers]=useState<PhotoTextLayer[]>([]);
+  const [selectedTextLayerId,setSelectedTextLayerId]=useState<string|null>(null);
+  const textLayerIdRef=useRef(0);
+  const textDragRef=useRef<{
+    id:string; pointerId:number; startX:number; startY:number;
+    initialX:number; initialY:number; width:number; height:number;
+  }|null>(null);
   const [targetBackgroundColor,setTargetBackgroundColor]=useState("#ffffff");
   const [sourceBackgroundColor,setSourceBackgroundColor]=useState<string|null>(null);
   const [backgroundTolerance,setBackgroundTolerance]=useState(30);
@@ -200,6 +235,7 @@ export default function PhotoStudio({
   const availableSizes = PHOTO_SIZES.filter(item => (photoPrices[item.id] ?? 0) > 0);
   const size = availableSizes.find(item => item.id === sizeId) ?? availableSizes[0] ?? PHOTO_SIZES[0];
   const hasCaption=includeFormDetails&&Boolean(photoName.trim()||dateOfBirth.trim());
+  const selectedTextLayer=textLayers.find(layer=>layer.id===selectedTextLayerId)??null;
   const captionFontMm=captionFontSizePt*25.4/72;
   const captionHeightMm=hasCaption?Math.max(7,captionFontMm*2+1.2):0;
   const maximumLayout=useMemo(()=>getPhotoSheetLayout(size,captionHeightMm),[size,captionHeightMm]);
@@ -337,9 +373,56 @@ export default function PhotoStudio({
     drawPhotoSheetPage(
       context,image,canvas.width,size,copies,photosPerPage,previewPageIndex,zoom,focusX,focusY,adjustments,
       {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
-      {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm
+      {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm,textLayers
     );
-  },[image,size,copies,photosPerPage,previewPageIndex,zoom,focusX,focusY,adjustments,photoName,dateOfBirth,captionFontSizePt,captionColor,sourceBackgroundColor,targetBackgroundColor,backgroundTolerance,captionHeightMm]);
+  },[image,size,copies,photosPerPage,previewPageIndex,zoom,focusX,focusY,adjustments,photoName,dateOfBirth,captionFontSizePt,captionColor,sourceBackgroundColor,targetBackgroundColor,backgroundTolerance,captionHeightMm,textLayers]);
+
+  function addTextLayer(){
+    const id="photo-text-"+(++textLayerIdRef.current);
+    setTextLayers(current=>[...current,{id,text:"Your text",xPercent:50,yPercent:50,fontSizePt:16,color:"#202020",bold:false}]);
+    setSelectedTextLayerId(id);
+    setActiveTool("text");
+    setError("");
+  }
+
+  function updateSelectedTextLayer(patch:Partial<Pick<PhotoTextLayer,"text"|"fontSizePt"|"color"|"bold">>){
+    if(!selectedTextLayerId)return;
+    setTextLayers(current=>current.map(layer=>layer.id===selectedTextLayerId?{...layer,...patch}:layer));
+  }
+
+  function removeSelectedTextLayer(){
+    if(!selectedTextLayerId)return;
+    setTextLayers(current=>current.filter(layer=>layer.id!==selectedTextLayerId));
+    setSelectedTextLayerId(null);
+    textDragRef.current=null;
+  }
+
+  function handleTextLayerPointerDown(layer:PhotoTextLayer,event:ReactPointerEvent<HTMLButtonElement>){
+    if(!textPanel||event.button!==0)return;
+    const stage=event.currentTarget.closest<HTMLElement>("[data-photo-preview-stage]");
+    const bounds=stage?.getBoundingClientRect();
+    if(!bounds||!bounds.width||!bounds.height)return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSelectedTextLayerId(layer.id);
+    textDragRef.current={
+      id:layer.id,pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,
+      initialX:layer.xPercent,initialY:layer.yPercent,width:bounds.width,height:bounds.height
+    };
+    try{event.currentTarget.setPointerCapture(event.pointerId);}catch{/* Pointer capture is best-effort on older WebViews. */}
+  }
+
+  function handleTextLayerPointerMove(event:ReactPointerEvent<HTMLButtonElement>){
+    const drag=textDragRef.current;
+    if(!drag||drag.pointerId!==event.pointerId)return;
+    const x=Math.max(2,Math.min(98,drag.initialX+(event.clientX-drag.startX)/drag.width*100));
+    const y=Math.max(2,Math.min(98,drag.initialY+(event.clientY-drag.startY)/drag.height*100));
+    setTextLayers(current=>current.map(layer=>layer.id===drag.id?{...layer,xPercent:x,yPercent:y}:layer));
+  }
+
+  function handleTextLayerPointerUp(event:ReactPointerEvent<HTMLButtonElement>){
+    if(textDragRef.current?.pointerId===event.pointerId)textDragRef.current=null;
+  }
 
   function handleBackgroundPick(event:MouseEvent<HTMLCanvasElement>){
     if(!pickingBackground||!image)return;
@@ -384,7 +467,7 @@ export default function PhotoStudio({
         const context=canvas.getContext("2d");if(!context)throw new Error("A print canvas could not be created.");
         drawPhotoSheetPage(context,image,canvas.width,size,parsedCopies,photosPerPage,page,zoom,focusX,focusY,adjustments,
           {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
-          {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm);
+          {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm,textLayers);
         let blob=await canvasToBlob(canvas,"image/jpeg",.9);
         if(blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(canvas,"image/jpeg",.82);
         jpegByteLength+=blob.size;
@@ -428,13 +511,13 @@ export default function PhotoStudio({
           <button type="button" id="photo-studio-tool-sheet" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
           <button type="button" id="photo-studio-tool-crop" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
           <button type="button" id="photo-studio-tool-looks" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
-          <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} disabled={!includeFormDetails} title={includeFormDetails?"Style the optional form details":"Enable form details in Sheet to style printed text"}><Type size={17}/><span>Text</span></button>
+          <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} title="Add, select and position text on the A4 sheet"><Type size={17}/><span>Text</span></button>
           <button type="button" id="photo-studio-tool-background" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"}><PaintBucket size={17}/><span>Background</span></button>
         </nav>
 
         <aside className={styles.toolPanel} data-testid="photo-studio-tool-panel">
           <div className={styles.panelHeading}>
-            <div><strong>{cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Caption styling":backgroundPanel?"Photo background":"Photo sheet & form details"}</strong><small>{cropPanel?"Frame the photo without changing facial features.":lookPanel?"Use subtle, print-friendly adjustments.":textPanel?"Set how the form details appear under each photo.":backgroundPanel?"Sample a flat background from the photo and replace only the edge-connected area.":"Set the ID photo size, form details and print quantity."}</small></div>
+            <div><strong>{cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Text layers":backgroundPanel?"Photo background":"Photo sheet & form details"}</strong><small>{cropPanel?"Frame the photo without changing facial features.":lookPanel?"Use subtle, print-friendly adjustments.":textPanel?"Add, select, edit and drag text directly on the A4 preview.":backgroundPanel?"Sample a flat background from the photo and replace only the edge-connected area.":"Set the ID photo size, form details and print quantity."}</small></div>
           </div>
 
           {cropPanel && <>
@@ -456,9 +539,29 @@ export default function PhotoStudio({
           </>}
 
           {textPanel && <>
-            <label className={styles.fieldLabel}>Caption font size<select id="photo-studio-caption-font-size" value={captionFontSizePt} onChange={event=>setCaptionFontSizePt(Number(event.target.value))}><option value={5}>5 pt · Compact</option><option value={6}>6 pt · Standard</option><option value={7}>7 pt · Large</option></select></label>
-            <label className={styles.fieldLabel}>Caption colour<input id="photo-studio-caption-colour" type="color" value={captionColor} onChange={event=>setCaptionColor(event.target.value)}/></label>
-            <div className={styles.editorHelp}>These settings style the name and DOB printed below each photo. The photo dimensions stay unchanged.</div>
+            <button type="button" id="photo-studio-add-text" className={styles.secondaryButton} onClick={addTextLayer}><Type size={14}/> Add text</button>
+            {selectedTextLayer ? <>
+              <label className={styles.fieldLabel}>Text content
+                <input id="photo-studio-text-content" type="text" maxLength={120} value={selectedTextLayer.text} onChange={event=>updateSelectedTextLayer({text:event.target.value})} placeholder="Enter text to print on the sheet"/>
+              </label>
+              <label className={styles.rangeControl}>Font size <output>{selectedTextLayer.fontSizePt} pt</output>
+                <input id="photo-studio-text-font-size" type="range" min="6" max="36" step="1" value={selectedTextLayer.fontSizePt} onChange={event=>updateSelectedTextLayer({fontSizePt:Number(event.target.value)})}/>
+              </label>
+              <label className={styles.fieldLabel}>Text colour
+                <input id="photo-studio-text-colour" type="color" value={selectedTextLayer.color} onChange={event=>updateSelectedTextLayer({color:event.target.value})}/>
+              </label>
+              <label className={styles.captionOptIn}>
+                <input id="photo-studio-text-bold" type="checkbox" checked={selectedTextLayer.bold} onChange={event=>updateSelectedTextLayer({bold:event.target.checked})}/>
+                <span><strong>Bold text</strong><small>Apply a stronger weight to the selected text.</small></span>
+              </label>
+              <button type="button" id="photo-studio-remove-text" className={styles.secondaryButton} onClick={removeSelectedTextLayer}><X size={14}/> Remove selected text</button>
+              <div className={styles.editorHelp}>Drag the selected text on the page to position it. Text is included in the prepared A4 PDF.</div>
+            </> : <div className={styles.editorHelp}>Add a text layer, then select it on the preview to edit its content, size and colour. You can add multiple text layers.</div>}
+            {includeFormDetails && <>
+              <div className={styles.editorHelp}>Photo caption styling</div>
+              <label className={styles.fieldLabel}>Caption font size<select id="photo-studio-caption-font-size" value={captionFontSizePt} onChange={event=>setCaptionFontSizePt(Number(event.target.value))}><option value={5}>5 pt · Compact</option><option value={6}>6 pt · Standard</option><option value={7}>7 pt · Large</option></select></label>
+              <label className={styles.fieldLabel}>Caption colour<input id="photo-studio-caption-colour" type="color" value={captionColor} onChange={event=>setCaptionColor(event.target.value)}/></label>
+            </>}
           </>}
 
           {backgroundPanel && <>
@@ -557,8 +660,31 @@ export default function PhotoStudio({
           <div className={styles.canvasViewport}>
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
-              {image ? <canvas id="photo-studio-preview-canvas" ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} data-testid="photo-studio-preview-canvas" data-background-sample-x-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.xMm ?? 0) + 2} data-background-sample-y-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.yMm ?? 0) + 2} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/> : <div className={styles.loadingState} role={imageError ? "alert" : "status"}>{imageError || "Preparing your photo…"}</div>}
-              <div className={styles.previewProtection} aria-hidden="true"/>
+              {image ? <div className={styles.previewStage} data-photo-preview-stage>
+                <canvas id="photo-studio-preview-canvas" ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} data-testid="photo-studio-preview-canvas" data-background-sample-x-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.xMm ?? 0) + 2} data-background-sample-y-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.yMm ?? 0) + 2} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/>
+                <div className={styles.previewProtection} aria-hidden="true"/>
+                {textLayers.map(layer=><button
+                  key={layer.id}
+                  type="button"
+                  className={styles.textLayer+(selectedTextLayerId===layer.id?" "+styles.textLayerSelected:"")}
+                  style={{
+                    left:layer.xPercent+"%",
+                    top:layer.yPercent+"%",
+                    color:layer.color,
+                    fontWeight:layer.bold?700:500,
+                    fontSize:`${(layer.fontSizePt*25.4/72/A4_WIDTH_MM*100).toFixed(4)}cqw`
+                  }}
+                  aria-label={"Select text: "+(layer.text||"Empty text")}
+                  aria-pressed={selectedTextLayerId===layer.id}
+                  data-testid="photo-studio-text-layer"
+                  disabled={!textPanel}
+                  onClick={()=>setSelectedTextLayerId(layer.id)}
+                  onPointerDown={event=>handleTextLayerPointerDown(layer,event)}
+                  onPointerMove={handleTextLayerPointerMove}
+                  onPointerUp={handleTextLayerPointerUp}
+                  onPointerCancel={handleTextLayerPointerUp}
+                >{layer.text||" "}</button>)}
+              </div> : <div className={styles.loadingState} role={imageError ? "alert" : "status"}>{imageError || "Preparing your photo…"}</div>}
             </div>
           </div>
           <div className={styles.canvasFooter}>
