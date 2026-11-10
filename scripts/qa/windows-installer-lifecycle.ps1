@@ -232,16 +232,19 @@ function Assert-OptionalParserService {
 function Assert-DocumentWorkerRuntimeIsolation {
     Write-Host "[QA-ACTION] Exercise the on-demand LocalService parser over its restricted named pipe." -ForegroundColor Cyan
     $taskName = "SmartPrintLifecycleParserAcceptance"
-    $probeTaskName = "SmartPrintLifecyclePipeAclProbe"
+    $networkProbeTaskName = "SmartPrintLifecycleNetworkServicePipeProbe"
+    $localProbeTaskName = "SmartPrintLifecycleLocalServicePipeProbe"
     $probeRoot = Join-Path $env:RUNNER_TEMP "SmartPrintParserAcceptance"
     $systemResultPath = Join-Path $probeRoot "system-analysis.json"
     $networkProbeDirectory = Join-Path $probeRoot "network-service"
     $networkResultPath = Join-Path $networkProbeDirectory "pipe-probe.txt"
+    $localProbeDirectory = Join-Path $probeRoot "local-service"
+    $localResultPath = Join-Path $localProbeDirectory "pipe-probe.txt"
     $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
     $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
     Assert-True (Test-Path -LiteralPath $assemblyPath) "The parser acceptance fixture assembly was not built."
 
-    New-Item -ItemType Directory -Force -Path $probeRoot, $networkProbeDirectory | Out-Null
+    New-Item -ItemType Directory -Force -Path $probeRoot, $networkProbeDirectory, $localProbeDirectory | Out-Null
     $script:ownsParserAcceptanceDirectory = $true
 
     try {
@@ -265,32 +268,49 @@ function Assert-DocumentWorkerRuntimeIsolation {
         $registration = Get-CimInstance -ClassName Win32_Service -Filter "Name='$workerServiceName'"
         Assert-True ($registration.StartName -eq "NT AUTHORITY\LocalService") "The parser service is not running as LocalService."
 
-        # Network Service is a distinct unprivileged local identity. The pipe
-        # DACL grants SYSTEM, LocalService and the worker's restricted service SID,
-        # but does not grant Network Service or broad local-user groups.
-        & icacls.exe (Split-Path -Parent $assemblyPath) /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(RX)" /T | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Could not grant Network Service read/execute access to the isolated fixture assembly." }
+        # The worker's unique service SID is the only non-SYSTEM pipe principal.
+        # Prove both ordinary LocalService and NetworkService processes are denied.
+        & icacls.exe (Split-Path -Parent $assemblyPath) /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(RX)" "NT AUTHORITY\LOCAL SERVICE:(OI)(CI)(RX)" /T | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not grant the unprivileged service probes read/execute access to the isolated fixture assembly." }
         & icacls.exe $networkProbeDirectory /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(M)" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Could not grant the isolated Network Service probe its result-file access." }
-        $probeArguments = '"' + $assemblyPath + '" probe-worker-pipe "' + $networkResultPath + '"'
-        $probeAction = New-ScheduledTaskAction -Execute $dotnetPath -Argument $probeArguments
-        $probePrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\NETWORK SERVICE" -LogonType ServiceAccount -RunLevel Limited
-        Register-ScheduledTask -TaskName $probeTaskName -Action $probeAction -Principal $probePrincipal | Out-Null
-        Start-ScheduledTask -TaskName $probeTaskName
+        if ($LASTEXITCODE -ne 0) { throw "Could not grant the NetworkService probe its result-file access." }
+        & icacls.exe $localProbeDirectory /grant "NT AUTHORITY\LOCAL SERVICE:(OI)(CI)(M)" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not grant the LocalService probe its result-file access." }
 
-        $probeDeadline = (Get-Date).AddSeconds(20)
-        while (-not (Test-Path -LiteralPath $networkResultPath) -and (Get-Date) -lt $probeDeadline) {
+        $networkArguments = '"' + $assemblyPath + '" probe-worker-pipe "' + $networkResultPath + '"'
+        $networkAction = New-ScheduledTaskAction -Execute $dotnetPath -Argument $networkArguments
+        $networkPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\NETWORK SERVICE" -LogonType ServiceAccount -RunLevel Limited
+        Register-ScheduledTask -TaskName $networkProbeTaskName -Action $networkAction -Principal $networkPrincipal | Out-Null
+        Start-ScheduledTask -TaskName $networkProbeTaskName
+
+        $networkDeadline = (Get-Date).AddSeconds(20)
+        while (-not (Test-Path -LiteralPath $networkResultPath) -and (Get-Date) -lt $networkDeadline) {
             Start-Sleep -Milliseconds 250
         }
-        Assert-True (Test-Path -LiteralPath $networkResultPath) "The unprivileged Network Service pipe probe did not produce a result."
-        $probeResult = (Get-Content -LiteralPath $networkResultPath -Raw).Trim()
-        Assert-True ($probeResult -eq "REJECTED") "The isolated worker pipe did not reject Network Service: $probeResult"
+        Assert-True (Test-Path -LiteralPath $networkResultPath) "The unprivileged NetworkService pipe probe did not produce a result."
+        $networkResult = (Get-Content -LiteralPath $networkResultPath -Raw).Trim()
+        Assert-True ($networkResult -eq "REJECTED") "The isolated worker pipe did not reject NetworkService: $networkResult"
 
-        Write-Host "[QA-RESULT] PASS: LocalSystem can use the LocalService parser; Network Service is denied by the worker pipe ACL." -ForegroundColor Green
+        $localArguments = '"' + $assemblyPath + '" probe-worker-pipe "' + $localResultPath + '"'
+        $localAction = New-ScheduledTaskAction -Execute $dotnetPath -Argument $localArguments
+        $localPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\LocalService" -LogonType ServiceAccount -RunLevel Limited
+        Register-ScheduledTask -TaskName $localProbeTaskName -Action $localAction -Principal $localPrincipal | Out-Null
+        Start-ScheduledTask -TaskName $localProbeTaskName
+
+        $localDeadline = (Get-Date).AddSeconds(20)
+        while (-not (Test-Path -LiteralPath $localResultPath) -and (Get-Date) -lt $localDeadline) {
+            Start-Sleep -Milliseconds 250
+        }
+        Assert-True (Test-Path -LiteralPath $localResultPath) "The ordinary LocalService pipe probe did not produce a result."
+        $localResult = (Get-Content -LiteralPath $localResultPath -Raw).Trim()
+        Assert-True ($localResult -eq "REJECTED") "The isolated worker pipe did not reject ordinary LocalService: $localResult"
+
+        Write-Host "[QA-RESULT] PASS: LocalSystem can use the restricted worker; ordinary LocalService and NetworkService clients are denied." -ForegroundColor Green
     }
     finally {
         Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-        Unregister-ScheduledTask -TaskName $probeTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $networkProbeTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $localProbeTaskName -Confirm:$false -ErrorAction SilentlyContinue
         $worker = Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue
         if ($worker -and $worker.Status -ne "Stopped") {
             Stop-Service -Name $workerServiceName -Force
