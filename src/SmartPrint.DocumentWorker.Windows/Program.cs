@@ -355,14 +355,10 @@ internal sealed class WindowsDocumentWorkerService(
 internal sealed class WindowsParserJob : IDisposable
 {
     private const uint JobObjectExtendedLimitInformation = 9;
-    private const uint JobObjectCpuRateControlInformation = 15;
     private const uint LimitActiveProcess = 0x00000008;
     private const uint LimitProcessMemory = 0x00000100;
     private const uint LimitKillOnJobClose = 0x00002000;
-    private const uint CpuRateControlEnable = 0x00000001;
-    private const uint CpuRateControlHardCap = 0x00000004;
-    private const uint ParserMemoryLimitBytes = 512 * 1024 * 1024;
-    private const uint CpuRateHundredthsPercent = 2000;
+    private const uint ParserMemoryLimitBytes = 768 * 1024 * 1024;
 
     private readonly IntPtr handle;
 
@@ -392,18 +388,9 @@ internal sealed class WindowsParserJob : IDisposable
                 return null;
             }
 
-            var cpu = new JobObjectCpuRateControlInformation
-            {
-                ControlFlags = CpuRateControlEnable | CpuRateControlHardCap,
-                CpuRate = CpuRateHundredthsPercent
-            };
-            if (!SetInformationJobObject(handle, JobObjectCpuRateControlInformation, ref cpu,
-                    (uint)Marshal.SizeOf<JobObjectCpuRateControlInformation>()))
-            {
-                job.Dispose();
-                return null;
-            }
-
+            // Intentionally no fixed CPU quota. The parser runs below-normal priority,
+            // so Windows schedules normal-priority printing/spooler work first and lets
+            // analysis use otherwise available CPU. Memory and process-count limits remain.
             if (!AssignProcessToJobObject(handle, process.Handle))
             {
                 job.Dispose();
@@ -460,13 +447,6 @@ internal sealed class WindowsParserJob : IDisposable
         public UIntPtr PeakJobMemoryUsed;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct JobObjectCpuRateControlInformation
-    {
-        public uint ControlFlags;
-        public uint CpuRate;
-    }
-
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateJobObject(IntPtr attributes, string? name);
 
@@ -475,13 +455,6 @@ internal sealed class WindowsParserJob : IDisposable
         IntPtr job,
         uint informationClass,
         ref JobObjectExtendedLimitInformation information,
-        uint informationLength);
-
-    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "SetInformationJobObject")]
-    private static extern bool SetInformationJobObject(
-        IntPtr job,
-        uint informationClass,
-        ref JobObjectCpuRateControlInformation information,
         uint informationLength);
 
     [DllImport("kernel32.dll", SetLastError = true)]
