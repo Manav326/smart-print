@@ -104,6 +104,7 @@ $tableCount = 0
 $fileCount = 0
 $backupCreatedUtc = $null
 $reportPath = $null
+$documentKey = $null
 
 try {
     Write-Host "Decrypting and authenticating backup..." -ForegroundColor Cyan
@@ -114,19 +115,21 @@ try {
     $manifestPath = Join-Path $extractDirectory "manifest.json"
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "Backup manifest is missing." }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ($manifest.Format -ne "SmartPrint.BackupBundle.v1") { throw "Unsupported backup manifest format." }
+    if ($manifest.Format -ne "SmartPrint.BackupBundle.v2") { throw "Unsupported backup manifest format or incomplete recovery secret set." }
     $backupCreatedUtc = [DateTimeOffset]::Parse([string]$manifest.CreatedUtc)
 
     $databaseFile = Join-Path $extractDirectory ([string]$manifest.DatabaseFile)
     $documentsFile = Join-Path $extractDirectory ([string]$manifest.DocumentsFile)
     $secretsFile = Join-Path $extractDirectory ([string]$manifest.SecretsFile)
-    foreach ($file in @($databaseFile, $documentsFile, $secretsFile)) {
+    $tunnelTokenFile = Join-Path $extractDirectory ([string]$manifest.TunnelTokenFile)
+    foreach ($file in @($databaseFile, $documentsFile, $secretsFile, $tunnelTokenFile)) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "A required backup component is missing: $([IO.Path]::GetFileName($file))" }
     }
 
     if ((Get-FileHash -LiteralPath $databaseFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.DatabaseSha256 -or
         (Get-FileHash -LiteralPath $documentsFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.DocumentsSha256 -or
-        (Get-FileHash -LiteralPath $secretsFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.SecretsSha256) {
+        (Get-FileHash -LiteralPath $secretsFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.SecretsSha256 -or
+        (Get-FileHash -LiteralPath $tunnelTokenFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.TunnelTokenSha256) {
         throw "A backup component checksum does not match the authenticated manifest."
     }
 
@@ -143,6 +146,9 @@ try {
     $dbName = $values["POSTGRES_DB"]
     $dbUser = $values["POSTGRES_USER"]
     $dbPassword = $values["POSTGRES_PASSWORD"]
+    if ((Get-Item -LiteralPath $tunnelTokenFile).Length -lt 16) {
+        throw "The authenticated Cloudflare Tunnel token is missing or unexpectedly short."
+    }
     $documentKey = [Convert]::FromBase64String($values["DOCUMENTS_ENCRYPTION_KEY"])
     if ($documentKey.Length -ne 32) { throw "The backup document-encryption key is not 32 bytes." }
 
@@ -247,6 +253,7 @@ try {
         DatabaseReferencedDocumentsVerified = $documentCount
         DatabaseRestorePassed = $true
         DocumentArchiveRestorePassed = $true
+        CloudflareTunnelRecoverySecretPresentAndAuthenticated = $true
         ReferencedQsp1AesGcmDocumentsAuthenticated = $true
         ProductionContainersOrVolumesTouched = $false
         ExternalNetworksOrPortsUsed = $false
