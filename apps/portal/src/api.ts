@@ -1233,6 +1233,7 @@ type CustomerLocalUploadTicket = {
   expiresUtc: string;
   completed: boolean;
   privatePrinting?: boolean;
+  sha256: string;
 };
 
 async function requestCustomerLocalUploadTicket(
@@ -1255,7 +1256,8 @@ async function requestCustomerLocalUploadTicket(
   }
   const privateExtension = file.name.match(/\.(pdf|jpe?g|png)$/i)?.[0]?.toLowerCase() ?? "";
   const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-  return apiRequest<CustomerLocalUploadTicket>("/api/v1/public/sessions/current/local-upload-tickets", {
+  new Uint8Array(digest).fill(0);
+  const ticket = await apiRequest<Omit<CustomerLocalUploadTicket, "sha256">>("/api/v1/public/sessions/current/local-upload-tickets", {
     method: "POST",
     headers: {
       "X-Print-Session": sessionToken,
@@ -1277,6 +1279,7 @@ async function requestCustomerLocalUploadTicket(
       privatePrinting
     })
   });
+  return { ...ticket, sha256 };
 }
 
 async function uploadCustomerLocalTicketViaCloud(
