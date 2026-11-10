@@ -13,7 +13,12 @@ $syntaxFiles = @(
     (Join-Path $repoRoot "scripts/SmartPrint.BackupCrypto.psm1"),
     (Join-Path $repoRoot "scripts/docker-backup.ps1"),
     (Join-Path $repoRoot "scripts/docker-restore.ps1"),
-    (Join-Path $repoRoot "scripts/docker-restore-drill.ps1")
+    (Join-Path $repoRoot "scripts/docker-restore-drill.ps1"),
+    (Join-Path $repoRoot "scripts/install-agent-service.ps1"),
+    (Join-Path $repoRoot "scripts/install-document-worker-service.ps1"),
+    (Join-Path $repoRoot "scripts/uninstall-agent-service.ps1"),
+    (Join-Path $repoRoot "scripts/qa/windows-installer-lifecycle.ps1"),
+    (Join-Path $repoRoot "scripts/qa/print-priority-contract.tests.ps1")
 )
 foreach ($syntaxFile in $syntaxFiles) {
     $tokens = $null
