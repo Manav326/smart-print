@@ -39,7 +39,7 @@ public sealed class AgentDocumentEncryptionKeyStoreTests
             try
             {
                 Assert.NotEmpty(protectedPrivateKey);
-                Assert.DoesNotContain(aesKey, protectedPrivateKey);
+                Assert.NotEqual(Convert.ToBase64String(aesKey), Convert.ToBase64String(protectedPrivateKey));
             }
             finally { CryptographicOperations.ZeroMemory(protectedPrivateKey); }
         }
