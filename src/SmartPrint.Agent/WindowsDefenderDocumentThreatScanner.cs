@@ -70,14 +70,17 @@ public sealed class WindowsDefenderDocumentThreatScanner
             // Do not let an on-demand scan silently remove or modify the staged source.
             // With remediation disabled, Defender reports detections to this process.
             startInfo.ArgumentList.Add("-DisableRemediation");
-            startInfo.ArgumentList.Add("-CpuThrottling");
-            startInfo.ArgumentList.Add("20");
 
             using var process = new Process { StartInfo = startInfo };
             if (!process.Start())
             {
                 throw new InvalidOperationException("Windows Defender scan process did not start.");
             }
+
+            // Do not throttle Defender to an arbitrary percentage. Let Windows
+            // schedule the scan below normal print/spooler priority and consume
+            // available CPU when the shop PC is otherwise idle.
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
 
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutSource.CancelAfter(ScanTimeout);
