@@ -6,7 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: [main, "feature/**", "feat/**"]
+    branches: [main, "feature/**", "feat/**", "security/**"]
   pull_request:
     branches: [main, "feature/**", "feat/**"]
 
@@ -17,6 +17,15 @@ env:
   SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL }}
 
 jobs:
+  backup_crypto:
+    name: Encrypted backup and restore-drill script tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PowerShell syntax and backup cryptography
+        shell: pwsh
+        run: ./scripts/qa/backup-crypto.tests.ps1
+
   portal:
     runs-on: ubuntu-24.04
     steps:
