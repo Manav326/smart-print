@@ -1247,6 +1247,7 @@ async function requestCustomerLocalUploadTicket(
   privatePrinting = false
 ): Promise<CustomerLocalUploadTicket> {
   const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const privateExtension = file.name.match(/\.(pdf|jpe?g|png)$/i)?.[0]?.toLowerCase() ?? "";
   const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   return apiRequest<CustomerLocalUploadTicket>("/api/v1/public/sessions/current/local-upload-tickets", {
     method: "POST",
@@ -1255,7 +1256,7 @@ async function requestCustomerLocalUploadTicket(
       "Idempotency-Key": idempotencyKey
     },
     body: JSON.stringify({
-      originalFileName: file.name,
+      originalFileName: privatePrinting ? "private-document" + privateExtension : file.name,
       sizeBytes: file.size,
       sha256,
       grantToken,
@@ -1557,7 +1558,15 @@ export async function uploadCustomerDocumentLocally(
       const rsaKey = await crypto.subtle.importKey("spki", publicKeyBytes, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]);
       const wrappedKey = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, rsaKey, aesKeyBytes);
       const aesKey = await crypto.subtle.importKey("raw", aesKeyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
-      const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, tagLength: 128 }, aesKey, await file.arrayBuffer());
+      const aad = new TextEncoder().encode(`SmartPrint.PrivatePrinting.v1|${ticket.id}|${ticket.printJobId}|${file.size}|${ticket.sha256 ?? ""}`);
+      const plaintext = await file.arrayBuffer();
+      let ciphertext: ArrayBuffer;
+      try {
+        ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad, tagLength: 128 }, aesKey, plaintext);
+      } finally {
+        new Uint8Array(plaintext).fill(0);
+        aad.fill(0);
+      }
       const bytesToBase64 = (bytes: Uint8Array) => {
         let binary = "";
         for (let offset = 0; offset < bytes.length; offset += 0x8000)
