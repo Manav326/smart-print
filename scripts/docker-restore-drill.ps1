@@ -84,9 +84,14 @@ if ($Passphrase.Length -lt 16) { throw "The backup passphrase must contain at le
 $runId = [Guid]::NewGuid().ToString("N")
 $stageDirectory = Join-Path ([IO.Path]::GetTempPath()) ("SmartPrintRestoreDrill-" + $runId)
 New-Item -ItemType Directory -Path $stageDirectory -Force | Out-Null
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-& icacls.exe $stageDirectory /inheritance:r /grant:r "$($identity):(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-18:(OI)(CI)(F)" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Could not restrict the temporary restore-drill directory." }
+if ($IsWindows) {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    & icacls.exe $stageDirectory /inheritance:r /grant:r "$($identity):(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-18:(OI)(CI)(F)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not restrict the temporary restore-drill directory." }
+} else {
+    & chmod 700 $stageDirectory
+    if ($LASTEXITCODE -ne 0) { throw "Could not restrict the temporary restore-drill directory." }
+}
 
 $plainBundle = Join-Path $stageDirectory "SmartPrint.bundle.zip"
 $extractDirectory = Join-Path $stageDirectory "bundle"
