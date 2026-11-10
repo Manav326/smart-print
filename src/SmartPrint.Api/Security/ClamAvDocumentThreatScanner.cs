@@ -26,7 +26,7 @@ public sealed class ClamAvDocumentThreatScanner : IDocumentThreatScanner
         var timeoutSeconds = configuration.GetValue<int?>("DocumentSecurity:ClamAv:TimeoutSeconds") ?? 90;
 
         if (string.IsNullOrWhiteSpace(host) ||
-            host.Contains('/', StringComparison.Ordinal) ||
+            host.Contains('/') ||
             port is < 1 or > 65535 ||
             timeoutSeconds is < 5 or > 300)
         {
@@ -103,7 +103,7 @@ public sealed class ClamAvDocumentThreatScanner : IDocumentThreatScanner
             throw new DocumentThreatScanException(
                 "The malware scanner is unavailable or timed out. The upload was blocked; please retry later.",
                 threatDetected: false,
-                exception);
+                innerException: exception);
         }
     }
 
