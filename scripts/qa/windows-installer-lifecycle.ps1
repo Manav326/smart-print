@@ -563,13 +563,17 @@ else if (mode == "analyze-worker")
         .Build();
     var analyzer = new WindowsLocalDocumentAnalyzer(
         configuration, new WindowsLocalDocumentWorkerServiceStarter());
-    var analysis = await analyzer.AnalyzeAsync(png, ".png", CancellationToken.None);
-    if (analysis.PageCount != 1 ||
-        analysis.MediaType != "image/png" ||
-        !analysis.PageSizesJson.Contains("\"pixelWidth\":1", StringComparison.Ordinal))
-        throw new InvalidOperationException("The LocalService worker returned unexpected PNG analysis.");
+    DocumentAnalysis? analysis = null;
+    for (var request = 0; request < 2; request++)
+    {
+        analysis = await analyzer.AnalyzeAsync(png, ".png", CancellationToken.None);
+        if (analysis.PageCount != 1 ||
+            analysis.MediaType != "image/png" ||
+            !analysis.PageSizesJson.Contains("\"pixelWidth\":1", StringComparison.Ordinal))
+            throw new InvalidOperationException($"The LocalService worker returned unexpected PNG analysis on request {request + 1}.");
+    }
     await File.WriteAllTextAsync(args[1], System.Text.Json.JsonSerializer.Serialize(analysis));
-    Console.WriteLine("The LocalSystem Agent client successfully used the LocalService worker and restricted parser child.");
+    Console.WriteLine("The LocalSystem Agent client successfully completed two successive analyses through the LocalService worker and restricted parser child.");
 }
 else if (mode == "probe-worker-pipe")
 {
