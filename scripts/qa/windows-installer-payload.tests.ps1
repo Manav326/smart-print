@@ -5,7 +5,7 @@ $scriptText = Get-Content -LiteralPath $scriptPath -Raw
 
 $desktopEntry = [regex]::Match(
     $scriptText,
-    '(?im)^Source:\s*"artifacts\\desktop\\\*";\s*DestDir:\s*"{app}";\s*Excludes:\s*"([^"]+)"'
+    '(?im)^Source:\s*"artifacts\\desktop\\\*";\s*DestDir:\s*"\{app\}";\s*Excludes:\s*"([^"]+)"'
 )
 if (-not $desktopEntry.Success) {
     throw "The customer desktop payload must have an explicit Inno Setup Excludes list."
