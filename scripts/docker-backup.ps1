@@ -101,6 +101,7 @@ try {
     docker compose @composeBaseArgs stop api portal
     if ($LASTEXITCODE -ne 0) { throw "Could not pause API and portal services." }
     $servicesStopped = $true
+    $snapshotUtc = (Get-Date).ToUniversalTime()
 
     Write-Host "Exporting PostgreSQL..." -ForegroundColor Cyan
     $dbUser = $values["POSTGRES_USER"]
@@ -147,6 +148,7 @@ try {
     @{
         Format = "SmartPrint.BackupBundle.v2"
         CreatedUtc = (Get-Date).ToUniversalTime().ToString("O")
+        SnapshotUtc = $snapshotUtc.ToString("O")
         DatabaseFile = [IO.Path]::GetFileName($dbFile)
         DatabaseSha256 = $dbHash
         DocumentsFile = [IO.Path]::GetFileName($docsFile)
