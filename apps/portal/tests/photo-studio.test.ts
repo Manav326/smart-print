@@ -457,3 +457,19 @@ test("Photo Studio browser acceptance covers every editor tool and failure recov
  assert.match(browser,/failRender=1/);
  assert.match(browser,/oversizeRaster=1/);
 });
+
+test("Photo Studio text layers are independently selectable, editable, draggable and included in the A4 PDF",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/id="photo-studio-tool-text"/);
+ assert.match(studio,/title="Add, select and position text on the A4 sheet"/);
+ assert.doesNotMatch(studio,/id="photo-studio-tool-text"[^>]*disabled=/);
+ assert.match(studio,/id="photo-studio-add-text"/);
+ assert.match(studio,/id="photo-studio-text-content"/);
+ assert.match(studio,/id="photo-studio-text-font-size"/);
+ assert.match(studio,/id="photo-studio-text-colour"/);
+ assert.match(studio,/handleTextLayerPointerDown/);
+ assert.match(studio,/handleTextLayerPointerMove/);
+ assert.match(studio,/context\.fillText\(value, xMm, yMm, A4_WIDTH_MM - 16\)/);
+ assert.match(studio,/captionHeightMm,textLayers/);
+ assert.match(studio,/data-testid="photo-studio-text-layer"/);
+});
