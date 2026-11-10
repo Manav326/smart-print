@@ -172,7 +172,8 @@ public sealed class LocalAgentApiHostedService(
     ILogger<LocalAgentApiHostedService> logger,
     IHostApplicationLifetime hostLifetime,
     LocalNetworkManager localNetworkManager,
-    AgentRuntimeReadiness runtimeReadiness) : IHostedService, IAsyncDisposable
+    AgentRuntimeReadiness runtimeReadiness,
+    AgentDocumentEncryptionKeyStore documentEncryptionKeyStore) : IHostedService, IAsyncDisposable
 {
     private WebApplication? application;
     private CancellationTokenSource? retryLifetime;
@@ -287,7 +288,7 @@ public sealed class LocalAgentApiHostedService(
             {
                 policy.SetIsOriginAllowed(state.IsOriginAllowed)
                     .WithMethods("GET", "POST")
-                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant", "X-Print-Photo-Revision-Grant")
+                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant", "X-Print-Photo-Revision-Grant", "X-Print-Encrypted-Key", "X-Print-Encrypted-Iv")
                     .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
             }));
 
@@ -796,8 +797,25 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The cloud API returned an invalid local upload grant.");
                 }
 
+                async Task ReportPrivateValidationFailureAsync(string code, string message)
+                {
+                    if (!claim.PrivatePrinting) return;
+                    using var rejectionRequest = new HttpRequestMessage(
+                        HttpMethod.Post, $"api/v1/agent/private-relays/{claim.Id:D}/reject")
+                    {
+                        Content = JsonContent.Create(new AgentPrivateRelayRejectRequest(code, message))
+                    };
+                    AddAgentHeaders(rejectionRequest, credentials, uploadGrant);
+                    using var rejectionResponse = await client.SendAsync(rejectionRequest, ct);
+                    if (!rejectionResponse.IsSuccessStatusCode)
+                        logger.LogWarning("Could not persist private upload validation failure for ticket {TicketId} (HTTP {StatusCode}).",
+                            claim.Id, (int)rejectionResponse.StatusCode);
+                }
+
                 if (claim.AlreadyCompleted && claim.UploadResult is not null)
                 {
+                    if (claim.PrivatePrinting && claim.UploadResult.Job.Status == "COMPLETED")
+                        return Results.Ok(claim.UploadResult);
                     var completedJobId = claim.PrintJobId != Guid.Empty
                         ? claim.PrintJobId
                         : claim.UploadResult.Job.Id;
@@ -855,22 +873,82 @@ public sealed class LocalAgentApiHostedService(
                     }
 
                     var form = await context.Request.ReadFormAsync(ct);
-                    if (form.Files.Count != 1 || form.Files[0].Length != claim.SizeBytes)
+                    var expectedWireSize = claim.PrivatePrinting ? checked(claim.SizeBytes + 16) : claim.SizeBytes;
+                    if (form.Files.Count != 1 || form.Files[0].Length != expectedWireSize || expectedWireSize > 20L * 1024 * 1024 + 16)
                     {
                         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "The received document size does not match the authorised upload.");
                     }
 
-                    await using var memory = new MemoryStream((int)claim.SizeBytes);
+                    await using var memory = new MemoryStream(checked((int)expectedWireSize));
                     await using (var input = form.Files[0].OpenReadStream())
                     {
                         await input.CopyToAsync(memory, ct);
                     }
-                    if (memory.Length != claim.SizeBytes)
+                    if (memory.Length != expectedWireSize)
                     {
                         return Results.BadRequest(new { code = "local_upload_incomplete", message = "The document transfer was incomplete. Retry the upload." });
                     }
-                    bytes = memory.ToArray();
+                    var receivedBytes = memory.ToArray();
                     CryptographicOperations.ZeroMemory(memory.GetBuffer().AsSpan(0, (int)memory.Length));
+                    if (claim.PrivatePrinting)
+                    {
+                        var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
+                        var ivText = context.Request.Headers["X-Print-Encrypted-Iv"].FirstOrDefault();
+                        if (string.IsNullOrWhiteSpace(wrappedKey) || string.IsNullOrWhiteSpace(ivText))
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            return Results.BadRequest(new { code = "private_document_encryption_required", message = "Private Printing requires the document encryption key and nonce." });
+                        }
+                        byte[]? aesKey = null;
+                        byte[]? iv = null;
+                        byte[] aad = Array.Empty<byte>();
+                        try
+                        {
+                            aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
+                            iv = Convert.FromBase64String(ivText);
+                        }
+                        catch (Exception exception) when (exception is CryptographicException or FormatException)
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
+                            if (iv is not null) CryptographicOperations.ZeroMemory(iv);
+                            await ReportPrivateValidationFailureAsync(
+                                "private_document_decryption_failed",
+                                "The shop computer could not securely open this file. Please select the document again.");
+                            return Results.UnprocessableEntity(new { code = "private_document_key_invalid", message = "The private document could not be decrypted by this paired shop computer." });
+                        }
+                        try
+                        {
+                            if (aesKey!.Length != 32 || iv!.Length != 12 || receivedBytes.LongLength != claim.SizeBytes + 16)
+                                throw new CryptographicException("The private document encryption envelope is invalid.");
+                            bytes = new byte[checked((int)claim.SizeBytes)];
+                            aad = Encoding.UTF8.GetBytes($"SmartPrint.PrivatePrinting.v1|{claim.Id}|{claim.PrintJobId}|{claim.SizeBytes}|{claim.Sha256}");
+                            using var aes = new AesGcm(aesKey, 16);
+                            aes.Decrypt(iv, receivedBytes.AsSpan(0, checked((int)claim.SizeBytes)),
+                                receivedBytes.AsSpan(checked((int)claim.SizeBytes), 16), bytes, aad);
+                        }
+                        catch (CryptographicException)
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            CryptographicOperations.ZeroMemory(aesKey);
+                            CryptographicOperations.ZeroMemory(iv);
+                            await ReportPrivateValidationFailureAsync(
+                                "private_document_decryption_failed",
+                                "The private document did not pass its authenticated encryption check. Please select it again.");
+                            return Results.UnprocessableEntity(new { code = "private_document_decryption_failed", message = "The private document did not pass its authenticated encryption check." });
+                        }
+                        finally
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
+                            if (iv is not null) CryptographicOperations.ZeroMemory(iv);
+                            CryptographicOperations.ZeroMemory(aad);
+                        }
+                    }
+                    else
+                    {
+                        bytes = receivedBytes;
+                    }
                 }
 
                 try
@@ -878,7 +956,10 @@ public sealed class LocalAgentApiHostedService(
                     var actualHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
                     if (!string.Equals(actualHash, claim.Sha256, StringComparison.OrdinalIgnoreCase))
                     {
-                        return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the cloud-authorised upload ticket." });
+                        await ReportPrivateValidationFailureAsync(
+                            "private_document_integrity_failed",
+                            "The file did not pass its integrity check. Please select it again.");
+                        return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the authorised upload." });
                     }
 
                     DocumentAnalysis analysis;
@@ -888,6 +969,9 @@ public sealed class LocalAgentApiHostedService(
                     }
                     catch (DocumentValidationException exception)
                     {
+                        await ReportPrivateValidationFailureAsync(
+                            "document_not_supported",
+                            exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
                         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
                     }
 
@@ -913,7 +997,8 @@ public sealed class LocalAgentApiHostedService(
                             claim.Sha256,
                             claim.ExpiresUtc,
                             "LOCAL_AGENT",
-                            Orientation: claim.Orientation);
+                            Orientation: claim.Orientation,
+                            PrivatePrinting: claim.PrivatePrinting);
                         await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
                     }
 
@@ -1015,6 +1100,7 @@ public sealed class LocalAgentApiHostedService(
         bool IsDuplex,
         int Copies,
         string Orientation,
+        bool PrivatePrinting,
         DateTimeOffset ExpiresUtc,
         LocalUploadedPrintResult? UploadResult);
 
@@ -1031,7 +1117,7 @@ public sealed class LocalAgentApiHostedService(
         Guid Id, string JobNumber, string Status, int PageCount, int Copies,
         string Currency, long QuotedAmountMinor, DateTimeOffset CreatedUtc,
         string ColourMode = "Mono", string PaperSize = "A4", bool IsDuplex = false,
-        string Orientation = "AUTO", int PricingVersion = 1);
+        string Orientation = "AUTO", int PricingVersion = 1, bool PrivatePrinting = false);
 
     private sealed record LocalUploadedDocument(
         Guid Id, string OriginalFileName, string MediaType, long SizeBytes,

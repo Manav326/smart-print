@@ -67,6 +67,95 @@ public sealed class DocumentStorage : IDisposable
         return new StoredDocument(storageKey, sha, bytes.LongLength, analysis);
     }
 
+    // Stores already-encrypted Private Printing payloads as opaque bytes. This method
+    // deliberately does not inspect, analyse, or decrypt the customer's document.
+    public async Task<string> StoreOpaquePrivateRelayAsync(
+        Guid tenantId,
+        Guid ticketId,
+        Stream input,
+        long declaredLength,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty || ticketId == Guid.Empty ||
+            declaredLength is <= 16 or > MaximumFileBytes + 16)
+            throw new InvalidDataException("The encrypted private relay payload has an invalid size or identity.");
+
+        await using var memory = new MemoryStream(checked((int)declaredLength));
+        await input.CopyToAsync(memory, cancellationToken);
+        if (memory.Length != declaredLength)
+            throw new InvalidDataException("The encrypted private relay payload is incomplete.");
+
+        var opaqueCiphertext = memory.ToArray();
+        var protectedCiphertext = Encrypt(opaqueCiphertext, encryptionKey);
+        var storageKey = $"private-relay/{tenantId:N}/{ticketId:N}/{Guid.NewGuid():N}.relay";
+        var fullPath = ResolveStoragePath(storageKey);
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        try
+        {
+            await using var output = new FileStream(
+                fullPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                bufferSize: 64 * 1024,
+                FileOptions.Asynchronous | FileOptions.WriteThrough);
+            await output.WriteAsync(protectedCiphertext, cancellationToken);
+            await output.FlushAsync(cancellationToken);
+        }
+        catch
+        {
+            if (File.Exists(fullPath)) File.Delete(fullPath);
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(opaqueCiphertext);
+            CryptographicOperations.ZeroMemory(protectedCiphertext);
+        }
+
+        return storageKey;
+    }
+
+    /// <summary>
+    /// Lists only old, canonical private-relay objects. Callers must compare these
+    /// keys with durable ticket references before deleting them. The age grace
+    /// period prevents racing an upload between object creation and DB commit.
+    /// </summary>
+    public IReadOnlyList<string> GetStalePrivateRelayStorageKeys(TimeSpan minimumAge, int maximumItems)
+    {
+        if (minimumAge < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(minimumAge));
+        if (maximumItems <= 0)
+            return Array.Empty<string>();
+
+        var relayRoot = Path.Combine(ResolveStorageRoot(), "private-relay");
+        if (!Directory.Exists(relayRoot))
+            return Array.Empty<string>();
+
+        var cutoffUtc = DateTime.UtcNow - minimumAge;
+        var candidates = new List<string>(Math.Min(maximumItems, 256));
+        foreach (var path in Directory.EnumerateFiles(relayRoot, "*.relay", SearchOption.AllDirectories))
+        {
+            if (candidates.Count >= maximumItems)
+                break;
+
+            var file = new FileInfo(path);
+            if (!file.Exists || file.LastWriteTimeUtc > cutoffUtc ||
+                (file.Attributes & FileAttributes.ReparsePoint) != 0)
+                continue;
+
+            var relative = Path.GetRelativePath(ResolveStorageRoot(), path).Replace('\\', '/');
+            var segments = relative.Split('/');
+            if (segments.Length != 4 ||
+                !string.Equals(segments[0], "private-relay", StringComparison.Ordinal) ||
+                !Guid.TryParseExact(segments[1], "N", out _) ||
+                !Guid.TryParseExact(segments[2], "N", out _) ||
+                !Guid.TryParseExact(Path.GetFileNameWithoutExtension(segments[3]), "N", out _))
+                continue;
+
+            candidates.Add(relative);
+        }
+
+        return candidates;
+    }
+
     public Task DeleteAsync(string storageKey)
     {
         var path = ResolveStoragePath(storageKey);
@@ -163,10 +252,7 @@ public sealed class DocumentStorage : IDisposable
 
     private string ResolveStoragePath(string storageKey)
     {
-        var rootSetting = configuration["Documents:StorageRoot"];
-        var root = Path.GetFullPath(string.IsNullOrWhiteSpace(rootSetting)
-            ? Path.Combine(environment.ContentRootPath, "App_Data", "documents")
-            : rootSetting);
+        var root = ResolveStorageRoot();
         var full = Path.GetFullPath(Path.Combine(root, storageKey.Replace('/', Path.DirectorySeparatorChar)));
         var prefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
         if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -174,6 +260,14 @@ public sealed class DocumentStorage : IDisposable
             throw new InvalidOperationException("Invalid document storage key.");
         }
         return full;
+    }
+
+    private string ResolveStorageRoot()
+    {
+        var rootSetting = configuration["Documents:StorageRoot"];
+        return Path.GetFullPath(string.IsNullOrWhiteSpace(rootSetting)
+            ? Path.Combine(environment.ContentRootPath, "App_Data", "documents")
+            : rootSetting);
     }
 }
 

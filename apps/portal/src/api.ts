@@ -1010,7 +1010,7 @@ export async function createCustomerSession(publicCode: string) {
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     photoPricing: CustomerPhotoPricing | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
-    localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    localAgent: { agentDeviceId: string; endpoints: string[]; documentEncryptionPublicKey?: string | null } | null;
     cloudAssistedPrintingEnabled: boolean;
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, {
     method: "POST",
@@ -1022,7 +1022,7 @@ export async function createCustomerSession(publicCode: string) {
 export async function renewCustomerPrintSession(sessionToken: string) {
   return apiRequest<{
     expiresUtc: string;
-    localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    localAgent: { agentDeviceId: string; endpoints: string[]; documentEncryptionPublicKey?: string | null } | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
   }>("/api/v1/public/sessions/current/renew", {
     method: "POST",
@@ -1040,7 +1040,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     photoPricing: CustomerPhotoPricing | null;
-    localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    localAgent: { agentDeviceId: string; endpoints: string[]; documentEncryptionPublicKey?: string | null } | null;
     cloudAssistedPrintingEnabled: boolean;
   }>("/api/v1/public/sessions/current/resume", {
     method: "POST",
@@ -1084,6 +1084,7 @@ export interface ShopPrintJob {
   isDuplex: boolean;
   orientation?: string;
   pdfBrandingEnabled?: boolean;
+  privatePrinting?: boolean;
   pricingVersion?: number;
   printKind?: string;
   photoSizeCode?: string | null;
@@ -1231,6 +1232,8 @@ type CustomerLocalUploadTicket = {
   agentDeviceId: string;
   expiresUtc: string;
   completed: boolean;
+  privatePrinting?: boolean;
+  sha256: string;
 };
 
 async function requestCustomerLocalUploadTicket(
@@ -1241,18 +1244,27 @@ async function requestCustomerLocalUploadTicket(
   batchName: string | undefined,
   idempotencyKey: string,
   grantToken: string,
-  settings: CustomerPrintRequestSettings
+  settings: CustomerPrintRequestSettings,
+  privatePrinting = false
 ): Promise<CustomerLocalUploadTicket> {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const hashInput = await file.arrayBuffer();
+  let digest: ArrayBuffer;
+  try {
+    digest = await crypto.subtle.digest("SHA-256", hashInput);
+  } finally {
+    new Uint8Array(hashInput).fill(0);
+  }
+  const privateExtension = file.name.match(/\.(pdf|jpe?g|png)$/i)?.[0]?.toLowerCase() ?? "";
   const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-  return apiRequest<CustomerLocalUploadTicket>("/api/v1/public/sessions/current/local-upload-tickets", {
+  new Uint8Array(digest).fill(0);
+  const ticket = await apiRequest<Omit<CustomerLocalUploadTicket, "sha256">>("/api/v1/public/sessions/current/local-upload-tickets", {
     method: "POST",
     headers: {
       "X-Print-Session": sessionToken,
       "Idempotency-Key": idempotencyKey
     },
     body: JSON.stringify({
-      originalFileName: file.name,
+      originalFileName: privatePrinting ? "private-document" + privateExtension : file.name,
       sizeBytes: file.size,
       sha256,
       grantToken,
@@ -1263,9 +1275,11 @@ async function requestCustomerLocalUploadTicket(
       paperSize: settings.paperSize,
       isDuplex: settings.isDuplex,
       copies: settings.copies,
-      orientation: settings.orientation
+      orientation: settings.orientation,
+      privatePrinting
     })
   });
+  return { ...ticket, sha256 };
 }
 
 async function uploadCustomerLocalTicketViaCloud(
@@ -1343,7 +1357,7 @@ export async function uploadCustomerDocument(
   return uploaded;
 }
 
-type CustomerLocalAgentApi = { agentDeviceId: string; endpoints: string[] };
+type CustomerLocalAgentApi = { agentDeviceId: string; endpoints: string[]; documentEncryptionPublicKey?: string | null };
 
 function customerLocalUploadAttemptStorageKeys(sessionToken: string, file: File) {
   const key = customerUploadAttemptStorageKey(sessionToken, file) + ".local";
@@ -1366,6 +1380,110 @@ function createLocalUploadGrantToken(): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+type CustomerPrivateRelayStatus =
+  | { state: "PENDING"; message?: string }
+  | { state: "FAILED" | "EXPIRED"; message?: string }
+  | { state: "READY"; uploadResult: UploadedPrintJob };
+
+async function getCustomerPrivateRelayStatus(
+  sessionToken: string,
+  ticket: CustomerLocalUploadTicket,
+  grantToken: string
+): Promise<CustomerPrivateRelayStatus> {
+  return apiRequest<CustomerPrivateRelayStatus>(
+    `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/private-relay-status`,
+    {
+      method: "GET",
+      headers: {
+        "X-Print-Session": sessionToken,
+        "X-Print-Upload-Grant": grantToken
+      }
+    }
+  );
+}
+
+async function uploadCustomerPrivateRelay(
+  sessionToken: string,
+  file: File,
+  ticket: CustomerLocalUploadTicket,
+  grantToken: string,
+  encryptedForm: FormData,
+  encryptedHeaders: Record<string, string>
+): Promise<UploadedPrintJob> {
+  // A direct LAN request may have completed even if its response was lost.
+  // Check the canonical ticket before attempting a second transport.
+  const existing = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+  if (existing.state === "READY") {
+    clearCustomerLocalUploadAttempt(sessionToken, file);
+    return existing.uploadResult;
+  }
+  if (existing.state === "FAILED" || existing.state === "EXPIRED") {
+    clearCustomerLocalUploadAttempt(sessionToken, file);
+    throw new LocalUploadPreflightError(
+      existing.message || "The shop could not validate this file. Please select it again.",
+      422,
+      existing.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
+    );
+  }
+
+  try {
+    await apiRequest<{ accepted: boolean; duplicateRequest?: boolean }>(
+      `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/private-relay`,
+      {
+        method: "POST",
+        headers: {
+          "X-Print-Session": sessionToken,
+          "X-Print-Upload-Grant": grantToken,
+          ...encryptedHeaders
+        },
+        body: encryptedForm
+      }
+    );
+  } catch (exception) {
+    // A lost HTTP response does not prove that the ciphertext was not stored.
+    // Poll the same ticket/grant before deciding that the transfer failed.
+    if (exception instanceof ApiError && exception.status >= 400) throw exception;
+  }
+
+  const deadline = Date.now() + 45_000;
+  while (Date.now() < deadline) {
+    let status: CustomerPrivateRelayStatus;
+    try {
+      status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+    } catch (exception) {
+      if (exception instanceof ApiError && exception.status >= 400) throw exception;
+      await new Promise(resolve => window.setTimeout(resolve, 900));
+      continue;
+    }
+    if (status.state === "READY") {
+      clearCustomerLocalUploadAttempt(sessionToken, file);
+      return {
+        ...status.uploadResult,
+        document: { ...status.uploadResult.document, originalFileName: "Private document" },
+        job: {
+          ...status.uploadResult.job,
+          batchId: ticket.batchId ?? status.uploadResult.job.batchId ?? null,
+          batchGroupName: ticket.batchGroupName ?? status.uploadResult.job.batchGroupName ?? null,
+          batchName: ticket.batchName ?? status.uploadResult.job.batchName ?? null
+        }
+      };
+    }
+    if (status.state === "FAILED" || status.state === "EXPIRED") {
+      clearCustomerLocalUploadAttempt(sessionToken, file);
+      throw new LocalUploadPreflightError(
+        status.message || "The shop computer could not validate this file. Please select it again.",
+        422,
+        status.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
+      );
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 900));
+  }
+
+  throw new LocalUploadOutcomeUnknownError(
+    "Your encrypted document reached the shop's secure transfer queue, but the shop computer is still checking it. SmartPrint has kept the same request; retry this file to refresh it without creating a duplicate."
+  );
 }
 
 function isPrivateLocalAgentEndpoint(value: string): URL | null {
@@ -1394,7 +1512,9 @@ export async function uploadCustomerDocumentLocally(
   batchGroupName?: string,
   batchName?: string,
   cloudAssistedPrintingEnabled = false,
-  settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" }
+  settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" },
+  privatePrinting = false,
+  localNetworkReady = true
 ): Promise<UploadedPrintJob> {
   const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
@@ -1405,11 +1525,11 @@ export async function uploadCustomerDocumentLocally(
   let ticket: CustomerLocalUploadTicket;
   try {
     ticket = await requestCustomerLocalUploadTicket(
-      sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken, settings
+      sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken, settings, privatePrinting
     );
   } catch (exception) {
     if (exception instanceof ApiError && exception.status === 409 &&
-        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch"].includes(exception.code ?? "")) {
+        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch", "private_printing_unavailable", "private_printing_physical_output_required"].includes(exception.code ?? "")) {
       // These are explicit preflight rejections; the API did not issue a ticket.
       sessionStorage.removeItem(keys.idempotency);
       sessionStorage.removeItem(keys.grant);
@@ -1418,15 +1538,32 @@ export async function uploadCustomerDocumentLocally(
     if (!(exception instanceof ApiError) || exception.status === 0) {
       // Fetch may fail with TypeError/AbortError rather than an ApiError. The
       // POST may nevertheless have committed; retain the key and grant so the
-      // Cloud-assisted route can retrieve and resume that exact ticket.
-      throw new LocalUploadOutcomeUnknownError(
-        "SmartPrint lost the response while preparing this upload. The original upload identity is saved; choose Cloud-assisted · HTTPS or retry this file and SmartPrint will resume the same job."
-      );
+      // Standard uploads may resume over HTTPS. Private uploads must retry
+      // only against the same paired shop Agent and never use cloud recovery.
+      throw new LocalUploadOutcomeUnknownError(privatePrinting
+        ? "SmartPrint lost the response while preparing this private upload. Its original upload identity is saved; reconnect to the same shop computer and retry this file. Cloud recovery is disabled."
+        : "SmartPrint lost the response while preparing this upload. The original upload identity is saved; choose Cloud-assisted · HTTPS or retry this file and SmartPrint will resume the same job.");
     }
     throw exception;
   }
 
   if (isUncompletedLocalUploadTicketExpired(ticket.completed, ticket.expiresUtc)) {
+    if (privatePrinting) {
+      const expiredStatus = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken).catch(() => null);
+      if (expiredStatus?.state === "READY") {
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        return expiredStatus.uploadResult;
+      }
+      if (expiredStatus?.state === "FAILED" || expiredStatus?.state === "EXPIRED") {
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        throw new LocalUploadPreflightError(
+          expiredStatus.message || "The private upload expired before the shop computer received it. Please retry this file.",
+          409,
+          "private_relay_expired"
+        );
+      }
+      throw new LocalUploadOutcomeUnknownError("The encrypted private request is still attached to its original ticket. SmartPrint will resume the same request when the shop computer reconnects.");
+    }
     // Keep the original ticket/grant: its monthly quota and batch capacity are
     // still reserved during the 24-hour recovery window. First let the API
     // recover this exact file over HTTPS if the paired Agent is unavailable or
@@ -1465,15 +1602,36 @@ export async function uploadCustomerDocumentLocally(
       }
       // A network interruption or reconciliation conflict is not proof that
       // the original ticket is dead. Preserve its idempotency key and grant.
+      if (privatePrinting) {
+        throw new LocalUploadOutcomeUnknownError("Private Printing is waiting for the shop computer to confirm this same local upload. Reconnect to the shop Wi-Fi and retry; cloud recovery is disabled.");
+      }
       throw new LocalUploadOutcomeUnknownError(
         "SmartPrint is checking the original upload. Its ticket and secure retry identity are preserved; retry this same file to continue without creating a second print job."
       );
     }
   }
 
+  if (ticket.completed && privatePrinting) {
+    const completed = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+    if (completed.state === "READY") {
+      clearCustomerLocalUploadAttempt(sessionToken, file);
+      return completed.uploadResult;
+    }
+    if (completed.state === "FAILED" || completed.state === "EXPIRED") {
+      clearCustomerLocalUploadAttempt(sessionToken, file);
+      throw new LocalUploadPreflightError(
+        completed.message || "The shop could not validate this file. Please select it again.",
+        422,
+        "private_relay_validation_failed"
+      );
+    }
+    throw new LocalUploadOutcomeUnknownError(
+      "This private print request is already being checked by the shop computer. Retry to refresh its status; SmartPrint will not create another upload."
+    );
+  }
+
   if (ticket.completed) {
-    // The document/job already exists. Reconcile its canonical status over the
-    // API without retransmitting bytes or requiring Cloud-assisted new uploads.
+    // Standard local uploads may still reconcile through the existing HTTPS recovery route.
     try {
       const completed = await uploadCustomerLocalTicketViaCloud(
         sessionToken, file, ticket, grantToken
@@ -1490,26 +1648,65 @@ export async function uploadCustomerDocumentLocally(
       };
     } catch {
       throw new LocalUploadOutcomeUnknownError(
-        "SmartPrint has your original upload recorded. The shop connection could not refresh its status just now; retry this same file to restore the existing print request. No new upload or print job has been created."
+        "SmartPrint has your original upload recorded. The shop connection could not refresh its status just now; retry this same file to restore the existing print request. No new print job has been created."
       );
     }
   }
 
   const form = new FormData();
-  form.append("file", file, file.name);
-  if (ticket.agentDeviceId === localAgent.agentDeviceId) {
-    for (const value of localAgent.endpoints.slice(0, 8)) {
+  let encryptedHeaders: Record<string, string> = {};
+  if (privatePrinting && !ticket.completed) {
+    if (!localAgent.documentEncryptionPublicKey) {
+      throw new LocalUploadPreflightError("This shop has not enabled its private document-encryption key yet. No document was uploaded.", 409, "private_printing_unavailable");
+    }
+    const aesKeyBytes = crypto.getRandomValues(new Uint8Array(32));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const publicKeyBytes = Uint8Array.from(atob(localAgent.documentEncryptionPublicKey), character => character.charCodeAt(0));
+    try {
+      const rsaKey = await crypto.subtle.importKey("spki", publicKeyBytes, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]);
+      const wrappedKey = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, rsaKey, aesKeyBytes);
+      const aesKey = await crypto.subtle.importKey("raw", aesKeyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
+      const aad = new TextEncoder().encode(`SmartPrint.PrivatePrinting.v1|${ticket.id}|${ticket.printJobId}|${file.size}|${ticket.sha256 ?? ""}`);
+      const plaintext = await file.arrayBuffer();
+      let ciphertext: ArrayBuffer;
+      try {
+        ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad, tagLength: 128 }, aesKey, plaintext);
+      } finally {
+        new Uint8Array(plaintext).fill(0);
+        aad.fill(0);
+      }
+      const bytesToBase64 = (bytes: Uint8Array) => {
+        let binary = "";
+        for (let offset = 0; offset < bytes.length; offset += 0x8000)
+          binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
+        return btoa(binary);
+      };
+      encryptedHeaders = {
+        "X-Print-Encrypted-Key": bytesToBase64(new Uint8Array(wrappedKey)),
+        "X-Print-Encrypted-Iv": bytesToBase64(iv)
+      };
+      form.append("file", new Blob([ciphertext], { type: "application/octet-stream" }), "private-document.bin");
+    } finally {
+      aesKeyBytes.fill(0);
+      iv.fill(0);
+      publicKeyBytes.fill(0);
+    }
+  } else if (!ticket.completed) {
+    form.append("file", file, file.name);
+  }
+  if (ticket.agentDeviceId === localAgent.agentDeviceId && (!privatePrinting || localNetworkReady)) {
+    for (const value of localAgent.endpoints.slice(0, privatePrinting ? 3 : 8)) {
     const endpoint = isPrivateLocalAgentEndpoint(value);
     if (!endpoint) continue;
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 90_000);
+    const timeout = window.setTimeout(() => controller.abort(), privatePrinting ? 3_500 : 90_000);
     try {
       const response = await fetch(`${endpoint.origin}/api/v1/local/uploads/${encodeURIComponent(ticket.id)}`, {
         method: "POST",
         mode: "cors",
         cache: "no-store",
         credentials: "omit",
-        headers: { "X-Print-Upload-Grant": grantToken },
+        headers: { "X-Print-Upload-Grant": grantToken, ...encryptedHeaders },
         body: form,
         signal: controller.signal,
         targetAddressSpace: "local"
@@ -1528,6 +1725,9 @@ export async function uploadCustomerDocumentLocally(
       // A confirmed response is now represented by the canonical job in the
       // customer batch draft. The retry-only grant can be released safely.
       const uploaded = payload as UploadedPrintJob;
+      if (privatePrinting) {
+        uploaded.document = { ...uploaded.document, originalFileName: "Private document" };
+      }
       if (!uploaded?.job?.id || !uploaded?.document?.id) continue;
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
@@ -1545,6 +1745,12 @@ export async function uploadCustomerDocumentLocally(
       window.clearTimeout(timeout);
     }
     }
+  }
+
+  if (privatePrinting) {
+    return uploadCustomerPrivateRelay(
+      sessionToken, file, ticket, grantToken, form, encryptedHeaders
+    );
   }
 
   // A LAN response can be lost after the Agent has safely staged the bytes.

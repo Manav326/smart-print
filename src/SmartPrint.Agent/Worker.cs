@@ -4,6 +4,8 @@ using System.Net.NetworkInformation;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text;
+using SmartPrint.Documents;
 
 namespace SmartPrint.Agent;
 
@@ -17,6 +19,7 @@ public sealed class Worker(
     LocalAgentApiState localAgentApiState,
     LocalNetworkManager localNetworkManager,
     AgentRuntimeReadiness runtimeReadiness,
+    AgentDocumentEncryptionKeyStore documentEncryptionKeyStore,
     IConfiguration configuration) : BackgroundService
 {
     private int printClaimBatchOffset;
@@ -43,7 +46,210 @@ public sealed class Worker(
         await Task.WhenAll(
             RunHeartbeatLoopAsync(stoppingToken),
             RunPrinterInventoryLoopAsync(stoppingToken),
-            RunPrintWorkLoopAsync(stoppingToken));
+            RunPrintWorkLoopAsync(stoppingToken),
+            RunPrivateRelayLoopAsync(stoppingToken));
+    }
+
+    // A PostgreSQL-backed long poll wakes this Agent as soon as its own shop
+    // receives a private relay. The bounded server wait is the recovery path if a
+    // notification listener is restarting; idle shops no longer poll every 4 seconds.
+    private async Task RunPrivateRelayLoopAsync(CancellationToken cancellationToken)
+    {
+        var retryDelay = TimeSpan.FromSeconds(5);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var pollSucceeded = false;
+            try
+            {
+                var credentials = LoadSecureCredentials();
+                if (credentials is not null)
+                {
+                    using var client = httpClientFactory.CreateClient("cloud");
+                    client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+                    pollSucceeded = await ProcessPrivateCloudRelaysAsync(client, credentials, cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Private encrypted relay check failed; the Agent will retry automatically.");
+            }
+
+            if (pollSucceeded)
+            {
+                retryDelay = TimeSpan.FromSeconds(5);
+                continue;
+            }
+
+            try { await Task.Delay(retryDelay, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            retryDelay = TimeSpan.FromSeconds(Math.Min(60, retryDelay.TotalSeconds * 2));
+        }
+    }
+
+    private async Task<bool> ProcessPrivateCloudRelaysAsync(
+        HttpClient client, AgentCredentials credentials, CancellationToken cancellationToken)
+    {
+        using var pendingResponse = await SendAgentGetRequestAsync(
+            client, credentials, "api/v1/agent/private-relays/pending?waitSeconds=25", cancellationToken);
+        if (!pendingResponse.IsSuccessStatusCode)
+        {
+            if (pendingResponse.StatusCode != HttpStatusCode.NotFound)
+                logger.LogWarning("Private relay long-poll returned HTTP {StatusCode}.", (int)pendingResponse.StatusCode);
+            return false;
+        }
+
+        var pending = await pendingResponse.Content.ReadFromJsonAsync<AgentPrivateRelayPendingResponse>(cancellationToken);
+        if (pending?.Items is null || pending.Items.Count == 0) return true;
+
+        var retryableFailure = false;
+        foreach (var ticket in pending.Items)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            byte[]? ciphertext = null;
+            byte[]? aesKey = null;
+            byte[]? iv = null;
+            byte[]? aad = null;
+            byte[]? plaintext = null;
+            try
+            {
+                using var contentResponse = await SendAgentGetRequestAsync(
+                    client, credentials,
+                    $"api/v1/agent/private-relays/{ticket.TicketId:D}/content", cancellationToken);
+                if (!contentResponse.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Encrypted relay payload for {JobNumber} returned HTTP {StatusCode}.", ticket.JobNumber, (int)contentResponse.StatusCode);
+                    retryableFailure = true;
+                    continue;
+                }
+
+                var wrappedKey = contentResponse.Headers.TryGetValues("X-Print-Encrypted-Key", out var keyValues)
+                    ? keyValues.FirstOrDefault() : null;
+                var ivText = contentResponse.Headers.TryGetValues("X-Print-Encrypted-Iv", out var ivValues)
+                    ? ivValues.FirstOrDefault() : null;
+                if (string.IsNullOrWhiteSpace(wrappedKey) || string.IsNullOrWhiteSpace(ivText))
+                    throw new InvalidDataException("The encrypted relay envelope is incomplete.");
+
+                ciphertext = await contentResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+                if (ticket.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
+                    ciphertext.LongLength != ticket.SizeBytes + 16)
+                    throw new InvalidDataException("The encrypted relay payload size does not match its ticket.");
+
+                aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
+                iv = Convert.FromBase64String(ivText);
+                if (aesKey.Length != 32 || iv.Length != 12)
+                    throw new CryptographicException("The private relay key envelope has an unsupported size.");
+
+                plaintext = new byte[checked((int)ticket.SizeBytes)];
+                aad = Encoding.UTF8.GetBytes(
+                    $"SmartPrint.PrivatePrinting.v1|{ticket.TicketId}|{ticket.PrintJobId}|{ticket.SizeBytes}|{ticket.Sha256}");
+                using (var aes = new AesGcm(aesKey, 16))
+                    aes.Decrypt(iv, ciphertext.AsSpan(0, checked((int)ticket.SizeBytes)),
+                        ciphertext.AsSpan(checked((int)ticket.SizeBytes), 16), plaintext, aad);
+
+                var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
+                if (!string.Equals(actualHash, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("The decrypted private document failed its SHA-256 check.");
+
+                DocumentAnalysis analysis;
+                try { analysis = DocumentAnalyzer.Analyse(plaintext, ticket.FileExtension); }
+                catch (DocumentValidationException exception)
+                {
+                    using var rejected = await SendAgentRequestAsync(
+                        client, credentials,
+                        $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                        new AgentPrivateRelayRejectRequest(
+                            "document_not_supported",
+                            exception.Message),
+                        cancellationToken);
+                    if (!rejected.IsSuccessStatusCode)
+                    {
+                        logger.LogWarning("Invalid private relay {JobNumber} could not be reported to the API (HTTP {StatusCode}); it will be retried.", ticket.JobNumber, (int)rejected.StatusCode);
+                        retryableFailure = true;
+                    }
+                    else
+                    {
+                        logger.LogInformation("Private relay {JobNumber} was rejected before entering the payable print queue: {Reason}.", ticket.JobNumber, exception.Message);
+                    }
+                    continue;
+                }
+
+                var job = new AgentClaimedJob(
+                    ticket.PrintJobId, ticket.JobNumber, "AWAITING_CONFIGURATION",
+                    analysis.PageCount, ticket.Copies, ticket.ColourMode, ticket.PaperSize,
+                    ticket.IsDuplex, "INR", 0, ticket.PrinterDeviceId, ticket.PrinterName,
+                    ticket.QueueName, "Private document", ticket.MediaType, ticket.SizeBytes,
+                    ticket.Sha256, ticket.ExpiresUtc, "LOCAL_AGENT",
+                    PrinterOutputModeRules.Physical, ticket.Orientation,
+                    PdfBrandingEnabled: false, PrivatePrinting: true);
+
+                // DPAPI-protect the document on this paired Windows computer before
+                // acknowledging the relay. Replaying the same ticket is idempotent.
+                await localQueueStore.EnqueueLocalUploadAsync(job, plaintext, cancellationToken);
+                using var completion = await SendAgentRequestAsync(
+                    client, credentials,
+                    $"api/v1/agent/private-relays/{ticket.TicketId:D}/complete",
+                    new LocalPrintUploadCompletionRequest(
+                        analysis.PageCount, analysis.PageSizesJson, ticket.FileExtension,
+                        ticket.MediaType, ticket.SizeBytes, ticket.Sha256),
+                    cancellationToken);
+                if (!completion.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Private relay completion for {JobNumber} returned HTTP {StatusCode}; the protected local copy is retained for retry.", ticket.JobNumber, (int)completion.StatusCode);
+                    retryableFailure = true;
+                    continue;
+                }
+
+                await localQueueStore.MarkLocalUploadFinalizedAsync(ticket.PrintJobId, cancellationToken);
+                logger.LogInformation("Private relay {JobNumber} was decrypted and secured in the shop's protected local queue.", ticket.JobNumber);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (CryptographicException exception)
+            {
+                using var rejected = await SendAgentRequestAsync(
+                    client, credentials,
+                    $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                    new AgentPrivateRelayRejectRequest(
+                        "private_document_decryption_failed",
+                        "The shop computer could not securely open this file. Please select the document again."),
+                    cancellationToken);
+                if (!rejected.IsSuccessStatusCode) retryableFailure = true;
+                logger.LogWarning(exception, "Private relay {JobNumber} failed authenticated decryption; the file was rejected before payment.", ticket.JobNumber);
+            }
+            catch (InvalidDataException exception)
+            {
+                using var rejected = await SendAgentRequestAsync(
+                    client, credentials,
+                    $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                    new AgentPrivateRelayRejectRequest(
+                        "private_document_integrity_failed",
+                        "The file did not pass its security and integrity checks. Please select it again."),
+                    cancellationToken);
+                if (!rejected.IsSuccessStatusCode) retryableFailure = true;
+                logger.LogWarning(exception, "Private relay {JobNumber} failed its integrity checks; the file was rejected before payment.", ticket.JobNumber);
+            }
+            catch (Exception exception)
+            {
+                retryableFailure = true;
+                logger.LogError(exception, "Private relay {JobNumber} could not be staged. Its encrypted cloud copy remains available for a safe retry.", ticket.JobNumber);
+            }
+            finally
+            {
+                if (ciphertext is not null) CryptographicOperations.ZeroMemory(ciphertext);
+                if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
+                if (iv is not null) CryptographicOperations.ZeroMemory(iv);
+                if (aad is not null) CryptographicOperations.ZeroMemory(aad);
+                if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext);
+            }
+        }
+
+        return !retryableFailure;
     }
 
     private async Task RunHeartbeatLoopAsync(CancellationToken cancellationToken)
@@ -104,6 +310,16 @@ public sealed class Worker(
             return;
         }
 
+        string? documentEncryptionPublicKey = null;
+        try
+        {
+            documentEncryptionPublicKey = documentEncryptionKeyStore.GetOrCreatePublicKey();
+        }
+        catch (Exception exception) when (exception is CryptographicException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            logger.LogError(exception, "The Agent document-encryption key is unavailable. Private Printing will remain disabled until the local key can be opened.");
+        }
+
         using var client = httpClientFactory.CreateClient("cloud");
         client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
         using var heartbeat = await SendAgentRequestAsync(
@@ -114,7 +330,8 @@ public sealed class Worker(
             {
                 version = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0",
                 operatingSystem = Environment.OSVersion.VersionString,
-                localEndpoints = GetLocalEndpointsForHeartbeat()
+                localEndpoints = GetLocalEndpointsForHeartbeat(),
+                documentEncryptionPublicKey
             },
             cancellationToken);
 
@@ -395,6 +612,7 @@ public sealed class Worker(
                 await RetrySpoolerReceiptsAsync(client, credentials, cancellationToken);
                 await ProcessAuthorizedPrintJobsAsync(client, credentials, cancellationToken);
                 await MonitorSpoolerJobsAsync(client, credentials, cancellationToken);
+                await ReconcilePrivateDocumentPurgesAsync(client, credentials, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -535,6 +753,80 @@ public sealed class Worker(
             catch (Exception exception)
             {
                 logger.LogError(exception, "Could not secure paid job {JobNumber} in the local queue.", job.JobNumber);
+            }
+        }
+    }
+
+    private async Task ReconcilePrivateDocumentPurgesAsync(
+        HttpClient client,
+        AgentCredentials credentials,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendAgentGetRequestAsync(
+            client, credentials, "api/v1/agent/jobs/private-purge", cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Private-document purge poll returned HTTP {StatusCode}; source files remain protected.", (int)response.StatusCode);
+            return;
+        }
+
+        var pending = await response.Content.ReadFromJsonAsync<AgentPrivateDocumentPurgeResponse>(cancellationToken);
+        // Also retry local pending acknowledgements. The API may already have
+        // redacted the server record even when the previous HTTP response was
+        // lost; its duplicate-ack response is idempotent and clears this marker.
+        var jobIds = (pending?.JobIds ?? Array.Empty<Guid>())
+            .Concat(localQueueStore.GetPrivatePurgePendingJobs().Select(entry => entry.JobId))
+            .Distinct()
+            .ToArray();
+        if (jobIds.Length == 0) return;
+
+        foreach (var jobId in jobIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var entry = localQueueStore.Find(jobId);
+                if (entry is null)
+                {
+                    // The server-authorised source is already absent from this Agent's queue.
+                    // Acknowledge absence so the API can redact the source metadata too.
+                    // Also remove a possible encrypted file/manifest temporary left by
+                    // a process stop between the document write and manifest commit.
+                    await localQueueStore.PurgeUnindexedPrivateSourceAsync(jobId, cancellationToken);
+                    logger.LogWarning("Private job {JobId} had no queue manifest; orphaned job-specific files were removed before acknowledging the purge.", jobId);
+                }
+                else
+                {
+                    if (!entry.PrivatePrinting)
+                        throw new InvalidDataException("The server requested a private purge for a non-private local queue item.");
+                    if (entry.State is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING"))
+                        throw new InvalidOperationException("The local job has not reached a state that permits a server-confirmed source purge.");
+
+                    if (entry.State is not ("OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING") || entry.CompletedUtc is null)
+                        await localQueueStore.MarkOutputConfirmedAsync(jobId, cancellationToken);
+                    await localQueueStore.PurgePrivateSourceAfterConfirmedOutputAsync(jobId, cancellationToken);
+                }
+
+                using var acknowledgement = await SendAgentRequestAsync(
+                    client, credentials, $"api/v1/agent/jobs/{jobId}/private-document-purged", new { }, cancellationToken);
+                if (!acknowledgement.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Private-document purge acknowledgement for {JobId} returned HTTP {StatusCode}; it will be retried.", jobId, (int)acknowledgement.StatusCode);
+                    continue;
+                }
+
+                var current = localQueueStore.Find(jobId);
+                if (current?.PrivatePurgePending == true)
+                    await localQueueStore.MarkPrivatePurgeAcknowledgedAsync(jobId, cancellationToken);
+                logger.LogInformation("Confirmed private source-document removal for job {JobId}.", jobId);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Private source-document removal for job {JobId} could not be completed; the next Agent poll will retry.", jobId);
             }
         }
     }
