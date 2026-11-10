@@ -7325,6 +7325,19 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Unauthorized();
     }
 
+    var privateBatchAlreadyExists = await db.PrintJobs.AsNoTracking().AnyAsync(job =>
+        job.TenantId == session.TenantId && job.CustomerSessionId == session.Id &&
+        job.BatchId == batchId && job.PrivatePrinting, ct) ||
+        await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(ticket =>
+            ticket.TenantId == session.TenantId && ticket.CustomerSessionId == session.Id &&
+            ticket.BatchId == batchId && ticket.PrivatePrinting, ct);
+    if (privateBatchAlreadyExists)
+        return Results.Conflict(new
+        {
+            code = "batch_privacy_mode_mismatch",
+            message = "This batch was started in Private Printing. Continue on the paired shop computer or start a new batch for Standard Printing."
+        });
+
     if (!context.Request.HasFormContentType)
     {
         return Results.BadRequest(new { code = "multipart_form_required", message = "Upload the document using multipart/form-data." });
@@ -7840,6 +7853,19 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         .Select(item => new { item.Id, item.TenantId, item.QrStationId, item.ExpiresUtc })
         .SingleOrDefaultAsync(ct);
     if (session is null) return Results.Unauthorized();
+
+    var hasPrivacyMismatch = await db.PrintJobs.AsNoTracking().AnyAsync(job =>
+        job.TenantId == session.TenantId && job.CustomerSessionId == session.Id &&
+        job.BatchId == batchId && job.PrivatePrinting != request.PrivatePrinting, ct) ||
+        await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(ticket =>
+            ticket.TenantId == session.TenantId && ticket.CustomerSessionId == session.Id &&
+            ticket.BatchId == batchId && ticket.PrivatePrinting != request.PrivatePrinting, ct);
+    if (hasPrivacyMismatch)
+        return Results.Conflict(new
+        {
+            code = "batch_privacy_mode_mismatch",
+            message = "Every file in a batch must use the same privacy choice. Start a new batch to change between Standard and Private Printing."
+        });
 
     var grantHash = HashOpaqueToken(request.GrantToken);
     var existing = await db.LocalPrintUploadTickets.AsNoTracking()
