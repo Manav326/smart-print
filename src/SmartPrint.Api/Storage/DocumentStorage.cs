@@ -12,17 +12,20 @@ public sealed class DocumentStorage : IDisposable
     private readonly byte[] encryptionKey;
     private readonly IDocumentThreatScanner threatScanner;
     private readonly IDocumentAnalyzer documentAnalyzer;
+    private readonly ILogger<DocumentStorage> logger;
 
     public DocumentStorage(
         IConfiguration configuration,
         IWebHostEnvironment environment,
         IDocumentThreatScanner threatScanner,
-        IDocumentAnalyzer documentAnalyzer)
+        IDocumentAnalyzer documentAnalyzer,
+        ILogger<DocumentStorage> logger)
     {
         this.configuration = configuration;
         this.environment = environment;
         this.threatScanner = threatScanner;
         this.documentAnalyzer = documentAnalyzer;
+        this.logger = logger;
         encryptionKey = LoadEncryptionKey(configuration, environment);
     }
 
@@ -57,8 +60,43 @@ public sealed class DocumentStorage : IDisposable
         try
         {
             // Scan before parsing; scanner outages and detected malware both fail closed.
-            await threatScanner.ScanAsync(bytes, cancellationToken);
-            var analysis = await documentAnalyzer.AnalyzeAsync(bytes, extension, cancellationToken);
+            try
+            {
+                await threatScanner.ScanAsync(bytes, cancellationToken);
+                logger.LogInformation(
+                    "Document security scan passed. TenantId={TenantId} DocumentId={DocumentId} Extension={Extension} SizeBytes={SizeBytes}",
+                    tenantId, documentId, extension, bytes.LongLength);
+            }
+            catch (DocumentThreatScanException exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Document security scan blocked an upload. TenantId={TenantId} DocumentId={DocumentId} Extension={Extension} SizeBytes={SizeBytes} ThreatDetected={ThreatDetected}",
+                    tenantId, documentId, extension, bytes.LongLength, exception.ThreatDetected);
+                throw;
+            }
+
+            DocumentAnalysis analysis;
+            try
+            {
+                analysis = await documentAnalyzer.AnalyzeAsync(bytes, extension, cancellationToken);
+            }
+            catch (DocumentValidationException exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Isolated document analysis rejected an upload. TenantId={TenantId} DocumentId={DocumentId} Extension={Extension} SizeBytes={SizeBytes}",
+                    tenantId, documentId, extension, bytes.LongLength);
+                throw;
+            }
+            catch (DocumentProcessingException exception)
+            {
+                logger.LogError(
+                    exception,
+                    "Isolated document analysis was unavailable; upload was blocked. TenantId={TenantId} DocumentId={DocumentId} Extension={Extension} SizeBytes={SizeBytes}",
+                    tenantId, documentId, extension, bytes.LongLength);
+                throw;
+            }
             var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             var storageKey = $"{tenantId:N}/{documentId:N}{extension}";
             var fullPath = ResolveStoragePath(storageKey);
