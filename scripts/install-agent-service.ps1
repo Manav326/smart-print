@@ -25,10 +25,9 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 
 $resolvedExe = (Resolve-Path -LiteralPath $AgentExePath).Path
 $workerExeCandidate = Join-Path (Split-Path -Parent $resolvedExe) "SmartPrint.DocumentWorker.Windows.exe"
-if (-not (Test-Path -LiteralPath $workerExeCandidate -PathType Leaf)) {
-    throw "The isolated Windows document worker is missing from the Agent package: $workerExeCandidate. Refusing to install an Agent that would parse uploaded documents in-process."
-}
-$resolvedWorkerExe = (Resolve-Path -LiteralPath $workerExeCandidate).Path
+$workerSetupScript = Join-Path $PSScriptRoot "install-document-worker-service.ps1"
+$workerPackageAvailable = Test-Path -LiteralPath $workerExeCandidate -PathType Leaf
+
 $portalUri = $null
 if (-not [Uri]::TryCreate($CustomerPortalOrigin.TrimEnd('/'), [UriKind]::Absolute, [ref]$portalUri)) {
     throw "Provide the canonical HTTPS customer portal origin without a path, query string, fragment, or credentials."
@@ -78,10 +77,7 @@ $settings.Agent.LocalApi | Add-Member -NotePropertyName AllowedOrigins -NoteProp
 $settings | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $settingsPath -Encoding utf8
 
 $serviceName = "QRtoPrintSmartPrintAgent"
-$workerServiceName = "QRtoPrintSmartPrintDocumentWorker"
 $binaryPath = '"' + $resolvedExe + '"'
-$workerBinaryPath = '"' + $resolvedWorkerExe + '"'
-$workerFirewallRuleName = "QRtoPrint Smart Print Document Worker outbound block - $AgentVersion"
 $firewallRulePrefix = "QRtoPrint Smart Print Agent Local API"
 $firewallRuleName = "$firewallRulePrefix - $AgentVersion"
 
@@ -89,53 +85,11 @@ $firewallRuleName = "$firewallRulePrefix - $AgentVersion"
 # started and the replacement firewall rule has been created successfully.
 $previousService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
 $previousController = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-$previousWorkerService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$workerServiceName'" -ErrorAction SilentlyContinue
-$previousWorkerController = Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue
-$previousWorkerWasRunning = $null -ne $previousWorkerController -and $previousWorkerController.Status -eq "Running"
-$createdWorkerService = $false
-$newWorkerFirewallRule = $null
 $previousWasRunning = $null -ne $previousController -and $previousController.Status -eq "Running"
 $createdService = $false
 $newFirewallRule = $null
 
 try {
-    # The document parser runs as LocalService, never under the Agent's LocalSystem
-    # token. Its named-pipe ACL allows only LocalSystem and LocalService.
-    if ($previousWorkerService) {
-        if ($previousWorkerController.Status -ne "Stopped") {
-            Stop-Service -Name $workerServiceName -Force
-            (Get-Service -Name $workerServiceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
-        }
-        & sc.exe config $workerServiceName binPath= $workerBinaryPath start= auto obj= "NT AUTHORITY\LocalService" password= "" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Could not update the isolated document worker service executable path or LocalService identity." }
-        Set-Service -Name $workerServiceName -StartupType Automatic
-    }
-    else {
-        & sc.exe create $workerServiceName binPath= $workerBinaryPath start= auto obj= "NT AUTHORITY\LocalService" password= "" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Could not create the isolated document worker under NT AUTHORITY\LocalService." }
-        $createdWorkerService = $true
-    }
-
-    & sc.exe sidtype $workerServiceName unrestricted | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not configure a dedicated service SID for the document worker." }
-    & sc.exe privs $workerServiceName SeChangeNotifyPrivilege | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not restrict the document worker service privileges." }
-    $workerServiceSid = "NT SERVICE\$workerServiceName"
-    & icacls.exe (Split-Path -Parent $resolvedWorkerExe) /grant "$($workerServiceSid):(OI)(CI)(RX)" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not grant the restricted document worker read/execute access to its own versioned payload." }
-
-    & sc.exe failure $workerServiceName reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not configure automatic document worker recovery." }
-    & sc.exe failureflag $workerServiceName 1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not enable document worker service failure recovery." }
-
-    $newWorkerFirewallRule = New-NetFirewallRule -DisplayName $workerFirewallRuleName -Direction Outbound -Action Block -Program $resolvedWorkerExe -Profile Any -RemoteAddress Any -Description "The isolated local document parser has no need for outbound network access."
-    Start-Service -Name $workerServiceName
-    (Get-Service -Name $workerServiceName).WaitForStatus("Running", [TimeSpan]::FromSeconds(30))
-    if ((Get-Service -Name $workerServiceName).Status -ne "Running") {
-        throw "Windows did not confirm that the isolated document worker is running."
-    }
-
     if ($previousService) {
         if ($previousController.Status -ne "Stopped") {
             Stop-Service -Name $serviceName -Force
@@ -165,6 +119,24 @@ try {
 
     $newFirewallRule = New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Any -RemoteAddress LocalSubnet -Description "Allows same-local-subnet devices to reach the QRtoPrint local agent status and upload endpoints."
 
+    # The parser is optional to the printing service. Install/configure it only
+    # after the main Agent is confirmed healthy. A parser setup failure blocks
+    # document uploads, never the print queue, spooler monitoring or accepted jobs.
+    $workerReady = $false
+    if ($workerPackageAvailable -and (Test-Path -LiteralPath $workerSetupScript -PathType Leaf)) {
+        try {
+            & $workerSetupScript -WorkerExePath $workerExeCandidate
+            $workerReady = $true
+        }
+        catch {
+            Write-Warning "The isolated document parser could not be configured: $($_.Exception.Message)"
+            Write-Warning "SmartPrint printing remains installed and running. New document uploads/photo revisions will return a temporary-unavailable response until the parser is repaired."
+        }
+    }
+    else {
+        Write-Warning "The isolated document parser package/helper is missing. SmartPrint printing remains installed and running; new uploads and photo revisions are blocked until the parser is repaired."
+    }
+
     # The new version is running and reachable. Old version-specific rules are
     # now safe to remove; any cleanup failure must not roll back a healthy Agent.
     Get-NetFirewallRule -ErrorAction SilentlyContinue |
@@ -178,14 +150,39 @@ try {
     $currentAgentDirectory = Split-Path -Parent $resolvedExe
     $agentRoot = Split-Path -Parent $currentAgentDirectory
     if ((Split-Path -Leaf $agentRoot) -ieq "agent") {
+        $keepDirectories = [System.Collections.Generic.List[string]]::new()
+        $keepDirectories.Add($currentAgentDirectory)
+
+        # If parser setup failed during an upgrade, its previous executable must
+        # remain on disk. Removing that version would orphan the optional worker.
+        $workerRegistration = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrintSmartPrintDocumentWorker'" -ErrorAction SilentlyContinue
+        if ($workerRegistration -and -not [string]::IsNullOrWhiteSpace([string]$workerRegistration.PathName)) {
+            $workerImage = [string]$workerRegistration.PathName
+            if ($workerImage -match '^\s*"([^"]+)"') { $workerImage = $Matches[1] }
+            else { $workerImage = ($workerImage -split '\s+', 2)[0] }
+            $workerDirectory = Split-Path -Parent $workerImage
+            if (Test-Path -LiteralPath $workerDirectory -PathType Container -and
+                -not $keepDirectories.Contains($workerDirectory, [StringComparer]::OrdinalIgnoreCase)) {
+                $keepDirectories.Add($workerDirectory)
+            }
+        }
+
         Get-ChildItem -LiteralPath $agentRoot -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -ne $currentAgentDirectory } |
+            Where-Object {
+                $candidate = $_.FullName
+                -not ($keepDirectories | Where-Object { [string]::Equals($_, $candidate, [StringComparison]::OrdinalIgnoreCase) })
+            } |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host "Configured the local Agent API CORS origin: $allowedOrigin"
     Write-Host "QRtoPrint Smart Print Agent $AgentVersion is installed and running." -ForegroundColor Green
     Write-Host "The local Agent accepts connections only from devices on the connected local subnet."
+    if ($workerReady) {
+        Write-Host "Document parsing is optional, LocalService-isolated and demand-started; it stops after two minutes idle."
+    } else {
+        Write-Warning "Printing is healthy. Document uploads/photo revisions are temporarily disabled because the isolated parser is unavailable."
+    }
     Write-Host "Use Get-Service $serviceName to inspect the service state."
 }
 catch {
@@ -238,42 +235,7 @@ catch {
         $rollbackFailure = $_.Exception.Message
     }
 
-    # Restore the parser worker first. If this fails, keep the old payload in place
-    # and report the failure instead of deleting files it may still need.
-    try {
-        if ($newWorkerFirewallRule) {
-            Remove-NetFirewallRule -InputObject $newWorkerFirewallRule -ErrorAction SilentlyContinue
-        }
-        if ($createdWorkerService) {
-            $worker = Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue
-            if ($worker -and $worker.Status -ne "Stopped") {
-                Stop-Service -Name $workerServiceName -Force
-                (Get-Service -Name $workerServiceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
-            }
-            & sc.exe delete $workerServiceName | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "The failed new document worker service could not be removed." }
-        }
-        elseif ($previousWorkerService) {
-            $worker = Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue
-            if ($worker -and $worker.Status -ne "Stopped") {
-                Stop-Service -Name $workerServiceName -Force
-                (Get-Service -Name $workerServiceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
-            }
-            $previousWorkerStart = switch ($previousWorkerService.StartMode) {
-                "Manual" { "demand" }
-                "Disabled" { "disabled" }
-                default { "auto" }
-            }
-            & sc.exe config $workerServiceName binPath= $previousWorkerService.PathName start= $previousWorkerStart obj= "NT AUTHORITY\LocalService" password= "" | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw "The previous isolated document worker executable path could not be restored." }
-            if ($previousWorkerWasRunning) {
-                Start-Service -Name $workerServiceName
-                (Get-Service -Name $workerServiceName).WaitForStatus("Running", [TimeSpan]::FromSeconds(30))
-            }
-        }
-    }
-    catch {
-        if ($rollbackFailure) { $rollbackFailure += "; document worker rollback: $($_.Exception.Message)" }
+    if ($rollbackFailure) { $rollbackFailure += "; document worker rollback: $($_.Exception.Message)" }
         else { $rollbackFailure = "document worker rollback: $($_.Exception.Message)" }
     }
 
