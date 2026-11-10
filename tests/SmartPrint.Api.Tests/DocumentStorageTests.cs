@@ -40,6 +40,33 @@ public sealed class DocumentStorageTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+
+    [Fact]
+    public async Task RejectsMaliciousDocumentBeforeWritingAnyEncryptedBytes()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Documents:StorageRoot"] = root,
+                ["Documents:EncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            }).Build();
+            using var storage = new DocumentStorage(
+                configuration,
+                new TestWebHostEnvironment(root, "Production"),
+                new RejectDocumentThreatScanner());
+
+            await using var input = new MemoryStream(ValidPng);
+            var exception = await Assert.ThrowsAsync<DocumentThreatScanException>(() =>
+                storage.ValidateAndStoreAsync(Guid.NewGuid(), Guid.NewGuid(), "infected.png", input, ValidPng.Length, CancellationToken.None));
+
+            Assert.True(exception.ThreatDetected);
+            Assert.Empty(Directory.GetFiles(root, "*", SearchOption.AllDirectories));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     [Fact]
     public async Task DetectsTamperingOfEncryptedDocument()
     {
@@ -126,7 +153,18 @@ public sealed class DocumentStorageTests
             ["Documents:StorageRoot"] = root,
             ["Documents:EncryptionKey"] = key
         }).Build();
-        return new DocumentStorage(configuration, new TestWebHostEnvironment(root, "Production"));
+        return new DocumentStorage(configuration, new TestWebHostEnvironment(root, "Production"), new AllowDocumentThreatScanner());
+    }
+
+    private sealed class AllowDocumentThreatScanner : IDocumentThreatScanner
+    {
+        public Task ScanAsync(ReadOnlyMemory<byte> document, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class RejectDocumentThreatScanner : IDocumentThreatScanner
+    {
+        public Task ScanAsync(ReadOnlyMemory<byte> document, CancellationToken cancellationToken) =>
+            throw new DocumentThreatScanException("test threat", threatDetected: true);
     }
 
     private static string CreateTemporaryDirectory()
