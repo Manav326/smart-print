@@ -380,6 +380,9 @@ public sealed class LocalPrintUploadTicket
     public string? PrivateRelayWrappedKey { get; set; }
     public string? PrivateRelayIv { get; set; }
     public DateTimeOffset? PrivateRelayUploadedUtc { get; set; }
+    public DateTimeOffset? PrivateRelayFailedUtc { get; set; }
+    public string? PrivateRelayFailureCode { get; set; }
+    public string? PrivateRelayFailureMessage { get; set; }
 }
 
 

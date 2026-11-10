@@ -149,3 +149,5 @@ public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerS
 
 
 public sealed record AgentPdfExportedRequest(string FileName, string OutputPath, long SizeBytes, string Sha256);
+
+public sealed record AgentPrivateRelayRejectRequest(string Code, string Message);

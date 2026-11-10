@@ -38,6 +38,7 @@ public sealed record AgentPrivateRelayItem(
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc);
 
 public sealed record AgentPrivateRelayPendingResponse(IReadOnlyList<AgentPrivateRelayItem> Items);
+public sealed record AgentPrivateRelayRejectRequest(string Code, string Message);
 
 public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);
 
