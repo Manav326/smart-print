@@ -106,6 +106,10 @@ app.MapPost("/analyze", async (HttpContext context, CancellationToken cancellati
         finally
         {
             CryptographicOperations.ZeroMemory(document);
+            if (memory.TryGetBuffer(out var buffer))
+            {
+                CryptographicOperations.ZeroMemory(buffer.AsSpan(0, checked((int)memory.Length)));
+            }
         }
     }
     finally
