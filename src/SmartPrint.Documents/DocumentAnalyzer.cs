@@ -136,7 +136,8 @@ public static class DocumentAnalyzer
             // Header checks are cheap, but cannot prove that compressed pixel data
             // is complete. Decode the entire single-frame image before it becomes
             // a payable print job so truncated/corrupt files cannot pass preflight.
-            var imageInfo = ImageInfo.FromMemory(bytes);
+            using var infoStream = new MemoryStream(bytes, writable: false);
+            var imageInfo = ImageInfo.FromStream(infoStream);
             if (imageInfo is null)
                 throw new DocumentValidationException("The image format could not be identified.");
 
