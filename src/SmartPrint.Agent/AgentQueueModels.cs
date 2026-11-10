@@ -31,6 +31,14 @@ public sealed record AgentJobClaimResponse(
 
 public sealed record AgentPrivateDocumentPurgeResponse(IReadOnlyList<Guid> JobIds);
 
+public sealed record AgentPrivateRelayItem(
+    Guid TicketId, Guid PrintJobId, string JobNumber, Guid PrinterDeviceId,
+    string PrinterName, string QueueName, string FileExtension, string MediaType,
+    long SizeBytes, string Sha256, string ColourMode, string PaperSize,
+    bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc);
+
+public sealed record AgentPrivateRelayPendingResponse(IReadOnlyList<AgentPrivateRelayItem> Items);
+
 public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);
 
 public sealed record LocalPrintUploadCompletionRequest(

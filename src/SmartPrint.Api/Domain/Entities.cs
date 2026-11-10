@@ -376,6 +376,10 @@ public sealed class LocalPrintUploadTicket
     public DateTimeOffset? ClaimedUtc { get; set; }
     public DateTimeOffset? ClaimLeaseExpiresUtc { get; set; }
     public DateTimeOffset? CompletedUtc { get; set; }
+    public string? PrivateRelayStorageKey { get; set; }
+    public string? PrivateRelayWrappedKey { get; set; }
+    public string? PrivateRelayIv { get; set; }
+    public DateTimeOffset? PrivateRelayUploadedUtc { get; set; }
 }
 
 
