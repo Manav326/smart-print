@@ -2937,6 +2937,11 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
             message = "Select a printer on a paired, online computer with a recent heartbeat and a ready or busy Windows queue."
         });
     }
+    if (selectedJob.PrivatePrinting && printer.OutputMode == "PDF_EXPORT")
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "private_printing_physical_output_required", message = "Private Printing must be sent to a physical printer. Saving the source as a managed PDF is not available." });
+    }
 
     var activeJobs = batchJobs
         .Where(item => item.Status is not ("REJECTED" or "REFUNDED"))
@@ -3242,6 +3247,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
         (x.Status == "VERIFIED" || x.Status == "PARTIALLY_REFUNDED"), ct);
     if (ready is null || !verified)
         return Results.Conflict(new { code = "print_prerequisites_not_met", message = "Verified payment and the same paired computer's live printer queue are required." });
+    if (job.PrivatePrinting && ready.OutputMode == "PDF_EXPORT")
+        return Results.Conflict(new { code = "private_printing_physical_output_required", message = "Private Printing must be sent to a physical printer, not exported as a managed PDF." });
 
     var previous = job.Status;
     job.Status = "PRINT_AUTHORISED";
@@ -3412,6 +3419,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision-grant", async (
     var job = await db.PrintJobs.AsNoTracking()
         .SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == tenantId, ct);
     if (job is null) return Results.NotFound();
+    if (job.PrivatePrinting)
+        return Results.Conflict(new { code = "private_printing_source_locked", message = "Private Printing documents cannot be opened or revised by the shop. Ask the customer to submit a new document when a change is needed." });
 
     if (job.Status != "AWAITING_SHOP_APPROVAL" ||
         job.LocalQueueReceivedUtc is not null ||
@@ -3737,6 +3746,10 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
     if (!TryGetTenantId(principal, out var tenantId))
         return Results.Forbid();
 
+    if (await db.PrintJobs.AsNoTracking().AnyAsync(job =>
+        job.Id == jobId && job.TenantId == tenantId && job.PrivatePrinting, ct))
+        return Results.Conflict(new { code = "private_printing_source_locked", message = "The customer selected Private Printing. The shop cannot preview or retrieve the original document." });
+
     var variant = context.Request.Query["variant"].FirstOrDefault();
     var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
     if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
@@ -3852,6 +3865,14 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
     {
         return Results.Forbid();
     }
+
+    var privatePrinting = await db.PrintJobs.AsNoTracking()
+        .Where(job => job.TenantId == tenantId && job.Id == jobId)
+        .Select(job => (bool?)job.PrivatePrinting)
+        .SingleOrDefaultAsync(ct);
+    if (privatePrinting is null) return Results.NotFound();
+    if (privatePrinting.Value)
+        return Results.Conflict(new { code = "private_printing_source_locked", message = "The customer selected Private Printing. The original source document is not available in the shop portal." });
 
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
