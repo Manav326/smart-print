@@ -676,7 +676,7 @@ public sealed class AgentLocalQueueStore
                 await SaveManifestAsync(entry with { CompletedUtc = DateTimeOffset.UtcNow }, ct);
             return;
         }
-        if (entry.State is not ("SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED"))
+        if (entry.State is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED"))
             throw new InvalidOperationException($"Cannot confirm local output from state {entry.State}.");
         await SaveManifestAsync(entry with
         {
