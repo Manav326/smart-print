@@ -92,6 +92,7 @@ services:
       start_period: 10s
 
   api:
+    stop_grace_period: 4m
     networks:
       default:
         aliases:
@@ -106,6 +107,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ASPNETCORE_URLS: http://+:8080
+      HostOptions__ShutdownTimeout: 00:04:00
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
       ConnectionStrings__SmartPrint: "Host=db;Port=5432;Database=${POSTGRES_DB:-qrtoprint};Username=${POSTGRES_USER:-qrtoprint};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       Authentication__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
@@ -144,6 +146,7 @@ services:
       start_period: 45s
 
   portal:
+    stop_grace_period: 1m
     image: ${IMAGE_NAMESPACE:?Set IMAGE_NAMESPACE in .env}/smart-print-portal:${IMAGE_TAG:-latest}
     build:
       context: .
