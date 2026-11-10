@@ -82,7 +82,7 @@ class IdStudioInstrumentedTest {
             }
         } finally {
             prepared.delete()
-            idStore.deleteDraft(draftId)
+            if (idStore.draftExists(draftId)) idStore.deleteDraft(draftId)
         }
     }
 
