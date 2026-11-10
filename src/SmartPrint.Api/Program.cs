@@ -947,6 +947,7 @@ customerApi.MapGet("/jobs", async (
         select new
         {
             job.Id,
+            job.PrivatePrinting,
             job.BatchId,
             job.BatchGroupName,
             job.BatchName,
@@ -9766,6 +9767,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         .Select(item => new
         {
             item.Id,
+            item.PrivatePrinting,
             item.JobNumber,
             item.Status,
             item.PageCount,
