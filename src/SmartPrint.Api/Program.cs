@@ -5798,6 +5798,72 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });
 });
 
+agentApi.MapPost("/jobs/{jobId:guid}/private-document-purged", async (
+    Guid jobId,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var job = await db.PrintJobs.SingleOrDefaultAsync(item =>
+        item.Id == jobId && item.TenantId == device.TenantId, ct);
+    if (job is null) return Results.NotFound();
+    if (!job.PrivatePrinting || job.Status != "COMPLETED" || job.OutputConfirmedUtc is null ||
+        !string.Equals(job.OutputType, "PHYSICAL", StringComparison.OrdinalIgnoreCase) ||
+        job.ClaimedByAgentDeviceId != device.Id)
+        return Results.Conflict(new { code = "private_document_purge_not_authorized", message = "Only the original paired Agent may confirm deletion after physical output has been confirmed." });
+
+    var document = await db.PrintDocuments.SingleOrDefaultAsync(item =>
+        item.TenantId == device.TenantId && item.PrintJobId == jobId, ct);
+    if (document is null || document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId != device.Id)
+        return Results.Conflict(new { code = "private_document_purge_record_missing", message = "The private document record does not match the original paired Agent." });
+
+    if (document.PurgedUtc is null)
+    {
+        var now = DateTimeOffset.UtcNow;
+        document.OriginalFileName = "Private document";
+        document.MediaType = "application/octet-stream";
+        document.FileExtension = ".private";
+        document.SizeBytes = 0;
+        document.Sha256 = string.Empty;
+        document.StorageKey = string.Empty;
+        document.PageSizesJson = "[]";
+        document.PurgedUtc = now;
+
+        var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
+            item.TenantId == device.TenantId && item.PrintJobId == jobId && item.PrivatePrinting, ct);
+        if (ticket is not null)
+        {
+            ticket.OriginalFileName = "Private document";
+            ticket.MediaType = "application/octet-stream";
+            ticket.FileExtension = ".private";
+            ticket.SizeBytes = 0;
+            ticket.Sha256 = string.Empty;
+            ticket.BatchGroupName = "Private documents";
+            ticket.BatchName = null;
+        }
+
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = device.TenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = job.Status,
+            NewStatus = job.Status,
+            ActorType = "PrintAgent",
+            ActorId = device.Id,
+            ReasonCode = "PRIVATE_PRINT_SOURCE_DOCUMENT_PURGED",
+            CreatedUtc = now
+        });
+        await db.SaveChangesAsync(ct);
+    }
+
+    await transaction.CommitAsync(ct);
+    return Results.Ok(new { job.Id, Purged = true, document.PurgedUtc });
+});
+
 agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async (
     Guid jobId,
     HttpContext context,
@@ -7647,11 +7713,12 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     {
         var existingGrantHash = Convert.FromHexString(existing.GrantHash);
         var suppliedGrantHash = Convert.FromHexString(grantHash);
+        var completedPrivateTicket = existing.PrivatePrinting && existing.CompletedUtc is not null;
         if (!CryptographicOperations.FixedTimeEquals(existingGrantHash, suppliedGrantHash) ||
-            existing.SizeBytes != request.SizeBytes ||
-            !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
-            existing.OriginalFileName != originalName ||
             existing.PrivatePrinting != request.PrivatePrinting ||
+            (!completedPrivateTicket && (existing.SizeBytes != request.SizeBytes ||
+                !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
+                existing.OriginalFileName != originalName)) ||
             (request.BatchId is Guid requestedBatchId && existing.BatchId != requestedBatchId) ||
             (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
             PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName ||
