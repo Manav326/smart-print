@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   Check, ChevronLeft, ChevronRight, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
   Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette
@@ -424,7 +424,7 @@ export default function PhotoStudio({
     if(textDragRef.current?.pointerId===event.pointerId)textDragRef.current=null;
   }
 
-  function handleBackgroundPick(event:MouseEvent<HTMLCanvasElement>){
+  function handleBackgroundPick(event:ReactPointerEvent<HTMLCanvasElement>){
     if(!pickingBackground||!image)return;
     const canvas=event.currentTarget,bounds=canvas.getBoundingClientRect();
     if(!bounds.width||!bounds.height)return;
@@ -661,7 +661,7 @@ export default function PhotoStudio({
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
               {image ? <div className={styles.previewStage} data-photo-preview-stage>
-                <canvas id="photo-studio-preview-canvas" ref={canvasRef} width={420} height={594} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} data-testid="photo-studio-preview-canvas" data-background-sample-x-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.xMm ?? 0) + 2} data-background-sample-y-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.yMm ?? 0) + 2} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/>
+                <canvas id="photo-studio-preview-canvas" ref={canvasRef} width={420} height={594} onPointerUp={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} data-testid="photo-studio-preview-canvas" data-background-sample-x-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.xMm ?? 0) + 2} data-background-sample-y-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.yMm ?? 0) + 2} draggable={false} role="img" aria-label={"A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/>
                 <div className={styles.previewProtection} aria-hidden="true"/>
                 {textLayers.map(layer=><button
                   key={layer.id}
