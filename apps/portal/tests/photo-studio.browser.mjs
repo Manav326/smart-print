@@ -291,7 +291,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await samplePhotoBackground(page);
 
   await activatePhotoTool(page, "Sheet", "Photos per A4 page");
-  const textTool = page.getByRole("button", { name: "Text" });
+  const textTool = page.getByRole("button", { name: "Text", exact: true });
   assert.equal(await textTool.isDisabled(), false,
     "The Text tool must be available without enabling optional name/DOB captions.");
   await textTool.click();
@@ -328,7 +328,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await captionToggle.check();
   await page.getByLabel("Name for form (optional)").fill("Photo Studio QA");
   await page.getByLabel("Date of birth (optional)").fill("2000-01-02");
-  await page.getByRole("button", { name: "Text" }).click();
+  await page.getByRole("button", { name: "Text", exact: true }).click();
   await page.getByLabel("Caption font size").selectOption("7");
   await setControlValue(page, "Caption colour", "#c02020");
   await activatePhotoTool(page, "Sheet", "Photos per A4 page");
@@ -639,7 +639,7 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
   await page.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).check();
   await page.getByLabel("Name for form (optional)").fill("Shop Owner QA");
   await page.getByLabel("Date of birth (optional)").fill("1998-05-17");
-  await page.getByRole("button", { name: "Text" }).click();
+  await page.getByRole("button", { name: "Text", exact: true }).click();
   await page.getByLabel("Caption font size").selectOption("7");
   await setControlValue(page, "Caption colour", "#202020");
   await activatePhotoTool(page, "Sheet", "Photos per A4 page");
