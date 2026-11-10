@@ -383,6 +383,7 @@ public sealed class LocalAgentApiHostedService(
                 Guid jobId,
                 HttpContext context,
                 WindowsDefenderDocumentThreatScanner threatScanner,
+                WindowsLocalDocumentAnalyzer documentAnalyzer,
                 CancellationToken ct) =>
             {
                 AgentCredentials? credentials;
@@ -454,7 +455,7 @@ public sealed class LocalAgentApiHostedService(
                 DocumentAnalysis analysis;
                 try
                 {
-                    analysis = DocumentAnalyzer.Analyse(bytes, ".pdf");
+                    analysis = await documentAnalyzer.AnalyzeAsync(bytes, ".pdf", ct);
                 }
                 catch (DocumentValidationException exception)
                 {
@@ -773,6 +774,7 @@ public sealed class LocalAgentApiHostedService(
                 Guid ticketId,
                 HttpContext context,
                 WindowsDefenderDocumentThreatScanner threatScanner,
+                WindowsLocalDocumentAnalyzer documentAnalyzer,
                 CancellationToken ct) =>
             {
                 AgentCredentials? credentials;
@@ -925,7 +927,7 @@ public sealed class LocalAgentApiHostedService(
                     DocumentAnalysis analysis;
                     try
                     {
-                        analysis = DocumentAnalyzer.Analyse(bytes, claim.FileExtension);
+                        analysis = await documentAnalyzer.AnalyzeAsync(bytes, claim.FileExtension, ct);
                     }
                     catch (DocumentValidationException exception)
                     {
