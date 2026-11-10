@@ -7744,7 +7744,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     var extension = Path.GetExtension(originalName).ToLowerInvariant();
     if (request.PrivatePrinting)
     {
-        originalName = "private-document" + extension;
+        originalName = "Private document";
         batchGroupName = "Private documents";
         requestedBatchName = null;
     }
