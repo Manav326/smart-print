@@ -563,7 +563,7 @@ else if (mode == "analyze-worker")
         .Build();
     var analyzer = new WindowsLocalDocumentAnalyzer(
         configuration, new WindowsLocalDocumentWorkerServiceStarter());
-    DocumentAnalysis? analysis = null;
+    SmartPrint.Documents.DocumentAnalysis? analysis = null;
     for (var request = 0; request < 2; request++)
     {
         analysis = await analyzer.AnalyzeAsync(png, ".png", CancellationToken.None);
