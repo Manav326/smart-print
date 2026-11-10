@@ -3531,6 +3531,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun addIdStudioPickerSection(parent: LinearLayout) {
+        if (portalUrl == null) return
         val prepared = idStudioStore.listPrepared()
         if (prepared.isEmpty()) return
         val section = LinearLayout(this).apply {
@@ -3744,6 +3745,10 @@ class MainActivity : AppCompatActivity() {
     private fun chooseFiles(files: List<File>, groupNames: List<String>? = null) {
         val callback = fileCallback
         if (callback == null) { toast("Open a document field in the print page first."); return }
+        if (files.any(idStudioStore::isPreparedDocument) && portalUrl == null) {
+            toast("Scan a shop QR code before selecting a prepared ID for printing.")
+            return
+        }
         val error = PrintBatchSelectionPolicy.validationError(files)
         if (error != null) { toast(error); return }
         if (!fileChooserAllowsMultiple && files.size != 1) {
