@@ -3735,9 +3735,13 @@ class MainActivity : AppCompatActivity() {
             val previewTokens = JSONArray().apply {
                 files.forEach { put(createCustomerUploadPdfPreview(it) ?: JSONObject.NULL) }
             }
+            val nativePrintKinds = JSONArray().apply {
+                files.forEach { put(if (idStudioStore.isPreparedDocument(it)) "ID_DOCUMENT" else "DOCUMENT") }
+            }
             val metadataScript = "window.__smartPrintNativePickerGroups = " +
                 JSONArray().apply { safeGroupNames.forEach { put(it) } }.toString() + ";" +
-                "window.__smartPrintNativePdfPreviews = " + previewTokens.toString() + ";"
+                "window.__smartPrintNativePdfPreviews = " + previewTokens.toString() + ";" +
+                "window.__smartPrintNativePrintKinds = " + nativePrintKinds.toString() + ";"
             val deliverSelection = {
                 fileCallback = null
                 chooserSelectedFilePaths.clear()
