@@ -6072,6 +6072,15 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
+    if (job.PrivatePrinting)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "private_printing_source_locked",
+            message = "Private Printing documents cannot be modified by the shop Agent."
+        });
+    }
 
     // Idempotent retry: the previous completion may have committed while its
     // HTTP response was lost. Recognise the exact same prepared sheet before
@@ -6263,6 +6272,14 @@ agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
             message = "The paired Print Agent identity was rejected by the shop service. Repair or re-pair this computer, then reopen the document preview."
         }, statusCode: StatusCodes.Status401Unauthorized);
     }
+
+    if (await db.PrintJobs.AsNoTracking().AnyAsync(job =>
+        job.Id == jobId && job.TenantId == device.TenantId && job.PrivatePrinting, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_source_locked",
+            message = "The customer selected Private Printing. The shop Agent cannot preview or retrieve the original source document."
+        });
 
     var grantToken = context.Request.Headers["X-Print-Preview-Grant"].FirstOrDefault();
     if (!LocalDocumentPreviewGrant.TryValidate(
@@ -7291,6 +7308,14 @@ publicApi.MapPost("/sessions/current/jobs", async (
     }
 
     var form = await context.Request.ReadFormAsync(ct);
+    if (bool.TryParse(form["privatePrinting"].FirstOrDefault(), out var privatePrintingRequested) && privatePrintingRequested)
+    {
+        return Results.Conflict(new
+        {
+            code = "private_printing_requires_local_agent",
+            message = "Private Printing is available only through encrypted direct transfer to the paired shop computer. Cloud document storage is disabled."
+        });
+    }
     if (form.Files.Count != 1)
     {
         return Results.BadRequest(new { code = "one_file_required", message = "Upload one document per print job." });
