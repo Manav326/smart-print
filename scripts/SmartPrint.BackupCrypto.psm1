@@ -238,7 +238,7 @@ function Protect-SmartPrintBackup {
     $tag = $null
     $nonce = $null
     $aad = $null
-    $input = $null
+    $inputStream = $null
     $output = $null
 
     try {
@@ -247,8 +247,8 @@ function Protect-SmartPrintBackup {
         $header = [byte[]]$metadata.Header
         $key = [SmartPrintBackupCryptoV1]::DeriveKey($passwordBytes, [byte[]]$metadata.Salt, $script:SmartPrintBackupIterations)
         $aes = [SmartPrintBackupAesGcm]::new($key)
-        $input = [IO.File]::OpenRead($sourcePath)
-        if ($input.Length -le 0) { throw "Refusing to encrypt an empty backup bundle." }
+        $inputStream = [IO.File]::OpenRead($sourcePath)
+        if ($inputStream.Length -le 0) { throw "Refusing to encrypt an empty backup bundle." }
         $output = [IO.File]::Open($temporaryPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
         $output.Write($header, 0, $header.Length)
 
@@ -259,7 +259,7 @@ function Protect-SmartPrintBackup {
         while ($true) {
             $filled = 0
             while ($filled -lt $buffer.Length) {
-                $read = $input.Read($buffer, $filled, $buffer.Length - $filled)
+                $read = $inputStream.Read($buffer, $filled, $buffer.Length - $filled)
                 if ($read -le 0) { break }
                 $filled += $read
             }
@@ -277,7 +277,8 @@ function Protect-SmartPrintBackup {
             Write-SmartPrintUInt32BigEndian -Stream $output -Value ([uint32]$filled)
             $output.Write($cipher, 0, $cipher.Length)
             $output.Write($tag, 0, $tag.Length)
-            $totalBytes = [checked]($totalBytes + [uint64]$filled)
+            if ([uint64]::MaxValue - $totalBytes -lt [uint64]$filled) { throw "The backup is too large for this encrypted format." }
+            $totalBytes = [uint64]($totalBytes + [uint64]$filled)
             $chunkCount++
 
             [SmartPrintBackupCryptoV1]::Zero($plain)
@@ -319,7 +320,7 @@ function Protect-SmartPrintBackup {
         throw
     }
     finally {
-        if ($null -ne $input) { $input.Dispose() }
+        if ($null -ne $inputStream) { $inputStream.Dispose() }
         if ($null -ne $output) { $output.Dispose() }
         if ($null -ne $aes) { $aes.Dispose() }
         foreach ($bytes in @($passwordBytes, $key, $plain, $cipher, $tag, $nonce, $aad)) {
@@ -358,14 +359,14 @@ function Unprotect-SmartPrintBackup {
     $tag = $null
     $nonce = $null
     $aad = $null
-    $input = $null
+    $inputStream = $null
     $output = $null
     $header = $null
 
     try {
         $passwordBytes = [byte[]](Get-SmartPrintBackupPasswordBytes -Passphrase $Passphrase)
-        $input = [IO.File]::OpenRead($sourcePath)
-        $header = [byte[]](Read-SmartPrintExactly -Stream $input -Count 40)
+        $inputStream = [IO.File]::OpenRead($sourcePath)
+        $header = [byte[]](Read-SmartPrintExactly -Stream $inputStream -Count 40)
         if (-not [SmartPrintBackupCryptoV1]::FixedTimeEquals(
             [byte[]]$header[0..7], $script:SmartPrintBackupMagic)) {
             throw "The backup file format is unsupported."
@@ -393,11 +394,11 @@ function Unprotect-SmartPrintBackup {
         [uint32]$chunkCount = 0
 
         while ($true) {
-            $recordLength = Read-SmartPrintUInt32BigEndian -Stream $input
+            $recordLength = Read-SmartPrintUInt32BigEndian -Stream $inputStream
             if ($recordLength -eq [uint32]::MaxValue) {
-                $footerBytes = Read-SmartPrintUInt64BigEndian -Stream $input
-                $footerChunks = Read-SmartPrintUInt32BigEndian -Stream $input
-                $tag = [byte[]](Read-SmartPrintExactly -Stream $input -Count $script:SmartPrintBackupTagSize)
+                $footerBytes = Read-SmartPrintUInt64BigEndian -Stream $inputStream
+                $footerChunks = Read-SmartPrintUInt32BigEndian -Stream $inputStream
+                $tag = [byte[]](Read-SmartPrintExactly -Stream $inputStream -Count $script:SmartPrintBackupTagSize)
                 if ($footerBytes -ne $totalBytes -or $footerChunks -ne $chunkCount) {
                     throw "The encrypted backup footer does not match its contents."
                 }
@@ -406,7 +407,7 @@ function Unprotect-SmartPrintBackup {
                 $aad = [SmartPrintBackupCryptoV1]::FooterAad($header, $footerBytes, $footerChunks)
                 $empty = [byte[]]::new(0)
                 $aes.Decrypt($nonce, $empty, $tag, $empty, $aad)
-                if ($input.Position -ne $input.Length) {
+                if ($inputStream.Position -ne $inputStream.Length) {
                     throw "The encrypted backup contains unexpected trailing data."
                 }
 
@@ -417,7 +418,7 @@ function Unprotect-SmartPrintBackup {
                 return [pscustomobject]@{
                     Path = $destinationPath
                     PlaintextBytes = $totalBytes
-                    EncryptedBytes = $input.Length
+                    EncryptedBytes = $inputStream.Length
                     ChunkCount = $chunkCount
                     Format = "SPBKUP01"
                     Authenticated = $true
@@ -428,14 +429,15 @@ function Unprotect-SmartPrintBackup {
                 throw "The encrypted backup contains an invalid chunk length or counter."
             }
 
-            $cipher = [byte[]](Read-SmartPrintExactly -Stream $input -Count ([int]$recordLength))
-            $tag = [byte[]](Read-SmartPrintExactly -Stream $input -Count $script:SmartPrintBackupTagSize)
+            $cipher = [byte[]](Read-SmartPrintExactly -Stream $inputStream -Count ([int]$recordLength))
+            $tag = [byte[]](Read-SmartPrintExactly -Stream $inputStream -Count $script:SmartPrintBackupTagSize)
             $plain = [byte[]]::new([int]$recordLength)
             $nonce = [SmartPrintBackupCryptoV1]::MakeNonce($noncePrefix, $chunkCount)
             $aad = [SmartPrintBackupCryptoV1]::ChunkAad($header, $chunkCount, $recordLength)
             $aes.Decrypt($nonce, $cipher, $tag, $plain, $aad)
             $output.Write($plain, 0, $plain.Length)
-            $totalBytes = [checked]($totalBytes + [uint64]$recordLength)
+            if ([uint64]::MaxValue - $totalBytes -lt [uint64]$recordLength) { throw "The backup is too large for this encrypted format." }
+            $totalBytes = [uint64]($totalBytes + [uint64]$recordLength)
             $chunkCount++
 
             [SmartPrintBackupCryptoV1]::Zero($cipher)
@@ -451,7 +453,7 @@ function Unprotect-SmartPrintBackup {
         throw
     }
     finally {
-        if ($null -ne $input) { $input.Dispose() }
+        if ($null -ne $inputStream) { $inputStream.Dispose() }
         if ($null -ne $output) { $output.Dispose() }
         if ($null -ne $aes) { $aes.Dispose() }
         foreach ($bytes in @($passwordBytes, $key, $plain, $cipher, $tag, $nonce, $aad, $header)) {
