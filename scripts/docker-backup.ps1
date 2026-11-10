@@ -119,7 +119,12 @@ try {
         throw "Could not locate the API container's persistent document volume."
     }
 
-    $backupContainer = docker create --volumes-from ($apiContainer.Trim() + ":ro") alpine:3.20 sh -c "tar -czf $tempDocsFile -C /var/lib/qrtoprint/documents ."
+    $documentsVolumeFormat = '{{range .Mounts}}{{if eq .Destination "/var/lib/qrtoprint/documents"}}{{.Name}}{{end}}{{end}}'
+    $documentsVolume = docker inspect --format $documentsVolumeFormat $apiContainer.Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($documentsVolume)) {
+        throw "Could not identify the API's persistent cloud-document volume."
+    }
+    $backupContainer = docker create --mount "type=volume,source=$($documentsVolume.Trim()),destination=/var/lib/qrtoprint/documents,readonly" alpine:3.20 sh -c "tar -czf $tempDocsFile -C /var/lib/qrtoprint/documents ."
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($backupContainer)) {
         throw "Could not create the read-only document archive helper."
     }
