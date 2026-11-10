@@ -960,10 +960,12 @@ customerApi.MapGet("/jobs", async (
             job.RejectedPageNumbersJson,
             job.OutputCompletedUtc,
             ShopName = profile.DisplayName,
-            OriginalFileName = db.PrintDocuments.AsNoTracking()
-                .Where(document => document.TenantId == job.TenantId && document.PrintJobId == job.Id)
-                .Select(document => document.OriginalFileName)
-                .FirstOrDefault(),
+            OriginalFileName = job.PrivatePrinting
+                ? "Private document"
+                : db.PrintDocuments.AsNoTracking()
+                    .Where(document => document.TenantId == job.TenantId && document.PrintJobId == job.Id)
+                    .Select(document => document.OriginalFileName)
+                    .FirstOrDefault(),
             PaidAmountMinor = db.PrintPayments.AsNoTracking()
                 .Where(payment => payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
                     (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED" || payment.Status == "REFUNDED"))
@@ -1048,10 +1050,13 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.RejectedPageNumbersJson,
             item.OutputCompletedUtc,
             item.UpdatedUtc,
-            OriginalFileName = db.PrintDocuments.AsNoTracking()
-                .Where(document => document.TenantId == item.TenantId && document.PrintJobId == item.Id)
-                .Select(document => document.OriginalFileName)
-                .FirstOrDefault()
+            item.PrivatePrinting,
+            OriginalFileName = item.PrivatePrinting
+                ? "Private document"
+                : db.PrintDocuments.AsNoTracking()
+                    .Where(document => document.TenantId == item.TenantId && document.PrintJobId == item.Id)
+                    .Select(document => document.OriginalFileName)
+                    .FirstOrDefault()
         })
         .SingleAsync(ct);
 
@@ -5178,6 +5183,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         return Results.Ok(new
         {
             AlreadyCompleted = true,
+            PrivatePrinting = ticket.PrivatePrinting,
             UploadResult = new
             {
                 Job = new
