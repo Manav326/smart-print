@@ -783,6 +783,77 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+    [Fact]
+    public async Task PrivateSourceIsRemovedOnlyAfterConfirmedPhysicalOutputAndServerAcknowledgement()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Sensitive customer private-print document"u8.ToArray();
+            var job = CreateJob(bytes) with { PrivatePrinting = true, StorageMode = "LOCAL_AGENT" };
+            var entry = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Private-Purge-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 789, "SmartPrint-Private-Purge-Test", CancellationToken.None);
+            Assert.True(File.Exists(entry.DocumentPath));
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+
+            await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
+
+            var sanitized = store.Find(job.Id)!;
+            Assert.Equal("OUTPUT_CONFIRMED", sanitized.State);
+            Assert.True(sanitized.PrivatePrinting);
+            Assert.True(sanitized.PrivatePurgePending);
+            Assert.Equal("Private document", sanitized.DocumentName);
+            Assert.Equal(string.Empty, sanitized.DocumentPath);
+            Assert.Equal(string.Empty, sanitized.Sha256);
+            Assert.Equal(0, sanitized.SizeBytes);
+            Assert.False(File.Exists(entry.DocumentPath));
+            Assert.Contains(store.GetPrivatePurgePendingJobs(), item => item.JobId == job.Id);
+
+            await store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None);
+            Assert.False(store.Find(job.Id)!.PrivatePurgePending);
+            Assert.Empty(store.GetPrivatePurgePendingJobs());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PrivateSourceRemainsAvailableWhenPhysicalOutputIsUnconfirmed()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Keep private print available for output reconciliation"u8.ToArray();
+            var job = CreateJob(bytes) with { PrivatePrinting = true, StorageMode = "LOCAL_AGENT" };
+            var entry = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Private-Unconfirmed", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 790, "SmartPrint-Private-Unconfirmed", CancellationToken.None);
+            await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
+
+            Assert.Equal("OUTPUT_UNCONFIRMED", store.Find(job.Id)!.State);
+            Assert.True(File.Exists(entry.DocumentPath));
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.Empty(store.GetPrivatePurgePendingJobs());
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                DateTimeOffset.UtcNow.AddDays(365), TimeSpan.FromDays(1), root, CancellationToken.None));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
