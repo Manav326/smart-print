@@ -68,6 +68,36 @@ object IdCardPdfComposer {
         }
     }
 
+    fun renderSheetPreview(
+        frontFile: File,
+        backFile: File,
+        frontRotationDegrees: Int,
+        backRotationDegrees: Int,
+        cardWidthMm: Float = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM,
+        cardHeightMm: Float = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
+    ): Bitmap {
+        require(frontFile.isFile && backFile.isFile) { "Both sides of the card must be scanned." }
+        require(frontRotationDegrees in setOf(0, 180) && backRotationDegrees in setOf(0, 180)) {
+            "Card orientation must be 0 or 180 degrees."
+        }
+        val layout = IdCardLayoutPolicy.calculate(cardWidthMm, cardHeightMm)
+        val preview = Bitmap.createBitmap(
+            IdCardLayoutPolicy.PAGE_WIDTH_POINTS.toInt(),
+            IdCardLayoutPolicy.PAGE_HEIGHT_POINTS.toInt(),
+            Bitmap.Config.ARGB_8888
+        )
+        try {
+            val canvas = Canvas(preview)
+            canvas.drawColor(Color.WHITE)
+            drawCard(canvas, frontFile, layout.front, frontRotationDegrees, "FRONT", layout)
+            drawCard(canvas, backFile, layout.back, backRotationDegrees, "BACK", layout)
+            return preview
+        } catch (error: Exception) {
+            preview.recycle()
+            throw error
+        }
+    }
+
     fun decodePreview(file: File, rotation: Int): Bitmap {
         var bitmap = ImagePdfComposer.decodePreviewBitmap(file, 700)
             ?: error("A scanned card side could not be decoded. Please scan that side again.")

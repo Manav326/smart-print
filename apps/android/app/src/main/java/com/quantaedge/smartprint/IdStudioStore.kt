@@ -27,7 +27,11 @@ class IdStudioStore(filesDir: File) {
 
     fun createDraft(): String {
         val id = UUID.randomUUID().toString()
-        check(draftDirectory(id).mkdir()) { "A private ID scan session could not be started." }
+        val directory = File(drafts, id).canonicalFile
+        require(directory.parentFile?.canonicalPath == drafts.canonicalPath) {
+            "ID scan storage path is invalid."
+        }
+        check(directory.mkdir()) { "A private ID scan session could not be started." }
         return id
     }
 
@@ -37,8 +41,7 @@ class IdStudioStore(filesDir: File) {
         require(directory.parentFile?.canonicalPath == drafts.canonicalPath) {
             "ID scan storage path is invalid."
         }
-        if (!directory.exists()) check(directory.mkdirs()) { "Private ID scan storage is unavailable." }
-        require(directory.isDirectory) { "Private ID scan storage is unavailable." }
+        require(directory.isDirectory) { "This private ID scan session is no longer available." }
         return directory
     }
 
@@ -71,8 +74,25 @@ class IdStudioStore(filesDir: File) {
             require(bounds.outWidth.toLong() * bounds.outHeight.toLong() <= MAX_IMAGE_PIXELS) {
                 "The scanned image is too large to prepare safely. Please scan again."
             }
-            if (target.exists()) check(target.delete()) { "The previous scan could not be replaced." }
-            check(temporary.renameTo(target)) { "The scan could not be saved securely." }
+            val decoded = BitmapFactory.decodeFile(
+                temporary.absolutePath,
+                BitmapFactory.Options().apply { inSampleSize = 4 }
+            ) ?: error("The scanned image is incomplete or unreadable. Please scan again.")
+            decoded.recycle()
+            try {
+                java.nio.file.Files.move(
+                    temporary.toPath(),
+                    target.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE
+                )
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                java.nio.file.Files.move(
+                    temporary.toPath(),
+                    target.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                )
+            }
             return target
         } catch (error: Exception) {
             temporary.delete()
