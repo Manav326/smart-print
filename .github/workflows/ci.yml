@@ -241,7 +241,7 @@ jobs:
           PUBLIC_BASE_URL: https://example.invalid
           IMAGE_NAMESPACE: ghcr.io/compose-validation
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: docker compose --env-file .env.example -f compose.yml config --quiet
+        run: docker compose --env-file .env.example -f compose.yml config --format json > "$RUNNER_TEMP/smartprint-production-compose.json"
       - name: Validate local development Compose configuration
         if: ${{ !cancelled() }}
         env:
@@ -251,7 +251,11 @@ jobs:
           AUTH_SIGNING_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
           DOCUMENTS_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
           PUBLIC_BASE_URL: https://example.invalid
-        run: docker compose -f compose.local.yml config --quiet
+        run: docker compose -f compose.local.yml config --format json > "$RUNNER_TEMP/smartprint-local-compose.json"
+
+      - name: Verify production and local Compose network isolation
+        if: ${{ !cancelled() }}
+        run: node scripts/qa/compose-network-isolation.mjs "$RUNNER_TEMP/smartprint-production-compose.json" "$RUNNER_TEMP/smartprint-local-compose.json"
 
   api_dotnet:
     runs-on: windows-latest
