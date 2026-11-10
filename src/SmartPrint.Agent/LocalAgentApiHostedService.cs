@@ -884,8 +884,8 @@ public sealed class LocalAgentApiHostedService(
                             CryptographicOperations.ZeroMemory(receivedBytes);
                             return Results.BadRequest(new { code = "private_document_encryption_required", message = "Private Printing requires the document encryption key and nonce." });
                         }
-                        byte[] aesKey;
-                        byte[] iv;
+                        byte[]? aesKey = null;
+                        byte[]? iv = null;
                         try
                         {
                             aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
@@ -894,11 +894,13 @@ public sealed class LocalAgentApiHostedService(
                         catch (Exception exception) when (exception is CryptographicException or FormatException)
                         {
                             CryptographicOperations.ZeroMemory(receivedBytes);
+                            if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
+                            if (iv is not null) CryptographicOperations.ZeroMemory(iv);
                             return Results.UnprocessableEntity(new { code = "private_document_key_invalid", message = "The private document could not be decrypted by this paired shop computer." });
                         }
                         try
                         {
-                            if (aesKey.Length != 32 || iv.Length != 12 || receivedBytes.LongLength != claim.SizeBytes + 16)
+                            if (aesKey!.Length != 32 || iv!.Length != 12 || receivedBytes.LongLength != claim.SizeBytes + 16)
                                 throw new CryptographicException("The private document encryption envelope is invalid.");
                             bytes = new byte[checked((int)claim.SizeBytes)];
                             using var aes = new AesGcm(aesKey, 16);
@@ -915,8 +917,8 @@ public sealed class LocalAgentApiHostedService(
                         finally
                         {
                             CryptographicOperations.ZeroMemory(receivedBytes);
-                            CryptographicOperations.ZeroMemory(aesKey);
-                            CryptographicOperations.ZeroMemory(iv);
+                            if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
+                            if (iv is not null) CryptographicOperations.ZeroMemory(iv);
                         }
                     }
                     else
