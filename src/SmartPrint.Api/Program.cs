@@ -7616,6 +7616,23 @@ publicApi.MapPost("/sessions/current/jobs", async (
         _ = await db.PrintJobs.FromSqlInterpolated(
             $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
             .ToListAsync(ct);
+        var hasPrivateBatchItem = await db.PrintJobs.AsNoTracking().AnyAsync(item =>
+            item.TenantId == session.TenantId && item.CustomerSessionId == session.Id &&
+            item.BatchId == batchId && item.PrivatePrinting, ct) ||
+            await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(item =>
+                item.TenantId == session.TenantId && item.CustomerSessionId == session.Id &&
+                item.BatchId == batchId && item.PrivatePrinting, ct);
+        if (hasPrivateBatchItem)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.Conflict(new
+            {
+                code = "batch_private_mode_mismatch",
+                message = "This batch already contains Private Printing documents. Keep one privacy choice for the entire batch, or start a new batch."
+            });
+        }
+
         var checkoutStartedAfterUpload = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
             item.TenantId == session.TenantId &&
             item.CustomerSessionId == session.Id &&
@@ -8108,6 +8125,22 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
         .ToListAsync(ct);
 
+    var hasOppositePrivacyMode = await db.PrintJobs.AsNoTracking().AnyAsync(item =>
+        item.TenantId == session.TenantId && item.CustomerSessionId == session.Id &&
+        item.BatchId == batchId && item.PrivatePrinting != request.PrivatePrinting, ct) ||
+        await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(item =>
+            item.TenantId == session.TenantId && item.CustomerSessionId == session.Id &&
+            item.BatchId == batchId && item.PrivatePrinting != request.PrivatePrinting, ct);
+    if (hasOppositePrivacyMode)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_private_mode_mismatch",
+            message = "This batch already contains documents with a different privacy choice. Keep one privacy choice for the entire batch, or start a new batch."
+        });
+    }
+
     var checkoutStartedAfterTicketPreflight = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
         item.TenantId == session.TenantId &&
         item.CustomerSessionId == session.Id &&
@@ -8364,13 +8397,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             DuplicateRequest = true
         });
     }
-
-    if (preflightTicket.PrivatePrinting)
-        return Results.Conflict(new
-        {
-            code = "private_printing_cloud_recovery_blocked",
-            message = "Private Printing never permits cloud recovery. Reconnect the original shop computer and retry the same local upload."
-        });
 
     if (!LocalUploadRecoveryRules.IsWithinRecoveryWindow(preflightTicket.CreatedUtc, now,
         TimeSpan.FromHours(maximumRecoveryAgeHours)))
