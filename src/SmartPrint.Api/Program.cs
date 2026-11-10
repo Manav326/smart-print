@@ -4968,7 +4968,6 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.Sha256,
             candidate.StorageMode,
             candidate.OutputMode,
-            candidate.PrivatePrinting,
             LeaseExpiresUtc = leaseExpiresUtc
         });
     }
@@ -5258,7 +5257,6 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         ticket.IsDuplex,
         ticket.Copies,
         ticket.Orientation,
-        ticket.PrivatePrinting,
         ticket.ExpiresUtc
     });
 });
