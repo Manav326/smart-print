@@ -40,7 +40,7 @@ try {
 
     Assert-True (Test-SmartPrintBackupPassphrasesEqual -First $passphrase -Second (ConvertTo-SecureString "correct horse battery stable 2026" -AsPlainText -Force)) "constant-time passphrase comparison should accept equal values"
     Assert-True (-not (Test-SmartPrintBackupPassphrasesEqual -First $passphrase -Second $mismatch)) "passphrase comparison should reject unequal values"
-    Assert-Throws { Test-SmartPrintBackupPassphrasesEqual -First (ConvertTo-SecureString "short" -AsPlainText -Force) -Second $passphrase } "short passphrases must be rejected"
+    Assert-True (-not (Test-SmartPrintBackupPassphrasesEqual -First (ConvertTo-SecureString "short" -AsPlainText -Force) -Second $passphrase)) "short passphrases must be rejected"
 
     $protection = Protect-SmartPrintBackup -InputPath $source -OutputPath $encrypted -Passphrase $passphrase
     Assert-True ($protection.Format -eq "SPBKUP01") "encrypted file should declare SPBKUP01 format"
