@@ -367,6 +367,18 @@ jobs:
         id: agent_publish
         if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
         run: dotnet publish src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/agent
+      - name: Publish restricted Windows document worker
+        id: document_worker_publish
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' && steps.agent_publish.outcome == 'success' }}
+        run: dotnet publish src/SmartPrint.DocumentWorker.Windows/SmartPrint.DocumentWorker.Windows.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/document-worker
+      - name: Add isolated document worker to the Windows Agent package
+        if: ${{ !cancelled() && steps.document_worker_publish.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          Copy-Item artifacts/document-worker/* artifacts/agent/ -Recurse -Force
+          if (-not (Test-Path artifacts/agent/SmartPrint.DocumentWorker.Windows.exe)) {
+            throw "The isolated LocalService parser executable was not packaged with the Agent."
+          }
       - name: Smoke-test non-interactive Agent pairing status command
         if: ${{ !cancelled() && steps.agent_publish.outcome == 'success' }}
         shell: pwsh
@@ -377,14 +389,14 @@ jobs:
             throw "Expected an unpaired Windows Agent to exit with code 2, got $($agentProcess.ExitCode)."
           }
       - name: Add Agent setup scripts and guide
-        if: ${{ !cancelled() && steps.agent_publish.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.document_worker_publish.outcome == 'success' }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/agent | Out-Null
           Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
       - name: Upload Windows Agent package
         id: agent_package_upload
-        if: ${{ always() && steps.agent_publish.outcome == 'success' }}
+        if: ${{ always() && steps.agent_publish.outcome == 'success' && steps.document_worker_publish.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: smart-print-agent-win-x64
