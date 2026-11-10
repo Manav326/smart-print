@@ -3218,9 +3218,10 @@ function Device({name,detail,state,tone}:{name:string;detail:string;state:string
 function Status({label,tone}:{label:string;tone:string}) { return <span className={"status-badge "+tone}><i/>{label}</span>; }
 function PrintKindTag({printKind,count}:{printKind?:string|null;count?:number}) {
   const isPhoto=printKind==="PHOTO";
-  const label=isPhoto?"Photo":"Document";
+  const isIdDocument=printKind==="ID_DOCUMENT";
+  const label=isPhoto?"Photo":isIdDocument?"ID card":"Document";
   const countLabel=typeof count==="number"&&count>1?` · ${count}`:"";
-  return <span className={`print-kind-tag print-kind-tag--${isPhoto?"photo":"document"}`} title={isPhoto?"Photo printing job":"Document printing job"}>{label}{countLabel}</span>;
+  return <span className={`print-kind-tag print-kind-tag--${isPhoto?"photo":"document"}`} title={isPhoto?"Photo printing job":isIdDocument?"Private ID card print job":"Document printing job"}>{label}{countLabel}</span>;
 }
 function initials(value:string) { return value.trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()||"").join("") || "SP"; }
 function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscriptionSummary; token: string; onUpdated: (summary: ShopSubscriptionSummary) => void }) {
@@ -4199,7 +4200,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       quotesByJobId,
       photoSettingsByJobId
     } satisfies StoredCustomerDraft));
-  },[publicCode,sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,batchName,quote,fileGroupNames,groupSettings,fileSettings,printSettingsByJobId,quotesByJobId,photoSettingsByJobId]);
+  },[publicCode,sessionToken,uploaded,uploadedBatch,uploadedFileFingerprints,batchId,batchName,quote,fileGroupNames,groupSettings,fileSettings,printSettingsByJobId,printKindsByJobId,quotesByJobId,photoSettingsByJobId]);
 
   const batchItemsForStatus=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
   const batchStatusKey=batchItemsForStatus.map(item=>item.job.id).join("|");
@@ -4389,7 +4390,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
       setSelectedFileIndex(0);
       setFiles([]);
-      if(paymentOptions.instantPaymentEnabled)await getQuote(results,savedSettings,savedPhotoSettings);
+      if(paymentOptions.instantPaymentEnabled)await getQuote(results,savedSettings,savedPhotoSettings,savedPrintKinds);
     } catch(exception) {
       setPrintSettingsByJobId(savedSettings);
       setPhotoSettingsByJobId(savedPhotoSettings);
@@ -4441,7 +4442,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     setUploaded(item);setQuote(quotesByJobId[item.job.id]??null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
-  async function getQuote(itemsOverride?:UploadedPrintJob[],settingsOverride?:Record<string,CustomerSavedPrintSettings>,photoSettingsOverride?:Record<string,CustomerPhotoSettings>) {
+  async function getQuote(itemsOverride?:UploadedPrintJob[],settingsOverride?:Record<string,CustomerSavedPrintSettings>,photoSettingsOverride?:Record<string,CustomerPhotoSettings>,printKindsOverride?:Record<string,"DOCUMENT"|"PHOTO"|"ID_DOCUMENT">) {
     const items=itemsOverride??(uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]));
     if(items.length===0)return;
     setBusy(true);setError("");setJobStatus(null);
@@ -4468,7 +4469,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           advancedEnabled:requestedSettings?.advancedEnabled??false
         };
         const photoSettings=photoSettingsOverride?.[item.job.id]??photoSettingsByJobId[item.job.id];
-        const idDocument=(printKindsByJobId[item.job.id]??item.job.printKind)==="ID_DOCUMENT";
+        const idDocument=(printKindsOverride?.[item.job.id]??printKindsByJobId[item.job.id]??item.job.printKind)==="ID_DOCUMENT";
         try {
           nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
             colourMode:photoSettings||idDocument?"Colour":settings.colourMode,
@@ -4968,7 +4969,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             const own={...defaults,...savedOwn};
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
-              <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":"DOCUMENT"}/></button>
+              <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
               <button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&<div className="customer-file-overrides">
