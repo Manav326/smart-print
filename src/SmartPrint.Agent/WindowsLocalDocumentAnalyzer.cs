@@ -16,6 +16,7 @@ public sealed class WindowsLocalDocumentAnalyzer
     public const string DefaultPipeName = "QRtoPrint.SmartPrint.DocumentWorker.v1";
     private const int MaximumDocumentBytes = 20 * 1024 * 1024;
     private const int MaximumResponseBytes = 1024 * 1024;
+    private static readonly SemaphoreSlim AnalysisGate = new(initialCount: 1, maxCount: 1);
     private readonly string pipeName;
     private readonly TimeSpan timeout;
     private readonly ILocalDocumentWorkerServiceStarter serviceStarter;
@@ -59,9 +60,16 @@ public sealed class WindowsLocalDocumentAnalyzer
         timeoutSource.CancelAfter(timeout);
         var token = timeoutSource.Token;
         byte[]? responseBytes = null;
+        var analysisGateAcquired = false;
 
         try
         {
+            // The Windows worker exposes one bounded parser child at a time. Queue
+            // local requests here instead of failing a second upload after a short
+            // named-pipe connection timeout while the first upload is being analysed.
+            await AnalysisGate.WaitAsync(token);
+            analysisGateAcquired = true;
+
             // The LocalService parser is demand-started only for this upload path.
             // The Agent's print queue/worker does not wait for or depend on it.
             await serviceStarter.EnsureRunningAsync(token);
@@ -72,7 +80,7 @@ public sealed class WindowsLocalDocumentAnalyzer
                 PipeDirection.InOut,
                 PipeOptions.Asynchronous | PipeOptions.WriteThrough);
 
-            await pipe.ConnectAsync(5000, token);
+            await pipe.ConnectAsync(token);
 
             var lengthBytes = new byte[sizeof(int)];
             BinaryPrimitives.WriteInt32LittleEndian(lengthBytes, document.Length);
@@ -144,6 +152,10 @@ public sealed class WindowsLocalDocumentAnalyzer
             if (responseBytes is not null)
             {
                 CryptographicOperations.ZeroMemory(responseBytes);
+            }
+            if (analysisGateAcquired)
+            {
+                AnalysisGate.Release();
             }
         }
     }
