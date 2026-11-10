@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using Microsoft.Win32.SafeHandles;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using SmartPrint.Documents;
@@ -461,10 +462,12 @@ internal static class RestrictedNamedPipeServer
         IntPtr securityDescriptor = IntPtr.Zero;
         try
         {
-            // Protected DACL: only LocalSystem (the print Agent) and LocalService
-            // (this worker) can open the pipe. Remote clients are rejected by
-            // PIPE_REJECT_REMOTE_CLIENTS as a second, independent boundary.
-            const string sddl = "D:P(A;;GA;;;SY)(A;;GA;;;LS)";
+            // The restricted service token is checked against both its normal
+            // LocalService identity and its restricting service SID. Grant both,
+            // plus LocalSystem (the Agent); no other local identity is included.
+            // Remote clients are rejected by PIPE_REJECT_REMOTE_CLIENTS separately.
+            var workerServiceSid = GetRestrictedServiceSid();
+            var sddl = $"D:P(A;;GA;;;SY)(A;;GA;;;LS)(A;;GA;;;{workerServiceSid})";
             if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
                     sddl, SddlRevision1, out securityDescriptor, out _))
             {
@@ -515,6 +518,95 @@ internal static class RestrictedNamedPipeServer
                 _ = LocalFree(securityDescriptor);
         }
     }
+
+    private const uint TokenQuery = 0x0008;
+    private const int TokenRestrictedSids = 11;
+
+    private static string GetRestrictedServiceSid()
+    {
+        if (!OpenProcessToken(GetCurrentProcess(), TokenQuery, out var token))
+            throw new Win32Exception(Marshal.GetLastWin32Error(),
+                "Could not inspect the restricted document-worker service token.");
+
+        try
+        {
+            _ = GetTokenInformation(token, TokenRestrictedSids, IntPtr.Zero, 0, out var requiredBytes);
+            var error = Marshal.GetLastWin32Error();
+            if (requiredBytes <= 0 || error != 122)
+                throw new Win32Exception(error,
+                    "Could not read the restricted document-worker service SID.");
+
+            var buffer = Marshal.AllocHGlobal(requiredBytes);
+            try
+            {
+                if (!GetTokenInformation(token, TokenRestrictedSids, buffer, requiredBytes, out _))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(),
+                        "Could not read the restricted document-worker service SID.");
+
+                var count = Marshal.ReadInt32(buffer);
+                var firstGroupOffset = Marshal.OffsetOf<TokenGroupsHeader>(
+                    nameof(TokenGroupsHeader.FirstGroup)).ToInt32();
+                var groupSize = Marshal.SizeOf<SidAndAttributes>();
+                for (var index = 0; index < count; index++)
+                {
+                    var entry = IntPtr.Add(buffer, firstGroupOffset + index * groupSize);
+                    var sidPointer = Marshal.ReadIntPtr(entry);
+                    if (sidPointer == IntPtr.Zero)
+                        continue;
+
+                    var sid = new SecurityIdentifier(sidPointer);
+                    if (sid.Value.StartsWith("S-1-5-80-", StringComparison.Ordinal))
+                        return sid.Value;
+                }
+
+                throw new InvalidOperationException(
+                    "The LocalService worker is missing its restricted NT SERVICE SID. Reinstall the worker service with restricted SID mode.");
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+        }
+        finally
+        {
+            _ = CloseTokenHandle(token);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SidAndAttributes
+    {
+        public IntPtr Sid;
+        public uint Attributes;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TokenGroupsHeader
+    {
+        public uint GroupCount;
+        public SidAndAttributes FirstGroup;
+    }
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(
+        IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(
+        IntPtr tokenHandle,
+        int tokenInformationClass,
+        IntPtr tokenInformation,
+        int tokenInformationLength,
+        out int returnLength);
+
+    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "CloseHandle")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseTokenHandle(IntPtr handle);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct NativeSecurityAttributes
