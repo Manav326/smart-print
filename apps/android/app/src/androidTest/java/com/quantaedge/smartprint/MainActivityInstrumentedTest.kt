@@ -953,6 +953,95 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun unconnectedCustomerCanOpenWifiVerificationWithoutConnectingAShop() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val shopPreferences = context.getSharedPreferences(
+            "smartprint.customer.last-shop",
+            Context.MODE_PRIVATE
+        )
+        val qaPreferences = context.getSharedPreferences(
+            "smartprint.qa.instrumentation",
+            Context.MODE_PRIVATE
+        )
+        val previousPauseCamera = qaPreferences.getBoolean("pauseQrCameraForPurposeTest", false)
+        val previousPreferences = shopPreferences.all.toMap()
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+
+        try {
+            // Start from a genuinely unconnected phone. The test does not create a
+            // customer session or station QR before opening the Wi-Fi readiness flow.
+            shopPreferences.edit().clear().commit()
+            qaPreferences.edit().putBoolean("pauseQrCameraForPurposeTest", true).commit()
+
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val portalField = MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                        isAccessible = true
+                    }
+                    assertEquals(null, portalField.get(activity))
+                    MainActivity::class.java.getDeclaredMethod("showShopManager").apply {
+                        isAccessible = true
+                    }.invoke(activity)
+                }
+
+                val scannerMonitor = instrumentation.addMonitor(
+                    QrScannerActivity::class.java.name,
+                    null,
+                    false
+                )
+                try {
+                    onView(withText("Scan shop QR")).check(matches(isDisplayed()))
+                    onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
+                    onView(withText("Check shop Wi-Fi")).perform(click())
+
+                    val launched = instrumentation.waitForMonitorWithTimeout(scannerMonitor, 10_000)
+                    val scannerActivity = launched as? QrScannerActivity
+                        ?: throw AssertionError("The unconnected Wi-Fi check did not launch QrScannerActivity.")
+                    assertEquals(
+                        "An unconnected phone must launch the Wi-Fi-readiness purpose, not shop connection.",
+                        "wifi_readiness",
+                        scannerActivity.intent.getStringExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE)
+                    )
+                    assertEquals(
+                        "Wi-Fi verification must not create or change the customer's saved shop.",
+                        null,
+                        shopPreferences.getString("portalUrl", null)
+                    )
+                    onView(withContentDescription("Close QR scanner")).perform(click())
+                } finally {
+                    instrumentation.removeMonitor(scannerMonitor)
+                }
+
+                // The alternate Scan & Print screen must expose the same independent action.
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredMethod("showScanPrint").apply {
+                        isAccessible = true
+                    }.invoke(activity)
+                }
+                onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
+                assertEquals(null, shopPreferences.getString("portalUrl", null))
+            }
+        } finally {
+            try {
+                qaPreferences.edit().putBoolean("pauseQrCameraForPurposeTest", previousPauseCamera).commit()
+            } finally {
+                val editor = shopPreferences.edit().clear()
+                previousPreferences.forEach { (key, value) ->
+                    when (value) {
+                        is String -> editor.putString(key, value)
+                        is Boolean -> editor.putBoolean(key, value)
+                        is Int -> editor.putInt(key, value)
+                        is Long -> editor.putLong(key, value)
+                        is Float -> editor.putFloat(key, value)
+                        is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                    }
+                }
+                editor.commit()
+            }
+        }
+    }
+
+    @Test
     fun connectedShopHasDedicatedWifiCheckWithoutStartingAShopSwitch() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val shopPreferences = context.getSharedPreferences(
