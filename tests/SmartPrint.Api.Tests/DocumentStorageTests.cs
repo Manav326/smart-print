@@ -156,7 +156,7 @@ public sealed class DocumentStorageTests
             ["Documents:StorageRoot"] = root,
             ["Documents:EncryptionKey"] = key
         }).Build();
-        return new DocumentStorage(configuration, new TestWebHostEnvironment(root, "Production"), new AllowDocumentThreatScanner(), new AllowDocumentAnalyzer());
+        return new DocumentStorage(configuration, new TestWebHostEnvironment(root, "Production"), new AllowDocumentThreatScanner(), new AllowDocumentAnalyzer(), NullLogger<DocumentStorage>.Instance);
     }
 
     private sealed class AllowDocumentAnalyzer : IDocumentAnalyzer
