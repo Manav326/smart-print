@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 using UglyToad.PdfPig;
-using SixLabors.ImageSharp;
+using StbImageSharp;
 
 namespace SmartPrint.Documents;
 
@@ -136,15 +136,22 @@ public static class DocumentAnalyzer
             // Header checks are cheap, but cannot prove that compressed pixel data
             // is complete. Decode the entire single-frame image before it becomes
             // a payable print job so truncated/corrupt files cannot pass preflight.
-            using var image = Image.Load(bytes);
-            if (image.Frames.Count != 1)
-                throw new DocumentValidationException("Animated or multi-frame images are not supported. Save one still image and upload it again.");
-            if (image.Width != expectedWidth || image.Height != expectedHeight)
+            var imageInfo = ImageInfo.FromMemory(bytes);
+            if (imageInfo is null)
+                throw new DocumentValidationException("The image format could not be identified.");
+
+            if (imageInfo.Width != expectedWidth || imageInfo.Height != expectedHeight)
                 throw new DocumentValidationException("The image dimensions do not match its file header.");
+
+            var decoded = ImageResult.FromMemory(bytes, ColorComponents.RedGreenBlueAlpha);
+            var expectedDecodedBytes = checked((long)imageInfo.Width * imageInfo.Height * 4);
+            if (decoded.Width != imageInfo.Width || decoded.Height != imageInfo.Height ||
+                decoded.Data.LongLength != expectedDecodedBytes)
+                throw new DocumentValidationException("The image pixel data is incomplete or invalid.");
 
             return new DocumentAnalysis(
                 1,
-                ImagePageSize((uint)image.Width, (uint)image.Height),
+                ImagePageSize((uint)decoded.Width, (uint)decoded.Height),
                 mediaType,
                 extension);
         }
