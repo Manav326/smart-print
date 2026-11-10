@@ -869,7 +869,7 @@ public sealed class LocalAgentApiHostedService(
                     {
                         await input.CopyToAsync(memory, ct);
                     }
-                    if (memory.Length != claim.SizeBytes)
+                    if (memory.Length != expectedWireSize)
                     {
                         return Results.BadRequest(new { code = "local_upload_incomplete", message = "The document transfer was incomplete. Retry the upload." });
                     }
