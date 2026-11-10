@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
 using Microsoft.Win32.SafeHandles;
+using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting.WindowsServices;
