@@ -267,6 +267,7 @@ public sealed class PrintJob
     public Guid? CustomerSessionId { get; set; }
     public Guid? CustomerUserId { get; set; }
     public string Origin { get; set; } = "CUSTOMER_QR";
+    public bool PrivatePrinting { get; set; }
     public string? RecipientName { get; set; }
     public string? RecipientPhone { get; set; }
     public Guid? PrinterDeviceId { get; set; }
@@ -345,6 +346,7 @@ public sealed class PrintDocument
 public sealed class LocalPrintUploadTicket
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public bool PrivatePrinting { get; set; }
     public Guid TenantId { get; set; }
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }
@@ -397,6 +399,7 @@ public sealed class AgentDevice
     public string FingerprintHash { get; set; } = string.Empty;
     public string SecretHash { get; set; } = string.Empty;
     public string LocalEndpointsJson { get; set; } = "[]";
+    public string? DocumentEncryptionPublicKey { get; set; }
     public string Status { get; set; } = "Online";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSeenUtc { get; set; }
