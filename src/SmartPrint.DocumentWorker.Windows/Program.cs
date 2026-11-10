@@ -462,12 +462,12 @@ internal static class RestrictedNamedPipeServer
         IntPtr securityDescriptor = IntPtr.Zero;
         try
         {
-            // The restricted service token is checked against both its normal
-            // LocalService identity and its restricting service SID. Grant both,
-            // plus LocalSystem (the Agent); no other local identity is included.
+            // SERVICE_SID_TYPE_RESTRICTED includes the service SID in the normal
+            // token and in the restricting SID list. Grant only SYSTEM (the Agent)
+            // and this service's unique SID; do not grant LocalService broadly.
             // Remote clients are rejected by PIPE_REJECT_REMOTE_CLIENTS separately.
             var workerServiceSid = GetRestrictedServiceSid();
-            var sddl = $"D:P(A;;GA;;;SY)(A;;GA;;;LS)(A;;GA;;;{workerServiceSid})";
+            var sddl = $"D:P(A;;GA;;;SY)(A;;GA;;;{workerServiceSid})";
             if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
                     sddl, SddlRevision1, out securityDescriptor, out _))
             {
