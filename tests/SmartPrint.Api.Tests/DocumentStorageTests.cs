@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Api.Storage;
 using SmartPrint.Documents;
 
@@ -56,7 +57,8 @@ public sealed class DocumentStorageTests
                 configuration,
                 new TestWebHostEnvironment(root, "Production"),
                 new RejectDocumentThreatScanner(),
-                new AllowDocumentAnalyzer());
+                new AllowDocumentAnalyzer(),
+                NullLogger<DocumentStorage>.Instance);
 
             await using var input = new MemoryStream(ValidPng);
             var exception = await Assert.ThrowsAsync<DocumentThreatScanException>(() =>
@@ -135,7 +137,7 @@ public sealed class DocumentStorageTests
         {
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
             var environment = new TestWebHostEnvironment(root, "Production");
-            Assert.Throws<InvalidOperationException>(() => new DocumentStorage(configuration, environment, new AllowDocumentThreatScanner(), new AllowDocumentAnalyzer()));
+            Assert.Throws<InvalidOperationException>(() => new DocumentStorage(configuration, environment, new AllowDocumentThreatScanner(), new AllowDocumentAnalyzer(), NullLogger<DocumentStorage>.Instance));
         }
         finally { Directory.Delete(root, recursive: true); }
     }
