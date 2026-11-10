@@ -103,6 +103,12 @@ builder.Services.AddHttpClient<SubscriptionRazorpayService>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddHostedService<PrivateRelayRetentionWorker>();
+builder.Services.AddSingleton<PrivateRelayWakeupService>(services =>
+    new PrivateRelayWakeupService(
+        connectionString,
+        services.GetRequiredService<ILogger<PrivateRelayWakeupService>>()));
+builder.Services.AddHostedService(services =>
+    services.GetRequiredService<PrivateRelayWakeupService>());
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("authentication", context =>
@@ -4800,36 +4806,56 @@ agentApi.MapPost("/jobs/{jobId:guid}/private-document-purged", async (
 agentApi.MapGet("/private-relays/pending", async (
     HttpContext context,
     SmartPrintDbContext db,
+    PrivateRelayWakeupService relayWakeups,
+    int? waitSeconds,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
-    var now = DateTimeOffset.UtcNow;
-    var items = await (
-        from ticket in db.LocalPrintUploadTickets.AsNoTracking()
-        join printer in db.PrinterDevices.AsNoTracking()
-            on new { ticket.TenantId, PrinterId = ticket.PrinterDeviceId }
-            equals new { printer.TenantId, PrinterId = printer.Id }
-        where ticket.TenantId == device.TenantId &&
-              ticket.AgentDeviceId == device.Id &&
-              ticket.PrivatePrinting &&
-              ticket.PrivateRelayUploadedUtc != null &&
-              ticket.PrivateRelayStorageKey != null &&
-              ticket.CompletedUtc == null &&
-              ticket.PrivateRelayFailedUtc == null &&
-              ticket.ExpiresUtc > now &&
-              printer.AgentDeviceId == device.Id &&
-              printer.IsActive &&
-              printer.OutputMode == "PHYSICAL" &&
-              printer.QueueName != null && printer.QueueName != ""
-        orderby ticket.PrivateRelayUploadedUtc
-        select new AgentPrivateRelayItem(
-            ticket.Id, ticket.PrintJobId, ticket.JobNumber, ticket.PrinterDeviceId,
-            printer.DisplayName, printer.QueueName!, ticket.FileExtension, ticket.MediaType,
-            ticket.SizeBytes, ticket.Sha256, ticket.ColourMode, ticket.PaperSize,
-            ticket.IsDuplex, ticket.Copies, ticket.Orientation, ticket.ExpiresUtc))
-        .Take(50)
-        .ToListAsync(ct);
+
+    async Task<List<AgentPrivateRelayItem>> ReadPendingItemsAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        return await (
+            from ticket in db.LocalPrintUploadTickets.AsNoTracking()
+            join printer in db.PrinterDevices.AsNoTracking()
+                on new { ticket.TenantId, PrinterId = ticket.PrinterDeviceId }
+                equals new { printer.TenantId, PrinterId = printer.Id }
+            where ticket.TenantId == device.TenantId &&
+                  ticket.AgentDeviceId == device.Id &&
+                  ticket.PrivatePrinting &&
+                  ticket.PrivateRelayUploadedUtc != null &&
+                  ticket.PrivateRelayStorageKey != null &&
+                  ticket.CompletedUtc == null &&
+                  ticket.PrivateRelayFailedUtc == null &&
+                  ticket.ExpiresUtc > now &&
+                  printer.AgentDeviceId == device.Id &&
+                  printer.IsActive &&
+                  printer.OutputMode == "PHYSICAL" &&
+                  printer.QueueName != null && printer.QueueName != ""
+            orderby ticket.PrivateRelayUploadedUtc
+            select new AgentPrivateRelayItem(
+                ticket.Id, ticket.PrintJobId, ticket.JobNumber, ticket.PrinterDeviceId,
+                printer.DisplayName, printer.QueueName!, ticket.FileExtension, ticket.MediaType,
+                ticket.SizeBytes, ticket.Sha256, ticket.ColourMode, ticket.PaperSize,
+                ticket.IsDuplex, ticket.Copies, ticket.Orientation, ticket.ExpiresUtc))
+            .Take(50)
+            .ToListAsync(ct);
+    }
+
+    // Subscribe before reading the durable queue. This closes the race where a relay
+    // arrives between the empty query and the wait. Notifications merely wake us;
+    // PostgreSQL remains the source of truth and the bounded timeout is the fallback.
+    var signal = relayWakeups.Subscribe(device.Id);
+    var items = await ReadPendingItemsAsync();
+    if (items.Count == 0)
+    {
+        var boundedWaitSeconds = Math.Clamp(waitSeconds ?? 25, 0, 25);
+        await relayWakeups.WaitForSignalAsync(
+            signal, TimeSpan.FromSeconds(boundedWaitSeconds), ct);
+        items = await ReadPendingItemsAsync();
+    }
+
     return Results.Ok(new AgentPrivateRelayPendingResponse(items));
 }).RequireRateLimiting("agent-api");
 
@@ -8715,6 +8741,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     HttpContext context,
     SmartPrintDbContext db,
     DocumentStorage storage,
+    PrivateRelayWakeupService relayWakeups,
+    ILoggerFactory loggerFactory,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -8795,28 +8823,59 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         return Results.UnprocessableEntity(new { code = "private_relay_payload_invalid", message = exception.Message });
     }
 
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
-        $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {ticketId} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
-        .ToListAsync(ct);
-    var locked = lockedTickets.SingleOrDefault();
-    if (locked is null || locked.CompletedUtc is not null || locked.PrivateRelayFailedUtc is not null ||
-        locked.PrivateRelayUploadedUtc is not null)
+    try
     {
-        await transaction.RollbackAsync(ct);
-        await storage.DeleteAsync(storageKey);
-        if (locked?.CompletedUtc is not null || locked?.PrivateRelayUploadedUtc is not null)
-            return Results.Ok(new { Accepted = true, DuplicateRequest = true, locked.PrintJobId, locked.JobNumber });
-        return Results.Conflict(new { code = "private_relay_state_changed", message = "This upload has changed state. Retry the same file to refresh its status." });
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
+            $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {ticketId} AND \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} FOR UPDATE")
+            .ToListAsync(ct);
+        var locked = lockedTickets.SingleOrDefault();
+        if (locked is null || locked.CompletedUtc is not null || locked.PrivateRelayFailedUtc is not null ||
+            locked.PrivateRelayUploadedUtc is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            await storage.DeleteAsync(storageKey);
+            if (locked?.CompletedUtc is not null || locked?.PrivateRelayUploadedUtc is not null)
+                return Results.Ok(new { Accepted = true, DuplicateRequest = true, locked.PrintJobId, locked.JobNumber });
+            return Results.Conflict(new { code = "private_relay_state_changed", message = "This upload has changed state. Retry the same file to refresh its status." });
+        }
+
+        locked.PrivateRelayStorageKey = storageKey;
+        locked.PrivateRelayWrappedKey = wrappedKey;
+        locked.PrivateRelayIv = ivText;
+        locked.PrivateRelayUploadedUtc = now;
+        locked.ExpiresUtc = now.AddHours(24);
+        await db.SaveChangesAsync(ct);
+        await transaction.CommitAsync(ct);
     }
-    locked.PrivateRelayStorageKey = storageKey;
-    locked.PrivateRelayWrappedKey = wrappedKey;
-    locked.PrivateRelayIv = ivText;
-    locked.PrivateRelayUploadedUtc = now;
-    locked.ExpiresUtc = now.AddHours(24);
-    await db.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
-    return Results.Ok(new { Accepted = true, DuplicateRequest = false, locked.PrintJobId, locked.JobNumber });
+    catch
+    {
+        // The commit result can be ambiguous after a connection interruption. Never
+        // delete a relay object while a committed ticket still references it.
+        try
+        {
+            var isReferenced = await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(
+                item => item.Id == ticketId && item.TenantId == session.TenantId &&
+                        item.PrivateRelayStorageKey == storageKey,
+                CancellationToken.None);
+            if (!isReferenced)
+                await storage.DeleteAsync(storageKey);
+        }
+        catch (Exception cleanupException)
+        {
+            loggerFactory.CreateLogger("PrivateRelayUpload").LogWarning(
+                cleanupException,
+                "Could not immediately reconcile private relay storage object {StorageKey}; the orphan sweeper will retry.",
+                storageKey);
+        }
+        throw;
+    }
+
+    // The durable ticket is committed before notifying. PostgreSQL broadcasts to
+    // every API instance, so the paired Agent wakes even when upload and listener
+    // traffic land on different replicas. Notification failure never fails upload.
+    await relayWakeups.NotifyAgentAsync(ticket.AgentDeviceId);
+
 })
 .WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
 .RequireRateLimiting("document-upload");
