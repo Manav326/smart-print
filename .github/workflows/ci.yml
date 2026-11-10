@@ -25,6 +25,9 @@ jobs:
       - name: Validate PowerShell syntax and backup cryptography
         shell: pwsh
         run: ./scripts/qa/backup-crypto.tests.ps1
+      - name: Run isolated PostgreSQL and encrypted-document restore drill
+        shell: pwsh
+        run: ./scripts/qa/backup-restore-drill.tests.ps1
 
   portal:
     runs-on: ubuntu-24.04
