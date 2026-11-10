@@ -30,6 +30,8 @@ public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
     DateTimeOffset ClaimedUtc);
 
+public sealed record AgentPrivateDocumentPurgeResponse(IReadOnlyList<Guid> JobIds);
+
 public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);
 
 public sealed record LocalPrintUploadCompletionRequest(
