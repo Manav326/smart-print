@@ -103,6 +103,7 @@ $documentCount = 0
 $tableCount = 0
 $fileCount = 0
 $backupCreatedUtc = $null
+$snapshotUtc = $null
 $reportPath = $null
 $documentKey = $null
 
@@ -117,6 +118,7 @@ try {
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     if ($manifest.Format -ne "SmartPrint.BackupBundle.v2") { throw "Unsupported backup manifest format or incomplete recovery secret set." }
     $backupCreatedUtc = [DateTimeOffset]::Parse([string]$manifest.CreatedUtc)
+    $snapshotUtc = [DateTimeOffset]::Parse([string]$manifest.SnapshotUtc)
 
     $databaseFile = Join-Path $extractDirectory ([string]$manifest.DatabaseFile)
     $documentsFile = Join-Path $extractDirectory ([string]$manifest.DocumentsFile)
@@ -236,7 +238,7 @@ try {
 
     $completedUtc = (Get-Date).ToUniversalTime()
     $elapsedSeconds = [Math]::Round(($completedUtc - $startedUtc).TotalSeconds, 2)
-    $rpoMinutes = [Math]::Round(($startedUtc - $backupCreatedUtc.UtcDateTime).TotalMinutes, 2)
+    $rpoMinutes = [Math]::Round(($startedUtc - $snapshotUtc.UtcDateTime).TotalMinutes, 2)
     New-Item -ItemType Directory -Path $EvidenceDirectory -Force | Out-Null
     $reportPath = Join-Path $EvidenceDirectory ("restore-drill-" + $completedUtc.ToString("yyyyMMdd-HHmmss") + ".json")
     @{
@@ -244,6 +246,7 @@ try {
         BackupFile = [IO.Path]::GetFileName($resolvedBackup)
         BackupSha256 = (Get-FileHash -LiteralPath $resolvedBackup -Algorithm SHA256).Hash.ToLowerInvariant()
         BackupCreatedUtc = $backupCreatedUtc.ToUniversalTime().ToString("O")
+        ConsistentSnapshotUtc = $snapshotUtc.ToUniversalTime().ToString("O")
         StartedUtc = $startedUtc.ToString("O")
         CompletedUtc = $completedUtc.ToString("O")
         RestoreDurationSeconds = $elapsedSeconds
