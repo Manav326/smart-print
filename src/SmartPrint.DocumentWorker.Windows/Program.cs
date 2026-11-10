@@ -138,11 +138,9 @@ internal sealed class WindowsDocumentWorkerService(
                 await pipe.WaitForConnectionAsync(idleWait.Token);
                 await HandleRequestAsync(pipe, stoppingToken);
 
-                // Do not disconnect until the Agent has consumed the full response.
-                // The same protected server instance can then accept the next upload.
-                pipe.WaitForPipeDrain();
-                if (pipe.IsConnected)
-                    pipe.Disconnect();
+                // Disconnect waits until the Agent has consumed the full response.
+                // Reuse this same protected server instance for the next upload.
+                TryDisconnect(pipe);
             }
             catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
             {
@@ -169,17 +167,28 @@ internal sealed class WindowsDocumentWorkerService(
                         pipe.WaitForPipeDrain();
                     }
                     catch (IOException) { }
-                    finally
-                    {
-                        if (pipe.IsConnected)
-                        {
-                            try { pipe.Disconnect(); }
-                            catch (IOException) { }
-                            catch (InvalidOperationException) { }
-                        }
-                    }
                 }
+
+                // A client can break the connection while sending or reading.
+                // Disconnect also resets that broken state so the instance can be reused.
+                TryDisconnect(pipe);
             }
+        }
+    }
+
+    private static void TryDisconnect(NamedPipeServerStream pipe)
+    {
+        try
+        {
+            pipe.Disconnect();
+        }
+        catch (IOException)
+        {
+            // The client may have closed its end while the request was being handled.
+        }
+        catch (InvalidOperationException)
+        {
+            // No connection was established or the pipe is already disconnected.
         }
     }
 
