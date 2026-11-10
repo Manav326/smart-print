@@ -38,7 +38,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 [Files]
 Source: "artifacts\agent\*"; DestDir: "{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}"; Excludes: "pair-agent.ps1,appsettings.example.json,README.md,agent-service-lifecycle.ps1"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "artifacts\desktop\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "artifacts\desktop\*"; DestDir: "{app}"; Excludes: "MicrosoftEdgeWebView2RuntimeInstallerX64.exe;SmartPrint.Desktop.QA.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "artifacts\desktop\*"; DestDir: "{app}"; Excludes: "MicrosoftEdgeWebView2RuntimeInstallerX64.exe,SmartPrint.Desktop.QA.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\SmartPrint"; Filename: "{app}\SmartPrint.Desktop.exe"; WorkingDir: "{app}"
