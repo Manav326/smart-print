@@ -23,7 +23,8 @@ public sealed record AgentClaimedJob(
     string OutputMode = PrinterOutputModeRules.Physical,
     string Orientation = "AUTO",
     bool PdfBrandingEnabled = false,
-    bool PrivatePrinting = false);
+    bool PrivatePrinting = false,
+    bool PrivatePurgePending = false);
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
