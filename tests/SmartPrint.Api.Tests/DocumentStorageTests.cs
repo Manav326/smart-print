@@ -1,4 +1,7 @@
 using System.Security.Cryptography;
+using System.Buffers.Binary;
+using System.IO.Compression;
+using System.Text;
 using Microsoft.Extensions.Configuration;
 using SmartPrint.Api.Storage;
 using SmartPrint.Documents;
@@ -7,12 +10,74 @@ namespace SmartPrint.Api.Tests;
 
 public sealed class DocumentStorageTests
 {
-    private static readonly byte[] ValidPng =
-    [
-        137, 80, 78, 71, 13, 10, 26, 10,
-        0, 0, 0, 13, 73, 72, 68, 82,
-        0, 0, 0, 2, 0, 0, 0, 3
-    ];
+    private static readonly byte[] ValidPng = CreateValidPng();
+
+    private static byte[] CreateValidPng()
+    {
+        const int width = 2;
+        const int height = 3;
+        using var output = new MemoryStream();
+        output.Write(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 });
+
+        var header = new byte[13];
+        BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(0, 4), width);
+        BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(4, 4), height);
+        header[8] = 8;
+        header[9] = 6;
+        WritePngChunk(output, "IHDR", header);
+
+        var rowBytes = width * 4;
+        var raw = new byte[(rowBytes + 1) * height];
+        for (var y = 0; y < height; y++)
+        {
+            raw[y * (rowBytes + 1)] = 0;
+            for (var x = 0; x < width; x++)
+            {
+                var pixel = y * (rowBytes + 1) + 1 + x * 4;
+                raw[pixel] = 24;
+                raw[pixel + 1] = 96;
+                raw[pixel + 2] = 160;
+                raw[pixel + 3] = 255;
+            }
+        }
+
+        using var compressed = new MemoryStream();
+        using (var zlib = new ZLibStream(compressed, CompressionLevel.SmallestSize, leaveOpen: true))
+            zlib.Write(raw);
+        WritePngChunk(output, "IDAT", compressed.ToArray());
+        WritePngChunk(output, "IEND", Array.Empty<byte>());
+        return output.ToArray();
+    }
+
+    private static void WritePngChunk(Stream output, string type, byte[] data)
+    {
+        Span<byte> length = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(length, (uint)data.Length);
+        output.Write(length);
+
+        var typeBytes = Encoding.ASCII.GetBytes(type);
+        output.Write(typeBytes);
+        output.Write(data);
+
+        var crcInput = new byte[typeBytes.Length + data.Length];
+        typeBytes.CopyTo(crcInput, 0);
+        data.CopyTo(crcInput, typeBytes.Length);
+        Span<byte> crcBytes = stackalloc byte[4];
+        BinaryPrimitives.WriteUInt32BigEndian(crcBytes, ComputePngCrc(crcInput));
+        output.Write(crcBytes);
+    }
+
+    private static uint ComputePngCrc(ReadOnlySpan<byte> bytes)
+    {
+        var crc = 0xFFFFFFFFu;
+        foreach (var value in bytes)
+        {
+            crc ^= value;
+            for (var bit = 0; bit < 8; bit++)
+                crc = (crc >> 1) ^ ((crc & 1) == 0 ? 0u : 0xEDB88320u);
+        }
+        return ~crc;
+    }
 
     [Fact]
     public async Task StoresDocumentsEncryptedAndReadsTheOriginalBytesBack()
