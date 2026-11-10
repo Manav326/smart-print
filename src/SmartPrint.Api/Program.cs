@@ -4733,6 +4733,7 @@ agentApi.MapPost("/jobs/claim", async (
             job.IsDuplex,
             job.Orientation,
             job.PdfBrandingEnabled,
+            job.PrivatePrinting,
             job.Currency,
             job.QuotedAmountMinor,
             job.PrinterDeviceId,
@@ -4820,6 +4821,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.IsDuplex,
             candidate.Orientation,
             candidate.PdfBrandingEnabled,
+            candidate.PrivatePrinting,
             candidate.Currency,
             candidate.QuotedAmountMinor,
             candidate.PrinterDeviceId,
@@ -5120,6 +5122,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         ticket.IsDuplex,
         ticket.Copies,
         ticket.Orientation,
+        ticket.PrivatePrinting,
         ticket.ExpiresUtc
     });
 });
@@ -5180,6 +5183,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                 Job = new
                 {
                     completedJob.Id,
+                    completedJob.PrivatePrinting,
                     completedJob.JobNumber,
                     completedJob.Status,
                     completedJob.PageCount,
@@ -5280,6 +5284,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                 Job = new
                 {
                     existingJob.Id,
+                    existingJob.PrivatePrinting,
                     existingJob.JobNumber,
                     existingJob.Status,
                     existingJob.PageCount,
