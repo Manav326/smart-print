@@ -464,7 +464,7 @@ internal static class RestrictedNamedPipeServer
             // Protected DACL: only LocalSystem (the print Agent) and LocalService
             // (this worker) can open the pipe. Remote clients are rejected by
             // PIPE_REJECT_REMOTE_CLIENTS as a second, independent boundary.
-            const string sddl = "O:SYG:SYD:P(A;;GA;;;SY)(A;;GA;;;LS)";
+            const string sddl = "D:P(A;;GA;;;SY)(A;;GA;;;LS)";
             if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
                     sddl, SddlRevision1, out securityDescriptor, out _))
             {
