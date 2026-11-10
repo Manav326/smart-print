@@ -5,13 +5,13 @@ public interface IDocumentThreatScanner
     Task ScanAsync(ReadOnlyMemory<byte> document, CancellationToken cancellationToken);
 }
 
-public class DocumentValidationException(string message) : Exception(message);
+public class DocumentValidationException(string message, Exception? innerException = null) : Exception(message, innerException);
 
 public sealed class DocumentThreatScanException(
     string message,
     bool threatDetected,
     Exception? innerException = null)
-    : DocumentValidationException(message)
+    : DocumentValidationException(message, innerException)
 {
     public bool ThreatDetected { get; } = threatDetected;
 }
