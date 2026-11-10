@@ -4137,7 +4137,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [uploadModeManuallySelected,setUploadModeManuallySelected]=useState(false);
   const privatePrintingStorageKey="smartprint.private-printing:"+sessionToken;
   const [privatePrinting,setPrivatePrinting]=useState(()=>sessionStorage.getItem("smartprint.private-printing:"+sessionToken)==="true");
-  const canOfferPrivatePrinting=Boolean(localAgent?.endpoints?.length && localAgent.documentEncryptionPublicKey);
+  const canOfferPrivatePrinting=Boolean(localAgent?.agentDeviceId && localAgent.documentEncryptionPublicKey);
 
   useEffect(()=>{
     if(privatePrinting)sessionStorage.setItem(privatePrintingStorageKey,"true");
@@ -4321,12 +4321,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return;
     }
     if(files.length===0)return;
+    const effectiveUploadMode:"LOCAL"|"CLOUD"=privatePrinting?"LOCAL":uploadMode;
     if(privatePrinting&&(!localAgent||!canOfferPrivatePrinting)) {
       setError("Private Printing is not ready at this shop yet. No document has been uploaded. Ask the shop operator to reconnect the paired computer.");
       return;
     }
     if(privatePrinting&&uploadMode!=="LOCAL")setUploadMode("LOCAL");
-    if(uploadMode==="LOCAL"&&!localReady) {
+    if(effectiveUploadMode==="LOCAL"&&!privatePrinting&&!localReady) {
       setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
       return;
     }
@@ -4347,8 +4348,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const fingerprint=customerFileFingerprint(candidate);
         const batchGroupName=groupNameForFile(candidate);
         const settings=settingsForFile(candidate);
-        const created=uploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,privatePrinting)
+        const created=effectiveUploadMode==="LOCAL"&&localAgent
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,privatePrinting,localReady)
           : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
@@ -4384,7 +4385,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setUploadedBatch(results);
       setUploadedFileFingerprints([...completedFingerprints]);
       if(results.length>0)setUploaded(results[0]);
-      const confirmedPreTicketRejection=uploadMode==="LOCAL"&&exception instanceof LocalUploadPreflightError;
+      const confirmedPreTicketRejection=effectiveUploadMode==="LOCAL"&&exception instanceof LocalUploadPreflightError;
       const agentUnavailable=exception instanceof LocalUploadPreflightError&&
         ["local_print_agent_unavailable","local_print_printer_unavailable"].includes(exception.code??"");
       const batchCheckoutLocked=exception instanceof LocalUploadPreflightError&&
@@ -4394,16 +4395,18 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         cloudAssistedPrintingEnabled||agentUnavailable
       );
       if(canFallbackToCloud){setUploadModeManuallySelected(true);setUploadMode("CLOUD");}
-      if(exception instanceof LocalUploadOutcomeUnknownError&&uploadMode==="LOCAL"&&!privatePrinting&&secureQueueFallbackEnabled) {
+      if(exception instanceof LocalUploadOutcomeUnknownError&&effectiveUploadMode==="LOCAL"&&!privatePrinting&&secureQueueFallbackEnabled) {
         // Local ticket and grant are preserved. The next retry will resume that
         // same PrintJob over HTTPS rather than creating a second cloud upload.
         setUploadModeManuallySelected(true);
         setUploadMode("CLOUD");
       }
       const uploadError=exception instanceof LocalUploadOutcomeUnknownError
-        ? cloudAssistedPrintingEnabled
-          ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
-          : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
+        ? privatePrinting
+          ? "Your file is encrypted and attached to the same private print request. The shop computer is still checking it; tap Retry to refresh the status without creating a duplicate."
+          : cloudAssistedPrintingEnabled
+            ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
+            : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
         : batchCheckoutLocked
           ? "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file."
           : confirmedPreTicketRejection
@@ -4874,17 +4877,17 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       <div className="customer-privacy-choice-heading"><div><span>CHOOSE YOUR PRIVACY</span><strong>How should SmartPrint handle your documents?</strong></div><small>This choice applies to every file in this batch.</small></div>
       <div className="customer-privacy-choice-grid">
         <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
-          <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>Your source document is automatically deleted after the shop confirms physical printing. It is encrypted on its way to the shop computer and is never uploaded to cloud document storage.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
+          <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>Your document is encrypted before it leaves your device. SmartPrint sends it directly over shop Wi-Fi when possible, or uses a temporary encrypted relay if Wi-Fi is unavailable. Only the paired shop computer can open it.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
         </button>
         <button type="button" aria-pressed={!privatePrinting} disabled={busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>setPrivatePrinting(false)}>
           <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Use the shop's normal document workflow and configured retention period. Existing upload choices remain available.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
       {!canOfferPrivatePrinting&&<small className="customer-privacy-unavailable">Private Printing becomes available when the shop's paired Windows computer is connected and has enabled its secure document key.</small>}
-      {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on for this batch.</strong> SmartPrint will not fall back to cloud storage. Keep this page connected to the shop Wi-Fi until the upload is confirmed.</span></div>}
+      {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on for this batch.</strong> Your file stays end-to-end encrypted. SmartPrint tries shop Wi-Fi first and securely relays only encrypted data when needed; it never enters the normal cloud document store.</span></div>}
     </section>
     {privatePrinting
-      ? <div className="customer-private-transfer-note"><Lock size={16}/><span>Encrypted direct transfer to the paired shop computer · No cloud document copy · Physical printing only</span></div>
+      ? <div className="customer-private-transfer-note"><Lock size={16}/><span>End-to-end encrypted · Shop Wi-Fi first, secure relay automatically if needed · Physical printing only</span></div>
       : <div className="customer-upload-modes">
       {localAgent?.endpoints.length
         ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>
@@ -4892,7 +4895,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Upload securely now; the shop can print when its Agent and printer are ready</small></button>}
     </div>}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">{privatePrinting?"Private Printing needs the paired shop computer to reconnect. No document has been uploaded.":"Secure upload is temporarily unavailable. Please ask the shop to reconnect its print service."}</div>}
-    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<div className="customer-upload-local-note" role="status">Tap Check shop Wi-Fi above to connect to this shop computer before uploading.</div>}
+    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<div className="customer-upload-local-note" role="status">Direct shop Wi-Fi is not verified yet. SmartPrint will use the encrypted online relay automatically; no Wi-Fi setup is needed.</div>}
     <div className="customer-upload-picker-grid"
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
       onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
@@ -5017,9 +5020,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply to every file. Set an individual file to Custom for an exception.</small>}
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing is not enabled at this shop yet. Ask the shop owner to configure photo sizes and rates.</small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">This photo is already with the shop. The shop owner can prepare it from the review queue without creating another print job.</small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only · The final prepared file stays in the print workflow.</small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview is not available in this session. The prepared PDF stays in your print workflow.</span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<button type="button" className="customer-flow-button" onClick={()=>openCustomerPdfPreview(file)}><FileText size={16}/> Preview PDF</button>:<small className="customer-upload-local-note">PDF selected. Preview is unavailable for this file, but you can still upload it.</small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
-    {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{uploadMode==="LOCAL"&&localAgent?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
+    {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Send "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div><small>The count advances when each document finishes uploading.</small></div>}
-    {files.length>0&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
+    {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{nativeAppMode?(localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS.":"Check shop Wi-Fi."):localReady?"Direct shop Wi-Fi transfer uses local HTTP and is not encrypted in transit. Choose Cloud-assisted for HTTPS encryption.":"Tap Check shop Wi-Fi above first to grant the browser permission."}</small>}
     {files.length>0&&uploadMode==="CLOUD"&&<small className="customer-upload-local-note">{nativeAppMode?"Encrypted HTTPS secure upload.":"Files are encrypted in transit and stored securely in the existing print queue until the shop computer is ready."}</small>}
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
