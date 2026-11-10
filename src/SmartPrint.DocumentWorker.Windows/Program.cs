@@ -448,6 +448,7 @@ internal static class RestrictedNamedPipeServer
 {
     private const uint PipeAccessDuplex = 0x00000003;
     private const uint FileFlagOverlapped = 0x40000000;
+    private const uint FileFlagFirstPipeInstance = 0x00080000;
     private const uint FileFlagWriteThrough = 0x80000000;
     private const uint PipeRejectRemoteClients = 0x00000008;
     private const uint SddlRevision1 = 1;
@@ -481,7 +482,7 @@ internal static class RestrictedNamedPipeServer
             var pipePath = $@"\\.\pipe\{pipeName}";
             var handle = CreateNamedPipeW(
                 pipePath,
-                PipeAccessDuplex | FileFlagOverlapped | FileFlagWriteThrough,
+                PipeAccessDuplex | FileFlagOverlapped | FileFlagWriteThrough | FileFlagFirstPipeInstance,
                 PipeRejectRemoteClients,
                 maxInstances: 1,
                 outBufferSize: BufferSize,
