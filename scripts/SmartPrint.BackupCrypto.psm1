@@ -240,6 +240,10 @@ function Protect-SmartPrintBackup {
     $aad = $null
     $inputStream = $null
     $output = $null
+    $buffer = $null
+    $header = $null
+    $metadata = $null
+    $empty = $null
 
     try {
         $passwordBytes = [byte[]](Get-SmartPrintBackupPasswordBytes -Passphrase $Passphrase)
@@ -252,10 +256,6 @@ function Protect-SmartPrintBackup {
         $output = [IO.File]::Open($temporaryPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
         $output.Write($header, 0, $header.Length)
 
-        $buffer = $null
-        $header = $null
-        $metadata = $null
-        $empty = $null
         $buffer = [byte[]]::new($script:SmartPrintBackupChunkSize)
         [uint64]$totalBytes = 0
         [uint32]$chunkCount = 0
@@ -529,7 +529,7 @@ function New-SmartPrintBackupArchive {
                     [IO.Compression.CompressionLevel]::NoCompression)
                 $entryStream = $entry.Open()
                 $sourceStream.CopyTo($entryStream, 1MB)
-                if ([long]::MaxValue - $totalInputBytes -lt $sourceStream.Length) {
+                if ($totalInputBytes -gt ([long]::MaxValue - $sourceStream.Length)) {
                     throw "The SmartPrint backup archive is too large."
                 }
                 $totalInputBytes += $sourceStream.Length
