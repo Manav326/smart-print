@@ -696,6 +696,26 @@ class PhotoStudioWebViewInstrumentedTest {
             setLabelValue(scenario, "photo-studio-replacement-background", "#f3f6fa")
             setRangeValue(scenario, "photo-studio-background-tolerance", 65)
             clickButton(scenario, "photo-studio-reset-background")
+            // The Text tool must work independently of the optional name/DOB caption fields.
+            clickButton(scenario, "photo-studio-tool-text")
+            waitFor(
+                scenario,
+                "document.getElementById('photo-studio-tool-text')?.disabled === false && Boolean(document.getElementById('photo-studio-add-text'))",
+                "text tool to be available without enabling optional form details"
+            )
+            clickButton(scenario, "photo-studio-add-text")
+            setLabelValue(scenario, "photo-studio-text-content", "Android overlay QA")
+            waitFor(
+                scenario,
+                "document.querySelector('[data-testid=photo-studio-text-layer]')?.textContent?.trim() === 'Android overlay QA'",
+                "new editable text layer to appear on the A4 preview"
+            )
+            waitFor(
+                scenario,
+                "document.querySelector('[data-testid=photo-studio-text-layer]')?.getAttribute('aria-pressed') === 'true'",
+                "new text layer to be selected"
+            )
+
             // The form-details checkbox exists only in the Sheet panel, not Background.
             clickButton(scenario, "photo-studio-tool-sheet")
 
