@@ -4850,7 +4850,11 @@ agentApi.MapGet("/private-relays/pending", async (
     var items = await ReadPendingItemsAsync();
     if (items.Count == 0)
     {
-        var boundedWaitSeconds = Math.Clamp(waitSeconds ?? 25, 0, 25);
+        // Keep fallback pickup responsive if LISTEN is unavailable behind a
+        // database proxy. With a live listener, notifications normally return
+        // immediately and the longer timeout avoids needless idle DB queries.
+        var maximumWaitSeconds = relayWakeups.IsListening ? 25 : 10;
+        var boundedWaitSeconds = Math.Clamp(waitSeconds ?? maximumWaitSeconds, 0, maximumWaitSeconds);
         await relayWakeups.WaitForSignalAsync(
             signal, TimeSpan.FromSeconds(boundedWaitSeconds), ct);
         items = await ReadPendingItemsAsync();
