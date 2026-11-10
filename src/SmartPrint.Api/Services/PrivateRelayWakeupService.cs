@@ -72,10 +72,10 @@ public sealed class PrivateRelayWakeupService(
                 "Could not publish the private-relay wake-up for Agent {AgentDeviceId}; its long-poll timeout remains the recovery path.",
                 agentDeviceId);
         }
-        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        catch (OperationCanceledException exception)
         {
-            logger.LogWarning(
-                "Private-relay wake-up for Agent {AgentDeviceId} timed out; its long-poll timeout remains the recovery path.",
+            logger.LogWarning(exception,
+                "Private-relay wake-up for Agent {AgentDeviceId} was interrupted; its long-poll timeout remains the recovery path.",
                 agentDeviceId);
         }
     }
