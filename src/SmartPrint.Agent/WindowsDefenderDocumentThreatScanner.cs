@@ -97,21 +97,13 @@ public sealed class WindowsDefenderDocumentThreatScanner
             }
 
             var output = (await standardOutput) + Environment.NewLine + (await standardError);
-            if (process.ExitCode == 0)
+            var decision = ClassifyResult(process.ExitCode, output);
+            if (decision is null)
             {
                 return;
             }
 
-            var threatReported = process.ExitCode == 2 &&
-                (output.Contains("threat", StringComparison.OrdinalIgnoreCase) ||
-                 output.Contains("malware", StringComparison.OrdinalIgnoreCase) ||
-                 output.Contains("infected", StringComparison.OrdinalIgnoreCase));
-
-            throw new DocumentThreatScanException(
-                threatReported
-                    ? "Microsoft Defender detected a threat. The local upload was rejected."
-                    : "Microsoft Defender could not confirm that the document is safe. The local upload was blocked.",
-                threatDetected: threatReported);
+            throw decision;
         }
         catch (DocumentThreatScanException)
         {
@@ -146,12 +138,58 @@ public sealed class WindowsDefenderDocumentThreatScanner
     }
 
 
+
+    /// <summary>
+    /// MpCmdRun returns 2 for both detections and scanning errors. With
+    /// -DisableRemediation, a detection is printed as a Threat information block.
+    /// Only an explicit clean result with exit code 0 may be accepted.
+    /// </summary>
+    public static DocumentThreatScanException? ClassifyResult(int exitCode, string output)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return new DocumentThreatScanException(
+                "Microsoft Defender returned no scan result. The local upload was blocked.",
+                threatDetected: false);
+        }
+
+        var threatReported = System.Text.RegularExpressions.Regex.IsMatch(
+            output,
+            @"(?im)^\s*Threat\s*:\s*\S+");
+
+        if (exitCode == 2 && threatReported)
+        {
+            return new DocumentThreatScanException(
+                "Microsoft Defender detected a threat. The local upload was rejected.",
+                threatDetected: true);
+        }
+
+        // The English CLI reports a clean custom scan as:
+        // "Scanning <path> found no threats."
+        // Unknown/localized/indeterminate output is intentionally fail-closed.
+        var explicitCleanResult = System.Text.RegularExpressions.Regex.IsMatch(
+            output,
+            @"(?im)^\s*Scanning\s+.+\s+found\s+no\s+threats?\s*\.\s*$");
+
+        if (exitCode == 0 && explicitCleanResult && !threatReported)
+        {
+            return null;
+        }
+
+        return new DocumentThreatScanException(
+            exitCode == 2 && threatReported
+                ? "Microsoft Defender detected a threat. The local upload was rejected."
+                : "Microsoft Defender could not confirm that the document is safe. The local upload was blocked.",
+            threatDetected: false);
+    }
+
     private static void SecureScanDirectory(string directory)
     {
         var systemSid = new System.Security.Principal.SecurityIdentifier(
             System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
         var administratorsSid = new System.Security.Principal.SecurityIdentifier(
             System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+        var serviceSid = System.Security.Principal.WindowsIdentity.GetCurrent().User;
 
         var security = new System.Security.AccessControl.DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
@@ -170,6 +208,16 @@ public sealed class WindowsDefenderDocumentThreatScanner
             System.Security.AccessControl.InheritanceFlags.ObjectInherit,
             System.Security.AccessControl.PropagationFlags.None,
             System.Security.AccessControl.AccessControlType.Allow));
+        if (serviceSid is not null && serviceSid != systemSid && serviceSid != administratorsSid)
+        {
+            security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+                serviceSid,
+                System.Security.AccessControl.FileSystemRights.FullControl,
+                System.Security.AccessControl.InheritanceFlags.ContainerInherit |
+                System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+                System.Security.AccessControl.PropagationFlags.None,
+                System.Security.AccessControl.AccessControlType.Allow));
+        }
         new DirectoryInfo(directory).SetAccessControl(security);
     }
 
