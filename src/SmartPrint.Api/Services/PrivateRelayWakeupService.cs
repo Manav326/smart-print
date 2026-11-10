@@ -16,6 +16,9 @@ public sealed class PrivateRelayWakeupService(
 {
     private const string NotificationChannel = "smartprint_private_relay";
     private readonly ConcurrentDictionary<Guid, Channel<bool>> waiters = new();
+    private int listenerReady;
+
+    public bool IsListening => Volatile.Read(ref listenerReady) == 1;
 
     public ChannelReader<bool> Subscribe(Guid agentDeviceId)
     {
@@ -100,9 +103,17 @@ public sealed class PrivateRelayWakeupService(
                 await using (var listen = new NpgsqlCommand($"LISTEN {NotificationChannel}", connection))
                     await listen.ExecuteNonQueryAsync(stoppingToken);
 
+                Volatile.Write(ref listenerReady, 1);
                 logger.LogInformation("Private-relay PostgreSQL wake-up listener is active.");
-                while (!stoppingToken.IsCancellationRequested)
-                    await connection.WaitAsync(stoppingToken);
+                try
+                {
+                    while (!stoppingToken.IsCancellationRequested)
+                        await connection.WaitAsync(stoppingToken);
+                }
+                finally
+                {
+                    Volatile.Write(ref listenerReady, 0);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
