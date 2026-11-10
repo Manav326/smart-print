@@ -2357,7 +2357,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
 
   return <section className="panel local-network-panel">
     <div className="local-network-heading">
-      <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>Customer phone connection</h2><p>Choose the connection customers use at your shop, then check it with a phone.</p></div>
+      <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>Customer phone connection</h2><p>Choose the connection customers use at your shop, including a phone hotspot. When the computer changes Wi-Fi, select the new connection here; SmartPrint will not switch saved shop networks by itself.</p></div>
       <Status label={loading?"Checking…":statusLabel} tone={loading?"slate":statusTone}/>
     </div>
     {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> Checking available connections…</div>:error&&!snapshot
@@ -2372,7 +2372,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
         </label>
         {selected
           ? <div className="local-network-selected"><Wifi size={17}/><span><strong>{selected.displayName}</strong><small>{selected.kind} · Used for customer document uploads</small></span><Check size={17}/></div>
-          : <p className="local-network-copy">Your previous connection is not available. Choose the Wi-Fi used by your customers before testing phone access.</p>}
+          : <p className="local-network-copy">Your saved shop connection is unavailable. Connect this computer to your phone hotspot, select it from the list above, then run the phone check. You do not need to change the Windows network profile.</p>}
         {!connected?<p className="local-network-copy">Connect this computer to your shop first. The phone check will be available when setup is complete.</p>:!localApiReady?<p className="local-network-copy">SmartPrint is preparing the shop connection. The phone check will be available when the print service is ready.</p>:<>
           <div className="local-network-actions">
             <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!hasSelectedNetwork||!localApiReady}>
@@ -2382,7 +2382,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
           </div>
           {test&&<div className="local-phone-test">
             <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
-            <div><strong>Scan with SmartPrint on your phone</strong><p>On the phone, open SmartPrint → Your space → connected shop → Check shop Wi-Fi, then scan this code. This screen will confirm automatically when the connection works.</p><small>Using a phone without SmartPrint? Scan with its camera and open the link. This check expires in five minutes.</small></div>
+            <div><strong>Scan with a second phone</strong><p>Use a customer phone connected to the selected shop Wi-Fi or phone hotspot. Open SmartPrint → Your space → connected shop → Check shop Wi-Fi, then scan this code. This screen will confirm automatically when the connection works.</p><small>The phone providing the hotspot cannot connect to its own Wi-Fi hotspot. This check expires in five minutes.</small></div>
           </div>}
           {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
           {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>Local print pipeline ready</strong><small>Protected queue, print worker, cloud heartbeat and printer inventory are healthy. The assigned printer is checked separately for each QR station upload.</small></span></div>}
@@ -2393,7 +2393,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
             readiness.heartbeatFresh?"":"Cloud heartbeat is stale",
             readiness.printerInventoryFresh?"":"Printer inventory is stale"
           ].filter(Boolean).join(" · ")} {readiness.lastFailureCode?"(Last issue: "+readiness.lastFailureCode+") ":""}Retry after the shop computer/Agent has recovered.</small></span></div>}
-          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Make sure the phone is on this same shop Wi-Fi, then start a new check. You can also try another connection above.</small></span></div>}
+          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Make sure the second phone is on this same shop Wi-Fi or hotspot, then start a new check. Some phone hotspots block connected devices from reaching each other; use a hotspot that allows device-to-device traffic.</small></span></div>}
         </>}
       </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the Wi-Fi or network you use at the shop, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
     </>}

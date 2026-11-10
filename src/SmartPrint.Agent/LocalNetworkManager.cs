@@ -20,19 +20,11 @@ public sealed class LocalNetworkManager(LocalNetworkPreferenceStore preferences,
         var preferredId = preferences.GetPreferredNetworkId();
         var selected = LocalNetworkEndpointDiscovery.SelectNetwork(networks, preferredId);
 
-        // Keep the saved Wi-Fi adapter selected when Windows moves it from a router
-        // to a phone hotspot. The discovery layer follows only an SSID change on the
-        // same adapter; switching to a different adapter still requires owner choice.
-        if (selected is not null &&
-            !string.Equals(preferredId, selected.Id, StringComparison.OrdinalIgnoreCase))
-        {
-            if (!string.IsNullOrWhiteSpace(preferredId))
-            {
-                state.ClearPhoneVerification();
-                SignalSelectionChanged();
-            }
+        // Persist only the first automatic choice. If the saved network disappears
+        // (including a router-to-phone-hotspot SSID change), keep it unselected until
+        // the owner explicitly chooses the currently connected network.
+        if (string.IsNullOrWhiteSpace(preferredId) && selected is not null)
             preferences.SetPreferredNetworkId(selected.Id);
-        }
 
         var endpoints = selected is null
             ? Array.Empty<string>()

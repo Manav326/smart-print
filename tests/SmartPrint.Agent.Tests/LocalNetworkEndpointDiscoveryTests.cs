@@ -33,7 +33,7 @@ public sealed class LocalNetworkEndpointDiscoveryTests
     }
 
     [Fact]
-    public void FollowsPhoneHotspotWhenTheSavedWifiAdapterConnectsToANewSsid()
+    public void RequiresOwnerSelectionWhenTheSavedWifiAdapterMovesToAPhoneHotspot()
     {
         const string adapterId = "6f9d30d2-5e52-4a73-aef1-07c0e8a72e11";
         var savedRouterId = $"{adapterId}|SSID:53686F70526F75746572";
@@ -41,11 +41,13 @@ public sealed class LocalNetworkEndpointDiscoveryTests
         var phoneHotspot = new LocalNetworkAdapter(
             phoneHotspotId, "Phone hotspot", "Wi-Fi", "192.168.43.27", 24);
 
-        var selected = LocalNetworkEndpointDiscovery.SelectNetwork([phoneHotspot], savedRouterId);
+        // Even though Windows reuses the same Wi-Fi adapter GUID, a changed SSID
+        // must not silently replace the shop owner's saved network.
+        Assert.Null(LocalNetworkEndpointDiscovery.SelectNetwork([phoneHotspot], savedRouterId));
 
-        Assert.NotNull(selected);
-        Assert.Equal(phoneHotspotId, selected!.Id);
-        Assert.Equal("192.168.43.27", selected.Ipv4Address);
+        // The connected hotspot is still selectable by the owner in the Shop Connection panel.
+        Assert.Equal(phoneHotspotId,
+            LocalNetworkEndpointDiscovery.SelectNetwork([phoneHotspot], phoneHotspotId)!.Id);
     }
 
     [Fact]
