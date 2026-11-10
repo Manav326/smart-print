@@ -278,6 +278,11 @@ public sealed class LocalAgentApiHostedService(
                 options.MemoryBufferThreshold = 21 * 1024 * 1024;
             });
 
+            // This is a separate WebApplication container from the outer Windows
+            // Service host. Register endpoint-injected scanners/parsers here rather
+            // than relying on registrations made by Agent Program.cs.
+            builder.Services.AddLocalAgentDocumentProcessingServices();
+
             // Retain loopback-only static origins for local development. The production
             // HTTPS origin is supplied dynamically by the authenticated API heartbeat.
             state.SetConfiguredOrigins(allowedOrigins.Where(origin =>
