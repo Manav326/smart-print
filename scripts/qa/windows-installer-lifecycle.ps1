@@ -203,6 +203,13 @@ function Wait-LocalApiReady([int]$TimeoutSeconds = 45) {
     throw "The Agent service is running, but its local print API did not become ready with the preserved shop identity."
 }
 
+function Assert-DesktopPayloadExcludesCiOnlyBinary {
+    $productionDesktop = Join-Path $installRoot "SmartPrint.Desktop.exe"
+    $qaDesktop = Join-Path $installRoot "SmartPrint.Desktop.QA.exe"
+    Assert-True (Test-Path -LiteralPath $productionDesktop -PathType Leaf) "The production Windows Desktop executable was not installed."
+    Assert-True (-not (Test-Path -LiteralPath $qaDesktop)) "The CI-only WebView2 DevTools executable must never be shipped in the customer installer."
+}
+
 function Assert-ServiceVersion([string]$ExpectedVersion) {
     Wait-Service "Running"
     $path = Get-ServiceBinaryPath
@@ -618,6 +625,7 @@ else
             $script:ownsInstall = $true
             Invoke-Setup $InstallerV1
             Assert-ServiceVersion "0.1.10"
+            Assert-DesktopPayloadExcludesCiOnlyBinary
             Assert-OptionalParserService
             Assert-DocumentWorkerRuntimeIsolation
             Assert-OptionalParserService
@@ -643,6 +651,7 @@ else
         $upgradeOk = Invoke-Check "Upgrade Windows installation N to N+1" {
             Invoke-Setup $InstallerV2
             Assert-ServiceVersion "0.1.11"
+            Assert-DesktopPayloadExcludesCiOnlyBinary
             Assert-OptionalParserService
             Assert-PreservedFixtures
             Assert-QueueUntouched
