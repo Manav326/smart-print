@@ -63,6 +63,8 @@ foreach ($entry in @(@{Name="InstallerV1";Path=$InstallerV1}, @{Name="InstallerV
 
 $ErrorActionPreference = "Stop"
 $serviceName = "QRtoPrintSmartPrintAgent"
+$workerServiceName = "QRtoPrintSmartPrintDocumentWorker"
+$workerFirewallPrefix = "QRtoPrint Smart Print Document Worker outbound block"
 $firewallPrefix = "QRtoPrint Smart Print Agent Local API"
 $testPrinterName = "SmartPrint Lifecycle QA Queue"
 $fixtureProject = Join-Path $env:RUNNER_TEMP "SmartPrintLifecycleFixture"
@@ -210,6 +212,23 @@ function Assert-ServiceVersion([string]$ExpectedVersion) {
     Wait-LocalApiReady
 }
 
+function Assert-OptionalParserService {
+    $worker = Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $worker) "The optional isolated document parser service was not installed."
+    Assert-True ($worker.Status -eq "Stopped") "The optional parser must remain stopped until an upload needs analysis; current state: $($worker.Status)."
+
+    $registration = Get-CimInstance -ClassName Win32_Service -Filter "Name='$workerServiceName'" -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $registration) "Windows Service Control Manager has no isolated parser registration."
+    Assert-True ($registration.StartMode -eq "Manual") "The parser service must be demand-started, not started automatically with the print Agent."
+    Assert-True ($registration.StartName -eq "NT AUTHORITY\LocalService") "The parser must run as the restricted LocalService identity, not LocalSystem."
+    $workerPath = ([string]$registration.PathName).Trim().Trim('"')
+    Assert-True (Test-Path -LiteralPath $workerPath -PathType Leaf) "The parser service executable is missing: $workerPath"
+
+    $agent = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    Assert-True ($agent -and $agent.Status -eq "Running") "The primary printing Agent must remain Running while the optional parser is stopped."
+    Wait-LocalApiReady
+}
+
 function Invoke-Fixture([string]$Mode) {
     Write-Host "[QA-ACTION] Run isolated Agent data-preservation fixture: mode=$Mode" -ForegroundColor Cyan
     & dotnet run --project $fixtureProject --configuration Release -- $Mode | ForEach-Object { Write-Host $_ }
@@ -305,6 +324,7 @@ $v2Installed = $false
 try {
     Write-Host "[QA-PREFLIGHT] Confirming this runner has no existing SmartPrint install, Agent service, fixture printer, task, firewall rule, or machine data to overwrite." -ForegroundColor Cyan
     Assert-True (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) "Refusing to test on a runner that already has the SmartPrint Agent service."
+    Assert-True (-not (Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue)) "Refusing to test on a runner that already has the optional document worker service."
     Assert-True (-not (Test-Path -LiteralPath $installRoot)) "Refusing to test on a runner that already has a SmartPrint installation directory."
     Assert-True (-not (Get-Printer -Name $testPrinterName -ErrorAction SilentlyContinue)) "Refusing to overwrite an existing printer queue named '$testPrinterName'."
     Assert-True (-not (Get-ScheduledTask -TaskName "SmartPrintLifecycleSystemPrinterProbe" -ErrorAction SilentlyContinue)) "Refusing to replace an existing lifecycle printer-probe task."
@@ -443,6 +463,7 @@ else
             $script:ownsInstall = $true
             Invoke-Setup $InstallerV1
             Assert-ServiceVersion "0.1.10"
+            Assert-OptionalParserService
             Assert-PreservedFixtures
             Assert-QueueUntouched
             $script:servicePathAfterFirstInstall = Get-ServiceBinaryPath
@@ -453,6 +474,7 @@ else
         Invoke-Check "Reinstall the exact same Windows installer while Agent service is running" {
             Invoke-Setup $InstallerV1
             Assert-ServiceVersion "0.1.10"
+            Assert-OptionalParserService
             Assert-PreservedFixtures
             Assert-QueueUntouched
         } | Out-Null
@@ -464,6 +486,7 @@ else
         $upgradeOk = Invoke-Check "Upgrade Windows installation N to N+1" {
             Invoke-Setup $InstallerV2
             Assert-ServiceVersion "0.1.11"
+            Assert-OptionalParserService
             Assert-PreservedFixtures
             Assert-QueueUntouched
             $script:v2Installed = $true
@@ -531,6 +554,9 @@ else
         $uninstallOk = Invoke-Check "Normal uninstall removes service but preserves printers and recovery data" {
             Invoke-Uninstall
             Assert-True (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) "The Agent service still exists after uninstall."
+            Assert-True (-not (Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue)) "The optional document worker service still exists after uninstall."
+            $workerRules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$workerFirewallPrefix*" })
+            Assert-True ($workerRules.Count -eq 0) "The isolated document worker outbound firewall rule remains after uninstall."
             $rules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue |
                 Where-Object { $_.DisplayName -like "$firewallPrefix*" })
             Assert-True ($rules.Count -eq 0) "SmartPrint firewall rules remain after uninstall."
@@ -542,6 +568,7 @@ else
             Invoke-Check "Reinstall after uninstall recovers the same machine identity and queue" {
                 Invoke-Setup $InstallerV2
                 Assert-ServiceVersion "0.1.11"
+                Assert-OptionalParserService
                 Assert-PreservedFixtures
                 Assert-QueueUntouched
             } | Out-Null
