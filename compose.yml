@@ -6,6 +6,11 @@ services:
     # Official ClamAV image; signatures are refreshed by the bundled freshclam daemon.
     image: clamav/clamav:1.5.4_base-debian13-slim
     restart: unless-stopped
+    # Isolated from the public portal's default network. The separate
+    # egress network exists only so freshclam can refresh signatures.
+    networks:
+      - document-processing
+      - malware-egress
     volumes:
       - qrtoprint_clamav_database:/var/lib/clamav
     cap_drop:
@@ -177,6 +182,7 @@ volumes:
 networks:
   document-processing:
     internal: true
+  malware-egress: {}
   cloudflare-edge:
     external: true
     name: cloudflare-edge
