@@ -189,7 +189,12 @@ try {
     docker compose @composeBaseArgs exec -T db rm -f $temporaryDbPath | Out-Null
 
     Write-Host "Restoring encrypted cloud documents..." -ForegroundColor Cyan
-    $backupHelper = docker create --volumes-from ($apiContainer.Trim() + ":rw") alpine:3.20 sh -c ("mkdir -p /var/lib/qrtoprint/documents && find /var/lib/qrtoprint/documents -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf " + $temporaryDocumentsPath + " -C /var/lib/qrtoprint/documents && chown -R 1654:1654 /var/lib/qrtoprint/documents")
+    $documentsVolumeFormat = '{{range .Mounts}}{{if eq .Destination "/var/lib/qrtoprint/documents"}}{{.Name}}{{end}}{{end}}'
+    $documentsVolume = docker inspect --format $documentsVolumeFormat $apiContainer.Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($documentsVolume)) {
+        throw "Could not identify the API's persistent cloud-document volume."
+    }
+    $backupHelper = docker create --mount "type=volume,source=$($documentsVolume.Trim()),destination=/var/lib/qrtoprint/documents" alpine:3.20 sh -c ("mkdir -p /var/lib/qrtoprint/documents && find /var/lib/qrtoprint/documents -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf " + $temporaryDocumentsPath + " -C /var/lib/qrtoprint/documents && chown -R 1654:1654 /var/lib/qrtoprint/documents")
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($backupHelper)) { throw "Could not create the document-volume restore helper." }
     docker cp $documentsFile ($backupHelper.Trim() + ":" + $temporaryDocumentsPath) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not copy the document archive to the restore helper." }
