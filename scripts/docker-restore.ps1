@@ -141,7 +141,7 @@ try {
     Write-Host "Saved previous deployment secrets to $temporaryEnvPath" -ForegroundColor Yellow
 
     Write-Host "Pausing API and portal writes..." -ForegroundColor Cyan
-    docker compose --timeout 240 @composeBaseArgs stop api portal
+    docker compose --timeout 240 @composeBaseArgs stop portal api
     if ($LASTEXITCODE -ne 0) { throw "Could not stop API and portal services." }
     $servicesStopped = $true
 
