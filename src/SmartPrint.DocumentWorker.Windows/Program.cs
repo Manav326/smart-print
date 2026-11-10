@@ -8,7 +8,6 @@ using System.Text.Json;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using SmartPrint.Documents;
 
-const string pipeName = "QRtoPrint.SmartPrint.DocumentWorker.v1";
 const int maximumDocumentBytes = 20 * 1024 * 1024;
 const int maximumResponseBytes = 1024 * 1024;
 
