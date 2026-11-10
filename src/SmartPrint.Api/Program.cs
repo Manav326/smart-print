@@ -3289,6 +3289,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export", async (
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
     var job = await db.PrintJobs.SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == tenantId, ct);
     if (job is null) return Results.NotFound();
+    if (job.PrivatePrinting)
+        return Results.Conflict(new { code = "private_printing_physical_output_required", message = "Private Printing source documents cannot be exported or retried as managed PDFs." });
 
     var printerIsPdfExport = job.PrinterDeviceId is Guid assignedPrinterId &&
         await db.PrinterDevices.AnyAsync(printer =>
@@ -8107,11 +8109,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     if (racedTicket is not null)
     {
         await transaction.RollbackAsync(ct);
+        var racedCompletedPrivateTicket = racedTicket.PrivatePrinting && racedTicket.CompletedUtc is not null;
+        var sameOriginalDocument = racedCompletedPrivateTicket ||
+            (racedTicket.SizeBytes == request.SizeBytes &&
+             string.Equals(racedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
+             racedTicket.OriginalFileName == originalName);
         var sameRequest = (request.BatchId is null || racedTicket.BatchId == request.BatchId.Value) &&
             (requestedBatchName is null || racedTicket.BatchName == requestedBatchName) &&
-            racedTicket.SizeBytes == request.SizeBytes &&
-            string.Equals(racedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
-            racedTicket.OriginalFileName == originalName &&
+            sameOriginalDocument &&
             racedTicket.PrivatePrinting == request.PrivatePrinting &&
             PrintBatchGroupRules.Normalize(racedTicket.BatchGroupName) == batchGroupName &&
             racedTicket.ColourMode == request.ColourMode &&
