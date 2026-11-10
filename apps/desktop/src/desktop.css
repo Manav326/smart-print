@@ -424,3 +424,10 @@ html[data-theme="light"] body[data-app-shell="desktop"] .app-shell.light {
   --red: #b23d4d;
   --blue: #2d5fa8;
 }
+
+/* Shared SmartPrint identity and parent signature on Windows Desktop. */
+body[data-app-shell="desktop"] .brand-lockup{align-items:center}
+body[data-app-shell="desktop"] .brand-mark-image{width:44px;height:44px;flex-basis:44px}
+body[data-app-shell="desktop"] .brand-name{color:var(--text)}
+body[data-app-shell="desktop"] .brand-name span{color:var(--accent)}
+body[data-app-shell="desktop"] .brand-parent-wordmark{background:#F5F7FC}
