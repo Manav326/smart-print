@@ -21,6 +21,60 @@ services:
       retries: 20
       start_period: 300s
 
+  document-worker-token:
+    image: alpine:3.20
+    restart: "no"
+    network_mode: none
+    volumes:
+      - qrtoprint_document_worker_token:/run/secrets
+    command:
+      - sh
+      - -ec
+      - |
+        umask 077
+        if [ ! -s /run/secrets/document-worker-token ]; then
+          od -An -N32 -tx1 /dev/urandom | tr -d ' \n' > /run/secrets/document-worker-token
+        fi
+        chmod 0444 /run/secrets/document-worker-token
+
+  document-worker:
+    image: ${IMAGE_NAMESPACE:?Set IMAGE_NAMESPACE in .env}/smart-print-document-worker:${IMAGE_TAG:-latest}
+    build:
+      context: .
+      dockerfile: Dockerfile.document-worker
+      args:
+        SOURCE_REPOSITORY: ${GITHUB_REPOSITORY_URL:-}
+    restart: unless-stopped
+    init: true
+    user: "1654:1654"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+    volumes:
+      - qrtoprint_document_worker_token:/run/secrets:ro
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8090
+      DocumentWorker__TokenFile: /run/secrets/document-worker-token
+    networks:
+      - document-processing
+    depends_on:
+      document-worker-token:
+        condition: service_completed_successfully
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/smartprint-document-worker-ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
   db:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -42,6 +96,7 @@ services:
       default:
         aliases:
           - smart-print-api
+      document-processing: {}
     image: ${IMAGE_NAMESPACE:?Set IMAGE_NAMESPACE in .env}/smart-print-api:${IMAGE_TAG:-latest}
     build:
       context: .
@@ -63,16 +118,23 @@ services:
       DocumentSecurity__ClamAv__Host: clamav
       DocumentSecurity__ClamAv__Port: 3310
       DocumentSecurity__ClamAv__TimeoutSeconds: 90
+      DocumentSecurity__AnalysisWorker__BaseUrl: http://document-worker:8090/
+      DocumentSecurity__AnalysisWorker__TokenFile: /run/secrets/document-worker-token
       Database__ApplyMigrationsOnStartup: "true"
       PublicPortal__BaseUrl: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
       PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:?Set GITHUB_REPOSITORY in .env}
       Cors__AllowedOrigins__0: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
     volumes:
       - qrtoprint_documents:/var/lib/qrtoprint/documents
+      - qrtoprint_document_worker_token:/run/secrets:ro
     depends_on:
       db:
         condition: service_healthy
       clamav:
+        condition: service_healthy
+      document-worker-token:
+        condition: service_completed_successfully
+      document-worker:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/health/ready || exit 1"]
@@ -107,8 +169,11 @@ volumes:
   qrtoprint_database:
   qrtoprint_documents:
   qrtoprint_clamav_database:
+  qrtoprint_document_worker_token:
 
 networks:
+  document-processing:
+    internal: true
   cloudflare-edge:
     external: true
     name: cloudflare-edge
