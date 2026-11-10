@@ -1,3 +1,4 @@
+#requires -Version 7.0
 [CmdletBinding()]
 param(
     [string]$BackupDirectory = (Join-Path (Split-Path -Parent $PSScriptRoot) "backups"),
@@ -9,6 +10,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env"
+$tunnelTokenSource = Join-Path $repoRoot ".secrets/cloudflare/tunnel-token"
 $composeFile = Join-Path $repoRoot "compose.yml"
 $composeProjectName = "qrtoprint"
 $composeBaseArgs = @("--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
@@ -17,6 +19,12 @@ Import-Module (Join-Path $PSScriptRoot "SmartPrint.BackupCrypto.psm1") -Force
 
 if (-not (Test-Path -LiteralPath $envPath -PathType Leaf)) {
     throw "No .env file exists. Start SmartPrint with scripts\docker-up.ps1 first."
+}
+if (-not (Test-Path -LiteralPath $tunnelTokenSource -PathType Leaf)) {
+    throw "The Cloudflare Tunnel secret is missing at .secrets/cloudflare/tunnel-token. It is required for a complete production recovery set."
+}
+if ((Get-Item -LiteralPath $tunnelTokenSource).Length -lt 16) {
+    throw "The Cloudflare Tunnel secret is unexpectedly short. Refusing to make an incomplete recovery set."
 }
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) { throw "Docker was not found." }
 docker compose version | Out-Null
@@ -44,41 +52,51 @@ if (-not [string]::IsNullOrWhiteSpace($OffsiteRemote)) {
 }
 
 $passphrase = Read-Host "Enter a backup encryption passphrase (at least 16 characters). Store it separately; it cannot be recovered." -AsSecureString
-$confirmation = Read-Host "Re-enter the backup encryption passphrase" -AsSecureString
-if (-not (Test-SmartPrintBackupPassphrasesEqual -First $passphrase -Second $confirmation)) {
-    throw "The backup passphrases did not match or were shorter than 16 characters. Nothing was stopped or changed."
+$confirmation = $null
+try {
+    $confirmation = Read-Host "Re-enter the backup encryption passphrase" -AsSecureString
+    if (-not (Test-SmartPrintBackupPassphrasesEqual -First $passphrase -Second $confirmation)) {
+        throw "The backup passphrases did not match or were shorter than 16 characters. Nothing was stopped or changed."
+    }
 }
-$confirmation.Dispose()
-
-New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
-$resolvedBackup = (Resolve-Path -LiteralPath $BackupDirectory).Path
-$identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-& icacls.exe $resolvedBackup /inheritance:r /grant:r "$($identity):(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-18:(OI)(CI)(F)" | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw "Could not restrict backup-directory permissions. Choose a protected backup directory and retry."
+catch {
+    $passphrase.Dispose()
+    throw
+}
+finally {
+    if ($null -ne $confirmation) { $confirmation.Dispose() }
 }
 
-$stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
-$bundleName = "SmartPrint-$stamp.spbackup"
-$bundlePath = Join-Path $resolvedBackup $bundleName
-$stagingDirectory = Join-Path $resolvedBackup (".staging-$stamp-" + [Guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
-& icacls.exe $stagingDirectory /inheritance:r /grant:r "$($identity):(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-18:(OI)(CI)(F)" | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Could not restrict temporary backup staging permissions." }
-
-$dbFile = Join-Path $stagingDirectory "qrtoprint-database-$stamp.dump"
-$docsFile = Join-Path $stagingDirectory "qrtoprint-documents-$stamp.tar.gz"
-$secretsFile = Join-Path $stagingDirectory "qrtoprint-secrets-$stamp.env"
-$manifestFile = Join-Path $stagingDirectory "manifest.json"
-$plainBundle = Join-Path $stagingDirectory "SmartPrint-$stamp.bundle.zip"
-$tempDbFile = "/tmp/qrtoprint-backup-$stamp.dump"
-$tempDocsFile = "/tmp/qrtoprint-documents-$stamp.tar.gz"
 $servicesStopped = $false
 $backupContainer = $null
-$encryptedResult = $null
+$stagingDirectory = $null
 $remoteDestination = $null
-
 try {
+    New-Item -ItemType Directory -Force -Path $BackupDirectory | Out-Null
+    $resolvedBackup = (Resolve-Path -LiteralPath $BackupDirectory).Path
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    & icacls.exe $resolvedBackup /inheritance:r /grant:r "$($identity):(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-18:(OI)(CI)(F)" | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not restrict backup-directory permissions. Choose a protected backup directory and retry."
+    }
+
+    $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
+    $bundleName = "SmartPrint-$stamp.spbackup"
+    $bundlePath = Join-Path $resolvedBackup $bundleName
+    $stagingDirectory = Join-Path $resolvedBackup (".staging-$stamp-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Path $stagingDirectory -Force | Out-Null
+    & icacls.exe $stagingDirectory /inheritance:r /grant:r "$($identity):(OI)(CI)(F)" "*S-1-5-32-544:(OI)(CI)(F)" "*S-1-5-18:(OI)(CI)(F)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not restrict temporary backup staging permissions." }
+
+    $dbFile = Join-Path $stagingDirectory "qrtoprint-database-$stamp.dump"
+    $docsFile = Join-Path $stagingDirectory "qrtoprint-documents-$stamp.tar.gz"
+    $secretsFile = Join-Path $stagingDirectory "qrtoprint-secrets-$stamp.env"
+    $tunnelTokenFile = Join-Path $stagingDirectory "cloudflare-tunnel-token"
+    $manifestFile = Join-Path $stagingDirectory "manifest.json"
+    $plainBundle = Join-Path $stagingDirectory "SmartPrint-$stamp.bundle.zip"
+    $tempDbFile = "/tmp/qrtoprint-backup-$stamp.dump"
+    $tempDocsFile = "/tmp/qrtoprint-documents-$stamp.tar.gz"
+
     Write-Host "Pausing API and portal writes for a consistent backup..." -ForegroundColor Cyan
     docker compose @composeBaseArgs stop api portal
     if ($LASTEXITCODE -ne 0) { throw "Could not pause API and portal services." }
@@ -109,17 +127,20 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Cloud document archive failed." }
     docker cp ($backupContainer.Trim() + ":" + $tempDocsFile) $docsFile
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $docsFile -PathType Leaf)) {
-        throw "Could not copy the cloud document archive into the restricted staging area."
+        throw "Could not copy the document archive into the restricted staging area."
     }
     docker rm -f $backupContainer | Out-Null
     $backupContainer = $null
 
     Copy-Item -LiteralPath $envPath -Destination $secretsFile -Force
+    Copy-Item -LiteralPath $tunnelTokenSource -Destination $tunnelTokenFile -Force
+
     $dbHash = (Get-FileHash -LiteralPath $dbFile -Algorithm SHA256).Hash.ToLowerInvariant()
     $docsHash = (Get-FileHash -LiteralPath $docsFile -Algorithm SHA256).Hash.ToLowerInvariant()
     $secretsHash = (Get-FileHash -LiteralPath $secretsFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    $tunnelTokenHash = (Get-FileHash -LiteralPath $tunnelTokenFile -Algorithm SHA256).Hash.ToLowerInvariant()
     @{
-        Format = "SmartPrint.BackupBundle.v1"
+        Format = "SmartPrint.BackupBundle.v2"
         CreatedUtc = (Get-Date).ToUniversalTime().ToString("O")
         DatabaseFile = [IO.Path]::GetFileName($dbFile)
         DatabaseSha256 = $dbHash
@@ -127,14 +148,17 @@ try {
         DocumentsSha256 = $docsHash
         SecretsFile = [IO.Path]::GetFileName($secretsFile)
         SecretsSha256 = $secretsHash
+        TunnelTokenFile = [IO.Path]::GetFileName($tunnelTokenFile)
+        TunnelTokenSha256 = $tunnelTokenHash
     } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $manifestFile -Encoding utf8
 
-    Write-Host "Creating a single authenticated encrypted backup bundle..." -ForegroundColor Cyan
-    Compress-Archive -LiteralPath @($dbFile, $docsFile, $secretsFile, $manifestFile) -DestinationPath $plainBundle -CompressionLevel Optimal
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $plainBundle -PathType Leaf)) {
-        throw "Could not assemble the complete backup bundle."
+    Write-Host "Creating the complete streamed backup archive..." -ForegroundColor Cyan
+    $archiveResult = New-SmartPrintBackupArchive -InputFiles @($dbFile, $docsFile, $secretsFile, $tunnelTokenFile, $manifestFile) -OutputPath $plainBundle
+    if (-not (Test-Path -LiteralPath $plainBundle -PathType Leaf)) {
+        throw "Could not assemble the complete backup archive."
     }
 
+    Write-Host "Encrypting the complete recovery set..." -ForegroundColor Cyan
     $encryptedResult = Protect-SmartPrintBackup -InputPath $plainBundle -OutputPath $bundlePath -Passphrase $passphrase
     $bundleHash = (Get-FileHash -LiteralPath $bundlePath -Algorithm SHA256).Hash.ToLowerInvariant()
 
@@ -153,6 +177,10 @@ try {
         if ([int64]$remoteInfo.Size -ne [int64]$localSize) {
             throw "The off-site backup size does not match the encrypted local bundle. Do not count this as a completed off-site backup."
         }
+        rclone check --download $bundlePath $remoteDestination
+        if ($LASTEXITCODE -ne 0) {
+            throw "Off-site copy content verification failed. Do not count this as a completed off-site backup."
+        }
     }
     elseif (-not $AllowLocalOnly) {
         throw "An encrypted local bundle was created, but an off-site target was not configured."
@@ -163,8 +191,9 @@ try {
     Write-Host "File: $bundlePath"
     Write-Host "SHA-256: $bundleHash"
     Write-Host "Plaintext input bytes protected: $($encryptedResult.PlaintextBytes)"
+    Write-Host "Archive entries: $($archiveResult.EntryCount)"
     if ($remoteDestination) {
-        Write-Host "Off-site copy verified by object size: $remoteDestination"
+        Write-Host "Off-site copy size and content verified: $remoteDestination"
     } else {
         Write-Warning "LOCAL-ONLY BACKUP: this file is encrypted but is not off-site. Copy it to independent protected storage."
     }
@@ -179,7 +208,7 @@ finally {
             Write-Warning "Backup finished but the API/portal restart failed. Run docker compose up -d api portal."
         }
     }
-    if (Test-Path -LiteralPath $stagingDirectory) {
+    if (-not [string]::IsNullOrWhiteSpace($stagingDirectory) -and (Test-Path -LiteralPath $stagingDirectory)) {
         Remove-Item -LiteralPath $stagingDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }
     $passphrase.Dispose()
