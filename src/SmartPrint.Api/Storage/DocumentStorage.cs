@@ -53,28 +53,44 @@ public sealed class DocumentStorage : IDisposable
         }
 
         var bytes = memory.ToArray();
-        // Scan before parsing; scanner outages and detected malware both fail closed.
-        await threatScanner.ScanAsync(bytes, cancellationToken);
-        var analysis = await documentAnalyzer.AnalyzeAsync(bytes, extension, cancellationToken);
-        var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-        var storageKey = $"{tenantId:N}/{documentId:N}{extension}";
-        var fullPath = ResolveStoragePath(storageKey);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        var encryptedBytes = Encrypt(bytes, encryptionKey);
-
-        await using (var output = new FileStream(
-            fullPath,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            bufferSize: 64 * 1024,
-            FileOptions.Asynchronous | FileOptions.WriteThrough))
+        byte[]? encryptedBytes = null;
+        try
         {
-            await output.WriteAsync(encryptedBytes, cancellationToken);
-            await output.FlushAsync(cancellationToken);
-        }
+            // Scan before parsing; scanner outages and detected malware both fail closed.
+            await threatScanner.ScanAsync(bytes, cancellationToken);
+            var analysis = await documentAnalyzer.AnalyzeAsync(bytes, extension, cancellationToken);
+            var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            var storageKey = $"{tenantId:N}/{documentId:N}{extension}";
+            var fullPath = ResolveStoragePath(storageKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            encryptedBytes = Encrypt(bytes, encryptionKey);
 
-        return new StoredDocument(storageKey, sha, bytes.LongLength, analysis);
+            await using (var output = new FileStream(
+                fullPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 64 * 1024,
+                FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await output.WriteAsync(encryptedBytes, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+
+            return new StoredDocument(storageKey, sha, bytes.LongLength, analysis);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (encryptedBytes is not null)
+            {
+                CryptographicOperations.ZeroMemory(encryptedBytes);
+            }
+            if (memory.TryGetBuffer(out var buffer))
+            {
+                CryptographicOperations.ZeroMemory(buffer.AsSpan(0, checked((int)memory.Length)));
+            }
+        }
     }
 
     public Task DeleteAsync(string storageKey)
