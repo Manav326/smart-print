@@ -33,6 +33,35 @@ public sealed class LocalNetworkEndpointDiscoveryTests
     }
 
     [Fact]
+    public void FollowsPhoneHotspotWhenTheSavedWifiAdapterConnectsToANewSsid()
+    {
+        const string adapterId = "6f9d30d2-5e52-4a73-aef1-07c0e8a72e11";
+        var savedRouterId = $"{adapterId}|SSID:53686F70526F75746572";
+        var phoneHotspotId = $"{adapterId}|SSID:50686F6E65486F7473706F74";
+        var phoneHotspot = new LocalNetworkAdapter(
+            phoneHotspotId, "Phone hotspot", "Wi-Fi", "192.168.43.27", 24);
+
+        var selected = LocalNetworkEndpointDiscovery.SelectNetwork([phoneHotspot], savedRouterId);
+
+        Assert.NotNull(selected);
+        Assert.Equal(phoneHotspotId, selected!.Id);
+        Assert.Equal("192.168.43.27", selected.Ipv4Address);
+    }
+
+    [Fact]
+    public void DoesNotFollowAHotspotOnADifferentWifiAdapter()
+    {
+        const string savedAdapterId = "6f9d30d2-5e52-4a73-aef1-07c0e8a72e11";
+        const string otherAdapterId = "9a2c7b53-22d1-4f37-bc7d-6db9e21caa32";
+        var savedRouterId = $"{savedAdapterId}|SSID:53686F70526F75746572";
+        var otherHotspot = new LocalNetworkAdapter(
+            $"{otherAdapterId}|SSID:50686F6E65486F7473706F74",
+            "Phone hotspot", "Wi-Fi", "192.168.43.27", 24);
+
+        Assert.Null(LocalNetworkEndpointDiscovery.SelectNetwork([otherHotspot], savedRouterId));
+    }
+
+    [Fact]
     public void ChoosesWifiOnlyWhenThereIsNoSavedPreference()
     {
         var networks = new[]
@@ -57,6 +86,8 @@ public sealed class LocalNetworkEndpointDiscoveryTests
     [Theory]
     [InlineData("192.168.31.47", 24, true)]
     [InlineData("10.0.0.12", 16, true)]
+    [InlineData("192.168.43.27", 24, true)]
+    [InlineData("172.20.10.2", 28, true)]
     [InlineData("169.254.1.8", 16, false)]
     [InlineData("8.8.8.8", 24, false)]
     [InlineData("192.168.31.47", 0, false)]

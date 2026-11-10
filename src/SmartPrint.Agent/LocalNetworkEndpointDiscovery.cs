@@ -52,8 +52,8 @@ public static class LocalNetworkEndpointDiscovery
                         : network.Name.Trim();
 
                 // A Wi-Fi adapter can move between SSIDs without changing its adapter GUID.
-                // Include the current SSID in the preference key so a change of Wi-Fi network
-                // requires an explicit owner selection and a fresh phone check.
+                // Keep the SSID in the identity so the manager can detect a router-to-hotspot
+                // switch on the same adapter and require a fresh phone reachability check.
                 var selectionId = kind == "Wi-Fi"
                     ? ssid is null
                         ? $"{network.Id}|SSID-UNAVAILABLE"
@@ -87,10 +87,25 @@ public static class LocalNetworkEndpointDiscovery
         var networks = availableNetworks.ToArray();
         if (!string.IsNullOrWhiteSpace(preferredNetworkId))
         {
-            // Do not silently move a shop from its saved Wi-Fi to a guest, hotspot
-            // or other adapter when the selected network disappears.
-            return networks.FirstOrDefault(network =>
+            var exactMatch = networks.FirstOrDefault(network =>
                 string.Equals(network.Id, preferredNetworkId, StringComparison.OrdinalIgnoreCase));
+            if (exactMatch is not null) return exactMatch;
+
+            // Phone hotspots often have a different SSID from the shop router, while
+            // Windows keeps the same physical Wi-Fi adapter GUID. Follow only that
+            // exact adapter transition; never jump to another Wi-Fi/Ethernet adapter.
+            var preferredAdapterId = GetWifiAdapterId(preferredNetworkId);
+            if (preferredAdapterId is not null)
+            {
+                var sameAdapter = networks.Where(network =>
+                    string.Equals(network.Kind, "Wi-Fi", StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(GetWifiAdapterId(network.Id), preferredAdapterId, StringComparison.OrdinalIgnoreCase))
+                    .ToArray();
+                if (sameAdapter.Length == 1) return sameAdapter[0];
+            }
+
+            // A different adapter appearing is not enough to change the shop network.
+            return null;
         }
 
         return networks
@@ -156,6 +171,15 @@ public static class LocalNetworkEndpointDiscovery
 
         return localEndpointAddress.Equals(selectedAddress) &&
             IsAddressOnNetwork(remoteAddress, selectedAddress, prefixLength);
+    }
+
+    private static string? GetWifiAdapterId(string networkId)
+    {
+        var ssidMarker = networkId.IndexOf("|SSID", StringComparison.Ordinal);
+        if (ssidMarker <= 0 || !Guid.TryParse(networkId[..ssidMarker], out var adapterGuid))
+            return null;
+
+        return adapterGuid.ToString("D");
     }
 
     private static int NetworkPriority(string kind) => kind switch

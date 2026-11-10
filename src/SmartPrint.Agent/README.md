@@ -21,6 +21,8 @@ Pair the Agent with the same PUBLIC_BASE_URL. After an authenticated heartbeat, 
 
 The installer enables the local status and direct-upload endpoint. The Agent allows TCP 17842 only from the connected local subnet, regardless of whether Windows labels that shop connection Public or Private. It does not open the endpoint to the internet. The authenticated heartbeat keeps the runtime browser CORS origin aligned with PUBLIC_BASE_URL.
 
+Phone hotspots are supported when they provide a private IPv4 local network. If Windows changes from the shop router to a phone hotspot on the same Wi-Fi adapter, the Agent follows the new SSID automatically, clears the previous phone check, and uses the hotspot's current IPv4 subnet. The owner must run the short phone check again. Use a second phone connected to the hotspot as the customer device; the phone providing the hotspot is not itself a Wi-Fi client on that hotspot. Some hotspots isolate connected devices from one another; when that happens, SmartPrint's phone check will fail safely and a shop Wi-Fi router or a hotspot that permits client-to-client traffic is required.
+
 ### Advanced / developer setup
 
 For a release ZIP or manual recovery, an administrator can pair and install from elevated PowerShell with the scripts in the package:
