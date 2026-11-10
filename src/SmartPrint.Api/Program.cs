@@ -4852,6 +4852,7 @@ agentApi.MapPost("/jobs/claim", async (
                   (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
                   (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
               availablePrinterIds.Contains(printer.Id) &&
+              (!job.PrivatePrinting || (document.StorageMode == "LOCAL_AGENT" && document.AgentDeviceId == device.Id)) &&
               (job.BatchId == null || !db.PrintJobs.Any(other =>
                   other.TenantId == job.TenantId &&
                   other.BatchId == job.BatchId &&
@@ -5011,6 +5012,7 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
               job.AgentLeaseExpiresUtc > now
         select new
         {
+            job.PrivatePrinting,
             printDocument.StorageKey,
             printDocument.StorageMode,
             printDocument.MediaType,
@@ -5025,9 +5027,15 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
         return Results.NotFound();
     }
 
-    if (document.StorageMode == "LOCAL_AGENT")
+    if (document.PrivatePrinting || document.StorageMode == "LOCAL_AGENT")
     {
-        return Results.Conflict(new { code = "document_stored_on_local_agent", message = "This document was uploaded directly to the shop's local agent and is not stored in cloud document storage." });
+        return Results.Conflict(new
+        {
+            code = document.PrivatePrinting ? "private_printing_cloud_download_blocked" : "document_stored_on_local_agent",
+            message = document.PrivatePrinting
+                ? "Private Printing documents are never downloaded from cloud storage."
+                : "This document was uploaded directly to the shop's local agent and is not stored in cloud document storage."
+        });
     }
 
     MemoryStream content;
@@ -5320,6 +5328,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         return Results.Ok(new
         {
             AlreadyCompleted = true,
+            PrivatePrinting = ticket.PrivatePrinting,
             UploadResult = new
             {
                 Job = new
