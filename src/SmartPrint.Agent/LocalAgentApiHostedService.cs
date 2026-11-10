@@ -462,6 +462,14 @@ public sealed class LocalAgentApiHostedService(
                     CryptographicOperations.ZeroMemory(bytes);
                     return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
                 }
+                catch (DocumentProcessingException exception)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    logger.LogWarning(exception, "Photo revision parser unavailable. JobId={JobId}; print queue remains active.", jobId);
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "The isolated document processor is temporarily unavailable. Your existing print jobs are not affected.");
+                }
                 var expectedPageCount = checked((photoCount + photosPerPage - 1) / photosPerPage);
                 if (analysis.PageCount != expectedPageCount)
                 {
@@ -932,6 +940,13 @@ public sealed class LocalAgentApiHostedService(
                     catch (DocumentValidationException exception)
                     {
                         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
+                    }
+                    catch (DocumentProcessingException exception)
+                    {
+                        logger.LogWarning(exception, "Local document parser unavailable. TicketId={TicketId}; print queue remains active.", ticketId);
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status503ServiceUnavailable,
+                            title: "The isolated document processor is temporarily unavailable. Your existing print jobs are not affected.");
                     }
 
                     if (existing is null)
