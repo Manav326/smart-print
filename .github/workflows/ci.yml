@@ -700,6 +700,9 @@ jobs:
         with:
           name: smart-print-desktop-win-x64
           path: artifacts/desktop
+      - name: Verify customer installer excludes CI-only desktop payloads
+        shell: pwsh
+        run: ./scripts/qa/windows-installer-payload.tests.ps1
       - name: Build two versioned SmartPrint installers
         shell: pwsh
         run: |
