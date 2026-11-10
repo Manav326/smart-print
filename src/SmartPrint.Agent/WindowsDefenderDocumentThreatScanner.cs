@@ -46,6 +46,8 @@ public sealed class WindowsDefenderDocumentThreatScanner
             "QRtoPrint",
             "SecurityScans");
         Directory.CreateDirectory(scanDirectory);
+        SecureScanDirectory(scanDirectory);
+        RemoveStaleScanFiles(scanDirectory);
         var scanPath = Path.Combine(scanDirectory, Guid.NewGuid().ToString("N") + extension);
 
         try
@@ -139,6 +141,57 @@ public sealed class WindowsDefenderDocumentThreatScanner
             }
             catch (UnauthorizedAccessException)
             {
+            }
+        }
+    }
+
+
+    private static void SecureScanDirectory(string directory)
+    {
+        var systemSid = new System.Security.Principal.SecurityIdentifier(
+            System.Security.Principal.WellKnownSidType.LocalSystemSid, null);
+        var administratorsSid = new System.Security.Principal.SecurityIdentifier(
+            System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid, null);
+
+        var security = new System.Security.AccessControl.DirectorySecurity();
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        security.SetOwner(administratorsSid);
+        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+            systemSid,
+            System.Security.AccessControl.FileSystemRights.FullControl,
+            System.Security.AccessControl.InheritanceFlags.ContainerInherit |
+            System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+            System.Security.AccessControl.PropagationFlags.None,
+            System.Security.AccessControl.AccessControlType.Allow));
+        security.AddAccessRule(new System.Security.AccessControl.FileSystemAccessRule(
+            administratorsSid,
+            System.Security.AccessControl.FileSystemRights.FullControl,
+            System.Security.AccessControl.InheritanceFlags.ContainerInherit |
+            System.Security.AccessControl.InheritanceFlags.ObjectInherit,
+            System.Security.AccessControl.PropagationFlags.None,
+            System.Security.AccessControl.AccessControlType.Allow));
+        new DirectoryInfo(directory).SetAccessControl(security);
+    }
+
+    private static void RemoveStaleScanFiles(string directory)
+    {
+        var cutoff = DateTime.UtcNow.AddHours(-24);
+        foreach (var path in Directory.EnumerateFiles(directory, "*", SearchOption.TopDirectoryOnly))
+        {
+            try
+            {
+                if (File.GetLastWriteTimeUtc(path) < cutoff)
+                {
+                    File.Delete(path);
+                }
+            }
+            catch (IOException)
+            {
+                // A busy/locked scan file is not reused; the current scan uses a fresh GUID path.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // The scan fails closed if the current file cannot be created below.
             }
         }
     }
