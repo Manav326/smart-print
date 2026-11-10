@@ -47,7 +47,7 @@ public sealed class WindowsLocalDocumentWorkerServiceStarter : ILocalDocumentWor
             throw;
         }
         catch (Exception exception) when (
-            exception is InvalidOperationException or Win32Exception or TimeoutException)
+            exception is InvalidOperationException or Win32Exception or System.TimeoutException)
         {
             throw new DocumentProcessingException(
                 "The optional document parser could not be started. Normal printing is unaffected; this upload was blocked.",
