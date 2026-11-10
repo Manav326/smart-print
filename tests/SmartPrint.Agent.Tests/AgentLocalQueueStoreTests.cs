@@ -854,6 +854,34 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+    [Fact]
+    public async Task PrivatePurgeRemovesOrphanedDocumentAndTemporaryManifestFiles()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            var jobId = Guid.NewGuid();
+            var documentPath = Path.Combine(root, jobId.ToString("N") + ".qdoc");
+            var temporaryDocumentPath = documentPath + ".tmp";
+            var temporaryManifestPath = Path.Combine(root, jobId.ToString("N") + ".json.tmp");
+            await File.WriteAllBytesAsync(documentPath, RandomNumberGenerator.GetBytes(256));
+            await File.WriteAllBytesAsync(temporaryDocumentPath, RandomNumberGenerator.GetBytes(128));
+            await File.WriteAllTextAsync(temporaryManifestPath, "{\\"documentName\\":\\"private-document.pdf\\",\\"sha256\\":\\"secret-hash\\"}");
+
+            Assert.Null(store.Find(jobId));
+            await store.PurgeUnindexedPrivateSourceAsync(jobId, CancellationToken.None);
+
+            Assert.False(File.Exists(documentPath));
+            Assert.False(File.Exists(temporaryDocumentPath));
+            Assert.False(File.Exists(temporaryManifestPath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
