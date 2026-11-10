@@ -358,7 +358,7 @@ internal sealed class WindowsDocumentWorkerService(
 
 internal sealed class WindowsParserJob : IDisposable
 {
-    private const uint JobObjectExtendedLimitInformation = 9;
+    private const uint JobObjectExtendedLimitInformationClass = 9;
     private const uint LimitActiveProcess = 0x00000008;
     private const uint LimitProcessMemory = 0x00000100;
     private const uint LimitKillOnJobClose = 0x00002000;
@@ -385,7 +385,7 @@ internal sealed class WindowsParserJob : IDisposable
                 },
                 ProcessMemoryLimit = new UIntPtr(ParserMemoryLimitBytes)
             };
-            if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformation, ref limits,
+            if (!SetInformationJobObject(handle, JobObjectExtendedLimitInformationClass, ref limits,
                     (uint)Marshal.SizeOf<JobObjectExtendedLimitInformation>()))
             {
                 job.Dispose();
