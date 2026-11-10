@@ -267,6 +267,8 @@ function Assert-DocumentWorkerRuntimeIsolation {
 
         # Network Service is a distinct unprivileged local identity. It must not
         # be able to connect to a pipe whose DACL grants only SYSTEM and LocalService.
+        & icacls.exe (Split-Path -Parent $assemblyPath) /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(RX)" /T | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not grant Network Service read/execute access to the isolated fixture assembly." }
         & icacls.exe $networkProbeDirectory /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(M)" | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not grant the isolated Network Service probe its result-file access." }
         $probeArguments = '"' + $assemblyPath + '" probe-worker-pipe "' + $networkResultPath + '"'
@@ -428,6 +430,7 @@ try {
     @'
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Agent;
 
@@ -542,7 +545,7 @@ else if (mode == "analyze-worker")
     var analysis = await analyzer.AnalyzeAsync(png, ".png", CancellationToken.None);
     if (analysis.PageCount != 1 ||
         analysis.MediaType != "image/png" ||
-        !analysis.PageSizesJson.Contains("\\"pixelWidth\\":1", StringComparison.Ordinal))
+        !analysis.PageSizesJson.Contains("\"pixelWidth\":1", StringComparison.Ordinal))
         throw new InvalidOperationException("The LocalService worker returned unexpected PNG analysis.");
     await File.WriteAllTextAsync(args[1], System.Text.Json.JsonSerializer.Serialize(analysis));
     Console.WriteLine("The LocalSystem Agent client successfully used the LocalService worker and restricted parser child.");
