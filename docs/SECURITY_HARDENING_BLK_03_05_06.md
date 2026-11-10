@@ -32,15 +32,39 @@ timeouts reject the upload.
 
 The Windows Agent uses Microsoft Defender's on-demand file scan before PDF/image
 analysis and before the document is accepted into the local queue. Its private scan
-directory is restricted to SYSTEM and Administrators. A missing or failing Defender
-scanner blocks the upload; it does not silently bypass scanning.
+directory is ACL-restricted to SYSTEM, Administrators and the running Agent service
+identity. A missing or failing Defender scanner blocks the upload; it does not
+silently bypass scanning. The invoking \`MpCmdRun\` process is below-normal priority;
+SmartPrint does not change the shop computer's global Defender CPU policy.
 
-**Remaining BLK-03 work:** the Windows Agent's PDFium/Skia parsing and rendering
-still execute inside the Agent process. The cloud parser has a container boundary,
-but the native Agent parser/render path still needs its own restricted process
-boundary and real Windows negative-test evidence. Run the supported-Windows Defender
-acceptance suite and a safe/malicious document corpus before sign-off. Do not state
-that BLK-03 is fully closed yet.
+The upload parser is a separate Windows service running as
+\`NT AUTHORITY\\LocalService\` with a restricted service SID and a local named-pipe
+ACL. The Agent starts it only when a new upload or photo revision needs analysis.
+The service stops itself after two minutes without a parsing request. Each parser
+child has a 768 MB process-memory ceiling, a one-process job limit and a 90-second
+request timeout. There is deliberately **no fixed CPU percentage cap**: the service
+and parser run at below-normal process priority, allowing Windows to schedule the
+normal-priority print Agent and spooler work first while analysis uses otherwise
+available CPU. The parser service is not part of the Agent's print-dispatch dependency
+graph. When it is unavailable, only new uploads/photo revisions are blocked; the
+print Agent, GDI spooler path and already-accepted jobs remain available.
+
+The Windows print path intentionally remains the existing direct
+\`WindowsPrintExecutor\`/GDI implementation. It does not start, wait for, or call the
+upload parser service. The Windows spooler integration tests execute that path
+without installing the optional parser service, and the installer lifecycle test
+asserts that the print Agent remains running while the parser is stopped and
+Manual-start.
+
+**Remaining BLK-03 work:** the existing Windows print executor still uses PDFium/Skia
+inside the Agent process when rendering an accepted PDF for physical printing. The
+upload-time analysis parser is now isolated, but the native print renderer is not.
+Moving rendering out of the print execution path would add IPC and raster-transfer
+cost and could compromise the shop computer's primary job. This candidate therefore
+preserves the current print path and does not claim complete native parser isolation.
+Run the supported-Windows Defender clean/malicious/scanner-outage acceptance suite,
+verify the upload worker's service/ACL behavior on a shop-shaped Windows VM, and
+obtain a security review of the in-process print renderer before BLK-03 sign-off.
 
 ## BLK-05 — PostgreSQL concurrency and financial-state integrity
 
@@ -93,7 +117,9 @@ an off-site backup and is not a recovery sign-off.
 authenticates the full encrypted stream before parsing the manifest, verifies all
 component hashes, validates the PostgreSQL/document archives and requires explicit
 operator confirmation before replacing live data. Before destructive restore it
-preserves the current `.env` and tunnel token. If restore fails after database
+preserves the current `.env` and tunnel token. The backup and restore scripts stop
+portal ingress first and drain API requests with a four-minute host/Compose shutdown
+window before changing the database/document set. If restore fails after database
 replacement starts, API and portal remain stopped rather than serving partial data.
 
 `scripts/docker-restore-drill.ps1` restores the database into a disposable
