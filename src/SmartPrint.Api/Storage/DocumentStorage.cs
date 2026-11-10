@@ -10,11 +10,16 @@ public sealed class DocumentStorage : IDisposable
     private readonly IConfiguration configuration;
     private readonly IWebHostEnvironment environment;
     private readonly byte[] encryptionKey;
+    private readonly IDocumentThreatScanner threatScanner;
 
-    public DocumentStorage(IConfiguration configuration, IWebHostEnvironment environment)
+    public DocumentStorage(
+        IConfiguration configuration,
+        IWebHostEnvironment environment,
+        IDocumentThreatScanner threatScanner)
     {
         this.configuration = configuration;
         this.environment = environment;
+        this.threatScanner = threatScanner;
         encryptionKey = LoadEncryptionKey(configuration, environment);
     }
 
@@ -45,6 +50,8 @@ public sealed class DocumentStorage : IDisposable
         }
 
         var bytes = memory.ToArray();
+        // Scan before parsing; scanner outages and detected malware both fail closed.
+        await threatScanner.ScanAsync(bytes, cancellationToken);
         var analysis = DocumentAnalyzer.Analyse(bytes, extension);
         var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         var storageKey = $"{tenantId:N}/{documentId:N}{extension}";
