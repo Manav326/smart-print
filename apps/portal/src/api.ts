@@ -1040,7 +1040,7 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
     printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
     photoPricing: CustomerPhotoPricing | null;
-    localAgent: { agentDeviceId: string; endpoints: string[] } | null;
+    localAgent: { agentDeviceId: string; endpoints: string[]; documentEncryptionPublicKey?: string | null } | null;
     cloudAssistedPrintingEnabled: boolean;
   }>("/api/v1/public/sessions/current/resume", {
     method: "POST",
@@ -1084,6 +1084,7 @@ export interface ShopPrintJob {
   isDuplex: boolean;
   orientation?: string;
   pdfBrandingEnabled?: boolean;
+  privatePrinting?: boolean;
   pricingVersion?: number;
   printKind?: string;
   photoSizeCode?: string | null;
