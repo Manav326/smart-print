@@ -27,6 +27,7 @@ if (token.Length < 64 || token.Any(character => !Uri.IsHexDigit(character)))
 var tokenBytes = Encoding.UTF8.GetBytes(token);
 
 var app = builder.Build();
+using var analysisGate = new SemaphoreSlim(1, 1);
 const string readyFile = "/tmp/smartprint-document-worker-ready";
 app.Lifetime.ApplicationStarted.Register(() => File.WriteAllText(readyFile, "ready"));
 app.Lifetime.ApplicationStopping.Register(() =>
@@ -69,6 +70,11 @@ app.MapPost("/analyze", async (HttpContext context, CancellationToken cancellati
         return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
     }
 
+    if (!await analysisGate.WaitAsync(TimeSpan.FromSeconds(2), cancellationToken))
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+
     await using var memory = new MemoryStream();
     var buffer = new byte[64 * 1024];
     try
@@ -106,15 +112,16 @@ app.MapPost("/analyze", async (HttpContext context, CancellationToken cancellati
         finally
         {
             CryptographicOperations.ZeroMemory(document);
-            if (memory.TryGetBuffer(out var buffer))
+            if (memory.TryGetBuffer(out var memoryBacking))
             {
-                CryptographicOperations.ZeroMemory(buffer.AsSpan(0, checked((int)memory.Length)));
+                CryptographicOperations.ZeroMemory(memoryBacking.AsSpan(0, checked((int)memory.Length)));
             }
         }
     }
     finally
     {
         CryptographicOperations.ZeroMemory(buffer);
+        analysisGate.Release();
     }
 });
 
