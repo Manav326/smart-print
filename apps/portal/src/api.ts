@@ -1482,9 +1482,46 @@ export async function uploadCustomerDocumentLocally(
     }
   }
 
-  if (ticket.completed && !privatePrinting) {
-    // The document/job already exists. Reconcile its canonical status over the
-    // API without retransmitting bytes or requiring Cloud-assisted new uploads.
+  if (ticket.completed) {
+    if (privatePrinting) {
+      // A private ticket is reconciled only with its original paired Agent.
+      // The Agent returns the already-completed job without reading or receiving
+      // the customer's source file again.
+      if (ticket.agentDeviceId === localAgent.agentDeviceId) {
+        for (const value of localAgent.endpoints.slice(0, 8)) {
+          const endpoint = isPrivateLocalAgentEndpoint(value);
+          if (!endpoint) continue;
+          try {
+            const response = await fetch(`${endpoint.origin}/api/v1/local/uploads/${encodeURIComponent(ticket.id)}`, {
+              method: "POST", mode: "cors", cache: "no-store", credentials: "omit",
+              headers: { "X-Print-Upload-Grant": grantToken },
+              targetAddressSpace: "local"
+            } as RequestInit & { targetAddressSpace: "local" });
+            if (!response.ok) continue;
+            const completed = await response.json() as UploadedPrintJob;
+            if (!completed?.job?.id || !completed?.document?.id) continue;
+            completed.document.originalFileName = "Private document";
+            clearCustomerLocalUploadAttempt(sessionToken, file);
+            return {
+              ...completed,
+              job: {
+                ...completed.job,
+                batchId: ticket.batchId ?? completed.job.batchId ?? null,
+                batchGroupName: ticket.batchGroupName ?? completed.job.batchGroupName ?? null,
+                batchName: ticket.batchName ?? completed.job.batchName ?? null
+              }
+            };
+          } catch {
+            // Keep the original ticket and try the next address of the same Agent.
+          }
+        }
+      }
+      throw new LocalUploadOutcomeUnknownError(
+        "This private print request is already recorded. Reconnect to the original shop computer to refresh its status; SmartPrint will not upload the source again or use cloud recovery."
+      );
+    }
+
+    // Standard local uploads may still reconcile through the existing HTTPS recovery route.
     try {
       const completed = await uploadCustomerLocalTicketViaCloud(
         sessionToken, file, ticket, grantToken
@@ -1503,6 +1540,7 @@ export async function uploadCustomerDocumentLocally(
       throw new LocalUploadOutcomeUnknownError(
         "SmartPrint has your original upload recorded. The shop connection could not refresh its status just now; retry this same file to restore the existing print request. No new upload or print job has been created."
       );
+    }
     }
   }
 
