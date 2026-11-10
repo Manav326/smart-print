@@ -367,6 +367,7 @@ jobs:
         env:
           SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION: ${{ steps.pdf_queue.outcome == 'success' && '1' || '0' }}
           SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION: ${{ steps.secondary_queue.outcome == 'success' && '1' || '0' }}
+          SMARTPRINT_RUN_WINDOWS_DEFENDER_INTEGRATION: "1"
         run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
       - name: Remove the temporary secondary Windows queue
         if: always()
