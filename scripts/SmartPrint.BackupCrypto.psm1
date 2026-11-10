@@ -252,6 +252,10 @@ function Protect-SmartPrintBackup {
         $output = [IO.File]::Open($temporaryPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
         $output.Write($header, 0, $header.Length)
 
+        $buffer = $null
+        $header = $null
+        $metadata = $null
+        $empty = $null
         $buffer = [byte[]]::new($script:SmartPrintBackupChunkSize)
         [uint64]$totalBytes = 0
         [uint32]$chunkCount = 0
@@ -472,4 +476,95 @@ function Unprotect-SmartPrintBackup {
     }
 }
 
-Export-ModuleMember -Function Protect-SmartPrintBackup, Unprotect-SmartPrintBackup, Test-SmartPrintBackupPassphrasesEqual
+
+function New-SmartPrintBackupArchive {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string[]]$InputFiles,
+        [Parameter(Mandatory)][ValidateNotNullOrEmpty()][string]$OutputPath
+    )
+
+    if ($InputFiles.Count -lt 2) {
+        throw "A SmartPrint backup archive must contain the database, documents and recovery secrets."
+    }
+
+    $resolvedFiles = @($InputFiles | ForEach-Object { (Resolve-Path -LiteralPath $_ -ErrorAction Stop).Path })
+    $entryNames = @($resolvedFiles | ForEach-Object { [IO.Path]::GetFileName($_) })
+    if (($entryNames | Select-Object -Unique).Count -ne $entryNames.Count) {
+        throw "Backup archive input filenames must be unique."
+    }
+
+    $destinationPath = [IO.Path]::GetFullPath($OutputPath)
+    if (Test-Path -LiteralPath $destinationPath) {
+        throw "The backup archive destination already exists: $destinationPath"
+    }
+    $destinationDirectory = [IO.Path]::GetDirectoryName($destinationPath)
+    if (-not (Test-Path -LiteralPath $destinationDirectory)) {
+        New-Item -ItemType Directory -Force -Path $destinationDirectory | Out-Null
+    }
+
+    $temporaryPath = "$destinationPath.partial-$([Guid]::NewGuid().ToString('N'))"
+    $zipStream = $null
+    $archive = $null
+    [long]$totalInputBytes = 0
+    try {
+        Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
+        $zipStream = [IO.File]::Open(
+            $temporaryPath,
+            [IO.FileMode]::CreateNew,
+            [IO.FileAccess]::Write,
+            [IO.FileShare]::None)
+        $archive = [IO.Compression.ZipArchive]::new(
+            $zipStream,
+            [IO.Compression.ZipArchiveMode]::Create,
+            $false)
+
+        foreach ($sourcePath in $resolvedFiles) {
+            $sourceStream = $null
+            $entryStream = $null
+            try {
+                $sourceStream = [IO.File]::OpenRead($sourcePath)
+                $entry = $archive.CreateEntry(
+                    [IO.Path]::GetFileName($sourcePath),
+                    [IO.Compression.CompressionLevel]::NoCompression)
+                $entryStream = $entry.Open()
+                $sourceStream.CopyTo($entryStream, 1MB)
+                if ([long]::MaxValue - $totalInputBytes -lt $sourceStream.Length) {
+                    throw "The SmartPrint backup archive is too large."
+                }
+                $totalInputBytes += $sourceStream.Length
+            }
+            finally {
+                if ($null -ne $entryStream) { $entryStream.Dispose() }
+                if ($null -ne $sourceStream) { $sourceStream.Dispose() }
+            }
+        }
+
+        $archive.Dispose()
+        $archive = $null
+        $zipStream.Flush($true)
+        $zipStream.Dispose()
+        $zipStream = $null
+        [IO.File]::Move($temporaryPath, $destinationPath)
+
+        return [pscustomobject]@{
+            Path = $destinationPath
+            EntryCount = $resolvedFiles.Count
+            PlaintextBytes = $totalInputBytes
+            ArchiveBytes = (Get-Item -LiteralPath $destinationPath).Length
+            Format = "ZIP64-capable streaming archive"
+        }
+    }
+    catch {
+        if (Test-Path -LiteralPath $temporaryPath) {
+            Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        }
+        throw
+    }
+    finally {
+        if ($null -ne $archive) { $archive.Dispose() }
+        if ($null -ne $zipStream) { $zipStream.Dispose() }
+    }
+}
+
+Export-ModuleMember -Function Protect-SmartPrintBackup, Unprotect-SmartPrintBackup, Test-SmartPrintBackupPassphrasesEqual, New-SmartPrintBackupArchive
