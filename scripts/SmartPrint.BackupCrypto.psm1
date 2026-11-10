@@ -517,7 +517,7 @@ function New-SmartPrintBackupArchive {
         $archive = [IO.Compression.ZipArchive]::new(
             $zipStream,
             [IO.Compression.ZipArchiveMode]::Create,
-            $false)
+            $true)
 
         foreach ($sourcePath in $resolvedFiles) {
             $sourceStream = $null
