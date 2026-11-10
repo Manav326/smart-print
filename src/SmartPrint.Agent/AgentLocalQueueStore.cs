@@ -118,6 +118,52 @@ public sealed class AgentLocalQueueStore
         ReadEntries().Where(entry => entry.PrivatePrinting &&
             (entry.State == "PRIVATE_PURGE_PENDING" || entry.PrivatePurgePending)).ToArray();
 
+    public async Task PurgeUnindexedPrivateSourceAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        if (jobId == Guid.Empty) throw new ArgumentException("A private job ID is required.", nameof(jobId));
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!Directory.Exists(queueRoot)) return;
+
+        var rootFull = Path.GetFullPath(queueRoot);
+        var prefix = rootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        var documentPath = Path.Combine(rootFull, jobId.ToString("N") + ".qdoc");
+        var paths = new[]
+        {
+            documentPath,
+            documentPath + ".tmp",
+            documentPath + ".photo-revision.bak",
+            GetManifestPath(jobId) + ".tmp"
+        };
+
+        foreach (var candidate in paths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var fullPath = Path.GetFullPath(candidate);
+            if (!fullPath.StartsWith(prefix, comparison))
+                throw new InvalidDataException("The orphaned private document path is outside the protected queue.");
+            if (!File.Exists(fullPath)) continue;
+
+            await using (var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Write, FileShare.None,
+                64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough | FileOptions.SequentialScan))
+            {
+                var zeroes = new byte[64 * 1024];
+                long remaining = stream.Length;
+                stream.Position = 0;
+                while (remaining > 0)
+                {
+                    var count = (int)Math.Min(zeroes.Length, remaining);
+                    await stream.WriteAsync(zeroes.AsMemory(0, count), cancellationToken);
+                    remaining -= count;
+                }
+                await stream.FlushAsync(cancellationToken);
+                stream.Flush(flushToDisk: true);
+                CryptographicOperations.ZeroMemory(zeroes);
+            }
+            File.Delete(fullPath);
+        }
+    }
+
     public IReadOnlyList<AgentLocalQueueEntry> GetStagedLocalUploads() =>
         ReadEntries().Where(entry => entry.State == "LOCAL_UPLOAD_STAGED").ToArray();
 
