@@ -23,7 +23,8 @@ public sealed record AgentClaimedJob(
     string OutputMode = PrinterOutputModeRules.Physical,
     string Orientation = "AUTO",
     bool PdfBrandingEnabled = false,
-    bool PrivatePrinting = false);
+    bool PrivatePrinting = false,
+    string PrintKind = "DOCUMENT");
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
@@ -35,7 +36,8 @@ public sealed record AgentPrivateRelayItem(
     Guid TicketId, Guid PrintJobId, string JobNumber, Guid PrinterDeviceId,
     string PrinterName, string QueueName, string FileExtension, string MediaType,
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
-    bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc);
+    bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
+    string PrintKind = "DOCUMENT");
 
 public sealed record AgentPrivateRelayPendingResponse(IReadOnlyList<AgentPrivateRelayItem> Items);
 public sealed record AgentPrivateRelayRejectRequest(string Code, string Message);
@@ -86,7 +88,8 @@ public sealed record AgentLocalQueueEntry(
     string Orientation = "AUTO",
     bool PdfBrandingEnabled = false,
     bool PrivatePrinting = false,
-    bool PrivatePurgePending = false);
+    bool PrivatePurgePending = false,
+    string PrintKind = "DOCUMENT");
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);

@@ -352,10 +352,14 @@ test("customer print settings are preserved independently of printer capability 
   assert.ok(flow.includes("Customer requests are captured independently of current hardware reports."));
   assert.ok(flow.includes("void printerCapabilitiesJson;"));
   assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
-  assert.ok(flow.includes('colourMode:photoSettings?"Colour":settings.colourMode'));
-  assert.ok(flow.includes("isDuplex:photoSettings?false:settings.isDuplex"));
-  assert.ok(flow.includes('paperSize:photoSettings?"A4":settings.paperSize'));
-  assert.ok(flow.includes('orientation:photoSettings?"AUTO":settings.orientation'));
+  // Settings are derived from the selected file/group defaults, while ID Studio
+  // receives a fixed portrait/A4/colour/single-sided profile of its own.
+  assert.ok(flow.includes("colourMode:selected.colourMode"));
+  assert.ok(flow.includes("isDuplex:selected.isDuplex"));
+  assert.ok(flow.includes('paperSize:selected.advancedEnabled?selected.paperSize:"A4"'));
+  assert.ok(flow.includes('orientation:selected.advancedEnabled?selected.orientation:"AUTO"'));
+  assert.ok(flow.includes("if(isSmartPrintIdDocument(candidate)) return {"));
+  assert.ok(flow.includes('copies:1,colourMode:"Colour",isDuplex:false,paperSize:"A4",orientation:"PORTRAIT"'));
 });
 
 test("folder defaults inherit to files and advanced paper options are opt-in", () => {
@@ -368,8 +372,8 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
   assert.ok(flow.includes("const selected=own?.custom?{...defaults,...own}:defaults;"));
   assert.ok(flow.includes("checked={defaults.advancedEnabled}"));
   assert.ok(flow.includes("checked={own.advancedEnabled}"));
-  assert.ok(flow.includes("{defaults.advancedEnabled&&"));
-  assert.ok(flow.includes("{own.advancedEnabled&&"));
+  assert.ok(flow.includes("{!isIdStudioGroup&&defaults.advancedEnabled&&"));
+  assert.ok(flow.includes("Prepared ID sheet · one colour copy · A4 portrait · single-sided"));
   assert.ok(flow.includes('{defaults.colourMode==="Mono"'));
   assert.ok(flow.includes('Copies · all files'));
 });

@@ -118,7 +118,8 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     bool IsDuplex = false,
     int Copies = 1,
     string Orientation = "AUTO",
-    bool PrivatePrinting = false);
+    bool PrivatePrinting = false,
+    string PrintKind = "DOCUMENT");
 
 public sealed record RecordPrintRefundRequest(
     string RefundMethod,

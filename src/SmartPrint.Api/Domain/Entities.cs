@@ -349,6 +349,7 @@ public sealed class LocalPrintUploadTicket
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public bool PrivatePrinting { get; set; }
+    public string PrintKind { get; set; } = "DOCUMENT";
     public Guid TenantId { get; set; }
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }

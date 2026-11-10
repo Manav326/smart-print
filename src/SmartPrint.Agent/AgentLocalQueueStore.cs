@@ -304,7 +304,8 @@ public sealed class AgentLocalQueueStore
             OutputMode: job.OutputMode,
             Orientation: job.Orientation,
             PdfBrandingEnabled: job.PdfBrandingEnabled,
-            PrivatePrinting: job.PrivatePrinting);
+            PrivatePrinting: job.PrivatePrinting,
+            PrintKind: job.PrintKind);
 
         try
         {
@@ -532,7 +533,8 @@ public sealed class AgentLocalQueueStore
             LeaseExpiresUtc = job.LeaseExpiresUtc,
             OutputMode = job.OutputMode,
             PdfBrandingEnabled = job.PdfBrandingEnabled,
-            PrivatePrinting = job.PrivatePrinting
+            PrivatePrinting = job.PrivatePrinting,
+            PrintKind = job.PrintKind
         }, cancellationToken);
     }
 
