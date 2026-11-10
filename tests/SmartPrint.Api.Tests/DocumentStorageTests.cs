@@ -55,7 +55,8 @@ public sealed class DocumentStorageTests
             using var storage = new DocumentStorage(
                 configuration,
                 new TestWebHostEnvironment(root, "Production"),
-                new RejectDocumentThreatScanner());
+                new RejectDocumentThreatScanner(),
+                new AllowDocumentAnalyzer());
 
             await using var input = new MemoryStream(ValidPng);
             var exception = await Assert.ThrowsAsync<DocumentThreatScanException>(() =>
@@ -134,7 +135,7 @@ public sealed class DocumentStorageTests
         {
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
             var environment = new TestWebHostEnvironment(root, "Production");
-            Assert.Throws<InvalidOperationException>(() => new DocumentStorage(configuration, environment, new AllowDocumentThreatScanner()));
+            Assert.Throws<InvalidOperationException>(() => new DocumentStorage(configuration, environment, new AllowDocumentThreatScanner(), new AllowDocumentAnalyzer()));
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -153,7 +154,13 @@ public sealed class DocumentStorageTests
             ["Documents:StorageRoot"] = root,
             ["Documents:EncryptionKey"] = key
         }).Build();
-        return new DocumentStorage(configuration, new TestWebHostEnvironment(root, "Production"), new AllowDocumentThreatScanner());
+        return new DocumentStorage(configuration, new TestWebHostEnvironment(root, "Production"), new AllowDocumentThreatScanner(), new AllowDocumentAnalyzer());
+    }
+
+    private sealed class AllowDocumentAnalyzer : IDocumentAnalyzer
+    {
+        public Task<DocumentAnalysis> AnalyzeAsync(ReadOnlyMemory<byte> document, string extension, CancellationToken cancellationToken) =>
+            Task.FromResult(DocumentAnalyzer.Analyse(document.ToArray(), extension));
     }
 
     private sealed class AllowDocumentThreatScanner : IDocumentThreatScanner
