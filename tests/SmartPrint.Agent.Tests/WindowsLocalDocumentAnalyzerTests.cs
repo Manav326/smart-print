@@ -113,6 +113,15 @@ public sealed class WindowsLocalDocumentAnalyzerTests
             analyzer.AnalyzeAsync("sample"u8.ToArray(), extension, CancellationToken.None));
     }
 
+    private sealed class TestWorkerServiceStarter : ILocalDocumentWorkerServiceStarter
+    {
+        public Task EnsureRunningAsync(CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.CompletedTask;
+        }
+    }
+
     private static WindowsLocalDocumentAnalyzer CreateAnalyzer(string pipeName)
     {
         var configuration = new ConfigurationBuilder()
@@ -122,6 +131,6 @@ public sealed class WindowsLocalDocumentAnalyzerTests
                 ["Agent:DocumentWorkerTimeoutSeconds"] = "10"
             })
             .Build();
-        return new WindowsLocalDocumentAnalyzer(configuration);
+        return new WindowsLocalDocumentAnalyzer(configuration, new TestWorkerServiceStarter());
     }
 }
