@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.IO.Pipes.AccessControl;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting.WindowsServices;
 using SmartPrint.Documents;
@@ -146,7 +147,6 @@ internal sealed class WindowsDocumentWorkerService(ILogger<WindowsDocumentWorker
         var localServiceSid = new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null);
         var security = new PipeSecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.SetOwner(systemSid);
         security.AddAccessRule(new PipeAccessRule(
             systemSid,
             PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
