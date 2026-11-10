@@ -157,7 +157,7 @@ public sealed class WindowsDefenderDocumentThreatScanner
             output,
             @"(?im)^\s*Threat\s*:\s*\S+");
 
-        if (exitCode == 2 && threatReported)
+        if (threatReported)
         {
             return new DocumentThreatScanException(
                 "Microsoft Defender detected a threat. The local upload was rejected.",
@@ -177,9 +177,7 @@ public sealed class WindowsDefenderDocumentThreatScanner
         }
 
         return new DocumentThreatScanException(
-            exitCode == 2 && threatReported
-                ? "Microsoft Defender detected a threat. The local upload was rejected."
-                : "Microsoft Defender could not confirm that the document is safe. The local upload was blocked.",
+            "Microsoft Defender could not confirm that the document is safe. The local upload was blocked.",
             threatDetected: false);
     }
 
