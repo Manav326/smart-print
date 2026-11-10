@@ -843,7 +843,21 @@ public sealed class PostgresMigrationUpgradeTests
     {
         var seeded = await SeedConcurrencyJobAsync(
             options, tenantId, stationId, sessionId, printerId, now, "two-claims");
-        async Task<int> TryClaimAsync()
+
+        var secondAgent = new AgentDevice
+        {
+            TenantId = tenantId,
+            DeviceName = "Concurrent claim contender",
+            FingerprintHash = new string('9', 64),
+            SecretHash = new string('8', 64)
+        };
+        await using (var seedAgentContext = new SmartPrintDbContext(options))
+        {
+            seedAgentContext.AgentDevices.Add(secondAgent);
+            await seedAgentContext.SaveChangesAsync();
+        }
+
+        async Task<(int Updated, Guid ClaimingAgentId)> TryClaimAsync(Guid claimingAgentId)
         {
             await using var context = new SmartPrintDbContext(options);
             await using var transaction = await context.Database.BeginTransactionAsync();
@@ -853,22 +867,24 @@ public sealed class PostgresMigrationUpgradeTests
                                item.Status == "PAID_AUTHORISED")
                 .ExecuteUpdateAsync(update => update
                     .SetProperty(item => item.Status, "LOCAL_QUEUE_CLAIMED")
-                    .SetProperty(item => item.ClaimedByAgentDeviceId, agentId)
+                    .SetProperty(item => item.ClaimedByAgentDeviceId, claimingAgentId)
                     .SetProperty(item => item.AgentClaimedUtc, now)
                     .SetProperty(item => item.AgentLeaseExpiresUtc, now.AddMinutes(3))
                     .SetProperty(item => item.AgentDispatchAttempts, item => item.AgentDispatchAttempts + 1));
             await transaction.CommitAsync();
-            return updated;
+            return (updated, claimingAgentId);
         }
 
-        var claimResults = await Task.WhenAll(TryClaimAsync(), TryClaimAsync());
-        Assert.Equal(1, claimResults.Sum());
-        Assert.Contains(0, claimResults);
+        var claimResults = await Task.WhenAll(TryClaimAsync(agentId), TryClaimAsync(secondAgent.Id));
+        Assert.Equal(1, claimResults.Sum(result => result.Updated));
+        var winner = Assert.Single(claimResults.Where(result => result.Updated == 1));
+        Assert.Single(claimResults.Where(result => result.Updated == 0));
 
         await using var verification = new SmartPrintDbContext(options);
         var job = await verification.PrintJobs.AsNoTracking().SingleAsync(item => item.Id == seeded.JobId);
         Assert.Equal("LOCAL_QUEUE_CLAIMED", job.Status);
-        Assert.Equal(agentId, job.ClaimedByAgentDeviceId);
+        Assert.Equal(winner.ClaimingAgentId, job.ClaimedByAgentDeviceId);
+        Assert.Contains(job.ClaimedByAgentDeviceId, new Guid?[] { agentId, secondAgent.Id });
         Assert.Equal(1, job.AgentDispatchAttempts);
     }
 
