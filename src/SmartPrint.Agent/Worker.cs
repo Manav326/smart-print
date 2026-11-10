@@ -441,6 +441,7 @@ public sealed class Worker(
         AgentCredentials credentials,
         CancellationToken cancellationToken)
     {
+        await ReconcilePrivateDocumentPurgesAsync(client, credentials, cancellationToken);
         await ReconcileStagedLocalUploadsAsync(client, credentials, cancellationToken);
         await ReconcilePendingPaymentLocalUploadsAsync(client, credentials, cancellationToken);
         await RetryPendingAcknowledgementsAsync(client, credentials, cancellationToken);
@@ -548,6 +549,70 @@ public sealed class Worker(
             catch (Exception exception)
             {
                 logger.LogError(exception, "Could not secure paid job {JobNumber} in the local queue.", job.JobNumber);
+            }
+        }
+    }
+
+    private async Task ReconcilePrivateDocumentPurgesAsync(
+        HttpClient client,
+        AgentCredentials credentials,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendAgentGetRequestAsync(
+            client, credentials, "api/v1/agent/jobs/private-purge", cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Private-document purge poll returned HTTP {StatusCode}; source files remain protected.", (int)response.StatusCode);
+            return;
+        }
+
+        var pending = await response.Content.ReadFromJsonAsync<AgentPrivateDocumentPurgeResponse>(cancellationToken);
+        if (pending?.JobIds is null || pending.JobIds.Count == 0) return;
+
+        foreach (var jobId in pending.JobIds)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var entry = localQueueStore.Find(jobId);
+                if (entry is null)
+                {
+                    // The server-authorised source is already absent from this Agent's queue.
+                    // Acknowledge absence so the API can redact the source metadata too.
+                    logger.LogWarning("Private job {JobId} has no local queue manifest; confirming that no managed queue copy remains.", jobId);
+                }
+                else
+                {
+                    if (!entry.PrivatePrinting)
+                        throw new InvalidDataException("The server requested a private purge for a non-private local queue item.");
+                    if (entry.State is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING"))
+                        throw new InvalidOperationException("The local job has not reached a state that permits a server-confirmed source purge.");
+
+                    if (entry.State is not ("OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING") || entry.CompletedUtc is null)
+                        await localQueueStore.MarkOutputConfirmedAsync(jobId, cancellationToken);
+                    await localQueueStore.PurgePrivateSourceAfterConfirmedOutputAsync(jobId, cancellationToken);
+                }
+
+                using var acknowledgement = await SendAgentRequestAsync(
+                    client, credentials, $"api/v1/agent/jobs/{jobId}/private-document-purged", new { }, cancellationToken);
+                if (!acknowledgement.IsSuccessStatusCode)
+                {
+                    logger.LogWarning("Private-document purge acknowledgement for {JobId} returned HTTP {StatusCode}; it will be retried.", jobId, (int)acknowledgement.StatusCode);
+                    continue;
+                }
+
+                var current = localQueueStore.Find(jobId);
+                if (current?.PrivatePurgePending == true)
+                    await localQueueStore.MarkPrivatePurgeAcknowledgedAsync(jobId, cancellationToken);
+                logger.LogInformation("Confirmed private source-document removal for job {JobId}.", jobId);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Private source-document removal for job {JobId} could not be completed; the next Agent poll will retry.", jobId);
             }
         }
     }
