@@ -4378,6 +4378,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const photoSettings=photoSettingsByFileFingerprint[fingerprint];
         if(photoSettings)savedPhotoSettings[created.job.id]=photoSettings;
         savedPrintKinds[created.job.id]=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
+        setPrintKindsByJobId({...savedPrintKinds});
         completedFingerprints.add(fingerprint);
         setUploadedBatch([...results]);
         setUploadedFileFingerprints([...completedFingerprints]);
