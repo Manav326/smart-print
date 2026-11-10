@@ -53,6 +53,42 @@ public sealed class WindowsDefenderDocumentThreatScannerTests
     }
 
     [Fact]
+    [Trait("Category", "WindowsDefenderIntegration")]
+    public async Task RealDefenderAcceptsCleanContentAndBlocksEicar()
+    {
+        if (!OperatingSystem.IsWindows() ||
+            !string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_DEFENDER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var scanner = new WindowsDefenderDocumentThreatScanner();
+        var cleanDocument = Encoding.ASCII.GetBytes(
+            "%PDF-1.7\n% SmartPrint clean Defender integration fixture\n%%EOF\n");
+        await scanner.ScanAsync(cleanDocument, ".pdf", CancellationToken.None);
+
+        // Keep the signature fragmented in source so Defender does not flag the
+        // compiled test assembly itself; only the temporary scan file contains it.
+        var eicarText = string.Concat(
+            "X5O!P%@AP[4\\P",
+            "ZX54(P^)7CC)7}",
+            "$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*");
+        var eicarDocument = Encoding.ASCII.GetBytes(eicarText);
+
+        var rejection = await Assert.ThrowsAsync<DocumentThreatScanException>(() =>
+            scanner.ScanAsync(eicarDocument, ".pdf", CancellationToken.None));
+
+        // A real-time Defender block during staging or an explicit MpCmdRun
+        // threat report are both safe rejection outcomes. A clean result is not.
+        Console.WriteLine(
+            $"Real Defender rejected the EICAR fixture. ExplicitThreatDetection={rejection.ThreatDetected}");
+        Assert.NotNull(rejection);
+    }
+
+    [Fact]
     public async Task FailsClosedWhenScannedOutsideWindows()
     {
         if (OperatingSystem.IsWindows()) return;
