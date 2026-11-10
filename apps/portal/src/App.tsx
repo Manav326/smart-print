@@ -4397,7 +4397,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         }
         if(!results.some(item=>item.job.id===created.job.id))results.push(created);
         savedSettings[created.job.id]=settings;
-        const photoSettings=photoSettingsByFileFingerprint[fingerprint];
         if(photoSettings)savedPhotoSettings[created.job.id]=photoSettings;
         savedPrintKinds[created.job.id]=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
         setPrintKindsByJobId({...savedPrintKinds});

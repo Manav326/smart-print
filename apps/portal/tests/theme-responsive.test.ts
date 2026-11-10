@@ -427,8 +427,8 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   const queueModels = read("../../../src/SmartPrint.Agent/AgentQueueModels.cs");
   const safetyRules = read("../../../src/SmartPrint.Agent/PdfBrandingRules.cs");
 
-  assert.ok(app.includes('useState(()=>jobs.some(job=>job.pdfBrandingEnabled===true))'));
-  assert.ok(app.includes('checked={pdfBrandingEnabled} disabled={busy}'));
+  assert.ok(app.includes('useState(()=>!hasIdDocument&&jobs.some(job=>job.pdfBrandingEnabled===true))'));
+  assert.ok(app.includes('checked={pdfBrandingEnabled&&!hasIdDocument} disabled={busy||hasIdDocument}'));
   assert.ok(api.includes('body: JSON.stringify({ reviewedJobIds, acceptedJobIds, pdfBrandingEnabled })'));
   assert.ok(contracts.includes('bool PdfBrandingEnabled = false'));
   assert.ok(server.includes('request.PdfBrandingEnabled'));
