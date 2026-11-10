@@ -229,6 +229,80 @@ function Assert-OptionalParserService {
     Wait-LocalApiReady
 }
 
+function Assert-DocumentWorkerRuntimeIsolation {
+    Write-Host "[QA-ACTION] Exercise the on-demand LocalService parser over its restricted named pipe." -ForegroundColor Cyan
+    $taskName = "SmartPrintLifecycleParserAcceptance"
+    $probeTaskName = "SmartPrintLifecyclePipeAclProbe"
+    $probeRoot = Join-Path $env:RUNNER_TEMP "SmartPrintParserAcceptance"
+    $systemResultPath = Join-Path $probeRoot "system-analysis.json"
+    $networkProbeDirectory = Join-Path $probeRoot "network-service"
+    $networkResultPath = Join-Path $networkProbeDirectory "pipe-probe.txt"
+    $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
+    $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
+    Assert-True (Test-Path -LiteralPath $assemblyPath) "The parser acceptance fixture assembly was not built."
+
+    New-Item -ItemType Directory -Force -Path $probeRoot, $networkProbeDirectory | Out-Null
+    $script:ownsParserAcceptanceDirectory = $true
+
+    try {
+        Remove-Item -LiteralPath $systemResultPath -Force -ErrorAction SilentlyContinue
+        $systemArguments = '"' + $assemblyPath + '" analyze-worker "' + $systemResultPath + '"'
+        $systemAction = New-ScheduledTaskAction -Execute $dotnetPath -Argument $systemArguments
+        $systemPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask -TaskName $taskName -Action $systemAction -Principal $systemPrincipal | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+
+        $deadline = (Get-Date).AddSeconds(35)
+        while (-not (Test-Path -LiteralPath $systemResultPath) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+        }
+        Assert-True (Test-Path -LiteralPath $systemResultPath) "The LocalSystem Agent could not complete a real LocalService document-worker analysis."
+        $analysis = Get-Content -LiteralPath $systemResultPath -Raw | ConvertFrom-Json
+        Assert-True ($analysis.pageCount -eq 1 -and $analysis.mediaType -eq "image/png") "The restricted parser returned unexpected analysis metadata."
+
+        $worker = Get-Service -Name $workerServiceName -ErrorAction Stop
+        Assert-True ($worker.Status -eq "Running") "The document worker did not start on demand."
+        $registration = Get-CimInstance -ClassName Win32_Service -Filter "Name='$workerServiceName'"
+        Assert-True ($registration.StartName -eq "NT AUTHORITY\LocalService") "The parser service is not running as LocalService."
+
+        # Network Service is a distinct unprivileged local identity. It must not
+        # be able to connect to a pipe whose DACL grants only SYSTEM and LocalService.
+        & icacls.exe $networkProbeDirectory /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(M)" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not grant the isolated Network Service probe its result-file access." }
+        $probeArguments = '"' + $assemblyPath + '" probe-worker-pipe "' + $networkResultPath + '"'
+        $probeAction = New-ScheduledTaskAction -Execute $dotnetPath -Argument $probeArguments
+        $probePrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\NETWORK SERVICE" -LogonType ServiceAccount -RunLevel Limited
+        Register-ScheduledTask -TaskName $probeTaskName -Action $probeAction -Principal $probePrincipal | Out-Null
+        Start-ScheduledTask -TaskName $probeTaskName
+
+        $probeDeadline = (Get-Date).AddSeconds(20)
+        while (-not (Test-Path -LiteralPath $networkResultPath) -and (Get-Date) -lt $probeDeadline) {
+            Start-Sleep -Milliseconds 250
+        }
+        Assert-True (Test-Path -LiteralPath $networkResultPath) "The unprivileged Network Service pipe probe did not produce a result."
+        $probeResult = (Get-Content -LiteralPath $networkResultPath -Raw).Trim()
+        Assert-True ($probeResult -eq "REJECTED") "The isolated worker pipe did not reject Network Service: $probeResult"
+
+        Write-Host "[QA-RESULT] PASS: LocalSystem can use the LocalService parser; Network Service is denied by the worker pipe ACL." -ForegroundColor Green
+    }
+    finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $probeTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        $worker = Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue
+        if ($worker -and $worker.Status -ne "Stopped") {
+            Stop-Service -Name $workerServiceName -Force
+            (Get-Service -Name $workerServiceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
+        }
+        if ($script:ownsParserAcceptanceDirectory) {
+            Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
+            $script:ownsParserAcceptanceDirectory = $false
+        }
+        $agent = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        Assert-True ($agent -and $agent.Status -eq "Running") "The primary print Agent stopped during isolated parser acceptance."
+        Wait-LocalApiReady
+    }
+}
+
 function Invoke-Fixture([string]$Mode) {
     Write-Host "[QA-ACTION] Run isolated Agent data-preservation fixture: mode=$Mode" -ForegroundColor Cyan
     & dotnet run --project $fixtureProject --configuration Release -- $Mode | ForEach-Object { Write-Host $_ }
@@ -443,6 +517,59 @@ else if (mode == "discover-printer")
     await File.WriteAllTextAsync(args[1], "FOUND");
     Console.WriteLine($"LocalSystem Agent discovery found '{expectedQueue}'.");
 }
+else if (mode == "analyze-worker")
+{
+    if (args.Length < 2)
+        throw new ArgumentException("analyze-worker requires a result path.");
+
+    // DocumentAnalyzer validates these fixed PNG header fields; the isolated
+    // worker still receives the bytes through its real service and child-process path.
+    byte[] png =
+    [
+        137, 80, 78, 71, 13, 10, 26, 10,
+        0, 0, 0, 13, 73, 72, 68, 82,
+        0, 0, 0, 1, 0, 0, 0, 1
+    ];
+    var configuration = new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Agent:DocumentWorkerPipeName"] = WindowsLocalDocumentAnalyzer.DefaultPipeName,
+            ["Agent:DocumentWorkerTimeoutSeconds"] = "20"
+        })
+        .Build();
+    var analyzer = new WindowsLocalDocumentAnalyzer(
+        configuration, new WindowsLocalDocumentWorkerServiceStarter());
+    var analysis = await analyzer.AnalyzeAsync(png, ".png", CancellationToken.None);
+    if (analysis.PageCount != 1 ||
+        analysis.MediaType != "image/png" ||
+        !analysis.PageSizesJson.Contains("\\"pixelWidth\\":1", StringComparison.Ordinal))
+        throw new InvalidOperationException("The LocalService worker returned unexpected PNG analysis.");
+    await File.WriteAllTextAsync(args[1], System.Text.Json.JsonSerializer.Serialize(analysis));
+    Console.WriteLine("The LocalSystem Agent client successfully used the LocalService worker and restricted parser child.");
+}
+else if (mode == "probe-worker-pipe")
+{
+    if (args.Length < 2)
+        throw new ArgumentException("probe-worker-pipe requires a result path.");
+
+    using var pipe = new System.IO.Pipes.NamedPipeClientStream(
+        ".", WindowsLocalDocumentAnalyzer.DefaultPipeName,
+        System.IO.Pipes.PipeDirection.InOut,
+        System.IO.Pipes.PipeOptions.Asynchronous);
+    try
+    {
+        await pipe.ConnectAsync(2500);
+        throw new InvalidOperationException("Network Service unexpectedly connected to the restricted document-worker pipe.");
+    }
+    catch (UnauthorizedAccessException)
+    {
+        await File.WriteAllTextAsync(args[1], "REJECTED");
+    }
+    catch (IOException exception) when ((exception.HResult & 0xFFFF) == 5)
+    {
+        await File.WriteAllTextAsync(args[1], "REJECTED");
+    }
+}
 else
 {
     throw new ArgumentException($"Unknown fixture mode: {mode}");
@@ -463,6 +590,8 @@ else
             $script:ownsInstall = $true
             Invoke-Setup $InstallerV1
             Assert-ServiceVersion "0.1.10"
+            Assert-OptionalParserService
+            Assert-DocumentWorkerRuntimeIsolation
             Assert-OptionalParserService
             Assert-PreservedFixtures
             Assert-QueueUntouched
