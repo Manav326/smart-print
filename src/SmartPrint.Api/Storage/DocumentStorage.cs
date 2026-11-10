@@ -113,6 +113,49 @@ public sealed class DocumentStorage : IDisposable
         return storageKey;
     }
 
+    /// <summary>
+    /// Lists only old, canonical private-relay objects. Callers must compare these
+    /// keys with durable ticket references before deleting them. The age grace
+    /// period prevents racing an upload between object creation and DB commit.
+    /// </summary>
+    public IReadOnlyList<string> GetStalePrivateRelayStorageKeys(TimeSpan minimumAge, int maximumItems)
+    {
+        if (minimumAge < TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(minimumAge));
+        if (maximumItems <= 0)
+            return Array.Empty<string>();
+
+        var relayRoot = Path.Combine(ResolveStorageRoot(), "private-relay");
+        if (!Directory.Exists(relayRoot))
+            return Array.Empty<string>();
+
+        var cutoffUtc = DateTime.UtcNow - minimumAge;
+        var candidates = new List<string>(Math.Min(maximumItems, 256));
+        foreach (var path in Directory.EnumerateFiles(relayRoot, "*.relay", SearchOption.AllDirectories))
+        {
+            if (candidates.Count >= maximumItems)
+                break;
+
+            var file = new FileInfo(path);
+            if (!file.Exists || file.LastWriteTimeUtc > cutoffUtc ||
+                (file.Attributes & FileAttributes.ReparsePoint) != 0)
+                continue;
+
+            var relative = Path.GetRelativePath(ResolveStorageRoot(), path).Replace('\\', '/');
+            var segments = relative.Split('/');
+            if (segments.Length != 4 ||
+                !string.Equals(segments[0], "private-relay", StringComparison.Ordinal) ||
+                !Guid.TryParseExact(segments[1], "N", out _) ||
+                !Guid.TryParseExact(segments[2], "N", out _) ||
+                !Guid.TryParseExact(Path.GetFileNameWithoutExtension(segments[3]), "N", out _))
+                continue;
+
+            candidates.Add(relative);
+        }
+
+        return candidates;
+    }
+
     public Task DeleteAsync(string storageKey)
     {
         var path = ResolveStoragePath(storageKey);
@@ -209,10 +252,7 @@ public sealed class DocumentStorage : IDisposable
 
     private string ResolveStoragePath(string storageKey)
     {
-        var rootSetting = configuration["Documents:StorageRoot"];
-        var root = Path.GetFullPath(string.IsNullOrWhiteSpace(rootSetting)
-            ? Path.Combine(environment.ContentRootPath, "App_Data", "documents")
-            : rootSetting);
+        var root = ResolveStorageRoot();
         var full = Path.GetFullPath(Path.Combine(root, storageKey.Replace('/', Path.DirectorySeparatorChar)));
         var prefix = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
         if (!full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -220,6 +260,14 @@ public sealed class DocumentStorage : IDisposable
             throw new InvalidOperationException("Invalid document storage key.");
         }
         return full;
+    }
+
+    private string ResolveStorageRoot()
+    {
+        var rootSetting = configuration["Documents:StorageRoot"];
+        return Path.GetFullPath(string.IsNullOrWhiteSpace(rootSetting)
+            ? Path.Combine(environment.ContentRootPath, "App_Data", "documents")
+            : rootSetting);
     }
 }
 
