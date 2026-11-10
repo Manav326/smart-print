@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using System.ServiceProcess;
 using SmartPrint.Documents;
 
@@ -17,17 +18,19 @@ public sealed class WindowsLocalDocumentWorkerServiceStarter : ILocalDocumentWor
 {
     public const string ServiceName = "QRtoPrintSmartPrintDocumentWorker";
     private static readonly TimeSpan StartTimeout = TimeSpan.FromSeconds(15);
+    private static readonly SemaphoreSlim StartGate = new(initialCount: 1, maxCount: 1);
 
-    public Task EnsureRunningAsync(CancellationToken cancellationToken)
+    public async Task EnsureRunningAsync(CancellationToken cancellationToken)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-
+        await StartGate.WaitAsync(cancellationToken);
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             using var service = new ServiceController(ServiceName);
             service.Refresh();
 
-            if (service.Status is not (ServiceControllerStatus.Running or ServiceControllerStatus.StartPending))
+            if (service.Status == ServiceControllerStatus.Stopped)
             {
                 if (service.StartType == ServiceStartMode.Disabled)
                 {
@@ -35,12 +38,47 @@ public sealed class WindowsLocalDocumentWorkerServiceStarter : ILocalDocumentWor
                         "The optional document parser is disabled. Normal printing is still available; uploads are temporarily unavailable.");
                 }
 
-                service.Start();
+                try
+                {
+                    service.Start();
+                }
+                catch (InvalidOperationException)
+                {
+                    // Another local service manager may have started it between
+                    // Refresh and Start. Continue only if it really left Stopped.
+                    service.Refresh();
+                    if (service.Status == ServiceControllerStatus.Stopped)
+                    {
+                        throw;
+                    }
+                }
             }
 
-            service.WaitForStatus(ServiceControllerStatus.Running, StartTimeout);
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.CompletedTask;
+            var elapsed = Stopwatch.StartNew();
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                service.Refresh();
+
+                if (service.Status == ServiceControllerStatus.Running)
+                {
+                    return;
+                }
+
+                if (service.Status == ServiceControllerStatus.Stopped)
+                {
+                    throw new InvalidOperationException(
+                        "The optional document parser stopped before it became ready.");
+                }
+
+                if (elapsed.Elapsed >= StartTimeout)
+                {
+                    throw new System.TimeoutException(
+                        "The optional document parser did not reach Running state within the startup limit.");
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(200), cancellationToken);
+            }
         }
         catch (DocumentProcessingException)
         {
@@ -52,6 +90,10 @@ public sealed class WindowsLocalDocumentWorkerServiceStarter : ILocalDocumentWor
             throw new DocumentProcessingException(
                 "The optional document parser could not be started. Normal printing is unaffected; this upload was blocked.",
                 exception);
+        }
+        finally
+        {
+            StartGate.Release();
         }
     }
 }
