@@ -1857,6 +1857,8 @@ html[data-theme="dark"] .customer-privacy-option-copy strong{color:#f0edff}
 html[data-theme="dark"] .customer-privacy-option-copy small,html[data-theme="dark"] .customer-privacy-unavailable{color:#b9b3ca}
 html[data-theme="dark"] .customer-privacy-option-state{color:#c5bbff}
 html[data-theme="dark"] .customer-private-confirmation,html[data-theme="dark"] .customer-private-transfer-note{background:#18372d;color:#c2f0da}
+.private-printing-tag{display:inline-flex;align-items:center;padding:2px 6px;border:1px solid #b8dfcf;border-radius:999px;background:#edf8f2;color:#216849;font-size:8px;font-weight:800;line-height:1.35;white-space:nowrap}
+html[data-theme="dark"] .private-printing-tag{border-color:#376b57;background:#17392d;color:#bdebd5}
 html[data-theme="dark"] .customer-private-confirmation strong{color:#dcffeb}
 html[data-theme="dark"] .customer-upload-icon {
   background: #302b54;
