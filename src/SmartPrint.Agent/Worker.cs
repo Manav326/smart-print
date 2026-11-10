@@ -566,9 +566,16 @@ public sealed class Worker(
         }
 
         var pending = await response.Content.ReadFromJsonAsync<AgentPrivateDocumentPurgeResponse>(cancellationToken);
-        if (pending?.JobIds is null || pending.JobIds.Count == 0) return;
+        // Also retry local pending acknowledgements. The API may already have
+        // redacted the server record even when the previous HTTP response was
+        // lost; its duplicate-ack response is idempotent and clears this marker.
+        var jobIds = (pending?.JobIds ?? Array.Empty<Guid>())
+            .Concat(localQueueStore.GetPrivatePurgePendingJobs().Select(entry => entry.JobId))
+            .Distinct()
+            .ToArray();
+        if (jobIds.Length == 0) return;
 
-        foreach (var jobId in pending.JobIds)
+        foreach (var jobId in jobIds)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
