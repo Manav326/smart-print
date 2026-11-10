@@ -186,14 +186,14 @@ try {
         throw "Could not create an isolated document-volume restore target."
     }
     $volumeCreated = $true
-    $documentContainer = docker create --name $documentContainer --network none --mount "type=volume,source=$documentVolume,destination=/restore" alpine:3.20 sh -c "mkdir -p /restore && tar -xzf /tmp/smartprint-documents.tar.gz -C /restore"
+    $documentContainer = docker create --name $documentContainer --network none --mount "type=volume,source=$documentVolume,destination=/restore" alpine:3.20 sh -c "mkdir -p /restore && tar -xzf /tmp/smartprint-documents.tar.gz -C /restore && sleep 600"
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($documentContainer)) {
         throw "Could not create the isolated document restore helper."
     }
     $documentsCreated = $true
     docker cp $documentsFile ($documentContainer + ":/tmp/smartprint-documents.tar.gz")
     if ($LASTEXITCODE -ne 0) { throw "Could not copy the document archive into the isolated restore helper." }
-    docker start -a $documentContainer | Out-Null
+    docker start $documentContainer | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "The document archive did not extract successfully." }
 
     $fileCountText = docker exec $documentContainer sh -c "find /restore -type f | wc -l"
