@@ -50,12 +50,15 @@ public sealed class Worker(
             RunPrivateRelayLoopAsync(stoppingToken));
     }
 
-    // Private relay polling is deliberately independent of the normal 30-second
-    // print cycle so an encrypted emergency upload is picked up almost immediately.
+    // A PostgreSQL-backed long poll wakes this Agent as soon as its own shop
+    // receives a private relay. The bounded server wait is the recovery path if a
+    // notification listener is restarting; idle shops no longer poll every 4 seconds.
     private async Task RunPrivateRelayLoopAsync(CancellationToken cancellationToken)
     {
+        var retryDelay = TimeSpan.FromSeconds(5);
         while (!cancellationToken.IsCancellationRequested)
         {
+            var pollSucceeded = false;
             try
             {
                 var credentials = LoadSecureCredentials();
@@ -63,7 +66,7 @@ public sealed class Worker(
                 {
                     using var client = httpClientFactory.CreateClient("cloud");
                     client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
-                    await ProcessPrivateCloudRelaysAsync(client, credentials, cancellationToken);
+                    pollSucceeded = await ProcessPrivateCloudRelaysAsync(client, credentials, cancellationToken);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -75,26 +78,34 @@ public sealed class Worker(
                 logger.LogWarning(exception, "Private encrypted relay check failed; the Agent will retry automatically.");
             }
 
-            try { await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken); }
+            if (pollSucceeded)
+            {
+                retryDelay = TimeSpan.FromSeconds(5);
+                continue;
+            }
+
+            try { await Task.Delay(retryDelay, cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+            retryDelay = TimeSpan.FromSeconds(Math.Min(60, retryDelay.TotalSeconds * 2));
         }
     }
 
-    private async Task ProcessPrivateCloudRelaysAsync(
+    private async Task<bool> ProcessPrivateCloudRelaysAsync(
         HttpClient client, AgentCredentials credentials, CancellationToken cancellationToken)
     {
         using var pendingResponse = await SendAgentGetRequestAsync(
-            client, credentials, "api/v1/agent/private-relays/pending", cancellationToken);
+            client, credentials, "api/v1/agent/private-relays/pending?waitSeconds=25", cancellationToken);
         if (!pendingResponse.IsSuccessStatusCode)
         {
             if (pendingResponse.StatusCode != HttpStatusCode.NotFound)
-                logger.LogWarning("Private relay poll returned HTTP {StatusCode}.", (int)pendingResponse.StatusCode);
-            return;
+                logger.LogWarning("Private relay long-poll returned HTTP {StatusCode}.", (int)pendingResponse.StatusCode);
+            return false;
         }
 
         var pending = await pendingResponse.Content.ReadFromJsonAsync<AgentPrivateRelayPendingResponse>(cancellationToken);
-        if (pending?.Items is null || pending.Items.Count == 0) return;
+        if (pending?.Items is null || pending.Items.Count == 0) return true;
 
+        var retryableFailure = false;
         foreach (var ticket in pending.Items)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -111,6 +122,7 @@ public sealed class Worker(
                 if (!contentResponse.IsSuccessStatusCode)
                 {
                     logger.LogWarning("Encrypted relay payload for {JobNumber} returned HTTP {StatusCode}.", ticket.JobNumber, (int)contentResponse.StatusCode);
+                    retryableFailure = true;
                     continue;
                 }
 
@@ -154,9 +166,14 @@ public sealed class Worker(
                             exception.Message),
                         cancellationToken);
                     if (!rejected.IsSuccessStatusCode)
+                    {
                         logger.LogWarning("Invalid private relay {JobNumber} could not be reported to the API (HTTP {StatusCode}); it will be retried.", ticket.JobNumber, (int)rejected.StatusCode);
+                        retryableFailure = true;
+                    }
                     else
+                    {
                         logger.LogInformation("Private relay {JobNumber} was rejected before entering the payable print queue: {Reason}.", ticket.JobNumber, exception.Message);
+                    }
                     continue;
                 }
 
@@ -182,6 +199,7 @@ public sealed class Worker(
                 if (!completion.IsSuccessStatusCode)
                 {
                     logger.LogWarning("Private relay completion for {JobNumber} returned HTTP {StatusCode}; the protected local copy is retained for retry.", ticket.JobNumber, (int)completion.StatusCode);
+                    retryableFailure = true;
                     continue;
                 }
 
@@ -201,6 +219,7 @@ public sealed class Worker(
                         "private_document_decryption_failed",
                         "The shop computer could not securely open this file. Please select the document again."),
                     cancellationToken);
+                if (!rejected.IsSuccessStatusCode) retryableFailure = true;
                 logger.LogWarning(exception, "Private relay {JobNumber} failed authenticated decryption; the file was rejected before payment.", ticket.JobNumber);
             }
             catch (InvalidDataException exception)
@@ -212,10 +231,12 @@ public sealed class Worker(
                         "private_document_integrity_failed",
                         "The file did not pass its security and integrity checks. Please select it again."),
                     cancellationToken);
+                if (!rejected.IsSuccessStatusCode) retryableFailure = true;
                 logger.LogWarning(exception, "Private relay {JobNumber} failed its integrity checks; the file was rejected before payment.", ticket.JobNumber);
             }
             catch (Exception exception)
             {
+                retryableFailure = true;
                 logger.LogError(exception, "Private relay {JobNumber} could not be staged. Its encrypted cloud copy remains available for a safe retry.", ticket.JobNumber);
             }
             finally
@@ -227,6 +248,8 @@ public sealed class Worker(
                 if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext);
             }
         }
+
+        return !retryableFailure;
     }
 
     private async Task RunHeartbeatLoopAsync(CancellationToken cancellationToken)
