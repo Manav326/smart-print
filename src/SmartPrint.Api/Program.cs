@@ -8452,7 +8452,8 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     }
 
     var isPhotoPrint = request.PrintKind == "PHOTO";
-    if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO")) ||
+    var isIdDocument = request.PrintKind == "ID_DOCUMENT";
+    if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO" or "ID_DOCUMENT")) ||
         job.PageCount is <= 0 or > 500 ||
         request.Copies is < 1 or > 100 ||
         request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
@@ -8464,11 +8465,14 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
              request.PhotoCount is null || request.PhotoCount is < 1 or > 100 ||
              request.PhotosPerPage is < 1)) ||
         (isPhotoPrint && (request.PaperSize != "A4" || request.Orientation != "AUTO")) ||
+        (isIdDocument && (job.PageCount != 1 || request.Copies != 1 ||
+                          request.PaperSize != "A4" || request.IsDuplex ||
+                          request.Orientation != "PORTRAIT")) ||
         (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null)))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["printOptions"] = ["Document printing supports A4, A3, A5, Letter or Legal paper, automatic/portrait/landscape orientation, 1–100 copies, Mono or Colour and single/double-sided. Photo sheets use one A4 page and a supported photo size/count."]
+            ["printOptions"] = ["Documents support A4, A3, A5, Letter or Legal. Photo sheets use one A4 page. Prepared ID sheets must be one A4 portrait page, single-sided and one copy."]
         });
     }
 
@@ -8525,7 +8529,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
                 pricing);
             pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
                 job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing);
-            job.PrintKind = "DOCUMENT";
+            job.PrintKind = isIdDocument ? "ID_DOCUMENT" : "DOCUMENT";
             job.PhotoSizeCode = null;
             job.PhotoCount = 0;
             job.PhotosPerPage = null;
