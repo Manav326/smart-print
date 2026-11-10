@@ -140,13 +140,14 @@ public static class DocumentAnalyzer
             var imageInfo = ImageInfo.FromStream(infoStream);
             if (imageInfo is null)
                 throw new DocumentValidationException("The image format could not be identified.");
+            var identified = imageInfo.Value;
 
-            if (imageInfo.Width != expectedWidth || imageInfo.Height != expectedHeight)
+            if (identified.Width != expectedWidth || identified.Height != expectedHeight)
                 throw new DocumentValidationException("The image dimensions do not match its file header.");
 
             var decoded = ImageResult.FromMemory(bytes, ColorComponents.RedGreenBlueAlpha);
-            var expectedDecodedBytes = checked((long)imageInfo.Width * imageInfo.Height * 4);
-            if (decoded.Width != imageInfo.Width || decoded.Height != imageInfo.Height ||
+            var expectedDecodedBytes = checked((long)identified.Width * identified.Height * 4);
+            if (decoded.Width != identified.Width || decoded.Height != identified.Height ||
                 decoded.Data.LongLength != expectedDecodedBytes)
                 throw new DocumentValidationException("The image pixel data is incomplete or invalid.");
 
