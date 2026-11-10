@@ -100,6 +100,13 @@ public sealed class WindowsPrintExecutor
         using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
+        if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase) &&
+            (entry.PageCount != 1 || raster.PageCount != 1 || entry.Copies != 1 ||
+             !string.Equals(entry.PaperSize, "A4", StringComparison.OrdinalIgnoreCase) ||
+             entry.IsDuplex || !string.Equals(entry.Orientation, "PORTRAIT", StringComparison.OrdinalIgnoreCase)))
+            throw new PrintExecutionBlockedException(
+                "ID_CARD_SETTINGS_INVALID",
+                "A prepared ID sheet must be exactly one A4 portrait page, one copy and single-sided.");
         var printablePageIndices = GetPrintablePageIndices(raster.PageCount, entry.RejectedPageNumbers);
 
         IntPtr printer = IntPtr.Zero;
@@ -128,6 +135,7 @@ public sealed class WindowsPrintExecutor
             var idDocumentPlacement = default(IdDocumentPagePlacement);
             if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase))
             {
+                using var idDocumentRaster = raster.RenderPage(0, dpi);
                 var compatible = IdDocumentPrintPlacementPolicy.TryCreate(
                     dpiX,
                     dpiY,
@@ -138,8 +146,8 @@ public sealed class WindowsPrintExecutor
                     GetDeviceCaps(dc, PhysicalOffsetY),
                     printableWidth,
                     printableHeight,
-                    (int)Math.Round(210d * dpi / 25.4d),
-                    (int)Math.Round(297d * dpi / 25.4d),
+                    idDocumentRaster.Width,
+                    idDocumentRaster.Height,
                     out idDocumentPlacement,
                     out var placementFailure);
                 if (!compatible)
@@ -780,9 +788,9 @@ public sealed class WindowsPrintExecutor
         var pin = GCHandle.Alloc(page.Pixels, GCHandleType.Pinned);
         try
         {
-            // Raster pixels map one-to-one to physical printer pixels. Negative
-            // offsets move the A4 page origin from the printable-area origin to
-            // the paper origin; no fit-to-printable-area scale is applied.
+            // The complete A4 raster is mapped to the driver's physical paper
+            // bounds. Negative offsets shift the paper origin from the printable
+            // origin; scale conversion is DPI-only, never fit-to-printable-area.
             return StretchDIBits(
                 dc,
                 placement.Left,
