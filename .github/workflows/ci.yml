@@ -29,6 +29,15 @@ jobs:
         shell: pwsh
         run: ./scripts/qa/backup-restore-drill.tests.ps1
 
+  print_priority_contract:
+    name: Preserve printer priority and Agent independence
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify no fixed CPU throttle or parser dependency in printing path
+        shell: pwsh
+        run: ./scripts/qa/print-priority-contract.tests.ps1
+
   clamav_integration:
     name: Real ClamAV EICAR and clean-file integration
     runs-on: ubuntu-24.04
