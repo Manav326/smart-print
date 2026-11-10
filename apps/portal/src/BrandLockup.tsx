@@ -14,14 +14,14 @@ export default function BrandLockup({ className = "", subline, children }: Brand
       <img className="brand-mark-image" src="/smartprint-mark.svg" alt="" />
       <div className="brand-lockup-copy">
         <div className="brand-name">Smart<span>Print</span></div>
-        <div className="brand-lockup-meta">
-          <span className="brand-lockup-by">by</span>
-          <span className="brand-parent-wordmark" aria-label="QuantaEdge">
-            <span className="brand-parent-quanta">Quanta</span><span className="brand-parent-edge">Edge</span>
-          </span>
-        </div>
+        <div className="brand-lockup-by">by</div>
         {subline && <div className="brand-lockup-subline">{subline}</div>}
       </div>
+      <img
+        className="brand-parent-logo"
+        src="/branding/quantaedge-logo.svg"
+        alt="QuantaEdge Learning — Smarter Decisions. Greater Growth."
+      />
       {children}
     </div>
   );
