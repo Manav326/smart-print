@@ -4767,7 +4767,9 @@ agentApi.MapPost("/jobs/{jobId:guid}/private-document-purged", async (
         uploadTicket.FileExtension = ".private";
         uploadTicket.SizeBytes = 0;
         uploadTicket.Sha256 = string.Empty;
-        uploadTicket.GrantHash = string.Empty;
+        // Keep only the one-way grant digest so the customer can reconcile a
+        // lost upload response. It cannot authorize document retrieval or
+        // cloud recovery after the ticket has completed.
         uploadTicket.BatchGroupName = "Private documents";
         uploadTicket.BatchName = null;
     }
