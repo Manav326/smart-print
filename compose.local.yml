@@ -3,7 +3,7 @@ name: smart-print
 
 services:
   clamav:
-    image: clamav/clamav:1.5.4-debian13-slim
+    image: clamav/clamav:1.5.4_base-debian13-slim
     restart: unless-stopped
     volumes:
       - smart_print_clamav_database:/var/lib/clamav
