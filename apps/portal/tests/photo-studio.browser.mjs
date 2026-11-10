@@ -322,7 +322,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   }, beforePosition, { timeout: 10000 });
   await setControlValue(page, "Font size", "20");
   await setControlValue(page, "Text colour", "#c02020");
-  await page.getByRole("button", { name: "Sheet" }).click();
+  await page.getByRole("button", { name: "Sheet", exact: true }).click();
 
   const captionToggle = page.getByRole("checkbox", { name: /Add name and DOB to each photo/ });
   await captionToggle.check();
