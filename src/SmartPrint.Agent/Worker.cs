@@ -407,6 +407,7 @@ public sealed class Worker(
                 await RetrySpoolerReceiptsAsync(client, credentials, cancellationToken);
                 await ProcessAuthorizedPrintJobsAsync(client, credentials, cancellationToken);
                 await MonitorSpoolerJobsAsync(client, credentials, cancellationToken);
+                await ReconcilePrivateDocumentPurgesAsync(client, credentials, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -981,6 +982,37 @@ public sealed class Worker(
                 }
             }
             catch (Exception ex) { logger.LogWarning(ex, "Spooler monitor error for {JobNumber}.", entry.JobNumber); }
+        }
+    }
+
+    private async Task ReconcilePrivateDocumentPurgesAsync(
+        HttpClient client, AgentCredentials credentials, CancellationToken ct)
+    {
+        foreach (var entry in localQueueStore.GetPrivatePurgePendingJobs())
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await localQueueStore.PurgePrivateSourceAfterConfirmedOutputAsync(entry.JobId, ct);
+                using var response = await SendAgentRequestAsync(
+                    client, credentials,
+                    $"api/v1/agent/jobs/{entry.JobId}/private-document-purged",
+                    new { }, ct);
+                if (response.IsSuccessStatusCode)
+                {
+                    await localQueueStore.MarkPrivatePurgeAcknowledgedAsync(entry.JobId, ct);
+                    logger.LogInformation("Private source document purged and server metadata redacted for job {JobNumber}.", entry.JobNumber);
+                }
+                else
+                {
+                    logger.LogWarning("Private source redaction for {JobNumber} returned HTTP {StatusCode}; the sanitized manifest will retry.", entry.JobNumber, (int)response.StatusCode);
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Private source cleanup failed for {JobNumber}; its purge marker will be retried.", entry.JobNumber);
+            }
         }
     }
 
