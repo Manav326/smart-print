@@ -235,10 +235,6 @@ catch {
         $rollbackFailure = $_.Exception.Message
     }
 
-    if ($rollbackFailure) { $rollbackFailure += "; document worker rollback: $($_.Exception.Message)" }
-        else { $rollbackFailure = "document worker rollback: $($_.Exception.Message)" }
-    }
-
     if ($rollbackFailure) {
         throw "SmartPrint update failed: $installationFailure. Automatic rollback also failed: $rollbackFailure. Keep the old version folder and run setup again."
     }
