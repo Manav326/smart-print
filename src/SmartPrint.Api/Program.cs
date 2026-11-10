@@ -2398,10 +2398,27 @@ shop.MapPost("/photo-jobs", async (
             await using var input = upload.OpenReadStream();
             stored = await storage.ValidateAndStoreAsync(tenantId, documentId, outputName, input, upload.Length, ct);
         }
+        catch (DocumentThreatScanException exception) when (!exception.ThreatDetected)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "The malware scanner could not confirm this document is safe. The upload was blocked.");
+        }
+        catch (DocumentThreatScanException exception)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message });
+        }
         catch (DocumentValidationException exception)
         {
             await transaction.RollbackAsync(ct);
             return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
+        }
+        catch (DocumentProcessingException)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Document security processing is temporarily unavailable. The upload was not accepted.");
         }
 
         if (stored.Analysis.PageCount != expectedPageCount ||
