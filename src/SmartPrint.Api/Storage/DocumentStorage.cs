@@ -87,7 +87,7 @@ public sealed class DocumentStorage : IDisposable
 
         var opaqueCiphertext = memory.ToArray();
         var protectedCiphertext = Encrypt(opaqueCiphertext, encryptionKey);
-        var storageKey = $"private-relay/{tenantId:N}/{ticketId:N}.relay";
+        var storageKey = $"private-relay/{tenantId:N}/{ticketId:N}/{Guid.NewGuid():N}.relay";
         var fullPath = ResolveStoragePath(storageKey);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         try

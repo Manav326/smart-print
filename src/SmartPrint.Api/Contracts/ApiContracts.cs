@@ -151,3 +151,11 @@ public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerS
 public sealed record AgentPdfExportedRequest(string FileName, string OutputPath, long SizeBytes, string Sha256);
 
 public sealed record AgentPrivateRelayRejectRequest(string Code, string Message);
+
+public sealed record AgentPrivateRelayItem(
+    Guid TicketId, Guid PrintJobId, string JobNumber, Guid PrinterDeviceId,
+    string PrinterName, string QueueName, string FileExtension, string MediaType,
+    long SizeBytes, string Sha256, string ColourMode, string PaperSize,
+    bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc);
+
+public sealed record AgentPrivateRelayPendingResponse(IReadOnlyList<AgentPrivateRelayItem> Items);

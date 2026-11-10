@@ -146,7 +146,18 @@ public sealed class Worker(
                 try { analysis = DocumentAnalyzer.Analyse(plaintext, ticket.FileExtension); }
                 catch (DocumentValidationException exception)
                 {
-                    throw new InvalidDataException("The decrypted private document is not a supported print file.", exception);
+                    using var rejected = await SendAgentRequestAsync(
+                        client, credentials,
+                        $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                        new AgentPrivateRelayRejectRequest(
+                            "document_not_supported",
+                            exception.Message),
+                        cancellationToken);
+                    if (!rejected.IsSuccessStatusCode)
+                        logger.LogWarning("Invalid private relay {JobNumber} could not be reported to the API (HTTP {StatusCode}); it will be retried.", ticket.JobNumber, (int)rejected.StatusCode);
+                    else
+                        logger.LogInformation("Private relay {JobNumber} was rejected before entering the payable print queue: {Reason}.", ticket.JobNumber, exception.Message);
+                    continue;
                 }
 
                 var job = new AgentClaimedJob(
@@ -180,6 +191,28 @@ public sealed class Worker(
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
+            }
+            catch (CryptographicException exception)
+            {
+                using var rejected = await SendAgentRequestAsync(
+                    client, credentials,
+                    $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                    new AgentPrivateRelayRejectRequest(
+                        "private_document_decryption_failed",
+                        "The shop computer could not securely open this file. Please select the document again."),
+                    cancellationToken);
+                logger.LogWarning(exception, "Private relay {JobNumber} failed authenticated decryption; the file was rejected before payment.", ticket.JobNumber);
+            }
+            catch (InvalidDataException exception)
+            {
+                using var rejected = await SendAgentRequestAsync(
+                    client, credentials,
+                    $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                    new AgentPrivateRelayRejectRequest(
+                        "private_document_integrity_failed",
+                        "The file did not pass its security and integrity checks. Please select it again."),
+                    cancellationToken);
+                logger.LogWarning(exception, "Private relay {JobNumber} failed its integrity checks; the file was rejected before payment.", ticket.JobNumber);
             }
             catch (Exception exception)
             {

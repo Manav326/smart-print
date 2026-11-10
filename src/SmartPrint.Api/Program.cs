@@ -102,6 +102,7 @@ builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddHttpClient<SubscriptionRazorpayService>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
+builder.Services.AddHostedService<PrivateRelayRetentionWorker>();
 builder.Services.AddRateLimiter(options =>
 {
     options.AddPolicy("authentication", context =>
@@ -8640,6 +8641,8 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
 
     if (ticket.PrivateRelayFailedUtc is not null)
         return Results.Ok(new { State = "FAILED", Message = ticket.PrivateRelayFailureMessage ?? "The shop computer could not validate this file. Please select it again." });
+    if (ticket.CompletedUtc is null && ticket.ExpiresUtc <= now)
+        return Results.Ok(new { State = "EXPIRED", Message = "The shop computer did not receive this file in time. Please retry the same file." });
 
     if (ticket.CompletedUtc is not null)
     {
