@@ -183,24 +183,55 @@ function Wait-LocalApiReady([int]$TimeoutSeconds = 45) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $uri = "http://127.0.0.1:17842/api/v1/local/status"
     $poll = 0
+    $lastHttpStatus = $null
+    $lastResponseBody = $null
+    $lastRequestError = $null
     do {
         $poll++
         if ($poll -eq 1 -or $poll % 10 -eq 0) {
             Write-Host "[QA-PROGRESS] Agent local API and identity readiness | poll=$poll | elapsed=$($poll)s." -ForegroundColor DarkCyan
         }
         try {
-            $status = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec 3
-            if ($status.status -eq "LOCAL_ENDPOINT_READY" -and
+            $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec 3 -SkipHttpErrorCheck
+            $lastHttpStatus = [int]$response.StatusCode
+            $lastResponseBody = [string]$response.Content
+            $status = $null
+            try { $status = $response.Content | ConvertFrom-Json -ErrorAction Stop } catch { }
+            if ($lastHttpStatus -eq 200 -and
+                $status.status -eq "LOCAL_ENDPOINT_READY" -and
                 $status.agentDeviceId -eq $expectedIdentityId) {
                 return
             }
         }
         catch {
-            # The Windows service can report Running before the LAN listener finishes starting.
+            $lastRequestError = $_.Exception.Message
         }
         Start-Sleep -Seconds 1
     } while ((Get-Date) -lt $deadline)
-    throw "The Agent service is running, but its local print API did not become ready with the preserved shop identity."
+
+    $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+    $safeService = if ($service) {
+        "State=$($service.State); StartName=$($service.StartName); PathName=$($service.PathName)"
+    } else { "Service registration is absent." }
+    $identity = if (Test-Path -LiteralPath $identityPath -PathType Leaf) {
+        $file = Get-Item -LiteralPath $identityPath
+        "Identity file exists; bytes=$($file.Length); lastWriteUtc=$($file.LastWriteTimeUtc.ToString('O'))"
+    } else { "Identity file is missing." }
+    $eventMessages = @()
+    try {
+        $eventMessages = @(Get-WinEvent -FilterHashtable @{
+            LogName = "Application"
+            StartTime = (Get-Date).AddMinutes(-3)
+        } -ErrorAction Stop |
+            Where-Object {
+                $_.ProviderName -match "SmartPrint|QRtoPrint|\.NET Runtime|Application Error" -or
+                $_.Message -match "SmartPrint|QRtoPrint"
+            } |
+            Select-Object -Last 12 |
+            ForEach-Object { "$($_.TimeCreated.ToString('O')) [$($_.ProviderName)] $($_.LevelDisplayName): $($_.Message -replace '\s+', ' ')" })
+    } catch { }
+    $eventSummary = if ($eventMessages.Count -gt 0) { $eventMessages -join " || " } else { "No matching recent Application events." }
+    throw "Agent local API readiness failed. HTTP=$lastHttpStatus; response=$lastResponseBody; requestError=$lastRequestError; $safeService; $identity; recentEvents=$eventSummary"
 }
 
 function Assert-DesktopPayloadExcludesCiOnlyBinary {
