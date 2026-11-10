@@ -38,8 +38,11 @@ silently bypass scanning. The invoking \`MpCmdRun\` process is below-normal prio
 SmartPrint does not change the shop computer's global Defender CPU policy.
 
 The upload parser is a separate Windows service running as
-\`NT AUTHORITY\\LocalService\` with a restricted service SID and a local named-pipe
-ACL. The Agent starts it only when a new upload or photo revision needs analysis.
+\`NT AUTHORITY\\LocalService\` with \`SERVICE_SID_TYPE_RESTRICTED\`. Its protected
+named-pipe DACL grants only LocalSystem (the print Agent) and the worker's unique
+service SID; it does not grant the LocalService account or broad local-user groups.
+The server also rejects remote pipe clients and requires first-instance creation.
+The Agent starts it only when a new upload or photo revision needs analysis.
 The service stops itself after two minutes without a parsing request. Each parser
 child has a 768 MB process-memory ceiling, a one-process job limit and a 90-second
 request timeout. There is deliberately **no fixed CPU percentage cap**: the service
@@ -56,8 +59,8 @@ without installing the optional parser service, and the installer lifecycle test
 asserts that the print Agent remains running while the parser is stopped and
 Manual-start. The installer lifecycle acceptance also starts the parser through a
 real LocalSystem Agent client, sends a synthetic PNG through the LocalService pipe
-and restricted parser child, and verifies that a separate NetworkService identity
-is denied by the pipe DACL.
+and restricted parser child, and verifies that both an ordinary LocalService process
+and a NetworkService process are denied by the pipe DACL.
 
 The Windows Agent CI test suite now runs the actual Microsoft Defender engine on a
 clean fixture and an EICAR test signature. The clean fixture must be explicitly
