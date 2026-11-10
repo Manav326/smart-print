@@ -87,7 +87,7 @@ static async Task AnalyzeChildRequestAsync()
 
 static async Task WriteChildResponseAsync(bool success, DocumentAnalysis? analysis, string? error)
 {
-    var payload = JsonSerializer.SerializeToUtf8Bytes(new WorkerResponse(success, analysis, error));
+    var payload = JsonSerializer.SerializeToUtf8Bytes(new WorkerResponse(1, success, analysis, error));
     if (payload.Length > maximumResponseBytes)
     {
         Environment.ExitCode = 3;
@@ -99,25 +99,45 @@ static async Task WriteChildResponseAsync(bool success, DocumentAnalysis? analys
     await output.FlushAsync();
 }
 
-internal sealed record WorkerResponse(bool Success, DocumentAnalysis? Analysis, string? Error);
+internal sealed record WorkerResponse(int ProtocolVersion, bool Success, DocumentAnalysis? Analysis, string? Error);
 
-internal sealed class WindowsDocumentWorkerService(ILogger<WindowsDocumentWorkerService> logger)
+internal sealed class WindowsDocumentWorkerService(
+    ILogger<WindowsDocumentWorkerService> logger,
+    IHostApplicationLifetime applicationLifetime)
     : BackgroundService
 {
     private const int RequestTimeoutSeconds = 90;
+    private const int IdleShutdownSeconds = 120;
     private const int MaximumDocumentBytes = 20 * 1024 * 1024;
     private const int MaximumResponseBytes = 1024 * 1024;
     private const string PipeName = "QRtoPrint.SmartPrint.DocumentWorker.v1";
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        try
+        {
+            Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
+        {
+            logger.LogWarning(exception, "Could not lower the idle document worker service priority; parser child processes remain resource-limited.");
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             await using var pipe = CreatePipe();
+            using var idleWait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            idleWait.CancelAfter(TimeSpan.FromSeconds(IdleShutdownSeconds));
             try
             {
-                await pipe.WaitForConnectionAsync(stoppingToken);
+                await pipe.WaitForConnectionAsync(idleWait.Token);
                 await HandleRequestAsync(pipe, stoppingToken);
+            }
+            catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+            {
+                logger.LogDebug("Stopping the on-demand document worker after {IdleSeconds} seconds without uploads.", IdleShutdownSeconds);
+                applicationLifetime.StopApplication();
+                return;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -131,6 +151,7 @@ internal sealed class WindowsDocumentWorkerService(ILogger<WindowsDocumentWorker
                     try
                     {
                         await WriteResponseAsync(pipe, new WorkerResponse(
+                            ProtocolVersion: 1,
                             Success: false,
                             Analysis: null,
                             Error: "The isolated document processor could not complete this request."));
@@ -178,14 +199,14 @@ internal sealed class WindowsDocumentWorkerService(ILogger<WindowsDocumentWorker
         var length = BinaryPrimitives.ReadInt32LittleEndian(lengthBytes);
         if (length is <= 0 or > MaximumDocumentBytes)
         {
-            await WriteResponseAsync(pipe, new WorkerResponse(false, null, "The document is outside the supported processing size range."));
+            await WriteResponseAsync(pipe, new WorkerResponse(1, false, null, "The document is outside the supported processing size range."));
             return;
         }
 
         var extensionLength = pipe.ReadByte();
         if (extensionLength is < 1 or > 8)
         {
-            await WriteResponseAsync(pipe, new WorkerResponse(false, null, "The document extension is invalid."));
+            await WriteResponseAsync(pipe, new WorkerResponse(1, false, null, "The document extension is invalid."));
             return;
         }
 
@@ -194,7 +215,7 @@ internal sealed class WindowsDocumentWorkerService(ILogger<WindowsDocumentWorker
         var extension = System.Text.Encoding.ASCII.GetString(extensionBytes).ToLowerInvariant();
         if (extension is not (".pdf" or ".jpg" or ".jpeg" or ".png"))
         {
-            await WriteResponseAsync(pipe, new WorkerResponse(false, null, "The document extension is not supported."));
+            await WriteResponseAsync(pipe, new WorkerResponse(1, false, null, "The document extension is not supported."));
             return;
         }
 
@@ -249,11 +270,14 @@ internal sealed class WindowsDocumentWorkerService(ILogger<WindowsDocumentWorker
             throw new InvalidOperationException("Windows could not apply the parser memory, CPU and process limits.");
         }
 
-        process.PriorityClass = ProcessPriorityClass.BelowNormal;
         var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
         var stdoutTask = ReadBoundedAsync(process.StandardOutput.BaseStream, MaximumResponseBytes, cancellationToken);
 
         try
+        {
+            // The parse child runs below normal priority, with its own job-object
+            // hard cap. Printer spooler and the primary Agent retain CPU headroom.
+            process.PriorityClass = ProcessPriorityClass.BelowNormal;
         {
             var header = new byte[sizeof(int)];
             BinaryPrimitives.WriteInt32LittleEndian(header, document.Length);
@@ -275,9 +299,12 @@ internal sealed class WindowsDocumentWorkerService(ILogger<WindowsDocumentWorker
             var response = JsonSerializer.Deserialize<WorkerResponse>(responseBytes);
             return response ?? throw new InvalidOperationException("The isolated parser returned an invalid response.");
         }
-        catch (OperationCanceledException)
+        catch
         {
-            try { process.Kill(entireProcessTree: true); }
+            try
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
             catch (InvalidOperationException) { }
             throw;
         }
