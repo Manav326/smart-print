@@ -1424,7 +1424,7 @@ export async function uploadCustomerDocumentLocally(
     );
   } catch (exception) {
     if (exception instanceof ApiError && exception.status === 409 &&
-        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch"].includes(exception.code ?? "")) {
+        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch", "private_printing_unavailable", "private_printing_physical_output_required"].includes(exception.code ?? "")) {
       // These are explicit preflight rejections; the API did not issue a ticket.
       sessionStorage.removeItem(keys.idempotency);
       sessionStorage.removeItem(keys.grant);
@@ -1433,10 +1433,11 @@ export async function uploadCustomerDocumentLocally(
     if (!(exception instanceof ApiError) || exception.status === 0) {
       // Fetch may fail with TypeError/AbortError rather than an ApiError. The
       // POST may nevertheless have committed; retain the key and grant so the
-      // Cloud-assisted route can retrieve and resume that exact ticket.
-      throw new LocalUploadOutcomeUnknownError(
-        "SmartPrint lost the response while preparing this upload. The original upload identity is saved; choose Cloud-assisted · HTTPS or retry this file and SmartPrint will resume the same job."
-      );
+      // Standard uploads may resume over HTTPS. Private uploads must retry
+      // only against the same paired shop Agent and never use cloud recovery.
+      throw new LocalUploadOutcomeUnknownError(privatePrinting
+        ? "SmartPrint lost the response while preparing this private upload. Its original upload identity is saved; reconnect to the same shop computer and retry this file. Cloud recovery is disabled."
+        : "SmartPrint lost the response while preparing this upload. The original upload identity is saved; choose Cloud-assisted · HTTPS or retry this file and SmartPrint will resume the same job.");
     }
     throw exception;
   }
