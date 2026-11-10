@@ -6,11 +6,12 @@ internal static class IdDocumentPrintPlacementPolicy
 {
     private const double A4WidthMm = 210d;
     private const double A4HeightMm = 297d;
-    private const double MaximumNonPrintableMarginMm = 12d;
+    private const double MaximumNonPrintableMarginMm = 10d;
 
     public static bool TryCreate(
         int dpiX,
         int dpiY,
+        int rasterDpi,
         int physicalWidth,
         int physicalHeight,
         int physicalOffsetX,
@@ -25,9 +26,9 @@ internal static class IdDocumentPrintPlacementPolicy
         placement = default;
         failure = "The printer driver did not report reliable A4 paper metrics.";
 
-        if (dpiX < 150 || dpiY < 150 || Math.Abs(dpiX - dpiY) > 1)
+        if (dpiX < 150 || dpiY < 150 || rasterDpi is < 150 or > 300)
         {
-            failure = "The driver reports incompatible horizontal and vertical print resolutions.";
+            failure = "The driver or PDF rasterizer reports an unsupported print resolution.";
             return false;
         }
 
@@ -40,7 +41,7 @@ internal static class IdDocumentPrintPlacementPolicy
         // A4 portrait paper space at the driver's actual dots-per-inch.
         var expectedWidth = A4WidthMm / 25.4d * dpiX;
         var expectedHeight = A4HeightMm / 25.4d * dpiY;
-        if (physicalWidth < physicalHeight == false ||
+        if (physicalWidth >= physicalHeight ||
             !WithinTolerance(physicalWidth, expectedWidth, 0.02) ||
             !WithinTolerance(physicalHeight, expectedHeight, 0.02))
         {
@@ -48,8 +49,10 @@ internal static class IdDocumentPrintPlacementPolicy
             return false;
         }
 
-        if (!WithinTolerance(rasterWidth, expectedWidth, 0.02) ||
-            !WithinTolerance(rasterHeight, expectedHeight, 0.02))
+        var expectedRasterWidth = A4WidthMm / 25.4d * rasterDpi;
+        var expectedRasterHeight = A4HeightMm / 25.4d * rasterDpi;
+        if (!WithinTolerance(rasterWidth, expectedRasterWidth, 0.02) ||
+            !WithinTolerance(rasterHeight, expectedRasterHeight, 0.02))
         {
             failure = "The PDF raster size does not match the printer's physical A4 resolution.";
             return false;
@@ -79,8 +82,8 @@ internal static class IdDocumentPrintPlacementPolicy
         placement = new IdDocumentPagePlacement(
             -physicalOffsetX,
             -physicalOffsetY,
-            rasterWidth,
-            rasterHeight);
+            physicalWidth,
+            physicalHeight);
         failure = string.Empty;
         return true;
     }

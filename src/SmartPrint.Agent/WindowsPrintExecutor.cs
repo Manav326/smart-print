@@ -131,6 +131,7 @@ public sealed class WindowsPrintExecutor
                 var compatible = IdDocumentPrintPlacementPolicy.TryCreate(
                     dpiX,
                     dpiY,
+                    dpi,
                     GetDeviceCaps(dc, PhysicalWidth),
                     GetDeviceCaps(dc, PhysicalHeight),
                     GetDeviceCaps(dc, PhysicalOffsetX),
@@ -173,10 +174,6 @@ public sealed class WindowsPrintExecutor
                         throw Uncertain("SPOOLER_START_PAGE_FAILED", "Windows accepted the job but could not start a page.");
 
                     using var page = raster.RenderPage(pageIndex, dpi);
-                    if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase) &&
-                        (page.Width != idDocumentPlacement.Width || page.Height != idDocumentPlacement.Height))
-                        throw Blocked("ID_CARD_RASTER_SIZE_MISMATCH", "The prepared ID sheet does not match the printer's A4 raster dimensions.");
-
                     var drawn = string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase)
                         ? DrawPageAtPhysicalScale(dc, page, idDocumentPlacement)
                         : DrawPage(dc, page, printableWidth, printableHeight);
