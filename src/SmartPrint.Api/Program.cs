@@ -5114,6 +5114,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         QueueName = stationPrinter.QueueName,
         ticket.OriginalFileName,
         ticket.FileExtension,
+        ticket.PrivatePrinting,
         ticket.MediaType,
         ticket.SizeBytes,
         ticket.Sha256,
@@ -8173,6 +8174,13 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             DuplicateRequest = true
         });
     }
+
+    if (preflightTicket.PrivatePrinting)
+        return Results.Conflict(new
+        {
+            code = "private_printing_cloud_recovery_blocked",
+            message = "Private Printing never permits cloud recovery. Reconnect the original shop computer and retry the same local upload."
+        });
 
     if (!LocalUploadRecoveryRules.IsWithinRecoveryWindow(preflightTicket.CreatedUtc, now,
         TimeSpan.FromHours(maximumRecoveryAgeHours)))
