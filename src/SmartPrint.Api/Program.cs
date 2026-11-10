@@ -5562,7 +5562,7 @@ agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
         .Where(item => item.PrintJobId == jobId &&
                        item.TenantId == device.TenantId &&
                        item.AgentDeviceId == device.Id)
-        .Select(item => new { item.CompletedUtc, item.ExpiresUtc, item.Sha256, item.SizeBytes })
+        .Select(item => new { item.CompletedUtc, item.ExpiresUtc, item.Sha256, item.SizeBytes, item.PrivatePrinting })
         .SingleOrDefaultAsync(ct);
     if (ticket is null) return Results.NotFound();
 
@@ -5601,7 +5601,12 @@ agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
                     .Select(item => (int?)item.PendingLocalUploadRetentionDays)
                     .SingleOrDefaultAsync(ct) ?? 30;
                 safeToDelete = true;
-                deleteAfterUtc = job.UpdatedUtc.AddDays(retentionDays);
+                // A private source is no longer needed once the job is terminal
+                // without output or a financial hold. Do not keep it for the
+                // standard abandoned-upload retention window.
+                deleteAfterUtc = ticket.PrivatePrinting
+                    ? DateTimeOffset.UtcNow
+                    : job.UpdatedUtc.AddDays(retentionDays);
             }
         }
     }
