@@ -9,7 +9,7 @@ services:
     # Isolated from the public portal's default network. The separate
     # egress network exists only so freshclam can refresh signatures.
     networks:
-      - document-processing
+      - malware-scanning
       - malware-egress
     volumes:
       - qrtoprint_clamav_database:/var/lib/clamav
@@ -106,6 +106,7 @@ services:
           - smart-print-api
       database: {}
       document-processing: {}
+      malware-scanning: {}
     image: ${IMAGE_NAMESPACE:?Set IMAGE_NAMESPACE in .env}/smart-print-api:${IMAGE_TAG:-latest}
     build:
       context: .
@@ -186,6 +187,8 @@ networks:
   database:
     internal: true
   document-processing:
+    internal: true
+  malware-scanning:
     internal: true
   malware-egress: {}
   cloudflare-edge:
