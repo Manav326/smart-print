@@ -12,10 +12,12 @@ public sealed class AgentDocumentEncryptionKeyStore
 {
     private static readonly byte[] Entropy = "SmartPrint.Agent.PrivateDocumentKey.v1"u8.ToArray();
     private readonly string keyPath;
+    private readonly bool applyWindowsAcl;
     private readonly object sync = new();
 
     public AgentDocumentEncryptionKeyStore(string? keyPath = null)
     {
+        applyWindowsAcl = keyPath is null;
         this.keyPath = Path.GetFullPath(keyPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "QRtoPrint", "LocalQueue", "document-encryption-key.dpapi"));
@@ -73,7 +75,7 @@ public sealed class AgentDocumentEncryptionKeyStore
         var directory = Path.GetDirectoryName(keyPath)
             ?? throw new InvalidOperationException("The Agent document key directory is unavailable.");
         Directory.CreateDirectory(directory);
-        if (OperatingSystem.IsWindows())
+        if (applyWindowsAcl && OperatingSystem.IsWindows())
         {
             var security = new DirectorySecurity();
             security.SetAccessRuleProtection(true, false);
