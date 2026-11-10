@@ -93,12 +93,15 @@ services:
       retries: 10
       start_period: 10s
 
+    networks:
+      - database
   api:
     stop_grace_period: 4m
     networks:
       default:
         aliases:
           - smart-print-api
+      database: {}
       document-processing: {}
     image: localhost/smart-print/smart-print-api:local
     build:
@@ -192,6 +195,8 @@ volumes:
   smart_print_document_worker_token:
 
 networks:
+  database:
+    internal: true
   document-processing:
     internal: true
   malware-egress: {}
