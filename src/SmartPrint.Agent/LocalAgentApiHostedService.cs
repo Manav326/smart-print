@@ -382,6 +382,7 @@ public sealed class LocalAgentApiHostedService(
             app.MapPost("/api/v1/local/documents/{jobId:guid}/photo-revision", async (
                 Guid jobId,
                 HttpContext context,
+                WindowsDefenderDocumentThreatScanner threatScanner,
                 CancellationToken ct) =>
             {
                 AgentCredentials? credentials;
@@ -428,6 +429,19 @@ public sealed class LocalAgentApiHostedService(
                 {
                     await input.CopyToAsync(memory, ct);
                     bytes = memory.ToArray();
+                }
+
+                try
+                {
+                    await threatScanner.ScanAsync(bytes, ".pdf", ct);
+                }
+                catch (DocumentThreatScanException exception)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return exception.ThreatDetected
+                        ? Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message })
+                        : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                            title: "The shop's malware scanner could not confirm that this document is safe. The upload was blocked.");
                 }
 
                 DocumentAnalysis analysis;
@@ -751,6 +765,7 @@ public sealed class LocalAgentApiHostedService(
             app.MapPost("/api/v1/local/uploads/{ticketId:guid}", async (
                 Guid ticketId,
                 HttpContext context,
+                WindowsDefenderDocumentThreatScanner threatScanner,
                 CancellationToken ct) =>
             {
                 AgentCredentials? credentials;
@@ -879,6 +894,18 @@ public sealed class LocalAgentApiHostedService(
                     if (!string.Equals(actualHash, claim.Sha256, StringComparison.OrdinalIgnoreCase))
                     {
                         return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the cloud-authorised upload ticket." });
+                    }
+
+                    try
+                    {
+                        await threatScanner.ScanAsync(bytes, claim.FileExtension, ct);
+                    }
+                    catch (DocumentThreatScanException exception)
+                    {
+                        return exception.ThreatDetected
+                            ? Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message })
+                            : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                                title: "The shop's malware scanner could not confirm that this document is safe. The upload was blocked.");
                     }
 
                     DocumentAnalysis analysis;
