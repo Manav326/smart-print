@@ -1,9 +1,7 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO.Pipes;
-using System.IO.Pipes.AccessControl;
-using System.Security.AccessControl;
-using System.Security.Principal;
+using Microsoft.Win32.SafeHandles;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.Extensions.Hosting.WindowsServices;
@@ -164,31 +162,8 @@ internal sealed class WindowsDocumentWorkerService(
         }
     }
 
-    private static NamedPipeServerStream CreatePipe()
-    {
-        var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-        var localServiceSid = new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null);
-        var security = new PipeSecurity();
-        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.AddAccessRule(new PipeAccessRule(
-            systemSid,
-            PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
-            AccessControlType.Allow));
-        security.AddAccessRule(new PipeAccessRule(
-            localServiceSid,
-            PipeAccessRights.ReadWrite | PipeAccessRights.CreateNewInstance,
-            AccessControlType.Allow));
-
-        return NamedPipeServerStreamAcl.Create(
-            PipeName,
-            PipeDirection.InOut,
-            maxNumberOfServerInstances: 1,
-            PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous | PipeOptions.WriteThrough,
-            inBufferSize: 64 * 1024,
-            outBufferSize: 64 * 1024,
-            security);
-    }
+    private static NamedPipeServerStream CreatePipe() =>
+        RestrictedNamedPipeServer.Create(PipeName);
 
     private async Task HandleRequestAsync(NamedPipeServerStream pipe, CancellationToken stoppingToken)
     {
@@ -466,4 +441,110 @@ internal sealed class WindowsParserJob : IDisposable
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool CloseHandle(IntPtr handle);
+}
+
+internal static class RestrictedNamedPipeServer
+{
+    private const uint PipeAccessDuplex = 0x00000003;
+    private const uint FileFlagOverlapped = 0x40000000;
+    private const uint FileFlagWriteThrough = 0x80000000;
+    private const uint PipeRejectRemoteClients = 0x00000008;
+    private const uint SddlRevision1 = 1;
+    private const int BufferSize = 64 * 1024;
+
+    public static NamedPipeServerStream Create(string pipeName)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException("The isolated document worker named pipe is Windows-only.");
+
+        IntPtr securityDescriptor = IntPtr.Zero;
+        try
+        {
+            // Protected DACL: only LocalSystem (the print Agent) and LocalService
+            // (this worker) can open the pipe. Remote clients are rejected by
+            // PIPE_REJECT_REMOTE_CLIENTS as a second, independent boundary.
+            const string sddl = "O:SYG:SYD:P(A;;GA;;;SY)(A;;GA;;;LS)";
+            if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                    sddl, SddlRevision1, out securityDescriptor, out _))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Could not create the restricted document-worker pipe security descriptor.");
+            }
+
+            var attributes = new NativeSecurityAttributes
+            {
+                Length = checked((uint)Marshal.SizeOf<NativeSecurityAttributes>()),
+                SecurityDescriptor = securityDescriptor,
+                InheritHandle = false
+            };
+            var pipePath = $@"\\.\pipe\{pipeName}";
+            var handle = CreateNamedPipeW(
+                pipePath,
+                PipeAccessDuplex | FileFlagOverlapped | FileFlagWriteThrough,
+                PipeRejectRemoteClients,
+                maxInstances: 1,
+                outBufferSize: BufferSize,
+                inBufferSize: BufferSize,
+                defaultTimeout: 0,
+                ref attributes);
+            if (handle == new IntPtr(-1))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error(),
+                    "Could not create the restricted local document-worker pipe.");
+            }
+
+            var safeHandle = new SafePipeHandle(handle, ownsHandle: true);
+            try
+            {
+                return new NamedPipeServerStream(
+                    PipeDirection.InOut,
+                    isAsync: true,
+                    isConnected: false,
+                    safeHandle);
+            }
+            catch
+            {
+                safeHandle.Dispose();
+                throw;
+            }
+        }
+        finally
+        {
+            if (securityDescriptor != IntPtr.Zero)
+                _ = LocalFree(securityDescriptor);
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativeSecurityAttributes
+    {
+        public uint Length;
+        public IntPtr SecurityDescriptor;
+        [MarshalAs(UnmanagedType.Bool)]
+        public bool InheritHandle;
+    }
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true,
+        EntryPoint = "ConvertStringSecurityDescriptorToSecurityDescriptorW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        string stringSecurityDescriptor,
+        uint stringSdRevision,
+        out IntPtr securityDescriptor,
+        out uint securityDescriptorSize);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true,
+        EntryPoint = "CreateNamedPipeW")]
+    private static extern IntPtr CreateNamedPipeW(
+        string name,
+        uint openMode,
+        uint pipeMode,
+        uint maxInstances,
+        int outBufferSize,
+        int inBufferSize,
+        uint defaultTimeout,
+        ref NativeSecurityAttributes securityAttributes);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr LocalFree(IntPtr memory);
 }
