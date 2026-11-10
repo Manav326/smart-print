@@ -393,7 +393,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/agent | Out-Null
-          Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
+          Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/install-document-worker-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
       - name: Upload Windows Agent package
         id: agent_package_upload
         if: ${{ always() && steps.agent_publish.outcome == 'success' && steps.document_worker_publish.outcome == 'success' }}
