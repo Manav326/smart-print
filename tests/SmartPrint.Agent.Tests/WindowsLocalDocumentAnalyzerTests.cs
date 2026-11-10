@@ -13,7 +13,7 @@ public sealed class WindowsLocalDocumentAnalyzerTests
     {
         var pipeName = "SmartPrintDocumentWorkerTest" + Guid.NewGuid().ToString("N");
         var bytes = "synthetic PDF bytes"u8.ToArray();
-        var expected = new DocumentAnalysis(1, "[{\"widthPoints\":595,\"heightPoints\":842}]", "application/pdf", ".pdf");
+        var expected = new DocumentAnalysis(1, """[{"widthPoints":595,"heightPoints":842}]""", "application/pdf", ".pdf");
 
         await using var server = new NamedPipeServerStream(
             pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
@@ -121,7 +121,7 @@ public sealed class WindowsLocalDocumentAnalyzerTests
         var pipeName = "SmartPrintDocumentWorkerConcurrentTest" + Guid.NewGuid().ToString("N");
         var firstBytes = "first synthetic PDF"u8.ToArray();
         var secondBytes = "second synthetic PDF"u8.ToArray();
-        var expected = new DocumentAnalysis(1, "[{\\"widthPoints\\":595,\\"heightPoints\\":842}]", "application/pdf", ".pdf");
+        var expected = new DocumentAnalysis(1, """[{"widthPoints":595,"heightPoints":842}]""", "application/pdf", ".pdf");
         var receivedRequests = new System.Collections.Concurrent.ConcurrentBag<string>();
 
         var serverTask = Task.Run(async () =>
