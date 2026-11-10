@@ -60,6 +60,17 @@ try {
     Assert-True (-not (Test-SmartPrintBackupPassphrasesEqual -First $passphrase -Second $mismatch)) "passphrase comparison should reject unequal values"
     Assert-True (-not (Test-SmartPrintBackupPassphrasesEqual -First (ConvertTo-SecureString "short" -AsPlainText -Force) -Second $passphrase)) "short passphrases must be rejected"
 
+    $secondSource = Join-Path $root "second-secret.env"
+    [IO.File]::WriteAllText($secondSource, "BACKUP_TEST_SECRET=not-a-real-secret")
+    $archivePath = Join-Path $root "streamed-backup.zip"
+    $archiveResult = New-SmartPrintBackupArchive -InputFiles @($source, $secondSource) -OutputPath $archivePath
+    Assert-True ($archiveResult.EntryCount -eq 2) "streaming archive should contain every recovery component"
+    Assert-True ($archiveResult.PlaintextBytes -gt 5MB) "streaming archive should report bytes copied"
+    $archiveExtract = Join-Path $root "archive-extracted"
+    Expand-Archive -LiteralPath $archivePath -DestinationPath $archiveExtract
+    Assert-True ((Get-FileHash -LiteralPath (Join-Path $archiveExtract "source.bundle") -Algorithm SHA256).Hash -eq $sourceHash) "streaming archive should preserve large database payload bytes"
+    Assert-True ([IO.File]::ReadAllText((Join-Path $archiveExtract "second-secret.env")) -eq "BACKUP_TEST_SECRET=not-a-real-secret") "streaming archive should preserve the recovery secret file"
+
     $protection = Protect-SmartPrintBackup -InputPath $source -OutputPath $encrypted -Passphrase $passphrase
     Assert-True ($protection.Format -eq "SPBKUP01") "encrypted file should declare SPBKUP01 format"
     Assert-True ($protection.Cipher -eq "AES-256-GCM") "backup should use AES-256-GCM"
@@ -88,7 +99,7 @@ try {
     [IO.File]::WriteAllBytes($truncated, $truncatedBytes)
     Assert-Throws { Unprotect-SmartPrintBackup -InputPath $truncated -OutputPath (Join-Path $root "truncated.bundle") -Passphrase $passphrase } "truncated backup must fail footer authentication"
 
-    Write-Host "PASS: backup crypto round-trip, multi-chunk framing, wrong passphrase, ciphertext tampering, truncated footer and no partial plaintext output."
+    Write-Host "PASS: streaming archive, AES-GCM round-trip, multi-chunk framing, wrong passphrase, ciphertext tampering, truncated footer and no partial plaintext output."
 }
 finally {
     if (Test-Path -LiteralPath $root) {
