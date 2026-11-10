@@ -502,82 +502,14 @@ class MainActivity : AppCompatActivity() {
         root.addView(blurTarget, FrameLayout.LayoutParams(-1, -1))
 
         toolbar = MaterialToolbar(this).apply {
-            title = ""
-            subtitle = ""
+            title = "smartprint"
+            subtitle = "BY QUANTAEDGE · HOME"
             setTitleTextColor(getColor(R.color.qp_text))
             setSubtitleTextColor(getColor(R.color.qp_muted))
+            setTitleTextAppearance(this@MainActivity, R.style.TextAppearance_SmartPrint_Toolbar)
+            setSubtitleTextAppearance(this@MainActivity, R.style.TextAppearance_SmartPrint_ToolbarSubtitle)
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             elevation = 0f
-            contentInsetStart = dp(10)
-            contentInsetStartWithNavigation = dp(10)
-
-            val brandRow = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                contentDescription = "SmartPrint by QuantaEdge"
-            }
-            val logo = ImageView(this@MainActivity).apply {
-                setImageResource(R.drawable.ic_launcher_foreground)
-                background = getDrawable(R.drawable.ic_launcher_background)
-                scaleType = ImageView.ScaleType.CENTER_INSIDE
-                setPadding(dp(7), dp(7), dp(7), dp(7))
-                contentDescription = null
-            }
-            brandRow.addView(logo, LinearLayout.LayoutParams(dp(38), dp(38)))
-            val brandCopy = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(9), 0, 0, 0)
-            }
-            val productName = TextView(this@MainActivity).apply {
-                val name = android.text.SpannableString("SmartPrint")
-                name.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_text)), 0, 5, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                name.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_primary)), 5, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                name.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                text = name
-                textSize = 16f
-                includeFontPadding = false
-                contentDescription = "SmartPrint"
-            }
-            brandCopy.addView(productName)
-            val brandMeta = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(0, dp(4), 0, 0)
-            }
-            brandMeta.addView(TextView(this@MainActivity).apply {
-                text = "by"
-                textSize = 9f
-                setTextColor(getColor(R.color.qp_muted))
-                includeFontPadding = false
-            }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(5) })
-            brandMeta.addView(TextView(this@MainActivity).apply {
-                val parentName = android.text.SpannableString("QuantaEdge")
-                parentName.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_parent_navy)), 0, 6, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                parentName.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_parent_orange)), 6, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                parentName.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                text = parentName
-                textSize = 9f
-                includeFontPadding = false
-                setPadding(dp(6), dp(3), dp(6), dp(3))
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(getColor(R.color.qp_parent_wordmark_bg))
-                    cornerRadius = dp(6).toFloat()
-                }
-                contentDescription = "QuantaEdge"
-            }, LinearLayout.LayoutParams(-2, -2))
-            toolbarPageContext = TextView(this@MainActivity).apply {
-                textSize = 9f
-                setTextColor(getColor(R.color.qp_muted))
-                includeFontPadding = false
-                setPadding(dp(7), 0, 0, 0)
-            }
-            brandMeta.addView(toolbarPageContext, LinearLayout.LayoutParams(-2, -2))
-            brandCopy.addView(brandMeta)
-            brandRow.addView(brandCopy, LinearLayout.LayoutParams(-2, -2))
-            addView(brandRow, androidx.appcompat.widget.Toolbar.LayoutParams(
-                -2, dp(48), Gravity.START or Gravity.CENTER_VERTICAL
-            ))
             menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Manage connected shop").apply {
                 setIcon(android.R.drawable.ic_menu_manage)
                 setContentDescription("Manage connected shop")
@@ -761,9 +693,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setToolbarPage(title: String) {
-        if (::toolbarPageContext.isInitialized) {
-            toolbarPageContext.text = "·  " + title.trim().uppercase(Locale.ROOT)
-        }
+        toolbar.title = "SmartPrint"
+        toolbar.subtitle = "by QuantaEdge  ·  " + title.trim()
     }
 
     private fun setToolbarBackAction(description: String, action: () -> Unit) {
@@ -1293,9 +1224,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(18), dp(16), dp(18), dp(24))
         }
         scroll.addView(column)
-        column.addView(text("Your print activity", 23, R.color.qp_text, true))
-        column.addView(text("Every order, organised by month.", 11, R.color.qp_muted, false)
-            .apply { setPadding(0, dp(4), 0, dp(12)) })
+        column.addView(text("Print history", 22, R.color.qp_text, true))
         val auth = customerAccountStore.read()
         if (auth == null) {
             column.addView(text("Sign in to sync jobs.", 13, R.color.qp_muted, false)
@@ -1390,21 +1319,7 @@ class MainActivity : AppCompatActivity() {
                                 .apply { gravity = Gravity.CENTER; setPadding(0, dp(20), 0, dp(20)) })
                             return
                         }
-                        val monthGroups = matches.groupBy { batch ->
-                            CustomerHistoryDatePresentation.monthHeading(batch.first().createdUtc)
-                        }
-                        monthGroups.forEach { (monthLabel, monthBatches) ->
-                            val monthHeader = LinearLayout(this).apply {
-                                orientation = LinearLayout.HORIZONTAL
-                                gravity = Gravity.CENTER_VERTICAL
-                                setPadding(dp(2), dp(11), dp(2), dp(8))
-                            }
-                            monthHeader.addView(text(monthLabel, 16, R.color.qp_text, true),
-                                LinearLayout.LayoutParams(0, -2, 1f))
-                            monthHeader.addView(text("${monthBatches.size} ${if (monthBatches.size == 1) "order" else "orders"}",
-                                10, R.color.qp_muted, true))
-                            results.addView(monthHeader, linearParams())
-                            monthBatches.forEach { batch ->
+                        matches.forEach { batch ->
                             val item = card()
                             val body = LinearLayout(this).apply {
                                 orientation = LinearLayout.VERTICAL
@@ -1441,13 +1356,7 @@ class MainActivity : AppCompatActivity() {
                                 .format(DateTimeFormatter.ofPattern("dd MMMM yyyy · hh:mm a", Locale.ENGLISH)) }
                                 .getOrDefault("Date unavailable")
                             body.addView(text(identity.shopName + " · " + date, 10, R.color.qp_muted, false)
-                                .apply { setPadding(0, dp(5), 0, dp(4)) })
-                            val visibleFileNames = batch.take(2).joinToString("  ·  ") { it.originalFileName }
-                            val remainingFiles = batch.size - 2
-                            body.addView(text(
-                                if (remainingFiles > 0) "$visibleFileNames  ·  +$remainingFiles more" else visibleFileNames,
-                                10, R.color.qp_text, false
-                            ).apply { maxLines = 2; setPadding(0, 0, 0, dp(5)) })
+                                .apply { setPadding(0, dp(5), 0, dp(5)) })
                             body.addView(text(batch.size.toString() + " file(s) · " +
                                 batch.sumOf { it.pageCount } + " pages", 10, R.color.qp_muted, false))
                             val photoLayouts = batch.filter { it.printKind == "PHOTO" }
@@ -1471,7 +1380,6 @@ class MainActivity : AppCompatActivity() {
                             }, linearParams().apply { topMargin = dp(7) })
                             item.addView(body)
                             results.addView(item, linearParams().apply { bottomMargin = dp(8) })
-                            }
                         }
                     }
 
