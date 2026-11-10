@@ -96,10 +96,26 @@ public sealed class PrivateRelayRetentionWorker(
             .ToListAsync(cancellationToken);
         var referenced = referencedKeys.ToHashSet(StringComparer.Ordinal);
 
+        // A ticket can exist before its storage-key update commits. Do not sweep
+        // any object belonging to a still-live ticket, even if its reference is
+        // momentarily absent during a long-running upload transaction.
+        var candidateTicketIds = candidates
+            .Select(key => Guid.ParseExact(key.Split('/')[2], "N"))
+            .Distinct()
+            .ToArray();
+        var activeTicketIds = await db.LocalPrintUploadTickets.AsNoTracking()
+            .Where(ticket => candidateTicketIds.Contains(ticket.Id) &&
+                             ticket.CompletedUtc == null &&
+                             ticket.PrivateRelayFailedUtc == null &&
+                             ticket.ExpiresUtc > DateTimeOffset.UtcNow)
+            .Select(ticket => ticket.Id)
+            .ToHashSetAsync(cancellationToken);
+
         foreach (var storageKey in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (referenced.Contains(storageKey)) continue;
+            var ticketId = Guid.ParseExact(storageKey.Split('/')[2], "N");
+            if (referenced.Contains(storageKey) || activeTicketIds.Contains(ticketId)) continue;
 
             try
             {
