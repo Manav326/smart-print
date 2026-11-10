@@ -50,21 +50,30 @@ graph. When it is unavailable, only new uploads/photo revisions are blocked; the
 print Agent, GDI spooler path and already-accepted jobs remain available.
 
 The Windows print path intentionally remains the existing direct
-\`WindowsPrintExecutor\`/GDI implementation. It does not start, wait for, or call the
+`WindowsPrintExecutor`/GDI implementation. It does not start, wait for, or call the
 upload parser service. The Windows spooler integration tests execute that path
 without installing the optional parser service, and the installer lifecycle test
 asserts that the print Agent remains running while the parser is stopped and
-Manual-start.
+Manual-start. The installer lifecycle acceptance also starts the parser through a
+real LocalSystem Agent client, sends a synthetic PNG through the LocalService pipe
+and restricted parser child, and verifies that a separate NetworkService identity
+is denied by the pipe DACL.
+
+The Windows Agent CI test suite now runs the actual Microsoft Defender engine on a
+clean fixture and an EICAR test signature. The clean fixture must be explicitly
+accepted; EICAR must be rejected either by Defender's threat report or by a
+real-time Defender block during secure staging. Unit tests separately keep
+scanner-error, missing-result and localized/unknown-output cases fail-closed.
 
 **Remaining BLK-03 work:** the existing Windows print executor still uses PDFium/Skia
 inside the Agent process when rendering an accepted PDF for physical printing. The
 upload-time analysis parser is now isolated, but the native print renderer is not.
-Moving rendering out of the print execution path would add IPC and raster-transfer
-cost and could compromise the shop computer's primary job. This candidate therefore
-preserves the current print path and does not claim complete native parser isolation.
-Run the supported-Windows Defender clean/malicious/scanner-outage acceptance suite,
-verify the upload worker's service/ACL behavior on a shop-shaped Windows VM, and
-obtain a security review of the in-process print renderer before BLK-03 sign-off.
+This candidate therefore preserves the current print path and does not claim
+complete native renderer isolation. The hosted Windows CI acceptance is not a
+substitute for testing the supported shop Windows editions, Defender policy/updates,
+scanner-outage behavior, service recovery and ACLs on a shop-shaped VM. Obtain a
+security review of the in-process print renderer and retain that shop-shaped
+acceptance evidence before BLK-03 sign-off.
 
 ## BLK-05 — PostgreSQL concurrency and financial-state integrity
 
