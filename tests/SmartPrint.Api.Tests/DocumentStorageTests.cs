@@ -123,6 +123,35 @@ public sealed class DocumentStorageTests
     }
 
     [Fact]
+    public async Task ListsOnlyOldCanonicalPrivateRelayObjectsForOrphanCleanup()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            using var storage = CreateStorage(root);
+            var tenantId = Guid.NewGuid();
+            var ticketId = Guid.NewGuid();
+            await using var firstInput = new MemoryStream("opaque encrypted payload"u8.ToArray());
+            var staleKey = await storage.StoreOpaquePrivateRelayAsync(
+                tenantId, ticketId, firstInput, firstInput.Length, CancellationToken.None);
+            var stalePath = Path.Combine(root, staleKey.Replace('/', Path.DirectorySeparatorChar));
+            File.SetLastWriteTimeUtc(stalePath, DateTime.UtcNow.AddHours(-2));
+
+            await using var secondInput = new MemoryStream("another encrypted payload"u8.ToArray());
+            var freshKey = await storage.StoreOpaquePrivateRelayAsync(
+                tenantId, Guid.NewGuid(), secondInput, secondInput.Length, CancellationToken.None);
+
+            var candidates = storage.GetStalePrivateRelayStorageKeys(TimeSpan.FromHours(1), 100);
+
+            Assert.Contains(staleKey, candidates);
+            Assert.DoesNotContain(freshKey, candidates);
+            Assert.All(candidates, key =>
+                Assert.StartsWith("private-relay/", key, StringComparison.Ordinal));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task RejectsUnsupportedExtension()
     {
         var root = CreateTemporaryDirectory();
