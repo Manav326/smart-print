@@ -89,7 +89,7 @@ Platform support access to tenant records must be least-privilege, time-bound, p
 - Provide diagnostics bundle export with secrets and document contents redacted.
 - The current backup script creates one authenticated AES-256-GCM `.spbackup` containing the PostgreSQL dump, encrypted document archive, deployment `.env`, Cloudflare Tunnel token and a hash manifest. A PBKDF2-HMAC-SHA256 passphrase is entered interactively; off-site completion requires an rclone content check. The companion restore-drill restores a disposable PostgreSQL database and document volume and verifies active QSP1 document tags, sizes and hashes. A real off-site target and scheduled owner-run restore rehearsal are still required before BLK-06 can be signed off.
 - Email verification and account recovery are not yet implemented. New accounts are not gated on confirmed email; complete verification and recovery workflows before relying on email ownership for sensitive account changes.
-- Cloud uploads and direct shop-LAN uploads now require malware scanning; cloud parsing is isolated in a restricted Docker worker. The native Windows Agent PDFium/Skia parser and renderer still run in the Agent process and remain a BLK-03 residual. Do not treat file-signature validation or a clean scan alone as full document-sandbox certification.
+- Cloud uploads and direct shop-LAN uploads now require malware scanning; cloud parsing is isolated in a restricted Docker worker and direct-LAN upload analysis is isolated in a restricted LocalService worker. Print-time PDFium/Skia rendering still runs in the Agent process and remains a BLK-03 residual. Do not treat file-signature validation or a clean scan alone as full document-sandbox certification.
 
 
 ## 8A. Security hardening evidence
