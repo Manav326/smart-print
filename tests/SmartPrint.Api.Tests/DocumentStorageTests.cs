@@ -134,7 +134,7 @@ public sealed class DocumentStorageTests
         {
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
             var environment = new TestWebHostEnvironment(root, "Production");
-            Assert.Throws<InvalidOperationException>(() => new DocumentStorage(configuration, environment));
+            Assert.Throws<InvalidOperationException>(() => new DocumentStorage(configuration, environment, new AllowDocumentThreatScanner()));
         }
         finally { Directory.Delete(root, recursive: true); }
     }
