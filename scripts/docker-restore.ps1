@@ -132,12 +132,12 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Could not restrict the pre-restore Cloudflare Tunnel secret backup permissions." }
     }
 
+    $envReplaced = $true
     Copy-Item -LiteralPath $secretsFile -Destination $envPath -Force
     New-Item -ItemType Directory -Path (Split-Path -Parent $tunnelTokenPath) -Force | Out-Null
     Copy-Item -LiteralPath $tunnelTokenFile -Destination $tunnelTokenPath -Force
     & icacls.exe $tunnelTokenPath /inheritance:r /grant:r "$($identity):(F)" "*S-1-5-32-544:(F)" "*S-1-5-18:(F)" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not restrict the restored Cloudflare Tunnel secret permissions." }
-    $envReplaced = $true
     Write-Host "Saved previous deployment secrets to $temporaryEnvPath" -ForegroundColor Yellow
 
     Write-Host "Pausing API and portal writes..." -ForegroundColor Cyan
