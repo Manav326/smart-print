@@ -74,5 +74,54 @@ public sealed class PrivateRelayRetentionWorker(
                 logger.LogWarning(exception, "Could not delete expired/consumed private relay ticket {TicketId}; it will be retried.", ticket.Id);
             }
         }
+
+        await SweepOrphanedRelayObjectsAsync(db, storage, cancellationToken);
+    }
+
+    private async Task SweepOrphanedRelayObjectsAsync(
+        SmartPrintDbContext db,
+        DocumentStorage storage,
+        CancellationToken cancellationToken)
+    {
+        // A one-hour grace period protects an upload whose object has been written
+        // but whose database transaction is still in progress. Objects younger than
+        // this are never candidates, even when no ticket reference is visible yet.
+        var candidates = storage.GetStalePrivateRelayStorageKeys(TimeSpan.FromHours(1), 250);
+        if (candidates.Count == 0) return;
+
+        var referencedKeys = await db.LocalPrintUploadTickets.AsNoTracking()
+            .Where(ticket => ticket.PrivateRelayStorageKey != null &&
+                             candidates.Contains(ticket.PrivateRelayStorageKey!))
+            .Select(ticket => ticket.PrivateRelayStorageKey!)
+            .ToListAsync(cancellationToken);
+        var referenced = referencedKeys.ToHashSet(StringComparer.Ordinal);
+
+        foreach (var storageKey in candidates)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (referenced.Contains(storageKey)) continue;
+
+            try
+            {
+                // This folder contains only encrypted private-relay payloads.
+                // Never delete an object while any ticket still references it.
+                await storage.DeleteAsync(storageKey);
+                logger.LogInformation(
+                    "Removed unreferenced private relay object after the orphan grace period: {StorageKey}.",
+                    storageKey);
+            }
+            catch (IOException exception)
+            {
+                logger.LogWarning(exception,
+                    "Could not remove unreferenced private relay object {StorageKey}; it will be retried.",
+                    storageKey);
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                logger.LogWarning(exception,
+                    "Private relay object {StorageKey} could not be removed because storage access was denied; it will be retried.",
+                    storageKey);
+            }
+        }
     }
 }
