@@ -323,9 +323,14 @@ function Protect-SmartPrintBackup {
         if ($null -ne $inputStream) { $inputStream.Dispose() }
         if ($null -ne $output) { $output.Dispose() }
         if ($null -ne $aes) { $aes.Dispose() }
-        foreach ($bytes in @($passwordBytes, $key, $plain, $cipher, $tag, $nonce, $aad)) {
-            [SmartPrintBackupCryptoV1]::Zero($bytes)
-        }
+        [SmartPrintBackupCryptoV1]::Zero($passwordBytes)
+        [SmartPrintBackupCryptoV1]::Zero($key)
+        [SmartPrintBackupCryptoV1]::Zero($plain)
+        [SmartPrintBackupCryptoV1]::Zero($cipher)
+        [SmartPrintBackupCryptoV1]::Zero($tag)
+        [SmartPrintBackupCryptoV1]::Zero($nonce)
+        [SmartPrintBackupCryptoV1]::Zero($aad)
+        if ($null -ne $buffer) { [SmartPrintBackupCryptoV1]::Zero($buffer) }
     }
 }
 
@@ -456,9 +461,14 @@ function Unprotect-SmartPrintBackup {
         if ($null -ne $inputStream) { $inputStream.Dispose() }
         if ($null -ne $output) { $output.Dispose() }
         if ($null -ne $aes) { $aes.Dispose() }
-        foreach ($bytes in @($passwordBytes, $key, $plain, $cipher, $tag, $nonce, $aad, $header)) {
-            [SmartPrintBackupCryptoV1]::Zero($bytes)
-        }
+        [SmartPrintBackupCryptoV1]::Zero($passwordBytes)
+        [SmartPrintBackupCryptoV1]::Zero($key)
+        [SmartPrintBackupCryptoV1]::Zero($plain)
+        [SmartPrintBackupCryptoV1]::Zero($cipher)
+        [SmartPrintBackupCryptoV1]::Zero($tag)
+        [SmartPrintBackupCryptoV1]::Zero($nonce)
+        [SmartPrintBackupCryptoV1]::Zero($aad)
+        [SmartPrintBackupCryptoV1]::Zero($header)
     }
 }
 
