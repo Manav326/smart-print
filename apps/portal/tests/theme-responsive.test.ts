@@ -254,14 +254,15 @@ test("Android customer printing uses the same single Copies control and event ha
     "Android mode may change presentation, but must not fork Copies behaviour.");
 });
 
-test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi check", () => {
+test("shop phone-readiness QR guides a second phone through the in-app Wi-Fi check", () => {
   const app = read("../src/App.tsx");
-  const start = app.indexOf('<strong>Scan with SmartPrint on your phone</strong>');
-  assert.ok(start >= 0, "The shop QR should lead with the SmartPrint in-app flow.");
+  const start = app.indexOf('<strong>Scan with a second phone</strong>');
+  assert.ok(start >= 0, "The shop QR should clearly require a second phone on the selected network.");
   const section = app.slice(start, start + 650);
+  assert.match(section, /customer phone connected to the selected shop Wi-Fi or phone hotspot/);
   assert.match(section, /Your space → connected shop → Check shop Wi-Fi/);
   assert.match(section, /This screen will confirm automatically/);
-  assert.match(section, /phone without SmartPrint/);
+  assert.match(section, /phone providing the hotspot cannot connect to its own Wi-Fi hotspot/);
   assert.match(section, /five minutes/);
 });
 
