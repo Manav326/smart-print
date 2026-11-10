@@ -116,6 +116,8 @@ class MainActivity : AppCompatActivity() {
     private var pendingIdStudioSide: String? = null
     private var idStudioFrontRotation = 0
     private var idStudioBackRotation = 0
+    private var idStudioCardWidthMm = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
+    private var idStudioCardHeightMm = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
     private var customerUploadPdfPreviewOpen = false
     private val customerUploadPdfPreviews = java.util.concurrent.ConcurrentHashMap<String, File>()
     private var webView: WebView? = null
@@ -195,6 +197,12 @@ class MainActivity : AppCompatActivity() {
         pendingIdStudioSide = savedInstanceState?.getString("pendingIdStudioSide")
         idStudioFrontRotation = savedInstanceState?.getInt("idStudioFrontRotation", 0) ?: 0
         idStudioBackRotation = savedInstanceState?.getInt("idStudioBackRotation", 0) ?: 0
+        idStudioCardWidthMm = savedInstanceState?.getFloat(
+            "idStudioCardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
+        ) ?: IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
+        idStudioCardHeightMm = savedInstanceState?.getFloat(
+            "idStudioCardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
+        ) ?: IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
         idStudioScreenOpen = savedInstanceState?.getBoolean("idStudioScreenOpen") ?: false
         customerAccountStore = CustomerAccountStore(this)
         customerPrintSessionStore = CustomerPrintSessionStore(this)
@@ -278,6 +286,8 @@ class MainActivity : AppCompatActivity() {
         outState.putString("pendingIdStudioSide", pendingIdStudioSide)
         outState.putInt("idStudioFrontRotation", idStudioFrontRotation)
         outState.putInt("idStudioBackRotation", idStudioBackRotation)
+        outState.putFloat("idStudioCardWidthMm", idStudioCardWidthMm)
+        outState.putFloat("idStudioCardHeightMm", idStudioCardHeightMm)
         outState.putBoolean("idStudioScreenOpen", idStudioScreenOpen)
         webView?.let { view ->
             val webState = Bundle()
@@ -3237,6 +3247,8 @@ class MainActivity : AppCompatActivity() {
         }
         idStudioFrontRotation = 0
         idStudioBackRotation = 0
+        idStudioCardWidthMm = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
+        idStudioCardHeightMm = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
         startIdStudioSideScan("front")
     }
 
@@ -3351,8 +3363,8 @@ class MainActivity : AppCompatActivity() {
 
         val front = idStudioStore.scanFile(draftId, "front")
         val back = idStudioStore.scanFile(draftId, "back")
-        var cardWidthMm = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
-        var cardHeightMm = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
+        var cardWidthMm = idStudioCardWidthMm
+        var cardHeightMm = idStudioCardHeightMm
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(22))
@@ -3443,6 +3455,8 @@ class MainActivity : AppCompatActivity() {
                     IdCardLayoutPolicy.calculate(width, height)
                     cardWidthMm = width
                     cardHeightMm = height
+                    idStudioCardWidthMm = width
+                    idStudioCardHeightMm = height
                     updatePreview(width, height)
                 } catch (error: Exception) {
                     toast(message(error))
@@ -3464,7 +3478,15 @@ class MainActivity : AppCompatActivity() {
                     toast("Enter valid card dimensions in millimetres.")
                     return@setOnClickListener
                 }
-                prepareIdStudioSheet(draftId, width, height)
+                try {
+                    IdCardLayoutPolicy.calculate(width, height)
+                    updatePreview(width, height)
+                    idStudioCardWidthMm = width
+                    idStudioCardHeightMm = height
+                    prepareIdStudioSheet(draftId, width, height)
+                } catch (error: Exception) {
+                    toast(message(error))
+                }
             }
         }, linearParams())
         content.addView(ScrollView(this).apply {
