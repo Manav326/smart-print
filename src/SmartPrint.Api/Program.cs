@@ -8478,6 +8478,24 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         });
     }
 
+    if (isIdDocument)
+    {
+        var documentAnalysis = await db.PrintDocuments.AsNoTracking()
+            .Where(item => item.TenantId == session.TenantId && item.PrintJobId == job.Id)
+            .Select(item => new { item.MediaType, item.PageSizesJson })
+            .SingleOrDefaultAsync(ct);
+        if (documentAnalysis is null ||
+            !string.Equals(documentAnalysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            !IdCardPdfRules.HasExactlyA4PortraitPage(documentAnalysis.PageSizesJson))
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["document"] = ["An ID card print must be a valid single-page A4 portrait PDF. Reopen ID Studio and prepare the sheet again."]
+            });
+        }
+    }
+
     var paymentPreferences = await db.ShopPaymentProfiles.AsNoTracking()
         .Where(item => item.TenantId == session.TenantId)
         .Select(item => new { item.InstantPaymentEnabled })
