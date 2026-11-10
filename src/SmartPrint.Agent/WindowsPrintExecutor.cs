@@ -39,6 +39,10 @@ public sealed class WindowsPrintExecutor
     private const int LogPixelsY = 90;
     private const int HorzRes = 8;
     private const int VertRes = 10;
+    private const int PhysicalWidth = 110;
+    private const int PhysicalHeight = 111;
+    private const int PhysicalOffsetX = 112;
+    private const int PhysicalOffsetY = 113;
     private const int BiRgb = 0;
     private const uint DibRgbColors = 0;
     private const uint SrcCopy = 0x00CC0020;
@@ -115,9 +119,34 @@ public sealed class WindowsPrintExecutor
 
             var printableWidth = GetDeviceCaps(dc, HorzRes);
             var printableHeight = GetDeviceCaps(dc, VertRes);
-            var dpi = Math.Clamp(Math.Min(GetDeviceCaps(dc, LogPixelsX), GetDeviceCaps(dc, LogPixelsY)), 150, 300);
+            var dpiX = GetDeviceCaps(dc, LogPixelsX);
+            var dpiY = GetDeviceCaps(dc, LogPixelsY);
+            var dpi = Math.Clamp(Math.Min(dpiX, dpiY), 150, 300);
             if (printableWidth <= 0 || printableHeight <= 0)
                 throw new PrintExecutionBlockedException("PRINTER_PRINTABLE_AREA_INVALID", "The printer driver returned an invalid printable area.");
+
+            var idDocumentPlacement = default(IdDocumentPagePlacement);
+            if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase))
+            {
+                var compatible = IdDocumentPrintPlacementPolicy.TryCreate(
+                    dpiX,
+                    dpiY,
+                    GetDeviceCaps(dc, PhysicalWidth),
+                    GetDeviceCaps(dc, PhysicalHeight),
+                    GetDeviceCaps(dc, PhysicalOffsetX),
+                    GetDeviceCaps(dc, PhysicalOffsetY),
+                    printableWidth,
+                    printableHeight,
+                    (int)Math.Round(210d * dpi / 25.4d),
+                    (int)Math.Round(297d * dpi / 25.4d),
+                    out idDocumentPlacement,
+                    out var placementFailure);
+                if (!compatible)
+                    throw new PrintExecutionBlockedException(
+                        "ID_CARD_PHYSICAL_SCALE_UNAVAILABLE",
+                        "This printer cannot guarantee the ID card's exact A4 print size. " + placementFailure +
+                        " Choose a supported A4 printer; SmartPrint will not shrink the ID card silently.");
+            }
 
             var documentName = string.IsNullOrWhiteSpace(entry.SpoolerJobName)
                 ? $"SmartPrint-{entry.JobNumber}-{entry.JobId:N}"
@@ -144,7 +173,13 @@ public sealed class WindowsPrintExecutor
                         throw Uncertain("SPOOLER_START_PAGE_FAILED", "Windows accepted the job but could not start a page.");
 
                     using var page = raster.RenderPage(pageIndex, dpi);
-                    var drawn = DrawPage(dc, page, printableWidth, printableHeight);
+                    if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase) &&
+                        (page.Width != idDocumentPlacement.Width || page.Height != idDocumentPlacement.Height))
+                        throw Blocked("ID_CARD_RASTER_SIZE_MISMATCH", "The prepared ID sheet does not match the printer's A4 raster dimensions.");
+
+                    var drawn = string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase)
+                        ? DrawPageAtPhysicalScale(dc, page, idDocumentPlacement)
+                        : DrawPage(dc, page, printableWidth, printableHeight);
                     if (drawn is 0 or -1)
                         throw Uncertain("SPOOLER_RENDER_FAILED", "Windows accepted the job but could not render a page.");
 
@@ -731,6 +766,42 @@ public sealed class WindowsPrintExecutor
         if (mediaType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) || mediaType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
             return new ImageRasterDocument(bytes, mono);
         throw new PrintExecutionBlockedException("DOCUMENT_TYPE_UNSUPPORTED", $"The document type '{mediaType}' cannot be printed by this agent.");
+    }
+
+    private static int DrawPageAtPhysicalScale(IntPtr dc, RasterPage page, IdDocumentPagePlacement placement)
+    {
+        _ = SetStretchBltMode(dc, Halftone);
+        _ = SetBrushOrgEx(dc, 0, 0, IntPtr.Zero);
+        var info = new BitmapInfo
+        {
+            Header = new BitmapInfoHeader
+            {
+                Size = (uint)Marshal.SizeOf<BitmapInfoHeader>(), Width = page.Width, Height = -page.Height,
+                Planes = 1, BitCount = 32, Compression = BiRgb, SizeImage = checked((uint)page.Pixels.Length)
+            }
+        };
+        var pin = GCHandle.Alloc(page.Pixels, GCHandleType.Pinned);
+        try
+        {
+            // Raster pixels map one-to-one to physical printer pixels. Negative
+            // offsets move the A4 page origin from the printable-area origin to
+            // the paper origin; no fit-to-printable-area scale is applied.
+            return StretchDIBits(
+                dc,
+                placement.Left,
+                placement.Top,
+                placement.Width,
+                placement.Height,
+                0,
+                0,
+                page.Width,
+                page.Height,
+                pin.AddrOfPinnedObject(),
+                ref info,
+                DibRgbColors,
+                SrcCopy);
+        }
+        finally { pin.Free(); }
     }
 
     private static int DrawPage(IntPtr dc, RasterPage page, int printableWidth, int printableHeight)
