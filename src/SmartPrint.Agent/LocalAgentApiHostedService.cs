@@ -886,6 +886,7 @@ public sealed class LocalAgentApiHostedService(
                         }
                         byte[]? aesKey = null;
                         byte[]? iv = null;
+                        byte[] aad = Array.Empty<byte>();
                         try
                         {
                             aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
@@ -903,9 +904,10 @@ public sealed class LocalAgentApiHostedService(
                             if (aesKey!.Length != 32 || iv!.Length != 12 || receivedBytes.LongLength != claim.SizeBytes + 16)
                                 throw new CryptographicException("The private document encryption envelope is invalid.");
                             bytes = new byte[checked((int)claim.SizeBytes)];
+                            aad = Encoding.UTF8.GetBytes($"SmartPrint.PrivatePrinting.v1|{claim.Id}|{claim.PrintJobId}|{claim.SizeBytes}|{claim.Sha256}");
                             using var aes = new AesGcm(aesKey, 16);
                             aes.Decrypt(iv, receivedBytes.AsSpan(0, checked((int)claim.SizeBytes)),
-                                receivedBytes.AsSpan(checked((int)claim.SizeBytes), 16), bytes);
+                                receivedBytes.AsSpan(checked((int)claim.SizeBytes), 16), bytes, aad);
                         }
                         catch (CryptographicException)
                         {
@@ -919,6 +921,7 @@ public sealed class LocalAgentApiHostedService(
                             CryptographicOperations.ZeroMemory(receivedBytes);
                             if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
                             if (iv is not null) CryptographicOperations.ZeroMemory(iv);
+                            CryptographicOperations.ZeroMemory(aad);
                         }
                     }
                     else
