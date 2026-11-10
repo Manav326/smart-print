@@ -3406,33 +3406,48 @@ html[data-theme="dark"] .auth-proof {
   .subscription-payment-history-status { grid-column: 1 / -1; justify-self: start; }
 }
 
-/* Premium SmartPrint identity: one mark across Web, Android and Windows.
-   QuantaEdge parent colours stay inside a light signature capsule. */
+/* Premium SmartPrint identity: canonical SmartPrint mark plus the actual
+   QuantaEdge Learning logo, kept separate from SmartPrint's violet palette. */
 .brand-mark-image{display:block;width:42px;height:42px;flex:0 0 42px;border-radius:13px;object-fit:contain;box-shadow:0 7px 20px rgba(112,88,223,.22)}
-.brand-lockup-copy{display:flex;min-width:0;flex-direction:column;align-items:flex-start;gap:4px}
+.brand-lockup-copy{display:flex;min-width:0;flex:0 0 auto;flex-direction:column;align-items:flex-start;gap:3px}
 .brand-name{color:var(--text,#202638);font:800 19px/1.05 Manrope,sans-serif;letter-spacing:-.85px;white-space:nowrap}
 .brand-name span{color:var(--accent,#7258E8)}
-.brand-lockup-meta{display:flex;align-items:center;gap:5px;min-height:17px}
-.brand-lockup-by{color:var(--muted,#69758A);font-size:9px;font-weight:600;letter-spacing:.01em}
-.brand-parent-wordmark{display:inline-flex;align-items:center;padding:3px 6px;border:1px solid rgba(21,32,56,.08);border-radius:6px;background:#F5F7FC;font:800 9px/1.15 Manrope,sans-serif;letter-spacing:-.12px;white-space:nowrap}
-.brand-parent-quanta{color:#152038}.brand-parent-edge{color:#F97316}
+.brand-lockup-by{color:var(--muted,#69758A);font-size:9px;font-weight:650;letter-spacing:.03em;line-height:1.1}
+.brand-parent-logo{display:block;width:118px;height:auto;max-height:32px;flex:0 0 auto;object-fit:contain;object-position:center}
 .brand-lockup-subline{margin-top:1px;color:var(--muted,#69758A);font-size:8px;font-weight:750;letter-spacing:1.15px;line-height:1.2}
-.brand-lockup{gap:11px}.app-shell .brand-lockup{padding-bottom:24px}.auth-brand{padding:0}
-.customer-entry-brand-lockup{gap:10px}
-.customer-entry-brand .brand-name{color:#202638}
-.customer-entry-brand .brand-name span{color:var(--accent,#7258E8)}
+.brand-lockup{display:flex;align-items:center;gap:9px;min-width:0}
+.app-shell .brand-lockup{padding-bottom:24px;gap:7px}
+.app-shell .brand-mark-image{width:34px;height:34px;flex-basis:34px;border-radius:10px}
+.app-shell .brand-name{font-size:16px;letter-spacing:-.55px}
+.app-shell .brand-lockup-copy{gap:2px}
+.app-shell .brand-parent-logo{width:91px;max-height:25px}
+.auth-brand{padding:0}
+html[data-theme="dark"] .auth-screen .brand-name,
+html[data-theme="dark"] .auth-screen .brand-name,
 html[data-theme="dark"] .customer-entry-brand .brand-name{color:#F0F3FA}
-html[data-theme="dark"] .customer-entry-brand .brand-name span{color:var(--accent,#9B8CFF)}
-.sp-public-brand .brand-lockup{padding:0;gap:10px}
+html[data-theme="dark"] .auth-screen .brand-name span,
+html[data-theme="dark"] .customer-entry-brand .brand-name span{color:#9B8CFF}
+html[data-theme="light"] .auth-screen .brand-name{color:#202638}
+html[data-theme="light"] .auth-screen .brand-name span{color:#7258E8}
+.customer-entry-brand-lockup{gap:9px}
+.sp-public-brand .brand-lockup{padding:0;gap:9px}
 .sp-public-brand .brand-mark-image{width:40px;height:40px;flex-basis:40px}
 .sp-public-brand .brand-name{color:#202638;font-size:19px}
 .sp-public-brand .brand-name span{color:#7258E8}
 .sp-public-brand .brand-lockup-by{color:#68758A}
-.sp-public-brand .brand-lockup-meta{gap:5px}
+.sp-public-brand .brand-parent-logo{width:118px;max-height:28px}
 .sp-public-brand .brand-lockup-subline{display:none}
 .app-shell .panel,.app-shell .metric-card{border-radius:15px}
 .app-shell .metric-card{box-shadow:0 8px 25px rgba(10,18,36,.055)}
 .app-shell .primary-button,.app-shell .secondary-button{min-height:40px;border-radius:10px}
 .app-shell :where(button,a,input,select,textarea):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 @media(prefers-reduced-motion:reduce){.app-shell *,.sp-public *{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
-@media(max-width:600px){.brand-mark-image{width:38px;height:38px;flex-basis:38px;border-radius:12px}.brand-name{font-size:17px}.brand-lockup-meta{gap:4px}}
+@media(max-width:600px){
+ .brand-mark-image{width:36px;height:36px;flex-basis:36px;border-radius:11px}
+ .brand-name{font-size:17px}
+ .brand-parent-logo{width:88px;max-height:22px}
+ .app-shell .brand-parent-logo{width:80px}
+ .app-shell .brand-mark-image{width:32px;height:32px;flex-basis:32px}
+ .sp-public-brand .brand-parent-logo{width:88px}
+ .sp-public-brand .brand-mark-image{width:36px;height:36px;flex-basis:36px}
+}
