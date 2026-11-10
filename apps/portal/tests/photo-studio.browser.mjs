@@ -291,12 +291,41 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await samplePhotoBackground(page);
 
   await activatePhotoTool(page, "Sheet", "Photos per A4 page");
+  const textTool = page.getByRole("button", { name: "Text" });
+  assert.equal(await textTool.isDisabled(), false,
+    "The Text tool must be available without enabling optional name/DOB captions.");
+  await textTool.click();
+  await page.getByRole("button", { name: "Add text" }).click();
+  const textContent = page.getByLabel("Text content");
+  await textContent.fill("SmartPrint overlay QA");
+  const textLayer = page.getByTestId("photo-studio-text-layer");
+  await page.waitForFunction(() => {
+    const layer = document.querySelector('[data-testid="photo-studio-text-layer"]');
+    return layer instanceof HTMLButtonElement && layer.textContent?.trim() === "SmartPrint overlay QA" &&
+      layer.getAttribute("aria-pressed") === "true";
+  }, null, { timeout: 10000 });
+
+  const beforePosition = await textLayer.evaluate(element => ({
+    left: element.style.left,
+    top: element.style.top
+  }));
+  const textBounds = await textLayer.boundingBox();
+  assert.ok(textBounds, "The selected text layer must be visible on the A4 preview.");
+  await page.mouse.move(textBounds.x + textBounds.width / 2, textBounds.y + textBounds.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(textBounds.x + textBounds.width / 2 + 38, textBounds.y + textBounds.height / 2 + 24, { steps: 5 });
+  await page.mouse.up();
+  await page.waitForFunction(before => {
+    const layer = document.querySelector('[data-testid="photo-studio-text-layer"]');
+    return layer instanceof HTMLButtonElement &&
+      (layer.style.left !== before.left || layer.style.top !== before.top);
+  }, beforePosition, { timeout: 10000 });
+  await setControlValue(page, "Font size", "20");
+  await setControlValue(page, "Text colour", "#c02020");
+  await page.getByRole("button", { name: "Sheet" }).click();
+
   const captionToggle = page.getByRole("checkbox", { name: /Add name and DOB to each photo/ });
-  assert.equal(await page.getByRole("button", { name: "Text" }).isDisabled(), true,
-    "Caption styling must stay disabled until the owner opts in.");
   await captionToggle.check();
-  assert.equal(await page.getByRole("button", { name: "Text" }).isDisabled(), false,
-    "Caption styling must become available after explicit opt-in.");
   await page.getByLabel("Name for form (optional)").fill("Photo Studio QA");
   await page.getByLabel("Date of birth (optional)").fill("2000-01-02");
   await page.getByRole("button", { name: "Text" }).click();
