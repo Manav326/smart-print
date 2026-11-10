@@ -98,7 +98,7 @@ try {
     $tempDocsFile = "/tmp/qrtoprint-documents-$stamp.tar.gz"
 
     Write-Host "Pausing API and portal writes for a consistent backup..." -ForegroundColor Cyan
-    docker compose --timeout 240 @composeBaseArgs stop api portal
+    docker compose --timeout 240 @composeBaseArgs stop portal api
     if ($LASTEXITCODE -ne 0) { throw "Could not pause API and portal services." }
     $servicesStopped = $true
     $snapshotUtc = (Get-Date).ToUniversalTime()
