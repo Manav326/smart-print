@@ -80,7 +80,7 @@ public sealed class WindowsLocalDocumentAnalyzer
                 PipeDirection.InOut,
                 PipeOptions.Asynchronous | PipeOptions.WriteThrough);
 
-            await pipe.ConnectAsync(token);
+            await pipe.ConnectAsync(5000, token);
 
             var lengthBytes = new byte[sizeof(int)];
             BinaryPrimitives.WriteInt32LittleEndian(lengthBytes, document.Length);
