@@ -3088,6 +3088,249 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun applySensitiveWindowProtection() {
+        if (photoStudioOpen || idStudioScreenOpen || privateIdViewerOpen) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    private fun showIdStudioHome() {
+        idStudioScreenOpen = true
+        privateIdViewerOpen = false
+        applySensitiveWindowProtection()
+        pickerMode = false
+        clearLibrarySelection()
+        setToolbarPage("ID Studio")
+        setToolbarBackAction("Back to Home", ::showHome)
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
+        toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
+        accountAction.visibility = View.GONE
+        setBottomNavigationVisible(false)
+        content.removeAllViews()
+
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(24))
+        }
+        column.addView(text("SmartPrint ID Studio", 21, R.color.qp_text, true))
+        column.addView(text(
+            "Create your ID whenever you need it. Scanning, reviewing and saving work on this device without connecting to a shop.",
+            12, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(5), 0, dp(14)) })
+        column.addView(button("Create a new ID card", true).apply {
+            setOnClickListener { startIdStudioCapture() }
+        }, linearParams().apply { bottomMargin = dp(9) })
+
+        val draftId = idStudioDraftId?.takeIf(idStudioStore::draftExists)
+        if (draftId != null) {
+            val nextSide = when {
+                !idStudioStore.hasFront(draftId) -> "front"
+                !idStudioStore.hasBack(draftId) -> "back"
+                else -> "review"
+            }
+            column.addView(button(
+                if (nextSide == "front") "Continue front-side scan"
+                else if (nextSide == "back") "Continue back-side scan"
+                else "Review scanned ID",
+                false
+            ).apply {
+                setOnClickListener {
+                    when (nextSide) {
+                        "front" -> startIdStudioSideScan("front")
+                        "back" -> showIdStudioBackStep()
+                        else -> showIdStudioReview()
+                    }
+                }
+            }, linearParams().apply { bottomMargin = dp(15) })
+        }
+
+        val prepared = idStudioStore.listPrepared()
+        column.addView(text("Prepared ID cards", 15, R.color.qp_text, true)
+            .apply { setPadding(0, dp(3), 0, dp(8)) })
+        if (prepared.isEmpty()) {
+            column.addView(text(
+                "Prepared cards stay private here, separate from My Files and other apps.",
+                12, R.color.qp_muted, false
+            ).apply { setPadding(dp(2), dp(5), dp(2), dp(15)) })
+        } else {
+            prepared.forEach { file ->
+                val item = card()
+                val body = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), dp(11), dp(12), dp(11))
+                }
+                body.addView(text(file.name, 13, R.color.qp_text, true).apply { maxLines = 2 })
+                body.addView(text(
+                    android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()) +
+                        " · Private to SmartPrint · A4 front/back sheet",
+                    10, R.color.qp_muted, false
+                ).apply { setPadding(0, dp(4), 0, dp(8)) })
+                val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                actions.addView(button("View", false).apply {
+                    setOnClickListener { showDocumentViewer(file) }
+                }, LinearLayout.LayoutParams(0, dp(38), 1f))
+                actions.addView(button("Delete", false).apply {
+                    setOnClickListener {
+                        showConfirmSheet(
+                            "Delete prepared ID?",
+                            "This removes the private sheet from this device. It does not change a print request already sent to a shop.",
+                            "Delete",
+                            destructive = true
+                        ) {
+                            try {
+                                idStudioStore.deletePrepared(file)
+                                showIdStudioHome()
+                                toast("Prepared ID deleted from this device.")
+                            } catch (error: Exception) {
+                                toast("Could not delete the prepared ID: " + message(error))
+                            }
+                        }
+                    }
+                }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(8) })
+                body.addView(actions)
+                item.addView(body)
+                column.addView(item, linearParams().apply { bottomMargin = dp(8) })
+            }
+        }
+        val printHelp = if (portalUrl == null) {
+            "When you are ready to print, scan a shop QR code. Your prepared ID will then appear in that shop's document picker."
+        } else {
+            "When ready, open the connected shop's Print page and select this ID from the private ID Studio section."
+        }
+        column.addView(text(printHelp, 11, R.color.qp_muted, false)
+            .apply { setPadding(dp(2), dp(12), dp(2), dp(3)) })
+        content.addView(ScrollView(this).apply {
+            isFillViewport = true
+            addView(column)
+        }, frameParams())
+    }
+
+    private fun startIdStudioCapture() {
+        val current = idStudioDraftId?.takeIf(idStudioStore::draftExists)
+        if (current != null && (idStudioStore.hasFront(current) || idStudioStore.hasBack(current))) {
+            showConfirmSheet(
+                "Start a new ID scan?",
+                "The unfinished scan currently saved in ID Studio will be discarded. Prepared ID cards are not affected.",
+                "Discard and scan",
+                destructive = true
+            ) {
+                try {
+                    idStudioStore.deleteDraft(current)
+                    idStudioDraftId = idStudioStore.createDraft()
+                    idStudioFrontRotation = 0
+                    idStudioBackRotation = 0
+                    startIdStudioSideScan("front")
+                } catch (error: Exception) {
+                    toast("Could not start an ID scan: " + message(error))
+                    showIdStudioHome()
+                }
+            }
+            return
+        }
+        idStudioDraftId = try {
+            current ?: idStudioStore.createDraft()
+        } catch (error: Exception) {
+            toast("Could not start an ID scan: " + message(error))
+            return
+        }
+        idStudioFrontRotation = 0
+        idStudioBackRotation = 0
+        startIdStudioSideScan("front")
+    }
+
+    private fun startIdStudioSideScan(side: String) {
+        val draftId = idStudioDraftId
+        if (draftId == null || !idStudioStore.draftExists(draftId)) {
+            toast("Start a new ID scan before capturing a side.")
+            showIdStudioHome()
+            return
+        }
+        if (side != "front" && side != "back") {
+            toast("Choose the front or back side of the card.")
+            showIdStudioHome()
+            return
+        }
+        pendingIdStudioSide = side
+        val options = GmsDocumentScannerOptions.Builder()
+            .setGalleryImportAllowed(true)
+            .setPageLimit(1)
+            .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+            .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+            .build()
+        GmsDocumentScanning.getClient(options)
+            .getStartScanIntent(this)
+            .addOnSuccessListener { sender ->
+                documentScanLauncher.launch(IntentSenderRequest.Builder(sender).build())
+            }
+            .addOnFailureListener { error ->
+                pendingIdStudioSide = null
+                toast("The ID scanner is unavailable. Your saved scan is unchanged. " + message(error))
+                if (idStudioStore.hasFront(draftId)) showIdStudioBackStep() else showIdStudioHome()
+            }
+    }
+
+    private fun saveIdStudioScan(scan: GmsDocumentScanningResult, side: String) {
+        val draftId = idStudioDraftId
+        try {
+            require(draftId != null && idStudioStore.draftExists(draftId)) {
+                "The private ID scan session is no longer available. Start again."
+            }
+            val page = scan.pages?.firstOrNull()
+                ?: error("The scanner did not return a corrected card image. Please scan again.")
+            val uri = page.imageUri
+                ?: error("The corrected card image is unavailable. Please scan again.")
+            val input = contentResolver.openInputStream(uri)
+                ?: error("The corrected card image could not be opened.")
+            input.use { idStudioStore.saveScan(draftId, side, it) }
+            toast(if (side == "front") "Front side saved privately." else "Back side saved privately.")
+            if (side == "front") showIdStudioBackStep() else showIdStudioReview()
+        } catch (error: Exception) {
+            toast("Could not save the " + side + " scan: " + message(error))
+            if (draftId != null && idStudioStore.draftExists(draftId) && idStudioStore.hasFront(draftId)) {
+                showIdStudioBackStep()
+            } else {
+                showIdStudioHome()
+            }
+        }
+    }
+
+    private fun showIdStudioBackStep() {
+        idStudioScreenOpen = true
+        privateIdViewerOpen = false
+        applySensitiveWindowProtection()
+        setToolbarPage("ID Studio · Back side")
+        setToolbarBackAction("Back to ID Studio", ::showIdStudioHome)
+        toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
+        accountAction.visibility = View.GONE
+        setBottomNavigationVisible(false)
+        content.removeAllViews()
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(20), dp(22), dp(20), dp(24))
+        }
+        column.addView(text("Front side saved", 20, R.color.qp_text, true).apply {
+            gravity = Gravity.CENTER
+        })
+        column.addView(text(
+            "Turn the same card over and scan its reverse. Both corrected images stay together in this private preparation.",
+            13, R.color.qp_muted, false
+        ).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            setPadding(0, dp(7), 0, dp(18))
+        })
+        column.addView(button("Scan back side", true).apply {
+            setOnClickListener { startIdStudioSideScan("back") }
+        }, LinearLayout.LayoutParams(-1, dp(48)))
+        column.addView(button("Retake front side", false).apply {
+            setOnClickListener { startIdStudioSideScan("front") }
+        }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(9) })
+        content.addView(column, frameParams())
+    }
+
     private fun startDocumentScan(destinationPath: String? = null) {
         pendingScanNeedsDestination = destinationPath == null
         pendingScanDestinationPath = destinationPath.orEmpty()
