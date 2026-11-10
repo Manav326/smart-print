@@ -18,8 +18,11 @@ public sealed class WindowsLocalDocumentAnalyzer
     private const int MaximumResponseBytes = 1024 * 1024;
     private readonly string pipeName;
     private readonly TimeSpan timeout;
+    private readonly ILocalDocumentWorkerServiceStarter serviceStarter;
 
-    public WindowsLocalDocumentAnalyzer(IConfiguration configuration)
+    public WindowsLocalDocumentAnalyzer(
+        IConfiguration configuration,
+        ILocalDocumentWorkerServiceStarter serviceStarter)
     {
         pipeName = configuration["Agent:DocumentWorkerPipeName"]?.Trim() ?? DefaultPipeName;
         if (string.IsNullOrWhiteSpace(pipeName) || pipeName.Contains('\\') || pipeName.Contains('/'))
@@ -34,6 +37,7 @@ public sealed class WindowsLocalDocumentAnalyzer
         }
 
         timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        this.serviceStarter = serviceStarter;
     }
 
     public async Task<DocumentAnalysis> AnalyzeAsync(
@@ -58,6 +62,10 @@ public sealed class WindowsLocalDocumentAnalyzer
 
         try
         {
+            // The LocalService parser is demand-started only for this upload path.
+            // The Agent's print queue/worker does not wait for or depend on it.
+            await serviceStarter.EnsureRunningAsync(token);
+
             using var pipe = new NamedPipeClientStream(
                 ".",
                 pipeName,
@@ -87,6 +95,12 @@ public sealed class WindowsLocalDocumentAnalyzer
             if (response is null)
             {
                 throw new DocumentProcessingException("The isolated document worker returned an empty response. Upload was blocked.");
+            }
+
+            if (response.ProtocolVersion != 1)
+            {
+                throw new DocumentProcessingException(
+                    "The local document parser version is not compatible. Normal printing remains available; this upload was blocked.");
             }
 
             if (!response.Success)
@@ -133,5 +147,5 @@ public sealed class WindowsLocalDocumentAnalyzer
         }
     }
 
-    private sealed record WorkerResponse(bool Success, DocumentAnalysis? Analysis, string? Error);
+    private sealed record WorkerResponse(int ProtocolVersion, bool Success, DocumentAnalysis? Analysis, string? Error);
 }
