@@ -867,7 +867,7 @@ public sealed class AgentLocalQueueStoreTests
             var temporaryManifestPath = Path.Combine(root, jobId.ToString("N") + ".json.tmp");
             await File.WriteAllBytesAsync(documentPath, RandomNumberGenerator.GetBytes(256));
             await File.WriteAllBytesAsync(temporaryDocumentPath, RandomNumberGenerator.GetBytes(128));
-            await File.WriteAllTextAsync(temporaryManifestPath, "{\\"documentName\\":\\"private-document.pdf\\",\\"sha256\\":\\"secret-hash\\"}");
+            await File.WriteAllTextAsync(temporaryManifestPath, "{\"documentName\":\"private-document.pdf\",\"sha256\":\"secret-hash\"}");
 
             Assert.Null(store.Find(jobId));
             await store.PurgeUnindexedPrivateSourceAsync(jobId, CancellationToken.None);
