@@ -75,7 +75,8 @@ public sealed record AgentLocalQueueEntry(
     DateTimeOffset? CompletedUtc = null,
     string Orientation = "AUTO",
     bool PdfBrandingEnabled = false,
-    bool PrivatePrinting = false);
+    bool PrivatePrinting = false,
+    bool PrivatePurgePending = false);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
