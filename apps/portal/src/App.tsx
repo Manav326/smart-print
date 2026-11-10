@@ -3857,6 +3857,7 @@ function customerPhotoSizeLabel(sizeCode?:string|null):string {
 
 type StoredCustomerDraft = {
   sessionMarker: string;
+  printKindsByJobId?: Record<string,"DOCUMENT"|"PHOTO"|"ID_DOCUMENT">;
   uploaded?: UploadedPrintJob;
   batchName?: string;
   uploadedBatch?: UploadedPrintJob[];
@@ -3879,6 +3880,10 @@ function customerFileFingerprint(file:File):string {
   const relativePath=(file as File & {webkitRelativePath?:string}).webkitRelativePath??"";
   const nativeGroup=(file as File & {__smartPrintBatchGroup?:string}).__smartPrintBatchGroup??"";
   return `${relativePath||nativeGroup}\u0000${file.name}\u0000${file.size}\u0000${file.lastModified}\u0000${file.type}`;
+}
+
+function isSmartPrintIdDocument(file:File):boolean {
+  return (file as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="ID_DOCUMENT";
 }
 
 function isCustomerPdf(file:File):boolean {
@@ -4028,6 +4033,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [groupSettings,setGroupSettings]=useState<Record<string,CustomerGroupSettings>>(()=>initialDraft?.groupSettings??{});
   const [fileSettings,setFileSettings]=useState<Record<string,CustomerFileSettings>>(()=>initialDraft?.fileSettings??{});
   const [printSettingsByJobId,setPrintSettingsByJobId]=useState<Record<string,CustomerSavedPrintSettings>>(()=>initialDraft?.printSettingsByJobId??{});
+  const [printKindsByJobId,setPrintKindsByJobId]=useState<Record<string,"DOCUMENT"|"PHOTO"|"ID_DOCUMENT">>(()=>initialDraft?.printKindsByJobId??{});
   const [quotesByJobId,setQuotesByJobId]=useState<Record<string,PrintQuoteResult>>(()=>initialDraft?.quotesByJobId??(initialDraft?.quote&&initialDraft?.uploaded?{[initialDraft.uploaded.job.id]:initialDraft.quote}:{}));
   const [photoSettingsByFileFingerprint,setPhotoSettingsByFileFingerprint]=useState<Record<string,CustomerPhotoSettings>>({});
   const [photoPreviewPagesByFingerprint,setPhotoPreviewPagesByFingerprint]=useState<Record<string,string[]>>({});
@@ -4182,6 +4188,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       groupSettings,
       fileSettings,
       printSettingsByJobId,
+      printKindsByJobId,
       quotesByJobId,
       photoSettingsByJobId
     } satisfies StoredCustomerDraft));
@@ -4198,6 +4205,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     return {...baseline,...(groupSettings[name]??{})};
   };
   const settingsForFile=(candidate:File):CustomerSavedPrintSettings=> {
+    if(isSmartPrintIdDocument(candidate)) return {
+      copies:1,colourMode:"Colour",isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",advancedEnabled:false
+    };
     const fingerprint=customerFileFingerprint(candidate);
     const defaults=defaultsForGroup(groupNameForFile(candidate));
     const own=fileSettings[fingerprint];

@@ -1165,7 +1165,7 @@ export interface PrintQuoteResult {
   paperSize: string;
   isDuplex: boolean;
   orientation?: string;
-  printKind?: "DOCUMENT" | "PHOTO";
+  printKind?: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT";
   photoSizeCode?: string | null;
   photoCount?: number;
   photosPerPage?: number | null;
@@ -1586,7 +1586,7 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
   isDuplex: boolean;
   copies: number;
   orientation?: "AUTO" | "PORTRAIT" | "LANDSCAPE";
-  printKind?: "DOCUMENT" | "PHOTO";
+  printKind?: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT";
   photoSizeCode?: string;
   photoCount?: number;
   photosPerPage?: number;
