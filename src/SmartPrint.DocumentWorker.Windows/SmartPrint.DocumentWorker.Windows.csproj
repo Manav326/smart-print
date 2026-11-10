@@ -4,14 +4,11 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- Required for the explicit SYSTEM/LocalService named-pipe DACL; keep other warnings as errors. -->
-    <NoWarn>$(NoWarn);NU1510</NoWarn>
     <UseAppHost>true</UseAppHost>
   </PropertyGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
-    <PackageReference Include="System.IO.Pipes.AccessControl" Version="5.0.0" />
     <ProjectReference Include="../SmartPrint.Documents/SmartPrint.Documents.csproj" />
   </ItemGroup>
 </Project>
