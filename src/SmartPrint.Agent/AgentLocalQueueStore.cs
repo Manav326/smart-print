@@ -253,7 +253,8 @@ public sealed class AgentLocalQueueStore
             job.LeaseExpiresUtc,
             OutputMode: job.OutputMode,
             Orientation: job.Orientation,
-            PdfBrandingEnabled: job.PdfBrandingEnabled);
+            PdfBrandingEnabled: job.PdfBrandingEnabled,
+            PrintKind: job.PrintKind);
 
         try
         {
@@ -476,6 +477,7 @@ public sealed class AgentLocalQueueStore
             PaperSize = job.PaperSize,
             IsDuplex = job.IsDuplex,
             Orientation = job.Orientation,
+            PrintKind = job.PrintKind,
             Currency = job.Currency,
             QuotedAmountMinor = job.QuotedAmountMinor,
             LeaseExpiresUtc = job.LeaseExpiresUtc,
