@@ -225,6 +225,10 @@ public sealed class PostgresMigrationUpgradeTests
         await VerifyConcurrentBatchAssignmentsRemainAtomicAsync(
             options, tenant.Id, station.Id, session.Id, printer.Id, now);
         await VerifyAgentReferencesCannotCrossTenantAsync(options, now);
+        await VerifyRefundAndAgentClaimCannotBothWinAsync(
+            options, tenant.Id, agent.Id, station.Id, session.Id, printer.Id, now);
+        await VerifyTwoAgentsCannotClaimTheSamePaidJobAsync(
+            options, tenant.Id, agent.Id, station.Id, session.Id, printer.Id, now);
 
         // The saved layout density is part of the quote snapshot and must survive a fresh DbContext.
         var photoJobId = Guid.NewGuid();
@@ -717,5 +721,200 @@ public sealed class PostgresMigrationUpgradeTests
     private static string HashForIsolationTest(string value) =>
         Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
             System.Text.Encoding.UTF8.GetBytes($"{value}-{Guid.NewGuid():N}"))).ToLowerInvariant();
+
+
+    private static async Task VerifyRefundAndAgentClaimCannotBothWinAsync(
+        DbContextOptions<SmartPrintDbContext> options,
+        Guid tenantId,
+        Guid agentId,
+        Guid stationId,
+        Guid sessionId,
+        Guid printerId,
+        DateTimeOffset now)
+    {
+        // Refund owns the PrintJob row first. The Agent's conditional UPDATE must wait,
+        // then observe the committed REFUNDED state and claim zero rows.
+        var refundWins = await SeedConcurrencyJobAsync(
+            options, tenantId, stationId, sessionId, printerId, now, "refund-wins");
+        await using (var refundContext = new SmartPrintDbContext(options))
+        await using (var refundTransaction = await refundContext.Database.BeginTransactionAsync())
+        {
+            var locked = await refundContext.PrintJobs.FromSqlInterpolated(
+                $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {refundWins.JobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+                .ToListAsync();
+            var job = Assert.Single(locked);
+            var payment = await refundContext.PrintPayments.SingleAsync(
+                item => item.TenantId == tenantId && item.PrintJobId == refundWins.JobId);
+            job.Status = "REFUNDED";
+            job.FailureCode = "TEST_REFUND_BEFORE_HANDOFF";
+            payment.Status = "REFUNDED";
+            payment.RefundedAmountMinor = payment.AmountMinor;
+            payment.UpdatedUtc = now;
+            await refundContext.SaveChangesAsync();
+
+            var claimStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var claimTask = Task.Run(async () =>
+            {
+                await using var claimContext = new SmartPrintDbContext(options);
+                await using var claimTransaction = await claimContext.Database.BeginTransactionAsync();
+                claimStarted.TrySetResult(true);
+                var updated = await claimContext.PrintJobs
+                    .Where(item => item.Id == refundWins.JobId &&
+                                   item.TenantId == tenantId &&
+                                   item.Status == "PAID_AUTHORISED" &&
+                                   claimContext.PrintPayments.Any(paymentItem =>
+                                       paymentItem.TenantId == item.TenantId &&
+                                       paymentItem.PrintJobId == item.Id &&
+                                       (paymentItem.Status == "VERIFIED" || paymentItem.Status == "PARTIALLY_REFUNDED")))
+                    .ExecuteUpdateAsync(update => update
+                        .SetProperty(item => item.Status, "LOCAL_QUEUE_CLAIMED")
+                        .SetProperty(item => item.ClaimedByAgentDeviceId, agentId)
+                        .SetProperty(item => item.AgentClaimedUtc, now)
+                        .SetProperty(item => item.AgentLeaseExpiresUtc, now.AddMinutes(3)));
+                await claimTransaction.CommitAsync();
+                return updated;
+            });
+
+            await claimStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(100);
+            await refundTransaction.CommitAsync();
+            Assert.Equal(0, await claimTask.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+
+        await using (var verifyRefund = new SmartPrintDbContext(options))
+        {
+            Assert.Equal("REFUNDED", (await verifyRefund.PrintJobs.AsNoTracking()
+                .SingleAsync(item => item.Id == refundWins.JobId)).Status);
+            Assert.Equal("REFUNDED", (await verifyRefund.PrintPayments.AsNoTracking()
+                .SingleAsync(item => item.PrintJobId == refundWins.JobId)).Status);
+        }
+
+        // Reverse the order: the Agent's conditional UPDATE owns the row first.
+        // The refund's SELECT FOR UPDATE must read LOCAL_QUEUE_CLAIMED after waiting
+        // and the production refund rule must reject the refund.
+        var claimWins = await SeedConcurrencyJobAsync(
+            options, tenantId, stationId, sessionId, printerId, now, "claim-wins");
+        await using (var claimContext = new SmartPrintDbContext(options))
+        await using (var claimTransaction = await claimContext.Database.BeginTransactionAsync())
+        {
+            var claimed = await claimContext.PrintJobs
+                .Where(item => item.Id == claimWins.JobId &&
+                               item.TenantId == tenantId &&
+                               item.Status == "PAID_AUTHORISED")
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(item => item.Status, "LOCAL_QUEUE_CLAIMED")
+                    .SetProperty(item => item.ClaimedByAgentDeviceId, agentId)
+                    .SetProperty(item => item.AgentClaimedUtc, now)
+                    .SetProperty(item => item.AgentLeaseExpiresUtc, now.AddMinutes(3)));
+            Assert.Equal(1, claimed);
+
+            var refundStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var refundTask = Task.Run(async () =>
+            {
+                await using var refundContext = new SmartPrintDbContext(options);
+                await using var refundTransaction = await refundContext.Database.BeginTransactionAsync();
+                refundStarted.TrySetResult(true);
+                var locked = await refundContext.PrintJobs.FromSqlInterpolated(
+                    $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {claimWins.JobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+                    .ToListAsync();
+                var lockedJob = Assert.Single(locked);
+                var refundable = PrintRefundRules.CanRefundBeforePrintHandoff(lockedJob);
+                await refundTransaction.RollbackAsync();
+                return (lockedJob.Status, refundable);
+            });
+
+            await refundStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(100);
+            await claimTransaction.CommitAsync();
+            var result = await refundTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal("LOCAL_QUEUE_CLAIMED", result.Status);
+            Assert.False(result.refundable);
+        }
+    }
+
+    private static async Task VerifyTwoAgentsCannotClaimTheSamePaidJobAsync(
+        DbContextOptions<SmartPrintDbContext> options,
+        Guid tenantId,
+        Guid agentId,
+        Guid stationId,
+        Guid sessionId,
+        Guid printerId,
+        DateTimeOffset now)
+    {
+        var seeded = await SeedConcurrencyJobAsync(
+            options, tenantId, stationId, sessionId, printerId, now, "two-claims");
+        async Task<int> TryClaimAsync()
+        {
+            await using var context = new SmartPrintDbContext(options);
+            await using var transaction = await context.Database.BeginTransactionAsync();
+            var updated = await context.PrintJobs
+                .Where(item => item.Id == seeded.JobId &&
+                               item.TenantId == tenantId &&
+                               item.Status == "PAID_AUTHORISED")
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(item => item.Status, "LOCAL_QUEUE_CLAIMED")
+                    .SetProperty(item => item.ClaimedByAgentDeviceId, agentId)
+                    .SetProperty(item => item.AgentClaimedUtc, now)
+                    .SetProperty(item => item.AgentLeaseExpiresUtc, now.AddMinutes(3))
+                    .SetProperty(item => item.AgentDispatchAttempts, item => item.AgentDispatchAttempts + 1));
+            await transaction.CommitAsync();
+            return updated;
+        }
+
+        var claimResults = await Task.WhenAll(TryClaimAsync(), TryClaimAsync());
+        Assert.Equal(1, claimResults.Sum());
+        Assert.Contains(0, claimResults);
+
+        await using var verification = new SmartPrintDbContext(options);
+        var job = await verification.PrintJobs.AsNoTracking().SingleAsync(item => item.Id == seeded.JobId);
+        Assert.Equal("LOCAL_QUEUE_CLAIMED", job.Status);
+        Assert.Equal(agentId, job.ClaimedByAgentDeviceId);
+        Assert.Equal(1, job.AgentDispatchAttempts);
+    }
+
+    private static async Task<(Guid JobId, Guid PaymentId)> SeedConcurrencyJobAsync(
+        DbContextOptions<SmartPrintDbContext> options,
+        Guid tenantId,
+        Guid stationId,
+        Guid sessionId,
+        Guid printerId,
+        DateTimeOffset now,
+        string scenario)
+    {
+        await using var seed = new SmartPrintDbContext(options);
+        var job = new PrintJob
+        {
+            TenantId = tenantId,
+            QrStationId = stationId,
+            CustomerSessionId = sessionId,
+            PrinterDeviceId = printerId,
+            JobNumber = $"SP-{Guid.NewGuid():N}"[..20],
+            IdempotencyKey = $"RACE-{scenario}-{Guid.NewGuid():N}",
+            Status = "PAID_AUTHORISED",
+            PageCount = 2,
+            Copies = 1,
+            Currency = "INR",
+            QuotedAmountMinor = 1000,
+            CreatedUtc = now,
+            UpdatedUtc = now
+        };
+        var payment = new PrintPayment
+        {
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            Method = "UPI",
+            Status = "VERIFIED",
+            AmountMinor = 1000,
+            Currency = "INR",
+            PaymentReference = $"RACE-{scenario}",
+            VerifiedUtc = now,
+            CreatedUtc = now,
+            UpdatedUtc = now
+        };
+        seed.AddRange(job, payment);
+        await seed.SaveChangesAsync();
+        return (job.Id, payment.Id);
+    }
+
 
 }
