@@ -1431,6 +1431,9 @@ export async function uploadCustomerDocumentLocally(
   }
 
   if (isUncompletedLocalUploadTicketExpired(ticket.completed, ticket.expiresUtc)) {
+    if (privatePrinting) {
+      throw new LocalUploadOutcomeUnknownError("The private upload reservation needs the original shop computer to reconnect. SmartPrint has kept the same ticket; reconnect to shop Wi-Fi and retry. No cloud copy was created.");
+    }
     // Keep the original ticket/grant: its monthly quota and batch capacity are
     // still reserved during the 24-hour recovery window. First let the API
     // recover this exact file over HTTPS if the paired Agent is unavailable or
@@ -1478,7 +1481,7 @@ export async function uploadCustomerDocumentLocally(
     }
   }
 
-  if (ticket.completed) {
+  if (ticket.completed && !privatePrinting) {
     // The document/job already exists. Reconcile its canonical status over the
     // API without retransmitting bytes or requiring Cloud-assisted new uploads.
     try {
@@ -1504,7 +1507,7 @@ export async function uploadCustomerDocumentLocally(
 
   const form = new FormData();
   let encryptedHeaders: Record<string, string> = {};
-  if (privatePrinting) {
+  if (privatePrinting && !ticket.completed) {
     if (!localAgent.documentEncryptionPublicKey) {
       throw new LocalUploadPreflightError("This shop has not enabled its private document-encryption key yet. No document was uploaded.", 409, "private_printing_unavailable");
     }
@@ -1532,7 +1535,7 @@ export async function uploadCustomerDocumentLocally(
       iv.fill(0);
       publicKeyBytes.fill(0);
     }
-  } else {
+  } else if (!ticket.completed) {
     form.append("file", file, file.name);
   }
   if (ticket.agentDeviceId === localAgent.agentDeviceId) {
@@ -1586,6 +1589,10 @@ export async function uploadCustomerDocumentLocally(
       window.clearTimeout(timeout);
     }
     }
+  }
+
+  if (privatePrinting) {
+    throw new LocalUploadOutcomeUnknownError("Private Printing could not confirm the local transfer. The original ticket is preserved. Reconnect to the same shop computer and retry this file; SmartPrint will not send it to cloud storage.");
   }
 
   // A LAN response can be lost after the Agent has safely staged the bytes.
