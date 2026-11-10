@@ -1040,9 +1040,10 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.ok(pixels.length > 0);
     await dialog.getByRole("button", { name: "Sheet", exact: true }).click();
     await captionToggle.uncheck();
-    assert.equal(await dialog.getByRole("button", { name: "Text", exact: true }).isDisabled(), true);
+    assert.equal(await dialog.getByRole("button", { name: "Text", exact: true }).isDisabled(), false,
+      "The Text tool remains available when optional captions are turned off.");
     assert.equal(await dialog.getByText("Photo sheet & form details", { exact: true }).count(), 1,
-      "Disabling captions from Text must return to the Sheet tool.");
+      "Turning captions off from Sheet must keep the Sheet panel visible.");
     assert.equal(await dialog.getByLabel("Name for form (optional)").count(), 0,
       "Turning captions off must clear the sensitive name/DOB inputs.");
 
