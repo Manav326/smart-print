@@ -797,6 +797,21 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The cloud API returned an invalid local upload grant.");
                 }
 
+                async Task ReportPrivateValidationFailureAsync(string code, string message)
+                {
+                    if (!claim.PrivatePrinting) return;
+                    using var rejectionRequest = new HttpRequestMessage(
+                        HttpMethod.Post, $"api/v1/agent/private-relays/{claim.Id:D}/reject")
+                    {
+                        Content = JsonContent.Create(new AgentPrivateRelayRejectRequest(code, message))
+                    };
+                    AddAgentHeaders(rejectionRequest, credentials, uploadGrant);
+                    using var rejectionResponse = await client.SendAsync(rejectionRequest, ct);
+                    if (!rejectionResponse.IsSuccessStatusCode)
+                        logger.LogWarning("Could not persist private upload validation failure for ticket {TicketId} (HTTP {StatusCode}).",
+                            claim.Id, (int)rejectionResponse.StatusCode);
+                }
+
                 if (claim.AlreadyCompleted && claim.UploadResult is not null)
                 {
                     if (claim.PrivatePrinting && claim.UploadResult.Job.Status == "COMPLETED")
@@ -897,6 +912,9 @@ public sealed class LocalAgentApiHostedService(
                             CryptographicOperations.ZeroMemory(receivedBytes);
                             if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
                             if (iv is not null) CryptographicOperations.ZeroMemory(iv);
+                            await ReportPrivateValidationFailureAsync(
+                                "private_document_decryption_failed",
+                                "The shop computer could not securely open this file. Please select the document again.");
                             return Results.UnprocessableEntity(new { code = "private_document_key_invalid", message = "The private document could not be decrypted by this paired shop computer." });
                         }
                         try
@@ -914,6 +932,9 @@ public sealed class LocalAgentApiHostedService(
                             CryptographicOperations.ZeroMemory(receivedBytes);
                             CryptographicOperations.ZeroMemory(aesKey);
                             CryptographicOperations.ZeroMemory(iv);
+                            await ReportPrivateValidationFailureAsync(
+                                "private_document_decryption_failed",
+                                "The private document did not pass its authenticated encryption check. Please select it again.");
                             return Results.UnprocessableEntity(new { code = "private_document_decryption_failed", message = "The private document did not pass its authenticated encryption check." });
                         }
                         finally
@@ -935,7 +956,10 @@ public sealed class LocalAgentApiHostedService(
                     var actualHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
                     if (!string.Equals(actualHash, claim.Sha256, StringComparison.OrdinalIgnoreCase))
                     {
-                        return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the cloud-authorised upload ticket." });
+                        await ReportPrivateValidationFailureAsync(
+                            "private_document_integrity_failed",
+                            "The file did not pass its integrity check. Please select it again.");
+                        return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the authorised upload." });
                     }
 
                     DocumentAnalysis analysis;
@@ -945,6 +969,9 @@ public sealed class LocalAgentApiHostedService(
                     }
                     catch (DocumentValidationException exception)
                     {
+                        await ReportPrivateValidationFailureAsync(
+                            "document_not_supported",
+                            exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
                         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
                     }
 
