@@ -15,3 +15,14 @@ public sealed class DocumentThreatScanException(
 {
     public bool ThreatDetected { get; } = threatDetected;
 }
+
+public interface IDocumentAnalyzer
+{
+    Task<DocumentAnalysis> AnalyzeAsync(
+        ReadOnlyMemory<byte> document,
+        string extension,
+        CancellationToken cancellationToken);
+}
+
+public sealed class DocumentProcessingException(string message, Exception? innerException = null)
+    : Exception(message, innerException);
