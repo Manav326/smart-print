@@ -434,9 +434,16 @@ public sealed class LocalAgentApiHostedService(
                 try
                 {
                     await threatScanner.ScanAsync(bytes, ".pdf", ct);
+                    logger.LogInformation(
+                        "Local photo revision passed Defender scanning. JobId={JobId} SizeBytes={SizeBytes}",
+                        jobId, bytes.LongLength);
                 }
                 catch (DocumentThreatScanException exception)
                 {
+                    logger.LogWarning(
+                        exception,
+                        "Local photo revision rejected by document security scanning. JobId={JobId} ThreatDetected={ThreatDetected} SizeBytes={SizeBytes}",
+                        jobId, exception.ThreatDetected, bytes.LongLength);
                     CryptographicOperations.ZeroMemory(bytes);
                     return exception.ThreatDetected
                         ? Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message })
@@ -899,9 +906,16 @@ public sealed class LocalAgentApiHostedService(
                     try
                     {
                         await threatScanner.ScanAsync(bytes, claim.FileExtension, ct);
+                        logger.LogInformation(
+                            "Local upload passed Defender scanning. TicketId={TicketId} SizeBytes={SizeBytes}",
+                            ticketId, bytes.LongLength);
                     }
                     catch (DocumentThreatScanException exception)
                     {
+                        logger.LogWarning(
+                            exception,
+                            "Local upload rejected by document security scanning. TicketId={TicketId} ThreatDetected={ThreatDetected} SizeBytes={SizeBytes}",
+                            ticketId, exception.ThreatDetected, bytes.LongLength);
                         return exception.ThreatDetected
                             ? Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message })
                             : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
