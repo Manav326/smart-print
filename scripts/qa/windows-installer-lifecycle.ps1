@@ -265,8 +265,9 @@ function Assert-DocumentWorkerRuntimeIsolation {
         $registration = Get-CimInstance -ClassName Win32_Service -Filter "Name='$workerServiceName'"
         Assert-True ($registration.StartName -eq "NT AUTHORITY\LocalService") "The parser service is not running as LocalService."
 
-        # Network Service is a distinct unprivileged local identity. It must not
-        # be able to connect to a pipe whose DACL grants only SYSTEM and LocalService.
+        # Network Service is a distinct unprivileged local identity. The pipe
+        # DACL grants SYSTEM, LocalService and the worker's restricted service SID,
+        # but does not grant Network Service or broad local-user groups.
         & icacls.exe (Split-Path -Parent $assemblyPath) /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(RX)" /T | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not grant Network Service read/execute access to the isolated fixture assembly." }
         & icacls.exe $networkProbeDirectory /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(M)" | Out-Null
