@@ -405,12 +405,13 @@ html[data-theme="dark"] .sp-public .sp-download-card h3 {
   color: #edf1fa;
 }
 
-/* Public site shares the in-app SmartPrint lockup. */
+/* Public site uses the same SmartPrint mark and actual QuantaEdge Learning logo. */
 .sp-public-brand{min-width:0}
-.sp-public-brand-lockup{padding:0;gap:10px}
+.sp-public-brand-lockup{padding:0;gap:9px}
 .sp-public-brand-lockup .brand-mark-image{width:40px;height:40px;flex-basis:40px}
 .sp-public-brand-lockup .brand-name{color:#202638;font-size:19px}
 .sp-public-brand-lockup .brand-name span{color:#7258E8}
 .sp-public-brand-lockup .brand-lockup-by{color:#68758A}
-.sp-public-brand-lockup .brand-parent-wordmark{font-size:9px}
+.sp-public-brand-lockup .brand-parent-logo{width:118px;max-height:28px}
 .sp-public-brand-lockup .brand-lockup-subline{display:none}
+@media(max-width:760px){.sp-public-brand-lockup .brand-parent-logo{width:88px;max-height:23px}}
