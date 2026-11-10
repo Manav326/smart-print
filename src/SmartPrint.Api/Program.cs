@@ -3358,10 +3358,19 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
     if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED"))
         return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
 
+    if (job.PrivatePrinting && (job.OutputType != "PHYSICAL" || job.ClaimedByAgentDeviceId is null))
+        return Results.Conflict(new
+        {
+            code = "private_output_confirmation_invalid",
+            message = "Private Printing can be completed only after confirmed physical output from its assigned shop computer."
+        });
+
     var now = DateTimeOffset.UtcNow;
     var previous = job.Status;
     job.Status = "COMPLETED";
     job.OutputConfirmedUtc = now;
+    if (job.PrivatePrinting)
+        job.PrivateDocumentPurgeRequestedUtc ??= now;
     job.SpoolerObservedUtc = now;
     job.SpoolerStatus = "SHOP_CONFIRMED_OUTPUT";
     job.UpdatedUtc = now;
@@ -4675,6 +4684,94 @@ agentApi.MapPost("/enroll", async (
         new AgentEnrollmentResponse(device.Id, rawSecret, device.CreatedUtc));
 });
 
+
+agentApi.MapGet("/jobs/private-purge", async (
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var jobIds = await db.PrintJobs.AsNoTracking()
+        .Where(job => job.TenantId == device.TenantId &&
+                      job.ClaimedByAgentDeviceId == device.Id &&
+                      job.PrivatePrinting &&
+                      job.Status == "COMPLETED" &&
+                      job.OutputType == "PHYSICAL" &&
+                      job.OutputConfirmedUtc != null &&
+                      job.PrivateDocumentPurgeRequestedUtc != null &&
+                      job.PrivateDocumentPurgedUtc == null)
+        .OrderBy(job => job.PrivateDocumentPurgeRequestedUtc)
+        .Select(job => job.Id)
+        .Take(100)
+        .ToListAsync(ct);
+
+    return Results.Ok(new { JobIds = jobIds });
+});
+
+agentApi.MapPost("/jobs/{jobId:guid}/private-document-purged", async (
+    Guid jobId,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(
+        item => item.Id == jobId && item.TenantId == device.TenantId, ct);
+    if (job is null) return Results.NotFound();
+    if (job.PrivateDocumentPurgedUtc is not null)
+        return Results.Ok(new { job.Id, job.PrivateDocumentPurgedUtc, DuplicateRequest = true });
+
+    if (!job.PrivatePrinting ||
+        job.Status != "COMPLETED" ||
+        job.OutputType != "PHYSICAL" ||
+        job.OutputConfirmedUtc is null ||
+        job.PrivateDocumentPurgeRequestedUtc is null ||
+        job.ClaimedByAgentDeviceId != device.Id)
+    {
+        return Results.Conflict(new
+        {
+            code = "private_document_purge_not_authorized",
+            message = "The shop has not confirmed physical output for this private job. The source document must remain available for reconciliation."
+        });
+    }
+
+    var document = await db.PrintDocuments.SingleOrDefaultAsync(
+        item => item.TenantId == device.TenantId && item.PrintJobId == jobId, ct);
+    if (document is null)
+        return Results.Conflict(new { code = "private_document_record_missing", message = "The private document record is unavailable; the purge cannot be acknowledged safely." });
+    if (document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId != device.Id)
+        return Results.Conflict(new { code = "private_document_storage_mismatch", message = "This private source is not assigned to the acknowledging Agent." });
+
+    var now = DateTimeOffset.UtcNow;
+    document.OriginalFileName = "Private document";
+    document.MediaType = string.Empty;
+    document.FileExtension = string.Empty;
+    document.SizeBytes = 0;
+    document.Sha256 = string.Empty;
+    document.StorageKey = string.Empty;
+    document.PageSizesJson = "[]";
+    document.AgentDeviceId = null;
+    document.PurgedUtc = now;
+    job.PrivateDocumentPurgedUtc = now;
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = device.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = job.Status,
+        NewStatus = job.Status,
+        ActorType = "PrintAgent",
+        ActorId = device.Id,
+        ReasonCode = "PRIVATE_SOURCE_DOCUMENT_PURGED_AND_METADATA_REDACTED",
+        CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { job.Id, job.PrivateDocumentPurgedUtc, DuplicateRequest = false });
+});
 
 agentApi.MapPost("/jobs/claim", async (
     HttpContext context,
