@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using UglyToad.PdfPig;
+using SixLabors.ImageSharp;
 
 namespace SmartPrint.Documents;
 
@@ -14,6 +15,7 @@ public sealed class DocumentValidationException(string message) : Exception(mess
 public static class DocumentAnalyzer
 {
     private const int MaximumPages = 500;
+    private const ulong MaximumImagePixels = 50_000_000UL;
 
     public static DocumentAnalysis Analyse(byte[] bytes, string extension)
     {
@@ -82,7 +84,7 @@ public static class DocumentAnalyzer
             var width = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(16, 4));
             var height = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(20, 4));
             ValidateImageDimensions(width, height);
-            return new DocumentAnalysis(1, ImagePageSize(width, height), "image/png", ".png");
+            return DecodeAndAnalyseImage(bytes, width, height, "image/png", ".png");
         }
 
         if (bytes.Length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 || bytes[2] != 0xFF)
@@ -92,7 +94,7 @@ public static class DocumentAnalyzer
 
         var dimensions = ReadJpegDimensions(bytes);
         ValidateImageDimensions(dimensions.Width, dimensions.Height);
-        return new DocumentAnalysis(1, ImagePageSize(dimensions.Width, dimensions.Height), "image/jpeg", extension);
+        return DecodeAndAnalyseImage(bytes, dimensions.Width, dimensions.Height, "image/jpeg", extension);
     }
 
     private static (uint Width, uint Height) ReadJpegDimensions(byte[] bytes)
@@ -126,9 +128,39 @@ public static class DocumentAnalyzer
         throw new DocumentValidationException("The JPEG image dimensions could not be read.");
     }
 
+    private static DocumentAnalysis DecodeAndAnalyseImage(
+        byte[] bytes, uint expectedWidth, uint expectedHeight, string mediaType, string extension)
+    {
+        try
+        {
+            // Header checks are cheap, but cannot prove that compressed pixel data
+            // is complete. Decode the entire single-frame image before it becomes
+            // a payable print job so truncated/corrupt files cannot pass preflight.
+            using var image = Image.Load(bytes);
+            if (image.Frames.Count != 1)
+                throw new DocumentValidationException("Animated or multi-frame images are not supported. Save one still image and upload it again.");
+            if (image.Width != expectedWidth || image.Height != expectedHeight)
+                throw new DocumentValidationException("The image dimensions do not match its file header.");
+
+            return new DocumentAnalysis(
+                1,
+                ImagePageSize((uint)image.Width, (uint)image.Height),
+                mediaType,
+                extension);
+        }
+        catch (DocumentValidationException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            throw new DocumentValidationException("The image is damaged, incomplete or could not be fully decoded.");
+        }
+    }
+
     private static void ValidateImageDimensions(uint width, uint height)
     {
-        if (width == 0 || height == 0 || (ulong)width * height > 100_000_000UL)
+        if (width == 0 || height == 0 || (ulong)width * height > MaximumImagePixels)
         {
             throw new DocumentValidationException("The image dimensions are invalid or too large to process safely.");
         }
