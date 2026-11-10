@@ -578,7 +578,10 @@ public sealed class Worker(
                 {
                     // The server-authorised source is already absent from this Agent's queue.
                     // Acknowledge absence so the API can redact the source metadata too.
-                    logger.LogWarning("Private job {JobId} has no local queue manifest; confirming that no managed queue copy remains.", jobId);
+                    // Also remove a possible encrypted file/manifest temporary left by
+                    // a process stop between the document write and manifest commit.
+                    await localQueueStore.PurgeUnindexedPrivateSourceAsync(jobId, cancellationToken);
+                    logger.LogWarning("Private job {JobId} had no queue manifest; orphaned job-specific files were removed before acknowledging the purge.", jobId);
                 }
                 else
                 {
