@@ -4337,6 +4337,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const results=[...uploadedBatch];
     const savedSettings={...printSettingsByJobId};
     const savedPhotoSettings={...photoSettingsByJobId};
+    const savedPrintKinds={...printKindsByJobId};
     const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
     if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
     setBusy(true);setError("");setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,currentFile:pending[0]?.name??null});
@@ -4347,9 +4348,18 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const fingerprint=customerFileFingerprint(candidate);
         const batchGroupName=groupNameForFile(candidate);
         const settings=settingsForFile(candidate);
-        const created=uploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings)
-          : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
+        const idDocument=isSmartPrintIdDocument(candidate);
+        if(idDocument&&!secureQueueFallbackEnabled) {
+          throw new ApiError(
+            "For privacy, prepared ID cards must use the shop's encrypted HTTPS print queue. This shop currently has direct local transfer only. Ask the shop owner to enable Secure queue · HTTPS.",
+            409
+          );
+        }
+        const created=idDocument
+          ? await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings)
+          : uploadMode==="LOCAL"&&localAgent
+            ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings)
+            : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
@@ -4365,6 +4375,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         savedSettings[created.job.id]=settings;
         const photoSettings=photoSettingsByFileFingerprint[fingerprint];
         if(photoSettings)savedPhotoSettings[created.job.id]=photoSettings;
+        savedPrintKinds[created.job.id]=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
         completedFingerprints.add(fingerprint);
         setUploadedBatch([...results]);
         setUploadedFileFingerprints([...completedFingerprints]);
@@ -4372,6 +4383,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       setPrintSettingsByJobId(savedSettings);
       setPhotoSettingsByJobId(savedPhotoSettings);
+      setPrintKindsByJobId(savedPrintKinds);
       setUploadedBatch(results);
       setUploaded(results[0]??null);
       setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
@@ -4381,6 +4393,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     } catch(exception) {
       setPrintSettingsByJobId(savedSettings);
       setPhotoSettingsByJobId(savedPhotoSettings);
+      setPrintKindsByJobId(savedPrintKinds);
       setUploadedBatch(results);
       setUploadedFileFingerprints([...completedFingerprints]);
       if(results.length>0)setUploaded(results[0]);
