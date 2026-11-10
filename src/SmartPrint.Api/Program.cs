@@ -8041,7 +8041,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
 
     var ticket = new LocalPrintUploadTicket
     {
-        PrivatePrinting = request.PrivatePrinting,
         TenantId = session.TenantId,
         CustomerSessionId = session.Id,
         QrStationId = session.QrStationId,
