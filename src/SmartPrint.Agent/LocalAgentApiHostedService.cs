@@ -172,7 +172,8 @@ public sealed class LocalAgentApiHostedService(
     ILogger<LocalAgentApiHostedService> logger,
     IHostApplicationLifetime hostLifetime,
     LocalNetworkManager localNetworkManager,
-    AgentRuntimeReadiness runtimeReadiness) : IHostedService, IAsyncDisposable
+    AgentRuntimeReadiness runtimeReadiness,
+    AgentDocumentEncryptionKeyStore documentEncryptionKeyStore) : IHostedService, IAsyncDisposable
 {
     private WebApplication? application;
     private CancellationTokenSource? retryLifetime;
@@ -287,7 +288,7 @@ public sealed class LocalAgentApiHostedService(
             {
                 policy.SetIsOriginAllowed(state.IsOriginAllowed)
                     .WithMethods("GET", "POST")
-                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant", "X-Print-Photo-Revision-Grant")
+                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant", "X-Print-Photo-Revision-Grant", "X-Print-Encrypted-Key", "X-Print-Encrypted-Iv")
                     .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
             }));
 
