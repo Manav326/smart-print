@@ -96,12 +96,15 @@ services:
       retries: 10
       start_period: 10s
 
+    networks:
+      - database
   api:
     stop_grace_period: 4m
     networks:
       default:
         aliases:
           - smart-print-api
+      database: {}
       document-processing: {}
     image: ${IMAGE_NAMESPACE:?Set IMAGE_NAMESPACE in .env}/smart-print-api:${IMAGE_TAG:-latest}
     build:
@@ -180,6 +183,8 @@ volumes:
   qrtoprint_document_worker_token:
 
 networks:
+  database:
+    internal: true
   document-processing:
     internal: true
   malware-egress: {}
