@@ -3114,7 +3114,7 @@ class MainActivity : AppCompatActivity() {
         clearLibrarySelection()
         setToolbarPage("ID Studio")
         setToolbarBackAction("Back to Home", ::showHome)
-        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = portalUrl != null
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
         accountAction.visibility = View.GONE
         setBottomNavigationVisible(false)
@@ -3314,6 +3314,7 @@ class MainActivity : AppCompatActivity() {
         applySensitiveWindowProtection()
         setToolbarPage("ID Studio · Back side")
         setToolbarBackAction("Back to ID Studio", ::showIdStudioHome)
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
         accountAction.visibility = View.GONE
         setBottomNavigationVisible(false)
@@ -3356,6 +3357,7 @@ class MainActivity : AppCompatActivity() {
         applySensitiveWindowProtection()
         setToolbarPage("Review ID card")
         setToolbarBackAction("Back to ID Studio", ::showIdStudioHome)
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
         accountAction.visibility = View.GONE
         setBottomNavigationVisible(false)
