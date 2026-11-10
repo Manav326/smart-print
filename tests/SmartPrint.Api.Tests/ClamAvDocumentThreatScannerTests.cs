@@ -12,7 +12,32 @@ namespace SmartPrint.Api.Tests;
 public sealed class ClamAvDocumentThreatScannerTests
 {
     private static readonly byte[] EicarTestSample = Encoding.ASCII.GetBytes(
-        @"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*");
+        @"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*");
+
+    [Fact]
+    public async Task RealClamAvEngineDetectsEicarAndAcceptsAnUninfectedSample()
+    {
+        if (!string.Equals(
+            Environment.GetEnvironmentVariable("SMARTPRINT_TEST_CLAMAV"),
+            "1",
+            StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var host = Environment.GetEnvironmentVariable("SMARTPRINT_CLAMAV_HOST") ?? "127.0.0.1";
+        var port = int.TryParse(Environment.GetEnvironmentVariable("SMARTPRINT_CLAMAV_PORT"), out var configuredPort)
+            ? configuredPort
+            : 3310;
+        var scanner = CreateScanner(host, port);
+
+        await scanner.ScanAsync("SmartPrint clean upload fixture"u8.ToArray(), CancellationToken.None);
+        var threat = await Assert.ThrowsAsync<DocumentThreatScanException>(
+            () => scanner.ScanAsync(EicarTestSample, CancellationToken.None));
+
+        Assert.True(threat.ThreatDetected);
+        Assert.Equal(68, EicarTestSample.Length);
+    }
 
     [Fact]
     public async Task SendsNulTerminatedInstreamChunksAndAcceptsOnlyAnExplicitCleanResult()
@@ -130,6 +155,19 @@ public sealed class ClamAvDocumentThreatScannerTests
             if (buffer[0] == 0) return Encoding.ASCII.GetString(bytes.ToArray());
             bytes.Add(buffer[0]);
         }
+    }
+
+    private static ClamAvDocumentThreatScanner CreateScanner(string host, int port)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["DocumentSecurity:ClamAv:Host"] = host,
+                ["DocumentSecurity:ClamAv:Port"] = port.ToString(),
+                ["DocumentSecurity:ClamAv:TimeoutSeconds"] = "90"
+            })
+            .Build();
+        return new ClamAvDocumentThreatScanner(configuration);
     }
 
     private static ClamAvDocumentThreatScanner CreateScanner(int port)
