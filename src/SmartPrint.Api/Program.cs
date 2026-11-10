@@ -100,6 +100,7 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddHttpClient<SubscriptionRazorpayService>();
+builder.Services.AddSingleton<IDocumentThreatScanner, ClamAvDocumentThreatScanner>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddRateLimiter(options =>
