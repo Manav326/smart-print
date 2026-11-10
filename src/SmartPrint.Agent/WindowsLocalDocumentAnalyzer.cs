@@ -132,7 +132,8 @@ public sealed class WindowsLocalDocumentAnalyzer
                 "The isolated local document parser timed out. The upload was blocked.",
                 exception);
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or JsonException or TimeoutException or System.ComponentModel.Win32Exception)
         {
             throw new DocumentProcessingException(
                 "The isolated local document processor is unavailable or returned an invalid response. The upload was blocked.",
