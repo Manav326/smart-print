@@ -75,7 +75,7 @@ public sealed class Worker(
                 logger.LogWarning(exception, "Private encrypted relay check failed; the Agent will retry automatically.");
             }
 
-            try { await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken); }
+            try { await Task.Delay(TimeSpan.FromSeconds(4), cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
         }
     }

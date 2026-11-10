@@ -1549,7 +1549,20 @@ export async function uploadCustomerDocumentLocally(
 
   if (isUncompletedLocalUploadTicketExpired(ticket.completed, ticket.expiresUtc)) {
     if (privatePrinting) {
-      throw new LocalUploadOutcomeUnknownError("The private upload reservation needs the original shop computer to reconnect. SmartPrint has kept the same ticket; reconnect to shop Wi-Fi and retry. No cloud copy was created.");
+      const expiredStatus = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken).catch(() => null);
+      if (expiredStatus?.state === "READY") {
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        return expiredStatus.uploadResult;
+      }
+      if (expiredStatus?.state === "FAILED" || expiredStatus?.state === "EXPIRED") {
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        throw new LocalUploadPreflightError(
+          expiredStatus.message || "The private upload expired before the shop computer received it. Please retry this file.",
+          409,
+          "private_relay_expired"
+        );
+      }
+      throw new LocalUploadOutcomeUnknownError("The encrypted private request is still attached to its original ticket. SmartPrint will resume the same request when the shop computer reconnects.");
     }
     // Keep the original ticket/grant: its monthly quota and batch capacity are
     // still reserved during the 24-hour recovery window. First let the API
@@ -1678,7 +1691,7 @@ export async function uploadCustomerDocumentLocally(
   } else if (!ticket.completed) {
     form.append("file", file, file.name);
   }
-  if (ticket.agentDeviceId === localAgent.agentDeviceId && (!privatePrinting || localNetworkReady)) {
+  if (ticket.agentDeviceId === localAgent.agentDeviceId && (!privatePrinting || localNetworkReady || localAgent.endpoints.length > 0)) {
     for (const value of localAgent.endpoints.slice(0, privatePrinting ? 3 : 8)) {
     const endpoint = isPrivateLocalAgentEndpoint(value);
     if (!endpoint) continue;

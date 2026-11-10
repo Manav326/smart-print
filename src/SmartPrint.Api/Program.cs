@@ -5550,7 +5550,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                        item.AgentDeviceId == device.Id &&
                        item.CompletedUtc == null &&
                        item.ExpiresUtc > now &&
-                       item.ClaimLeaseExpiresUtc > now)
+                       (privateRelayClaim || item.ClaimLeaseExpiresUtc > now))
         .ExecuteUpdateAsync(update => update.SetProperty(item => item.CompletedUtc, now), ct);
 
     if (completed != 1)
@@ -8518,7 +8518,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         ivBytes = Convert.FromBase64String(ivText);
     }
     catch (FormatException) { return Results.BadRequest(new { code = "private_relay_envelope_invalid" }); }
-    if (keyBytes.Length is < 256 or > 512 || ivBytes.Length != 12)
+    var envelopeValid = keyBytes.Length is >= 256 and <= 512 && ivBytes.Length == 12;
+    CryptographicOperations.ZeroMemory(keyBytes);
+    CryptographicOperations.ZeroMemory(ivBytes);
+    if (!envelopeValid)
         return Results.BadRequest(new { code = "private_relay_envelope_invalid" });
 
     var now = DateTimeOffset.UtcNow;
@@ -8586,7 +8589,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     {
         await transaction.RollbackAsync(ct);
         await storage.DeleteAsync(storageKey);
-        if (locked?.PrivateRelayUploadedUtc is not null)
+        if (locked?.CompletedUtc is not null || locked?.PrivateRelayUploadedUtc is not null)
             return Results.Ok(new { Accepted = true, DuplicateRequest = true, locked.PrintJobId, locked.JobNumber });
         return Results.Conflict(new { code = "private_relay_state_changed", message = "This upload has changed state. Retry the same file to refresh its status." });
     }
@@ -8672,7 +8675,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
     }
 
     return Results.Ok(new { State = "PENDING", Message = "The shop computer is securely receiving and checking your document." });
-}).RequireRateLimiting("document-upload");
+}).RequireRateLimiting("public-api");
 
 publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery", async (
     Guid ticketId,
