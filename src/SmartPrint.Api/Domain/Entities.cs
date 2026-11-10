@@ -268,6 +268,8 @@ public sealed class PrintJob
     public Guid? CustomerUserId { get; set; }
     public string Origin { get; set; } = "CUSTOMER_QR";
     public bool PrivatePrinting { get; set; }
+    public DateTimeOffset? PrivateDocumentPurgeRequestedUtc { get; set; }
+    public DateTimeOffset? PrivateDocumentPurgedUtc { get; set; }
     public string? RecipientName { get; set; }
     public string? RecipientPhone { get; set; }
     public Guid? PrinterDeviceId { get; set; }
