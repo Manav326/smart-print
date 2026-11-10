@@ -2024,6 +2024,7 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
         select new
         {
             job.Id,
+            job.PrivatePrinting,
             job.JobNumber,
             job.Status,
             job.CreatedUtc,
@@ -2045,9 +2046,9 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
             job.OutputCompletedUtc,
             Document = new
             {
-                document.OriginalFileName,
-                document.MediaType,
-                document.SizeBytes
+                OriginalFileName = PrivatePrintingRules.SafeDocumentLabel(job.PrivatePrinting, document.OriginalFileName),
+                MediaType = job.PrivatePrinting ? "application/octet-stream" : document.MediaType,
+                SizeBytes = job.PrivatePrinting ? 0 : document.SizeBytes
             },
             Payment = db.PrintPayments.AsNoTracking()
                 .Where(payment => payment.TenantId == tenantId && payment.PrintJobId == job.Id)
@@ -2118,6 +2119,7 @@ shop.MapGet("/print-jobs", async (
             job.BatchName,
             job.RejectedPageNumbersJson,
             job.PdfBrandingEnabled,
+            job.PrivatePrinting,
             job.Origin,
             job.CustomerUserId,
             job.RecipientName,
@@ -2211,9 +2213,9 @@ shop.MapGet("/print-jobs", async (
                 .FirstOrDefault(),
             Document = new
             {
-                document.OriginalFileName,
-                document.MediaType,
-                document.SizeBytes
+                OriginalFileName = PrivatePrintingRules.SafeDocumentLabel(job.PrivatePrinting, document.OriginalFileName),
+                MediaType = job.PrivatePrinting ? "application/octet-stream" : document.MediaType,
+                SizeBytes = job.PrivatePrinting ? 0 : document.SizeBytes
             }
         };
 
@@ -2231,7 +2233,7 @@ shop.MapGet("/print-jobs", async (
             (job.BatchGroupName != null && job.BatchGroupName.ToLower().Contains(normalizedSearch)) ||
             (job.RecipientName != null && job.RecipientName.ToLower().Contains(normalizedSearch)) ||
             (job.RecipientPhone != null && job.RecipientPhone.ToLower().Contains(normalizedSearch)) ||
-            job.Document.OriginalFileName.ToLower().Contains(normalizedSearch) ||
+            (!job.PrivatePrinting && job.Document.OriginalFileName.ToLower().Contains(normalizedSearch)) ||
             (job.PrinterName != null && job.PrinterName.ToLower().Contains(normalizedSearch)));
     }
 
