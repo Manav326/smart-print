@@ -2,6 +2,25 @@
 name: qrtoprint
 
 services:
+  clamav:
+    # Official ClamAV image; signatures are refreshed by the bundled freshclam daemon.
+    image: clamav/clamav:1.5.4-debian13-slim
+    restart: unless-stopped
+    volumes:
+      - qrtoprint_clamav_database:/var/lib/clamav
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    cpus: 2.0
+    healthcheck:
+      test: ["CMD-SHELL", "clamdscan --ping=1 --config-file=/etc/clamav/clamd.conf /dev/null >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 300s
+
   db:
     image: postgres:17-alpine
     restart: unless-stopped
@@ -41,6 +60,9 @@ services:
       Razorpay__WebhookSecret: ${RAZORPAY_WEBHOOK_SECRET:-}
       Razorpay__BaseUrl: ${RAZORPAY_BASE_URL:-https://api.razorpay.com/v1}
       Documents__StorageRoot: /var/lib/qrtoprint/documents
+      DocumentSecurity__ClamAv__Host: clamav
+      DocumentSecurity__ClamAv__Port: 3310
+      DocumentSecurity__ClamAv__TimeoutSeconds: 90
       Database__ApplyMigrationsOnStartup: "true"
       PublicPortal__BaseUrl: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
       PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:?Set GITHUB_REPOSITORY in .env}
@@ -49,6 +71,8 @@ services:
       - qrtoprint_documents:/var/lib/qrtoprint/documents
     depends_on:
       db:
+        condition: service_healthy
+      clamav:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1:8080/health/ready || exit 1"]
@@ -82,6 +106,7 @@ services:
 volumes:
   qrtoprint_database:
   qrtoprint_documents:
+  qrtoprint_clamav_database:
 
 networks:
   cloudflare-edge:
