@@ -32,7 +32,7 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 - Accept the document only at the exact private-LAN Agent, verify grant ownership with the cloud API, enforce a 20 MB transfer ceiling and analyse the actual document signature/content before storing.
 - Store received Agent documents and the Windows Agent identity with DPAPI LocalMachine; protect the queue directory with SYSTEM/Administrators-only Windows ACLs. Never return a local-only document through cloud document-preview/download endpoints.
 - The document storage format is versioned (`QSP1`); never reuse the development key in production.
-- Scan uploads where configured and isolate conversion/rendering processes.
+- Cloud document uploads require a clean ClamAV result and then use the private, resource-limited document-worker container for parsing. Direct shop-LAN uploads require a Windows Defender scan on the paired Agent. Both paths fail closed on scanner failure; the Agent's PDFium/Skia rendering still needs its own process isolation and Windows acceptance evidence.
 - Apply explicit retention and deletion policies. Never log document contents or public file URLs.
 - Platform administrators configure print quota and document/database retention under **Platform Control Centre → Operations & retention**. The seeded trial quota is 3,000 print jobs per calendar month. Paid-plan quotas remain versioned in **Plans & entitlements**. Operations controls cloud-completed, Agent-completed, abandoned-unpaid, pending-local-upload, expired-ticket, empty-session and stale-refresh-token retention, plus API/Agent sweep intervals and whether already-paid work may continue during a shop suspension. Every update requires an audit reason and records before/after settings.
 - Cloud source documents are purged only after confirmed physical output or a verified PDF export, or after a terminal rejection, quote expiry or full refund has passed the configured abandonment period without a financial hold. The database retains job, payment and refund metadata and marks purged documents with `PurgedUtc`; subsequent cloud preview/download returns HTTP 410.
@@ -87,6 +87,11 @@ Platform support access to tenant records must be least-privilege, time-bound, p
 - Preserve queue state and local configuration during upgrade.
 - Publish checksums and release notes.
 - Provide diagnostics bundle export with secrets and document contents redacted.
-- Current backup scripts restrict local filesystem ACLs but do not encrypt the generated database dump, document archive or secrets file themselves. Encrypt the complete three-file backup set before transferring it to off-host storage. Perform and record restore drills; do not assume successful backup creation proves recoverability.
+- The current backup script creates one authenticated AES-256-GCM `.spbackup` containing the PostgreSQL dump, encrypted document archive, deployment `.env`, Cloudflare Tunnel token and a hash manifest. A PBKDF2-HMAC-SHA256 passphrase is entered interactively; off-site completion requires an rclone content check. The companion restore-drill restores a disposable PostgreSQL database and document volume and verifies active QSP1 document tags, sizes and hashes. A real off-site target and scheduled owner-run restore rehearsal are still required before BLK-06 can be signed off.
 - Email verification and account recovery are not yet implemented. New accounts are not gated on confirmed email; complete verification and recovery workflows before relying on email ownership for sensitive account changes.
-- Malware scanning and isolated document conversion/rendering remain deployment hardening requirements; do not treat file-signature validation as malware protection.
+- Cloud uploads and direct shop-LAN uploads now require malware scanning; cloud parsing is isolated in a restricted Docker worker. The native Windows Agent PDFium/Skia parser and renderer still run in the Agent process and remain a BLK-03 residual. Do not treat file-signature validation or a clean scan alone as full document-sandbox certification.
+
+
+## 8A. Security hardening evidence
+
+See [Security hardening BLK-03/05/06](SECURITY_HARDENING_BLK_03_05_06.md) for scanner configuration, isolated worker boundaries, PostgreSQL race cases, encrypted backup format, restore drill, operator commands and residual acceptance requirements.
