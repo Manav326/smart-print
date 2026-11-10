@@ -124,6 +124,40 @@ public sealed class PlatformSubscriptionAudit
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class ShopSubscriptionPayment
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid CreatedByUserId { get; set; }
+    public Guid PlanVersionId { get; set; }
+    public string PlanCode { get; set; } = string.Empty;
+    public string BillingInterval { get; set; } = string.Empty;
+    public long AmountMinor { get; set; }
+    public string Currency { get; set; } = "INR";
+    public string ClientRequestId { get; set; } = string.Empty;
+    public string RazorpayOrderId { get; set; } = string.Empty;
+    public string? RazorpayPaymentId { get; set; }
+    public string Status { get; set; } = "CREATED";
+    public Guid? AssignedSubscriptionId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? VerifiedUtc { get; set; }
+}
+
+public sealed class RazorpayWebhookEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string EventId { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public string? RazorpayOrderId { get; set; }
+    public string? RazorpayPaymentId { get; set; }
+    public string PayloadSha256 { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public string? Reason { get; set; }
+    public DateTimeOffset ReceivedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ProcessedUtc { get; set; }
+}
+
 public sealed class SubscriptionPlan
 {
     public Guid Id { get; set; } = Guid.NewGuid();

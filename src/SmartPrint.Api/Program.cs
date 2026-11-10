@@ -99,6 +99,7 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddScoped<TenantEntitlementService>();
+builder.Services.AddHttpClient<SubscriptionRazorpayService>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddRateLimiter(options =>
@@ -141,6 +142,8 @@ builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
     .AllowAnyMethod()));
 
 var app = builder.Build();
+
+app.MapRazorpaySubscriptionWebhookEndpoint();
 
 if (builder.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup"))
 {
@@ -1103,6 +1106,8 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
 
 var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
+
+shop.MapShopSubscriptionPaymentEndpoints();
 
 shop.MapGet("/subscription", async (
     ClaimsPrincipal principal,

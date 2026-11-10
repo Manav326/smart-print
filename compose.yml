@@ -36,6 +36,10 @@ services:
       ConnectionStrings__SmartPrint: "Host=db;Port=5432;Database=${POSTGRES_DB:-qrtoprint};Username=${POSTGRES_USER:-qrtoprint};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       Authentication__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
       Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:?Set DOCUMENTS_ENCRYPTION_KEY in .env}
+      Razorpay__KeyId: ${RAZORPAY_KEY_ID:-}
+      Razorpay__KeySecret: ${RAZORPAY_KEY_SECRET:-}
+      Razorpay__WebhookSecret: ${RAZORPAY_WEBHOOK_SECRET:-}
+      Razorpay__BaseUrl: ${RAZORPAY_BASE_URL:-https://api.razorpay.com/v1}
       Documents__StorageRoot: /var/lib/qrtoprint/documents
       Database__ApplyMigrationsOnStartup: "true"
       PublicPortal__BaseUrl: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
