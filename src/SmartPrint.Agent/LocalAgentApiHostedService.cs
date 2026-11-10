@@ -799,6 +799,8 @@ public sealed class LocalAgentApiHostedService(
 
                 if (claim.AlreadyCompleted && claim.UploadResult is not null)
                 {
+                    if (claim.PrivatePrinting && claim.UploadResult.Job.Status == "COMPLETED")
+                        return Results.Ok(claim.UploadResult);
                     var completedJobId = claim.PrintJobId != Guid.Empty
                         ? claim.PrintJobId
                         : claim.UploadResult.Job.Id;
@@ -856,12 +858,13 @@ public sealed class LocalAgentApiHostedService(
                     }
 
                     var form = await context.Request.ReadFormAsync(ct);
-                    if (form.Files.Count != 1 || form.Files[0].Length != claim.SizeBytes)
+                    var expectedWireSize = claim.PrivatePrinting ? checked(claim.SizeBytes + 16) : claim.SizeBytes;
+                    if (form.Files.Count != 1 || form.Files[0].Length != expectedWireSize || expectedWireSize > 20L * 1024 * 1024 + 16)
                     {
                         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "The received document size does not match the authorised upload.");
                     }
 
-                    await using var memory = new MemoryStream((int)claim.SizeBytes);
+                    await using var memory = new MemoryStream(checked((int)expectedWireSize));
                     await using (var input = form.Files[0].OpenReadStream())
                     {
                         await input.CopyToAsync(memory, ct);
@@ -870,8 +873,56 @@ public sealed class LocalAgentApiHostedService(
                     {
                         return Results.BadRequest(new { code = "local_upload_incomplete", message = "The document transfer was incomplete. Retry the upload." });
                     }
-                    bytes = memory.ToArray();
+                    var receivedBytes = memory.ToArray();
                     CryptographicOperations.ZeroMemory(memory.GetBuffer().AsSpan(0, (int)memory.Length));
+                    if (claim.PrivatePrinting)
+                    {
+                        var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
+                        var ivText = context.Request.Headers["X-Print-Encrypted-Iv"].FirstOrDefault();
+                        if (string.IsNullOrWhiteSpace(wrappedKey) || string.IsNullOrWhiteSpace(ivText))
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            return Results.BadRequest(new { code = "private_document_encryption_required", message = "Private Printing requires the document encryption key and nonce." });
+                        }
+                        byte[] aesKey;
+                        byte[] iv;
+                        try
+                        {
+                            aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
+                            iv = Convert.FromBase64String(ivText);
+                        }
+                        catch (Exception exception) when (exception is CryptographicException or FormatException)
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            return Results.UnprocessableEntity(new { code = "private_document_key_invalid", message = "The private document could not be decrypted by this paired shop computer." });
+                        }
+                        try
+                        {
+                            if (aesKey.Length != 32 || iv.Length != 12 || receivedBytes.LongLength != claim.SizeBytes + 16)
+                                throw new CryptographicException("The private document encryption envelope is invalid.");
+                            bytes = new byte[checked((int)claim.SizeBytes)];
+                            using var aes = new AesGcm(aesKey, 16);
+                            aes.Decrypt(iv, receivedBytes.AsSpan(0, checked((int)claim.SizeBytes)),
+                                receivedBytes.AsSpan(checked((int)claim.SizeBytes), 16), bytes);
+                        }
+                        catch (CryptographicException)
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            CryptographicOperations.ZeroMemory(aesKey);
+                            CryptographicOperations.ZeroMemory(iv);
+                            return Results.UnprocessableEntity(new { code = "private_document_decryption_failed", message = "The private document did not pass its authenticated encryption check." });
+                        }
+                        finally
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            CryptographicOperations.ZeroMemory(aesKey);
+                            CryptographicOperations.ZeroMemory(iv);
+                        }
+                    }
+                    else
+                    {
+                        bytes = receivedBytes;
+                    }
                 }
 
                 try
@@ -914,7 +965,8 @@ public sealed class LocalAgentApiHostedService(
                             claim.Sha256,
                             claim.ExpiresUtc,
                             "LOCAL_AGENT",
-                            Orientation: claim.Orientation);
+                            Orientation: claim.Orientation,
+                            PrivatePrinting: claim.PrivatePrinting);
                         await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
                     }
 
@@ -1016,6 +1068,7 @@ public sealed class LocalAgentApiHostedService(
         bool IsDuplex,
         int Copies,
         string Orientation,
+        bool PrivatePrinting,
         DateTimeOffset ExpiresUtc,
         LocalUploadedPrintResult? UploadResult);
 
@@ -1032,7 +1085,7 @@ public sealed class LocalAgentApiHostedService(
         Guid Id, string JobNumber, string Status, int PageCount, int Copies,
         string Currency, long QuotedAmountMinor, DateTimeOffset CreatedUtc,
         string ColourMode = "Mono", string PaperSize = "A4", bool IsDuplex = false,
-        string Orientation = "AUTO", int PricingVersion = 1);
+        string Orientation = "AUTO", int PricingVersion = 1, bool PrivatePrinting = false);
 
     private sealed record LocalUploadedDocument(
         Guid Id, string OriginalFileName, string MediaType, long SizeBytes,
