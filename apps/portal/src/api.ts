@@ -1246,7 +1246,13 @@ async function requestCustomerLocalUploadTicket(
   settings: CustomerPrintRequestSettings,
   privatePrinting = false
 ): Promise<CustomerLocalUploadTicket> {
-  const digest = await crypto.subtle.digest("SHA-256", await file.arrayBuffer());
+  const hashInput = await file.arrayBuffer();
+  let digest: ArrayBuffer;
+  try {
+    digest = await crypto.subtle.digest("SHA-256", hashInput);
+  } finally {
+    new Uint8Array(hashInput).fill(0);
+  }
   const privateExtension = file.name.match(/\.(pdf|jpe?g|png)$/i)?.[0]?.toLowerCase() ?? "";
   const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   return apiRequest<CustomerLocalUploadTicket>("/api/v1/public/sessions/current/local-upload-tickets", {
