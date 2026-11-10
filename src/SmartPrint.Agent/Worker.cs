@@ -17,6 +17,7 @@ public sealed class Worker(
     LocalAgentApiState localAgentApiState,
     LocalNetworkManager localNetworkManager,
     AgentRuntimeReadiness runtimeReadiness,
+    AgentDocumentEncryptionKeyStore documentEncryptionKeyStore,
     IConfiguration configuration) : BackgroundService
 {
     private int printClaimBatchOffset;
@@ -104,6 +105,16 @@ public sealed class Worker(
             return;
         }
 
+        string? documentEncryptionPublicKey = null;
+        try
+        {
+            documentEncryptionPublicKey = documentEncryptionKeyStore.GetOrCreatePublicKey();
+        }
+        catch (Exception exception) when (exception is CryptographicException or IOException or UnauthorizedAccessException or InvalidOperationException)
+        {
+            logger.LogError(exception, "The Agent document-encryption key is unavailable. Private Printing will remain disabled until the local key can be opened.");
+        }
+
         using var client = httpClientFactory.CreateClient("cloud");
         client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
         using var heartbeat = await SendAgentRequestAsync(
@@ -114,7 +125,8 @@ public sealed class Worker(
             {
                 version = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0",
                 operatingSystem = Environment.OSVersion.VersionString,
-                localEndpoints = GetLocalEndpointsForHeartbeat()
+                localEndpoints = GetLocalEndpointsForHeartbeat(),
+                documentEncryptionPublicKey
             },
             cancellationToken);
 
