@@ -124,15 +124,25 @@ internal sealed class WindowsDocumentWorkerService(
             logger.LogWarning(exception, "Could not lower the idle document worker service priority; parser child processes remain resource-limited.");
         }
 
+        // Create the protected first instance once, then reuse the same instance.
+        // FILE_FLAG_FIRST_PIPE_INSTANCE must not be supplied on subsequent
+        // CreateNamedPipe calls; reusing this handle also closes the squatting race
+        // between uploads while retaining the startup first-instance protection.
+        await using var pipe = CreatePipe();
         while (!stoppingToken.IsCancellationRequested)
         {
-            await using var pipe = CreatePipe();
             using var idleWait = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             idleWait.CancelAfter(TimeSpan.FromSeconds(IdleShutdownSeconds));
             try
             {
                 await pipe.WaitForConnectionAsync(idleWait.Token);
                 await HandleRequestAsync(pipe, stoppingToken);
+
+                // Do not disconnect until the Agent has consumed the full response.
+                // The same protected server instance can then accept the next upload.
+                pipe.WaitForPipeDrain();
+                if (pipe.IsConnected)
+                    pipe.Disconnect();
             }
             catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
             {
@@ -156,8 +166,18 @@ internal sealed class WindowsDocumentWorkerService(
                             Success: false,
                             Analysis: null,
                             Error: "The isolated document processor could not complete this request."));
+                        pipe.WaitForPipeDrain();
                     }
                     catch (IOException) { }
+                    finally
+                    {
+                        if (pipe.IsConnected)
+                        {
+                            try { pipe.Disconnect(); }
+                            catch (IOException) { }
+                            catch (InvalidOperationException) { }
+                        }
+                    }
                 }
             }
         }
