@@ -89,6 +89,7 @@ services:
       start_period: 10s
 
   api:
+    stop_grace_period: 4m
     networks:
       default:
         aliases:
@@ -145,6 +146,7 @@ services:
       start_period: 45s
 
   portal:
+    stop_grace_period: 1m
     image: localhost/smart-print/smart-print-portal:local
     build:
       context: .
