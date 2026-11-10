@@ -161,8 +161,14 @@ try {
             if ($workerImage -match '^\s*"([^"]+)"') { $workerImage = $Matches[1] }
             else { $workerImage = ($workerImage -split '\s+', 2)[0] }
             $workerDirectory = Split-Path -Parent $workerImage
-            if (Test-Path -LiteralPath $workerDirectory -PathType Container -and
-                -not $keepDirectories.Contains($workerDirectory, [StringComparer]::OrdinalIgnoreCase)) {
+            $workerDirectoryAlreadyKept = $false
+            foreach ($keepDirectory in $keepDirectories) {
+                if ([string]::Equals($keepDirectory, $workerDirectory, [StringComparison]::OrdinalIgnoreCase)) {
+                    $workerDirectoryAlreadyKept = $true
+                    break
+                }
+            }
+            if ((Test-Path -LiteralPath $workerDirectory -PathType Container) -and -not $workerDirectoryAlreadyKept) {
                 $keepDirectories.Add($workerDirectory)
             }
         }
