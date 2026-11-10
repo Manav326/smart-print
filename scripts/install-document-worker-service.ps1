@@ -53,6 +53,11 @@ try {
     & sc.exe privs $serviceName SeChangeNotifyPrivilege | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not reduce the document-worker service privileges." }
 
+    & sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not configure document-worker recovery after a genuine crash." }
+    & sc.exe failureflag $serviceName 1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not enable document-worker failure recovery." }
+
     $workerServiceSid = "NT SERVICE\$serviceName"
     & icacls.exe (Split-Path -Parent $resolvedWorkerExe) /grant "$($workerServiceSid):(OI)(CI)(RX)" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not grant the isolated worker read/execute access to its versioned application folder." }
