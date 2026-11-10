@@ -1111,6 +1111,16 @@ class MainActivity : AppCompatActivity() {
         column.addView(button("Scan QR code", true).apply {
             setOnClickListener { scanQr() }
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(22) })
+        column.addView(text(
+            "Already on the shop network? You can verify phone access without connecting your shop account.",
+            12, R.color.qp_muted, false
+        ).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(18), 0, dp(4))
+        })
+        column.addView(button("Check shop Wi-Fi", false).apply {
+            setOnClickListener { scanQr(QrScanPurpose.WIFI_READINESS) }
+        }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(4) })
         column.addView(button("Open My Files", false).apply {
             setOnClickListener { showFiles() }
         }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(8) })
@@ -2816,7 +2826,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun showShopManager() {
         if (portalUrl == null) {
-            scanQr()
+            showOptionSheet(
+                "Shop connection",
+                listOf(
+                    "Scan shop QR" to { scanQr() },
+                    "Check shop Wi-Fi" to { scanQr(QrScanPurpose.WIFI_READINESS) }
+                )
+            )
             return
         }
         val shopName = shopDisplayName?.takeIf { it.isNotBlank() } ?: "this shop"
