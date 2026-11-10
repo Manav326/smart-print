@@ -2739,7 +2739,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                     orientation:(["AUTO","PORTRAIT","LANDSCAPE"].includes(job.orientation??"AUTO")?job.orientation??"AUTO":"AUTO") as CustomerPrintRequestSettings["orientation"]
                   });
                 }}>Adjust options</button>}
-                <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onPreview(job)}>Preview original</button>
+                <button className="subtle-button" disabled={busyJobId===job.id||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source · preview disabled":"Preview original"}</button>
                 {job.status==="COMPLETED"&&job.outputType==="PDF_EXPORT"&&verifiedPdfExportPath(job)&&job.outputFileName&&job.outputSha256?.length===64&&(job.outputSizeBytes??0)>0&&(job.outputSizeBytes??0)<=100*1024*1024&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onPreviewOutput(job)}>Preview saved PDF</button>}
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
                 {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}
@@ -2820,7 +2820,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
           <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
           <span className="batch-review-index">{index+1}</span>
           <div className="batch-review-file"><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
-          <button className="subtle-button" type="button" disabled={busy} onClick={()=>onPreview(job)}>Preview</button>
+          <button className="subtle-button" type="button" disabled={busy||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source · preview disabled":"Preview"}</button>
         </div>;
       })}
     </section>)}</div>
