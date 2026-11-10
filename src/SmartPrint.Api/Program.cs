@@ -6372,6 +6372,12 @@ agentApi.MapPost("/heartbeat", async (
             return Results.BadRequest(new { code = "agent_document_key_invalid", message = "The Agent document-encryption public key is invalid." });
         }
     }
+    else
+    {
+        // A heartbeat without a usable key disables Private Printing rather
+        // than advertising an obsolete public key after local key-store failure.
+        device.DocumentEncryptionPublicKey = null;
+    }
     device.Status = "Online";
     device.LastSeenUtc = now;
     await db.SaveChangesAsync(ct);
