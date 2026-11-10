@@ -1067,6 +1067,7 @@ export interface ShopPricingProfile {
 
 export interface ShopPrintJob {
   id: string;
+  privatePrinting?: boolean;
   batchId?: string | null;
   batchGroupName?: string | null;
   batchName?: string | null;
