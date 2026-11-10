@@ -9,7 +9,6 @@
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
-    <PackageReference Include="System.IO.Pipes.AccessControl" Version="5.0.0" />
     <ProjectReference Include="../SmartPrint.Documents/SmartPrint.Documents.csproj" />
   </ItemGroup>
 </Project>
