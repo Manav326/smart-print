@@ -4874,6 +4874,222 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     return Results.File(ciphertext, "application/octet-stream", enableRangeProcessing: false);
 }).RequireRateLimiting("agent-api");
 
+agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
+    Guid ticketId,
+    LocalPrintUploadCompletionRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    DocumentStorage storage,
+    TenantEntitlementService entitlements,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
+        item.Id == ticketId &&
+        item.TenantId == device.TenantId &&
+        item.AgentDeviceId == device.Id &&
+        item.PrivatePrinting, ct);
+    if (ticket is null) return Results.NotFound();
+
+    async Task<IResult> ExistingResultAsync(bool duplicate)
+    {
+        var job = await db.PrintJobs.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.Id == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
+        var document = await db.PrintDocuments.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
+        if (job is null || document is null)
+            return Results.Conflict(new { code = "private_relay_completion_inconsistent", message = "The shop's secure upload is being reconciled. Retry the same file." });
+
+        return Results.Ok(new
+        {
+            AlreadyCompleted = duplicate,
+            UploadResult = new
+            {
+                Job = new
+                {
+                    job.Id, job.PrivatePrinting, job.JobNumber, job.Status, job.PageCount,
+                    job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
+                    job.PricingVersion, job.Currency, job.QuotedAmountMinor, job.CreatedUtc
+                },
+                Document = new
+                {
+                    document.Id, OriginalFileName = "Private document", document.MediaType,
+                    document.SizeBytes, document.Sha256, document.PageSizesJson,
+                    document.StorageMode
+                },
+                DuplicateRequest = duplicate
+            }
+        });
+    }
+
+    if (ticket.CompletedUtc is not null)
+        return await ExistingResultAsync(true);
+
+    if (ticket.PrivateRelayFailedUtc is not null ||
+        string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey) ||
+        ticket.PrivateRelayUploadedUtc is null ||
+        ticket.ExpiresUtc <= DateTimeOffset.UtcNow)
+        return Results.Conflict(new { code = "private_relay_not_available", message = "The encrypted relay is no longer available for this upload." });
+
+    var sha = request.Sha256?.Trim().ToLowerInvariant();
+    if (request.PageCount is < 1 or > 500 ||
+        string.IsNullOrWhiteSpace(request.PageSizesJson) ||
+        request.PageSizesJson.Length is < 2 or > 200_000 ||
+        !string.Equals(request.FileExtension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(request.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase) ||
+        request.SizeBytes != ticket.SizeBytes ||
+        !string.Equals(sha, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+        return Results.UnprocessableEntity(new { code = "private_document_validation_mismatch", message = "The shop computer's document check did not match the original upload." });
+
+    try
+    {
+        using var parsedSizes = JsonDocument.Parse(request.PageSizesJson);
+        if (parsedSizes.RootElement.ValueKind != JsonValueKind.Array ||
+            parsedSizes.RootElement.GetArrayLength() != request.PageCount)
+            return Results.UnprocessableEntity(new { code = "private_document_page_analysis_invalid", message = "The shop computer returned invalid page information." });
+    }
+    catch (JsonException)
+    {
+        return Results.UnprocessableEntity(new { code = "private_document_page_analysis_invalid", message = "The shop computer returned invalid page information." });
+    }
+
+    var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
+    if (!subscription.IsAccessActive)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
+    if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
+        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "This document exceeds the maximum size configured for this shop's plan.");
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
+        $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {ticket.Id} AND \"TenantId\" = {device.TenantId} AND \"AgentDeviceId\" = {device.Id} FOR UPDATE")
+        .ToListAsync(ct);
+    var locked = lockedTickets.SingleOrDefault();
+    if (locked is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+    if (locked.CompletedUtc is not null)
+    {
+        await transaction.CommitAsync(ct);
+        return await ExistingResultAsync(true);
+    }
+    if (locked.PrivateRelayFailedUtc is not null ||
+        string.IsNullOrWhiteSpace(locked.PrivateRelayStorageKey) ||
+        locked.PrivateRelayUploadedUtc is null ||
+        locked.ExpiresUtc <= DateTimeOffset.UtcNow)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = "private_relay_not_available", message = "The encrypted relay is no longer available for this upload." });
+    }
+
+    await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    var quota = await entitlements.CheckCapacityAsync(device.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
+    if (!quota.Allowed)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    locked.CompletedUtc = now;
+    var job = new PrintJob
+    {
+        Id = locked.PrintJobId,
+        TenantId = locked.TenantId,
+        BatchId = locked.BatchId,
+        BatchGroupName = locked.BatchGroupName,
+        BatchName = locked.BatchName,
+        QrStationId = locked.QrStationId,
+        PrinterDeviceId = locked.PrinterDeviceId,
+        CustomerSessionId = locked.CustomerSessionId,
+        JobNumber = locked.JobNumber,
+        Status = "AWAITING_CONFIGURATION",
+        IdempotencyKey = $"LOCAL-{locked.Id:N}",
+        PageCount = request.PageCount,
+        Copies = locked.Copies,
+        ColourMode = locked.ColourMode,
+        PaperSize = locked.PaperSize,
+        IsDuplex = locked.IsDuplex,
+        Orientation = locked.Orientation,
+        PrivatePrinting = true,
+        Currency = "INR",
+        QuotedAmountMinor = 0,
+        CreatedUtc = now,
+        UpdatedUtc = now
+    };
+    var document = new PrintDocument
+    {
+        TenantId = locked.TenantId,
+        PrintJobId = job.Id,
+        OriginalFileName = "Private document",
+        MediaType = locked.MediaType,
+        FileExtension = locked.FileExtension,
+        SizeBytes = locked.SizeBytes,
+        Sha256 = locked.Sha256,
+        StorageKey = string.Empty,
+        StorageMode = "LOCAL_AGENT",
+        AgentDeviceId = device.Id,
+        PageSizesJson = request.PageSizesJson,
+        CreatedUtc = now
+    };
+    db.PrintJobs.Add(job);
+    db.PrintDocuments.Add(document);
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = job.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = null,
+        NewStatus = job.Status,
+        ActorType = "Customer",
+        ReasonCode = "PRIVATE_DOCUMENT_VALIDATED_ON_SHOP_AGENT",
+        CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+
+    // Agent has already persisted a DPAPI-protected local copy. Delete the
+    // opaque cloud relay as soon as that handoff and job record are committed.
+    try
+    {
+        await storage.DeleteAsync(locked.PrivateRelayStorageKey);
+        await db.LocalPrintUploadTickets
+            .Where(item => item.Id == locked.Id && item.TenantId == device.TenantId)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.PrivateRelayStorageKey, (string?)null)
+                .SetProperty(item => item.PrivateRelayWrappedKey, (string?)null)
+                .SetProperty(item => item.PrivateRelayIv, (string?)null)
+                .SetProperty(item => item.PrivateRelayUploadedUtc, (DateTimeOffset?)null), ct);
+    }
+    catch (IOException)
+    {
+        // The five-minute private-relay retention worker retries the purge.
+    }
+
+    return Results.Ok(new
+    {
+        AlreadyCompleted = false,
+        UploadResult = new
+        {
+            Job = new
+            {
+                job.Id, job.PrivatePrinting, job.JobNumber, job.Status, job.PageCount,
+                job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
+                job.PricingVersion, job.Currency, job.QuotedAmountMinor, job.CreatedUtc
+            },
+            Document = new
+            {
+                document.Id, OriginalFileName = "Private document", document.MediaType,
+                document.SizeBytes, document.Sha256, document.PageSizesJson,
+                document.StorageMode
+            },
+            DuplicateRequest = false
+        }
+    });
+}).RequireRateLimiting("agent-api");
+
 agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     Guid ticketId,
     AgentPrivateRelayRejectRequest request,
