@@ -115,6 +115,65 @@ public sealed class WindowsLocalDocumentAnalyzerTests
             analyzer.AnalyzeAsync("sample"u8.ToArray(), extension, CancellationToken.None));
     }
 
+    [Fact]
+    public async Task SerializesConcurrentRequestsThroughTheSingleWorkerPipe()
+    {
+        var pipeName = "SmartPrintDocumentWorkerConcurrentTest" + Guid.NewGuid().ToString("N");
+        var firstBytes = "first synthetic PDF"u8.ToArray();
+        var secondBytes = "second synthetic PDF"u8.ToArray();
+        var expected = new DocumentAnalysis(1, "[{\\"widthPoints\\":595,\\"heightPoints\\":842}]", "application/pdf", ".pdf");
+        var receivedRequests = new System.Collections.Concurrent.ConcurrentBag<string>();
+
+        var serverTask = Task.Run(async () =>
+        {
+            for (var requestIndex = 0; requestIndex < 2; requestIndex++)
+            {
+                await using var server = new NamedPipeServerStream(
+                    pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                await server.WaitForConnectionAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+                var header = new byte[sizeof(int)];
+                await server.ReadExactlyAsync(header);
+                var length = BinaryPrimitives.ReadInt32LittleEndian(header);
+                var extensionLength = server.ReadByte();
+                Assert.InRange(extensionLength, 1, 8);
+
+                var extension = new byte[extensionLength];
+                await server.ReadExactlyAsync(extension);
+                var received = new byte[length];
+                await server.ReadExactlyAsync(received);
+                Assert.Equal(".pdf", System.Text.Encoding.ASCII.GetString(extension));
+                receivedRequests.Add(Convert.ToBase64String(received));
+
+                // Model an active parser so the second Agent request has to wait.
+                await Task.Delay(150);
+
+                var response = JsonSerializer.SerializeToUtf8Bytes(new
+                {
+                    ProtocolVersion = 1,
+                    Success = true,
+                    Analysis = expected,
+                    Error = (string?)null
+                });
+                BinaryPrimitives.WriteInt32LittleEndian(header, response.Length);
+                await server.WriteAsync(header);
+                await server.WriteAsync(response);
+                await server.FlushAsync();
+            }
+        });
+
+        var analyzer = CreateAnalyzer(pipeName);
+        var results = await Task.WhenAll(
+            analyzer.AnalyzeAsync(firstBytes, ".pdf", CancellationToken.None),
+            analyzer.AnalyzeAsync(secondBytes, ".pdf", CancellationToken.None)).WaitAsync(TimeSpan.FromSeconds(10));
+        await serverTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(2, results.Length);
+        Assert.All(results, result => Assert.Equal(expected, result));
+        Assert.Contains(Convert.ToBase64String(firstBytes), receivedRequests);
+        Assert.Contains(Convert.ToBase64String(secondBytes), receivedRequests);
+    }
+
     private sealed class TestWorkerServiceStarter : ILocalDocumentWorkerServiceStarter
     {
         public Task EnsureRunningAsync(CancellationToken cancellationToken)
