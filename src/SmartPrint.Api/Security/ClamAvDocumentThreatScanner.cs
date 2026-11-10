@@ -18,6 +18,7 @@ public sealed class ClamAvDocumentThreatScanner : IDocumentThreatScanner
     private readonly string host;
     private readonly int port;
     private readonly TimeSpan timeout;
+    private readonly SemaphoreSlim scanSlots = new(initialCount: 2, maxCount: 2);
 
     public ClamAvDocumentThreatScanner(IConfiguration configuration)
     {
@@ -46,64 +47,78 @@ public sealed class ClamAvDocumentThreatScanner : IDocumentThreatScanner
                 threatDetected: false);
         }
 
-        using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(timeout);
-        var token = timeoutSource.Token;
+        if (!await scanSlots.WaitAsync(TimeSpan.FromSeconds(15), cancellationToken))
+        {
+            throw new DocumentThreatScanException(
+                "The malware scanner is busy. The upload was blocked; retry when the shop/server is ready.",
+                threatDetected: false);
+        }
 
         try
         {
-            using var client = new TcpClient();
-            await client.ConnectAsync(host, port, token);
-            await using var stream = client.GetStream();
-
-            // clamd's z-prefixed INSTREAM command is NUL terminated.
-            await stream.WriteAsync("zINSTREAM\0"u8.ToArray(), token);
-
-            var header = new byte[sizeof(uint)];
-            for (var offset = 0; offset < document.Length; offset += ChunkBytes)
+            using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutSource.CancelAfter(timeout);
+            var token = timeoutSource.Token;
+    
+            try
             {
-                var length = Math.Min(ChunkBytes, document.Length - offset);
-                BinaryPrimitives.WriteUInt32BigEndian(header, checked((uint)length));
+                using var client = new TcpClient();
+                await client.ConnectAsync(host, port, token);
+                await using var stream = client.GetStream();
+    
+                // clamd's z-prefixed INSTREAM command is NUL terminated.
+                await stream.WriteAsync("zINSTREAM\0"u8.ToArray(), token);
+    
+                var header = new byte[sizeof(uint)];
+                for (var offset = 0; offset < document.Length; offset += ChunkBytes)
+                {
+                    var length = Math.Min(ChunkBytes, document.Length - offset);
+                    BinaryPrimitives.WriteUInt32BigEndian(header, checked((uint)length));
+                    await stream.WriteAsync(header, token);
+                    await stream.WriteAsync(document.Slice(offset, length), token);
+                }
+    
+                // A zero-length chunk terminates the stream.
+                BinaryPrimitives.WriteUInt32BigEndian(header, 0);
                 await stream.WriteAsync(header, token);
-                await stream.WriteAsync(document.Slice(offset, length), token);
+                await stream.FlushAsync(token);
+    
+                var response = await ReadResponseAsync(stream, token);
+                if (response.EndsWith(" OK", StringComparison.Ordinal))
+                {
+                    return;
+                }
+    
+                if (response.Contains(" FOUND", StringComparison.Ordinal))
+                {
+                    throw new DocumentThreatScanException(
+                        "The document was rejected by the malware scanner.",
+                        threatDetected: true);
+                }
+    
+                throw new DocumentThreatScanException(
+                    "The malware scanner could not complete the document scan. The upload was blocked.",
+                    threatDetected: false);
             }
-
-            // A zero-length chunk terminates the stream.
-            BinaryPrimitives.WriteUInt32BigEndian(header, 0);
-            await stream.WriteAsync(header, token);
-            await stream.FlushAsync(token);
-
-            var response = await ReadResponseAsync(stream, token);
-            if (response.EndsWith(" OK", StringComparison.Ordinal))
+            catch (DocumentThreatScanException)
             {
-                return;
+                throw;
             }
-
-            if (response.Contains(" FOUND", StringComparison.Ordinal))
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
             {
                 throw new DocumentThreatScanException(
-                    "The document was rejected by the malware scanner.",
-                    threatDetected: true);
+                    "The malware scanner is unavailable or timed out. The upload was blocked; please retry later.",
+                    threatDetected: false,
+                    innerException: exception);
             }
-
-            throw new DocumentThreatScanException(
-                "The malware scanner could not complete the document scan. The upload was blocked.",
-                threatDetected: false);
         }
-        catch (DocumentThreatScanException)
+        finally
         {
-            throw;
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception exception)
-        {
-            throw new DocumentThreatScanException(
-                "The malware scanner is unavailable or timed out. The upload was blocked; please retry later.",
-                threatDetected: false,
-                innerException: exception);
+            scanSlots.Release();
         }
     }
 
