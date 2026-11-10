@@ -877,8 +877,8 @@ public sealed class PostgresMigrationUpgradeTests
 
         var claimResults = await Task.WhenAll(TryClaimAsync(agentId), TryClaimAsync(secondAgent.Id));
         Assert.Equal(1, claimResults.Sum(result => result.Updated));
-        var winner = Assert.Single(claimResults.Where(result => result.Updated == 1));
-        Assert.Single(claimResults.Where(result => result.Updated == 0));
+        var winner = Assert.Single(claimResults, result => result.Updated == 1);
+        Assert.Single(claimResults, result => result.Updated == 0);
 
         await using var verification = new SmartPrintDbContext(options);
         var job = await verification.PrintJobs.AsNoTracking().SingleAsync(item => item.Id == seeded.JobId);
