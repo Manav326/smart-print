@@ -3899,6 +3899,13 @@ function postSmartPrintNativeMessage(message:string):boolean {
   catch {return false;}
 }
 
+function consumeSmartPrintNativePrintKinds():Array<string|null>|undefined {
+  const target=window as Window & {__smartPrintNativePrintKinds?:Array<string|null>};
+  const kinds=target.__smartPrintNativePrintKinds;
+  delete target.__smartPrintNativePrintKinds;
+  return Array.isArray(kinds)?kinds:undefined;
+}
+
 function consumeSmartPrintNativePdfPreviews():Array<string|null>|undefined {
   const target=window as Window & {__smartPrintNativePdfPreviews?:Array<string|null>};
   const previews=target.__smartPrintNativePdfPreviews;
@@ -4663,7 +4670,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     setError("");
   }
-  function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>) {
+  function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>) {
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
       return;
@@ -4672,6 +4679,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       next.forEach((candidate,index)=>{
         const token=nativePreviewTokens[index];
         if(token&&isCustomerPdf(candidate))smartPrintNativePdfPreviewTokens.set(candidate,token);
+      });
+    }
+    if(nativePrintKinds?.length===next.length) {
+      next.forEach((candidate,index)=>{
+        if(nativePrintKinds[index]==="ID_DOCUMENT") {
+          (candidate as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind="ID_DOCUMENT";
+        }
       });
     }
     let nestedSkipped=0;
@@ -4874,13 +4888,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
       onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>Select documents or images</strong>
         <small>Choose PDF documents or JPG/PNG images</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
         <small>{nativeAppMode?"Select multiple folders at once":"Choose one folder; select again to add another to this batch"}</small>
