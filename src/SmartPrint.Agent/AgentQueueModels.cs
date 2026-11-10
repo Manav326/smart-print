@@ -22,7 +22,8 @@ public sealed record AgentClaimedJob(
     string StorageMode = "CLOUD",
     string OutputMode = PrinterOutputModeRules.Physical,
     string Orientation = "AUTO",
-    bool PdfBrandingEnabled = false);
+    bool PdfBrandingEnabled = false,
+    bool PrivatePrinting = false);
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
@@ -72,7 +73,8 @@ public sealed record AgentLocalQueueEntry(
     IReadOnlyList<int>? RejectedPageNumbers = null,
     DateTimeOffset? CompletedUtc = null,
     string Orientation = "AUTO",
-    bool PdfBrandingEnabled = false);
+    bool PdfBrandingEnabled = false,
+    bool PrivatePrinting = false);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
