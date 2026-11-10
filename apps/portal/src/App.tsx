@@ -4135,28 +4135,34 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     localAgent?.endpoints.length ? "LOCAL" : "CLOUD"
   );
   const [uploadModeManuallySelected,setUploadModeManuallySelected]=useState(false);
+  const [privatePrinting,setPrivatePrinting]=useState(false);
+  const canOfferPrivatePrinting=Boolean(localAgent?.endpoints?.length && localAgent.documentEncryptionPublicKey);
 
   const secureQueueFallbackEnabled = cloudAssistedPrintingEnabled || !localAgent?.endpoints.length || localFallbackSuggested;
 
   useEffect(()=>{
+    if(privatePrinting){setUploadMode("LOCAL");return;}
     setUploadMode(current=>resolveCustomerUploadMode(
       current,
       Boolean(localAgent?.endpoints?.length),
       secureQueueFallbackEnabled,
       uploadModeManuallySelected
     ));
-  },[secureQueueFallbackEnabled,localAgent?.endpoints.join("|"),uploadModeManuallySelected]);
+  },[secureQueueFallbackEnabled,localAgent?.endpoints.join("|"),uploadModeManuallySelected,privatePrinting]);
 
   useEffect(()=>{
+    if(privatePrinting){setUploadMode("LOCAL");return;}
     if(uploadModeManuallySelected)return;
     if((localFallbackSuggested||!localReady)&&secureQueueFallbackEnabled) {
       setUploadMode("CLOUD");
     } else if(!localFallbackSuggested&&localReady&&localAgent?.endpoints.length) {
       setUploadMode("LOCAL");
     }
-  },[localFallbackSuggested,localReady,localAgent?.endpoints.length,secureQueueFallbackEnabled,uploadModeManuallySelected]);
+  },[localFallbackSuggested,localReady,localAgent?.endpoints.length,secureQueueFallbackEnabled,uploadModeManuallySelected,privatePrinting]);
 
-  const customerUploadUnavailable = !secureQueueFallbackEnabled && !localAgent?.endpoints.length;
+  const customerUploadUnavailable = privatePrinting
+    ? !canOfferPrivatePrinting
+    : !secureQueueFallbackEnabled && !localAgent?.endpoints.length;
 
   useEffect(()=>{
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
@@ -4309,6 +4315,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return;
     }
     if(files.length===0)return;
+    if(privatePrinting&&(!localAgent||!canOfferPrivatePrinting)) {
+      setError("Private Printing is not ready at this shop yet. No document has been uploaded. Ask the shop operator to reconnect the paired computer.");
+      return;
+    }
+    if(privatePrinting&&uploadMode!=="LOCAL")setUploadMode("LOCAL");
     if(uploadMode==="LOCAL"&&!localReady) {
       setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
       return;
@@ -4331,7 +4342,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const batchGroupName=groupNameForFile(candidate);
         const settings=settingsForFile(candidate);
         const created=uploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings)
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,privatePrinting)
           : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
@@ -4372,12 +4383,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         ["local_print_agent_unavailable","local_print_printer_unavailable"].includes(exception.code??"");
       const batchCheckoutLocked=exception instanceof LocalUploadPreflightError&&
         exception.code==="batch_upload_locked_after_payment_start";
-      const canFallbackToCloud=!batchCheckoutLocked&&canFallbackToCloudFromLocalFailure(
+      const canFallbackToCloud=!privatePrinting&&!batchCheckoutLocked&&canFallbackToCloudFromLocalFailure(
         confirmedPreTicketRejection,
         cloudAssistedPrintingEnabled||agentUnavailable
       );
       if(canFallbackToCloud){setUploadModeManuallySelected(true);setUploadMode("CLOUD");}
-      if(exception instanceof LocalUploadOutcomeUnknownError&&uploadMode==="LOCAL"&&secureQueueFallbackEnabled) {
+      if(exception instanceof LocalUploadOutcomeUnknownError&&uploadMode==="LOCAL"&&!privatePrinting&&secureQueueFallbackEnabled) {
         // Local ticket and grant are preserved. The next retry will resume that
         // same PrintJob over HTTPS rather than creating a second cloud upload.
         setUploadModeManuallySelected(true);
@@ -4853,12 +4864,27 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const photoAlreadyUploaded=Boolean(file&&uploadedFileFingerprints.includes(customerFileFingerprint(file)));
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF documents · JPG/PNG images · Up to 20 files / 50 MB per batch</span></div>
-    <div className="customer-upload-modes">
+    <section className="customer-privacy-choice" aria-label="Document privacy choice">
+      <div className="customer-privacy-choice-heading"><div><span>CHOOSE YOUR PRIVACY</span><strong>How should SmartPrint handle your documents?</strong></div><small>This choice applies to every file in this batch.</small></div>
+      <div className="customer-privacy-choice-grid">
+        <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
+          <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>Your source document is automatically deleted after the shop confirms physical printing. It is encrypted on its way to the shop computer and is never uploaded to cloud document storage.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
+        </button>
+        <button type="button" aria-pressed={!privatePrinting} disabled={busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>setPrivatePrinting(false)}>
+          <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Use the shop's normal document workflow and configured retention period. Existing upload choices remain available.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
+        </button>
+      </div>
+      {!canOfferPrivatePrinting&&<small className="customer-privacy-unavailable">Private Printing becomes available when the shop's paired Windows computer is connected and has enabled its secure document key.</small>}
+      {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on for this batch.</strong> SmartPrint will not fall back to cloud storage. Keep this page connected to the shop Wi-Fi until the upload is confirmed.</span></div>}
+    </section>
+    {privatePrinting
+      ? <div className="customer-private-transfer-note"><Lock size={16}/><span>Encrypted direct transfer to the paired shop computer · No cloud document copy · Physical printing only</span></div>
+      : <div className="customer-upload-modes">
       {localAgent?.endpoints.length
         ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct local HTTP · not encrypted in transit</small></button>
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Temporarily unavailable · the shop computer has not reported a reachable local connection</small></button>}
       {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Upload securely now; the shop can print when its Agent and printer are ready</small></button>}
-    </div>
+    </div>}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload is temporarily unavailable. Please ask the shop to reconnect its print service.</div>}
     <div className="customer-upload-picker-grid"
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
@@ -4974,7 +5000,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         </section>;
       })}</div>
     </div>}
-    {files.length>0&&<label className="customer-batch-name-field">
+    {files.length>0&&!privatePrinting&&<label className="customer-batch-name-field">
   <span>Give this batch a name <small>Optional · the shop will see it in the print queue</small></span>
   <input type="text" value={batchName} maxLength={50}
     placeholder="e.g. Rahul – College Notes"
