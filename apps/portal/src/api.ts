@@ -1625,7 +1625,9 @@ export async function uploadCustomerDocumentLocally(
         "private_relay_validation_failed"
       );
     }
-    return uploadCustomerPrivateRelay(sessionToken, file, ticket, grantToken, new FormData(), {});
+    throw new LocalUploadOutcomeUnknownError(
+      "This private print request is already being checked by the shop computer. Retry to refresh its status; SmartPrint will not create another upload."
+    );
   }
 
   if (ticket.completed) {
@@ -1648,6 +1650,7 @@ export async function uploadCustomerDocumentLocally(
       throw new LocalUploadOutcomeUnknownError(
         "SmartPrint has your original upload recorded. The shop connection could not refresh its status just now; retry this same file to restore the existing print request. No new print job has been created."
       );
+    }
   }
 
   const form = new FormData();
@@ -1691,7 +1694,7 @@ export async function uploadCustomerDocumentLocally(
   } else if (!ticket.completed) {
     form.append("file", file, file.name);
   }
-  if (ticket.agentDeviceId === localAgent.agentDeviceId && (!privatePrinting || localNetworkReady || localAgent.endpoints.length > 0)) {
+  if (ticket.agentDeviceId === localAgent.agentDeviceId && (!privatePrinting || localNetworkReady)) {
     for (const value of localAgent.endpoints.slice(0, privatePrinting ? 3 : 8)) {
     const endpoint = isPrivateLocalAgentEndpoint(value);
     if (!endpoint) continue;
