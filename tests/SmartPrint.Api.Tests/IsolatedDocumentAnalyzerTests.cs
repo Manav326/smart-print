@@ -15,14 +15,22 @@ public sealed class IsolatedDocumentAnalyzerTests
         var tokenPath = CreateTokenFile(out var directory);
         try
         {
-            HttpRequestMessage? observed = null;
-            using var client = new HttpClient(new StubHandler((request, _) =>
+            HttpMethod? observedMethod = null;
+            string? observedUri = null;
+            string? observedToken = null;
+            string? observedExtension = null;
+            byte[]? observedBody = null;
+            using var client = new HttpClient(new StubHandler(async (request, _) =>
             {
-                observed = request;
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                observedMethod = request.Method;
+                observedUri = request.RequestUri!.ToString();
+                observedToken = request.Headers.GetValues("X-SmartPrint-Worker-Token").Single();
+                observedExtension = request.Headers.GetValues("X-Document-Extension").Single();
+                observedBody = await request.Content!.ReadAsByteArrayAsync();
+                return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = JsonContent.Create(new DocumentAnalysis(1, "[]", "image/png", ".png"))
-                });
+                };
             }));
             var analyzer = new IsolatedDocumentAnalyzer(client, Configuration(tokenPath));
             var bytes = "sample document"u8.ToArray();
@@ -30,12 +38,11 @@ public sealed class IsolatedDocumentAnalyzerTests
             var result = await analyzer.AnalyzeAsync(bytes, ".png", CancellationToken.None);
 
             Assert.Equal(1, result.PageCount);
-            Assert.NotNull(observed);
-            Assert.Equal(HttpMethod.Post, observed.Method);
-            Assert.Equal("http://document-worker:8090/analyze", observed.RequestUri!.ToString());
-            Assert.Equal("unit-test-worker-token", observed.Headers.GetValues("X-SmartPrint-Worker-Token").Single());
-            Assert.Equal(".png", observed.Headers.GetValues("X-Document-Extension").Single());
-            Assert.Equal(bytes, await observed.Content!.ReadAsByteArrayAsync());
+            Assert.Equal(HttpMethod.Post, observedMethod);
+            Assert.Equal("http://document-worker:8090/analyze", observedUri);
+            Assert.Equal(new string('a', 64), observedToken);
+            Assert.Equal(".png", observedExtension);
+            Assert.Equal(bytes, observedBody);
         }
         finally { Directory.Delete(directory, recursive: true); }
     }
@@ -107,7 +114,7 @@ public sealed class IsolatedDocumentAnalyzerTests
         directory = Path.Combine(Path.GetTempPath(), "smartprint-worker-token-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "token");
-        File.WriteAllText(path, "unit-test-worker-token");
+        File.WriteAllText(path, new string('a', 64));
         return path;
     }
 
