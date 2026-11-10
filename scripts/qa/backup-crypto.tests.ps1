@@ -7,6 +7,24 @@ Set-StrictMode -Version Latest
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 Import-Module (Join-Path $repoRoot "scripts/SmartPrint.BackupCrypto.psm1") -Force
 
+
+# Fail early if any executable backup/restore script has a PowerShell parse error.
+$syntaxFiles = @(
+    (Join-Path $repoRoot "scripts/SmartPrint.BackupCrypto.psm1"),
+    (Join-Path $repoRoot "scripts/docker-backup.ps1"),
+    (Join-Path $repoRoot "scripts/docker-restore.ps1"),
+    (Join-Path $repoRoot "scripts/docker-restore-drill.ps1")
+)
+foreach ($syntaxFile in $syntaxFiles) {
+    $tokens = $null
+    $parseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile($syntaxFile, [ref]$tokens, [ref]$parseErrors) | Out-Null
+    if ($parseErrors.Count -gt 0) {
+        $details = ($parseErrors | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Message)" }) -join [Environment]::NewLine
+        throw ("PowerShell syntax validation failed for " + $syntaxFile + [Environment]::NewLine + $details)
+    }
+}
+
 $root = Join-Path ([IO.Path]::GetTempPath()) ("smartprint-backup-crypto-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $root -Force | Out-Null
 
@@ -65,7 +83,9 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $tamperedOutput)) "tampered ciphertext must not leave a partial plaintext output"
 
     $truncated = Join-Path $root "truncated.spbackup"
-    [IO.File]::WriteAllBytes($truncated, [IO.File]::ReadAllBytes($encrypted)[0..([IO.File]::ReadAllBytes($encrypted).Length - 20)])
+    $encryptedBytes = [IO.File]::ReadAllBytes($encrypted)
+    $truncatedBytes = $encryptedBytes[0..($encryptedBytes.Length - 21)]
+    [IO.File]::WriteAllBytes($truncated, $truncatedBytes)
     Assert-Throws { Unprotect-SmartPrintBackup -InputPath $truncated -OutputPath (Join-Path $root "truncated.bundle") -Passphrase $passphrase } "truncated backup must fail footer authentication"
 
     Write-Host "PASS: backup crypto round-trip, multi-chunk framing, wrong passphrase, ciphertext tampering, truncated footer and no partial plaintext output."
