@@ -101,6 +101,7 @@ builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddHttpClient<SubscriptionRazorpayService>();
 builder.Services.AddSingleton<IDocumentThreatScanner, ClamAvDocumentThreatScanner>();
+builder.Services.AddHttpClient<IDocumentAnalyzer, IsolatedDocumentAnalyzer>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddRateLimiter(options =>
@@ -3614,6 +3615,12 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     {
         await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
+    }
+    catch (DocumentProcessingException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Document security processing is temporarily unavailable. The upload was not accepted.");
     }
 
     if (stored.Analysis.PageCount != expectedPageCount)
@@ -7282,6 +7289,11 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
     }
+    catch (DocumentProcessingException)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Document security processing is temporarily unavailable. The upload was not accepted.");
+    }
 
     var job = new PrintJob
     {
@@ -8128,6 +8140,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     catch (DocumentValidationException exception)
     {
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
+    }
+    catch (DocumentProcessingException)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Document security processing is temporarily unavailable. The upload was not accepted.");
     }
 
     if (!LocalUploadRecoveryRules.MatchesOriginalDocument(
