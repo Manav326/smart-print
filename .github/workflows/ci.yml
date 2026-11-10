@@ -29,6 +29,41 @@ jobs:
         shell: pwsh
         run: ./scripts/qa/backup-restore-drill.tests.ps1
 
+  clamav_integration:
+    name: Real ClamAV EICAR and clean-file integration
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Start official ClamAV engine with current signatures
+        shell: bash
+        run: |
+          docker run --detach --name smartprint-clamav-test \
+            --publish 127.0.0.1:13310:3310 \
+            clamav/clamav:1.5.4-debian13-slim
+          ready=0
+          for attempt in $(seq 1 180); do
+            if docker exec smartprint-clamav-test clamdscan --ping=1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs smartprint-clamav-test
+            exit 1
+          fi
+      - name: Run real ClamAV INSTREAM clean and EICAR rejection tests
+        env:
+          SMARTPRINT_TEST_CLAMAV: "1"
+          SMARTPRINT_CLAMAV_HOST: 127.0.0.1
+          SMARTPRINT_CLAMAV_PORT: "13310"
+        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release --filter FullyQualifiedName~RealClamAvEngineDetectsEicarAndAcceptsAnUninfectedSample
+      - name: Remove ClamAV test container
+        if: always()
+        run: docker rm -f smartprint-clamav-test
   portal:
     runs-on: ubuntu-24.04
     steps:
