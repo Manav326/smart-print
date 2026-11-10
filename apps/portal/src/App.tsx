@@ -4124,7 +4124,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         paperSize:candidate.paperSize as CustomerPrintRequestSettings["paperSize"],
         isDuplex:candidate.isDuplex,
         orientation:(candidate.orientation??"AUTO") as CustomerPrintRequestSettings["orientation"],
-        printKind:(candidate.printKind??"DOCUMENT") as "DOCUMENT"|"PHOTO",
+        printKind:(candidate.printKind??"DOCUMENT") as "DOCUMENT"|"PHOTO"|"ID_DOCUMENT",
         photoSizeCode:candidate.photoSizeCode??null,
         photoCount:candidate.photoCount,
         photoUnitPriceMinor:candidate.photoUnitPriceMinorSnapshot,
@@ -4468,14 +4468,17 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           advancedEnabled:requestedSettings?.advancedEnabled??false
         };
         const photoSettings=photoSettingsOverride?.[item.job.id]??photoSettingsByJobId[item.job.id];
+        const idDocument=(printKindsByJobId[item.job.id]??item.job.printKind)==="ID_DOCUMENT";
         try {
           nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
-            colourMode:photoSettings?"Colour":settings.colourMode,
-            paperSize:photoSettings?"A4":settings.paperSize,
-            isDuplex:photoSettings?false:settings.isDuplex,
-            copies:photoSettings?1:settings.copies,
-            orientation:photoSettings?"AUTO":settings.orientation,
-            ...(photoSettings?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount}:{printKind:"DOCUMENT" as const})
+            colourMode:photoSettings||idDocument?"Colour":settings.colourMode,
+            paperSize:photoSettings||idDocument?"A4":settings.paperSize,
+            isDuplex:photoSettings||idDocument?false:settings.isDuplex,
+            copies:photoSettings?1:idDocument?1:settings.copies,
+            orientation:photoSettings?"AUTO":idDocument?"PORTRAIT":settings.orientation,
+            ...(photoSettings
+              ?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount}
+              :idDocument?{printKind:"ID_DOCUMENT" as const}:{printKind:"DOCUMENT" as const})
           });
         } catch(exception) {
           failures.push(item.document.originalFileName);
