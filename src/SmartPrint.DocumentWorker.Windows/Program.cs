@@ -278,7 +278,6 @@ internal sealed class WindowsDocumentWorkerService(
             // The parse child runs below normal priority, with its own job-object
             // hard cap. Printer spooler and the primary Agent retain CPU headroom.
             process.PriorityClass = ProcessPriorityClass.BelowNormal;
-        {
             var header = new byte[sizeof(int)];
             BinaryPrimitives.WriteInt32LittleEndian(header, document.Length);
             await process.StandardInput.BaseStream.WriteAsync(header, cancellationToken);
