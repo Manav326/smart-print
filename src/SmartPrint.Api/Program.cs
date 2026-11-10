@@ -2262,6 +2262,14 @@ shop.MapPost("/photo-jobs", async (
         return Results.BadRequest(new { code = "photo_order_form_required", message = "Select a photo, prepare its A4 sheet and save the photo order." });
 
     var form = await context.Request.ReadFormAsync(ct);
+    if (bool.TryParse(form["privatePrinting"].FirstOrDefault(), out var privatePrintingRequested) && privatePrintingRequested)
+    {
+        return Results.Conflict(new
+        {
+            code = "private_printing_requires_local_agent",
+            message = "Private Printing must be transferred directly to the paired shop computer. Cloud document storage and cloud recovery are disabled for this request."
+        });
+    }
     if (form.Files.Count != 1)
         return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Save exactly one prepared multi-page A4 photo PDF." });
 
@@ -4821,6 +4829,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.Sha256,
             candidate.StorageMode,
             candidate.OutputMode,
+            candidate.PrivatePrinting,
             LeaseExpiresUtc = leaseExpiresUtc
         });
     }
@@ -5321,6 +5330,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         PaperSize = ticket.PaperSize,
         IsDuplex = ticket.IsDuplex,
         Orientation = ticket.Orientation,
+        PrivatePrinting = ticket.PrivatePrinting,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -6199,6 +6209,26 @@ agentApi.MapPost("/heartbeat", async (
     var now = DateTimeOffset.UtcNow;
     var localEndpoints = AgentLocalEndpointRules.Normalize(request.LocalEndpoints);
     device.LocalEndpointsJson = JsonSerializer.Serialize(localEndpoints);
+    if (!string.IsNullOrWhiteSpace(request.DocumentEncryptionPublicKey))
+    {
+        try
+        {
+            var publicKeyBytes = Convert.FromBase64String(request.DocumentEncryptionPublicKey);
+            try
+            {
+                using var rsa = RSA.Create();
+                rsa.ImportSubjectPublicKeyInfo(publicKeyBytes, out _);
+                if (rsa.KeySize < 2048 || rsa.KeySize > 4096)
+                    return Results.BadRequest(new { code = "agent_document_key_invalid", message = "The Agent document-encryption key must be RSA-2048 through RSA-4096." });
+                device.DocumentEncryptionPublicKey = request.DocumentEncryptionPublicKey;
+            }
+            finally { CryptographicOperations.ZeroMemory(publicKeyBytes); }
+        }
+        catch (Exception exception) when (exception is FormatException or CryptographicException)
+        {
+            return Results.BadRequest(new { code = "agent_document_key_invalid", message = "The Agent document-encryption public key is invalid." });
+        }
+    }
     device.Status = "Online";
     device.LastSeenUtc = now;
     await db.SaveChangesAsync(ct);
@@ -7563,6 +7593,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     }
     originalName = originalName[..Math.Min(originalName.Length, 255)];
     var extension = Path.GetExtension(originalName).ToLowerInvariant();
+    if (request.PrivatePrinting) originalName = "private-document" + extension;
     var mediaType = extension switch
     {
         ".pdf" => "application/pdf",
@@ -7605,6 +7636,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.SizeBytes != request.SizeBytes ||
             !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
             existing.OriginalFileName != originalName ||
+            existing.PrivatePrinting != request.PrivatePrinting ||
             (request.BatchId is Guid requestedBatchId && existing.BatchId != requestedBatchId) ||
             (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
             PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName ||
@@ -7728,6 +7760,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         {
             existing.Id,
             existing.PrintJobId,
+            existing.PrivatePrinting,
             existing.BatchId,
             existing.BatchGroupName,
             existing.BatchName,
@@ -7780,7 +7813,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             printer.Status,
             printer.LastSeenUtc,
             printer.OutputMode,
-            agent.LocalEndpointsJson
+            agent.LocalEndpointsJson,
+            agent.DocumentEncryptionPublicKey
         }
     ).SingleOrDefaultAsync(ct);
 
@@ -7790,7 +7824,17 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         return Results.Conflict(new
         {
             code = "local_print_agent_unavailable",
-            message = "The shop computer is temporarily unavailable. SmartPrint can keep this request securely online; the shop can release it when an Agent is ready."
+            message = request.PrivatePrinting
+                ? "Private Printing is unavailable because the paired shop computer is offline. No cloud copy has been created."
+                : "The shop computer is temporarily unavailable. SmartPrint can keep this request securely online; the shop can release it when an Agent is ready."
+        });
+    }
+    if (request.PrivatePrinting && string.IsNullOrWhiteSpace(stationPrinter.DocumentEncryptionPublicKey))
+    {
+        return Results.Conflict(new
+        {
+            code = "private_printing_unavailable",
+            message = "This shop computer has not published its secure document-encryption key yet. Ask the operator to reconnect SmartPrint and try again."
         });
     }
 
@@ -7827,6 +7871,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         IsDuplex = request.IsDuplex,
         Copies = request.Copies,
         Orientation = request.Orientation,
+        PrivatePrinting = request.PrivatePrinting,
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
@@ -7882,6 +7927,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             racedTicket.SizeBytes == request.SizeBytes &&
             string.Equals(racedTicket.Sha256, sha, StringComparison.OrdinalIgnoreCase) &&
             racedTicket.OriginalFileName == originalName &&
+            racedTicket.PrivatePrinting == request.PrivatePrinting &&
             PrintBatchGroupRules.Normalize(racedTicket.BatchGroupName) == batchGroupName &&
             racedTicket.ColourMode == request.ColourMode &&
             racedTicket.PaperSize == request.PaperSize &&
@@ -7897,6 +7943,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         {
             racedTicket.Id,
             racedTicket.PrintJobId,
+            racedTicket.PrivatePrinting,
             racedTicket.BatchId,
             racedTicket.BatchGroupName,
             racedTicket.BatchName,
@@ -8008,6 +8055,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     {
         ticket.Id,
         ticket.PrintJobId,
+        ticket.PrivatePrinting,
         ticket.BatchId,
         ticket.BatchGroupName,
         ticket.BatchName,
@@ -9961,12 +10009,17 @@ static async Task<object?> GetLocalAgentInfoAsync(
               printer.IsActive && printer.AgentDeviceId != null &&
               device.RevokedUtc == null && device.LastSeenUtc != null &&
               device.LastSeenUtc >= now.AddMinutes(-2)
-        select new { device.Id, device.LocalEndpointsJson }
+        select new { device.Id, device.LocalEndpointsJson, device.DocumentEncryptionPublicKey }
     ).SingleOrDefaultAsync(ct);
 
     if (agent is null) return null;
     var endpoints = ReadLocalAgentEndpoints(agent.LocalEndpointsJson);
-    return endpoints.Length == 0 ? null : new { AgentDeviceId = agent.Id, Endpoints = endpoints };
+    return endpoints.Length == 0 ? null : new
+    {
+        AgentDeviceId = agent.Id,
+        Endpoints = endpoints,
+        DocumentEncryptionPublicKey = agent.DocumentEncryptionPublicKey
+    };
 }
 
 static bool TryGetTenantId(ClaimsPrincipal principal, out Guid tenantId) =>
