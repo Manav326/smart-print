@@ -96,6 +96,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private lateinit var store: LocalDocumentStore
+    private lateinit var idStudioStore: IdStudioStore
     private lateinit var customerAccountStore: CustomerAccountStore
     private lateinit var customerPrintSessionStore: CustomerPrintSessionStore
     private lateinit var toolbar: MaterialToolbar
@@ -108,6 +109,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var accountAction: ImageView
     private var documentViewer: SmartPrintDocumentViewer? = null
     private var viewingDocument: File? = null
+    private var documentViewerReturnToIdStudio = false
+    private var privateIdViewerOpen = false
+    private var idStudioScreenOpen = false
+    private var idStudioDraftId: String? = null
+    private var pendingIdStudioSide: String? = null
+    private var idStudioFrontRotation = 0
+    private var idStudioBackRotation = 0
     private var customerUploadPdfPreviewOpen = false
     private val customerUploadPdfPreviews = java.util.concurrent.ConcurrentHashMap<String, File>()
     private var webView: WebView? = null
@@ -182,6 +190,12 @@ class MainActivity : AppCompatActivity() {
             isAppearanceLightNavigationBars = lightSystemBars
         }
         store = LocalDocumentStore(filesDir)
+        idStudioStore = IdStudioStore(filesDir)
+        idStudioDraftId = savedInstanceState?.getString("idStudioDraftId")
+        pendingIdStudioSide = savedInstanceState?.getString("pendingIdStudioSide")
+        idStudioFrontRotation = savedInstanceState?.getInt("idStudioFrontRotation", 0) ?: 0
+        idStudioBackRotation = savedInstanceState?.getInt("idStudioBackRotation", 0) ?: 0
+        idStudioScreenOpen = savedInstanceState?.getBoolean("idStudioScreenOpen") ?: false
         customerAccountStore = CustomerAccountStore(this)
         customerPrintSessionStore = CustomerPrintSessionStore(this)
         pendingScanNeedsDestination = savedInstanceState?.getBoolean("pendingScanNeedsDestination") ?: false
@@ -219,16 +233,23 @@ class MainActivity : AppCompatActivity() {
         val restoredDocumentPath = savedInstanceState?.getString("viewingDocumentPath")
         if (!restoredDocumentPath.isNullOrBlank()) {
             val restoredDocument = runCatching {
-                File(restoredDocumentPath).canonicalFile.also { store.pathOf(it) }
+                File(restoredDocumentPath).canonicalFile.also { file ->
+                    if (!runCatching { store.pathOf(file) }.isSuccess &&
+                        !idStudioStore.isPreparedDocument(file)) error("Document is outside private storage.")
+                }
             }.getOrNull()?.takeIf { it.isFile }
             if (restoredDocument != null) {
-                folderPath = restoredDocument.parentFile?.let { store.pathOf(it) }.orEmpty()
-                showFiles()
+                folderPath = restoredDocument.parentFile?.let { folder ->
+                    runCatching { store.pathOf(folder) }.getOrDefault("")
+                }.orEmpty()
+                if (idStudioStore.isPreparedDocument(restoredDocument)) showIdStudioHome() else showFiles()
                 showDocumentViewer(
                     restoredDocument,
                     savedInstanceState?.getInt("viewerPosition", 0) ?: 0
                 )
             }
+        } else if (savedInstanceState?.getBoolean("idStudioScreenOpen") == true) {
+            showIdStudioHome()
         } else if (savedInstanceState?.getBoolean("profileVisible") == true) {
             profileReturnDestination = savedInstanceState.getInt(
                 "profileReturnDestination",
@@ -253,6 +274,11 @@ class MainActivity : AppCompatActivity() {
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
         outState.putBoolean("photoStudioOpen", photoStudioOpen)
+        outState.putString("idStudioDraftId", idStudioDraftId)
+        outState.putString("pendingIdStudioSide", pendingIdStudioSide)
+        outState.putInt("idStudioFrontRotation", idStudioFrontRotation)
+        outState.putInt("idStudioBackRotation", idStudioBackRotation)
+        outState.putBoolean("idStudioScreenOpen", idStudioScreenOpen)
         webView?.let { view ->
             val webState = Bundle()
             view.saveState(webState)
@@ -275,6 +301,7 @@ class MainActivity : AppCompatActivity() {
                     null
                 )
             }
+            idStudioScreenOpen -> showHome()
             profileVisible -> returnFromProfile()
             pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
             pickerMode -> cancelPicker()
@@ -323,16 +350,35 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
                         ?: error("The scan could not be read.")
-                    if (pendingScanNeedsDestination) showScanDestinationPicker(scan)
+                    val idSide = pendingIdStudioSide
+                    if (idSide != null) {
+                        pendingIdStudioSide = null
+                        saveIdStudioScan(scan, idSide)
+                    } else if (pendingScanNeedsDestination) showScanDestinationPicker(scan)
                     else saveDocumentScan(scan, pendingScanDestinationPath)
                 } catch (e: Exception) {
-                    pendingScanNeedsDestination = false
-                    pendingScanDestinationPath = ""
-                    toast("Could not save the scan: ${message(e)}")
+                    if (pendingIdStudioSide != null || idStudioDraftId != null) {
+                        pendingIdStudioSide = null
+                        toast("ID scan could not be saved: " + message(e))
+                        if (idStudioDraftId?.let(idStudioStore::hasFront) == true) showIdStudioBackStep()
+                        else showIdStudioHome()
+                    } else {
+                        pendingScanNeedsDestination = false
+                        pendingScanDestinationPath = ""
+                        toast("Could not save the scan: " + message(e))
+                    }
                 }
             } else {
-                pendingScanNeedsDestination = false
-                pendingScanDestinationPath = ""
+                val idSide = pendingIdStudioSide
+                pendingIdStudioSide = null
+                if (idSide != null) {
+                    toast("Scan cancelled. Your existing private ID scans are unchanged.")
+                    if (idStudioDraftId?.let(idStudioStore::hasFront) == true) showIdStudioBackStep()
+                    else showIdStudioHome()
+                } else {
+                    pendingScanNeedsDestination = false
+                    pendingScanDestinationPath = ""
+                }
             }
         }
         importFiles = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -958,6 +1004,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHome() {
+        idStudioScreenOpen = false
+        privateIdViewerOpen = false
+        documentViewerReturnToIdStudio = false
+        applySensitiveWindowProtection()
         clearLibrarySelection()
         pickerMode = false
         resetToolbar("Home")
@@ -1001,6 +1051,13 @@ class MainActivity : AppCompatActivity() {
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             setOnClickListener { startDocumentScan() }
         }, LinearLayout.LayoutParams(-1, dp(48)))
+        quickActions.addView(button("Prepare ID card", false).apply {
+            icon = getDrawable(R.drawable.ic_file)
+            iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            iconPadding = dp(8)
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            setOnClickListener { showIdStudioHome() }
+        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
         quickActions.addView(button("Choose from phone", false).apply {
             icon = getDrawable(R.drawable.ic_file)
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
@@ -1460,6 +1517,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showFiles() {
+        idStudioScreenOpen = false
+        privateIdViewerOpen = false
+        applySensitiveWindowProtection()
         pickerMode = false
         editingPdf = null
         resetToolbar("Files")
@@ -1484,6 +1544,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPrint() {
+        idStudioScreenOpen = false
+        privateIdViewerOpen = false
+        applySensitiveWindowProtection()
         clearLibrarySelection()
         pickerMode = false
         profileVisible = false
@@ -1623,6 +1686,7 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(-2, dp(40)).apply { marginStart = dp(8) })
             column.addView(sourceRow, linearParams().apply { bottomMargin = dp(4) })
         }
+        if (isPicker && !fileChooserSelectFolders) addIdStudioPickerSection(column)
         if (!isPicker) {
             val folderActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -3192,6 +3256,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun printBatchGroupName(file: File): String {
+        if (idStudioStore.isPreparedDocument(file)) return "ID Studio"
         val parentPath = file.parentFile?.let { runCatching { store.pathOf(it) }.getOrDefault("") }.orEmpty()
         return parentPath.replace("/", " - ").take(80).ifBlank { "Loose files" }
     }
@@ -3467,13 +3532,16 @@ class MainActivity : AppCompatActivity() {
         documentViewer?.dispose()
         customerUploadPdfPreviewOpen = false
         viewingDocument = file
+        documentViewerReturnToIdStudio = idStudioStore.isPreparedDocument(file)
+        privateIdViewerOpen = documentViewerReturnToIdStudio
+        applySensitiveWindowProtection()
         pickerMode = false
         profileVisible = false
         clearLibrarySelection()
         setToolbarPage(file.name)
         setToolbarBackAction("Back to My Files", ::closeDocumentViewer)
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
-        toolbar.menu.findItem(OPEN_WITH)?.isVisible = true
+        toolbar.menu.findItem(OPEN_WITH)?.isVisible = !privateIdViewerOpen
         accountAction.visibility = View.GONE
         setBottomNavigationVisible(false)
         content.removeAllViews()
@@ -3541,7 +3609,12 @@ class MainActivity : AppCompatActivity() {
         documentViewer = null
         viewingDocument = null
         customerUploadPdfPreviewOpen = false
-        showFiles()
+        privateIdViewerOpen = false
+        applySensitiveWindowProtection()
+        if (documentViewerReturnToIdStudio) {
+            documentViewerReturnToIdStudio = false
+            showIdStudioHome()
+        } else showFiles()
     }
 
     private fun openDocument(file: File) {
@@ -3550,6 +3623,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openDocumentExternally(file: File) {
+        if (idStudioStore.isPreparedDocument(file)) {
+            toast("Prepared ID documents can only be viewed and printed inside SmartPrint.")
+            return
+        }
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.documents", file)
             val intent = Intent(Intent.ACTION_VIEW).apply {
@@ -3561,6 +3638,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun shareDocument(file: File) {
+        if (idStudioStore.isPreparedDocument(file)) {
+            toast("Prepared ID documents cannot be shared outside SmartPrint.")
+            return
+        }
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.documents", file)
             val intent = Intent(Intent.ACTION_SEND).apply {
