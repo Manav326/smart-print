@@ -114,6 +114,10 @@ public sealed class AgentLocalQueueStore
     public IReadOnlyList<AgentLocalQueueEntry> GetSpoolerTrackingJobs() =>
         ReadEntries().Where(x => x.State == "SPOOLER_ACCEPTED" && x.SpoolerJobId is > 0).ToArray();
 
+    public IReadOnlyList<AgentLocalQueueEntry> GetPrivatePurgePendingJobs() =>
+        ReadEntries().Where(entry => entry.PrivatePrinting &&
+            (entry.State == "PRIVATE_PURGE_PENDING" || entry.PrivatePurgePending)).ToArray();
+
     public IReadOnlyList<AgentLocalQueueEntry> GetStagedLocalUploads() =>
         ReadEntries().Where(entry => entry.State == "LOCAL_UPLOAD_STAGED").ToArray();
 
@@ -253,7 +257,8 @@ public sealed class AgentLocalQueueStore
             job.LeaseExpiresUtc,
             OutputMode: job.OutputMode,
             Orientation: job.Orientation,
-            PdfBrandingEnabled: job.PdfBrandingEnabled);
+            PdfBrandingEnabled: job.PdfBrandingEnabled,
+            PrivatePrinting: job.PrivatePrinting);
 
         try
         {
@@ -480,7 +485,8 @@ public sealed class AgentLocalQueueStore
             QuotedAmountMinor = job.QuotedAmountMinor,
             LeaseExpiresUtc = job.LeaseExpiresUtc,
             OutputMode = job.OutputMode,
-            PdfBrandingEnabled = job.PdfBrandingEnabled
+            PdfBrandingEnabled = job.PdfBrandingEnabled,
+            PrivatePrinting = job.PrivatePrinting
         }, cancellationToken);
     }
 
@@ -674,10 +680,77 @@ public sealed class AgentLocalQueueStore
             throw new InvalidOperationException($"Cannot confirm local output from state {entry.State}.");
         await SaveManifestAsync(entry with
         {
-            State = "OUTPUT_CONFIRMED",
+            State = entry.PrivatePrinting ? "PRIVATE_PURGE_PENDING" : "OUTPUT_CONFIRMED",
             SpoolerStatus = "SHOP_CONFIRMED_OUTPUT",
             CompletedUtc = DateTimeOffset.UtcNow
         }, ct);
+        if (entry.PrivatePrinting)
+            await PurgePrivateSourceAfterConfirmedOutputAsync(jobId, ct);
+    }
+
+    public async Task PurgePrivateSourceAfterConfirmedOutputAsync(Guid jobId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        await stagedUploadLeaseGate.WaitAsync(ct);
+        try
+        {
+            var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
+            if (!entry.PrivatePrinting || entry.State is not ("PRIVATE_PURGE_PENDING" or "OUTPUT_CONFIRMED") || entry.CompletedUtc is null)
+                throw new InvalidOperationException("A private source can be purged only after confirmed physical output.");
+
+            var queueRootFull = Path.GetFullPath(queueRoot);
+            var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!string.IsNullOrWhiteSpace(entry.DocumentPath))
+            {
+                var documentPath = Path.GetFullPath(entry.DocumentPath);
+                if (!documentPath.StartsWith(queuePrefix, comparison))
+                    throw new InvalidDataException("The private document path is outside the protected queue.");
+                if (File.Exists(documentPath))
+                {
+                    await using (var stream = new FileStream(documentPath, FileMode.Open, FileAccess.Write, FileShare.None,
+                        64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
+                    {
+                        var zeroes = new byte[64 * 1024];
+                        long remaining = stream.Length;
+                        stream.Position = 0;
+                        while (remaining > 0)
+                        {
+                            var count = (int)Math.Min(zeroes.Length, remaining);
+                            await stream.WriteAsync(zeroes.AsMemory(0, count), ct);
+                            remaining -= count;
+                        }
+                        stream.Flush(flushToDisk: true);
+                        CryptographicOperations.ZeroMemory(zeroes);
+                    }
+                    File.Delete(documentPath);
+                }
+            }
+
+            await SaveManifestAsync(entry with
+            {
+                State = "OUTPUT_CONFIRMED",
+                DocumentPath = string.Empty,
+                DocumentName = "Private document",
+                MediaType = string.Empty,
+                Sha256 = string.Empty,
+                SizeBytes = 0,
+                PrivatePurgePending = true
+            }, ct);
+        }
+        finally
+        {
+            stagedUploadLeaseGate.Release();
+        }
+    }
+
+    public async Task MarkPrivatePurgeAcknowledgedAsync(Guid jobId, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
+        if (!entry.PrivatePrinting || entry.State != "OUTPUT_CONFIRMED" || !entry.PrivatePurgePending ||
+            !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256))
+            throw new InvalidOperationException("The private source purge has not completed locally.");
+        await SaveManifestAsync(entry with { PrivatePurgePending = false }, ct);
     }
 
     public async Task UpdateSpoolerStatusAsync(Guid jobId, string status, CancellationToken ct)
