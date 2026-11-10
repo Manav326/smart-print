@@ -41,7 +41,9 @@ static async Task AnalyzeChildRequestAsync()
             return;
         }
 
-        var extensionLength = input.ReadByte();
+        var extensionLengthBuffer = new byte[1];
+        await input.ReadExactlyAsync(extensionLengthBuffer);
+        var extensionLength = extensionLengthBuffer[0];
         if (extensionLength is < 1 or > 8)
         {
             await WriteChildResponseAsync(false, null, "The document extension is invalid.");
@@ -203,7 +205,9 @@ internal sealed class WindowsDocumentWorkerService(
             return;
         }
 
-        var extensionLength = pipe.ReadByte();
+        var extensionLengthBuffer = new byte[1];
+        await pipe.ReadExactlyAsync(extensionLengthBuffer, token);
+        var extensionLength = extensionLengthBuffer[0];
         if (extensionLength is < 1 or > 8)
         {
             await WriteResponseAsync(pipe, new WorkerResponse(1, false, null, "The document extension is invalid."));
