@@ -164,7 +164,6 @@ internal sealed class WindowsDocumentWorkerService(
                             Success: false,
                             Analysis: null,
                             Error: "The isolated document processor could not complete this request."));
-                        pipe.WaitForPipeDrain();
                     }
                     catch (IOException) { }
                 }
