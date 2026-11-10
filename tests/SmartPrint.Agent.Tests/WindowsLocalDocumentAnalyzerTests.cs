@@ -37,6 +37,7 @@ public sealed class WindowsLocalDocumentAnalyzerTests
 
             var response = JsonSerializer.SerializeToUtf8Bytes(new
             {
+                ProtocolVersion = 1,
                 Success = true,
                 Analysis = expected,
                 Error = (string?)null
@@ -73,6 +74,7 @@ public sealed class WindowsLocalDocumentAnalyzerTests
 
             var response = JsonSerializer.SerializeToUtf8Bytes(new
             {
+                ProtocolVersion = 1,
                 Success = false,
                 Analysis = (DocumentAnalysis?)null,
                 Error = "The PDF is damaged."
