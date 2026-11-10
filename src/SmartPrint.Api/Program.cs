@@ -2458,6 +2458,7 @@ shop.MapPost("/photo-jobs", async (
                 Job = new
                 {
                     existingJob.Id,
+                    existingJob.PrivatePrinting,
                     existingJob.JobNumber,
                     existingJob.Status,
                     existingJob.Origin,
@@ -2482,7 +2483,8 @@ shop.MapPost("/photo-jobs", async (
                     existingDocument.MediaType,
                     existingDocument.SizeBytes,
                     existingDocument.Sha256,
-                    existingDocument.PageSizesJson
+                    existingDocument.PageSizesJson,
+                    existingDocument.StorageMode
                 },
                 Payment = existingPayment,
                 DuplicateRequest = true
@@ -5043,6 +5045,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                 Job = new
                 {
                     completedJob.Id,
+                    completedJob.PrivatePrinting,
                     completedJob.JobNumber,
                     completedJob.Status,
                     completedJob.PageCount,
@@ -5197,7 +5200,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                     completedDocument.MediaType,
                     completedDocument.SizeBytes,
                     completedDocument.Sha256,
-                    completedDocument.PageSizesJson
+                    completedDocument.PageSizesJson,
+                    completedDocument.StorageMode
                 },
                 DuplicateRequest = true
             }
@@ -5340,7 +5344,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     {
         TenantId = ticket.TenantId,
         PrintJobId = job.Id,
-        OriginalFileName = ticket.OriginalFileName,
+        OriginalFileName = ticket.PrivatePrinting ? "Private document" : ticket.OriginalFileName,
         MediaType = ticket.MediaType,
         FileExtension = ticket.FileExtension,
         SizeBytes = ticket.SizeBytes,
@@ -7593,7 +7597,12 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     }
     originalName = originalName[..Math.Min(originalName.Length, 255)];
     var extension = Path.GetExtension(originalName).ToLowerInvariant();
-    if (request.PrivatePrinting) originalName = "private-document" + extension;
+    if (request.PrivatePrinting)
+    {
+        originalName = "private-document" + extension;
+        batchGroupName = "Private documents";
+        requestedBatchName = null;
+    }
     var mediaType = extension switch
     {
         ".pdf" => "application/pdf",
@@ -7829,6 +7838,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 : "The shop computer is temporarily unavailable. SmartPrint can keep this request securely online; the shop can release it when an Agent is ready."
         });
     }
+    if (request.PrivatePrinting && stationPrinter.OutputMode == "PDF_EXPORT")
+    {
+        return Results.Conflict(new { code = "private_printing_physical_output_required", message = "Private Printing is available only when the shop has assigned a physical printer." });
+    }
     if (request.PrivatePrinting && string.IsNullOrWhiteSpace(stationPrinter.DocumentEncryptionPublicKey))
     {
         return Results.Conflict(new
@@ -7850,6 +7863,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
 
     var ticket = new LocalPrintUploadTicket
     {
+        PrivatePrinting = request.PrivatePrinting,
         TenantId = session.TenantId,
         CustomerSessionId = session.Id,
         QrStationId = session.QrStationId,
@@ -8099,6 +8113,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                                       item.TenantId == session.TenantId &&
                                       item.CustomerSessionId == session.Id, ct);
     if (preflightTicket is null) return Results.NotFound();
+    if (preflightTicket.PrivatePrinting)
+    {
+        return Results.Conflict(new
+        {
+            code = "private_printing_cloud_recovery_blocked",
+            message = "This is a Private Printing request. Cloud document storage and HTTPS recovery are disabled. Reconnect to the original shop computer and retry the same upload."
+        });
+    }
 
     var suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
     var preflightGrantHash = Convert.FromHexString(preflightTicket.GrantHash);
