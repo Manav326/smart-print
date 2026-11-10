@@ -10,6 +10,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $envPath = Join-Path $repoRoot ".env"
+$tunnelTokenPath = Join-Path $repoRoot ".secrets/cloudflare/tunnel-token"
 $composeFile = Join-Path $repoRoot "compose.yml"
 $composeProjectName = "qrtoprint"
 $composeBaseArgs = @("--project-name", $composeProjectName, "--env-file", $envPath, "-f", $composeFile)
@@ -59,6 +60,7 @@ New-Item -ItemType Directory -Path $extractDirectory -Force | Out-Null
 $temporaryDbPath = "/tmp/qrtoprint-restore-" + [Guid]::NewGuid().ToString("N") + ".dump"
 $temporaryDocumentsPath = "/tmp/qrtoprint-documents-restore-" + [Guid]::NewGuid().ToString("N") + ".tar.gz"
 $temporaryEnvPath = Join-Path $repoRoot (".env.pre-restore-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
+$temporaryTunnelTokenPath = Join-Path $repoRoot (".secrets/cloudflare/tunnel-token.pre-restore-" + (Get-Date -Format "yyyyMMdd-HHmmss"))
 $backupHelper = $null
 $apiContainer = $null
 $servicesStopped = $false
@@ -75,18 +77,20 @@ try {
     $manifestPath = Join-Path $extractDirectory "manifest.json"
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { throw "The backup bundle manifest is missing." }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
-    if ($manifest.Format -ne "SmartPrint.BackupBundle.v1") { throw "The backup manifest version is unsupported." }
+    if ($manifest.Format -ne "SmartPrint.BackupBundle.v2") { throw "The backup manifest version is unsupported or does not contain the full recovery secret set." }
 
     $databaseFile = Join-Path $extractDirectory ([string]$manifest.DatabaseFile)
     $documentsFile = Join-Path $extractDirectory ([string]$manifest.DocumentsFile)
     $secretsFile = Join-Path $extractDirectory ([string]$manifest.SecretsFile)
-    foreach ($file in @($databaseFile, $documentsFile, $secretsFile)) {
+    $tunnelTokenFile = Join-Path $extractDirectory ([string]$manifest.TunnelTokenFile)
+    foreach ($file in @($databaseFile, $documentsFile, $secretsFile, $tunnelTokenFile)) {
         if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "A required encrypted backup component is missing: $([IO.Path]::GetFileName($file))" }
     }
 
     if ((Get-FileHash -LiteralPath $databaseFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.DatabaseSha256 -or
         (Get-FileHash -LiteralPath $documentsFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.DocumentsSha256 -or
-        (Get-FileHash -LiteralPath $secretsFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.SecretsSha256) {
+        (Get-FileHash -LiteralPath $secretsFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.SecretsSha256 -or
+        (Get-FileHash -LiteralPath $tunnelTokenFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $manifest.TunnelTokenSha256) {
         throw "A backup component checksum does not match the authenticated manifest."
     }
 
@@ -121,7 +125,18 @@ try {
     & icacls.exe $temporaryEnvPath /inheritance:r /grant:r "$($identity):(F)" "*S-1-5-32-544:(F)" "*S-1-5-18:(F)" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not restrict the pre-restore environment backup permissions." }
 
+    if (Test-Path -LiteralPath $tunnelTokenPath -PathType Leaf) {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $temporaryTunnelTokenPath) -Force | Out-Null
+        Copy-Item -LiteralPath $tunnelTokenPath -Destination $temporaryTunnelTokenPath -Force
+        & icacls.exe $temporaryTunnelTokenPath /inheritance:r /grant:r "$($identity):(F)" "*S-1-5-32-544:(F)" "*S-1-5-18:(F)" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not restrict the pre-restore Cloudflare Tunnel secret backup permissions." }
+    }
+
     Copy-Item -LiteralPath $secretsFile -Destination $envPath -Force
+    New-Item -ItemType Directory -Path (Split-Path -Parent $tunnelTokenPath) -Force | Out-Null
+    Copy-Item -LiteralPath $tunnelTokenFile -Destination $tunnelTokenPath -Force
+    & icacls.exe $tunnelTokenPath /inheritance:r /grant:r "$($identity):(F)" "*S-1-5-32-544:(F)" "*S-1-5-18:(F)" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not restrict the restored Cloudflare Tunnel secret permissions." }
     $envReplaced = $true
     Write-Host "Saved previous deployment secrets to $temporaryEnvPath" -ForegroundColor Yellow
 
@@ -198,13 +213,24 @@ try {
     $restoreSucceeded = $true
     Write-Host "SmartPrint database and encrypted cloud documents have been restored successfully." -ForegroundColor Green
     Write-Host "The previous .env was preserved at: $temporaryEnvPath"
+    Write-Host "The Cloudflare Tunnel token has been restored at .secrets/cloudflare/tunnel-token. Restart the separately managed Cloudflare Tunnel connector to load it."
     Write-Host "The Windows Agent local DPAPI queue is not part of this Docker backup; it remains on each shop computer."
 }
 finally {
     if (-not [string]::IsNullOrWhiteSpace($backupHelper)) { docker rm -f $backupHelper | Out-Null }
+    if (-not $restoreStarted -and $envReplaced) {
+        Write-Warning "Restore stopped before changing the database; restoring the original deployment secrets."
+        if (Test-Path -LiteralPath $temporaryEnvPath) {
+            Copy-Item -LiteralPath $temporaryEnvPath -Destination $envPath -Force
+        }
+        if (Test-Path -LiteralPath $temporaryTunnelTokenPath) {
+            Copy-Item -LiteralPath $temporaryTunnelTokenPath -Destination $tunnelTokenPath -Force
+        } else {
+            Remove-Item -LiteralPath $tunnelTokenPath -Force -ErrorAction SilentlyContinue
+        }
+    }
     if (-not $restoreSucceeded -and $servicesStopped -and -not $restoreStarted) {
         Write-Warning "Restore stopped before replacing the database; restarting the original API and portal."
-        if ($envReplaced -and (Test-Path -LiteralPath $temporaryEnvPath)) { Copy-Item -LiteralPath $temporaryEnvPath -Destination $envPath -Force }
         docker compose @composeBaseArgs start api portal | Out-Null
     } elseif (-not $restoreSucceeded -and $restoreStarted) {
         Write-Warning "The restore started but did not complete. API and portal are intentionally left stopped to prevent serving a partial data restore."
