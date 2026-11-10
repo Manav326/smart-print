@@ -979,7 +979,7 @@ class MainActivityInstrumentedTest {
                         isAccessible = true
                     }
                     assertEquals(null, portalField.get(activity))
-                    MainActivity::class.java.getDeclaredMethod("showShopManager").apply {
+                    MainActivity::class.java.getDeclaredMethod("showScanPrint").apply {
                         isAccessible = true
                     }.invoke(activity)
                 }
@@ -990,7 +990,7 @@ class MainActivityInstrumentedTest {
                     false
                 )
                 try {
-                    onView(withText("Scan shop QR")).check(matches(isDisplayed()))
+                    onView(withText("Scan QR code")).check(matches(isDisplayed()))
                     onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
                     onView(withText("Check shop Wi-Fi")).perform(click())
 
