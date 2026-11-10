@@ -8880,6 +8880,13 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     // traffic land on different replicas. Notification failure never fails upload.
     await relayWakeups.NotifyAgentAsync(ticket.AgentDeviceId);
 
+    return Results.Ok(new
+    {
+        Accepted = true,
+        DuplicateRequest = false,
+        ticket.PrintJobId,
+        ticket.JobNumber
+    });
 })
 .WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
 .RequireRateLimiting("document-upload");
