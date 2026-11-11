@@ -17,6 +17,6 @@
   </g>
   <text x="166" y="83" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="54" font-weight="800" letter-spacing="-2.3" fill="#152038">Smart<tspan fill="#7258E8">Print</tspan></text>
   <text x="313" y="130" text-anchor="middle" font-family="Manrope, Inter, Segoe UI, sans-serif" font-weight="800">
-    <tspan font-size="21" font-weight="650" fill="#667085">by </tspan><tspan font-size="27" fill="#152038">Quanta</tspan><tspan font-size="27" fill="#F97316">Edge</tspan>
+    <tspan font-size="21" font-weight="650" fill="#667085">by </tspan><tspan font-size="27" fill="#152038">Quanta</tspan><tspan font-size="27" fill="#F97316" stroke="#913B0B" stroke-width="2.2" stroke-linejoin="round" paint-order="stroke">Edge</tspan>
   </text>
 </svg>
