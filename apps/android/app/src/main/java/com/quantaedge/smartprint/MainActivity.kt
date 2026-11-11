@@ -509,9 +509,6 @@ class MainActivity : AppCompatActivity() {
             setSubtitleTextColor(getColor(R.color.qp_muted))
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             elevation = 0f
-            contentInsetStart = dp(10)
-            contentInsetStartWithNavigation = dp(10)
-
             val brandRow = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
