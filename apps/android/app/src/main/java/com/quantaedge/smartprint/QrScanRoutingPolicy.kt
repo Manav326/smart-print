@@ -16,7 +16,7 @@ internal enum class QrScanPurpose(
         wireValue = "shop_connection",
         eyebrow = "SHOP QR",
         title = "Scan Shop QR",
-        instruction = "Scan the Shop QR to send your documents.",
+        instruction = "Scan the Shop QR to send documents to this shop.",
         alignmentHint = "Fit the Shop QR inside the frame."
     ),
     WIFI_READINESS(
