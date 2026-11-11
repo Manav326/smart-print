@@ -6,22 +6,17 @@ type BrandLockupProps = {
   children?: ReactNode;
 };
 
-/** One shared SmartPrint lockup for web and the Windows desktop workspace. */
+/** Canonical in-app SmartPrint lockup; launcher contexts use only the symbol. */
 export default function BrandLockup({ className = "", subline, children }: BrandLockupProps) {
   const classes = ["brand-lockup", className].filter(Boolean).join(" ");
   return (
-    <div className={classes} aria-label="SmartPrint by QuantaEdge">
-      <img className="brand-mark-image" src="/smartprint-mark.svg" alt="" />
-      <div className="brand-lockup-copy">
-        <div className="brand-name">Smart<span>Print</span></div>
-        <div className="brand-lockup-by">by</div>
-        {subline && <div className="brand-lockup-subline">{subline}</div>}
-      </div>
-      <img
-        className="brand-parent-logo"
-        src="/branding/quantaedge-logo.svg"
-        alt="QuantaEdge Learning — Smarter Decisions. Greater Growth."
-      />
+    <div className={classes} role="group" aria-label="SmartPrint by QuantaEdge">
+      <img className="brand-lockup-full brand-lockup-logo-light"
+        src="/branding/smartprint-logo-light.svg" alt="" aria-hidden="true" />
+      <img className="brand-lockup-full brand-lockup-logo-dark"
+        src="/branding/smartprint-logo-dark.svg" alt="" aria-hidden="true" />
+      <img className="brand-mark-image" src="/smartprint-mark.svg" alt="" aria-hidden="true" />
+      {subline && <span className="brand-lockup-subline">{subline}</span>}
       {children}
     </div>
   );
