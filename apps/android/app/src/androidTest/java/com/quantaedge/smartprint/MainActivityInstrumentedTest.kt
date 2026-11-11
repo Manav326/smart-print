@@ -1232,6 +1232,10 @@ class QrScannerPermissionInstrumentedTest {
             onView(withText("Allow camera to scan live, or choose a photo below."))
                 .check(matches(isDisplayed()))
             onView(withText("Allow camera")).check(matches(isDisplayed()))
+            // Photo selection remains available even when the customer has not granted camera access.
+            onView(withText("Choose from photos")).check(matches(isDisplayed()))
+            onView(withContentDescription("Choose a QR from a photo or screenshot"))
+                .check(matches(isDisplayed()))
         }
     }
 }
