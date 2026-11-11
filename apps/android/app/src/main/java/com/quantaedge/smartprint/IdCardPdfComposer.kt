@@ -14,7 +14,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Creates a one-page A4 portrait sheet with the front and reverse of a card side by side.
+ * Creates a one-page A4 portrait sheet with the front above the reverse, both centred at exact physical card dimensions.
  * Source scans and generated PDF bytes remain in memory; IdStudioStore encrypts them before
  * they are written to persistent storage.
  */
@@ -46,8 +46,8 @@ object IdCardPdfComposer {
                 ).create()
             )
             page.canvas.drawColor(Color.WHITE)
-            drawCard(page.canvas, frontBytes, layout.front, frontRotationDegrees, "FRONT", layout, MAX_DECODE_EDGE)
-            drawCard(page.canvas, backBytes, layout.back, backRotationDegrees, "BACK", layout, MAX_DECODE_EDGE)
+            drawCard(page.canvas, frontBytes, layout.front, frontRotationDegrees, "FRONT", layout.frontLabelTop, layout, MAX_DECODE_EDGE)
+            drawCard(page.canvas, backBytes, layout.back, backRotationDegrees, "BACK", layout.backLabelTop, layout, MAX_DECODE_EDGE)
             document.finishPage(page)
             val output = ByteArrayOutputStream()
             document.writeTo(output)
@@ -83,8 +83,8 @@ object IdCardPdfComposer {
         try {
             val canvas = Canvas(preview)
             canvas.drawColor(Color.WHITE)
-            drawCard(canvas, frontBytes, layout.front, frontRotationDegrees, "FRONT", layout, PREVIEW_DECODE_EDGE)
-            drawCard(canvas, backBytes, layout.back, backRotationDegrees, "BACK", layout, PREVIEW_DECODE_EDGE)
+            drawCard(canvas, frontBytes, layout.front, frontRotationDegrees, "FRONT", layout.frontLabelTop, layout, PREVIEW_DECODE_EDGE)
+            drawCard(canvas, backBytes, layout.back, backRotationDegrees, "BACK", layout.backLabelTop, layout, PREVIEW_DECODE_EDGE)
             return preview
         } catch (error: Exception) {
             preview.recycle()
@@ -114,6 +114,7 @@ object IdCardPdfComposer {
         card: IdCardLayoutPolicy.CardRect,
         rotation: Int,
         label: String,
+        labelTop: Float,
         layout: IdCardLayoutPolicy.Layout,
         maxDecodeEdge: Int
     ) {
@@ -154,7 +155,7 @@ object IdCardPdfComposer {
                     typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     textAlign = Paint.Align.CENTER
                 }
-                canvas.drawText(label, target.centerX(), layout.labelTop, labelPaint)
+                canvas.drawText(label, target.centerX(), labelTop, labelPaint)
             } finally {
                 if (displayBitmap !== bitmap) displayBitmap.recycle()
             }
