@@ -3481,7 +3481,7 @@ class MainActivity : AppCompatActivity() {
         sizeRow.addView(heightInput, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(8) })
         column.addView(sizeRow, linearParams().apply { bottomMargin = dp(6) })
         column.addView(text(
-            "Default: 85.6 × 53.98 mm. Enter the physical size of your card. Both panels remain identical and fit side by side on A4.",
+            "Default: 85.6 × 53.98 mm. Enter the physical size of your card. Both faces stay identical and are centred one above the other on A4 portrait.",
             10, R.color.qp_muted, false
         ).apply { setPadding(0, 0, 0, dp(8)) })
         column.addView(button("Update A4 preview", false).apply {
