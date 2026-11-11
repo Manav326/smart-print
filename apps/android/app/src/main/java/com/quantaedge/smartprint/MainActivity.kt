@@ -1183,7 +1183,7 @@ class MainActivity : AppCompatActivity() {
         column.addView(text("Scan the counter QR code.", 13, R.color.qp_muted, false).apply {
             gravity = Gravity.CENTER
         })
-        column.addView(button("Scan QR code", true).apply {
+        column.addView(button("Scan Shop QR", true).apply {
             setOnClickListener { scanQr() }
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(22) })
         column.addView(text(
@@ -1193,7 +1193,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(18), 0, dp(4))
         })
-        column.addView(button("Check shop Wi-Fi", false).apply {
+        column.addView(button("Check Wi-Fi", false).apply {
             setOnClickListener { scanQr(QrScanPurpose.WIFI_READINESS) }
         }, LinearLayout.LayoutParams(-1, dp(44)).apply { topMargin = dp(4) })
         column.addView(button("Open My Files", false).apply {
@@ -2911,8 +2911,8 @@ class MainActivity : AppCompatActivity() {
             showOptionSheet(
                 "Shop connection",
                 listOf(
-                    "Scan shop QR" to { scanQr() },
-                    "Check shop Wi-Fi" to { scanQr(QrScanPurpose.WIFI_READINESS) }
+                    "Scan Shop QR" to { scanQr() },
+                    "Check Wi-Fi" to { scanQr(QrScanPurpose.WIFI_READINESS) }
                 )
             )
             return
@@ -2922,7 +2922,7 @@ class MainActivity : AppCompatActivity() {
             "Connected to " + shopName,
             listOf(
                 "Open print station" to { showPrint() },
-                "Check shop Wi-Fi" to { scanQr(QrScanPurpose.WIFI_READINESS) },
+                "Check Wi-Fi" to { scanQr(QrScanPurpose.WIFI_READINESS) },
                 "Switch to another shop" to { switchShop() },
                 "Disconnect this device" to {
                     showConfirmSheet(
