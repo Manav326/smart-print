@@ -1131,7 +1131,7 @@ class MainActivityInstrumentedTest {
                         inspection.set(
                             containsVisibleText(
                                 scannerActivity.window.decorView,
-                                "Scan the Wi-Fi QR on the shop computer to check the connection."
+                                "Scan the Wi-Fi QR shown on the shop computer."
                             ) to containsVisibleText(
                                 scannerActivity.window.decorView,
                                 QrScannerActivity.QA_CAMERA_PAUSED_LABEL
@@ -1225,8 +1225,11 @@ class QrScannerPermissionInstrumentedTest {
             onView(withText("Choose from photos")).check(matches(isDisplayed())).perform(click())
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
 
-            // Back closes the Android system picker and returns to the same scanner.
-            androidx.test.espresso.Espresso.pressBack()
+            // The picker is a separate system Activity, so send Back through instrumentation
+            // rather than Espresso's app-root-only pressBack helper.
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+                .sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
 
             onView(withText("Choose from photos")).check(matches(isDisplayed()))
             onView(withText("Camera access needed")).check(matches(isDisplayed()))
