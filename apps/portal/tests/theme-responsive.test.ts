@@ -642,3 +642,30 @@ test("SmartPrint and QuantaEdge lockup lettering has AA contrast in both themes"
       contrast(foreground, background).toFixed(2) + ":1.");
   }
 });
+
+
+test("native Android toolbar follows the transparent SmartPrint by QuantaEdge lockup", () => {
+  const activity = read("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+  const lightColors = read("../../android/app/src/main/res/values/colors.xml");
+  const darkColors = read("../../android/app/src/main/res/values-night/colors.xml");
+  const start = activity.indexOf("val brandMeta = LinearLayout(this@MainActivity).apply {");
+  const end = activity.indexOf("toolbarPageContext = TextView(this@MainActivity).apply {", start);
+  assert.ok(start >= 0 && end > start, "The native toolbar must keep an explicit brand metadata row.");
+  const brandMeta = activity.slice(start, end);
+
+  assert.match(brandMeta, /text = "by"/);
+  assert.match(brandMeta, /SpannableString\("QuantaEdge"\)/);
+  assert.match(brandMeta, /qp_parent_navy/);
+  assert.match(brandMeta, /qp_parent_orange/);
+  assert.match(brandMeta, /qp_parent_navy_outline/);
+  assert.match(brandMeta, /qp_parent_orange_outline/);
+  assert.doesNotMatch(brandMeta, /R\.drawable\.quantaedge_mark/,
+    "The native SmartPrint lockup must not insert the QuantaEdge launcher symbol.");
+  assert.doesNotMatch(brandMeta, /GradientDrawable|qp_parent_wordmark_bg|setPadding\(dp\(6\), dp\(3\)/,
+    "The native QuantaEdge wordmark must sit on a transparent surface with no capsule.");
+  for (const colors of [lightColors, darkColors]) {
+    assert.match(colors, /qp_parent_navy_outline.*#D7DEEE/);
+    assert.match(colors, /qp_parent_orange_outline.*#913B0B/);
+    assert.doesNotMatch(colors, /qp_parent_wordmark_bg/);
+  }
+});
