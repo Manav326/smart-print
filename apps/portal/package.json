@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit --pretty"
+    "build": "tsc --noEmit && vite build && node scripts/generate-seo-assets.mjs",
+    "typecheck": "tsc --noEmit --pretty",
+    "validate:seo": "node scripts/validate-seo-assets.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
