@@ -23,7 +23,7 @@ internal enum class QrScanPurpose(
         wireValue = "wifi_readiness",
         eyebrow = "WI-FI CHECK",
         title = "Check Wi-Fi",
-        instruction = "Scan the Wi-Fi QR on the shop computer to check the connection.",
+        instruction = "Scan the Wi-Fi QR shown on the shop computer.",
         alignmentHint = "Fit the Wi-Fi QR inside the frame."
     );
 
