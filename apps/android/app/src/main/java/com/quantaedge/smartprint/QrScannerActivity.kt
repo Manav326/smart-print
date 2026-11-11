@@ -59,7 +59,7 @@ class QrScannerActivity : AppCompatActivity() {
     }
 
     private lateinit var permissionLauncher: ActivityResultLauncher<String>
-    private lateinit var photoPickerLauncher: ActivityResultLauncher<String>
+    private lateinit var photoPickerLauncher: ActivityResultLauncher<Array<String>>
     private lateinit var photoButton: MaterialButton
     private lateinit var previewHost: FrameLayout
     private lateinit var previewView: PreviewView
@@ -106,9 +106,9 @@ class QrScannerActivity : AppCompatActivity() {
         permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) bindCamera() else showPermissionPanel()
         }
-        // GetContent uses the system picker and grants access only to the selected image.
-        // No broad photo/media permission is needed.
-        photoPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        // The system file picker can browse Downloads as well as photo folders.
+        // Access is granted only to the selected image; no broad photo/media permission is needed.
+        photoPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) {
                 photoFlowActive = false
                 photoFeedbackMessage = null
@@ -309,7 +309,7 @@ class QrScannerActivity : AppCompatActivity() {
         photoFeedbackMessage = null
         statusText.text = "Choose a photo or screenshot with a QR code."
         try {
-            photoPickerLauncher.launch("image/*")
+            photoPickerLauncher.launch(arrayOf("image/*"))
         } catch (_: Exception) {
             photoFlowActive = false
             photoFeedbackMessage = "Photos are unavailable. You can still scan with the camera."
