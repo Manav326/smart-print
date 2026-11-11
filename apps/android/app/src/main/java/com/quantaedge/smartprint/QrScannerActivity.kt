@@ -330,7 +330,7 @@ class QrScannerActivity : AppCompatActivity() {
                     }?.rawValue?.trim()
                     val decoded = rawValue?.takeIf { it.isNotBlank() }
                     if (decoded != null) {
-                        returnScannedQr(decoded)
+                        handleDecodedQr(decoded, fromPhoto = true)
                     } else {
                         photoButton.isEnabled = true
                         photoFlowActive = false
@@ -394,7 +394,7 @@ class QrScannerActivity : AppCompatActivity() {
                                 val decoded = rawValue?.takeIf { it.isNotBlank() }
                                 if (!photoFlowActive && decoded != null) {
                                     runOnUiThread {
-                                        if (!photoFlowActive) returnScannedQr(decoded)
+                                        if (!photoFlowActive) handleDecodedQr(decoded, fromPhoto = false)
                                     }
                                 }
                             }
@@ -428,8 +428,31 @@ class QrScannerActivity : AppCompatActivity() {
     }
 
     /**
-     * Both live-camera and photo scans enter the same result/validation path.
-     * Purpose remains attached so a Shop QR can never be treated as a Wi-Fi QR.
+     * Both live-camera and photo scans use the same purpose-aware validation.
+     * An unrelated QR leaves the scanner open, so the user can retry immediately.
+     */
+    private fun handleDecodedQr(rawValue: String, fromPhoto: Boolean) {
+        when (val route = QrScanRoutingPolicy.route(
+            rawValue = rawValue,
+            purpose = scanPurpose,
+            expectedServiceUrl = BuildConfig.SERVICE_BASE_URL,
+            allowLocalDevelopment = BuildConfig.DEBUG
+        )) {
+            is QrScanRoute.Unsupported -> {
+                photoFlowActive = false
+                photoButton.isEnabled = true
+                photoFeedbackMessage = route.message
+                statusText.text = route.message
+                if (fromPhoto) bindCamera()
+            }
+            else -> returnScannedQr(rawValue)
+        }
+    }
+
+    /**
+     * Only a QR validated for this scanner's purpose reaches MainActivity.
+     * Purpose remains attached and MainActivity repeats the validation before
+     * performing any account or network action.
      */
     private fun returnScannedQr(rawValue: String) {
         if (!hasReturnedResult.compareAndSet(false, true)) return
