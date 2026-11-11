@@ -881,11 +881,11 @@ class MainActivityInstrumentedTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
-            openNavigationDestination(4, "Print history")
+            openNavigationDestination(4, "Your print activity")
             onView(withContentDescription("Account")).perform(click())
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
-            onView(withText("Print history")).check(matches(isDisplayed()))
+            onView(withText("Your print activity")).check(matches(isDisplayed()))
         }
     }
 
