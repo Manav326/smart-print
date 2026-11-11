@@ -882,6 +882,54 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+    [Fact]
+    public async Task PreservesPrivateIdDocumentKindInTheProtectedAgentQueue()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "%PDF-1.7\\nprivate ID sheet"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                PrintKind = "ID_DOCUMENT",
+                PageCount = 1,
+                Copies = 1,
+                ColourMode = "Colour",
+                PaperSize = "A4",
+                IsDuplex = false,
+                Orientation = "PORTRAIT"
+            };
+
+            var entry = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            var persisted = store.Find(job.Id)!;
+
+            Assert.Equal("ID_DOCUMENT", entry.PrintKind);
+            Assert.Equal("ID_DOCUMENT", persisted.PrintKind);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+
+            var updatedClaim = job with
+            {
+                Status = "LOCAL_QUEUE_CLAIMED",
+                QuotedAmountMinor = 500,
+                LeaseExpiresUtc = DateTimeOffset.UtcNow.AddMinutes(3)
+            };
+            await store.UpdateFromClaimAsync(updatedClaim, CancellationToken.None);
+
+            var claimed = store.Find(job.Id)!;
+            Assert.Equal("ID_DOCUMENT", claimed.PrintKind);
+            Assert.Equal("A4", claimed.PaperSize);
+            Assert.Equal("PORTRAIT", claimed.Orientation);
+            Assert.False(claimed.IsDuplex);
+            Assert.Equal(1, claimed.Copies);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();

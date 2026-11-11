@@ -583,7 +583,7 @@ class SmartPrintDocumentViewer(
 }
 
 /** Matrix-based image canvas with pinch zoom, panning, double-tap fit and swipe navigation. */
-private class ZoomableDocumentImageView(
+internal class ZoomableDocumentImageView(
     context: Context,
     private val onSwipe: (Int) -> Unit
 ) : AppCompatImageView(context) {

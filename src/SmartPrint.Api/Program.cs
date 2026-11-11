@@ -4005,6 +4005,16 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
         .ToListAsync(ct);
     var protectedJobIds = paymentProtectedJobIds.ToHashSet();
 
+    if (request.PdfBrandingEnabled && lockedJobs.Any(job => job.PrintKind == "ID_DOCUMENT"))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "id_document_branding_not_allowed",
+            message = "ID card sheets cannot be modified with SmartPrint PDF branding."
+        });
+    }
+
     var accepted = acceptedIds.ToHashSet();
     var now = DateTimeOffset.UtcNow;
     foreach (var job in lockedJobs)
@@ -4838,7 +4848,8 @@ agentApi.MapGet("/private-relays/pending", async (
                 ticket.Id, ticket.PrintJobId, ticket.JobNumber, ticket.PrinterDeviceId,
                 printer.DisplayName, printer.QueueName!, ticket.FileExtension, ticket.MediaType,
                 ticket.SizeBytes, ticket.Sha256, ticket.ColourMode, ticket.PaperSize,
-                ticket.IsDuplex, ticket.Copies, ticket.Orientation, ticket.ExpiresUtc))
+                ticket.IsDuplex, ticket.Copies, ticket.Orientation, ticket.ExpiresUtc,
+                ticket.PrintKind))
             .Take(50)
             .ToListAsync(ct);
     }
@@ -4939,7 +4950,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             {
                 Job = new
                 {
-                    job.Id, job.PrivatePrinting, job.JobNumber, job.Status, job.PageCount,
+                    job.Id, job.PrivatePrinting, job.PrintKind, job.JobNumber, job.Status, job.PageCount,
                     job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
                     job.PricingVersion, job.Currency, job.QuotedAmountMinor, job.CreatedUtc
                 },
@@ -4984,6 +4995,16 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     {
         return Results.UnprocessableEntity(new { code = "private_document_page_analysis_invalid", message = "The shop computer returned invalid page information." });
     }
+
+    if (ticket.PrintKind == "ID_DOCUMENT" &&
+        (request.PageCount != 1 ||
+         !string.Equals(ticket.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+         !IdCardPdfRules.HasExactlyA4PortraitPage(request.PageSizesJson)))
+        return Results.UnprocessableEntity(new
+        {
+            code = "id_document_pdf_invalid",
+            message = "The ID card sheet must be a valid, single-page A4 portrait PDF. Recheck the prepared sheet before sending it."
+        });
 
     var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
     if (!subscription.IsAccessActive)
@@ -5045,6 +5066,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         IsDuplex = locked.IsDuplex,
         Orientation = locked.Orientation,
         PrivatePrinting = true,
+        PrintKind = locked.PrintKind,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -5105,7 +5127,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         {
             Job = new
             {
-                job.Id, job.PrivatePrinting, job.JobNumber, job.Status, job.PageCount,
+                job.Id, job.PrivatePrinting, job.PrintKind, job.JobNumber, job.Status, job.PageCount,
                 job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
                 job.PricingVersion, job.Currency, job.QuotedAmountMinor, job.CreatedUtc
             },
@@ -5239,6 +5261,7 @@ agentApi.MapPost("/jobs/claim", async (
             job.Orientation,
             job.PdfBrandingEnabled,
             job.PrivatePrinting,
+            job.PrintKind,
             job.Currency,
             job.QuotedAmountMinor,
             job.PrinterDeviceId,
@@ -5327,6 +5350,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.Orientation,
             candidate.PdfBrandingEnabled,
             candidate.PrivatePrinting,
+            candidate.PrintKind,
             candidate.Currency,
             candidate.QuotedAmountMinor,
             candidate.PrinterDeviceId,
@@ -5560,6 +5584,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                 {
                     completedJob.Id,
                     completedJob.PrivatePrinting,
+                    completedJob.PrintKind,
                     completedJob.JobNumber,
                     completedJob.Status,
                     completedJob.PageCount,
@@ -5627,6 +5652,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         ticket.OriginalFileName,
         ticket.FileExtension,
         ticket.PrivatePrinting,
+        ticket.PrintKind,
         ticket.MediaType,
         ticket.SizeBytes,
         ticket.Sha256,
@@ -5715,6 +5741,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                 {
                     completedJob.Id,
                     completedJob.PrivatePrinting,
+                    completedJob.PrintKind,
                     completedJob.JobNumber,
                     completedJob.Status,
                     completedJob.PageCount,
@@ -5769,6 +5796,17 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         return Results.UnprocessableEntity(new { code = "local_document_page_analysis_invalid", message = "The local agent returned invalid document page analysis." });
     }
 
+    if (ticket.PrintKind == "ID_DOCUMENT" &&
+        (!ticket.PrivatePrinting ||
+         request.PageCount != 1 ||
+         !string.Equals(ticket.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+         !IdCardPdfRules.HasExactlyA4PortraitPage(request.PageSizesJson)))
+        return Results.UnprocessableEntity(new
+        {
+            code = "id_document_pdf_invalid",
+            message = "The ID card sheet must be a valid, single-page A4 portrait PDF. Recheck the prepared sheet before sending it."
+        });
+
     var now = DateTimeOffset.UtcNow;
     var privateRelayClaim = ticket.PrivatePrinting &&
         ticket.PrivateRelayUploadedUtc is not null &&
@@ -5820,6 +5858,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                 {
                     existingJob.Id,
                     existingJob.PrivatePrinting,
+                    existingJob.PrintKind,
                     existingJob.JobNumber,
                     existingJob.Status,
                     existingJob.PageCount,
@@ -5875,6 +5914,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         IsDuplex = ticket.IsDuplex,
         Orientation = ticket.Orientation,
         PrivatePrinting = ticket.PrivatePrinting,
+        PrintKind = ticket.PrintKind,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -5938,6 +5978,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             Job = new
             {
                 job.Id,
+                job.PrintKind,
                 job.BatchGroupName,
                 job.BatchName,
                 job.BatchId,
@@ -8236,6 +8277,20 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         ".png" => "image/png",
         _ => null
     };
+    var isIdDocumentUpload = request.PrintKind == "ID_DOCUMENT";
+    if (request.PrintKind is not ("DOCUMENT" or "PHOTO" or "ID_DOCUMENT") ||
+        (isIdDocumentUpload && (!request.PrivatePrinting ||
+            mediaType != "application/pdf" ||
+            request.ColourMode != "Colour" ||
+            request.PaperSize != "A4" ||
+            request.IsDuplex ||
+            request.Copies != 1 ||
+            request.Orientation != "PORTRAIT")))
+        return Results.Conflict(new
+        {
+            code = "id_document_private_printing_required",
+            message = "ID card sheets require Private Printing, a one-page A4 portrait PDF, colour, one copy and single-sided output. Start a new Private Printing batch."
+        });
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (mediaType is null || request.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
         string.IsNullOrWhiteSpace(sha) || sha.Length != 64 || sha.Any(character => !Uri.IsHexDigit(character)) ||
@@ -8283,6 +8338,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         var completedPrivateTicket = existing.PrivatePrinting && existing.CompletedUtc is not null;
         if (!CryptographicOperations.FixedTimeEquals(existingGrantHash, suppliedGrantHash) ||
             existing.PrivatePrinting != request.PrivatePrinting ||
+            existing.PrintKind != request.PrintKind ||
             (!completedPrivateTicket && (existing.SizeBytes != request.SizeBytes ||
                 !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
                 existing.OriginalFileName != originalName)) ||
@@ -8526,6 +8582,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         Copies = request.Copies,
         Orientation = request.Orientation,
         PrivatePrinting = request.PrivatePrinting,
+        PrintKind = request.PrintKind,
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
@@ -8729,6 +8786,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         ticket.Id,
         ticket.PrintJobId,
         ticket.PrivatePrinting,
+        ticket.PrintKind,
         ticket.BatchId,
         ticket.BatchGroupName,
         ticket.BatchName,
@@ -9404,7 +9462,17 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     }
 
     var isPhotoPrint = request.PrintKind == "PHOTO";
-    if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO")) ||
+    var isIdDocument = request.PrintKind == "ID_DOCUMENT";
+    if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO" or "ID_DOCUMENT")) ||
+        (isIdDocument && (!job.PrivatePrinting ||
+            job.PrintKind != "ID_DOCUMENT" ||
+            job.PageCount != 1 ||
+            request.Copies != 1 ||
+            request.ColourMode != "Colour" ||
+            request.PaperSize != "A4" ||
+            request.IsDuplex ||
+            request.Orientation != "PORTRAIT")) ||
+        (job.PrintKind == "ID_DOCUMENT" && !isIdDocument) ||
         job.PageCount is <= 0 or > 500 ||
         request.Copies is < 1 or > 100 ||
         request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
@@ -9422,6 +9490,25 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         {
             ["printOptions"] = ["Document printing supports A4, A3, A5, Letter or Legal paper, automatic/portrait/landscape orientation, 1–100 copies, Mono or Colour and single/double-sided. Photo sheets use one A4 page and a supported photo size/count."]
         });
+    }
+
+    if (isIdDocument)
+    {
+        var idDocument = await db.PrintDocuments.AsNoTracking()
+            .Where(item => item.TenantId == session.TenantId && item.PrintJobId == job.Id)
+            .Select(item => new { item.MediaType, item.PageSizesJson })
+            .SingleOrDefaultAsync(ct);
+        if (idDocument is null ||
+            !string.Equals(idDocument.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            !IdCardPdfRules.HasExactlyA4PortraitPage(idDocument.PageSizesJson))
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.UnprocessableEntity(new
+            {
+                code = "id_document_pdf_invalid",
+                message = "The ID card sheet must be a valid, single-page A4 portrait PDF. Recheck the prepared sheet before requesting a quote."
+            });
+        }
     }
 
     var paymentPreferences = await db.ShopPaymentProfiles.AsNoTracking()
@@ -9477,7 +9564,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
                 pricing);
             pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
                 job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing);
-            job.PrintKind = "DOCUMENT";
+            job.PrintKind = isIdDocument ? "ID_DOCUMENT" : "DOCUMENT";
             job.PhotoSizeCode = null;
             job.PhotoCount = 0;
             job.PhotosPerPage = null;

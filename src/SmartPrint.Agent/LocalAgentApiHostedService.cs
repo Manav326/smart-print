@@ -998,7 +998,8 @@ public sealed class LocalAgentApiHostedService(
                             claim.ExpiresUtc,
                             "LOCAL_AGENT",
                             Orientation: claim.Orientation,
-                            PrivatePrinting: claim.PrivatePrinting);
+                            PrivatePrinting: claim.PrivatePrinting,
+                            PrintKind: claim.PrintKind);
                         await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
                     }
 
@@ -1102,7 +1103,8 @@ public sealed class LocalAgentApiHostedService(
         string Orientation,
         bool PrivatePrinting,
         DateTimeOffset ExpiresUtc,
-        LocalUploadedPrintResult? UploadResult);
+        LocalUploadedPrintResult? UploadResult,
+        string PrintKind = "DOCUMENT");
 
     private sealed record LocalUploadCompletionResponse(
         bool AlreadyCompleted,
@@ -1117,7 +1119,8 @@ public sealed class LocalAgentApiHostedService(
         Guid Id, string JobNumber, string Status, int PageCount, int Copies,
         string Currency, long QuotedAmountMinor, DateTimeOffset CreatedUtc,
         string ColourMode = "Mono", string PaperSize = "A4", bool IsDuplex = false,
-        string Orientation = "AUTO", int PricingVersion = 1, bool PrivatePrinting = false);
+        string Orientation = "AUTO", int PricingVersion = 1, bool PrivatePrinting = false,
+        string PrintKind = "DOCUMENT");
 
     private sealed record LocalUploadedDocument(
         Guid Id, string OriginalFileName, string MediaType, long SizeBytes,
