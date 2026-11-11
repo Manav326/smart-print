@@ -28,7 +28,13 @@ def main() -> None:
     if STAGE.exists():
         shutil.rmtree(STAGE)
     STAGE.mkdir(parents=True)
-    shutil.copytree(ROOT / "marketing" / "smartprint-ad", STAGE / "production")
+    source_dir = ROOT / "marketing" / "smartprint-ad"
+    for item in source_dir.iterdir():
+        target = STAGE / item.name
+        if item.is_dir():
+            shutil.copytree(item, target)
+        elif item.is_file():
+            shutil.copy2(item, target)
     people = STAGE / "references" / "people"
     people.mkdir(parents=True, exist_ok=True)
     src = ROOT / "src"
