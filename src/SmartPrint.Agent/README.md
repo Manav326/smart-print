@@ -21,6 +21,14 @@ Pair the Agent with the same PUBLIC_BASE_URL. After an authenticated heartbeat, 
 
 The installer enables the local status and direct-upload endpoint. The Agent allows TCP 17842 only from the connected local subnet, regardless of whether Windows labels that shop connection Public or Private. It does not open the endpoint to the internet. The authenticated heartbeat keeps the runtime browser CORS origin aligned with PUBLIC_BASE_URL.
 
+## Using a phone hotspot
+
+1. Connect the shop computer to the hotspot, then select it in the desktop **Shop Connection** panel. SmartPrint will not switch the saved shop network by itself.
+2. Check the connection with a second phone connected to the same hotspot. The phone sharing the hotspot cannot join it as a Wi-Fi client, so use another phone.
+3. Customers connect to that same shop Wi-Fi or hotspot for direct local uploads. The one-time phone check is for the shop owner only; it is not a customer step.
+
+Some hotspots block connected devices from reaching one another. If the check fails, use shop Wi-Fi or a hotspot that allows connected devices to communicate. No Windows network-profile change is needed: TCP 17842 remains limited to the local subnet on all firewall profiles.
+
 ### Advanced / developer setup
 
 For a release ZIP or manual recovery, an administrator can pair and install from elevated PowerShell with the scripts in the package:
@@ -33,7 +41,7 @@ To remove the Windows Service, run scripts\uninstall-agent-service.ps1 from an e
 
 ## Current capabilities
 
-Direct customer document upload over shop Wi-Fi is implemented. The customer portal obtains a one-use upload grant from the API, sends document bytes to this paired Agent, and the Agent validates the hash and document structure before storing the file in its DPAPI-protected local queue. The API retains only job/document metadata, SHA-256, page analysis and quote/payment/dispatch state. The same PrintJob is later authorised by the shop and claimed by this Agent after manual payment verification; the cloud is not asked to download a LOCAL_AGENT document.
+Direct customer document upload over shop Wi-Fi or a compatible phone hotspot is implemented. The customer portal obtains a one-use upload grant from the API, sends document bytes to this paired Agent, and the Agent validates the hash and document structure before storing the file in its DPAPI-protected local queue. The API retains only job/document metadata, SHA-256, page analysis and quote/payment/dispatch state. The same PrintJob is later authorised by the shop and claimed by this Agent after manual payment verification; the cloud is not asked to download a LOCAL_AGENT document.
 
 Cloud-assisted uploads use the shop's HTTPS customer portal and API, and the customer UI selects this path by default when the shop's subscription includes Cloud-assisted Printing. Documents are sent to the cloud service over HTTPS, then handed to the paired Agent over its authenticated HTTPS connection. This is the encrypted-in-transit option.
 

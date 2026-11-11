@@ -2248,13 +2248,13 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       </>}
     </section>
     {desktop && <ShopConnectionPanel connected={connected} localApiReady={localAgentStatus?.localApiReachable===true}/>}
-    {!desktop && <section className="panel local-network-hint"><div className="local-network-mark"><Wifi size={20}/></div><div><h2>Shop connection</h2><p>Open SmartPrint on the Windows computer connected to your printers to choose and test the shop Wi-Fi.</p></div></section>}
+    {!desktop && <section className="panel local-network-hint"><div className="local-network-mark"><Wifi size={20}/></div><div><h2>Shop connection</h2><p>Open SmartPrint on the Windows computer connected to your printers to choose and test the shop Wi-Fi or hotspot.</p></div></section>}
     <section className="panel agent-device-panel">
       <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} paired</span></div>
       {agents.length===0?<div className="agent-empty"><Monitor size={25}/><strong>No Windows computer paired yet</strong><span>Generate a pairing code above and run the agent on the computer connected to your printers.</span></div>:
         <div className="agent-device-list">{agents.map(agent=><article className="agent-device-card" key={agent.id}>
           <div className="agent-device-icon"><Monitor size={19}/></div>
-          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>Shop connection found · run the phone check on the shop computer</small>:<small>Connect this computer to the shop Wi-Fi to enable phone uploads</small>}</div>
+          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>Shop connection found · run the phone check on the shop computer</small>:<small>Connect this computer to the shop Wi-Fi or hotspot to enable phone uploads</small>}</div>
           <Status label={agent.revokedUtc?"Revoked":agent.status} tone={agent.revokedUtc?"red":agent.status==="Online"?"green":"slate"}/>
           {!agent.revokedUtc&&<button className="subtle-button reject-action" disabled={busy} onClick={()=>onRevoke(agent)}>Revoke</button>}
         </article>)}</div>}
@@ -2356,14 +2356,14 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
 
   return <section className="panel local-network-panel">
     <div className="local-network-heading">
-      <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>Customer phone connection</h2><p>Choose the connection customers use at your shop, then check it with a phone.</p></div>
+      <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>Customer upload connection</h2><p>Choose the Wi-Fi or hotspot customers will use to send documents.</p></div>
       <Status label={loading?"Checking…":statusLabel} tone={loading?"slate":statusTone}/>
     </div>
     {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> Checking available connections…</div>:error&&!snapshot
       ? <div className="local-network-empty"><Wifi size={20}/><div><strong>Could not check this computer</strong><p>SmartPrint is not responding yet. Make sure the desktop app is open, then try again.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Try again</button></div>
       : <>
       {snapshot?.networks.length?<>
-        <label className="local-network-choice">Shop Wi-Fi or network
+        <label className="local-network-choice">Shop Wi-Fi or hotspot
           <select value={snapshot.selectedNetworkId??""} onChange={event=>void changeNetwork(event.target.value)} disabled={saving||!connected}>
             <option value="">Choose the connection customers use</option>
             {snapshot.networks.map(network=><option key={network.id} value={network.id}>{network.displayName}{network.kind&&network.displayName.toLowerCase()!==network.kind.toLowerCase()?" · "+network.kind:""}</option>)}
@@ -2371,17 +2371,17 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
         </label>
         {selected
           ? <div className="local-network-selected"><Wifi size={17}/><span><strong>{selected.displayName}</strong><small>{selected.kind} · Used for customer document uploads</small></span><Check size={17}/></div>
-          : <p className="local-network-copy">Your previous connection is not available. Choose the Wi-Fi used by your customers before testing phone access.</p>}
+          : <p className="local-network-copy">Connect this computer to the Wi-Fi or hotspot customers will use, then select it here.</p>}
         {!connected?<p className="local-network-copy">Connect this computer to your shop first. The phone check will be available when setup is complete.</p>:!localApiReady?<p className="local-network-copy">SmartPrint is preparing the shop connection. The phone check will be available when the print service is ready.</p>:<>
           <div className="local-network-actions">
             <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!hasSelectedNetwork||!localApiReady}>
-              {saving?<span className="button-spinner"/>:<><QrCode size={16}/> Test with a phone</>}
+              {saving?<span className="button-spinner"/>:<><QrCode size={16}/> Check with another phone</>}
             </button>
             <button className="secondary-button" type="button" onClick={()=>void refresh()} disabled={saving}><RotateCcw size={15}/> Refresh</button>
           </div>
           {test&&<div className="local-phone-test">
             <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
-            <div><strong>Scan with SmartPrint on your phone</strong><p>On your phone, open SmartPrint and tap Check Wi-Fi. Scan this QR or choose its saved photo or screenshot. This screen will confirm automatically when the connection works.</p><small>Using a phone without SmartPrint? Scan with its camera and open the link. This check expires in five minutes.</small></div>
+            <div><strong>Use a second phone</strong><p>Connect another phone to this same Wi-Fi or hotspot. In SmartPrint, open Your space → connected shop → Check shop Wi-Fi, then scan this QR.</p><small>The phone sharing the hotspot cannot join it. No SmartPrint? Scan with your camera and open the link.</small></div>
           </div>}
           {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
           {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>Local print pipeline ready</strong><small>Protected queue, print worker, cloud heartbeat and printer inventory are healthy. The assigned printer is checked separately for each QR station upload.</small></span></div>}
@@ -2392,7 +2392,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
             readiness.heartbeatFresh?"":"Cloud heartbeat is stale",
             readiness.printerInventoryFresh?"":"Printer inventory is stale"
           ].filter(Boolean).join(" · ")} {readiness.lastFailureCode?"(Last issue: "+readiness.lastFailureCode+") ":""}Retry after the shop computer/Agent has recovered.</small></span></div>}
-          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Make sure the phone is on this same shop Wi-Fi, then start a new check. You can also try another connection above.</small></span></div>}
+          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>No phone reached this computer. Check that another phone is on the same Wi-Fi or hotspot and try again. Some hotspots block connected devices from reaching each other; use shop Wi-Fi or a hotspot that allows them to communicate.</small></span></div>}
         </>}
       </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the Wi-Fi or network you use at the shop, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
     </>}
@@ -3604,7 +3604,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     }
     setCheckStatus("checking");
     onReady(false);
-    setMessage(nativeAppMode ? "Checking shop Wi-Fi." : "Checking the shop computer. No document is sent by this check.");
+    setMessage(nativeAppMode ? "Checking shop connection." : "Checking the shop computer. No document is sent by this check.");
     let nativeLocalNetworkPermissionDenied=false;
     if(nativeAppMode) {
       const access=await requestSmartPrintNativeLocalNetworkAccess();
@@ -3698,7 +3698,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
           }
           setCheckStatus("connected");
           onReady(true);
-          setMessage(nativeAppMode ? "Shop Wi-Fi ready. Standard local uploads use HTTP; Private Printing encrypts document contents end-to-end." : "This phone can reach the shop computer. Standard local uploads use HTTP and are not encrypted in transit; Private Printing encrypts document contents end-to-end.");
+          setMessage(nativeAppMode ? "Shop connection ready. Standard local uploads use HTTP; Private Printing encrypts document contents end-to-end." : "This phone can reach the shop computer. Standard local uploads use HTTP and are not encrypted in transit; Private Printing encrypts document contents end-to-end.");
           return;
         }
       } catch {
@@ -3717,11 +3717,11 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     onUnavailable();
     setMessage(nativeAppMode
       ? nativeLocalNetworkPermissionDenied
-        ? "Could not reach the shop. Check that this phone is on the same Wi-Fi as the shop computer. If Android 16 local-network access is restricted, allow SmartPrint under Android Settings → Permissions → Nearby devices. Cloud-assisted upload remains available."
+        ? "Could not reach the shop. Make sure this phone is on the same Wi-Fi or hotspot as the shop computer. If Android 16 local-network access is restricted, allow SmartPrint under Android Settings → Permissions → Nearby devices. Cloud-assisted upload remains available."
         : "Shop offline · Secure HTTPS queue available while the shop Agent is offline."
       : validEndpointCount===0
         ? "The shop Agent has not announced a usable local address. Secure HTTPS queue fallback is available only while the shop Agent is offline."
-        : "Could not reach the shop computer. Make sure this phone is connected to the same shop Wi-Fi, then ask the shop operator to check the connection. Secure HTTPS queue fallback is available only while the shop Agent is offline.");
+        : "Could not reach the shop computer. Connect this phone to the same shop Wi-Fi or hotspot, then ask the shop owner to check the connection. Secure HTTPS queue fallback is available only while the shop Agent is offline.");
   }
 
   useEffect(()=>{
@@ -3732,7 +3732,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
       onUnavailable();
       setPermissionState("unknown");
       setCheckStatus("unavailable");
-      setMessage("The shop's paired print computer has not reported a reachable local connection. Direct Wi-Fi transfer is temporarily unavailable. Use Secure queue · HTTPS below to submit your request when available.");
+      setMessage("The shop's paired print computer has not reported a reachable local connection. Direct shop Wi-Fi or hotspot transfer is temporarily unavailable. Use Secure queue · HTTPS below to submit your request when available.");
       return ()=>{checkGeneration.current++;};
     }
     onReady(false);

@@ -230,6 +230,6 @@ Write-Host ""
 Write-Host "SmartPrint is reachable through the centrally managed Cloudflare Tunnel." -ForegroundColor Green
 Write-Host "Single public application URL: $currentBaseUrl"
 Write-Host "Portal, QR links and API:      $currentBaseUrl"
-Write-Host "Agent local listener:         TCP 17842 (Private firewall profile)"
+Write-Host "Agent local listener:         TCP 17842 (all firewall profiles; local subnet only)"
 Write-Host "No customer certificate installation is required."
 Write-Host "Do not run docker compose down -v; the database and documents are persistent."

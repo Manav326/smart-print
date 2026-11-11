@@ -254,15 +254,22 @@ test("Android customer printing uses the same single Copies control and event ha
     "Android mode may change presentation, but must not fork Copies behaviour.");
 });
 
-test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi check", () => {
+test("shop connection guidance keeps hotspot setup clear for owners", () => {
   const app = read("../src/App.tsx");
-  const start = app.indexOf('<strong>Scan with SmartPrint on your phone</strong>');
-  assert.ok(start >= 0, "The shop QR should lead with the SmartPrint in-app flow.");
-  const section = app.slice(start, start + 650);
-  assert.match(section, /On your phone, open SmartPrint and tap Check Wi-Fi. Scan this QR or choose its saved photo or screenshot/);
-  assert.match(section, /This screen will confirm automatically/);
-  assert.match(section, /phone without SmartPrint/);
-  assert.match(section, /five minutes/);
+  assert.match(app, /Choose the Wi-Fi or hotspot customers will use to send documents/);
+  assert.match(app, /Shop Wi-Fi or hotspot/);
+  assert.match(app, /Check with another phone/);
+  assert.match(app, /Connect another phone to this same Wi-Fi or hotspot/);
+  assert.match(app, /phone sharing the hotspot cannot join it/);
+  assert.match(app, /Some hotspots block connected devices from reaching each other/);
+});
+
+test("customer local-upload recovery explains shop Wi-Fi and hotspot without adding setup steps", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /same Wi-Fi or hotspot as the shop computer/);
+  assert.match(app, /same shop Wi-Fi or hotspot/);
+  assert.match(app, /Direct shop Wi-Fi or hotspot transfer is temporarily unavailable/);
+  assert.match(app, /Shop connection ready/);
 });
 
 
