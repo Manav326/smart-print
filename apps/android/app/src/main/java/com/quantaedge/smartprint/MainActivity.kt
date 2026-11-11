@@ -997,7 +997,10 @@ class MainActivity : AppCompatActivity() {
         heroContent.addView(text(
             if (portalUrl == null) "Your next print starts here." else "Everything ready for your next print.",
             25, R.color.qp_hero_text, true
-        ).apply { setPadding(0, dp(9), 0, dp(7)) })
+        ).apply {
+            id = R.id.smartprint_home_heading
+            setPadding(0, dp(9), 0, dp(7))
+        })
         heroContent.addView(text(
             if (portalUrl == null) "Keep your documents close. Find a participating shop when you're ready to print."
             else "You're connected to ${shopDisplayName ?: "your print shop"}. Choose a document whenever you're ready.",
@@ -1343,8 +1346,7 @@ class MainActivity : AppCompatActivity() {
                             val identity = batch.first()
                             val batchTitle = identity.batchName?.takeIf(String::isNotBlank)
                                 ?: identity.batchGroupName?.takeIf(String::isNotBlank)
-                                ?: identity.batchId?.let { "Batch · " + it.take(8).uppercase(Locale.ROOT) }
-                                ?: "Order · " + identity.jobNumber
+                                ?: if (batch.size > 1) "Print batch" else "Print order · " + identity.jobNumber
                             top.addView(text(batchTitle, 13, R.color.qp_text, true), LinearLayout.LayoutParams(0, -2, 1f))
                             top.addView(text(activityStatusLabel(status), 9, R.color.qp_primary, true).apply {
                                 setPadding(dp(8), dp(5), dp(8), dp(5))
