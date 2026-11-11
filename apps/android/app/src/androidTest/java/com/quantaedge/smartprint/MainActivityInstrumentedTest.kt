@@ -1,7 +1,9 @@
 package com.quantaedge.smartprint
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.util.Base64
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.ValueCallback
@@ -1233,6 +1235,44 @@ class QrScannerPermissionInstrumentedTest {
 
             onView(withText("Choose from photos")).check(matches(isDisplayed()))
             onView(withText("Camera access needed")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun decodesARealShopQrImageAndRejectsItInTheWifiCheckFlow() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val qrImage = File(context.cacheDir, "smartprint-shop-qr-photo-test.png")
+        // A real QR PNG containing a valid Shop QR for the configured CI service origin.
+        val qrPng = Base64.decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAQ4AAAEOAQAAAABQysQIAAACSklEQVR4nO2aQWojQQxFX40aspRvkKOUYQ4W5mZqmIvMAQLyMlDNn4W6nWyGDDgkKXBhTIP/Qh9Jv/TVbuKds/14DwF3yB1yh7TWWjsvl/PWzlwasLAul9ZaWz47ltshSDJJ2QddEnSr7+z10/hO4f4v5NIWwGNrbbBup1XJgNbOnx/LzZDl+vTwfP4t0Poz2U4sz58ey4dD/NdLOy+Xp5fTavnFsdwAee0jXJYoGXTomrmPttbaCftzhr7QHxJLFtbW2qfHcjsEHceymwKwxCpxkubL0V51xQIPZa8PgM9YdUgaHngMj+HCwxSm2NtqUkb0Qbej9vAAcA2fteqGhxR2UBu+q5+mzZGyHsKS4cExDimZtI+Kgg46phgeJjFt1SmBTul29gFScCRrRkZ44KohQYfKmaLG7xkZDQ8lw1UXkCmUHXZ/MSOjOkCpgZLK2tT3kWWXojShUlZCNymjXQGgZLzkrsR8UkamY2nnGr5bckDTKsM+bCcDLPvwGGCKeatu0AelBjFcVpfR5PdRDQmWjJI7xYB5+2i4gD0pb/zRvPeRJVIAVXJXfzRn1S3AuMDlSawPz+ca8Lb2FbF8IMRj8V/A9hgvJ15OmEK5WjLplhhQdlMMroZCgGWf1B+9znW7Yh/SN+19BEC3fPVHeC27ZmW0bxUUV69XdKr8pmSUe8sou12XxgCz7hmKUZm+wx8JGFPm6BWyPQpWPLbHku5es+s3Dfff5807vsMfeVj2MbOHBXYRoNe2oQR8zn1du/9D4w65Q26G/AXcYX3BuKy7xQAAAABJRU5ErkJggg==",
+            Base64.DEFAULT
+        )
+        qrImage.writeBytes(qrPng)
+
+        val intent = Intent(context, QrScannerActivity::class.java)
+            .putExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE, QrScanPurpose.WIFI_READINESS.wireValue)
+            .putExtra(QrScannerActivity.EXTRA_QA_PAUSE_CAMERA, true)
+
+        try {
+            ActivityScenario.launch<QrScannerActivity>(intent).use { scenario ->
+                // Exercise the exact ML Kit file-URI decode method used by OpenDocument.
+                // The system picker itself is covered separately by the open/cancel UI test.
+                scenario.onActivity { activity ->
+                    val decode = QrScannerActivity::class.java.getDeclaredMethod(
+                        "decodePhotoQr",
+                        Uri::class.java
+                    )
+                    decode.isAccessible = true
+                    decode.invoke(activity, Uri.fromFile(qrImage))
+                }
+
+                onView(withText(
+                    "This isn't a Wi-Fi QR. Choose the Wi-Fi QR shown on the shop computer. Your saved shop is unchanged."
+                )).check(matches(isDisplayed()))
+                onView(withText("Choose from photos")).check(matches(isDisplayed()))
+            }
+        } finally {
+            qrImage.delete()
         }
     }
 
