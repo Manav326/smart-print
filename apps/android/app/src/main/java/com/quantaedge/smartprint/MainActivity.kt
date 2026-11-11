@@ -1180,7 +1180,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             setPadding(0, dp(18), 0, dp(6))
         })
-        column.addView(text("Scan the counter QR code.", 13, R.color.qp_muted, false).apply {
+        column.addView(text("Scan the Shop QR to send your documents.", 13, R.color.qp_muted, false).apply {
             gravity = Gravity.CENTER
         })
         column.addView(button("Scan Shop QR", true).apply {
