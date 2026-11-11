@@ -261,7 +261,11 @@ test("shop connection guidance keeps hotspot setup clear for owners", () => {
   assert.match(app, /Check with another phone/);
   assert.match(app, /Connect another phone to this same Wi-Fi or hotspot/);
   assert.match(app, /phone sharing the hotspot cannot join it/);
-  assert.match(app, /Some hotspots block connected devices from reaching each other/);
+  assert.match(app, /This screen updates automatically when the phone connects/);
+  assert.match(app, /Check that the second phone is on the selected Wi-Fi or hotspot/);
+  assert.match(app, /Some hotspots block devices from communicating; try shop Wi-Fi instead/);
+  assert.match(app, /Connect this computer to the shop Wi-Fi or hotspot, then refresh/);
+  assert.doesNotMatch(app, /Connect this computer to the Wi-Fi or network you use at the shop/);
 });
 
 test("customer local-upload recovery explains shop Wi-Fi and hotspot without adding setup steps", () => {

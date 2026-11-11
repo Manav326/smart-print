@@ -2381,7 +2381,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
           </div>
           {test&&<div className="local-phone-test">
             <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
-            <div><strong>Use a second phone</strong><p>Connect another phone to this same Wi-Fi or hotspot. In SmartPrint, open Your space → connected shop → Check shop Wi-Fi, then scan this QR.</p><small>The phone sharing the hotspot cannot join it. No SmartPrint? Scan with your camera and open the link.</small></div>
+            <div><strong>Use a second phone</strong><p>Connect another phone to this same Wi-Fi or hotspot. In SmartPrint, open Your space → connected shop → Check shop Wi-Fi, then scan this QR.</p><small>The phone sharing the hotspot cannot join it. No SmartPrint? Scan with your camera and open the link.</small><p>This screen updates automatically when the phone connects.</p></div>
           </div>}
           {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
           {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>Local print pipeline ready</strong><small>Protected queue, print worker, cloud heartbeat and printer inventory are healthy. The assigned printer is checked separately for each QR station upload.</small></span></div>}
@@ -2392,9 +2392,9 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
             readiness.heartbeatFresh?"":"Cloud heartbeat is stale",
             readiness.printerInventoryFresh?"":"Printer inventory is stale"
           ].filter(Boolean).join(" · ")} {readiness.lastFailureCode?"(Last issue: "+readiness.lastFailureCode+") ":""}Retry after the shop computer/Agent has recovered.</small></span></div>}
-          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>No phone reached this computer. Check that another phone is on the same Wi-Fi or hotspot and try again. Some hotspots block connected devices from reaching each other; use shop Wi-Fi or a hotspot that allows them to communicate.</small></span></div>}
+          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Check that the second phone is on the selected Wi-Fi or hotspot. Some hotspots block devices from communicating; try shop Wi-Fi instead.</small></span></div>}
         </>}
-      </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the Wi-Fi or network you use at the shop, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
+      </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the shop Wi-Fi or hotspot, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
     </>}
     {error&&<div className="local-network-error" role="alert">{error}</div>}
   </section>;
