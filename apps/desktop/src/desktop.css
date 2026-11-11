@@ -431,3 +431,11 @@ body[data-app-shell="desktop"] .brand-mark-image{width:44px;height:44px;flex-bas
 body[data-app-shell="desktop"] .brand-name{color:var(--text)}
 body[data-app-shell="desktop"] .brand-name span{color:var(--accent)}
 body[data-app-shell="desktop"] .brand-parent-wordmark{background:#F5F7FC}
+
+/* Keep the full parent lockup inside the narrower Windows navigation rail. */
+body[data-app-shell="desktop"] .app-shell .brand-lockup{gap:5px}
+body[data-app-shell="desktop"] .app-shell .brand-mark-image{width:32px;height:32px;flex-basis:32px;border-radius:10px}
+body[data-app-shell="desktop"] .app-shell .brand-lockup-copy{gap:2px}
+body[data-app-shell="desktop"] .app-shell .brand-name{font-size:15px;letter-spacing:-.55px}
+body[data-app-shell="desktop"] .app-shell .brand-lockup-by{font-size:8px}
+body[data-app-shell="desktop"] .app-shell .brand-parent-logo{width:82px;max-height:19px}
