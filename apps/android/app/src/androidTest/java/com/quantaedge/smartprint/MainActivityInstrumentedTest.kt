@@ -21,6 +21,7 @@ import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
+import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
@@ -125,9 +126,12 @@ class MainActivityInstrumentedTest {
             scenario.onActivity { activity ->
                 val toolbar = MainActivity::class.java.getDeclaredField("toolbar").apply { isAccessible = true }
                     .get(activity) as com.google.android.material.appbar.MaterialToolbar
-                assertEquals("SmartPrint", toolbar.title.toString())
-                assertTrue(toolbar.subtitle.toString().contains("by QuantaEdge"))
-                assertTrue(toolbar.subtitle.toString().contains("Account"))
+                assertEquals("SmartPrint by QuantaEdge", toolbar.contentDescription.toString())
+                assertEquals("", toolbar.title.toString())
+                assertEquals("", toolbar.subtitle.toString())
+                val pageContext = toolbar.findViewWithTag<TextView>("smartprint-toolbar-page")
+                assertNotNull(pageContext)
+                assertTrue(pageContext.text.toString().contains("ACCOUNT"))
                 assertEquals("Back", toolbar.navigationContentDescription)
                 assertNotNull(toolbar.navigationIcon)
             }
@@ -532,7 +536,7 @@ class MainActivityInstrumentedTest {
                 val toolbar = MainActivity::class.java.getDeclaredField("toolbar")
                     .apply { isAccessible = true }
                     .get(activity) as com.google.android.material.appbar.MaterialToolbar
-                assertEquals("SmartPrint", toolbar.title.toString())
+                assertEquals("SmartPrint by QuantaEdge", toolbar.contentDescription.toString())
             }
         }
     }
@@ -548,7 +552,7 @@ class MainActivityInstrumentedTest {
             onView(withText("Choose files")).check(matches(isDisplayed()))
             onView(withText("Find a print shop")).check(matches(isDisplayed()))
             onView(withContentDescription("Shop connection")).check(matches(isDisplayed()))
-            onView(withText("FROM SMARTPRINT")).check(matches(isDisplayed()))
+            onView(withText("FROM SMARTPRINT")).perform(scrollTo()).check(matches(isDisplayed()))
             scenario.onActivity { activity ->
                 val customBar = MainActivity::class.java.getDeclaredField("bottomNavigationContent").apply {
                     isAccessible = true
