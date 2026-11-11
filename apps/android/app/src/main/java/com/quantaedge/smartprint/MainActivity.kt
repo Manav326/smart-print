@@ -573,6 +573,7 @@ class MainActivity : AppCompatActivity() {
                 contentDescription = "QuantaEdge"
             }, LinearLayout.LayoutParams(-2, -2))
             toolbarPageContext = TextView(this@MainActivity).apply {
+                tag = "smartprint-toolbar-page"
                 textSize = 9f
                 setTextColor(getColor(R.color.qp_muted))
                 includeFontPadding = false
