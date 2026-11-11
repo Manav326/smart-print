@@ -11,6 +11,14 @@
 - Android: adaptive launcher XML in `mipmap-anydpi-v26`; foreground, monochrome, and background layers in `res/drawable`. The same foreground vector is used by the in-app native toolbar.
 - Windows installer: `apps/desktop/src-tauri/icons/icon.ico`, generated from the same app-icon master.
 
+## Approved lockup and launch identity
+- In the app, use the full SmartPrint lockup: SmartPrint (one line, one wordmark) with smaller "by QuantaEdge" directly beneath.
+- The SmartPrint icon/mark remains visible beside the SmartPrint name in the full lockup. Do not insert the QuantaEdge launcher mark between the product name and its parent endorsement.
+- The QuantaEdge endorsement is plain lettering on a transparent background: Quanta navy `#152038`, Edge orange `#F97316`. No white capsule, navy/blue rectangle, pill, or badge behind either word.
+- On dark surfaces, retain Quanta's navy fill with a fine light outline for visibility; on light surfaces, retain Edge's orange fill with a fine dark outline. Do not recolour either wordmark.
+- Android and Windows launchers use the SmartPrint symbol only, with no text and no QuantaEdge mark. Their displayed app name is **Smart Print**.
+- Android adaptive, monochrome, Windows ICO, web favicon, and installed-app icon assets must all use the same clean symbol-only direction.
+
 ## Rules
 - Do not redraw, stretch, skew, crop, or add effects to the master mark. Preserve clear space around it.
 - Keep the violet mark unchanged in both themes. Theme changes affect surrounding UI and wordmark text only.
