@@ -2,7 +2,6 @@
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="256" android:viewportHeight="256">
-    <!-- Clean printer-and-paper symbol; centered inside the adaptive-icon safe area. -->
     <path android:pathData="M55,171 C53,190 68,205 91,211 C133,222 183,205 204,177"
         android:strokeColor="#FFE0DBFF" android:strokeWidth="10"
         android:strokeLineCap="round" android:fillColor="#00000000" />
@@ -13,8 +12,7 @@
         android:fillColor="#FFFFFFFF" />
     <path android:pathData="M91,113 H162" android:strokeColor="#FF7258E8"
         android:strokeWidth="9" android:strokeLineCap="round" android:fillColor="#00000000" />
-    <path android:pathData="M178,119 a5,5 0 1,0 0,10 a5,5 0 1,0 0,-10"
-        android:fillColor="#FF9B8CFF" />
+    <path android:pathData="M178,119 a5,5 0 1,0 0,10 a5,5 0 1,0 0,-10" android:fillColor="#FF9B8CFF" />
     <path android:pathData="M88,151 H169 V204 H88 Z" android:fillColor="#FFF8F7FF" />
     <path android:pathData="M105,169 H151 M105,184 H145" android:strokeColor="#FF7258E8"
         android:strokeWidth="7" android:strokeLineCap="round" android:fillColor="#00000000" />
