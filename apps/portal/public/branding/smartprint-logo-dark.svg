@@ -16,6 +16,7 @@
     <path d="M98 176 H158 M98 193 H148" fill="none" stroke="#7258E8" stroke-width="8" stroke-linecap="round"/>
   </g>
   <text x="166" y="83" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="54" font-weight="800" letter-spacing="-2.3" fill="#F0F3FA">Smart<tspan fill="#9B8CFF">Print</tspan></text>
-  <text x="171" y="128" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="18" font-weight="650" fill="#AAB6CA">by</text>
-  <text x="205" y="128" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="18" font-weight="800" letter-spacing="-.45"><tspan fill="#152038" stroke="#D7DEEE" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke">Quanta</tspan><tspan fill="#F97316">Edge</tspan></text>
+  <text x="313" y="130" text-anchor="middle" font-family="Manrope, Inter, Segoe UI, sans-serif" font-weight="800">
+    <tspan font-size="21" font-weight="650" fill="#AAB6CA">by </tspan><tspan font-size="27" fill="#152038" stroke="#D7DEEE" stroke-width="3" stroke-linejoin="round" paint-order="stroke">Quanta</tspan><tspan font-size="27" fill="#F97316">Edge</tspan>
+  </text>
 </svg>
