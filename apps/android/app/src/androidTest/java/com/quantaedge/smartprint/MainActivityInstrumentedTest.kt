@@ -1,7 +1,9 @@
 package com.quantaedge.smartprint
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.util.Base64
 import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.ValueCallback
@@ -871,7 +873,7 @@ class MainActivityInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             // Verify the customer route after a real bottom-navigation tap.
             openNavigationDestination(3, "Connect to a shop")
-            onView(withText("Scan QR code")).check(matches(isDisplayed()))
+            onView(withText("Scan Shop QR")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
         }
     }
@@ -1001,9 +1003,9 @@ class MainActivityInstrumentedTest {
                     false
                 )
                 try {
-                    onView(withText("Scan QR code")).check(matches(isDisplayed()))
-                    onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
-                    onView(withText("Check shop Wi-Fi")).perform(click())
+                    onView(withText("Scan Shop QR")).check(matches(isDisplayed()))
+                    onView(withText("Check Wi-Fi")).check(matches(isDisplayed()))
+                    onView(withText("Check Wi-Fi")).perform(click())
 
                     val launched = instrumentation.waitForMonitorWithTimeout(scannerMonitor, 10_000)
                     val scannerActivity = launched as? QrScannerActivity
@@ -1013,6 +1015,9 @@ class MainActivityInstrumentedTest {
                         "wifi_readiness",
                         scannerActivity.intent.getStringExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE)
                     )
+                    onView(withText("Choose from photos")).check(matches(isDisplayed()))
+                    onView(withContentDescription("Choose a QR from a photo or screenshot"))
+                        .check(matches(isDisplayed()))
                     assertEquals(
                         "Wi-Fi verification must not create or change the customer's saved shop.",
                         null,
@@ -1029,7 +1034,7 @@ class MainActivityInstrumentedTest {
                         isAccessible = true
                     }.invoke(activity)
                 }
-                onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
+                onView(withText("Check Wi-Fi")).check(matches(isDisplayed()))
                 assertEquals(null, shopPreferences.getString("portalUrl", null))
             }
         } finally {
@@ -1109,8 +1114,8 @@ class MainActivityInstrumentedTest {
                     false
                 )
                 try {
-                    onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
-                    onView(withText("Check shop Wi-Fi")).perform(click())
+                    onView(withText("Check Wi-Fi")).check(matches(isDisplayed()))
+                    onView(withText("Check Wi-Fi")).perform(click())
 
                     val launched = instrumentation.waitForMonitorWithTimeout(scannerMonitor, 10_000)
                     val scannerActivity = launched as? QrScannerActivity
@@ -1139,7 +1144,7 @@ class MainActivityInstrumentedTest {
                         inspection.set(
                             containsVisibleText(
                                 scannerActivity.window.decorView,
-                                "Scan the temporary phone-check QR shown on the shop computer."
+                                "Scan the Wi-Fi QR shown on the shop computer."
                             ) to containsVisibleText(
                                 scannerActivity.window.decorView,
                                 QrScannerActivity.QA_CAMERA_PAUSED_LABEL
@@ -1150,7 +1155,7 @@ class MainActivityInstrumentedTest {
                     val visibleState = inspection.get()
                         ?: throw AssertionError("The QR scanner view hierarchy was not inspected.")
                     assertTrue(
-                        "The Wi-Fi scanner must display the temporary phone-check QR instruction.",
+                        "The Wi-Fi scanner must display the simple Wi-Fi QR instruction.",
                         visibleState.first
                     )
                     assertTrue(
@@ -1228,18 +1233,93 @@ class MainActivityInstrumentedTest {
 @RunWith(AndroidJUnit4::class)
 class QrScannerPermissionInstrumentedTest {
     @Test
+    fun photoPickerCanBeOpenedAndCancelledWithoutCameraPermission() {
+        ActivityScenario.launch(QrScannerActivity::class.java).use {
+            onView(withText("Choose from photos")).check(matches(isDisplayed())).perform(click())
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+
+            // The picker is a separate system Activity, so send Back through instrumentation
+            // rather than Espresso's app-root-only pressBack helper.
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+                .sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+
+            onView(withText("Choose from photos")).check(matches(isDisplayed()))
+            onView(withText("Camera access needed")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
+    fun decodesARealShopQrImageAndRejectsItInTheWifiCheckFlow() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val qrImage = File(context.cacheDir, "smartprint-shop-qr-photo-test.png")
+        // A real QR PNG containing a valid Shop QR for the configured CI service origin.
+        val qrPng = Base64.decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAQ4AAAEOAQAAAABQysQIAAACSklEQVR4nO2aQWojQQxFX40aspRvkKOUYQ4W5mZqmIvMAQLyMlDNn4W6nWyGDDgkKXBhTIP/Qh9Jv/TVbuKds/14DwF3yB1yh7TWWjsvl/PWzlwasLAul9ZaWz47ltshSDJJ2QddEnSr7+z10/hO4f4v5NIWwGNrbbBup1XJgNbOnx/LzZDl+vTwfP4t0Poz2U4sz58ey4dD/NdLOy+Xp5fTavnFsdwAee0jXJYoGXTomrmPttbaCftzhr7QHxJLFtbW2qfHcjsEHceymwKwxCpxkubL0V51xQIPZa8PgM9YdUgaHngMj+HCwxSm2NtqUkb0Qbej9vAAcA2fteqGhxR2UBu+q5+mzZGyHsKS4cExDimZtI+Kgg46phgeJjFt1SmBTul29gFScCRrRkZ44KohQYfKmaLG7xkZDQ8lw1UXkCmUHXZ/MSOjOkCpgZLK2tT3kWWXojShUlZCNymjXQGgZLzkrsR8UkamY2nnGr5bckDTKsM+bCcDLPvwGGCKeatu0AelBjFcVpfR5PdRDQmWjJI7xYB5+2i4gD0pb/zRvPeRJVIAVXJXfzRn1S3AuMDlSawPz+ca8Lb2FbF8IMRj8V/A9hgvJ15OmEK5WjLplhhQdlMMroZCgGWf1B+9znW7Yh/SN+19BEC3fPVHeC27ZmW0bxUUV69XdKr8pmSUe8sou12XxgCz7hmKUZm+wx8JGFPm6BWyPQpWPLbHku5es+s3Dfff5807vsMfeVj2MbOHBXYRoNe2oQR8zn1du/9D4w65Q26G/AXcYX3BuKy7xQAAAABJRU5ErkJggg==",
+            Base64.DEFAULT
+        )
+        qrImage.writeBytes(qrPng)
+
+        val intent = Intent(context, QrScannerActivity::class.java)
+            .putExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE, QrScanPurpose.WIFI_READINESS.wireValue)
+            .putExtra(QrScannerActivity.EXTRA_QA_PAUSE_CAMERA, true)
+
+        try {
+            ActivityScenario.launch<QrScannerActivity>(intent).use { scenario ->
+                // Exercise the exact ML Kit file-URI decode method used by OpenDocument.
+                // The system picker itself is covered separately by the open/cancel UI test.
+                scenario.onActivity { activity ->
+                    val decode = QrScannerActivity::class.java.getDeclaredMethod(
+                        "decodePhotoQr",
+                        Uri::class.java
+                    )
+                    decode.isAccessible = true
+                    decode.invoke(activity, Uri.fromFile(qrImage))
+                }
+
+                val expectedMessage =
+                    "This isn't a Wi-Fi QR. Choose the Wi-Fi QR shown on the shop computer. Your saved shop is unchanged."
+                var actualMessage = ""
+                val deadline = System.currentTimeMillis() + 10_000
+                while (actualMessage != expectedMessage && System.currentTimeMillis() < deadline) {
+                    scenario.onActivity { activity ->
+                        val statusField = QrScannerActivity::class.java.getDeclaredField("statusText")
+                        statusField.isAccessible = true
+                        actualMessage = (statusField.get(activity) as android.widget.TextView).text.toString()
+                    }
+                    if (actualMessage != expectedMessage) Thread.sleep(100)
+                }
+                assertEquals(expectedMessage, actualMessage)
+                scenario.onActivity { activity ->
+                    val photoButtonField = QrScannerActivity::class.java.getDeclaredField("photoButton")
+                    photoButtonField.isAccessible = true
+                    val photoButton = photoButtonField.get(activity) as com.google.android.material.button.MaterialButton
+                    assertTrue("The scanner must remain open after a wrong-purpose QR photo.", !activity.isFinishing)
+                    assertTrue("The photo action must remain available for retry.", photoButton.isEnabled)
+                }
+            }
+        } finally {
+            qrImage.delete()
+        }
+    }
+
+    @Test
     fun explainsCameraPermissionBeforeStartingTheScanner() {
         // The CI emulator installs this app with runtime permissions denied.
         // Do not change a package permission from the instrumentation process:
         // Android kills the app UID when a runtime permission grant changes.
         ActivityScenario.launch(QrScannerActivity::class.java).use {
-            onView(withText("Scan shop QR")).check(matches(isDisplayed()))
-            onView(withText("Scan the SmartPrint QR displayed at the shop counter to connect."))
+            onView(withText("Scan Shop QR")).check(matches(isDisplayed()))
+            onView(withText("Scan the Shop QR to send documents to this shop."))
                 .check(matches(isDisplayed()))
             onView(withText("Camera access needed")).check(matches(isDisplayed()))
-            onView(withText("Allow camera for QR scanning."))
+            onView(withText("Allow camera to scan live, or choose a photo below."))
                 .check(matches(isDisplayed()))
             onView(withText("Allow camera")).check(matches(isDisplayed()))
+            // Photo selection remains available even when the customer has not granted camera access.
+            onView(withText("Choose from photos")).check(matches(isDisplayed()))
+            onView(withContentDescription("Choose a QR from a photo or screenshot"))
+                .check(matches(isDisplayed()))
         }
     }
 }
