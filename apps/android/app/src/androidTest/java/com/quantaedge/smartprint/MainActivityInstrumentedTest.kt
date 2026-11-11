@@ -1220,6 +1220,20 @@ class MainActivityInstrumentedTest {
 @RunWith(AndroidJUnit4::class)
 class QrScannerPermissionInstrumentedTest {
     @Test
+    fun photoPickerCanBeOpenedAndCancelledWithoutCameraPermission() {
+        ActivityScenario.launch(QrScannerActivity::class.java).use {
+            onView(withText("Choose from photos")).check(matches(isDisplayed())).perform(click())
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+
+            // Back closes the Android system picker and returns to the same scanner.
+            androidx.test.espresso.Espresso.pressBack()
+
+            onView(withText("Choose from photos")).check(matches(isDisplayed()))
+            onView(withText("Camera access needed")).check(matches(isDisplayed()))
+        }
+    }
+
+    @Test
     fun explainsCameraPermissionBeforeStartingTheScanner() {
         // The CI emulator installs this app with runtime permissions denied.
         // Do not change a package permission from the instrumentation process:
