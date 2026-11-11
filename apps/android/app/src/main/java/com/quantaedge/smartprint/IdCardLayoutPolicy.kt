@@ -70,8 +70,8 @@ object IdCardLayoutPolicy {
             back,
             cropOffset,
             cropLength,
-            front.top + cardHeight + mmToPoints(6.5f),
-            back.top + cardHeight + mmToPoints(6.5f)
+            front.top - mmToPoints(5f),
+            back.top + cardHeight + mmToPoints(9f)
         )
     }
 }
