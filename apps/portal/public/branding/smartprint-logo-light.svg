@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 620 170" role="img" aria-labelledby="title desc">
   <title id="title">SmartPrint by QuantaEdge</title>
-  <desc id="desc">SmartPrint wordmark with the QuantaEdge parent-brand signature beneath it.</desc>
+  <desc id="desc">SmartPrint wordmark with the QuantaEdge parent-brand signature beneath it. All lettering is on a transparent background.</desc>
   <defs>
     <linearGradient id="printer" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#9B8CFF"/><stop offset="1" stop-color="#4B2CBF"/></linearGradient>
     <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#9B8CFF"/><stop offset="1" stop-color="#7258E8"/></linearGradient>
@@ -17,8 +17,5 @@
   </g>
   <text x="166" y="83" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="54" font-weight="800" letter-spacing="-2.3" fill="#152038">Smart<tspan fill="#7258E8">Print</tspan></text>
   <text x="171" y="128" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="18" font-weight="650" fill="#667085">by</text>
-  <rect x="202" y="104" width="174" height="35" rx="8" fill="#F5F7FC"/>
-  <path d="M298 104 H368 Q376 104 376 112 V131 Q376 139 368 139 H298 Z" fill="#152038"/>
-  <text x="214" y="129" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="18" font-weight="800" letter-spacing="-.45" fill="#152038">Quanta</text>
-  <text x="305" y="129" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="18" font-weight="800" letter-spacing="-.45" fill="#F97316">Edge</text>
+  <text x="205" y="128" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="18" font-weight="800" letter-spacing="-.45"><tspan fill="#152038">Quanta</tspan><tspan fill="#F97316">Edge</tspan></text>
 </svg>
