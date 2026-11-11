@@ -860,7 +860,7 @@ class MainActivityInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             // Verify the customer route after a real bottom-navigation tap.
             openNavigationDestination(3, "Connect to a shop")
-            onView(withText("Scan QR code")).check(matches(isDisplayed()))
+            onView(withText("Scan Shop QR")).check(matches(isDisplayed()))
             onView(withText("Open My Files")).check(matches(isDisplayed()))
         }
     }
@@ -990,9 +990,9 @@ class MainActivityInstrumentedTest {
                     false
                 )
                 try {
-                    onView(withText("Scan QR code")).check(matches(isDisplayed()))
-                    onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
-                    onView(withText("Check shop Wi-Fi")).perform(click())
+                    onView(withText("Scan Shop QR")).check(matches(isDisplayed()))
+                    onView(withText("Check Wi-Fi")).check(matches(isDisplayed()))
+                    onView(withText("Check Wi-Fi")).perform(click())
 
                     val launched = instrumentation.waitForMonitorWithTimeout(scannerMonitor, 10_000)
                     val scannerActivity = launched as? QrScannerActivity
@@ -1002,6 +1002,9 @@ class MainActivityInstrumentedTest {
                         "wifi_readiness",
                         scannerActivity.intent.getStringExtra(QrScannerActivity.EXTRA_SCAN_PURPOSE)
                     )
+                    onView(withText("Choose from photos")).check(matches(isDisplayed()))
+                    onView(withContentDescription("Choose a QR from a photo or screenshot"))
+                        .check(matches(isDisplayed()))
                     assertEquals(
                         "Wi-Fi verification must not create or change the customer's saved shop.",
                         null,
@@ -1018,7 +1021,7 @@ class MainActivityInstrumentedTest {
                         isAccessible = true
                     }.invoke(activity)
                 }
-                onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
+                onView(withText("Check Wi-Fi")).check(matches(isDisplayed()))
                 assertEquals(null, shopPreferences.getString("portalUrl", null))
             }
         } finally {
@@ -1098,8 +1101,8 @@ class MainActivityInstrumentedTest {
                     false
                 )
                 try {
-                    onView(withText("Check shop Wi-Fi")).check(matches(isDisplayed()))
-                    onView(withText("Check shop Wi-Fi")).perform(click())
+                    onView(withText("Check Wi-Fi")).check(matches(isDisplayed()))
+                    onView(withText("Check Wi-Fi")).perform(click())
 
                     val launched = instrumentation.waitForMonitorWithTimeout(scannerMonitor, 10_000)
                     val scannerActivity = launched as? QrScannerActivity
@@ -1128,7 +1131,7 @@ class MainActivityInstrumentedTest {
                         inspection.set(
                             containsVisibleText(
                                 scannerActivity.window.decorView,
-                                "Scan the temporary phone-check QR shown on the shop computer."
+                                "Scan the Wi-Fi QR on the shop computer to check the connection."
                             ) to containsVisibleText(
                                 scannerActivity.window.decorView,
                                 QrScannerActivity.QA_CAMERA_PAUSED_LABEL
@@ -1139,7 +1142,7 @@ class MainActivityInstrumentedTest {
                     val visibleState = inspection.get()
                         ?: throw AssertionError("The QR scanner view hierarchy was not inspected.")
                     assertTrue(
-                        "The Wi-Fi scanner must display the temporary phone-check QR instruction.",
+                        "The Wi-Fi scanner must display the simple Wi-Fi QR instruction.",
                         visibleState.first
                     )
                     assertTrue(
@@ -1222,7 +1225,7 @@ class QrScannerPermissionInstrumentedTest {
         // Do not change a package permission from the instrumentation process:
         // Android kills the app UID when a runtime permission grant changes.
         ActivityScenario.launch(QrScannerActivity::class.java).use {
-            onView(withText("Scan shop QR")).check(matches(isDisplayed()))
+            onView(withText("Scan Shop QR")).check(matches(isDisplayed()))
             onView(withText("Scan the SmartPrint QR displayed at the shop counter to connect."))
                 .check(matches(isDisplayed()))
             onView(withText("Camera access needed")).check(matches(isDisplayed()))
