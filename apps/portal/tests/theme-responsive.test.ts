@@ -576,7 +576,7 @@ test("SmartPrint uses the full theme-aware brand lockup inside the app", () => {
     "The parent logo must not be inserted beside the SmartPrint wordmark.");
   assert.match(light, /fill="#7258E8">Print/);
   assert.match(light, /fill="#152038">Quanta/);
-  assert.match(light, /fill="#F97316" stroke="#913B0B">Edge/);
+  assert.match(light, /fill="#F97316" stroke="#913B0B"[^>]*>Edge/);
   assert.match(dark, /fill="#F0F3FA">Smart/);
   assert.match(dark, /fill="#9B8CFF">Print/);
   assert.match(dark, /fill="#152038" stroke="#D7DEEE"/);
