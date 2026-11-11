@@ -259,7 +259,7 @@ test("shop phone-readiness QR guides SmartPrint users through the in-app Wi-Fi c
   const start = app.indexOf('<strong>Scan with SmartPrint on your phone</strong>');
   assert.ok(start >= 0, "The shop QR should lead with the SmartPrint in-app flow.");
   const section = app.slice(start, start + 650);
-  assert.match(section, /On your phone, open SmartPrint and tap Check Wi-Fi, then scan this QR/);
+  assert.match(section, /On your phone, open SmartPrint and tap Check Wi-Fi. Scan this QR or choose its saved photo or screenshot/);
   assert.match(section, /This screen will confirm automatically/);
   assert.match(section, /phone without SmartPrint/);
   assert.match(section, /five minutes/);
