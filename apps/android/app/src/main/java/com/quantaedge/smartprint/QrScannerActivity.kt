@@ -45,8 +45,9 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * On-device QR scanner. Camera frames are processed locally by ML Kit and
- * never saved or uploaded. Only the decoded QR string is returned to MainActivity.
+ * On-device QR scanner. Live camera frames and user-selected photos are processed
+ * locally by ML Kit. Images are never uploaded or saved by the scanner; only the
+ * decoded QR text is returned to MainActivity.
  */
 @OptIn(ExperimentalGetImage::class)
 class QrScannerActivity : AppCompatActivity() {
@@ -323,14 +324,9 @@ class QrScannerActivity : AppCompatActivity() {
                     val rawValue = barcodes.firstOrNull {
                         it.format == MlBarcode.FORMAT_QR_CODE && !it.rawValue.isNullOrBlank()
                     }?.rawValue?.trim()
-                    if (!rawValue.isNullOrBlank() && hasReturnedResult.compareAndSet(false, true)) {
-                        setResult(
-                            RESULT_OK,
-                            Intent()
-                                .putExtra(EXTRA_RAW_VALUE, rawValue)
-                                .putExtra(EXTRA_SCAN_PURPOSE, scanPurpose.wireValue)
-                        )
-                        finish()
+                    val decoded = rawValue?.takeIf { it.isNotBlank() }
+                    if (decoded != null) {
+                        returnScannedQr(decoded)
                     } else {
                         photoButton.isEnabled = true
                         photoFlowActive = false
@@ -388,17 +384,10 @@ class QrScannerActivity : AppCompatActivity() {
                                 val rawValue = barcodes.firstOrNull {
                                     it.format == MlBarcode.FORMAT_QR_CODE && !it.rawValue.isNullOrBlank()
                                 }?.rawValue?.trim()
-                                if (!photoFlowActive && !rawValue.isNullOrBlank() &&
-                                    hasReturnedResult.compareAndSet(false, true)
-                                ) {
+                                val decoded = rawValue?.takeIf { it.isNotBlank() }
+                                if (!photoFlowActive && decoded != null) {
                                     runOnUiThread {
-                                        setResult(
-                                            RESULT_OK,
-                                            Intent()
-                                                .putExtra(EXTRA_RAW_VALUE, rawValue)
-                                                .putExtra(EXTRA_SCAN_PURPOSE, scanPurpose.wireValue)
-                                        )
-                                        finish()
+                                        if (!photoFlowActive) returnScannedQr(decoded)
                                     }
                                 }
                             }
@@ -429,6 +418,21 @@ class QrScannerActivity : AppCompatActivity() {
                 showRetryButton()
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    /**
+     * Both live-camera and photo scans enter the same result/validation path.
+     * Purpose remains attached so a Shop QR can never be treated as a Wi-Fi QR.
+     */
+    private fun returnScannedQr(rawValue: String) {
+        if (!hasReturnedResult.compareAndSet(false, true)) return
+        setResult(
+            RESULT_OK,
+            Intent()
+                .putExtra(EXTRA_RAW_VALUE, rawValue)
+                .putExtra(EXTRA_SCAN_PURPOSE, scanPurpose.wireValue)
+        )
+        finish()
     }
 
     private fun showCameraPreview() {
