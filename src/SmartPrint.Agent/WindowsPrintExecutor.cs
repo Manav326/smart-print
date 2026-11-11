@@ -129,14 +129,20 @@ public sealed class WindowsPrintExecutor
 
             var printableWidth = GetDeviceCaps(dc, HorzRes);
             var printableHeight = GetDeviceCaps(dc, VertRes);
-            var dpiX = GetDeviceCaps(dc, LogPixelsX);
-            var dpiY = GetDeviceCaps(dc, LogPixelsY);
+            var isIdDocument = string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase);
+            var reportedDpiX = GetDeviceCaps(dc, LogPixelsX);
+            var reportedDpiY = GetDeviceCaps(dc, LogPixelsY);
+            // ID jobs are more important than a driver's imperfect metadata.
+            // Use the standard 300-DPI geometry when the driver reports an
+            // unusable resolution; do not reject solely on metadata quality.
+            var dpiX = isIdDocument ? NormalizeIdPrinterDpi(reportedDpiX) : reportedDpiX;
+            var dpiY = isIdDocument ? NormalizeIdPrinterDpi(reportedDpiY) : reportedDpiY;
             var dpi = Math.Clamp(Math.Min(dpiX, dpiY), 150, 300);
-            if (printableWidth <= 0 || printableHeight <= 0)
+            if ((printableWidth <= 0 || printableHeight <= 0) && !isIdDocument)
                 throw new PrintExecutionBlockedException("PRINTER_PRINTABLE_AREA_INVALID", "The printer driver returned an invalid printable area.");
 
             var idDocumentPlacement = default(IdDocumentPagePlacement);
-            if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase))
+            if (isIdDocument)
             {
                 using var idDocumentRaster = raster.RenderPage(0, dpi);
                 var compatible = IdDocumentPrintPlacementPolicy.TryCreate(
@@ -155,9 +161,14 @@ public sealed class WindowsPrintExecutor
                     out var placementFailure);
                 if (!compatible)
                     throw new PrintExecutionBlockedException(
-                        "ID_CARD_PHYSICAL_SCALE_UNAVAILABLE",
-                        "This printer cannot guarantee the ID card's exact A4 print size. " + placementFailure +
-                        " Choose a supported A4 printer; SmartPrint will not shrink the ID card silently.");
+                        "ID_CARD_PAGE_GEOMETRY_INVALID",
+                        "The prepared ID sheet could not be validated as an A4 portrait page. " + placementFailure);
+
+                if (idDocumentPlacement.UsesNominalA4Fallback)
+                    System.Diagnostics.Trace.TraceWarning(
+                        "SmartPrint is submitting ID job {0} with nominal A4 placement because printer geometry is unreliable. {1}",
+                        entry.JobNumber,
+                        placementFailure);
             }
 
             var documentName = string.IsNullOrWhiteSpace(entry.SpoolerJobName)
@@ -748,6 +759,9 @@ public sealed class WindowsPrintExecutor
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
+
+    private static int NormalizeIdPrinterDpi(int reportedDpi) =>
+        reportedDpi is >= 150 and <= 2400 ? reportedDpi : 300;
 
     private static short PaperCode(string paper) => paper.Trim().ToUpperInvariant() switch
     {
