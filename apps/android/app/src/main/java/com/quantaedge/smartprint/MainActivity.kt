@@ -1358,14 +1358,20 @@ class MainActivity : AppCompatActivity() {
                         setPadding(0, 0, 0, dp(12))
                     }
                     val query = EditText(this).apply {
-                        hint = "Search batch, order, file or shop name"
+                        hint = "Search orders, files or shops"
                         setSingleLine(true)
                         inputType = InputType.TYPE_CLASS_TEXT
-                        textSize = 12f
+                        textSize = 14f
+                        includeFontPadding = false
+                        gravity = Gravity.CENTER_VERTICAL
+                        minHeight = dp(50)
                         setTextColor(getColor(R.color.qp_text))
                         setHintTextColor(getColor(R.color.qp_muted))
-                        setPadding(dp(12), 0, dp(12), 0)
-                        background = roundedDrawable(getColor(R.color.qp_card), 10, getColor(R.color.qp_outline))
+                        setPadding(dp(14), dp(6), dp(14), dp(6))
+                        setCompoundDrawablesRelativeWithIntrinsicBounds(android.R.drawable.ic_menu_search, 0, 0, 0)
+                        compoundDrawablePadding = dp(10)
+                        compoundDrawableTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
+                        background = roundedDrawable(getColor(R.color.qp_card), 12, getColor(R.color.qp_outline))
                     }
                     val filterActions = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
