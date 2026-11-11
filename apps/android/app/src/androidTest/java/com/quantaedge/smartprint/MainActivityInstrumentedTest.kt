@@ -37,6 +37,7 @@ import org.junit.runner.RunWith
 import eightbitlab.com.blurview.BlurView
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.view.ViewGroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
