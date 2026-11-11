@@ -613,24 +613,25 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(getColor(R.color.qp_muted))
                 includeFontPadding = false
             }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(4) })
-            brandMeta.addView(ImageView(this@MainActivity).apply {
-                setImageResource(R.drawable.quantaedge_mark)
-                scaleType = ImageView.ScaleType.FIT_CENTER
-                contentDescription = "QuantaEdge symbol"
-            }, LinearLayout.LayoutParams(dp(15), dp(15)).apply { marginEnd = dp(4) })
             brandMeta.addView(TextView(this@MainActivity).apply {
+                val isDarkTheme = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                    android.content.res.Configuration.UI_MODE_NIGHT_YES
                 val parentName = android.text.SpannableString("QuantaEdge")
                 parentName.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_parent_navy)), 0, 6, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 parentName.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_parent_orange)), 6, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 parentName.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                // Preserve each official parent-brand colour. A fine text halo, not a
+                // background capsule, keeps the navy/orange letters visible per theme.
+                val outlineColor = if (isDarkTheme) R.color.qp_parent_navy_outline else R.color.qp_parent_orange_outline
+                val outlineRange = if (isDarkTheme) 0..5 else 6..9
+                parentName.setSpan(object : android.text.style.CharacterStyle() {
+                    override fun updateDrawState(tp: android.text.TextPaint) {
+                        tp.setShadowLayer(dp(1).toFloat(), 0f, 0f, getColor(outlineColor))
+                    }
+                }, outlineRange.first, outlineRange.last + 1, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 text = parentName
-                textSize = 9f
+                textSize = 10f
                 includeFontPadding = false
-                setPadding(dp(6), dp(3), dp(6), dp(3))
-                background = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(getColor(R.color.qp_parent_wordmark_bg))
-                    cornerRadius = dp(6).toFloat()
-                }
                 contentDescription = "QuantaEdge"
             }, LinearLayout.LayoutParams(-2, -2))
             toolbarPageContext = TextView(this@MainActivity).apply {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SmartPrint by QuantaEdge",
+  "productName": "Smart Print",
   "version": "0.1.0",
   "identifier": "in.thinkwithsujeet.smartprint",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "SmartPrint by QuantaEdge",
+        "title": "Smart Print",
         "width": 1360,
         "height": 900,
         "minWidth": 1000,
@@ -31,10 +31,16 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico"],
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" }
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
     }
   }
 }

@@ -6,7 +6,7 @@
 - Light primary accent: `#7258E8`; dark primary accent: `#9B8CFF`.
 - The canonical SmartPrint mark is `apps/portal/public/smartprint-mark.svg`.
 - Web and Windows use the same SVG from the shared portal public asset directory. Android adaptive foreground/monochrome artwork mirrors its printer geometry and uses the same violet gradient background.
-- QuantaEdge is the parent-brand endorsement only. Its wordmark uses the approved QuantaEdge Learning colours: Quanta navy `#152038`, Edge orange `#F97316`. A pale `#F5F7FC` signature capsule preserves contrast in either SmartPrint theme. These colours do not replace SmartPrint's own palette.
+- QuantaEdge is the parent-brand endorsement only, centered beneath the SmartPrint wordmark as smaller `by QuantaEdge` lettering. Quanta stays navy `#152038`; Edge stays orange `#F97316`. The endorsement sits directly on the transparent logo canvas: no white capsule, navy block, blue badge, or inserted QuantaEdge icon. On dark surfaces, a fine light outline keeps the navy Quanta lettering visible without changing its fill colour; on light surfaces, a fine dark outline keeps the orange Edge lettering readable.
 
 ## Customer experience
 

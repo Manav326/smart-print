@@ -1,7 +1,8 @@
 <resources>
     <color name="qp_parent_navy">#152038</color>
     <color name="qp_parent_orange">#F97316</color>
-    <color name="qp_parent_wordmark_bg">#F5F7FC</color>
+    <color name="qp_parent_navy_outline">#D7DEEE</color>
+    <color name="qp_parent_orange_outline">#913B0B</color>
     <color name="qp_icon_background">#11131B</color>
     <color name="qp_primary">#9B8CFF</color>
     <color name="qp_primary_dark">#826EFF</color>

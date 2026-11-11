@@ -3517,3 +3517,76 @@ html[data-theme="light"] .auth-screen .brand-name span{color:#7258E8}
     transition-duration:.01ms!important;
   }
 }
+
+
+/* Canonical brand lockup: theme-aware full SVG in the app, symbol only when collapsed. */
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  min-width: 0;
+}
+.brand-lockup-full {
+  display: none;
+  width: 220px;
+  max-width: 100%;
+  height: auto;
+  flex: 0 1 auto;
+  object-fit: contain;
+}
+.brand-lockup-logo-light { display: block; }
+.brand-lockup-logo-dark { display: none; }
+html[data-theme="dark"] .brand-lockup-logo-light { display: none; }
+html[data-theme="dark"] .brand-lockup-logo-dark { display: block; }
+.brand-lockup .brand-mark-image {
+  display: none;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+  border-radius: 0;
+  box-shadow: none;
+  object-fit: contain;
+}
+.brand-lockup-subline {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted, #667085);
+  font-size: 9px;
+  line-height: 1.4;
+}
+.app-shell.sidebar-collapsed .brand-lockup {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+.app-shell.sidebar-collapsed .brand-lockup .brand-lockup-full,
+.app-shell.sidebar-collapsed .brand-lockup .brand-lockup-subline {
+  display: none !important;
+}
+.app-shell.sidebar-collapsed .brand-lockup .brand-mark-image {
+  display: block !important;
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+}
+.boot-brand-lockup {
+  justify-content: center;
+  padding: 0 !important;
+  margin: 0 auto 22px;
+}
+.boot-brand-lockup .brand-lockup-full { width: 244px; }
+.auth-brand .brand-lockup-full { width: 252px; }
+.customer-entry-brand-lockup .brand-lockup-full { width: min(220px, 64vw); }
+.sp-public-brand .brand-lockup-full { width: 218px; }
+.platform-admin-shell .brand-lockup-full { width: 214px; }
+@media(max-width: 600px) {
+  .brand-lockup-full { width: min(204px, 63vw); }
+  .auth-brand .brand-lockup-full { width: min(224px, 72vw); }
+  .customer-entry-brand-lockup .brand-lockup-full { width: min(204px, 63vw); }
+  .sp-public-brand .brand-lockup-full { width: min(200px, 63vw); }
+  .app-shell.sidebar-collapsed .brand-lockup .brand-mark-image {
+    width: 34px;
+    height: 34px;
+    flex-basis: 34px;
+  }
+}

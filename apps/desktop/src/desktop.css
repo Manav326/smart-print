@@ -425,17 +425,22 @@ html[data-theme="light"] body[data-app-shell="desktop"] .app-shell.light {
   --blue: #2d5fa8;
 }
 
-/* Shared SmartPrint identity and parent signature on Windows Desktop. */
-body[data-app-shell="desktop"] .brand-lockup{align-items:center}
-body[data-app-shell="desktop"] .brand-mark-image{width:44px;height:44px;flex-basis:44px}
-body[data-app-shell="desktop"] .brand-name{color:var(--text)}
-body[data-app-shell="desktop"] .brand-name span{color:var(--accent)}
-body[data-app-shell="desktop"] .brand-parent-wordmark{background:#F5F7FC}
-
-/* Keep the full parent lockup inside the narrower Windows navigation rail. */
-body[data-app-shell="desktop"] .app-shell .brand-lockup{gap:5px}
-body[data-app-shell="desktop"] .app-shell .brand-mark-image{width:32px;height:32px;flex-basis:32px;border-radius:10px}
-body[data-app-shell="desktop"] .app-shell .brand-lockup-copy{gap:2px}
-body[data-app-shell="desktop"] .app-shell .brand-name{font-size:15px;letter-spacing:-.55px}
-body[data-app-shell="desktop"] .app-shell .brand-lockup-by{font-size:8px}
-body[data-app-shell="desktop"] .app-shell .brand-parent-logo{width:82px;max-height:19px}
+/* Windows desktop uses the same theme-aware in-app lockup as the portal. */
+body[data-app-shell="desktop"] .brand-lockup {
+  align-items: center;
+}
+body[data-app-shell="desktop"] .brand-lockup-full {
+  width: 214px;
+  max-width: 100%;
+}
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .brand-lockup .brand-lockup-full {
+  display: none !important;
+}
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .brand-lockup .brand-mark-image {
+  display: block !important;
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+  border-radius: 0;
+  box-shadow: none;
+}

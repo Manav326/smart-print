@@ -11,11 +11,11 @@
 [Setup]
 SourceDir=..\
 AppId={{A7F2E9CA-2C3A-4E58-AE63-26E6B7B0DDF1}
-AppName=SmartPrint by QuantaEdge
+AppName=Smart Print
 AppVersion={#SmartPrintVersion}
 AppPublisher=QuantaEdge
 DefaultDirName={autopf}\SmartPrint
-DefaultGroupName=SmartPrint
+DefaultGroupName=Smart Print
 DisableProgramGroupPage=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64
@@ -25,7 +25,7 @@ OutputBaseFilename=SmartPrint-Windows-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-UninstallDisplayName=SmartPrint by QuantaEdge
+UninstallDisplayName=Smart Print
 CloseApplications=yes
 RestartApplications=no
 
@@ -46,7 +46,7 @@ Name: "{autodesktop}\SmartPrint"; Filename: "{app}\SmartPrint.Desktop.exe"; Work
 Name: "{group}\Uninstall SmartPrint"; Filename: "{uninstallexe}"
 
 [Run]
-Filename: "{app}\SmartPrint.Desktop.exe"; Description: "Launch SmartPrint"; Flags: postinstall nowait skipifsilent
+Filename: "{app}\SmartPrint.Desktop.exe"; Description: "Launch Smart Print"; Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}\uninstall-agent-service.ps1"""; Flags: runhidden waituntilterminated skipifdoesntexist
@@ -73,14 +73,14 @@ begin
 
   InstallerPath := ExpandConstant('{tmp}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe');
   if not FileExists(InstallerPath) then
-    RaiseException('The Microsoft Edge WebView2 Runtime installer is missing. Repair SmartPrint setup and try again.');
+    RaiseException('The Microsoft Edge WebView2 Runtime installer is missing. Repair Smart Print setup and try again.');
 
   if not Exec(InstallerPath, '/silent /install', '', SW_HIDE, ewWaitUntilTerminated, ExitCode) then
-    RaiseException('SmartPrint could not start the Microsoft WebView2 Runtime installer.');
+    RaiseException('Smart Print could not start the Microsoft WebView2 Runtime installer.');
   if (ExitCode <> 0) and (ExitCode <> 3010) then
-    RaiseException('Microsoft WebView2 Runtime setup failed. Check Windows Update and try SmartPrint setup again.');
+    RaiseException('Microsoft WebView2 Runtime setup failed. Check Windows Update and try Smart Print setup again.');
   if not IsWebView2Installed then
-    RaiseException('Microsoft WebView2 Runtime is still unavailable. SmartPrint cannot open without it.');
+    RaiseException('Microsoft WebView2 Runtime is still unavailable. Smart Print cannot open without it.');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
@@ -102,9 +102,9 @@ begin
     '" -AgentVersion "{#SmartPrintVersion}" -CustomerPortalOrigin "{#SmartPrintPublicUrl}" -ApiBaseUrl "{#SmartPrintPublicUrl}"';
 
   if not Exec(PowerShellPath, Parameters, ExpandConstant('{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}'), SW_HIDE, ewWaitUntilTerminated, ExitCode) then
-    RaiseException('SmartPrint could not start its background service installer.');
+    RaiseException('Smart Print could not start its background service installer.');
   if ExitCode <> 0 then
-    RaiseException('SmartPrint could not install or start the background print service. No printer connection has been changed. Restart Windows and run setup again.');
+    RaiseException('Smart Print could not install or start the background print service. No printer connection has been changed. Restart Windows and run setup again.');
 
   // Remove legacy Agent files from the old install layout only after the
   // replacement Windows service has started successfully. The previous Agent
