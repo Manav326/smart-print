@@ -107,6 +107,7 @@ class MainActivity : AppCompatActivity() {
     private var shopLogoUrl: String? = null
     private var shopAccentColor: String? = null
     private lateinit var accountAction: ImageView
+    private lateinit var toolbarPageContext: TextView
     private var documentViewer: SmartPrintDocumentViewer? = null
     private var viewingDocument: File? = null
     private var documentViewerReturnToIdStudio = false
@@ -565,14 +566,87 @@ class MainActivity : AppCompatActivity() {
         root.addView(blurTarget, FrameLayout.LayoutParams(-1, -1))
 
         toolbar = MaterialToolbar(this).apply {
-            title = "smartprint"
-            subtitle = "BY QUANTAEDGE · HOME"
+            title = ""
+            subtitle = ""
+            contentDescription = "SmartPrint by QuantaEdge"
             setTitleTextColor(getColor(R.color.qp_text))
             setSubtitleTextColor(getColor(R.color.qp_muted))
-            setTitleTextAppearance(this@MainActivity, R.style.TextAppearance_SmartPrint_Toolbar)
-            setSubtitleTextAppearance(this@MainActivity, R.style.TextAppearance_SmartPrint_ToolbarSubtitle)
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             elevation = 0f
+            val brandRow = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                contentDescription = "SmartPrint by QuantaEdge"
+            }
+            val logo = ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_launcher_foreground)
+                background = getDrawable(R.drawable.ic_launcher_background)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                setPadding(dp(7), dp(7), dp(7), dp(7))
+                contentDescription = null
+            }
+            brandRow.addView(logo, LinearLayout.LayoutParams(dp(38), dp(38)))
+            val brandCopy = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(9), 0, 0, 0)
+            }
+            brandCopy.addView(TextView(this@MainActivity).apply {
+                val name = android.text.SpannableString("SmartPrint")
+                name.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_text)), 0, 5, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                name.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_primary)), 5, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                name.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                text = name
+                textSize = 16f
+                includeFontPadding = false
+                contentDescription = "SmartPrint"
+            })
+            val brandMeta = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(4), 0, 0)
+            }
+            brandMeta.addView(TextView(this@MainActivity).apply {
+                text = "by"
+                textSize = 9f
+                setTextColor(getColor(R.color.qp_muted))
+                includeFontPadding = false
+            }, LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(4) })
+            brandMeta.addView(ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.quantaedge_mark)
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                contentDescription = "QuantaEdge symbol"
+            }, LinearLayout.LayoutParams(dp(15), dp(15)).apply { marginEnd = dp(4) })
+            brandMeta.addView(TextView(this@MainActivity).apply {
+                val parentName = android.text.SpannableString("QuantaEdge")
+                parentName.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_parent_navy)), 0, 6, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                parentName.setSpan(android.text.style.ForegroundColorSpan(getColor(R.color.qp_parent_orange)), 6, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                parentName.setSpan(android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, 10, android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                text = parentName
+                textSize = 9f
+                includeFontPadding = false
+                setPadding(dp(6), dp(3), dp(6), dp(3))
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(getColor(R.color.qp_parent_wordmark_bg))
+                    cornerRadius = dp(6).toFloat()
+                }
+                contentDescription = "QuantaEdge"
+            }, LinearLayout.LayoutParams(-2, -2))
+            toolbarPageContext = TextView(this@MainActivity).apply {
+                tag = "smartprint-toolbar-page"
+                textSize = 9f
+                setTextColor(getColor(R.color.qp_muted))
+                includeFontPadding = false
+                setPadding(dp(7), 0, 0, 0)
+            }
+            brandMeta.addView(toolbarPageContext, LinearLayout.LayoutParams(-2, -2))
+            brandCopy.addView(brandMeta)
+            brandRow.addView(brandCopy, LinearLayout.LayoutParams(-2, -2))
+            addView(brandRow, androidx.appcompat.widget.Toolbar.LayoutParams(
+                -2, dp(48), Gravity.START or Gravity.CENTER_VERTICAL
+            ))
+
             menu.add(Menu.NONE, SWITCH_SHOP, Menu.NONE, "Manage connected shop").apply {
                 setIcon(android.R.drawable.ic_menu_manage)
                 setContentDescription("Manage connected shop")
@@ -756,8 +830,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setToolbarPage(title: String) {
-        toolbar.title = "SmartPrint"
-        toolbar.subtitle = "by QuantaEdge  ·  " + title.trim()
+        if (::toolbarPageContext.isInitialized) {
+            toolbarPageContext.text = "·  " + title.trim().uppercase(Locale.ROOT)
+        }
     }
 
     private fun setToolbarBackAction(description: String, action: () -> Unit) {
@@ -1042,53 +1117,106 @@ class MainActivity : AppCompatActivity() {
         }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(15), dp(18), dp(24))
+            setPadding(dp(18), dp(17), dp(18), dp(28))
         }
         scroll.addView(column)
 
         val recentFiles = store.root.walkTopDown().filter { it.isFile }.toList()
         val used = android.text.format.Formatter.formatShortFileSize(this, store.storageUsageBytes())
-        val heading = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+
+        // A calm, high-contrast welcome surface makes the first action unmistakable.
+        val hero = card().apply {
+            radius = dp(24).toFloat()
+            cardElevation = dp(4).toFloat()
+            strokeWidth = dp(0)
+            setCardBackgroundColor(getColor(R.color.qp_hero))
         }
-        heading.addView(text("Your space", 23, R.color.qp_text, true).apply {
+        val heroContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(19), dp(18), dp(18))
+        }
+        heroContent.addView(text("SMARTPRINT  ·  YOUR PRINT SPACE", 10, R.color.qp_hero_muted, true))
+        heroContent.addView(text(
+            if (portalUrl == null) "Your next print starts here." else "Everything ready for your next print.",
+            25, R.color.qp_hero_text, true
+        ).apply {
             id = R.id.smartprint_home_heading
+            setPadding(0, dp(9), 0, dp(7))
         })
-        heading.addView(text("${recentFiles.size} files · $used used", 12, R.color.qp_muted, false).apply {
-            setPadding(0, dp(3), 0, 0)
-        })
-        column.addView(heading, linearParams().apply { bottomMargin = dp(16) })
+        heroContent.addView(text(
+            if (portalUrl == null) "Keep your documents close. Find a participating shop when you're ready to print."
+            else "You're connected to ${shopDisplayName ?: "your print shop"}. Choose a document whenever you're ready.",
+            12, R.color.qp_hero_muted, false
+        ).apply { setLineSpacing(dp(3).toFloat(), 1f); setPadding(0, 0, 0, dp(15)) })
+        heroContent.addView(button(
+            if (portalUrl == null) "Find a print shop" else "Continue to your shop",
+            true
+        ).apply {
+            minHeight = dp(46)
+            setOnClickListener { if (portalUrl == null) showScanPrint() else showPrint() }
+        }, LinearLayout.LayoutParams(-1, dp(46)))
+        hero.addView(heroContent)
+        column.addView(hero, linearParams().apply { bottomMargin = dp(17) })
+
+        val spaceSummary = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(1), dp(2), dp(12))
+        }
+        val summaryCopy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        summaryCopy.addView(text("Your space", 17, R.color.qp_text, true))
+        summaryCopy.addView(text("${recentFiles.size} saved files  ·  ${used} used", 11, R.color.qp_muted, false)
+            .apply { setPadding(0, dp(3), 0, 0) })
+        spaceSummary.addView(summaryCopy, LinearLayout.LayoutParams(0, -2, 1f))
+        spaceSummary.addView(text("PRIVATE ON THIS DEVICE", 8, R.color.qp_muted, true))
+        column.addView(spaceSummary, linearParams())
 
         val quickActions = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
         quickActions.addView(button("Scan document", true).apply {
             icon = getDrawable(R.drawable.ic_document_scan)
-            iconTint = ColorStateList.valueOf(getColor(android.R.color.white))
-            iconPadding = dp(8)
+            iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary_content))
+            iconPadding = dp(6)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            minHeight = dp(48)
             setOnClickListener { startDocumentScan() }
         }, LinearLayout.LayoutParams(-1, dp(48)))
-        quickActions.addView(button("Prepare ID card", false).apply {
+        val secondaryActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        secondaryActions.addView(button("Prepare ID card", false).apply {
             icon = getDrawable(R.drawable.ic_file)
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            iconPadding = dp(8)
+            iconPadding = dp(5)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            textSize = 11f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            minHeight = dp(48)
             setOnClickListener { showIdStudioHome() }
-        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
-        quickActions.addView(button("Choose from phone", false).apply {
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        secondaryActions.addView(button("Choose files", false).apply {
             icon = getDrawable(R.drawable.ic_file)
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            iconPadding = dp(8)
+            iconPadding = dp(5)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            textSize = 11f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            minHeight = dp(48)
             setOnClickListener {
                 folderPath = ""
                 pendingImportDestinationPath = ""
                 importFiles.launch(arrayOf("*/*"))
                 navigation.selectedItemId = FILES
             }
-        }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(9) })
-        column.addView(quickActions, linearParams())
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(9) })
+        quickActions.addView(secondaryActions, LinearLayout.LayoutParams(-1, dp(48)).apply {
+            topMargin = dp(9)
+        })
+        column.addView(quickActions, linearParams().apply { bottomMargin = dp(17) })
 
         val shopCard = card().apply {
             strokeWidth = dp(1)
@@ -1097,7 +1225,7 @@ class MainActivity : AppCompatActivity() {
         val shopRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), dp(12), dp(13), dp(12))
+            setPadding(dp(13), dp(13), dp(13), dp(13))
         }
         val shopGlyph = ImageView(this).apply {
             setImageResource(R.drawable.ic_store)
@@ -1114,40 +1242,82 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(11), 0, 0, 0)
         }
         shopCopy.addView(text(
-            if (portalUrl == null) "Print at a shop" else shopDisplayName ?: "Connected shop",
+            if (portalUrl == null) "Find a print shop" else shopDisplayName ?: "Connected shop",
             14, R.color.qp_text, true
         ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         shopCopy.addView(text(
-            if (portalUrl == null) "Scan a shop QR" else "Connected · tap to manage",
-            12, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(2), 0, 0) })
+            if (portalUrl == null) "Scan the QR code at the counter to connect" else "Connected · tap to manage your shop",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(3), 0, 0) })
         shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
         shopRow.addView(text(if (portalUrl == null) "›" else "⋮", 22, R.color.qp_muted, false))
         shopCard.addView(shopRow)
-        column.addView(shopCard, linearParams().apply { topMargin = dp(12); bottomMargin = dp(20) })
+        column.addView(shopCard, linearParams().apply { bottomMargin = dp(22) })
 
         val recentHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        recentHeader.addView(text("Recent", 17, R.color.qp_text, true),
+        recentHeader.addView(text("Recent files", 17, R.color.qp_text, true),
             LinearLayout.LayoutParams(0, -2, 1f))
-        recentHeader.addView(text("See all", 12, R.color.qp_primary, true).apply {
+        recentHeader.addView(text("View library  ›", 11, R.color.qp_primary, true).apply {
             setOnClickListener { showFiles() }
             isClickable = true
+            isFocusable = true
         })
-        column.addView(recentHeader, linearParams().apply { bottomMargin = dp(8) })
+        column.addView(recentHeader, linearParams().apply { bottomMargin = dp(9) })
 
-        val recent = recentFiles.sortedByDescending { it.lastModified() }.take(6)
+        val recent = recentFiles.sortedByDescending { it.lastModified() }.take(5)
         if (recent.isEmpty()) {
-            column.addView(text("No files yet", 13, R.color.qp_muted, false).apply {
-                setPadding(dp(2), dp(16), 0, dp(16))
-            })
+            val empty = card()
+            val emptyCopy = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(18), dp(22), dp(18), dp(22))
+            }
+            emptyCopy.addView(text("Your files will appear here", 13, R.color.qp_text, true))
+            emptyCopy.addView(text("Scan a document or choose files from your phone.", 11, R.color.qp_muted, false)
+                .apply { setPadding(0, dp(5), 0, 0); gravity = Gravity.CENTER })
+            empty.addView(emptyCopy)
+            column.addView(empty, linearParams())
         } else {
             recent.forEach { file ->
-                column.addView(entryView(file, false, showActions = false), linearParams().apply { bottomMargin = dp(4) })
+                column.addView(entryView(file, false, showActions = false), linearParams().apply { bottomMargin = dp(5) })
             }
         }
+
+        // This is owned SmartPrint promotion, not a third-party ad slot.
+        val promotion = card().apply {
+            radius = dp(18).toFloat()
+            setCardBackgroundColor(getColor(R.color.qp_glass_card))
+        }
+        val promoRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), dp(13), dp(13), dp(13))
+        }
+        val promoIcon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_file_image)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+        }
+        promoRow.addView(promoIcon, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val promoCopy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), 0, 0, 0)
+        }
+        promoCopy.addView(text("FROM SMARTPRINT", 8, R.color.qp_primary, true))
+        promoCopy.addView(text("Make every photo print-ready", 13, R.color.qp_text, true)
+            .apply { setPadding(0, dp(4), 0, dp(3)) })
+        promoCopy.addView(text("Prepare beautiful photo sheets with Photo Studio.", 10, R.color.qp_muted, false))
+        promoRow.addView(promoCopy, LinearLayout.LayoutParams(0, -2, 1f))
+        promoRow.addView(text("›", 24, R.color.qp_primary, true))
+        promotion.addView(promoRow)
+        promotion.setOnClickListener { if (portalUrl != null) showPrint() else showScanPrint() }
+        promotion.isClickable = true
+        promotion.isFocusable = true
+        column.addView(promotion, linearParams().apply { topMargin = dp(18) })
         return scroll
     }
 
@@ -1219,7 +1389,9 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(18), dp(16), dp(18), dp(24))
         }
         scroll.addView(column)
-        column.addView(text("Print history", 22, R.color.qp_text, true))
+        column.addView(text("Your print activity", 23, R.color.qp_text, true))
+        column.addView(text("Every order, organised by month.", 11, R.color.qp_muted, false)
+            .apply { setPadding(0, dp(4), 0, dp(12)) })
         val auth = customerAccountStore.read()
         if (auth == null) {
             column.addView(text("Sign in to sync jobs.", 13, R.color.qp_muted, false)
@@ -1274,14 +1446,20 @@ class MainActivity : AppCompatActivity() {
                         setPadding(0, 0, 0, dp(12))
                     }
                     val query = EditText(this).apply {
-                        hint = "Search batch, order, file or shop name"
+                        hint = "Search orders, files or shops"
                         setSingleLine(true)
                         inputType = InputType.TYPE_CLASS_TEXT
-                        textSize = 12f
+                        textSize = 14f
+                        includeFontPadding = false
+                        gravity = Gravity.CENTER_VERTICAL
+                        minHeight = dp(50)
                         setTextColor(getColor(R.color.qp_text))
                         setHintTextColor(getColor(R.color.qp_muted))
-                        setPadding(dp(12), 0, dp(12), 0)
-                        background = roundedDrawable(getColor(R.color.qp_card), 10, getColor(R.color.qp_outline))
+                        setPadding(dp(14), dp(6), dp(14), dp(6))
+                        setCompoundDrawablesRelativeWithIntrinsicBounds(android.R.drawable.ic_menu_search, 0, 0, 0)
+                        compoundDrawablePadding = dp(10)
+                        compoundDrawableTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
+                        background = roundedDrawable(getColor(R.color.qp_card), 12, getColor(R.color.qp_outline))
                     }
                     val filterActions = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
@@ -1314,7 +1492,21 @@ class MainActivity : AppCompatActivity() {
                                 .apply { gravity = Gravity.CENTER; setPadding(0, dp(20), 0, dp(20)) })
                             return
                         }
-                        matches.forEach { batch ->
+                        val monthGroups = matches.groupBy { batch ->
+                            CustomerHistoryDatePresentation.monthHeading(batch.first().createdUtc)
+                        }
+                        monthGroups.forEach { (monthLabel, monthBatches) ->
+                            val monthHeader = LinearLayout(this).apply {
+                                orientation = LinearLayout.HORIZONTAL
+                                gravity = Gravity.CENTER_VERTICAL
+                                setPadding(dp(2), dp(11), dp(2), dp(8))
+                            }
+                            monthHeader.addView(text(monthLabel, 16, R.color.qp_text, true),
+                                LinearLayout.LayoutParams(0, -2, 1f))
+                            monthHeader.addView(text("${monthBatches.size} ${if (monthBatches.size == 1) "order" else "orders"}",
+                                10, R.color.qp_muted, true))
+                            results.addView(monthHeader, linearParams())
+                            monthBatches.forEach { batch ->
                             val item = card()
                             val body = LinearLayout(this).apply {
                                 orientation = LinearLayout.VERTICAL
@@ -1338,8 +1530,7 @@ class MainActivity : AppCompatActivity() {
                             val identity = batch.first()
                             val batchTitle = identity.batchName?.takeIf(String::isNotBlank)
                                 ?: identity.batchGroupName?.takeIf(String::isNotBlank)
-                                ?: identity.batchId?.let { "Batch · " + it.take(8).uppercase(Locale.ROOT) }
-                                ?: "Order · " + identity.jobNumber
+                                ?: if (batch.size > 1) "Print batch" else "Print order · " + identity.jobNumber
                             top.addView(text(batchTitle, 13, R.color.qp_text, true), LinearLayout.LayoutParams(0, -2, 1f))
                             top.addView(text(activityStatusLabel(status), 9, R.color.qp_primary, true).apply {
                                 setPadding(dp(8), dp(5), dp(8), dp(5))
@@ -1348,7 +1539,7 @@ class MainActivity : AppCompatActivity() {
                             })
                             body.addView(top)
                             val date = runCatching { Instant.parse(identity.createdUtc).atZone(ZoneId.systemDefault())
-                                .format(DateTimeFormatter.ofPattern("dd MMM yyyy · hh:mm a", Locale.ROOT)) }
+                                .format(DateTimeFormatter.ofPattern("dd MMMM yyyy · hh:mm a", Locale.ENGLISH)) }
                                 .getOrDefault("Date unavailable")
                             body.addView(text(identity.shopName + " · " + date, 10, R.color.qp_muted, false)
                                 .apply { setPadding(0, dp(5), 0, dp(5)) })
@@ -1375,6 +1566,7 @@ class MainActivity : AppCompatActivity() {
                             }, linearParams().apply { topMargin = dp(7) })
                             item.addView(body)
                             results.addView(item, linearParams().apply { bottomMargin = dp(8) })
+                            }
                         }
                     }
 
@@ -1383,7 +1575,7 @@ class MainActivity : AppCompatActivity() {
                         android.app.DatePickerDialog(this, { _, year, month, day ->
                             selectedDate = "%04d-%02d-%02d".format(Locale.ROOT, year, month + 1, day)
                             dateButton.text = "%02d %s %04d".format(Locale.ROOT, day,
-                                java.text.DateFormatSymbols.getInstance(Locale.ROOT).shortMonths[month], year)
+                                java.text.DateFormatSymbols.getInstance(Locale.ENGLISH).months[month], year)
                             renderCards()
                         }, calendar.get(java.util.Calendar.YEAR), calendar.get(java.util.Calendar.MONTH),
                             calendar.get(java.util.Calendar.DAY_OF_MONTH)).show()
@@ -1503,7 +1695,7 @@ class MainActivity : AppCompatActivity() {
                             val event = timeline.optJSONObject(eventIndex) ?: continue
                             val timestamp = runCatching {
                                 Instant.parse(event.optString("createdUtc")).atZone(ZoneId.systemDefault())
-                                    .format(DateTimeFormatter.ofPattern("dd MMM · hh:mm a", Locale.ROOT))
+                                    .format(DateTimeFormatter.ofPattern("dd MMMM · hh:mm a", Locale.ENGLISH))
                             }.getOrDefault("")
                             detailColumn.addView(text(
                                 activityStatusLabel(event.optString("newStatus")) + " · " + timestamp,

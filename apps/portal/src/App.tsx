@@ -40,6 +40,7 @@ import {
 import { verifiedPdfExportPath } from "./print-output";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
+import BrandLockup from "./BrandLockup";
 import OrderJourneyPage from "./OrderJourneyPage";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
 
@@ -130,7 +131,7 @@ function ScopeAccessDenied({ scope, onSignOut, dark, onToggleTheme }: { scope: s
   return (
     <main className="auth-screen">
       <header className="auth-topbar">
-        <div className="brand-lockup auth-brand"><div className="brand-mark"><Printer size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></div>
+        <BrandLockup className="auth-brand" />
         <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/><a className="auth-home-link" href="/">Back to website</a></div>
       </header>
       <section className="auth-card" style={{ maxWidth: 520, margin: "12vh auto" }}>
@@ -1447,17 +1448,15 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   const activePageTitle = active === "Settings" ? "Shop profile" : active;
 
   if (loading && !profile) {
-    return <div className={dark ? "app-shell dark boot-screen" : "app-shell light boot-screen"}><div className="boot-card"><div className="brand-mark"><QrCode size={22}/></div><div className="boot-title">Preparing your workspace</div><div className="boot-subtitle">Connecting securely to your shop…</div><div className="button-spinner boot-spinner"/></div></div>;
+    return <div className={dark ? "app-shell dark boot-screen" : "app-shell light boot-screen"}><div className="boot-card"><img className="brand-mark-image" src="/smartprint-mark.svg" alt="" /><div className="boot-title">Preparing your workspace</div><div className="boot-subtitle">Connecting securely to your shop…</div><div className="button-spinner boot-spinner"/></div></div>;
   }
 
   return (
     <div className={`${dark ? "app-shell dark" : "app-shell light"}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <aside className={sidebarOpen ? "sidebar sidebar-open" : "sidebar"}>
-        <div className="brand-lockup">
-          <div className="brand-mark"><QrCode size={21} strokeWidth={2.4}/></div>
-          <div><div className="brand-name">Smart<span>Print</span></div><div className="brand-caption">by QuantaEdge</div></div>
+        <BrandLockup>
           <button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18}/></button>
-        </div>
+        </BrandLockup>
         <div className="workspace-switcher">
           <div className="shop-avatar">{(profile?.displayName || "S").slice(0,1).toUpperCase()}</div>
           <div className="workspace-copy"><strong>{profile?.displayName || "Your shop"}</strong><span>{profile?.businessName || "Shop workspace"}</span></div>
@@ -3495,7 +3494,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
 
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
-    <header className="customer-entry-brand"><div className="customer-entry-brand-lockup"><div className="brand-mark"><QrCode size={21}/></div><div><div className="brand-name">Smart<span>Print</span></div><div className="brand-caption">by QuantaEdge</div></div></div><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
+    <header className="customer-entry-brand"><BrandLockup className="customer-entry-brand-lockup" /><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
     <main className={result ? "customer-entry-card customer-entry-card--upload" : "customer-entry-card"}>
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?"Connecting…":"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
