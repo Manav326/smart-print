@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldC
 import { isPlatformAdminSession, registerShop, signIn, storeTokens, type AuthTokens } from "./api";
 import { isDesktopApp } from "./desktop-bridge";
 import ThemeToggleButton from "./ThemeToggleButton";
+import BrandLockup from "./BrandLockup";
 
 export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { onAuthenticated: (tokens: AuthTokens) => void; dark: boolean; onToggleTheme: () => void }) {
   const desktop = isDesktopApp();
@@ -47,7 +48,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
     <div className="auth-screen">
       <div className="auth-glow auth-glow-one"/><div className="auth-glow auth-glow-two"/>
       <header className="auth-topbar">
-        <div className="brand-lockup auth-brand"><div className="brand-mark"><Printer size={21}/></div><div><div className="brand-name">smart<span>print</span></div><div className="brand-caption">BY QRtoPrint</div></div></div>
+        <BrandLockup className="auth-brand" />
         <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/>{!desktop && <a className="auth-home-link" href="/"><ArrowLeft size={14}/> Back to website</a>}<span className="auth-top-note"><ShieldCheck size={15}/> Secure Smart Print workspace</span></div>
       </header>
       <main className="auth-layout">
@@ -79,7 +80,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
           <div className="auth-card-footer">By continuing, you agree to the Smart Print service terms and privacy policy.</div>
         </section>
       </main>
-      <footer className="auth-footer"><span>© 2026 Smart Print by QRtoPrint</span><span>thinkwithsujeet.in</span><span>Thoughtfully made for print shops.</span></footer>
+      <footer className="auth-footer"><span>© 2026 SmartPrint by QuantaEdge</span><span>thinkwithsujeet.in</span><span>Thoughtfully made for print shops.</span></footer>
     </div>
   );
 }

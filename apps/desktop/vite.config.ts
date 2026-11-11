@@ -5,6 +5,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   return {
     plugins: [react()],
+    publicDir: "../portal/public",
     clearScreen: false,
     server: {
       host: "127.0.0.1",

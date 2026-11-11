@@ -49,7 +49,7 @@ class SavedPdfEditorInstrumentedTest {
                 onView(withText("Edit PDF")).perform(click())
 
                 onView(withText("SmartPrint")).check(matches(isDisplayed()))
-                onView(withText(org.hamcrest.Matchers.containsString("Edit PDF"))).check(matches(isDisplayed()))
+                onView(withText("Save copy")).check(matches(isDisplayed()))
                 onView(withText("Page 1")).check(matches(isDisplayed()))
                 onView(withContentDescription("Rotate page 1")).perform(scrollTo(), click())
                 onView(withText("90°")).perform(scrollTo()).check(matches(isDisplayed()))

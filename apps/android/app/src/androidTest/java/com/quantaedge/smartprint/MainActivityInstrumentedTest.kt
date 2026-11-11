@@ -23,6 +23,7 @@ import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
+import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
@@ -38,6 +39,7 @@ import org.junit.runner.RunWith
 import eightbitlab.com.blurview.BlurView
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.view.ViewGroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -127,9 +129,12 @@ class MainActivityInstrumentedTest {
             scenario.onActivity { activity ->
                 val toolbar = MainActivity::class.java.getDeclaredField("toolbar").apply { isAccessible = true }
                     .get(activity) as com.google.android.material.appbar.MaterialToolbar
-                assertEquals("SmartPrint", toolbar.title.toString())
-                assertTrue(toolbar.subtitle.toString().contains("by QuantaEdge"))
-                assertTrue(toolbar.subtitle.toString().contains("Account"))
+                assertEquals("SmartPrint by QuantaEdge", toolbar.contentDescription.toString())
+                assertEquals("", toolbar.title.toString())
+                assertEquals("", toolbar.subtitle.toString())
+                val pageContext = toolbar.findViewWithTag<TextView>("smartprint-toolbar-page")
+                assertNotNull(pageContext)
+                assertTrue(pageContext.text.toString().contains("ACCOUNT"))
                 assertEquals("Back", toolbar.navigationContentDescription)
                 assertNotNull(toolbar.navigationIcon)
             }
@@ -534,7 +539,7 @@ class MainActivityInstrumentedTest {
                 val toolbar = MainActivity::class.java.getDeclaredField("toolbar")
                     .apply { isAccessible = true }
                     .get(activity) as com.google.android.material.appbar.MaterialToolbar
-                assertEquals("SmartPrint", toolbar.title.toString())
+                assertEquals("SmartPrint by QuantaEdge", toolbar.contentDescription.toString())
             }
         }
     }
@@ -544,10 +549,16 @@ class MainActivityInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))
             onView(withId(R.id.smartprint_home_heading)).check(matches(isDisplayed()))
-            onView(withText("Recent")).check(matches(isDisplayed()))
+            onView(withText("Your next print starts here.")).check(matches(isDisplayed()))
+            onView(withText("Recent files")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
-            onView(withText("Choose from phone")).check(matches(isDisplayed()))
+            onView(withText("Choose files")).check(matches(isDisplayed()))
+            onView(allOf(
+                withText("Find a print shop"),
+                isAssignableFrom(com.google.android.material.button.MaterialButton::class.java)
+            )).check(matches(isDisplayed()))
             onView(withContentDescription("Shop connection")).check(matches(isDisplayed()))
+            onView(withText("FROM SMARTPRINT")).perform(scrollTo()).check(matches(isDisplayed()))
             scenario.onActivity { activity ->
                 val customBar = MainActivity::class.java.getDeclaredField("bottomNavigationContent").apply {
                     isAccessible = true
@@ -872,11 +883,11 @@ class MainActivityInstrumentedTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
-            openNavigationDestination(4, "Print history")
+            openNavigationDestination(4, "Your print activity")
             onView(withContentDescription("Account")).perform(click())
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
-            onView(withText("Print history")).check(matches(isDisplayed()))
+            onView(withText("Your print activity")).check(matches(isDisplayed()))
         }
     }
 

@@ -5,6 +5,7 @@ import {
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import { useFileDownload } from "./download-manager";
 import ThemeToggleButton from "./ThemeToggleButton";
+import BrandLockup from "./BrandLockup";
 import "./public-landing.css";
 
 export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
@@ -16,11 +17,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
     <div className="sp-public">
       <header className="sp-public-header">
         <a className="sp-public-brand" href="/" aria-label="SmartPrint home">
-          <span className="sp-public-brand-mark"><Printer size={21} strokeWidth={2.2}/></span>
-          <span className="sp-public-brand-copy">
-            <strong>smart<span>print</span></strong>
-            <small>BY QUANTAEDGE</small>
-          </span>
+          <BrandLockup className="sp-public-brand-lockup" />
         </a>
         <nav className="sp-public-nav" aria-label="Main navigation">
           <a href="#how-it-works">How it works</a>
@@ -182,7 +179,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
         </section>
       </main>
       <footer className="sp-public-footer">
-        <a className="sp-public-brand" href="/"><span className="sp-public-brand-mark"><Printer size={19}/></span><span className="sp-public-brand-copy"><strong>smart<span>print</span></strong><small>BY QUANTAEDGE</small></span></a>
+        <a className="sp-public-brand" href="/"><BrandLockup className="sp-public-brand-lockup" /></a>
         <span>© {new Date().getFullYear()} SmartPrint by QuantaEdge</span>
         <div><a href="#how-it-works">How it works</a><a href="#downloads">Downloads</a><a href="/shop">For print shops</a></div>
       </footer>

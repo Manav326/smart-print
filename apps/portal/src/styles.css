@@ -3405,3 +3405,115 @@ html[data-theme="dark"] .auth-proof {
   .subscription-payment-history-row > strong { grid-column: 2; grid-row: 1; }
   .subscription-payment-history-status { grid-column: 1 / -1; justify-self: start; }
 }
+
+/* Premium SmartPrint identity: canonical SmartPrint mark plus the actual
+   QuantaEdge Learning logo, kept separate from SmartPrint's violet palette. */
+.brand-mark-image{display:block;width:42px;height:42px;flex:0 0 42px;border-radius:13px;object-fit:contain;box-shadow:0 7px 20px rgba(112,88,223,.22)}
+.brand-lockup-copy{display:flex;min-width:0;flex:0 0 auto;flex-direction:column;align-items:flex-start;gap:3px}
+.brand-name{color:var(--text,#202638);font:800 19px/1.05 Manrope,sans-serif;letter-spacing:-.85px;white-space:nowrap}
+.brand-name span{color:var(--accent,#7258E8)}
+.brand-lockup-by{color:var(--muted,#69758A);font-size:9px;font-weight:650;letter-spacing:.03em;line-height:1.1}
+.brand-parent-logo{display:block;width:118px;height:auto;max-height:32px;flex:0 0 auto;object-fit:contain;object-position:center}
+.brand-lockup-subline{margin-top:1px;color:var(--muted,#69758A);font-size:8px;font-weight:750;letter-spacing:1.15px;line-height:1.2}
+.brand-lockup{display:flex;align-items:center;gap:9px;min-width:0}
+.app-shell .brand-lockup{padding-bottom:24px;gap:7px}
+.app-shell .brand-mark-image{width:34px;height:34px;flex-basis:34px;border-radius:10px}
+.app-shell .brand-name{font-size:16px;letter-spacing:-.55px}
+.app-shell .brand-lockup-copy{gap:2px}
+.app-shell .brand-parent-logo{width:91px;max-height:25px}
+.auth-brand{padding:0}
+html[data-theme="dark"] .auth-screen .brand-name,
+html[data-theme="dark"] .auth-screen .brand-name,
+html[data-theme="dark"] .customer-entry-brand .brand-name{color:#F0F3FA}
+html[data-theme="dark"] .auth-screen .brand-name span,
+html[data-theme="dark"] .customer-entry-brand .brand-name span{color:#9B8CFF}
+html[data-theme="light"] .auth-screen .brand-name{color:#202638}
+html[data-theme="light"] .auth-screen .brand-name span{color:#7258E8}
+.customer-entry-brand-lockup{gap:9px}
+.sp-public-brand .brand-lockup{padding:0;gap:9px}
+.sp-public-brand .brand-mark-image{width:40px;height:40px;flex-basis:40px}
+.sp-public-brand .brand-name{color:#202638;font-size:19px}
+.sp-public-brand .brand-name span{color:#7258E8}
+.sp-public-brand .brand-lockup-by{color:#68758A}
+.sp-public-brand .brand-parent-logo{width:118px;max-height:28px}
+.sp-public-brand .brand-lockup-subline{display:none}
+.app-shell .panel,.app-shell .metric-card{border-radius:15px}
+.app-shell .metric-card{box-shadow:0 8px 25px rgba(10,18,36,.055)}
+.app-shell .primary-button,.app-shell .secondary-button{min-height:40px;border-radius:10px}
+.app-shell :where(button,a,input,select,textarea):focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+@media(prefers-reduced-motion:reduce){.app-shell *,.sp-public *{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+@media(max-width:600px){
+ .brand-mark-image{width:36px;height:36px;flex-basis:36px;border-radius:11px}
+ .brand-name{font-size:17px}
+ .brand-parent-logo{width:88px;max-height:22px}
+ .app-shell .brand-parent-logo{width:80px}
+ .app-shell .brand-mark-image{width:32px;height:32px;flex-basis:32px}
+ .sp-public-brand .brand-parent-logo{width:88px}
+ .sp-public-brand .brand-mark-image{width:36px;height:36px;flex-basis:36px}
+}
+
+
+/* Compact parent-brand geometry for the two fixed-width administration rails. */
+.platform-admin-shell .brand-lockup{gap:5px;padding:0 4px 24px}
+.platform-admin-shell .brand-mark-image{width:34px;height:34px;flex-basis:34px;border-radius:11px}
+.platform-admin-shell .brand-lockup-copy{gap:2px}
+.platform-admin-shell .brand-name{font-size:15px;letter-spacing:-.55px}
+.platform-admin-shell .brand-lockup-by{font-size:8px}
+.platform-admin-shell .brand-parent-logo{width:84px;max-height:20px}
+
+/* A quieter premium finish across every shop/admin workspace surface. */
+.app-shell .sidebar{
+  background:linear-gradient(180deg,color-mix(in srgb,var(--sidebar) 96%,var(--accent) 4%),var(--sidebar));
+}
+.app-shell .topbar{
+  background:color-mix(in srgb,var(--sidebar) 92%,transparent);
+  backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);
+}
+.app-shell .nav-item{
+  min-height:43px;
+  border:1px solid transparent;
+  border-radius:11px;
+  transition:background .18s,border-color .18s,color .18s,transform .18s;
+}
+.app-shell .nav-item.active{
+  border-color:color-mix(in srgb,var(--accent) 18%,transparent);
+  box-shadow:inset 0 1px rgba(255,255,255,.035);
+}
+.app-shell .metric-card,
+.app-shell .panel{
+  border-radius:16px;
+  box-shadow:0 12px 30px rgba(10,18,36,.045);
+}
+.app-shell .metric-card{
+  transition:border-color .18s,box-shadow .18s,transform .18s;
+}
+.app-shell .metric-card:hover{
+  transform:translateY(-2px);
+  border-color:color-mix(in srgb,var(--accent) 28%,var(--border));
+  box-shadow:0 16px 34px rgba(10,18,36,.075);
+}
+.app-shell .primary-button{
+  min-height:42px;
+  border-radius:11px;
+  font-weight:700;
+}
+.app-shell .secondary-button{
+  min-height:40px;
+  border-radius:10px;
+}
+.app-shell :where(input:not([type=checkbox]):not([type=radio]),select,textarea){
+  border-radius:10px;
+}
+.app-shell :where(button,a,input,select,textarea):focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:3px;
+}
+@media(prefers-reduced-motion:reduce){
+  .app-shell *, .auth-screen *, .customer-entry *, .sp-public *{
+    scroll-behavior:auto!important;
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.01ms!important;
+  }
+}

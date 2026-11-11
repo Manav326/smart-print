@@ -157,7 +157,15 @@ class DocumentViewerInstrumentedTest {
                     val viewer = MainActivity::class.java.getDeclaredField("documentViewer")
                         .apply { isAccessible = true }
                         .get(activity)
-                    assertTrue("The upload form is restored after closing PDF preview", toolbar.subtitle.toString().endsWith("Print"))
+                    val pageContext = toolbar.findViewWithTag<android.widget.TextView>("smartprint-toolbar-page")
+                    assertTrue(
+                        "The Print destination is restored after closing PDF preview",
+                        pageContext?.text?.toString()?.endsWith("PRINT") == true
+                    )
+                    val webView = MainActivity::class.java.getDeclaredField("webView")
+                        .apply { isAccessible = true }
+                        .get(activity) as? android.webkit.WebView
+                    assertTrue("The customer upload WebView is visible after closing PDF preview", webView?.isShown == true)
                     assertNull("The native preview reader is closed", viewer)
                 }
             }
