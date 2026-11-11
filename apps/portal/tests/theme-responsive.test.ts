@@ -560,3 +560,75 @@ test("contextual help supports outside-click and Escape dismissal", () => {
   assert.match(app, /event\.key==="Escape"/);
   assert.match(app, /aria-expanded=\{open\}/);
 });
+
+
+test("SmartPrint uses the full theme-aware brand lockup inside the app", () => {
+  const component = read("../src/BrandLockup.tsx");
+  const css = read("../src/styles.css");
+  const light = read("../public/branding/smartprint-logo-light.svg");
+  const dark = read("../public/branding/smartprint-logo-dark.svg");
+  const app = read("../src/App.tsx");
+
+  assert.match(component, /smartprint-logo-light\.svg/);
+  assert.match(component, /smartprint-logo-dark\.svg/);
+  assert.match(component, /smartprint-mark\.svg/);
+  assert.doesNotMatch(component, /quantaedge-logo\.svg/,
+    "The parent logo must not be inserted beside the SmartPrint wordmark.");
+  assert.match(light, /Smart<tspan fill="#7258E8">Print<\/tspan>/);
+  assert.match(light, /fill="#152038">Quanta/);
+  assert.match(light, /fill="#F97316">Edge/);
+  assert.match(dark, /fill="#F0F3FA">Smart/);
+  assert.match(dark, /fill="#9B8CFF">Print/);
+  assert.match(css, /html\[data-theme="dark"\] \.brand-lockup-logo-dark/);
+  assert.match(css, /app-shell\.sidebar-collapsed \.brand-lockup \.brand-mark-image/);
+  assert.match(app, /<BrandLockup className="boot-brand-lockup" \/>/);
+});
+
+test("Android and Windows launchers use the clean icon-only identity and Smart Print app name", () => {
+  const androidStrings = read("../../android/app/src/main/res/values/strings.xml");
+  const androidForeground = read("../../android/app/src/main/res/drawable/ic_launcher_foreground.xml");
+  const androidMonochrome = read("../../android/app/src/main/res/drawable/ic_launcher_monochrome.xml");
+  const appIcon = read("../public/branding/smartprint-app-icon.svg");
+  const manifest = JSON.parse(read("../public/manifest.webmanifest"));
+  const tauri = JSON.parse(read("../../desktop/src-tauri/tauri.conf.json"));
+  const desktopHtml = read("../../desktop/index.html");
+
+  assert.match(androidStrings, /<string name="app_name">Smart Print<\/string>/);
+  assert.doesNotMatch(androidForeground, /SmartPrint|QuantaEdge|<text/i);
+  assert.doesNotMatch(androidMonochrome, /SmartPrint|QuantaEdge|<text/i);
+  assert.doesNotMatch(appIcon, /<text|QuantaEdge/i);
+  assert.equal(manifest.name, "Smart Print");
+  assert.equal(manifest.short_name, "Smart Print");
+  assert.equal(tauri.productName, "Smart Print");
+  assert.equal(tauri.app.windows[0].title, "Smart Print");
+  assert.match(desktopHtml, /<title>Smart Print<\/title>/);
+});
+
+test("SmartPrint and QuantaEdge lockup lettering has AA contrast in both themes", () => {
+  const contrast = (foreground: string, background: string) => {
+    const luminance = (hex: string) => {
+      const channels = [0, 2, 4].map(offset => parseInt(hex.slice(offset + 1, offset + 3), 16) / 255)
+        .map(channel => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+      return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+    };
+    const [high, low] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+    return (high + 0.05) / (low + 0.05);
+  };
+
+  const pairs = [
+    ["#152038", "#F4F6FA", "light Smart"],
+    ["#7258E8", "#F4F6FA", "light Print"],
+    ["#667085", "#F4F6FA", "light by"],
+    ["#F0F3FA", "#141A25", "dark Smart"],
+    ["#9B8CFF", "#141A25", "dark Print"],
+    ["#AAB6CA", "#141A25", "dark by"],
+    ["#152038", "#F5F7FC", "Quanta"],
+    ["#F97316", "#152038", "Edge"],
+  ] as const;
+
+  for (const [foreground, background, label] of pairs) {
+    assert.ok(contrast(foreground, background) >= 4.5,
+      label + " lettering must remain readable (WCAG AA); got " +
+      contrast(foreground, background).toFixed(2) + ":1.");
+  }
+});
