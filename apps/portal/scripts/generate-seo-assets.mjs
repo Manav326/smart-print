@@ -33,10 +33,16 @@ async function replaceOriginPlaceholder(directory, origin) {
 }
 
 const origin = canonicalOrigin(configuredOrigin);
-const publicPaths = ["/", "/print-shop-software/", "/qr-code-print-ordering/", "/print-job-management/", "/windows-print-agent/"];
+const publicPaths = ["/", "/print-shop-software/", "/qr-code-print-ordering/", "/print-job-management/", "/windows-print-agent/", "/smartprint-faq/"];
 await replaceOriginPlaceholder(distRoot, origin);
 
 const sitemapEntries = publicPaths.map(path => `  <url><loc>${origin}${path}</loc></url>`).join("\n");
 await writeFile(join(distRoot, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapEntries}\n</urlset>\n`, "utf8");
-await writeFile(join(distRoot, "robots.txt"), `User-agent: *\nAllow: /\nDisallow: /api/\nDisallow: /health/\nDisallow: /downloads/\n\nSitemap: ${origin}/sitemap.xml\n`, "utf8");
+const protectedPaths = "Disallow: /api/\nDisallow: /health/\nDisallow: /downloads/";
+const searchAgents = ["OAI-SearchBot", "PerplexityBot", "Claude-SearchBot", "Claude-User"];
+const agentRules = searchAgents
+  .map(agent => `User-agent: ${agent}\nAllow: /\n${protectedPaths}`)
+  .join("\n\n");
+const robots = `${agentRules}\n\nUser-agent: *\nAllow: /\n${protectedPaths}\n\nSitemap: ${origin}/sitemap.xml\n`;
+await writeFile(join(distRoot, "robots.txt"), robots, "utf8");
 console.log(`Generated SmartPrint sitemap and robots.txt for ${origin}.`);

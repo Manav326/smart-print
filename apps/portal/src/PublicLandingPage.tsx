@@ -188,6 +188,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
           <a href="/qr-code-print-ordering/">QR code ordering</a>
           <a href="/print-job-management/">Print job management</a>
           <a href="/windows-print-agent/">Windows Print Agent</a>
+          <a href="/smartprint-faq/">SmartPrint FAQ</a>
         </nav>
       </footer>
     </div>

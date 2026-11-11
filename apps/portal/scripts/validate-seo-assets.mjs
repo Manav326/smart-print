@@ -10,7 +10,8 @@ const pages = [
   ["print-shop-software/index.html", "/print-shop-software/"],
   ["qr-code-print-ordering/index.html", "/qr-code-print-ordering/"],
   ["print-job-management/index.html", "/print-job-management/"],
-  ["windows-print-agent/index.html", "/windows-print-agent/"]
+  ["windows-print-agent/index.html", "/windows-print-agent/"],
+  ["smartprint-faq/index.html", "/smartprint-faq/"]
 ];
 const htmlFiles = await Promise.all(pages.map(([path]) => readFile(join(dist, path), "utf8")));
 const sitemap = await readFile(join(dist, "sitemap.xml"), "utf8");
@@ -33,6 +34,9 @@ assert.ok(htmlFiles[0].includes('"@type":"Organization"'), "homepage must descri
 for (const [, route] of pages) assert.ok(sitemap.includes(`<loc>${origin}${route}</loc>`), `sitemap must include ${route}`);
 assert.doesNotMatch(sitemap, /\/(?:shop|admin|s|api|health)\//, "sitemap must exclude private application routes");
 assert.ok(robots.includes(`Sitemap: ${origin}/sitemap.xml`), "robots.txt must reference the generated sitemap");
+for (const agent of ["OAI-SearchBot","PerplexityBot","Claude-SearchBot","Claude-User"]) {
+  assert.ok(robots.includes(`User-agent: ${agent}`), `robots.txt must explicitly allow ${agent}`);
+}
 assert.match(robots, /Disallow: \/api\//);
 assert.match(robots, /Disallow: \/downloads\//);
 console.log("PASS: SmartPrint public SEO pages, canonical URLs, structured data, sitemap and robots.txt are valid.");
