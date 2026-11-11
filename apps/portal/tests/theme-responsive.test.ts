@@ -579,6 +579,14 @@ test("SmartPrint uses the full theme-aware brand lockup inside the app", () => {
   assert.match(light, /fill="#F97316">Edge/);
   assert.match(dark, /fill="#F0F3FA">Smart/);
   assert.match(dark, /fill="#9B8CFF">Print/);
+  assert.match(dark, /fill="#152038" stroke="#D7DEEE"/);
+  assert.doesNotMatch(light, /<rect x="202"|<path d="M298 104/,
+    "QuantaEdge must not sit on white, navy, blue, or pill-shaped backing panels.");
+  assert.doesNotMatch(dark, /<rect x="202"|<path d="M298 104/,
+    "Dark mode must not add a background behind QuantaEdge either.");
+  assert.match(light, /<tspan fill="#152038">Quanta<\\/tspan><tspan fill="#F97316">Edge/);
+  assert.match(dark, /<tspan fill="#152038" stroke="#D7DEEE"/);
+  assert.match(dark, /<tspan fill="#F97316">Edge/);
   assert.match(css, /html\[data-theme="dark"\] \.brand-lockup-logo-dark/);
   assert.match(css, /app-shell\.sidebar-collapsed \.brand-lockup \.brand-mark-image/);
   assert.match(app, /<BrandLockup className="boot-brand-lockup" \/>/);
@@ -622,8 +630,10 @@ test("SmartPrint and QuantaEdge lockup lettering has AA contrast in both themes"
     ["#F0F3FA", "#141A25", "dark Smart"],
     ["#9B8CFF", "#141A25", "dark Print"],
     ["#AAB6CA", "#141A25", "dark by"],
-    ["#152038", "#F5F7FC", "Quanta"],
-    ["#F97316", "#152038", "Edge"],
+    ["#152038", "#F5F7FC", "light Quanta"],
+    ["#F97316", "#F4F6FA", "light Edge"],
+    ["#D7DEEE", "#141A25", "dark Quanta outline"],
+    ["#F97316", "#141A25", "dark Edge"],
   ] as const;
 
   for (const [foreground, background, label] of pairs) {
