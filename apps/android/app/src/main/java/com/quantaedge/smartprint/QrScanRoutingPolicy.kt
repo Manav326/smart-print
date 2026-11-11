@@ -58,7 +58,7 @@ internal object QrScanRoutingPolicy {
                 QrScanRoute.ConnectToShop(link)
             } else {
                 QrScanRoute.Unsupported(
-                    "This isn't a Shop QR. Choose the QR provided by the shop to send your documents."
+                    "This isn't a Shop QR. Choose the QR provided by the shop to send documents here."
                 )
             }
         }
