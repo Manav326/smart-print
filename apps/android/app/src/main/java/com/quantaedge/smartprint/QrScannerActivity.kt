@@ -73,6 +73,7 @@ class QrScannerActivity : AppCompatActivity() {
 
     // Keep live-camera frames from winning while the user is choosing or reading a photo.
     @Volatile private var photoFlowActive = false
+    private var photoFeedbackMessage: String? = null
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -110,6 +111,7 @@ class QrScannerActivity : AppCompatActivity() {
         photoPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
             if (uri == null) {
                 photoFlowActive = false
+                photoFeedbackMessage = null
                 statusText.text = scanPurpose.alignmentHint
                 bindCamera()
             } else {
@@ -304,12 +306,14 @@ class QrScannerActivity : AppCompatActivity() {
         camera = null
         torchEnabled = false
         torchButton.isEnabled = false
+        photoFeedbackMessage = null
         statusText.text = "Choose a photo or screenshot with a QR code."
         try {
             photoPickerLauncher.launch("image/*")
         } catch (_: Exception) {
             photoFlowActive = false
-            statusText.text = "Photos are unavailable. You can still scan with the camera."
+            photoFeedbackMessage = "Photos are unavailable. You can still scan with the camera."
+            statusText.text = photoFeedbackMessage.orEmpty()
             bindCamera()
         }
     }
@@ -330,20 +334,23 @@ class QrScannerActivity : AppCompatActivity() {
                     } else {
                         photoButton.isEnabled = true
                         photoFlowActive = false
-                        statusText.text = "No QR found in that photo. Try another photo or scan with the camera."
+                        photoFeedbackMessage = "No QR found in that photo. Try another photo or scan with the camera."
+                        statusText.text = photoFeedbackMessage.orEmpty()
                         bindCamera()
                     }
                 }
                 .addOnFailureListener {
                     photoButton.isEnabled = true
                     photoFlowActive = false
-                    statusText.text = "Couldn't read that photo. Try a clearer photo or screenshot."
+                    photoFeedbackMessage = "Couldn't read that photo. Try a clearer photo or screenshot."
+                    statusText.text = photoFeedbackMessage.orEmpty()
                     bindCamera()
                 }
         } catch (_: Exception) {
             photoButton.isEnabled = true
             photoFlowActive = false
-            statusText.text = "Couldn't open that photo. Try another photo or screenshot."
+            photoFeedbackMessage = "Couldn't open that photo. Try another photo or screenshot."
+            statusText.text = photoFeedbackMessage.orEmpty()
             bindCamera()
         }
     }
@@ -407,7 +414,7 @@ class QrScannerActivity : AppCompatActivity() {
                 val hasFlash = camera?.cameraInfo?.hasFlashUnit() == true
                 torchButton.isEnabled = hasFlash
                 if (!hasFlash) torchEnabled = false
-                statusText.text = if (hasFlash) {
+                statusText.text = photoFeedbackMessage ?: if (hasFlash) {
                     scanPurpose.alignmentHint + " Flashlight available."
                 } else {
                     scanPurpose.alignmentHint
