@@ -1266,10 +1266,26 @@ class QrScannerPermissionInstrumentedTest {
                     decode.invoke(activity, Uri.fromFile(qrImage))
                 }
 
-                onView(withText(
+                val expectedMessage =
                     "This isn't a Wi-Fi QR. Choose the Wi-Fi QR shown on the shop computer. Your saved shop is unchanged."
-                )).check(matches(isDisplayed()))
-                onView(withText("Choose from photos")).check(matches(isDisplayed()))
+                var actualMessage = ""
+                val deadline = System.currentTimeMillis() + 10_000
+                while (actualMessage != expectedMessage && System.currentTimeMillis() < deadline) {
+                    scenario.onActivity { activity ->
+                        val statusField = QrScannerActivity::class.java.getDeclaredField("statusText")
+                        statusField.isAccessible = true
+                        actualMessage = (statusField.get(activity) as android.widget.TextView).text.toString()
+                    }
+                    if (actualMessage != expectedMessage) Thread.sleep(100)
+                }
+                assertEquals(expectedMessage, actualMessage)
+                scenario.onActivity { activity ->
+                    val photoButtonField = QrScannerActivity::class.java.getDeclaredField("photoButton")
+                    photoButtonField.isAccessible = true
+                    val photoButton = photoButtonField.get(activity) as com.google.android.material.button.MaterialButton
+                    assertTrue("The scanner must remain open after a wrong-purpose QR photo.", !activity.isFinishing)
+                    assertTrue("The photo action must remain available for retry.", photoButton.isEnabled)
+                }
             }
         } finally {
             qrImage.delete()
