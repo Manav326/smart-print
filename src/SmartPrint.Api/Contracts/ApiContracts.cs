@@ -118,7 +118,8 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     bool IsDuplex = false,
     int Copies = 1,
     string Orientation = "AUTO",
-    bool PrivatePrinting = false);
+    bool PrivatePrinting = false,
+    string PrintKind = "DOCUMENT");
 
 public sealed record RecordPrintRefundRequest(
     string RefundMethod,
@@ -156,6 +157,7 @@ public sealed record AgentPrivateRelayItem(
     Guid TicketId, Guid PrintJobId, string JobNumber, Guid PrinterDeviceId,
     string PrinterName, string QueueName, string FileExtension, string MediaType,
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
-    bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc);
+    bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
+    string PrintKind = "DOCUMENT");
 
 public sealed record AgentPrivateRelayPendingResponse(IReadOnlyList<AgentPrivateRelayItem> Items);

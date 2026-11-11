@@ -1145,7 +1145,8 @@ export interface UploadedPrintJob {
     batchGroupName?: string | null;
     batchName?: string | null;
     batchId?: string | null;
-    printKind?: string;
+    printKind?: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT";
+    privatePrinting?: boolean;
     photoSizeCode?: string | null;
     photoCount?: number;
     photosPerPage?: number | null;
@@ -1166,7 +1167,7 @@ export interface PrintQuoteResult {
   paperSize: string;
   isDuplex: boolean;
   orientation?: string;
-  printKind?: "DOCUMENT" | "PHOTO";
+  printKind?: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT";
   photoSizeCode?: string | null;
   photoCount?: number;
   photosPerPage?: number | null;
@@ -1233,6 +1234,7 @@ type CustomerLocalUploadTicket = {
   expiresUtc: string;
   completed: boolean;
   privatePrinting?: boolean;
+  printKind?: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT";
   sha256: string;
 };
 
@@ -1245,7 +1247,8 @@ async function requestCustomerLocalUploadTicket(
   idempotencyKey: string,
   grantToken: string,
   settings: CustomerPrintRequestSettings,
-  privatePrinting = false
+  privatePrinting = false,
+  printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT"
 ): Promise<CustomerLocalUploadTicket> {
   const hashInput = await file.arrayBuffer();
   let digest: ArrayBuffer;
@@ -1276,7 +1279,8 @@ async function requestCustomerLocalUploadTicket(
       isDuplex: settings.isDuplex,
       copies: settings.copies,
       orientation: settings.orientation,
-      privatePrinting
+      privatePrinting,
+      printKind
     })
   });
   return { ...ticket, sha256 };
@@ -1514,8 +1518,16 @@ export async function uploadCustomerDocumentLocally(
   cloudAssistedPrintingEnabled = false,
   settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" },
   privatePrinting = false,
-  localNetworkReady = true
+  localNetworkReady = true,
+  printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT"
 ): Promise<UploadedPrintJob> {
+  if (printKind === "ID_DOCUMENT" && !privatePrinting) {
+    throw new LocalUploadPreflightError(
+      "Prepared ID cards must use Private Printing. The normal upload route is disabled for ID documents.",
+      409,
+      "id_document_private_printing_required"
+    );
+  }
   const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
   const grantToken = sessionStorage.getItem(keys.grant) || createLocalUploadGrantToken();
@@ -1525,7 +1537,7 @@ export async function uploadCustomerDocumentLocally(
   let ticket: CustomerLocalUploadTicket;
   try {
     ticket = await requestCustomerLocalUploadTicket(
-      sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken, settings, privatePrinting
+      sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken, settings, privatePrinting, printKind
     );
   } catch (exception) {
     if (exception instanceof ApiError && exception.status === 409 &&
@@ -1792,7 +1804,7 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
   isDuplex: boolean;
   copies: number;
   orientation?: "AUTO" | "PORTRAIT" | "LANDSCAPE";
-  printKind?: "DOCUMENT" | "PHOTO";
+  printKind?: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT";
   photoSizeCode?: string;
   photoCount?: number;
   photosPerPage?: number;
