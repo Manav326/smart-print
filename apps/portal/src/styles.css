@@ -3451,3 +3451,69 @@ html[data-theme="light"] .auth-screen .brand-name span{color:#7258E8}
  .sp-public-brand .brand-parent-logo{width:88px}
  .sp-public-brand .brand-mark-image{width:36px;height:36px;flex-basis:36px}
 }
+
+
+/* Compact parent-brand geometry for the two fixed-width administration rails. */
+.platform-admin-shell .brand-lockup{gap:5px;padding:0 4px 24px}
+.platform-admin-shell .brand-mark-image{width:34px;height:34px;flex-basis:34px;border-radius:11px}
+.platform-admin-shell .brand-lockup-copy{gap:2px}
+.platform-admin-shell .brand-name{font-size:15px;letter-spacing:-.55px}
+.platform-admin-shell .brand-lockup-by{font-size:8px}
+.platform-admin-shell .brand-parent-logo{width:84px;max-height:20px}
+
+/* A quieter premium finish across every shop/admin workspace surface. */
+.app-shell .sidebar{
+  background:linear-gradient(180deg,color-mix(in srgb,var(--sidebar) 96%,var(--accent) 4%),var(--sidebar));
+}
+.app-shell .topbar{
+  background:color-mix(in srgb,var(--sidebar) 92%,transparent);
+  backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px);
+}
+.app-shell .nav-item{
+  min-height:43px;
+  border:1px solid transparent;
+  border-radius:11px;
+  transition:background .18s,border-color .18s,color .18s,transform .18s;
+}
+.app-shell .nav-item.active{
+  border-color:color-mix(in srgb,var(--accent) 18%,transparent);
+  box-shadow:inset 0 1px rgba(255,255,255,.035);
+}
+.app-shell .metric-card,
+.app-shell .panel{
+  border-radius:16px;
+  box-shadow:0 12px 30px rgba(10,18,36,.045);
+}
+.app-shell .metric-card{
+  transition:border-color .18s,box-shadow .18s,transform .18s;
+}
+.app-shell .metric-card:hover{
+  transform:translateY(-2px);
+  border-color:color-mix(in srgb,var(--accent) 28%,var(--border));
+  box-shadow:0 16px 34px rgba(10,18,36,.075);
+}
+.app-shell .primary-button{
+  min-height:42px;
+  border-radius:11px;
+  font-weight:700;
+}
+.app-shell .secondary-button{
+  min-height:40px;
+  border-radius:10px;
+}
+.app-shell :where(input:not([type=checkbox]):not([type=radio]),select,textarea){
+  border-radius:10px;
+}
+.app-shell :where(button,a,input,select,textarea):focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:3px;
+}
+@media(prefers-reduced-motion:reduce){
+  .app-shell *, .auth-screen *, .customer-entry *, .sp-public *{
+    scroll-behavior:auto!important;
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.01ms!important;
+  }
+}
