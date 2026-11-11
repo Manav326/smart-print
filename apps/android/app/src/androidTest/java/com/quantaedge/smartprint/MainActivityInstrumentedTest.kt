@@ -542,10 +542,13 @@ class MainActivityInstrumentedTest {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))
             onView(withId(R.id.smartprint_home_heading)).check(matches(isDisplayed()))
-            onView(withText("Recent")).check(matches(isDisplayed()))
+            onView(withText("Your next print starts here.")).check(matches(isDisplayed()))
+            onView(withText("Recent files")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
-            onView(withText("Choose from phone")).check(matches(isDisplayed()))
+            onView(withText("Choose files")).check(matches(isDisplayed()))
+            onView(withText("Find a print shop")).check(matches(isDisplayed()))
             onView(withContentDescription("Shop connection")).check(matches(isDisplayed()))
+            onView(withText("FROM SMARTPRINT")).check(matches(isDisplayed()))
             scenario.onActivity { activity ->
                 val customBar = MainActivity::class.java.getDeclaredField("bottomNavigationContent").apply {
                     isAccessible = true
