@@ -27,6 +27,9 @@ class IdCardLayoutPolicyTest {
             0.01f
         )
         assertTrue(layout.front.top >= IdCardLayoutPolicy.mmToPoints(IdCardLayoutPolicy.MIN_VERTICAL_MARGIN_MM))
+        assertTrue("FRONT label stays above the front trim guides.", layout.frontLabelTop < layout.front.top)
+        assertTrue("BACK label stays below the back trim guides.",
+            layout.backLabelTop > layout.back.top + layout.back.height)
         assertTrue(layout.back.top + layout.back.height <=
             layout.pageHeight - IdCardLayoutPolicy.mmToPoints(IdCardLayoutPolicy.MIN_VERTICAL_MARGIN_MM))
     }
