@@ -16,7 +16,7 @@ class QrScanRoutingPolicyTest {
         assertEquals("Scan the Shop QR to send your documents.", QrScanPurpose.SHOP_CONNECTION.instruction)
         assertEquals("Check Wi-Fi", QrScanPurpose.WIFI_READINESS.title)
         assertEquals(
-            "Scan the Wi-Fi QR on the shop computer to check the connection.",
+            "Scan the Wi-Fi QR shown on the shop computer.",
             QrScanPurpose.WIFI_READINESS.instruction
         )
     }
