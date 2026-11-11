@@ -58,6 +58,8 @@ class QrScannerActivity : AppCompatActivity() {
     }
 
     private lateinit var permissionLauncher: ActivityResultLauncher<String>
+    private lateinit var photoPickerLauncher: ActivityResultLauncher<String>
+    private lateinit var photoButton: MaterialButton
     private lateinit var previewHost: FrameLayout
     private lateinit var previewView: PreviewView
     private lateinit var overlay: ScanFrameView
@@ -67,6 +69,9 @@ class QrScannerActivity : AppCompatActivity() {
     private lateinit var scanPurpose: QrScanPurpose
     private val analyzerExecutor = Executors.newSingleThreadExecutor()
     private val hasReturnedResult = AtomicBoolean(false)
+
+    // Keep live-camera frames from winning while the user is choosing or reading a photo.
+    @Volatile private var photoFlowActive = false
 
     private var cameraProvider: ProcessCameraProvider? = null
     private var camera: Camera? = null
@@ -99,6 +104,17 @@ class QrScannerActivity : AppCompatActivity() {
         permissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) bindCamera() else showPermissionPanel()
         }
+        // GetContent uses the system picker and grants access only to the selected image.
+        // No broad photo/media permission is needed.
+        photoPickerLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            if (uri == null) {
+                photoFlowActive = false
+                statusText.text = scanPurpose.alignmentHint
+                bindCamera()
+            } else {
+                decodePhotoQr(uri)
+            }
+        }
 
         scanner = BarcodeScanning.getClient(
             BarcodeScannerOptions.Builder()
@@ -116,7 +132,7 @@ class QrScannerActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (::previewHost.isInitialized && !isQaCameraPaused() &&
+        if (::previewHost.isInitialized && !isQaCameraPaused() && !photoFlowActive &&
             hasCameraPermission() && camera == null && !cameraBindInProgress
         ) {
             bindCamera()
@@ -220,6 +236,29 @@ class QrScannerActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
         ))
 
+        photoButton = MaterialButton(this).apply {
+            text = "Choose from photos"
+            isAllCaps = false
+            maxLines = 1
+            minHeight = dp(50)
+            insetTop = 0
+            insetBottom = 0
+            cornerRadius = dp(15)
+            icon = ContextCompat.getDrawable(this@QrScannerActivity, R.drawable.ic_photo_library)
+            iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            iconPadding = dp(10)
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_glass_inset))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_glass_border))
+            strokeWidth = dp(1)
+            setTextColor(getColor(R.color.qp_text))
+            contentDescription = "Choose a QR from a photo or screenshot"
+            setOnClickListener { openPhotoPicker() }
+        }
+        root.addView(photoButton, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(50)
+        ).apply { topMargin = dp(10) })
+
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -257,8 +296,64 @@ class QrScannerActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(root)
     }
 
+    private fun openPhotoPicker() {
+        photoFlowActive = true
+        imageAnalysis?.clearAnalyzer()
+        cameraProvider?.unbindAll()
+        camera = null
+        torchEnabled = false
+        torchButton.isEnabled = false
+        statusText.text = "Choose a photo or screenshot with a QR code."
+        try {
+            photoPickerLauncher.launch("image/*")
+        } catch (_: Exception) {
+            photoFlowActive = false
+            statusText.text = "Photos are unavailable. You can still scan with the camera."
+            bindCamera()
+        }
+    }
+
+    private fun decodePhotoQr(uri: Uri) {
+        photoFlowActive = true
+        photoButton.isEnabled = false
+        statusText.text = "Reading QR from photo…"
+        try {
+            scanner.process(InputImage.fromFilePath(this, uri))
+                .addOnSuccessListener { barcodes ->
+                    val rawValue = barcodes.firstOrNull {
+                        it.format == MlBarcode.FORMAT_QR_CODE && !it.rawValue.isNullOrBlank()
+                    }?.rawValue?.trim()
+                    if (!rawValue.isNullOrBlank() && hasReturnedResult.compareAndSet(false, true)) {
+                        setResult(
+                            RESULT_OK,
+                            Intent()
+                                .putExtra(EXTRA_RAW_VALUE, rawValue)
+                                .putExtra(EXTRA_SCAN_PURPOSE, scanPurpose.wireValue)
+                        )
+                        finish()
+                    } else {
+                        photoButton.isEnabled = true
+                        photoFlowActive = false
+                        statusText.text = "No QR found in that photo. Try another photo or scan with the camera."
+                        bindCamera()
+                    }
+                }
+                .addOnFailureListener {
+                    photoButton.isEnabled = true
+                    photoFlowActive = false
+                    statusText.text = "Couldn't read that photo. Try a clearer photo or screenshot."
+                    bindCamera()
+                }
+        } catch (_: Exception) {
+            photoButton.isEnabled = true
+            photoFlowActive = false
+            statusText.text = "Couldn't open that photo. Try another photo or screenshot."
+            bindCamera()
+        }
+    }
+
     private fun bindCamera() {
-        if (cameraBindInProgress || camera != null || !hasCameraPermission()) return
+        if (cameraBindInProgress || camera != null || !hasCameraPermission() || photoFlowActive) return
         cameraBindInProgress = true
         showCameraPreview()
 
@@ -293,7 +388,9 @@ class QrScannerActivity : AppCompatActivity() {
                                 val rawValue = barcodes.firstOrNull {
                                     it.format == MlBarcode.FORMAT_QR_CODE && !it.rawValue.isNullOrBlank()
                                 }?.rawValue?.trim()
-                                if (!rawValue.isNullOrBlank() && hasReturnedResult.compareAndSet(false, true)) {
+                                if (!photoFlowActive && !rawValue.isNullOrBlank() &&
+                                    hasReturnedResult.compareAndSet(false, true)
+                                ) {
                                     runOnUiThread {
                                         setResult(
                                             RESULT_OK,
@@ -360,7 +457,7 @@ class QrScannerActivity : AppCompatActivity() {
             setPadding(0, dp(12), 0, dp(8))
         })
         panel.addView(label(
-            "Allow camera for QR scanning.",
+            "Allow camera to scan live, or choose a photo below.",
             13, getColor(R.color.qp_muted), false
         ).apply { gravity = Gravity.CENTER; textAlignment = View.TEXT_ALIGNMENT_CENTER })
         val action = MaterialButton(this).apply {
@@ -388,7 +485,7 @@ class QrScannerActivity : AppCompatActivity() {
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT
         ))
         torchButton.isEnabled = false
-        statusText.text = "Camera permission required."
+        statusText.text = "Camera permission needed for live scanning. Photos still work."
     }
 
     private fun showRetryButton() {
