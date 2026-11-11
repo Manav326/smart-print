@@ -1187,7 +1187,7 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { scanQr() }
         }, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(22) })
         column.addView(text(
-            "Already on the shop network? You can verify phone access without connecting your shop account.",
+            "Already on the shop Wi-Fi? Check that your phone can reach the shop.",
             12, R.color.qp_muted, false
         ).apply {
             gravity = Gravity.CENTER
