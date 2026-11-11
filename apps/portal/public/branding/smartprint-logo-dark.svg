@@ -15,7 +15,7 @@
 <path d="M82 162 H174 V205 H82 Z" fill="url(#logo-output)"/><path d="M101 177 H155 M101 190 H145" fill="none" stroke="#7058DF" stroke-width="7" stroke-linecap="round"/>
 <path d="M183 37 L200 32 L205 49 L188 54 Z" fill="#B6A7FF"/><path d="M210 53 L226 49 L231 65 L215 70 Z" fill="#8F7AFF"/>
 </g>
-<text x="172" y="83" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="54" font-weight="800" letter-spacing="-2.4" fill="#F4F2FF">Smart<tspan fill="#9B8CFF">Print</tspan></text>
-<text x="175" y="118" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="18" font-weight="600" fill="#C4BEDD">by</text><rect x="415" y="64" width="164" height="36" rx="8" fill="#F5F7FC"/>
-<text x="431" y="89" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="19" font-weight="800" letter-spacing="-.5"><tspan fill="#152038">Quanta</tspan><tspan fill="#F97316">Edge</tspan></text>
+<text x="172" y="83" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="52" font-weight="800" letter-spacing="-2.25" fill="#F4F2FF">Smart<tspan fill="#9B8CFF">Print</tspan></text>
+<text x="175" y="122" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="18" font-weight="600" fill="#C4BEDD">by</text><rect x="207" y="99" width="164" height="34" rx="8" fill="#F5F7FC"/>
+<text x="219" y="122" font-family="Manrope, Inter, Segoe UI, sans-serif" font-size="17" font-weight="800" letter-spacing="-.35"><tspan fill="#152038">Quanta</tspan><tspan fill="#F97316">Edge</tspan></text>
 </svg>
