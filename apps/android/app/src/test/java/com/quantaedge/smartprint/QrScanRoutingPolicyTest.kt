@@ -13,7 +13,7 @@ class QrScanRoutingPolicyTest {
     @Test
     fun scannerCopyClearlySeparatesShopQrFromWifiCheck() {
         assertEquals("Scan Shop QR", QrScanPurpose.SHOP_CONNECTION.title)
-        assertEquals("Scan the Shop QR to send your documents.", QrScanPurpose.SHOP_CONNECTION.instruction)
+        assertEquals("Scan the Shop QR to send documents to this shop.", QrScanPurpose.SHOP_CONNECTION.instruction)
         assertEquals("Check Wi-Fi", QrScanPurpose.WIFI_READINESS.title)
         assertEquals(
             "Scan the Wi-Fi QR shown on the shop computer.",
