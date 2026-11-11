@@ -682,8 +682,12 @@ public sealed class WindowsPrintExecutor
 
             var mode = Marshal.PtrToStructure<DevModeW>(pointer);
             var paper = PaperCode(entry.PaperSize);
-            if (SupportsPaper(queueName, pointer, paper) is false)
+            var isIdDocument = string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase);
+            if (SupportsPaper(queueName, pointer, paper) is false && !isIdDocument)
                 throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
+            // For ID sheets, a negative capability-list result is advisory. Ask
+            // DocumentProperties to apply A4 and verify its response below rather
+            // than refusing the job solely from a possibly stale capability list.
 
             var orientationCapability = DeviceCapabilitiesW(queueName, null, DcOrientation, IntPtr.Zero, pointer);
             if (landscape && orientationCapability == 0)
@@ -805,9 +809,10 @@ public sealed class WindowsPrintExecutor
         var pin = GCHandle.Alloc(page.Pixels, GCHandleType.Pinned);
         try
         {
-            // The complete A4 raster is mapped to the driver's physical paper
-            // bounds. Negative offsets shift the paper origin from the printable
-            // origin; scale conversion is DPI-only, never fit-to-printable-area.
+            // The complete A4 raster is mapped to nominal A4 device dimensions.
+            // A trusted physical offset moves the page origin from the printable
+            // origin; otherwise the best-effort nominal origin is used. Scaling is
+            // DPI-only and never fit-to-printable-area.
             return StretchDIBits(
                 dc,
                 placement.Left,
