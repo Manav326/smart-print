@@ -1226,10 +1226,10 @@ class QrScannerPermissionInstrumentedTest {
         // Android kills the app UID when a runtime permission grant changes.
         ActivityScenario.launch(QrScannerActivity::class.java).use {
             onView(withText("Scan Shop QR")).check(matches(isDisplayed()))
-            onView(withText("Scan the SmartPrint QR displayed at the shop counter to connect."))
+            onView(withText("Scan the Shop QR to send your documents."))
                 .check(matches(isDisplayed()))
             onView(withText("Camera access needed")).check(matches(isDisplayed()))
-            onView(withText("Allow camera for QR scanning."))
+            onView(withText("Allow camera to scan live, or choose a photo below."))
                 .check(matches(isDisplayed()))
             onView(withText("Allow camera")).check(matches(isDisplayed()))
         }
