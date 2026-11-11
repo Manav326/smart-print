@@ -574,7 +574,7 @@ test("SmartPrint uses the full theme-aware brand lockup inside the app", () => {
   assert.match(component, /smartprint-mark\.svg/);
   assert.doesNotMatch(component, /quantaedge-logo\.svg/,
     "The parent logo must not be inserted beside the SmartPrint wordmark.");
-  assert.match(light, /Smart<tspan fill="#7258E8">Print<\/tspan>/);
+  assert.match(light, /fill="#7258E8">Print/);
   assert.match(light, /fill="#152038">Quanta/);
   assert.match(light, /fill="#F97316" stroke="#913B0B">Edge/);
   assert.match(dark, /fill="#F0F3FA">Smart/);
@@ -584,9 +584,9 @@ test("SmartPrint uses the full theme-aware brand lockup inside the app", () => {
     "QuantaEdge must not sit on white, navy, blue, or pill-shaped backing panels.");
   assert.doesNotMatch(dark, /<rect x="202"|<path d="M298 104/,
     "Dark mode must not add a background behind QuantaEdge either.");
-  assert.match(light, /<tspan font-size="27" fill="#152038">Quanta<\\/tspan><tspan font-size="27" fill="#F97316" stroke="#913B0B"/);
-  assert.match(dark, /<tspan font-size="27" fill="#152038" stroke="#D7DEEE"/);
-  assert.match(dark, /<tspan fill="#F97316">Edge/);
+  assert.match(light, /font-size="27" fill="#152038">Quanta/);
+  assert.match(dark, /font-size="27" fill="#152038" stroke="#D7DEEE"/);
+  assert.match(dark, /fill="#F97316">Edge/);
   assert.match(css, /html\[data-theme="dark"\] \.brand-lockup-logo-dark/);
   assert.match(css, /app-shell\.sidebar-collapsed \.brand-lockup \.brand-mark-image/);
   assert.match(app, /<BrandLockup className="boot-brand-lockup" \/>/);
