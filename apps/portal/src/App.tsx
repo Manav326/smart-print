@@ -2382,7 +2382,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
           </div>
           {test&&<div className="local-phone-test">
             <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
-            <div><strong>Scan with SmartPrint on your phone</strong><p>On your phone, open SmartPrint and tap Check Wi-Fi, then scan this QR. This screen will confirm automatically when the connection works.</p><small>Using a phone without SmartPrint? Scan with its camera and open the link. This check expires in five minutes.</small></div>
+            <div><strong>Scan with SmartPrint on your phone</strong><p>On your phone, open SmartPrint and tap Check Wi-Fi. Scan this QR or choose its saved photo or screenshot. This screen will confirm automatically when the connection works.</p><small>Using a phone without SmartPrint? Scan with its camera and open the link. This check expires in five minutes.</small></div>
           </div>}
           {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
           {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>Local print pipeline ready</strong><small>Protected queue, print worker, cloud heartbeat and printer inventory are healthy. The assigned printer is checked separately for each QR station upload.</small></span></div>}
