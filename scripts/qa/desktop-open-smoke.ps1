@@ -208,7 +208,7 @@ try {
         }
 
         if ($process.MainWindowHandle -ne [IntPtr]::Zero -and
-            $process.MainWindowTitle -eq "SmartPrint by QuantaEdge") {
+            $process.MainWindowTitle -eq "Smart Print") {
             $mainWindowReady = $true
         }
 
@@ -232,7 +232,7 @@ try {
                         -not [string]::IsNullOrWhiteSpace($_.webSocketDebuggerUrl)
                     } |
                     Sort-Object {
-                        if ($_.title -eq "SmartPrint by QuantaEdge") { 0 }
+                        if ($_.title -eq "Smart Print") { 0 }
                         elseif ($_.url -match "^https?://tauri\.localhost(?:/|$)") { 1 }
                         elseif ($_.url -eq "about:blank") { 2 }
                         else { 3 }
@@ -395,7 +395,7 @@ new Promise(resolve => {
       rootTextLength: root ? (root.innerText || "").trim().length : 0
     };
     if (
-      result.title === "SmartPrint by QuantaEdge" &&
+      result.title === "Smart Print" &&
       result.appShell === "desktop" &&
       result.rootId === "smartprint-desktop-root" &&
       result.rootChildCount > 0 &&
@@ -514,7 +514,7 @@ new Promise(resolve => {
 
         $probe = $probeJson | ConvertFrom-Json -ErrorAction Stop
 
-        if ($probe.title -ne "SmartPrint by QuantaEdge" -or
+        if ($probe.title -ne "Smart Print" -or
             $probe.appShell -ne "desktop" -or
             $probe.rootId -ne "smartprint-desktop-root" -or
             [int]$probe.rootChildCount -lt 1 -or
