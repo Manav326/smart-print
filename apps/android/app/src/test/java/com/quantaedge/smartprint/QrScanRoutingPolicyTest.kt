@@ -11,6 +11,17 @@ class QrScanRoutingPolicyTest {
         "http://192.168.1.25:17842/api/v1/local/connection-check?token=${"B".repeat(43)}"
 
     @Test
+    fun scannerCopyClearlySeparatesShopQrFromWifiCheck() {
+        assertEquals("Scan Shop QR", QrScanPurpose.SHOP_CONNECTION.title)
+        assertEquals("Scan the Shop QR to send your documents.", QrScanPurpose.SHOP_CONNECTION.instruction)
+        assertEquals("Check Wi-Fi", QrScanPurpose.WIFI_READINESS.title)
+        assertEquals(
+            "Scan the Wi-Fi QR on the shop computer to check the connection.",
+            QrScanPurpose.WIFI_READINESS.instruction
+        )
+    }
+
+    @Test
     fun shopConnectionEntryAcceptsOnlyTheConfiguredStationQr() {
         val route = QrScanRoutingPolicy.route(
             rawValue = stationUrl,
@@ -53,7 +64,7 @@ class QrScanRoutingPolicyTest {
         )
         assertTrue(route is QrScanRoute.Unsupported)
         assertEquals(
-            "That isn't a Wi-Fi check QR. Scan the temporary phone-check QR shown on the shop computer. Your current shop connection has not been changed.",
+            "This isn't a Wi-Fi QR. Choose the Wi-Fi QR shown on the shop computer. Your saved shop is unchanged.",
             (route as QrScanRoute.Unsupported).message
         )
     }
