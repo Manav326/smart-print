@@ -94,19 +94,20 @@ const groupFor = (agent) => {
   return robots.slice(bodyStart, nextGroup === -1 ? robots.length : nextGroup);
 };
 const protectedPaths = ["/api/", "/health/", "/downloads/"];
-const explicitlyPermittedAgents = [
-  "OAI-SearchBot", "PerplexityBot", "Claude-SearchBot", "Claude-User",
-  "GPTBot", "ClaudeBot", "Google-Extended"
-];
-for (const agent of explicitlyPermittedAgents) {
+const searchAgents = ["OAI-SearchBot", "PerplexityBot", "Claude-SearchBot", "Claude-User"];
+for (const agent of searchAgents) {
   const group = groupFor(agent);
   assert.match(group, /^Allow: \/$/m, `${agent} must be allowed on public paths`);
   assert.doesNotMatch(group, /^Disallow: \/$/m, `${agent} must not be blocked site-wide`);
   for (const path of protectedPaths) assert.ok(group.includes(`Disallow: ${path}`), `${agent} must not access ${path}`);
 }
+const modelTrainingAgents = ["GPTBot", "ClaudeBot", "Google-Extended"];
+for (const agent of modelTrainingAgents) {
+  const group = groupFor(agent);
+  assert.match(group, /^Disallow: \/$/m, `${agent} must remain blocked until the site owner explicitly permits model training / Gemini grounding`);
+}
 const trainingPreference = groupFor("__usage_ai-training");
-assert.match(trainingPreference, /^Allow: \/$/m, "AI-training preference must permit public content");
-for (const path of protectedPaths) assert.ok(trainingPreference.includes(`Disallow: ${path}`), `AI-training preference must exclude ${path}`);
+assert.match(trainingPreference, /^Disallow: \/$/m, "the shared AI-training preference must opt out of training");
 const defaultGroup = groupFor("*");
 assert.match(defaultGroup, /^Allow: \/$/m, "other standards-compliant crawlers must be allowed by default");
 for (const path of protectedPaths) assert.ok(defaultGroup.includes(`Disallow: ${path}`), `default crawler policy must exclude ${path}`);
