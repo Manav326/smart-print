@@ -2175,6 +2175,14 @@ class MainActivity : AppCompatActivity() {
         })
         setToolbarBackAction("Back", ::cancelPicker)
         setBottomNavigationVisible(false)
+        if (fileChooserReturnToPhotoStudio) {
+            // The private studio WebView is retained in memory, but its host is
+            // removed while the library picker is visible. Re-entry attaches the
+            // same instance through showDedicatedPhotoStudio().
+            val studioView = webView
+            val studioHost = studioView?.parent as? ViewGroup
+            if (studioHost?.parent === content) content.removeView(studioHost)
+        }
         content.removeAllViews()
         content.addView(libraryView(true), frameParams())
     }
