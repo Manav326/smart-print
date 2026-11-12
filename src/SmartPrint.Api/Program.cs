@@ -930,32 +930,6 @@ customerApi.MapGet("/me", async (
     });
 });
 
-customerApi.MapGet("/jobs/count", async (
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    var customerId = CustomerIdentity.GetCustomerId(principal);
-    if (customerId is null)
-    {
-        return Results.Forbid();
-    }
-
-    var totalCount = await (
-        from job in db.PrintJobs.AsNoTracking()
-        join profile in db.ShopProfiles.AsNoTracking()
-            on job.TenantId equals profile.TenantId
-        where job.CustomerUserId == customerId ||
-              (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
-                  session.TenantId == job.TenantId &&
-                  session.Id == job.CustomerSessionId &&
-                  session.CustomerUserId == customerId))
-        select job.Id
-    ).CountAsync(ct);
-
-    return Results.Ok(new { TotalCount = totalCount });
-});
-
 customerApi.MapGet("/jobs", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
@@ -1047,7 +1021,7 @@ customerApi.MapGet("/jobs", async (
 
     return Results.Ok(new
     {
-        Jobs = jobs,
+        Items = jobs,
         Page = pageNumber,
         Size = pageSize,
         TotalItems = totalItems,
