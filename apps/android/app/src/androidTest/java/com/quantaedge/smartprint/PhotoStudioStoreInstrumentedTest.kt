@@ -114,8 +114,8 @@ class PhotoStudioStoreInstrumentedTest {
             .put("title", "Invalid")
             .put("sizeCode", "35x45")
             .put("photoCount", 26)
-            .put("photosPerPage", 25)
-            .put("pageCount", 2)
+            .put("photosPerPage", 26)
+            .put("pageCount", 1)
             .put("resolutionDpi", 300)
         var rejected = false
         try {
