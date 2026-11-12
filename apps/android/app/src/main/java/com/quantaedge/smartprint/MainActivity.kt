@@ -145,6 +145,7 @@ class MainActivity : AppCompatActivity() {
     private var privatePhotoStudioPageOpen = false
     private var photoStudioLoadingOverlay: View? = null
     private var photoStudioLoadFailed = false
+    private var webViewWarmupScheduled = false
     private var customerHistoryRefreshing = false
     // Remember which WebView flow opened Android's shared document picker.
     // Photo Studio needs its own source picker and must not return to shop upload.
@@ -1166,6 +1167,22 @@ class MainActivity : AppCompatActivity() {
         updateBottomNavigationSelection(HOME)
         content.removeAllViews()
         content.addView(homeView(), frameParams())
+        warmWebViewWhenHomeIsIdle()
+    }
+
+    private fun warmWebViewWhenHomeIsIdle() {
+        if (webView != null || webViewWarmupScheduled || portalUrl != null) return
+        webViewWarmupScheduled = true
+        content.post {
+            webViewWarmupScheduled = false
+            if (!isFinishing && !isDestroyed && webView == null &&
+                portalUrl == null && navigation.selectedItemId == HOME) {
+                // Initialize the one shared WebView after the first Home frame.
+                // Do not navigate it or create a second WebView: Photo Studio then
+                // pays only the service-page load cost when the customer taps it.
+                ensureWebView()
+            }
+        }
     }
 
     private fun homeView(): View {
@@ -1408,8 +1425,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun isPhotoStudioPageUrl(rawUrl: String?): Boolean {
         val uri = runCatching { Uri.parse(rawUrl.orEmpty()) }.getOrNull() ?: return false
-        return uri.scheme.equals("https", ignoreCase = true) &&
-            uri.host.equals(Uri.parse(BuildConfig.SERVICE_BASE_URL).host, ignoreCase = true) &&
+        val service = Uri.parse(BuildConfig.SERVICE_BASE_URL)
+        return uri.scheme.equals(service.scheme, ignoreCase = true) &&
+            uri.host.equals(service.host, ignoreCase = true) &&
+            uri.port == service.port &&
             uri.path.orEmpty().trimEnd('/').equals("/photo-studio", ignoreCase = true)
     }
 
@@ -2129,7 +2148,7 @@ class MainActivity : AppCompatActivity() {
         (view.parent as? ViewGroup)?.removeView(view)
         content.addView(view, frameParams())
         val activeShopUrl = portalUrl
-        if (activeShopUrl != null && view.url?.contains("/photo-studio") == true) view.loadUrl(activeShopUrl)
+        if (activeShopUrl != null && isPhotoStudioPageUrl(view.url)) view.loadUrl(activeShopUrl)
     }
 
     private fun refreshLibrary(preserveScroll: Boolean = true) {
@@ -3183,7 +3202,7 @@ class MainActivity : AppCompatActivity() {
                             data.startsWith("renamePhotoStudioDocument|") ||
                             data.startsWith("deletePhotoStudioDocument|")
                         val photoStudioRouteActive = privatePhotoStudioPageOpen &&
-                            Uri.parse(webView?.url.orEmpty()).path == "/photo-studio"
+                            isPhotoStudioPageUrl(webView?.url)
                         when {
                             data == "releasePhotoStudioUploadFiles" -> {
                                 runOnUiThread {
@@ -4584,7 +4603,14 @@ class MainActivity : AppCompatActivity() {
             front.fill(0)
             back.fill(0)
             toast("Could not preview the ID: " + message(error))
-            showIdStudioBackStep()
+            if (readOnly) {
+                showIdStudioHome()
+            } else if (draftId != null && idStudioStore.draftExists(draftId) &&
+                idStudioStore.hasFront(draftId)) {
+                showIdStudioBackStep()
+            } else {
+                showIdStudioHome()
+            }
             return
         }
         content.addView(root, frameParams())
