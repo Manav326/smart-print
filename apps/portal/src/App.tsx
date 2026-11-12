@@ -4257,7 +4257,15 @@ function isSmartPrintIdDocument(file:File):boolean {
 }
 
 function isSmartPrintPhotoDocument(file:File):boolean {
-  return Boolean((file as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings);
+  return (file as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="PHOTO";
+}
+function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSettings {
+  if(!value||typeof value!=="object")return false;
+  const settings=value as CustomerPhotoSettings;
+  const maximumBySize:Record<string,number>={"35x45":25,"25x35":49,"2x2":15,"4x6":1};
+  const maximum=maximumBySize[settings.sizeCode];
+  return maximum!==undefined&&Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
+    Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum;
 }
 
 function isCustomerPdf(file:File):boolean {
@@ -4758,11 +4766,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const idDocument=isSmartPrintIdDocument(candidate);
         const photoSettings=photoSettingsByFileFingerprint[fingerprint];
         const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
-        if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards are always sent with Private Printing. No normal cloud upload is allowed.",409);
+        const isPrivateStudioDocument=idDocument||Boolean(photoSettings);
+        if(isPrivateStudioDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID and Photo Studio documents must use Private Printing. No normal cloud upload is allowed.",409);
         const created=effectiveUploadMode==="LOCAL"&&localAgent
           ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)
-          : idDocument
-            ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded.",409);})()
+          : isPrivateStudioDocument
+            ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No private studio document was uploaded or sent to cloud storage.",409);})()
             : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
@@ -5105,17 +5114,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     if(nativePrintKinds?.length===next.length) {
       next.forEach((candidate,index)=>{
-        if(nativePrintKinds[index]==="ID_DOCUMENT") {
-          (candidate as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind="ID_DOCUMENT";
+        if(nativePrintKinds[index]==="ID_DOCUMENT"||nativePrintKinds[index]==="PHOTO") {
+          (candidate as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind=nativePrintKinds[index]!;
         }
       });
     }
     if(nativePhotoSettings?.length===next.length) {
       next.forEach((candidate,index)=>{
         const settings=nativePhotoSettings[index];
-        if(settings&&["35x45","25x35","2x2","4x6"].includes(settings.sizeCode)&&
-          Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
-          Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=49) {
+        if(settings&&isValidNativePhotoSettings(settings)) {
           (candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings=settings;
         }
       });
@@ -5128,10 +5135,16 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return true;
     });
     const supported=rootFiles.filter(candidate=>/\.(pdf|jpe?g|png)$/i.test(candidate.name));
+    const malformedPhotoDocument=supported.some(candidate=>
+      (candidate as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="PHOTO"&&!isValidNativePhotoSettings(
+        (candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings
+      )
+    );
+    if(malformedPhotoDocument){setError("This saved Photo Studio sheet is missing its print details. Refresh the private document library and select it again.");return;}
     const incomingIdDocument=supported.some(isSmartPrintIdDocument);
     const incomingPhotoDocument=supported.some(isSmartPrintPhotoDocument);
     if((incomingIdDocument||incomingPhotoDocument)&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
-      setError("Prepared ID cards use Private Printing for the entire batch. Finish the current Standard batch, then start a new batch for the ID sheet.");
+      setError("Prepared ID and Photo Studio documents use Private Printing for the entire batch. Finish the current Standard batch, then start a new private batch.");
       return;
     }
     if(incomingIdDocument||incomingPhotoDocument) {
