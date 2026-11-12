@@ -16,7 +16,9 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Add public metadata, social preview metadata and a SmartPrint favicon.
 - [x] Preserve the existing `/s/{publicCode}` customer QR route ahead of public landing-page routing.
 - [x] Run portal type-check/build on the current main commit and resolve any failures (CI run 344 passed).
-- [ ] Deploy the updated portal and verify `https://qr-test.paintpulp.com/` on desktop and mobile.
+- [x] Keep the production website at `https://smartprint.quantaedge.in/` publicly available 24 hours a day, 7 days a week; SEO changes must not intentionally take it offline or place it into maintenance.
+- [ ] Verify the live production homepage, SEO pages, `robots.txt` and `sitemap.xml` on desktop and mobile as ongoing checks. A failed external fetch is an unverified check, not evidence of downtime.
+- [ ] Roll out portal changes with health checks and rollback, keeping the currently healthy version serving traffic until the replacement is ready.
 - [ ] Complete keyboard, contrast, screen-reader and responsive browser checks.
 - [ ] Publish and link the actual Terms of Service and Privacy Policy pages.
 - [x] Keep Android download disabled until a production-signed APK is published; do not link the CI debug APK.
@@ -65,7 +67,7 @@ This checklist tracks the public website, non-technical Windows setup, Android r
 - [x] Generate a `SHA256SUMS.txt` manifest for exactly the binaries included in each version.
 - [x] Document stable GitHub Release asset names; keep Android disabled until its APK is published and deploy the Windows Available link only after the first Windows release exists.
 - [x] Add a version/release-notes link from each download card.
-- [x] Default release builds to `https://qr-test.paintpulp.com` through the `SMARTPRINT_PUBLIC_BASE_URL` repository variable, with an explicit default.
+- [x] Use `https://smartprint.quantaedge.in` as the canonical production origin for release builds through the `SMARTPRINT_PUBLIC_BASE_URL` repository variable; validate the configured origin before building.
 - [x] Validate the configured release origin as a canonical HTTPS origin before building either installer.
 - [x] Limit GitHub Release write permission to the publication job and fail if any expected release asset is missing.
 - [x] Retain every published stable version; new versions move the latest-release pointer without deleting older releases.
