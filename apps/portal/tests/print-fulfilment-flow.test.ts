@@ -486,6 +486,23 @@ test("native customer account identity accompanies QR session renewal",()=>{
 });
 
 
+test("local shop Photo Studio revision completion commits the exact authorized price snapshot",()=>{
+  const agent=read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
+  const program=read("../../../src/SmartPrint.Api/Program.cs");
+  assert.match(agent,/ExpectedQuotedAmountMinor = authorization\.QuotedAmountMinor/);
+  assert.match(agent,/ExpectedPricingVersion = authorization\.PricingVersion/);
+  assert.match(agent,/JsonContent\.Create\(completionRequest\)/);
+  const start=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"');
+  const end=program.indexOf("\\nagentApi.MapPost(",start+30);
+  assert.ok(start>=0&&end>start);
+  const complete=program.slice(start,end);
+  assert.match(complete,/expectedQuotedAmountMinor <= 0/);
+  assert.match(complete,/pricing\.Version != expectedPricingVersion \|\| amount != expectedQuotedAmountMinor/);
+  assert.match(complete,/photo_revision_pricing_changed/);
+  assert.match(complete,/job\.QuotedAmountMinor == request\.ExpectedQuotedAmountMinor/);
+  assert.match(complete,/job\.PricingVersion == request\.ExpectedPricingVersion/);
+});
+
 test("local shop Photo Studio revision authorization and completion enforce the A4 raster contract",()=>{
   const program=read("../../../src/SmartPrint.Api/Program.cs");
   const authorizeStart=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize"');

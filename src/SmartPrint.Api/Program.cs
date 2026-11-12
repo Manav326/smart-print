@@ -6594,6 +6594,16 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
             message = "The completed local photo PDF must contain only portrait A4 pages with one full-page 300-DPI photo raster on each page."
         });
 
+    if (request.ExpectedQuotedAmountMinor is not long expectedQuotedAmountMinor ||
+        expectedQuotedAmountMinor <= 0 ||
+        request.ExpectedPricingVersion is not int expectedPricingVersion ||
+        expectedPricingVersion <= 0)
+        return Results.BadRequest(new
+        {
+            code = "photo_revision_price_snapshot_missing",
+            message = "The local photo revision must include the price and pricing version returned by its authorization."
+        });
+
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
         $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {device.TenantId} FOR UPDATE")
@@ -6638,6 +6648,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.PhotoSizeCode == request.PhotoSizeCode &&
         job.PhotoCount == request.PhotoCount &&
         job.PhotosPerPage == request.PhotosPerPage &&
+        job.QuotedAmountMinor == request.ExpectedQuotedAmountMinor &&
+        job.PricingVersion == request.ExpectedPricingVersion &&
         string.Equals(
             job.PageRefundAllocationsJson,
             JsonSerializer.Serialize(PricingCalculator.CalculatePhotoPageRefundAllocations(
@@ -6729,6 +6741,16 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
+    }
+
+    if (pricing.Version != expectedPricingVersion || amount != expectedQuotedAmountMinor)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "photo_revision_pricing_changed",
+            message = "Photo pricing changed while this sheet was being saved. The original photo is unchanged; reopen Photo Studio to review the current price."
+        });
     }
 
     var now = DateTimeOffset.UtcNow;
