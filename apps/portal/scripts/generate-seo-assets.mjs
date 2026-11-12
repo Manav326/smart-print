@@ -49,14 +49,18 @@ const searchAgentRules = searchAgents
 // Model-training access is not required for search visibility. Keep it blocked unless
 // the site owner explicitly chooses to permit it. Google-Extended additionally
 // controls Gemini Apps / Vertex AI grounding, not just training.
-const modelTrainingAgents = ["GPTBot", "ClaudeBot", "Google-Extended"];
+const modelTrainingAgents = ["GPTBot", "ClaudeBot"];
 const trainingAgentRules = modelTrainingAgents
   .map(agent => `User-agent: ${agent}\nDisallow: /`)
   .join("\n\n");
 
+// Google-Extended is explicitly allowed for Gemini Apps / Vertex AI grounding,
+// with the site owner's consent to Google's associated Gemini model-training use.
+const googleExtendedRules = `User-agent: Google-Extended\\nAllow: /\\n${protectedPaths}`;
+
 // Draft IETF AIPREF token: express the site owner's preference against model training.
 const trainingPreference = "User-agent: __usage_ai-training\nDisallow: /";
 const defaultRules = `User-agent: *\nAllow: /\n${protectedPaths}`;
-const robots = `${searchAgentRules}\n\n${trainingAgentRules}\n\n${trainingPreference}\n\n${defaultRules}\n\nSitemap: ${origin}/sitemap.xml\n`;
+const robots = `${searchAgentRules}\n\n${trainingAgentRules}\n\n${googleExtendedRules}\n\n${trainingPreference}\n\n${defaultRules}\n\nSitemap: ${origin}/sitemap.xml\n`;
 await writeFile(join(distRoot, "robots.txt"), robots, "utf8");
 console.log(`Generated SmartPrint sitemap and robots.txt for ${origin}.`);
