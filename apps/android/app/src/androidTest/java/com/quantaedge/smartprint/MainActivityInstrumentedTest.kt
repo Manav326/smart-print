@@ -690,6 +690,40 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun openingPhotoStudioAfterShopPrintAlwaysUsesConfiguredServiceOrigin() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val shopUrl = "https://shop.example.test/station/12345678901234567890123456789012"
+                MainActivity::class.java.getDeclaredField("portalUrl").apply { isAccessible = true }
+                    .set(activity, shopUrl)
+                MainActivity::class.java.getDeclaredField("portalHost").apply { isAccessible = true }
+                    .set(activity, "shop.example.test")
+                val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
+                    isAccessible = true
+                }.invoke(activity) as WebView
+                webView.loadUrl(shopUrl)
+                MainActivity::class.java.getDeclaredMethod("showDedicatedPhotoStudio").apply {
+                    isAccessible = true
+                }.invoke(activity)
+                val studioUrl = Uri.parse(webView.url)
+                assertEquals("The Photo Studio route must not inherit the QR-selected shop host.",
+                    Uri.parse(BuildConfig.SERVICE_BASE_URL).host, studioUrl.host)
+                assertEquals("/photo-studio", studioUrl.path)
+                assertTrue(
+                    "Photo Studio must activate its route-scoped private library bridge.",
+                    MainActivity::class.java.getDeclaredField("privatePhotoStudioPageOpen")
+                        .apply { isAccessible = true }.getBoolean(activity)
+                )
+                assertFalse(
+                    "The shop-print route must not remain active when Photo Studio opens.",
+                    MainActivity::class.java.getDeclaredField("fileChooserReturnToPhotoStudio")
+                        .apply { isAccessible = true }.getBoolean(activity)
+                )
+            }
+        }
+    }
+
+    @Test
     fun enteringShopPrintFromPhotoStudioUsesOnlyTheQrSelectedShopRoute() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Photo Studio")).perform(click())
