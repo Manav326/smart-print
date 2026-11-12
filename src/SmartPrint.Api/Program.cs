@@ -5617,6 +5617,9 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                     completedJob.PaperSize,
                     completedJob.IsDuplex,
                     completedJob.Orientation,
+                    completedJob.PhotoSizeCode,
+                    completedJob.PhotoCount,
+                    completedJob.PhotosPerPage,
                     completedJob.PricingVersion,
                     completedJob.Currency,
                     completedJob.QuotedAmountMinor,
@@ -5831,6 +5834,27 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             message = "The ID card sheet must be a valid, single-page A4 portrait PDF. Recheck the prepared sheet before sending it."
         });
 
+    if (ticket.PrintKind == "PHOTO")
+    {
+        if (!ticket.PrivatePrinting ||
+            ticket.PhotoSizeCode is not string photoSizeCode ||
+            ticket.PhotoCount is not int photoCount ||
+            ticket.PhotosPerPage is not int photosPerPage)
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_metadata_invalid",
+                message = "This saved Photo Studio sheet is missing its private print details."
+            });
+        var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+        if (request.PageCount != expectedPageCount ||
+            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, expectedPageCount))
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_sheet_layout_invalid",
+                message = $"The Photo Studio PDF must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page photo raster."
+            });
+    }
+
     var now = DateTimeOffset.UtcNow;
     var privateRelayClaim = ticket.PrivatePrinting &&
         ticket.PrivateRelayUploadedUtc is not null &&
@@ -5891,6 +5915,9 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                     existingJob.PaperSize,
                     existingJob.IsDuplex,
                     existingJob.Orientation,
+                    existingJob.PhotoSizeCode,
+                    existingJob.PhotoCount,
+                    existingJob.PhotosPerPage,
                     existingJob.PricingVersion,
                     existingJob.Currency,
                     existingJob.QuotedAmountMinor,
