@@ -24,15 +24,25 @@ internal class CustomerHistoryStore(context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
 
     fun read(email: String): List<CustomerPrintHistoryItem>? {
-        val encoded = preferences.getString(preferenceKey(email), null) ?: return null
+        val key = preferenceKey(email)
+        val encoded = preferences.getString(key, null) ?: return null
         return try {
-            val plain = decrypt(Base64.decode(encoded, Base64.NO_WRAP))
-            val array = JSONArray(String(plain, StandardCharsets.UTF_8))
-            (0 until array.length()).mapNotNull { index ->
-                array.optJSONObject(index)?.toHistoryItem()
+            val payload = Base64.decode(encoded, Base64.NO_WRAP)
+            val plain = try {
+                decrypt(payload)
+            } finally {
+                payload.fill(0)
+            }
+            try {
+                val array = JSONArray(String(plain, StandardCharsets.UTF_8))
+                (0 until array.length()).mapNotNull { index ->
+                    array.optJSONObject(index)?.toHistoryItem()
+                }
+            } finally {
+                plain.fill(0)
             }
         } catch (_: Exception) {
-            preferences.edit().remove(preferenceKey(email)).apply()
+            preferences.edit().remove(key).commit()
             null
         }
     }
@@ -40,10 +50,20 @@ internal class CustomerHistoryStore(context: Context) {
     fun replace(email: String, history: List<CustomerPrintHistoryItem>) {
         val array = JSONArray()
         history.distinctBy { it.id }.forEach { item -> array.put(item.toJson()) }
-        val encrypted = encrypt(array.toString().toByteArray(StandardCharsets.UTF_8))
-        preferences.edit()
-            .putString(preferenceKey(email), Base64.encodeToString(encrypted, Base64.NO_WRAP))
-            .apply()
+        val plain = array.toString().toByteArray(StandardCharsets.UTF_8)
+        val encrypted = try {
+            encrypt(plain)
+        } finally {
+            plain.fill(0)
+        }
+        val encoded = try {
+            Base64.encodeToString(encrypted, Base64.NO_WRAP)
+        } finally {
+            encrypted.fill(0)
+        }
+        check(preferences.edit().putString(preferenceKey(email), encoded).commit()) {
+            "Your print history could not be saved securely."
+        }
     }
 
     fun clear(email: String) {
