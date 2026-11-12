@@ -9504,7 +9504,13 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             request.PaperSize != "A4" ||
             request.IsDuplex ||
             request.Orientation != "PORTRAIT")) ||
+        (isPhotoPrint && (!job.PrivatePrinting ||
+            job.PrintKind != "PHOTO" ||
+            request.PhotoSizeCode != job.PhotoSizeCode ||
+            request.PhotoCount != job.PhotoCount ||
+            request.PhotosPerPage != job.PhotosPerPage)) ||
         (job.PrintKind == "ID_DOCUMENT" && !isIdDocument) ||
+        (job.PrintKind == "PHOTO" && !isPhotoPrint) ||
         job.PageCount is <= 0 or > 500 ||
         request.Copies is < 1 or > 100 ||
         request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
@@ -9567,13 +9573,24 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         {
             var photoSizeCode = request.PhotoSizeCode!;
             var photoCount = request.PhotoCount!.Value;
-            var photosPerPage = request.PhotosPerPage ?? photoCount;
+            var photosPerPage = request.PhotosPerPage!.Value;
             var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
             if (job.PageCount != expectedPageCount)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
                     ["pageCount"] = [$"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for {photoCount} photos of the selected size."]
+                });
+            }
+
+            var photoDocument = await db.PrintDocuments.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == job.TenantId && item.PrintJobId == job.Id, ct);
+            if (photoDocument is null ||
+                !PhotoSheetPdfRules.HasExactlyA4PortraitPages(photoDocument.PageSizesJson, expectedPageCount))
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["photoSheet"] = ["The saved Photo Studio document must contain the selected number of portrait A4 pages with a full-page photo raster."]
                 });
             }
 
