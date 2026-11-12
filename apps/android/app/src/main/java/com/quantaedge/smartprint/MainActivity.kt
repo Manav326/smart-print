@@ -1681,6 +1681,7 @@ class MainActivity : AppCompatActivity() {
         filterRow.addView(text("Status", 11, R.color.qp_muted, true),
             LinearLayout.LayoutParams(dp(55), -2))
         val statusSpinner = android.widget.Spinner(this).apply {
+            contentDescription = "History status filter"
             val labels = listOf("All statuses") + statusValues.map(::activityStatusLabel)
             adapter = android.widget.ArrayAdapter(
                 this@MainActivity,
