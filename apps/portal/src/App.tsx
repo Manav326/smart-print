@@ -5139,6 +5139,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setUploadMode("LOCAL");
       setUploadModeManuallySelected(true);
     }
+    for(const candidate of supported){
+      const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
+      if(nativeGroup)(candidate as File & {__smartPrintBatchGroup?:string}).__smartPrintBatchGroup=nativeGroup;
+    }
     if(incomingPhotoDocument){
       setPhotoSettingsByFileFingerprint(current=>{
         const updated={...current};
@@ -5148,10 +5152,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         });
         return updated;
       });
-    }
-    for(const candidate of supported){
-      const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
-      if(nativeGroup)(candidate as File & {__smartPrintBatchGroup?:string}).__smartPrintBatchGroup=nativeGroup;
     }
     const unsupportedSkipped=rootFiles.length-supported.length;
     if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
