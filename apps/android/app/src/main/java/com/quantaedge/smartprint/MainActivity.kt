@@ -127,6 +127,7 @@ class MainActivity : AppCompatActivity() {
     private var idStudioCardHeightMm = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
     private var idStudioPreviewMode = "CARD"
     private var idStudioPreviewSide = "front"
+    private var idStudioReadOnlyView = false
     private var idStudioReviewBitmap: Bitmap? = null
     private var idStudioReviewScans: Pair<ByteArray, ByteArray>? = null
     private var customerUploadPdfPreviewOpen = false
@@ -229,6 +230,7 @@ class MainActivity : AppCompatActivity() {
         ) ?: IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
         idStudioPreviewMode = savedInstanceState?.getString("idStudioPreviewMode")?.takeIf { it == "CARD" || it == "A4" } ?: "CARD"
         idStudioPreviewSide = savedInstanceState?.getString("idStudioPreviewSide")?.takeIf { it == "front" || it == "back" } ?: "front"
+        idStudioReadOnlyView = savedInstanceState?.getBoolean("idStudioReadOnlyView") ?: false
         idStudioScreenOpen = savedInstanceState?.getBoolean("idStudioScreenOpen") ?: false
         customerAccountStore = CustomerAccountStore(this)
         customerPrintSessionStore = CustomerPrintSessionStore(this)
@@ -283,7 +285,14 @@ class MainActivity : AppCompatActivity() {
                 )
             }
         } else if (savedInstanceState?.getBoolean("idStudioScreenOpen") == true) {
-            showIdStudioHome()
+            if (idStudioReadOnlyView && idStudioEditingFile?.let(idStudioStore::canEditPreparedDocument) == true) {
+                showIdStudioReview()
+            } else if (idStudioDraftId?.let(idStudioStore::draftExists) == true &&
+                idStudioStore.hasFront(idStudioDraftId!!) && idStudioStore.hasBack(idStudioDraftId!!)) {
+                showIdStudioReview()
+            } else {
+                showIdStudioHome()
+            }
         } else if (savedInstanceState?.getBoolean("profileVisible") == true) {
             profileReturnDestination = savedInstanceState.getInt(
                 "profileReturnDestination",
@@ -320,6 +329,7 @@ class MainActivity : AppCompatActivity() {
         outState.putFloat("idStudioCardHeightMm", idStudioCardHeightMm)
         outState.putString("idStudioPreviewMode", idStudioPreviewMode)
         outState.putString("idStudioPreviewSide", idStudioPreviewSide)
+        outState.putBoolean("idStudioReadOnlyView", idStudioReadOnlyView)
         outState.putBoolean("idStudioScreenOpen", idStudioScreenOpen)
         webView?.let { view ->
             val webState = Bundle()
@@ -1167,11 +1177,29 @@ class MainActivity : AppCompatActivity() {
         val used = android.text.format.Formatter.formatShortFileSize(this, store.storageUsageBytes())
 
         // A calm, high-contrast welcome surface makes the first action unmistakable.
+        val heroBackground = android.graphics.drawable.LayerDrawable(arrayOf(
+            android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(
+                    getColor(R.color.qp_hero_start),
+                    getColor(R.color.qp_hero_middle),
+                    getColor(R.color.qp_hero_end)
+                )
+            ).apply {
+                cornerRadius = dp(24).toFloat()
+                setStroke(dp(1), getColor(R.color.qp_hero_outline))
+            },
+            android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(0x35FFFFFF, 0x12FFFFFF, 0x00FFFFFF)
+            ).apply { cornerRadius = dp(24).toFloat() }
+        )).apply { setLayerInset(1, dp(1), dp(1), dp(1), dp(1)) }
         val hero = card().apply {
             radius = dp(24).toFloat()
             cardElevation = dp(4).toFloat()
             strokeWidth = dp(0)
-            setCardBackgroundColor(getColor(R.color.qp_hero))
+            setCardBackgroundColor(android.graphics.Color.TRANSPARENT)
+            background = heroBackground
         }
         val heroContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1197,9 +1225,15 @@ class MainActivity : AppCompatActivity() {
         })
         heroContent.addView(button(
             if (portalUrl == null) "Find a print shop" else "Manage connected shop",
-            true
+            portalUrl == null
         ).apply {
             minHeight = dp(46)
+            if (portalUrl != null) {
+                icon = getDrawable(R.drawable.ic_store)
+                iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
+                iconPadding = dp(6)
+                iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            }
             setOnClickListener { if (portalUrl == null) showScanPrint() else showShopManager() }
         }, LinearLayout.LayoutParams(-1, dp(46)))
         val studioActions = LinearLayout(this).apply {
@@ -1208,7 +1242,7 @@ class MainActivity : AppCompatActivity() {
         }
         studioActions.addView(button("ID Studio", false).apply {
             icon = getDrawable(R.drawable.ic_file)
-            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
+            iconTint = ColorStateList.valueOf(android.graphics.Color.rgb(91, 72, 204))
             iconPadding = dp(4)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             textSize = 11f
@@ -1218,7 +1252,7 @@ class MainActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(0, dp(48), 1f))
         studioActions.addView(button("Photo Studio", false).apply {
             icon = getDrawable(R.drawable.ic_file_image)
-            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
+            iconTint = ColorStateList.valueOf(android.graphics.Color.rgb(213, 112, 63))
             iconPadding = dp(4)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             textSize = 11f
@@ -1287,44 +1321,42 @@ class MainActivity : AppCompatActivity() {
         })
         column.addView(quickActions, linearParams().apply { bottomMargin = dp(17) })
 
-        // Keep the shop connection visible and independently accessible on Home.
-        // This preserves the existing connection entry point while the hero remains
-        // focused on the primary print action.
-        val shopCard = card().apply {
-            strokeWidth = dp(1)
-            setOnClickListener { if (portalUrl != null) showShopManager() else showScanPrint() }
+        // The hero button is the single shop-management action. Keep this
+        // connected-shop row informational so the saved shop identity remains
+        // visible without presenting a second button for the same destination.
+        if (portalUrl != null) {
+            val shopCard = card().apply {
+                strokeWidth = dp(1)
+                isClickable = false
+                isFocusable = false
+            }
+            val shopRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
+            val shopGlyph = ImageView(this).apply {
+                setImageResource(R.drawable.ic_store)
+                imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+                background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
+                contentDescription = "Connected shop"
+            }
+            loadShopLogo(shopGlyph)
+            shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(42), dp(42)))
+            val shopCopy = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(10), 0, 0, 0)
+            }
+            shopCopy.addView(text(shopDisplayName ?: "Connected shop", 13, R.color.qp_text, true)
+                .apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+            shopCopy.addView(text("Connected · shop details saved on this device", 10, R.color.qp_muted, false)
+                .apply { setPadding(0, dp(3), 0, 0) })
+            shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
+            shopCard.addView(shopRow)
+            column.addView(shopCard, linearParams().apply { bottomMargin = dp(17) })
         }
-        val shopRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), dp(13), dp(13), dp(13))
-        }
-        val shopGlyph = ImageView(this).apply {
-            setImageResource(R.drawable.ic_store)
-            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
-            contentDescription = if (portalUrl == null) "Shop connection" else "Connected shop icon"
-        }
-        if (portalUrl != null) loadShopLogo(shopGlyph)
-        shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
-        val shopCopy = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(11), 0, 0, 0)
-        }
-        shopCopy.addView(text(
-            if (portalUrl == null) "Find a print shop" else shopDisplayName ?: "Connected shop",
-            14, R.color.qp_text, true
-        ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
-        shopCopy.addView(text(
-            if (portalUrl == null) "Scan the QR code at the counter to connect" else "Connected · tap to manage your shop",
-            11, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(3), 0, 0) })
-        shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        shopRow.addView(text(if (portalUrl == null) "›" else "⋮", 22, R.color.qp_muted, false))
-        shopCard.addView(shopRow)
-        column.addView(shopCard, linearParams().apply { bottomMargin = dp(22) })
 
         val recentHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -2794,7 +2826,7 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun addPrivatePreviewWatermarks(container: FrameLayout) {
+    private fun addPrivateSecurityWatermark(container: FrameLayout) {
         val securityMark = TextView(this).apply {
             text = "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"
             textSize = 9f
@@ -2811,6 +2843,10 @@ class MainActivity : AppCompatActivity() {
             securityMark,
             FrameLayout.LayoutParams(-1, dp(48), Gravity.CENTER)
         )
+    }
+
+    private fun addPrivatePreviewWatermarks(container: FrameLayout) {
+        addPrivateSecurityWatermark(container)
         val brandMark = TextView(this).apply {
             text = "SmartPrint by QuantaEdge"
             textSize = 10f
@@ -3585,6 +3621,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun showIdStudioHome() {
         releaseIdStudioReviewBitmap()
+        if (idStudioReadOnlyView) {
+            idStudioEditingFile = null
+            idStudioReadOnlyView = false
+        }
         idStudioScreenOpen = true
         privateIdViewerOpen = false
         privateIdPreviewCaptureAllowed = false
@@ -3668,11 +3708,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                val thumbnailFrame = FrameLayout(this).apply {
-                    addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
-                    addPrivatePreviewWatermarks(this)
-                }
-                row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(88), dp(58)))
+                row.addView(thumbnail, LinearLayout.LayoutParams(dp(88), dp(58)))
                 val details = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(10), 0, dp(6), 0)
@@ -3693,11 +3729,11 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                 }
-                actions.addView(button("A4 sheet", false).apply {
+                actions.addView(button("View", false).apply {
                     minHeight = dp(34)
                     textSize = 11f
-                    contentDescription = "View A4 print sheet for $displayName"
-                    setOnClickListener { showDocumentViewer(file) }
+                    contentDescription = "View ID card for $displayName"
+                    setOnClickListener { viewPreparedId(file) }
                 }, LinearLayout.LayoutParams(0, dp(36), 1f))
                 actions.addView(button("⋮", false).apply {
                     minHeight = dp(34)
@@ -3760,7 +3796,34 @@ class MainActivity : AppCompatActivity() {
         }, frameParams())
     }
 
+    private fun viewPreparedId(file: File) {
+        if (!idStudioStore.canEditPreparedDocument(file)) {
+            toast("This older ID sheet has no saved original scans. Showing its saved print sheet.")
+            showDocumentViewer(file)
+            return
+        }
+        try {
+            val metadata = idStudioStore.readMetadata(file)
+            idStudioEditingFile = file
+            idStudioReadOnlyView = true
+            idStudioFrontRotation = metadata.optInt("frontRotation", 0).takeIf { it in setOf(0, 180) } ?: 0
+            idStudioBackRotation = metadata.optInt("backRotation", 0).takeIf { it in setOf(0, 180) } ?: 0
+            idStudioCardWidthMm = metadata.optDouble("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble()).toFloat()
+            idStudioCardHeightMm = metadata.optDouble("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble()).toFloat()
+            idStudioPreviewMode = "CARD"
+            idStudioPreviewSide = "front"
+            IdCardLayoutPolicy.calculate(idStudioCardWidthMm, idStudioCardHeightMm)
+            showIdStudioReview()
+        } catch (error: Exception) {
+            idStudioReadOnlyView = false
+            idStudioEditingFile = null
+            toast("Could not open this ID: " + message(error))
+            showIdStudioHome()
+        }
+    }
+
     private fun editPreparedId(file: File) {
+        idStudioReadOnlyView = false
         if (!idStudioStore.canEditPreparedDocument(file)) {
             toast("This older ID sheet has no saved original scans, so it can still be viewed, renamed and printed but cannot be edited.")
             return
@@ -3938,10 +4001,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIdStudioReview() {
+        val readOnly = idStudioReadOnlyView
+        val preparedFile = idStudioEditingFile
         val draftId = idStudioDraftId
-        if (draftId == null || !idStudioStore.draftExists(draftId) ||
-            !idStudioStore.hasFront(draftId) || !idStudioStore.hasBack(draftId)) {
-            toast("Scan both sides before preparing the ID sheet.")
+        val canShowSavedId = readOnly && preparedFile != null &&
+            idStudioStore.canEditPreparedDocument(preparedFile)
+        val canShowDraft = !readOnly && draftId != null && idStudioStore.draftExists(draftId) &&
+            idStudioStore.hasFront(draftId) && idStudioStore.hasBack(draftId)
+        if (!canShowSavedId && !canShowDraft) {
+            toast("Scan both sides before reviewing the ID.")
             showIdStudioHome()
             return
         }
@@ -3957,8 +4025,10 @@ class MainActivity : AppCompatActivity() {
         setBottomNavigationVisible(false)
         content.removeAllViews()
 
-        val front = idStudioStore.readScanBytes(draftId, "front")
-        val back = idStudioStore.readScanBytes(draftId, "back")
+        val front = if (readOnly) idStudioStore.readPreparedSideBytes(preparedFile!!, "front")
+            else idStudioStore.readScanBytes(draftId!!, "front")
+        val back = if (readOnly) idStudioStore.readPreparedSideBytes(preparedFile!!, "back")
+            else idStudioStore.readScanBytes(draftId!!, "back")
         idStudioReviewScans = front to back
         var cardWidthMm = idStudioCardWidthMm
         var cardHeightMm = idStudioCardHeightMm
@@ -3971,7 +4041,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        heading.addView(text("Review your ID", 17, R.color.qp_text, true),
+        heading.addView(text(if (readOnly) "View your ID" else "Review your ID", 17, R.color.qp_text, true),
             LinearLayout.LayoutParams(0, -2, 1f))
         heading.addView(text("FRONT + BACK", 9, R.color.qp_muted, true))
         root.addView(heading, linearParams().apply { bottomMargin = dp(5) })
@@ -4010,7 +4080,7 @@ class MainActivity : AppCompatActivity() {
             "A4 ID front and back print sheet preview. Pinch to zoom."
         }
         previewStage.addView(preview, FrameLayout.LayoutParams(-1, -1))
-        addPrivatePreviewWatermarks(previewStage)
+        addPrivateSecurityWatermark(previewStage)
         root.addView(previewStage, LinearLayout.LayoutParams(-1, 0, 1f).apply {
             bottomMargin = dp(5)
         })
@@ -4055,7 +4125,8 @@ class MainActivity : AppCompatActivity() {
                     idStudioBackRotation,
                     cardWidthMm,
                     cardHeightMm,
-                    previewWidth
+                    previewWidth,
+                    getDrawable(R.drawable.smartprint_mark_watermark)?.mutate()
                 )
             }
             releaseIdStudioReviewBitmap()
@@ -4085,22 +4156,24 @@ class MainActivity : AppCompatActivity() {
                     showIdStudioReview()
                 }
             }, LinearLayout.LayoutParams(0, dp(40), 0.85f).apply { marginStart = dp(5) })
-            cardControls.addView(button("Rotate", false).apply {
-                minHeight = dp(40)
-                textSize = 10f
-                setOnClickListener {
-                    if (idStudioPreviewSide == "front") idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
-                    else idStudioBackRotation = (idStudioBackRotation + 180) % 360
-                    showIdStudioReview()
-                }
-            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(5) })
-            cardControls.addView(button("Retake", false).apply {
-                minHeight = dp(40)
-                textSize = 10f
-                setOnClickListener { startIdStudioSideScan(idStudioPreviewSide) }
-            }, LinearLayout.LayoutParams(0, dp(40), 0.9f).apply { marginStart = dp(5) })
+            if (!readOnly) {
+                cardControls.addView(button("Rotate", false).apply {
+                    minHeight = dp(40)
+                    textSize = 10f
+                    setOnClickListener {
+                        if (idStudioPreviewSide == "front") idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
+                        else idStudioBackRotation = (idStudioBackRotation + 180) % 360
+                        showIdStudioReview()
+                    }
+                }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(5) })
+                cardControls.addView(button("Retake", false).apply {
+                    minHeight = dp(40)
+                    textSize = 10f
+                    setOnClickListener { startIdStudioSideScan(idStudioPreviewSide) }
+                }, LinearLayout.LayoutParams(0, dp(40), 0.9f).apply { marginStart = dp(5) })
+            }
             root.addView(cardControls, linearParams().apply { bottomMargin = dp(5) })
-        } else {
+        } else if (!readOnly) {
             sheetControls.addView(button("Rotate front", false).apply {
                 minHeight = dp(40)
                 textSize = 10f
@@ -4174,21 +4247,28 @@ class MainActivity : AppCompatActivity() {
                     .show()
             }
         }
-        root.addView(sizeAction, LinearLayout.LayoutParams(-1, dp(25)).apply {
-            bottomMargin = dp(4)
-        })
-
-        root.addView(button("Prepare A4 print sheet", true).apply {
-            minHeight = dp(46)
-            setOnClickListener {
-                try {
-                    IdCardLayoutPolicy.calculate(cardWidthMm, cardHeightMm)
-                    prepareIdStudioSheet(draftId, cardWidthMm, cardHeightMm)
-                } catch (error: Exception) {
-                    toast(message(error))
+        if (!readOnly) {
+            root.addView(sizeAction, LinearLayout.LayoutParams(-1, dp(25)).apply {
+                bottomMargin = dp(4)
+            })
+            root.addView(button("Save", true).apply {
+                minHeight = dp(46)
+                setOnClickListener {
+                    try {
+                        IdCardLayoutPolicy.calculate(cardWidthMm, cardHeightMm)
+                        prepareIdStudioSheet(draftId!!, cardWidthMm, cardHeightMm)
+                    } catch (error: Exception) {
+                        toast(message(error))
+                    }
                 }
-            }
-        }, LinearLayout.LayoutParams(-1, dp(46)))
+            }, LinearLayout.LayoutParams(-1, dp(46)))
+        } else {
+            root.addView(button("View mode", false).apply {
+                minHeight = dp(42)
+                isEnabled = false
+                alpha = 0.68f
+            }, LinearLayout.LayoutParams(-1, dp(42)))
+        }
 
         try {
             updatePreview()
@@ -4338,11 +4418,7 @@ class MainActivity : AppCompatActivity() {
                     bytes.fill(0)
                 }
             }
-            val thumbnailFrame = FrameLayout(this).apply {
-                addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
-                addPrivatePreviewWatermarks(this)
-            }
-            row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(56), dp(74)))
+            row.addView(thumbnail, LinearLayout.LayoutParams(dp(56), dp(74)))
             val details = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(8), 0, 0, 0)
@@ -4930,7 +5006,7 @@ class MainActivity : AppCompatActivity() {
         if (isPreparedId) {
             val previewFrame = FrameLayout(this)
             previewFrame.addView(reader, FrameLayout.LayoutParams(-1, -1))
-            addPrivatePreviewWatermarks(previewFrame)
+            addPrivateSecurityWatermark(previewFrame)
             content.addView(previewFrame, frameParams())
         } else {
             content.addView(reader, frameParams())

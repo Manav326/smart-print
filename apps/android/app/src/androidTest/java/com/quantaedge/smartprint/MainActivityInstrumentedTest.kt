@@ -610,7 +610,7 @@ class MainActivityInstrumentedTest {
                 withText("Find a print shop"),
                 isAssignableFrom(com.google.android.material.button.MaterialButton::class.java)
             )).check(matches(isDisplayed()))
-            onView(withContentDescription("Shop connection")).check(matches(isDisplayed()))
+            onView(withContentDescription("Shop connection")).check(doesNotExist())
             onView(withText("ID Studio")).check(matches(isDisplayed()))
             onView(withText("Photo Studio")).check(matches(isDisplayed()))
             onView(withText("FROM SMARTPRINT")).check(doesNotExist())

@@ -136,10 +136,10 @@ class IdStudioInstrumentedTest {
 
                 onView(withText("Create a new ID card")).check(matches(isDisplayed()))
                 onView(withText("Student ID")).check(matches(isDisplayed()))
-                onView(withText("A4 sheet")).perform(click())
-                onView(withText("Page 1 of 1")).check(matches(isDisplayed()))
-                onView(withText("SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW")).check(matches(isDisplayed()))
-                onView(withText("SmartPrint by QuantaEdge")).check(matches(isDisplayed()))
+                onView(withText("View")).perform(click())
+                onView(withContentDescription("ID front card preview. Pinch to zoom.")).check(matches(isDisplayed()))
+                onView(withText("View mode")).check(matches(isDisplayed()))
+                onView(withText("Prepare A4 print sheet")).check(doesNotExist())
 
                 scenario.onActivity { activity ->
                     assertTrue(
@@ -187,10 +187,11 @@ class IdStudioInstrumentedTest {
                     .check(matches(isDisplayed()))
                 onView(withText("Front")).check(matches(isDisplayed()))
                 onView(withText("Back")).check(matches(isDisplayed()))
+                onView(withText("Save")).check(matches(isDisplayed()))
                 onView(withText("A4 sheet")).perform(click())
                 onView(withContentDescription("A4 ID front and back print sheet preview. Pinch to zoom."))
                     .check(matches(isDisplayed()))
-                onView(withText("Prepare A4 print sheet")).check(matches(isDisplayed()))
+                onView(withText("Save")).check(matches(isDisplayed()))
                 onView(withText("ID card")).perform(click())
                 onView(withContentDescription("ID front card preview. Pinch to zoom."))
                     .check(matches(isDisplayed()))
