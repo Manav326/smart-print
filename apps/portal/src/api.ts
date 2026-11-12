@@ -1320,7 +1320,9 @@ export async function uploadCustomerDocument(
   batchId?: string,
   batchGroupName?: string,
   batchName?: string,
-  settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" }
+  settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" },
+  printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
 ) {
   const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
@@ -1329,7 +1331,8 @@ export async function uploadCustomerDocument(
     // The local request may have reached the Agent. Recover that exact ticket
     // using HTTPS, retaining its PrintJob ID and one-use grant.
     const ticket = await requestCustomerLocalUploadTicket(
-      sessionToken, file, batchId, batchGroupName, batchName, pendingLocalIdempotency, pendingLocalGrant, settings
+      sessionToken, file, batchId, batchGroupName, batchName, pendingLocalIdempotency, pendingLocalGrant,
+      settings, false, printKind, photoSettings
     );
     const recovered = await uploadCustomerLocalTicketViaCloud(
       sessionToken, file, ticket, pendingLocalGrant
@@ -1354,6 +1357,12 @@ export async function uploadCustomerDocument(
   form.append("isDuplex", String(settings.isDuplex));
   form.append("copies", String(settings.copies));
   form.append("orientation", settings.orientation);
+  form.append("printKind", printKind);
+  if (printKind === "PHOTO" && photoSettings) {
+    form.append("photoSizeCode", photoSettings.sizeCode);
+    form.append("photoCount", String(photoSettings.photoCount));
+    form.append("photosPerPage", String(photoSettings.photosPerPage ?? 1));
+  }
   const uploaded = await apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
     method: "POST",
     headers: {

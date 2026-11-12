@@ -7863,6 +7863,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
     var requestedDuplexText = form["isDuplex"].FirstOrDefault() ?? "false";
     var requestedCopiesText = form["copies"].FirstOrDefault() ?? "1";
     var requestedOrientation = form["orientation"].FirstOrDefault() ?? "AUTO";
+    var requestedPrintKind = form["printKind"].FirstOrDefault() ?? "DOCUMENT";
     if (requestedColourMode is not ("Mono" or "Colour") ||
         requestedPaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         !bool.TryParse(requestedDuplexText, out var requestedDuplex) ||
@@ -7905,6 +7906,46 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
     originalName = originalName[..Math.Min(originalName.Length, 255)];
 
+    var photoSizeCode = form["photoSizeCode"].FirstOrDefault();
+    var photoCountText = form["photoCount"].FirstOrDefault();
+    var photosPerPageText = form["photosPerPage"].FirstOrDefault();
+    var hasPhotoMetadata =
+        !string.IsNullOrWhiteSpace(photoSizeCode) ||
+        !string.IsNullOrWhiteSpace(photoCountText) ||
+        !string.IsNullOrWhiteSpace(photosPerPageText);
+    int? photoCount = int.TryParse(photoCountText, out var parsedPhotoCount) ? parsedPhotoCount : null;
+    int? photosPerPage = int.TryParse(photosPerPageText, out var parsedPhotosPerPage) ? parsedPhotosPerPage : null;
+    var validPhotoMetadata =
+        requestedPrintKind == "PHOTO" &&
+        photoSizeCode is string supportedPhotoSizeCode &&
+        supportedPhotoSizeCode is "35x45" or "25x35" or "2x2" or "4x6" &&
+        photoCount is >= 1 and <= 100 &&
+        photosPerPage is int requestedPhotosPerPage &&
+        requestedPhotosPerPage >= 1 &&
+        requestedPhotosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(supportedPhotoSizeCode);
+    var isPhotoUpload = requestedPrintKind == "PHOTO";
+    var invalidPhotoUpload =
+        isPhotoUpload &&
+        (!validPhotoMetadata ||
+         !Path.GetExtension(originalName).Equals(".pdf", StringComparison.OrdinalIgnoreCase) ||
+         requestedColourMode != "Colour" ||
+         requestedPaperSize != "A4" ||
+         requestedDuplex ||
+         requestedCopies != 1 ||
+         requestedOrientation != "AUTO");
+    if (requestedPrintKind is not ("DOCUMENT" or "PHOTO") ||
+        (hasPhotoMetadata && !validPhotoMetadata) ||
+        invalidPhotoUpload)
+    {
+        return Results.Conflict(new
+        {
+            code = requestedPrintKind == "ID_DOCUMENT" ? "id_document_private_printing_required" : "photo_metadata_invalid",
+            message = requestedPrintKind == "ID_DOCUMENT"
+                ? "ID Studio documents require Private Printing through the paired shop computer."
+                : "Photo Studio sheets must be a valid A4 colour PDF with a supported photo size, quantity and per-page layout. No document was uploaded."
+        });
+    }
+
     // A retry must be the exact original document and the exact original
     // settings. Do not return an existing job just because its key matches;
     // verify the body before treating this request as idempotent.
@@ -7914,7 +7955,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
         {
             job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId,
             job.JobNumber, job.Status, job.PageCount, job.Copies, job.ColourMode,
-            job.PaperSize, job.IsDuplex, job.Orientation, job.PricingVersion,
+            job.PaperSize, job.IsDuplex, job.Orientation, job.PrintKind,
+            job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PricingVersion,
             job.Currency, job.QuotedAmountMinor, job.CreatedUtc
         })
         .SingleOrDefaultAsync(ct);
@@ -7947,6 +7989,10 @@ publicApi.MapPost("/sessions/current/jobs", async (
             existing.PaperSize != requestedPaperSize ||
             existing.IsDuplex != requestedDuplex ||
             existing.Orientation != requestedOrientation ||
+            existing.PrintKind != requestedPrintKind ||
+            existing.PhotoSizeCode != photoSizeCode ||
+            existing.PhotoCount != (photoCount ?? 0) ||
+            existing.PhotosPerPage != photosPerPage ||
             (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
             existingDocument.OriginalFileName != originalName ||
             existingDocument.SizeBytes != file.Length ||
@@ -8022,6 +8068,24 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
     }
 
+    var photoPageCount = 0;
+    if (isPhotoUpload)
+    {
+        photoPageCount = PricingCalculator.PhotoPageCount(
+            photoCount ?? 0, photoSizeCode ?? string.Empty, photosPerPage ?? 0);
+        if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            stored.Analysis.PageCount != photoPageCount ||
+            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, photoPageCount))
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_sheet_layout_invalid",
+                message = $"The Photo Studio PDF must contain exactly {photoPageCount} portrait A4 page(s), each with one full-page 300-DPI photo raster."
+            });
+        }
+    }
+
     var job = new PrintJob
     {
         TenantId = session.TenantId,
@@ -8034,12 +8098,16 @@ publicApi.MapPost("/sessions/current/jobs", async (
         JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
         Status = "AWAITING_CONFIGURATION",
         IdempotencyKey = idempotencyKey,
-        PageCount = stored.Analysis.PageCount,
+        PageCount = isPhotoUpload ? photoPageCount : stored.Analysis.PageCount,
         Copies = requestedCopies,
         ColourMode = requestedColourMode,
         PaperSize = requestedPaperSize,
         IsDuplex = requestedDuplex,
         Orientation = requestedOrientation,
+        PrintKind = requestedPrintKind,
+        PhotoSizeCode = photoSizeCode,
+        PhotoCount = photoCount ?? 0,
+        PhotosPerPage = photosPerPage,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -8070,7 +8138,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
             {
                 item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.BatchGroupName,
                 item.JobNumber, item.Status, item.PageCount, item.Copies, item.ColourMode,
-                item.PaperSize, item.IsDuplex, item.Orientation, item.PricingVersion,
+                item.PaperSize, item.IsDuplex, item.Orientation, item.PrintKind,
+                item.PhotoSizeCode, item.PhotoCount, item.PhotosPerPage, item.PricingVersion,
                 item.Currency, item.QuotedAmountMinor, item.CreatedUtc
             })
             .SingleOrDefaultAsync(ct);
@@ -8092,6 +8161,10 @@ publicApi.MapPost("/sessions/current/jobs", async (
                 racedJob.PaperSize != requestedPaperSize ||
                 racedJob.IsDuplex != requestedDuplex ||
                 racedJob.Orientation != requestedOrientation ||
+                racedJob.PrintKind != requestedPrintKind ||
+                racedJob.PhotoSizeCode != photoSizeCode ||
+                racedJob.PhotoCount != (photoCount ?? 0) ||
+                racedJob.PhotosPerPage != photosPerPage ||
                 (requestedBatchName is not null && racedJob.BatchName != requestedBatchName) ||
                 racedDocument.OriginalFileName != originalName ||
                 racedDocument.SizeBytes != file.Length ||

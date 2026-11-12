@@ -14,6 +14,32 @@ test("customer upload sends the selected file settings to both storage paths", (
   assert.match(api, /orientation: settings\.orientation/);
 });
 
+test("standard Cloud-assisted Photo Studio uploads keep photo identity through the existing multipart form", () => {
+  const api = read("../src/api.ts");
+  const app = read("../src/App.tsx");
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const cloudStart = api.indexOf("export async function uploadCustomerDocument(");
+  const cloudEnd = api.indexOf("type CustomerLocalAgentApi", cloudStart);
+  const cloudUpload = api.slice(cloudStart, cloudEnd);
+  assert.ok(cloudStart >= 0 && cloudEnd > cloudStart);
+  assert.match(cloudUpload, /printKind: "DOCUMENT" \| "PHOTO" \| "ID_DOCUMENT" = "DOCUMENT"/);
+  assert.match(cloudUpload, /form\.append\("printKind", printKind\)/);
+  assert.match(cloudUpload, /form\.append\("photoSizeCode", photoSettings\.sizeCode\)/);
+  assert.match(cloudUpload, /form\.append\("photoCount", String\(photoSettings\.photoCount\)\)/);
+  assert.match(cloudUpload, /form\.append\("photosPerPage", String\(photoSettings\.photosPerPage \?\? 1\)\)/);
+  assert.match(app, /await uploadCustomerDocument\(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName\|\|undefined,settings,printKind,photoSettings\)/);
+  const routeStart = program.indexOf('publicApi.MapPost("/sessions/current/jobs"');
+  const routeEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"', routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  const route = program.slice(routeStart, routeEnd);
+  assert.match(route, /PhotoSheetPdfRules\.HasExactlyA4PortraitPages/);
+  assert.match(route, /PrintKind = requestedPrintKind/);
+  assert.match(route, /PhotoSizeCode = photoSizeCode/);
+  assert.match(route, /PhotoCount = photoCount \?\? 0/);
+  assert.match(route, /PhotosPerPage = photosPerPage/);
+  assert.match(route, /existing\.PhotoCount != \(photoCount \?\? 0\)/);
+});
+
 test("owner quote edits are sent through the existing print-job API", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");

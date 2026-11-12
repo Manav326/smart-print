@@ -4800,7 +4800,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)
           : idDocument
             ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded or sent to cloud storage.",409);})()
-            : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
+            : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings,printKind,photoSettings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
