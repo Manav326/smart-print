@@ -101,11 +101,14 @@ for (const agent of searchAgents) {
   assert.doesNotMatch(group, /^Disallow: \/$/m, `${agent} must not be blocked site-wide`);
   for (const path of protectedPaths) assert.ok(group.includes(`Disallow: ${path}`), `${agent} must not access ${path}`);
 }
-const modelTrainingAgents = ["GPTBot", "ClaudeBot", "Google-Extended"];
+const modelTrainingAgents = ["GPTBot", "ClaudeBot"];
 for (const agent of modelTrainingAgents) {
   const group = groupFor(agent);
   assert.match(group, /^Disallow: \/$/m, `${agent} must remain blocked until the site owner explicitly permits model training / Gemini grounding`);
 }
+const googleExtendedGroup = groupFor("Google-Extended");
+assert.match(googleExtendedGroup, /^Allow: \/$/m, "Google-Extended must be explicitly allowed for Gemini grounding by site-owner choice");
+for (const path of protectedPaths) assert.ok(googleExtendedGroup.includes(`Disallow: ${path}`), `Google-Extended must not access ${path}`);
 const trainingPreference = groupFor("__usage_ai-training");
 assert.match(trainingPreference, /^Disallow: \/$/m, "the shared AI-training preference must opt out of training");
 const defaultGroup = groupFor("*");
