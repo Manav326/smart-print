@@ -1225,19 +1225,63 @@ class MainActivity : AppCompatActivity() {
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(0, 0, 0, dp(7))
         })
-        heroContent.addView(button(
-            if (portalUrl == null) "Find a print shop" else "Manage connected shop",
-            portalUrl == null
-        ).apply {
-            minHeight = dp(46)
-            if (portalUrl != null) {
-                icon = getDrawable(R.drawable.ic_store)
-                iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
-                iconPadding = dp(6)
-                iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+        // This is the single shop action on Home. It replaces the old hero
+        // button; the same row carries the saved shop identity when connected.
+        val shopAction = card().apply {
+            radius = dp(14).toFloat()
+            cardElevation = dp(1).toFloat()
+            strokeWidth = dp(1)
+            strokeColor = getColor(R.color.qp_shop_action_outline)
+            setCardBackgroundColor(getColor(R.color.qp_shop_action_surface))
+            isClickable = true
+            isFocusable = true
+            contentDescription = if (portalUrl == null) {
+                "Find a print shop"
+            } else {
+                "Manage connected shop: \${shopDisplayName ?: "Connected shop"}"
             }
             setOnClickListener { if (portalUrl == null) showScanPrint() else showShopManager() }
-        }, LinearLayout.LayoutParams(-1, dp(46)))
+        }
+        val shopActionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(9), dp(12), dp(9))
+        }
+        val shopGlyph = ImageView(this).apply {
+            setImageResource(if (portalUrl == null) R.drawable.ic_nav_scan_print else R.drawable.ic_store)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            background = roundedDrawable(getColor(R.color.qp_shop_action_icon_surface), dp(12))
+            contentDescription = if (portalUrl == null) "Find a print shop" else "Connected shop"
+        }
+        if (portalUrl != null) loadShopLogo(shopGlyph)
+        shopActionRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val shopActionCopy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), 0, dp(8), 0)
+        }
+        shopActionCopy.addView(text(
+            if (portalUrl == null) "Find a print shop" else shopDisplayName ?: "Connected shop",
+            14, R.color.qp_shop_action_text, true
+        ).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        shopActionCopy.addView(text(
+            if (portalUrl == null) "Scan the shop QR to connect" else "Connected · tap to manage",
+            11, R.color.qp_shop_action_muted, false
+        ).apply {
+            setPadding(0, dp(3), 0, 0)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        shopActionRow.addView(shopActionCopy, LinearLayout.LayoutParams(0, -2, 1f))
+        shopActionRow.addView(text("›", 25, R.color.qp_shop_action_muted, false))
+        shopAction.addView(shopActionRow)
+        heroContent.addView(shopAction, LinearLayout.LayoutParams(-1, dp(64)).apply {
+            bottomMargin = dp(2)
+        })
         val studioActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1322,43 +1366,6 @@ class MainActivity : AppCompatActivity() {
             topMargin = dp(9)
         })
         column.addView(quickActions, linearParams().apply { bottomMargin = dp(17) })
-
-        // The hero button is the single shop-management action. Keep this
-        // connected-shop row informational so the saved shop identity remains
-        // visible without presenting a second button for the same destination.
-        if (portalUrl != null) {
-            val shopCard = card().apply {
-                strokeWidth = dp(1)
-                isClickable = false
-                isFocusable = false
-            }
-            val shopRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(12), dp(10), dp(12), dp(10))
-            }
-            val shopGlyph = ImageView(this).apply {
-                setImageResource(R.drawable.ic_store)
-                imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-                scaleType = ImageView.ScaleType.CENTER_INSIDE
-                setPadding(dp(8), dp(8), dp(8), dp(8))
-                background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
-                contentDescription = "Connected shop"
-            }
-            loadShopLogo(shopGlyph)
-            shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(42), dp(42)))
-            val shopCopy = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(10), 0, 0, 0)
-            }
-            shopCopy.addView(text(shopDisplayName ?: "Connected shop", 13, R.color.qp_text, true)
-                .apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
-            shopCopy.addView(text("Connected · shop details saved on this device", 10, R.color.qp_muted, false)
-                .apply { setPadding(0, dp(3), 0, 0) })
-            shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
-            shopCard.addView(shopRow)
-            column.addView(shopCard, linearParams().apply { bottomMargin = dp(17) })
-        }
 
         val recentHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1808,31 +1815,57 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val local = store.read(email).orEmpty()
-                val serverCount = authenticated { token ->
-                    CustomerAccountClient.historyCount(accountServiceUrl(), token)
+                val firstPage = authenticated { token ->
+                    CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = 100)
                 }
-                if (serverCount <= local.size) {
+                val serverCount = firstPage.totalItems
+                if (serverCount <= local.size.toLong()) {
                     local
                 } else {
-                    val downloaded = linkedMapOf<String, CustomerPrintHistoryItem>()
-                    var page = 1
-                    var expectedCount = serverCount
-                    while (downloaded.size < expectedCount && page <= 10_000) {
-                        val response = authenticated { token ->
-                            CustomerAccountClient.historyPage(accountServiceUrl(), token, page, 100)
-                        }
-                        expectedCount = maxOf(expectedCount, response.totalCount)
-                        if (response.items.isEmpty()) break
-                        response.items.forEach { downloaded[it.id] = it }
-                        page++
+                    require(firstPage.page == 0 && firstPage.size == 100) {
+                        "The server returned an invalid first history page. Your saved history has not changed."
                     }
-                    require(downloaded.size >= expectedCount) {
+                    val downloaded = linkedMapOf<String, CustomerPrintHistoryItem>()
+                    firstPage.items.forEach { downloaded[it.id] = it }
+                    var currentPage = firstPage
+                    while (currentPage.hasNext) {
+                        val nextPageNumber = currentPage.page + 1
+                        require(nextPageNumber < firstPage.totalPages) {
+                            "The server returned inconsistent history pagination. Your saved history has not changed."
+                        }
+                        currentPage = authenticated { token ->
+                            CustomerAccountClient.historyPage(
+                                accountServiceUrl(),
+                                token,
+                                page = nextPageNumber,
+                                size = firstPage.size
+                            )
+                        }
+                        require(
+                            currentPage.page == nextPageNumber &&
+                                currentPage.size == firstPage.size &&
+                                currentPage.totalItems == serverCount &&
+                                currentPage.totalPages == firstPage.totalPages &&
+                                currentPage.items.isNotEmpty()
+                        ) {
+                            "The server history changed or returned an incomplete page. Your saved history has not changed."
+                        }
+                        currentPage.items.forEach { downloaded[it.id] = it }
+                    }
+                    require(!currentPage.hasNext && downloaded.size.toLong() == serverCount) {
                         "History download was incomplete. Your saved history has not changed."
                     }
-                    val confirmedCount = authenticated { token ->
-                        CustomerAccountClient.historyCount(accountServiceUrl(), token)
+
+                    // Offset pages can shift if a new order arrives during the sync.
+                    // Verify the first page again before replacing the local snapshot.
+                    val latestFirstPage = authenticated { token ->
+                        CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = firstPage.size)
                     }
-                    require(confirmedCount == expectedCount && downloaded.size >= confirmedCount) {
+                    require(
+                        latestFirstPage.totalItems == serverCount &&
+                            latestFirstPage.totalPages == firstPage.totalPages &&
+                            latestFirstPage.items.map { it.id } == firstPage.items.map { it.id }
+                    ) {
                         "New orders arrived during sync. Tap refresh again to get the complete history."
                     }
                     downloaded.values.toList().also { store.replace(email, it) }
