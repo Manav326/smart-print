@@ -1,6 +1,11 @@
 package com.quantaedge.smartprint
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import android.util.Base64
+import org.json.JSONObject
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.io.ByteArrayOutputStream
@@ -105,17 +110,139 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
     fun hasBack(draftId: String): Boolean =
         runCatching { readScanBytes(draftId, "back").isNotEmpty() }.getOrDefault(false)
 
-    fun savePreparedOutput(pdfBytes: ByteArray): File {
+    fun savePreparedOutput(
+        pdfBytes: ByteArray,
+        frontBytes: ByteArray? = null,
+        backBytes: ByteArray? = null,
+        suppliedMetadata: JSONObject? = null
+    ): File {
         require(pdfBytes.size.toLong() in 1L..MAX_PREPARED_BYTES) {
             "The prepared ID sheet is too large. Please scan the card again with a closer crop."
         }
         require(hasPdfSignature(pdfBytes)) { "The private ID sheet could not be verified." }
-        val output = File(root, FILE_PREFIX + UUID.randomUUID().toString() + ".spid").canonicalFile
+        require((frontBytes == null) == (backBytes == null)) {
+            "Both original ID sides are required to enable editing."
+        }
+        val id = UUID.randomUUID().toString()
+        val output = preparedFile(id).canonicalFile
         require(output.parentFile?.canonicalPath == root.canonicalPath && !output.exists()) {
             "A private ID document with this name already exists."
         }
-        writeEncryptedAtomically(output, pdfBytes)
+        val metadata = JSONObject(suppliedMetadata?.toString() ?: "{}").apply {
+            put("id", id)
+            put("title", safeTitle(optString("title").ifBlank { "ID card" }))
+            put("createdUtc", System.currentTimeMillis())
+            put("updatedUtc", System.currentTimeMillis())
+        }
+        try {
+            writeEncryptedAtomically(output, pdfBytes)
+            if (frontBytes != null && backBytes != null) {
+                writeEncryptedAtomically(preparedSidecar(id, "front"), frontBytes)
+                writeEncryptedAtomically(preparedSidecar(id, "back"), backBytes)
+            }
+            writeEncryptedAtomically(preparedSidecar(id, "meta"), metadata.toString().toByteArray(Charsets.UTF_8))
+        } catch (error: Exception) {
+            output.delete()
+            preparedSidecar(id, "front").delete()
+            preparedSidecar(id, "back").delete()
+            preparedSidecar(id, "meta").delete()
+            throw error
+        }
         return output
+    }
+
+    fun updatePreparedOutput(
+        file: File,
+        pdfBytes: ByteArray,
+        frontBytes: ByteArray,
+        backBytes: ByteArray,
+        suppliedMetadata: JSONObject
+    ): File {
+        require(isPreparedDocument(file)) { "Only a prepared ID document can be edited." }
+        require(pdfBytes.size.toLong() in 1L..MAX_PREPARED_BYTES && hasPdfSignature(pdfBytes)) {
+            "The edited ID sheet could not be verified."
+        }
+        require(frontBytes.isNotEmpty() && backBytes.isNotEmpty()) {
+            "Both original ID sides are required to save edits."
+        }
+        val id = idFromPreparedFile(file)
+        val existing = readMetadata(file)
+        val metadata = JSONObject(suppliedMetadata.toString()).apply {
+            put("id", id)
+            put("title", safeTitle(existing.optString("title", optString("title"))))
+            put("createdUtc", existing.optLong("createdUtc", System.currentTimeMillis()))
+            put("updatedUtc", System.currentTimeMillis())
+        }
+        writeEncryptedAtomically(file, pdfBytes)
+        writeEncryptedAtomically(preparedSidecar(id, "front"), frontBytes)
+        writeEncryptedAtomically(preparedSidecar(id, "back"), backBytes)
+        writeEncryptedAtomically(preparedSidecar(id, "meta"), metadata.toString().toByteArray(Charsets.UTF_8))
+        return file
+    }
+
+    fun readMetadata(file: File): JSONObject {
+        require(isPreparedDocument(file)) { "Only a prepared ID document can be opened here." }
+        val sidecar = preparedSidecar(idFromPreparedFile(file), "meta")
+        if (!sidecar.isFile) return JSONObject()
+            .put("id", idFromPreparedFile(file))
+            .put("title", "ID card")
+        val bytes = readVaultOrMigrate(sidecar, MAX_METADATA_BYTES)
+        return JSONObject(String(bytes, Charsets.UTF_8))
+    }
+
+    fun renamePrepared(file: File, title: String): JSONObject {
+        val metadata = readMetadata(file)
+        metadata.put("title", safeTitle(title))
+        metadata.put("updatedUtc", System.currentTimeMillis())
+        writeEncryptedAtomically(
+            preparedSidecar(idFromPreparedFile(file), "meta"),
+            metadata.toString().toByteArray(Charsets.UTF_8)
+        )
+        return metadata
+    }
+
+    fun canEditPreparedDocument(file: File): Boolean = runCatching {
+        isPreparedDocument(file) &&
+            preparedSidecar(idFromPreparedFile(file), "front").isFile &&
+            preparedSidecar(idFromPreparedFile(file), "back").isFile
+    }.getOrDefault(false)
+
+    fun readPreparedSideBytes(file: File, side: String): ByteArray {
+        require(side == "front" || side == "back") { "Choose the front or back side of the card." }
+        require(canEditPreparedDocument(file)) {
+            "The original scans for this older ID document are not available for editing."
+        }
+        return readVaultOrMigrate(preparedSidecar(idFromPreparedFile(file), side), MAX_SCAN_BYTES)
+    }
+
+    fun createThumbnailBase64(file: File): String? {
+        val materialized = runCatching { materializePreparedFile(file) }.getOrNull() ?: return null
+        return try {
+            val descriptor = ParcelFileDescriptor.open(materialized, ParcelFileDescriptor.MODE_READ_ONLY)
+            descriptor.use { parcel ->
+                PdfRenderer(parcel).use { renderer ->
+                    if (renderer.pageCount < 1) return null
+                    renderer.openPage(0).use { page ->
+                        val width = THUMBNAIL_WIDTH
+                        val height = maxOf(1, (width.toFloat() * page.height / page.width).toInt())
+                        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                        try {
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            ByteArrayOutputStream().use { output ->
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 78, output)
+                                Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+                            }
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            releaseTransientFile(materialized)
+        }
     }
 
     fun listPrepared(): List<File> =
@@ -160,7 +287,11 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
 
     fun deletePrepared(file: File) {
         require(isPreparedDocument(file)) { "Only a prepared ID document can be deleted here." }
+        val id = idFromPreparedFile(file)
         check(file.delete()) { "The prepared ID document could not be deleted." }
+        preparedSidecar(id, "front").delete()
+        preparedSidecar(id, "back").delete()
+        preparedSidecar(id, "meta").delete()
     }
 
     fun deleteDraft(draftId: String) {
@@ -170,6 +301,17 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
 
     fun draftExists(draftId: String): Boolean =
         isValidId(draftId) && File(drafts, draftId).isDirectory
+
+    private fun preparedFile(id: String): File = File(root, FILE_PREFIX + id + ".spid")
+
+    private fun preparedSidecar(id: String, kind: String): File = File(root, id + "." + kind)
+
+    private fun idFromPreparedFile(file: File): String =
+        file.name.removePrefix(FILE_PREFIX).removeSuffix(".spid")
+
+    private fun safeTitle(raw: String): String =
+        raw.replace(Regex("[\\p{Cntrl}]+"), " ")
+            .replace(Regex("\\s+"), " ").trim().take(80).ifBlank { "ID card" }
 
     private fun cleanupAbandonedDrafts() {
         val cutoff = System.currentTimeMillis() - DRAFT_RETENTION_MILLIS
@@ -314,6 +456,8 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
         private const val MAX_CARD_ASPECT_RATIO = 2.1f
         private const val MAX_SCAN_BYTES = 30L * 1024L * 1024L
         private const val MAX_PREPARED_BYTES = 20L * 1024L * 1024L
+        private const val MAX_METADATA_BYTES = 64L * 1024L
+        private const val THUMBNAIL_WIDTH = 320
         private const val VAULT_OVERHEAD_BYTES = 64L
         private const val DRAFT_RETENTION_MILLIS = 48L * 60L * 60L * 1000L
         private const val TRANSIENT_RETENTION_MILLIS = 30L * 60L * 1000L
