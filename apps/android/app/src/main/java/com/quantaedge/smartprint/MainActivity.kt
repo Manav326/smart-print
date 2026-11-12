@@ -1413,6 +1413,41 @@ class MainActivity : AppCompatActivity() {
             uri.path.orEmpty().trimEnd('/').equals("/photo-studio", ignoreCase = true)
     }
 
+    private fun showPhotoStudioLoadError(message: String) {
+        photoStudioLoadFailed = true
+        val host = webView?.parent as? FrameLayout ?: return
+        photoStudioLoadingOverlay?.let { overlay ->
+            (overlay.parent as? ViewGroup)?.removeView(overlay)
+        }
+        val errorState = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            setBackgroundColor(getColor(R.color.qp_surface))
+            addView(text("Photo Studio couldn’t open", 17, R.color.qp_text, true).apply {
+                gravity = Gravity.CENTER
+                textAlignment = View.TEXT_ALIGNMENT_CENTER
+            })
+            addView(text(message, 12, R.color.qp_muted, false).apply {
+                gravity = Gravity.CENTER
+                textAlignment = View.TEXT_ALIGNMENT_CENTER
+                setPadding(0, dp(7), 0, dp(16))
+            })
+            addView(button("Try again", true).apply {
+                setOnClickListener { showDedicatedPhotoStudio() }
+            }, LinearLayout.LayoutParams(-1, dp(46)))
+            addView(button("Back to Home", false).apply {
+                setOnClickListener { showHome() }
+            }, LinearLayout.LayoutParams(-1, dp(42)).apply {
+                topMargin = dp(8)
+            })
+            isClickable = true
+            isFocusable = true
+        }
+        photoStudioLoadingOverlay = errorState
+        host.addView(errorState, FrameLayout.LayoutParams(-1, -1))
+    }
+
     private fun showDedicatedPhotoStudio() {
         fileChooserReturnToPhotoStudio = false
         // Do not early-return merely because the WebView URL is already /photo-studio:
@@ -3420,7 +3455,9 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
                 if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(url)) {
-                    photoStudioLoadingOverlay?.visibility = View.GONE
+                    photoStudioLoadingOverlay?.let { overlay ->
+                        (overlay.parent as? ViewGroup)?.removeView(overlay)
+                    }
                     photoStudioLoadingOverlay = null
                     photoStudioLoadFailed = false
                 }
@@ -3461,19 +3498,15 @@ class MainActivity : AppCompatActivity() {
                 super.onReceivedError(view, request, error)
                 if (request.isForMainFrame && privatePhotoStudioPageOpen &&
                     isPhotoStudioPageUrl(request.url.toString())) {
-                    photoStudioLoadFailed = true
-                    photoStudioLoadingOverlay?.visibility = View.GONE
-                    photoStudioLoadingOverlay = null
-                    toast("Photo Studio could not load. Check your connection and try again.")
+                    showPhotoStudioLoadError("Check your connection and try again.")
                 }
             }
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: android.net.http.SslError) {
                 handler.cancel()
                 if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(view.url)) {
-                    photoStudioLoadFailed = true
-                    photoStudioLoadingOverlay?.visibility = View.GONE
-                    photoStudioLoadingOverlay = null
-                    toast("Photo Studio could not connect securely. Your saved photo sheets are unchanged.")
+                    showPhotoStudioLoadError(
+                        "The secure connection failed. Your saved photo sheets remain on this device."
+                    )
                 } else {
                     toast("The shop connection could not be verified securely.")
                 }
