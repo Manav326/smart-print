@@ -22,15 +22,14 @@ assert.ok(originMatch, "homepage needs an absolute HTTPS canonical URL");
 const origin = originMatch[1];
 const expectedOriginValue = process.env.SMARTPRINT_PUBLIC_BASE_URL
   || process.env.PUBLIC_BASE_URL
-  || process.env.VITE_PUBLIC_BASE_URL;
-if (expectedOriginValue) {
-  const expectedUrl = new URL(expectedOriginValue);
-  assert.equal(expectedUrl.protocol, "https:", "configured public origin must use HTTPS");
-  assert.equal(expectedUrl.pathname, "/", "configured public origin must not include a path");
-  assert.equal(expectedUrl.search, "", "configured public origin must not include a query");
-  assert.equal(expectedUrl.hash, "", "configured public origin must not include a fragment");
-  assert.equal(origin, expectedUrl.origin, "generated canonicals must match the configured production origin");
-}
+  || process.env.VITE_PUBLIC_BASE_URL
+  || "https://smartprint.quantaedge.in";
+const expectedUrl = new URL(expectedOriginValue);
+assert.equal(expectedUrl.protocol, "https:", "configured public origin must use HTTPS");
+assert.equal(expectedUrl.pathname, "/", "configured public origin must not include a path");
+assert.equal(expectedUrl.search, "", "configured public origin must not include a query");
+assert.equal(expectedUrl.hash, "", "configured public origin must not include a fragment");
+assert.equal(origin, expectedUrl.origin, "generated canonicals must match the configured production origin");
 
 for (let index = 0; index < pages.length; index += 1) {
   const [path, route] = pages[index];

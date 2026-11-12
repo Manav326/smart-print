@@ -152,7 +152,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
 
           <section className="panel platform-ops-policy-note">
             <AlertTriangle size={17}/>
-            <div><strong>Safety behaviour</strong><p>Output-unconfirmed documents are never automatically deleted. Paid files and files with outstanding refund obligations are retained. Permanent tenant deactivation is blocked until unsettled print and financial work is resolved.</p></div>
+            <div><strong>Safety behaviour</strong><p>Output-unconfirmed and unfinished jobs are never automatically deleted. Completed Standard Printing documents follow the configured retention window (7 days by default). Eligible abandoned files are purged only after the abandonment window and once financial holds clear. Private Printing files are removed only after the shop confirms physical output and the paired Agent acknowledges deletion. Permanent tenant deactivation is blocked until unsettled print and financial work is resolved.</p></div>
           </section>
 
           <section className="panel platform-ops-history">
