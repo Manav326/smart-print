@@ -40,6 +40,28 @@ test("standard Cloud-assisted Photo Studio uploads keep photo identity through t
   assert.match(route, /existing\.PhotoCount != \(photoCount \?\? 0\)/);
 });
 
+test("private Photo Studio vault operations are scoped to the dedicated native route", () => {
+  const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+  assert.match(main, /privatePhotoStudioPageOpen &&[\s\S]*Uri\.parse\(webView\?\.url\.orEmpty\(\)\)\.path == "\/photo-studio"/);
+  assert.match(main, /photoStudioLibraryCommand && !photoStudioRouteActive/);
+});
+
+test("after upload only the decrypted picker copy is released and the saved library document remains", () => {
+  const app = read("../src/App.tsx");
+  const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+  const store = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/PhotoStudioStore.kt");
+  assert.match(app, /setFiles\(\);[\s\S]*postSmartPrintNativeMessage\("releasePhotoStudioUploadFiles"\)/);
+  assert.match(main, /data == "releasePhotoStudioUploadFiles"/);
+  assert.match(main, /privatePhotoUploadTempFiles\.toList\(\)\.forEach\(photoStudioStore::releaseTransientFile\)/);
+  assert.match(main, /privatePhotoUploadTempFiles\.clear\(\)/);
+  assert.match(store, /fun releaseTransientFile\(file: File\)/);
+  assert.match(store, /fun deletePrepared\(file: File\)/);
+  assert.match(store, /sourceFile\(id\)\.delete\(\)/);
+  const release = main.slice(main.indexOf('data == "releasePhotoStudioUploadFiles"'), main.indexOf('data == "releasePhotoStudioUploadFiles"') + 900);
+  assert.doesNotMatch(release, /deletePrepared|documentFile|sourceFile|metadataFile/,
+    "Upload cleanup must not delete the encrypted saved Photo Studio library entry.");
+});
+
 test("owner quote edits are sent through the existing print-job API", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");

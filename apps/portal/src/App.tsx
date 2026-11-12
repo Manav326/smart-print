@@ -4830,6 +4830,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
       setSelectedFileIndex(0);
       setFiles([]);
+      // Upload succeeded; release only the temporary decrypted picker copies.
+      // The saved encrypted Photo Studio document remains available in the app library.
+      postSmartPrintNativeMessage("releasePhotoStudioUploadFiles");
       if(paymentOptions.instantPaymentEnabled)await getQuote(results,savedSettings,savedPhotoSettings,savedPrintKinds);
     } catch(exception) {
       setPrintSettingsByJobId(savedSettings);

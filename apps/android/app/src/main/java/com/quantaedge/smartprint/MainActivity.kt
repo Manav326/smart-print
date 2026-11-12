@@ -1331,7 +1331,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDedicatedPhotoStudio() {
-        if (webView?.url?.contains("/photo-studio") == true && privatePhotoStudioPageOpen) return
+        if (Uri.parse(webView?.url.orEmpty()).path == "/photo-studio" && privatePhotoStudioPageOpen) return
         idStudioScreenOpen = false
         privateIdViewerOpen = false
         photoStudioOpen = false
@@ -2853,7 +2853,31 @@ class MainActivity : AppCompatActivity() {
                         }
                     } else {
                         val parts = data.split("|", limit = 3)
+                        val photoStudioLibraryCommand =
+                            data == "listPhotoStudioDocuments" ||
+                            data.startsWith("savePhotoStudioDocument|") ||
+                            data.startsWith("updatePhotoStudioDocument|") ||
+                            data.startsWith("getPhotoStudioPreviewPage|") ||
+                            data.startsWith("getPhotoStudioSource|") ||
+                            data.startsWith("renamePhotoStudioDocument|") ||
+                            data.startsWith("deletePhotoStudioDocument|")
+                        val photoStudioRouteActive = privatePhotoStudioPageOpen &&
+                            Uri.parse(webView?.url.orEmpty()).path == "/photo-studio"
                         when {
+                            data == "releasePhotoStudioUploadFiles" -> {
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        // Remove only decrypted temporary picker copies.
+                                        // The encrypted .spph PDF, source photo and metadata stay in the library.
+                                        privatePhotoUploadTempFiles.toList().forEach(photoStudioStore::releaseTransientFile)
+                                        privatePhotoUploadTempFiles.clear()
+                                        replyProxy.postMessage("OK")
+                                    }
+                                }
+                            }
+                            photoStudioLibraryCommand && !photoStudioRouteActive -> {
+                                replyProxy.postMessage("PHOTO_LIBRARY_FAILED|Open the dedicated Photo Studio screen to access private documents.")
+                            }
                             parts.size == 2 && parts[0] == "setPhotoStudioOpen" &&
                                 parts[1] in setOf("on", "off") -> {
                                 runOnUiThread {
