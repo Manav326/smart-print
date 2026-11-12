@@ -24,8 +24,12 @@ const expectedOriginValue = process.env.SMARTPRINT_PUBLIC_BASE_URL
   || process.env.PUBLIC_BASE_URL
   || process.env.VITE_PUBLIC_BASE_URL;
 if (expectedOriginValue) {
-  const expectedOrigin = new URL(expectedOriginValue).origin;
-  assert.equal(origin, expectedOrigin, "generated canonicals must match the configured production origin");
+  const expectedUrl = new URL(expectedOriginValue);
+  assert.equal(expectedUrl.protocol, "https:", "configured public origin must use HTTPS");
+  assert.equal(expectedUrl.pathname, "/", "configured public origin must not include a path");
+  assert.equal(expectedUrl.search, "", "configured public origin must not include a query");
+  assert.equal(expectedUrl.hash, "", "configured public origin must not include a fragment");
+  assert.equal(origin, expectedUrl.origin, "generated canonicals must match the configured production origin");
 }
 
 for (let index = 0; index < pages.length; index += 1) {
@@ -39,30 +43,34 @@ for (let index = 0; index < pages.length; index += 1) {
   assert.match(html, /<meta name="robots" content="index,follow,max-image-preview:large">/, `${path} must be indexable`);
   assert.match(html, /<meta property="og:title"/, `${path} needs a social title`);
   assert.match(html, /<meta property="og:description"/, `${path} needs a social description`);
-  const jsonLdScripts = [...html.matchAll(/<script type="application\\/ld\\+json">([\\s\\S]*?)<\\/script>/g)];
+  const jsonLdScripts = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
   assert.ok(jsonLdScripts.length > 0, `${path} needs structured data`);
-  for (const match of jsonLdScripts) assert.doesNotThrow(() => JSON.parse(match[1]), `${path} has invalid JSON-LD`);
+  for (const match of jsonLdScripts) {
+    assert.doesNotThrow(() => JSON.parse(match[1]), `${path} has invalid JSON-LD`);
+  }
 }
 assert.ok(htmlFiles[0].includes('"@type":"SoftwareApplication"'), "homepage must describe the app with structured data");
 assert.ok(htmlFiles[0].includes('"@type":"Organization"'), "homepage must describe its publisher");
-for (const [, route] of pages) assert.ok(sitemap.includes(`<loc>${origin}${route}</loc>`), `sitemap must include ${route}`);
-assert.doesNotMatch(sitemap, /\/(?:shop|admin|s|api|health)\//, "sitemap must exclude private application routes");
+const sitemapLocations = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match => match[1]);
+assert.deepEqual(sitemapLocations, pages.map(([, route]) => `${origin}${route}`), "sitemap must contain exactly the intended public pages");
+assert.doesNotMatch(sitemap, /\/(?:shop|admin|s|api|health|downloads)\//, "sitemap must exclude private application and download routes");
 assert.ok(robots.includes(`Sitemap: ${origin}/sitemap.xml`), "robots.txt must reference the generated sitemap");
 assert.doesNotMatch(robots, /__SMARTPRINT_ORIGIN__/, "robots.txt must not contain unresolved origin placeholders");
 
 // App-only routes must be explicitly excluded from indexing at the HTTP layer,
-// including the trailing-slash variants of the authentication entry points.
+// including trailing-slash variants of the authentication entry points.
 for (const route of ["/admin", "/shop", "/login", "/login/", "/signup", "/signup/"]) {
-  const escaped = route.replace(/[.*+?^${}()|[\\]\\]/g, "\\assert.ok(robots.includes(`Sitemap: ${origin}/sitemap.xml`), "robots.txt must reference the generated sitemap");
-
-const groupFor");
-  const routePattern = new RegExp(`location = ${escaped.replace("/", "\\/")} \\\\{[\\s\\S]*?add_header X-Robots-Tag "noindex, nofollow" always;`);
-  assert.match(nginx, routePattern, `${route} must return a noindex response header`);
+  const escapedRoute = route.replace(/\//g, "\\/");
+  const match = nginx.match(new RegExp("location = " + escapedRoute + " \\{([^}]*)\\}"));
+  assert.ok(match, `${route} needs an exact Nginx location`);
+  assert.match(match[1], /add_header X-Robots-Tag "noindex, nofollow" always;/, `${route} must return a noindex response header`);
 }
 for (const route of ["/admin/", "/shop/", "/s/"]) {
   assert.ok(nginx.includes(`location ^~ ${route}`), `${route} must have a private SPA route handler`);
-  assert.match(nginx, /location @noindex_spa \\\{[\\s\\S]*?add_header X-Robots-Tag "noindex, nofollow" always;/, "private SPA fallback must keep its noindex response header");
 }
+const privateFallback = nginx.match(/location @noindex_spa\s*\{([\s\S]*?)\n    \}/);
+assert.ok(privateFallback, "private SPA routes need a named fallback");
+assert.match(privateFallback[1], /add_header X-Robots-Tag "noindex, nofollow" always;/, "private SPA fallback must keep its noindex response header");
 
 const groupFor = (agent) => {
   const marker = `User-agent: ${agent}\n`;
@@ -89,4 +97,4 @@ for (const path of protectedPaths) assert.ok(trainingPreference.includes(`Disall
 const defaultGroup = groupFor("*");
 assert.match(defaultGroup, /^Allow: \/$/m, "other standards-compliant crawlers must be allowed by default");
 for (const path of protectedPaths) assert.ok(defaultGroup.includes(`Disallow: ${path}`), `default crawler policy must exclude ${path}`);
-console.log("PASS: SmartPrint public SEO pages, canonical URLs, structured data, sitemap and search/training crawler permissions are valid.");
+console.log("PASS: SmartPrint public SEO pages, canonicals, JSON-LD, sitemap, private-route indexing and AI crawler permissions are valid.");
