@@ -1150,12 +1150,35 @@ class MainActivity : AppCompatActivity() {
             12, R.color.qp_hero_muted, false
         ).apply { setLineSpacing(dp(3).toFloat(), 1f); setPadding(0, 0, 0, dp(15)) })
         heroContent.addView(button(
-            if (portalUrl == null) "Find a print shop" else "Continue to your shop",
+            if (portalUrl == null) "Find a print shop" else "Manage connected shop",
             true
         ).apply {
             minHeight = dp(46)
-            setOnClickListener { if (portalUrl == null) showScanPrint() else showPrint() }
+            setOnClickListener { if (portalUrl == null) showScanPrint() else showShopManager() }
         }, LinearLayout.LayoutParams(-1, dp(46)))
+        val studioActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        studioActions.addView(button("ID Studio", false).apply {
+            icon = getDrawable(R.drawable.ic_file)
+            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
+            iconPadding = dp(4)
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            textSize = 11f
+            minHeight = dp(40)
+            setOnClickListener { showIdStudioHome() }
+        }, LinearLayout.LayoutParams(0, dp(40), 1f))
+        studioActions.addView(button("Photo Studio", false).apply {
+            icon = getDrawable(R.drawable.ic_file_image)
+            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
+            iconPadding = dp(4)
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            textSize = 11f
+            minHeight = dp(40)
+            setOnClickListener { showDedicatedPhotoStudio() }
+        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(8) })
+        heroContent.addView(studioActions, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(10) })
         hero.addView(heroContent)
         column.addView(hero, linearParams().apply { bottomMargin = dp(17) })
 
@@ -1187,17 +1210,6 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        secondaryActions.addView(button("Prepare ID card", false).apply {
-            icon = getDrawable(R.drawable.ic_file)
-            iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            iconPadding = dp(5)
-            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
-            textSize = 11f
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            minHeight = dp(48)
-            setOnClickListener { showIdStudioHome() }
-        }, LinearLayout.LayoutParams(0, dp(48), 1f))
         secondaryActions.addView(button("Choose files", false).apply {
             icon = getDrawable(R.drawable.ic_file)
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
@@ -1213,47 +1225,11 @@ class MainActivity : AppCompatActivity() {
                 importFiles.launch(arrayOf("*/*"))
                 navigation.selectedItemId = FILES
             }
-        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(9) })
+        }, LinearLayout.LayoutParams(-1, dp(48)))
         quickActions.addView(secondaryActions, LinearLayout.LayoutParams(-1, dp(48)).apply {
             topMargin = dp(9)
         })
         column.addView(quickActions, linearParams().apply { bottomMargin = dp(17) })
-
-        val shopCard = card().apply {
-            strokeWidth = dp(1)
-            setOnClickListener { if (portalUrl != null) showShopManager() else showScanPrint() }
-        }
-        val shopRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), dp(13), dp(13), dp(13))
-        }
-        val shopGlyph = ImageView(this).apply {
-            setImageResource(R.drawable.ic_store)
-            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
-            contentDescription = if (portalUrl == null) "Shop connection" else "Connected shop icon"
-        }
-        if (portalUrl != null) loadShopLogo(shopGlyph)
-        shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
-        val shopCopy = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(11), 0, 0, 0)
-        }
-        shopCopy.addView(text(
-            if (portalUrl == null) "Find a print shop" else shopDisplayName ?: "Connected shop",
-            14, R.color.qp_text, true
-        ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
-        shopCopy.addView(text(
-            if (portalUrl == null) "Scan the QR code at the counter to connect" else "Connected · tap to manage your shop",
-            11, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(3), 0, 0) })
-        shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        shopRow.addView(text(if (portalUrl == null) "›" else "⋮", 22, R.color.qp_muted, false))
-        shopCard.addView(shopRow)
-        column.addView(shopCard, linearParams().apply { bottomMargin = dp(22) })
 
         val recentHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1287,38 +1263,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // This is owned SmartPrint promotion, not a third-party ad slot.
-        val promotion = card().apply {
-            radius = dp(18).toFloat()
-            setCardBackgroundColor(getColor(R.color.qp_glass_card))
-        }
-        val promoRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), dp(13), dp(13), dp(13))
-        }
-        val promoIcon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_file_image)
-            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-        }
-        promoRow.addView(promoIcon, LinearLayout.LayoutParams(dp(46), dp(46)))
-        val promoCopy = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(11), 0, 0, 0)
-        }
-        promoCopy.addView(text("FROM SMARTPRINT", 8, R.color.qp_primary, true))
-        promoCopy.addView(text("Make every photo print-ready", 13, R.color.qp_text, true)
-            .apply { setPadding(0, dp(4), 0, dp(3)) })
-        promoCopy.addView(text("Prepare beautiful photo sheets with Photo Studio.", 10, R.color.qp_muted, false))
-        promoRow.addView(promoCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        promoRow.addView(text("›", 24, R.color.qp_primary, true))
-        promotion.addView(promoRow)
-        promotion.setOnClickListener { if (portalUrl != null) showPrint() else showScanPrint() }
-        promotion.isClickable = true
-        promotion.isFocusable = true
-        column.addView(promotion, linearParams().apply { topMargin = dp(18) })
         return scroll
     }
 
