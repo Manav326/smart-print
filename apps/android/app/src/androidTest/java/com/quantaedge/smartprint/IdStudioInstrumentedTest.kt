@@ -15,6 +15,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.json.JSONObject
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayInputStream
@@ -37,15 +38,50 @@ class IdStudioInstrumentedTest {
         val back = idStore.saveScan(draftId, "back", ByteArrayInputStream(testJpeg()))
         val frontVaultBytes = File(idStore.draftDirectory(draftId), "front.jpg").readBytes()
         assertTrue("Saved scans are AES-GCM vault envelopes.", frontVaultBytes.take(4).toByteArray().contentEquals(byteArrayOf(83, 80, 73, 68)))
-        val pdfBytes = IdCardPdfComposer.compose(
-            idStore.readScanBytes(draftId, "front"),
-            idStore.readScanBytes(draftId, "back")
+        val frontBytes = idStore.readScanBytes(draftId, "front")
+        val backBytes = idStore.readScanBytes(draftId, "back")
+        val pdfBytes = IdCardPdfComposer.compose(frontBytes, backBytes)
+        val prepared = idStore.savePreparedOutput(
+            pdfBytes,
+            frontBytes,
+            backBytes,
+            JSONObject().put("title", "School ID")
+                .put("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble())
+                .put("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble())
+                .put("frontRotation", 0)
+                .put("backRotation", 0)
         )
-        val prepared = idStore.savePreparedOutput(pdfBytes)
 
         try {
             val encryptedPreparedBytes = prepared.readBytes()
             assertTrue("Prepared PDFs are AES-GCM vault envelopes.", encryptedPreparedBytes.take(4).toByteArray().contentEquals(byteArrayOf(83, 80, 73, 68)))
+            assertTrue("New ID documents retain both encrypted original scans.", idStore.canEditPreparedDocument(prepared))
+            assertTrue("ID library entries can render an A4 thumbnail.", idStore.createThumbnailBase64(prepared)?.isNotBlank() == true)
+            assertTrue("The title is saved independently of the opaque file name.", idStore.readMetadata(prepared).optString("title") == "School ID")
+            idStore.renamePrepared(prepared, "Student ID")
+            assertTrue("Renaming persists in encrypted metadata.", idStore.readMetadata(prepared).optString("title") == "Student ID")
+            val editableFront = idStore.readPreparedSideBytes(prepared, "front")
+            val editableBack = idStore.readPreparedSideBytes(prepared, "back")
+            try {
+                assertTrue("The original front scan can be reopened.", editableFront.contentEquals(frontBytes))
+                assertTrue("The original back scan can be reopened.", editableBack.contentEquals(backBytes))
+                val editedPdf = IdCardPdfComposer.compose(editableFront, editableBack)
+                idStore.updatePreparedOutput(
+                    prepared,
+                    editedPdf,
+                    editableFront,
+                    editableBack,
+                    JSONObject().put("title", "Replacement title")
+                        .put("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble())
+                        .put("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble())
+                        .put("frontRotation", 0)
+                        .put("backRotation", 0)
+                )
+            } finally {
+                editableFront.fill(0)
+                editableBack.fill(0)
+            }
+            assertTrue("An edit updates the existing document without replacing its title.", idStore.readMetadata(prepared).optString("title") == "Student ID")
             val transientPdf = idStore.materializePreparedFile(prepared)
             assertTrue("Only the short-lived viewer copy contains a PDF header.",
                 transientPdf.inputStream().use { input ->
@@ -53,6 +89,7 @@ class IdStudioInstrumentedTest {
                     input.read(header) == 5 && header.contentEquals("%PDF-".toByteArray(Charsets.US_ASCII))
                 })
             val reopenedStore = IdStudioStore(context.filesDir, context.cacheDir)
+            assertTrue("Original scans remain editable after store recreation.", reopenedStore.canEditPreparedDocument(prepared))
             assertTrue("A recent picker file survives Activity recreation.", transientPdf.isFile)
             transientPdf.setLastModified(System.currentTimeMillis() - 60L * 60L * 1000L)
             IdStudioStore(context.filesDir, context.cacheDir)
@@ -85,20 +122,27 @@ class IdStudioInstrumentedTest {
                 }
 
                 onView(withText("Create a new ID card")).check(matches(isDisplayed()))
-                val displayName = prepared.name.removeSuffix(".spid") + ".pdf"
-                onView(withText(displayName)).check(matches(isDisplayed()))
+                onView(withText("Student ID")).check(matches(isDisplayed()))
                 onView(withText("View")).perform(click())
                 onView(withText("Page 1 of 1")).check(matches(isDisplayed()))
+                onView(withText("SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW")).check(matches(isDisplayed()))
+                onView(withText("SmartPrint by QuantaEdge")).check(matches(isDisplayed()))
 
                 scenario.onActivity { activity ->
                     assertTrue(
-                        "The in-app ID viewer must keep screen capture disabled.",
-                        activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
+                        "Only the explicitly watermarked ID preview allows capture.",
+                        activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0
                     )
                 }
 
                 onView(withContentDescription("Back to ID Studio")).perform(click())
-                onView(withText(displayName)).check(matches(isDisplayed()))
+                onView(withText("Student ID")).check(matches(isDisplayed()))
+                scenario.onActivity { activity ->
+                    assertTrue(
+                        "ID Studio library remains protected after leaving the preview.",
+                        activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
+                    )
+                }
             }
         } finally {
             idStore.deletePrepared(prepared)
