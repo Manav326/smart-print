@@ -781,6 +781,70 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun historyPaginationAppearsOnlyWhenFilteredResultsExceedTen() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val render = MainActivity::class.java.getDeclaredMethod(
+                    "renderCustomerHistory",
+                    LinearLayout::class.java,
+                    String::class.java,
+                    List::class.java,
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType
+                ).apply { isAccessible = true }
+
+                fun history(count: Int) = (0 until count).map { index ->
+                    CustomerPrintHistoryItem(
+                        id = "history-$index",
+                        batchId = "batch-$index",
+                        batchName = "Print batch $index",
+                        batchGroupName = null,
+                        jobNumber = "QE-${index + 1}",
+                        status = "COMPLETED",
+                        pageCount = 1,
+                        copies = 1,
+                        currency = "INR",
+                        quotedAmountMinor = 1000,
+                        createdUtc = "2026-11-12T10:00:00Z",
+                        shopName = "Test Print Shop",
+                        originalFileName = "document-$index.pdf",
+                        paidAmountMinor = 1000,
+                        refundedAmountMinor = 0,
+                        paymentStatus = "VERIFIED",
+                        paymentMethod = "UPI",
+                        rejectedPageNumbersJson = "[]",
+                        outputCompletedUtc = null,
+                        printKind = "DOCUMENT",
+                        photoSizeCode = null,
+                        photoCount = 0,
+                        photosPerPage = null
+                    )
+                }
+
+                fun pagerVisibility(records: List<CustomerPrintHistoryItem>): Int {
+                    val container = LinearLayout(activity)
+                    render.invoke(activity, container, "test@example.com", records, null, false)
+                    fun find(view: View): View? {
+                        if (view.contentDescription == "History pagination") return view
+                        if (view is ViewGroup) {
+                            for (index in 0 until view.childCount) {
+                                find(view.getChildAt(index))?.let { return it }
+                            }
+                        }
+                        return null
+                    }
+                    return (find(container)
+                        ?: throw AssertionError("History pager container was not created.")).visibility
+                }
+
+                assertEquals("10 history results must not show pagination.", View.GONE, pagerVisibility(history(10)))
+                assertEquals("11 history results must show pagination.", View.VISIBLE, pagerVisibility(history(11)))
+                assertEquals("Fewer than 10 results must not show pagination.", View.GONE, pagerVisibility(history(9)))
+            }
+        }
+    }
+
+    @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))
