@@ -1235,6 +1235,9 @@ type CustomerLocalUploadTicket = {
   completed: boolean;
   privatePrinting?: boolean;
   printKind?: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT";
+  photoSizeCode?: string | null;
+  photoCount?: number | null;
+  photosPerPage?: number | null;
   sha256: string;
 };
 
@@ -1248,7 +1251,8 @@ async function requestCustomerLocalUploadTicket(
   grantToken: string,
   settings: CustomerPrintRequestSettings,
   privatePrinting = false,
-  printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT"
+  printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
 ): Promise<CustomerLocalUploadTicket> {
   const hashInput = await file.arrayBuffer();
   let digest: ArrayBuffer;
@@ -1280,7 +1284,10 @@ async function requestCustomerLocalUploadTicket(
       copies: settings.copies,
       orientation: settings.orientation,
       privatePrinting,
-      printKind
+      printKind,
+      photoSizeCode: photoSettings?.sizeCode ?? null,
+      photoCount: photoSettings?.photoCount ?? null,
+      photosPerPage: photoSettings?.photosPerPage ?? null
     })
   });
   return { ...ticket, sha256 };
@@ -1519,7 +1526,8 @@ export async function uploadCustomerDocumentLocally(
   settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" },
   privatePrinting = false,
   localNetworkReady = true,
-  printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT"
+  printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
 ): Promise<UploadedPrintJob> {
   if (printKind === "ID_DOCUMENT" && !privatePrinting) {
     throw new LocalUploadPreflightError(
@@ -1537,7 +1545,7 @@ export async function uploadCustomerDocumentLocally(
   let ticket: CustomerLocalUploadTicket;
   try {
     ticket = await requestCustomerLocalUploadTicket(
-      sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken, settings, privatePrinting, printKind
+      sessionToken, file, batchId, batchGroupName, batchName, idempotencyKey, grantToken, settings, privatePrinting, printKind, photoSettings
     );
   } catch (exception) {
     if (exception instanceof ApiError && exception.status === 409 &&

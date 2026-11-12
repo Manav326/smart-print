@@ -4760,7 +4760,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
         if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards are always sent with Private Printing. No normal cloud upload is allowed.",409);
         const created=effectiveUploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind)
+          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)
           : idDocument
             ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded.",409);})()
             : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);

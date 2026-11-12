@@ -5915,6 +5915,9 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         Orientation = ticket.Orientation,
         PrivatePrinting = ticket.PrivatePrinting,
         PrintKind = ticket.PrintKind,
+        PhotoSizeCode = ticket.PhotoSizeCode,
+        PhotoCount = ticket.PhotoCount ?? 0,
+        PhotosPerPage = ticket.PhotosPerPage,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -8278,6 +8281,17 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         _ => null
     };
     var isIdDocumentUpload = request.PrintKind == "ID_DOCUMENT";
+    var hasPhotoMetadata = request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null;
+    var validPhotoMetadata = request.PrintKind == "PHOTO" &&
+        request.PhotoSizeCode is "35x45" or "25x35" or "2x2" or "4x6" &&
+        request.PhotoCount is >= 1 and <= 100 &&
+        request.PhotosPerPage is int photosPerPage &&
+        photosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(request.PhotoSizeCode);
+    var invalidPrivatePhotoUpload = request.PrivatePrinting && request.PrintKind == "PHOTO" &&
+        (!validPhotoMetadata || mediaType != "application/pdf" ||
+         request.ColourMode != "Colour" || request.PaperSize != "A4" ||
+         request.IsDuplex || request.Copies != 1 ||
+         request.Orientation is not ("AUTO" or "PORTRAIT"));
     if (request.PrintKind is not ("DOCUMENT" or "PHOTO" or "ID_DOCUMENT") ||
         (isIdDocumentUpload && (!request.PrivatePrinting ||
             mediaType != "application/pdf" ||
@@ -8285,11 +8299,15 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             request.PaperSize != "A4" ||
             request.IsDuplex ||
             request.Copies != 1 ||
-            request.Orientation != "PORTRAIT")))
+            request.Orientation != "PORTRAIT")) ||
+        (hasPhotoMetadata && !validPhotoMetadata) ||
+        invalidPrivatePhotoUpload)
         return Results.Conflict(new
         {
-            code = "id_document_private_printing_required",
-            message = "ID card sheets require Private Printing, a one-page A4 portrait PDF, colour, one copy and single-sided output. Start a new Private Printing batch."
+            code = isIdDocumentUpload ? "id_document_private_printing_required" : "photo_metadata_invalid",
+            message = isIdDocumentUpload
+                ? "ID card sheets require Private Printing, a one-page A4 portrait PDF, colour, one copy and single-sided output. Start a new Private Printing batch."
+                : "Private Photo Studio sheets require a supported photo size, quantity, A4 sheet layout and a single-sided colour A4 PDF. No document was uploaded."
         });
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (mediaType is null || request.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
@@ -8349,7 +8367,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.PaperSize != request.PaperSize ||
             existing.IsDuplex != request.IsDuplex ||
             existing.Copies != request.Copies ||
-            existing.Orientation != request.Orientation)
+            existing.Orientation != request.Orientation ||
+            existing.PhotoSizeCode != request.PhotoSizeCode ||
+            existing.PhotoCount != request.PhotoCount ||
+            existing.PhotosPerPage != request.PhotosPerPage)
         {
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document, batch or set of print options." });
         }
@@ -8583,6 +8604,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         Orientation = request.Orientation,
         PrivatePrinting = request.PrivatePrinting,
         PrintKind = request.PrintKind,
+        PhotoSizeCode = request.PhotoSizeCode,
+        PhotoCount = request.PhotoCount,
+        PhotosPerPage = request.PhotosPerPage,
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
@@ -8664,6 +8688,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             racedTicket.IsDuplex == request.IsDuplex &&
             racedTicket.Copies == request.Copies &&
             racedTicket.Orientation == request.Orientation &&
+            racedTicket.PhotoSizeCode == request.PhotoSizeCode &&
+            racedTicket.PhotoCount == request.PhotoCount &&
+            racedTicket.PhotosPerPage == request.PhotosPerPage &&
             CryptographicOperations.FixedTimeEquals(
                 Convert.FromHexString(racedTicket.GrantHash),
                 Convert.FromHexString(grantHash));
@@ -9328,6 +9355,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             PaperSize = ticket.PaperSize,
             IsDuplex = ticket.IsDuplex,
             Orientation = ticket.Orientation,
+            PrintKind = ticket.PrintKind,
+            PhotoSizeCode = ticket.PhotoSizeCode,
+            PhotoCount = ticket.PhotoCount ?? 0,
+            PhotosPerPage = ticket.PhotosPerPage,
             Currency = "INR",
             QuotedAmountMinor = 0,
             CreatedUtc = commitNow,
