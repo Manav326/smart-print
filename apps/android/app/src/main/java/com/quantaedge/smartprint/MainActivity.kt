@@ -1173,16 +1173,21 @@ class MainActivity : AppCompatActivity() {
         heroContent.addView(text("SMARTPRINT  ·  YOUR PRINT SPACE", 10, R.color.qp_hero_muted, true))
         heroContent.addView(text(
             if (portalUrl == null) "Your next print starts here." else "Everything ready for your next print.",
-            25, R.color.qp_hero_text, true
+            22, R.color.qp_hero_text, true
         ).apply {
             id = R.id.smartprint_home_heading
-            setPadding(0, dp(6), 0, dp(5))
+            maxLines = 2
+            setPadding(0, dp(5), 0, dp(4))
         })
         heroContent.addView(text(
-            if (portalUrl == null) "Keep your documents close. Find a participating shop when you're ready to print."
-            else "You're connected to ${shopDisplayName ?: "your print shop"}. Choose a document whenever you're ready.",
-            12, R.color.qp_hero_muted, false
-        ).apply { setLineSpacing(dp(2).toFloat(), 1f); setPadding(0, 0, 0, dp(9)) })
+            if (portalUrl == null) "Your files stay private. Print when ready."
+            else "Connected to ${shopDisplayName ?: "your print shop"}.",
+            11, R.color.qp_hero_muted, false
+        ).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, 0, 0, dp(7))
+        })
         heroContent.addView(button(
             if (portalUrl == null) "Find a print shop" else "Manage connected shop",
             true
@@ -1227,12 +1232,16 @@ class MainActivity : AppCompatActivity() {
         val privateIdCount = idStudioStore.listPrepared().size
         val privatePhotoCount = photoStudioStore.listPrepared().size
         summaryCopy.addView(text("Your space", 17, R.color.qp_text, true))
-        summaryCopy.addView(text("${recentFiles.size} saved files  ·  ${used} used", 11, R.color.qp_muted, false)
-            .apply { setPadding(0, dp(3), 0, 0) })
-        summaryCopy.addView(text("$privateIdCount ID cards  ·  $privatePhotoCount photo sheets", 10, R.color.qp_muted, false)
-            .apply { setPadding(0, dp(2), 0, 0) })
+        summaryCopy.addView(text(
+            "${recentFiles.size} files · $used · $privateIdCount IDs · $privatePhotoCount photo sheets",
+            10, R.color.qp_muted, false
+        ).apply {
+            setPadding(0, dp(3), 0, 0)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
         spaceSummary.addView(summaryCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        spaceSummary.addView(text("PRIVATE ON THIS DEVICE", 8, R.color.qp_muted, true))
+        spaceSummary.addView(text("PRIVATE", 8, R.color.qp_muted, true))
         column.addView(spaceSummary, linearParams())
 
         val quickActions = LinearLayout(this).apply {
@@ -3638,7 +3647,8 @@ class MainActivity : AppCompatActivity() {
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     contentDescription = "ID card front preview"
                     background = roundedDrawable(getColor(R.color.qp_soft), dp(8))
-                    idStudioStore.createCardFaceThumbnailBase64(file, "front")?.let { encoded ->
+                    (idStudioStore.createCardFaceThumbnailBase64(file, "front")
+                        ?: idStudioStore.createThumbnailBase64(file))?.let { encoded ->
                         val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
                         try {
                             setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))

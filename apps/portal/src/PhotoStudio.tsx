@@ -571,12 +571,12 @@ export default function PhotoStudio({
 
   const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
   const footerHint = mode === "private-library"
-    ? "Original stays private · Only the A4 sheet is saved."
+    ? "Original stays private · A4 sheet saved here."
     : mode === "shop-create"
-      ? "New order · Payment must be verified before printing."
+      ? "New order · Verify payment before printing."
       : mode === "shop"
-        ? "Save your prepared multi-page A4 photo PDF to this existing unpaid job. Approval and dispatch are still required."
-        : "This prepared multi-page A4 photo PDF replaces it in your batch; the original stays untouched.";
+        ? "Replace this unpaid job's photo PDF; approval and dispatch still apply."
+        : "Prepared A4 replaces this upload; original stays untouched.";
   const actionLabel = mode === "private-library" ? "Save private sheet" : mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
   const busyLabel = mode === "private-library" ? "Saving privately…" : mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your A4 sheet…";
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";

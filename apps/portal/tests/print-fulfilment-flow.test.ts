@@ -332,7 +332,7 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  assert.match(studio,/mode === "shop-create" \? "Create photo order"/);
  assert.match(studio,/mode === "shop" \? "Save sheet to this job"/);
  assert.match(studio,/: "Prepare A4 sheet"/);
- assert.match(studio,/This prepared multi-page A4 photo PDF replaces it in your batch/);
+ assert.match(studio,/Prepared A4 replaces this upload; original stays untouched/);
  assert.match(studio,/type="date"/);
  assert.match(studio,/formatDobForPrint/);
 });
