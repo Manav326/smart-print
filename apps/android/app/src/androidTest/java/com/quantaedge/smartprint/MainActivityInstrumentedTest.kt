@@ -647,7 +647,15 @@ class MainActivityInstrumentedTest {
                 assertTrue(method.invoke(activity, "$origin/photo-studio/") as Boolean)
                 assertTrue(method.invoke(activity, "$origin/photo-studio/?source=library") as Boolean)
                 assertFalse(method.invoke(activity, "$origin/") as Boolean)
+                assertFalse(method.invoke(activity, "$origin/station/ci?next=/photo-studio") as Boolean)
                 assertFalse(method.invoke(activity, "https://other.example/photo-studio") as Boolean)
+                val serviceUri = Uri.parse(origin)
+                val wrongPort = if (serviceUri.port in 1..65534) serviceUri.port + 1 else 444
+                val wrongOrigin = serviceUri.buildUpon()
+                    .port(wrongPort)
+                    .appendPath("photo-studio")
+                    .build()
+                assertFalse(method.invoke(activity, wrongOrigin.toString()) as Boolean)
             }
         }
     }
@@ -677,6 +685,34 @@ class MainActivityInstrumentedTest {
                 assertTrue("Photo Studio Home shortcut must open its private library route.", privatePage)
                 assertNotNull("Photo Studio route must be hosted in the app WebView.", webView)
                 assertEquals("/photo-studio", Uri.parse(webView?.url.orEmpty()).path)
+            }
+        }
+    }
+
+    @Test
+    fun enteringShopPrintFromPhotoStudioUsesOnlyTheQrSelectedShopRoute() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            onView(withText("Photo Studio")).perform(click())
+            scenario.onActivity { activity ->
+                val webView = MainActivity::class.java.getDeclaredField("webView")
+                    .apply { isAccessible = true }.get(activity) as WebView
+                assertEquals("/photo-studio", Uri.parse(webView.url).path)
+                MainActivity::class.java.getDeclaredField("portalUrl").apply { isAccessible = true }
+                    .set(activity, "https://shop.example.test/station/12345678901234567890123456789012")
+                MainActivity::class.java.getDeclaredField("portalHost").apply { isAccessible = true }
+                    .set(activity, "shop.example.test")
+                MainActivity::class.java.getDeclaredMethod("showPrint").apply { isAccessible = true }
+                    .invoke(activity)
+                assertEquals(
+                    "The shop print page must use the selected QR route, not the private studio route.",
+                    "/station/12345678901234567890123456789012",
+                    Uri.parse(webView.url).path
+                )
+                assertFalse(
+                    "The shop print route must not retain the private Photo Studio flag.",
+                    MainActivity::class.java.getDeclaredField("privatePhotoStudioPageOpen")
+                        .apply { isAccessible = true }.getBoolean(activity)
+                )
             }
         }
     }
