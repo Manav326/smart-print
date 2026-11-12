@@ -44,6 +44,7 @@ import android.view.ViewGroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
