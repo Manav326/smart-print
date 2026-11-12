@@ -255,6 +255,8 @@ class MainActivityInstrumentedTest {
                     assertTrue("Light primary button contrast", contrast(activity.getColor(R.color.qp_primary_content), activity.getColor(R.color.qp_primary)) >= 4.5)
                     assertTrue("Light danger button contrast", contrast(activity.getColor(R.color.qp_danger_content), activity.getColor(R.color.qp_danger)) >= 4.5)
                     assertTrue("Light hero secondary text contrast", contrast(activity.getColor(R.color.qp_hero_muted), activity.getColor(R.color.qp_hero)) >= 4.5)
+                    assertTrue("Light shop-action primary text contrast", contrast(activity.getColor(R.color.qp_shop_action_text), activity.getColor(R.color.qp_shop_action_surface)) >= 4.5)
+                    assertTrue("Light shop-action secondary text contrast", contrast(activity.getColor(R.color.qp_shop_action_muted), activity.getColor(R.color.qp_shop_action_surface)) >= 4.5)
                 }
             }
 
@@ -267,6 +269,8 @@ class MainActivityInstrumentedTest {
                     assertTrue("Dark primary button contrast", contrast(activity.getColor(R.color.qp_primary_content), activity.getColor(R.color.qp_primary)) >= 4.5)
                     assertTrue("Dark danger button contrast", contrast(activity.getColor(R.color.qp_danger_content), activity.getColor(R.color.qp_danger)) >= 4.5)
                     assertTrue("Dark hero secondary text contrast", contrast(activity.getColor(R.color.qp_hero_muted), activity.getColor(R.color.qp_hero)) >= 4.5)
+                    assertTrue("Dark shop-action primary text contrast", contrast(activity.getColor(R.color.qp_shop_action_text), activity.getColor(R.color.qp_shop_action_surface)) >= 4.5)
+                    assertTrue("Dark shop-action secondary text contrast", contrast(activity.getColor(R.color.qp_shop_action_muted), activity.getColor(R.color.qp_shop_action_surface)) >= 4.5)
                 }
             }
         } finally {
@@ -614,6 +618,13 @@ class MainActivityInstrumentedTest {
                 val action = findByDescription(activity.window.decorView)
                 assertNotNull("The replacement shop row must be a tappable action.", action)
                 assertTrue("The replacement shop row must open shop management.", action!!.isClickable)
+                val shopAction = action as? com.google.android.material.card.MaterialCardView
+                    ?: throw AssertionError("The shop action must use the designed white card surface.")
+                assertEquals(
+                    "The replacement shop action must be white in both app themes.",
+                    activity.getColor(R.color.qp_shop_action_surface),
+                    shopAction.cardBackgroundColor.defaultColor
+                )
             }
             onView(withText("Study Print Shop")).check(matches(isDisplayed()))
             onView(withText("Connected · tap to manage")).check(matches(isDisplayed()))
