@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode, type CSSProperties } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound,
@@ -162,8 +162,8 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         setError(message.slice(message.indexOf("|")+1)||"The private photo sheet could not be saved.");
       }else if(message.startsWith("PHOTO_PREVIEW_PAGE|")){
         const parts=message.split("|",4);
-        if(parts.length===4&&preview?.id===parts[1]){
-          setPreview(current=>current?{...current,pageIndex:Number(parts[2])||0,image:parts[3]}:current);
+        if(parts.length===4){
+          setPreview(current=>current&&current.id===parts[1]?{...current,pageIndex:Number(parts[2])||0,image:parts[3]}:current);
         }
       }else if(message.startsWith("PHOTO_PREVIEW_FAILED|")){
         setError(message.slice("PHOTO_PREVIEW_FAILED|".length)||"The private photo preview could not be opened.");
@@ -200,7 +200,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         setError(message.slice("PHOTO_RENAME_FAILED|".length)||"The document could not be renamed.");
       }else if(message.startsWith("PHOTO_DELETED|")){
         setMenuDocumentId(null);
-        if(preview?.id===message.slice("PHOTO_DELETED|".length))closePreview();
+        setPreview(current=>current?.id===message.slice("PHOTO_DELETED|".length)?null:current);
         setStatus("Private photo document deleted from this device.");
         refreshLibrary();
       }else if(message.startsWith("PHOTO_DELETE_FAILED|")){
@@ -220,7 +220,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
       bridge.postMessage("setSensitivePreview|on");
       bridge.postMessage("setPhotoStudioOpen|off");
     };
-  },[preview?.id]);
+  },[]);
 
   function chooseSource(event:ChangeEvent<HTMLInputElement>){
     const selected=event.currentTarget.files?.[0]??null;
@@ -432,7 +432,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
   </main>;
 }
 
-const actionStyle:React.CSSProperties={padding:"7px 10px",borderRadius:8,border:"1px solid var(--border,#dbe2ec)",background:"transparent",color:"inherit",fontSize:11,fontWeight:700,cursor:"pointer"};
+const actionStyle:CSSProperties={padding:"7px 10px",borderRadius:8,border:"1px solid var(--border,#dbe2ec)",background:"transparent",color:"inherit",fontSize:11,fontWeight:700,cursor:"pointer"};
 
 export default function App() {
   const route = resolvePortalRoute(window.location.pathname);
@@ -4256,6 +4256,10 @@ function isSmartPrintIdDocument(file:File):boolean {
   return (file as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="ID_DOCUMENT";
 }
 
+function isSmartPrintPhotoDocument(file:File):boolean {
+  return Boolean((file as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings);
+}
+
 function isCustomerPdf(file:File):boolean {
   return file.type.toLowerCase()==="application/pdf"||/\.pdf$/i.test(file.name);
 }
@@ -4274,6 +4278,13 @@ function consumeSmartPrintNativePrintKinds():Array<string|null>|undefined {
   const kinds=target.__smartPrintNativePrintKinds;
   delete target.__smartPrintNativePrintKinds;
   return Array.isArray(kinds)?kinds:undefined;
+}
+
+function consumeSmartPrintNativePhotoSettings():Array<CustomerPhotoSettings|null>|undefined {
+  const target=window as Window & {__smartPrintNativePhotoSettings?:Array<CustomerPhotoSettings|null>};
+  const settings=target.__smartPrintNativePhotoSettings;
+  delete target.__smartPrintNativePhotoSettings;
+  return Array.isArray(settings)?settings:undefined;
 }
 
 function consumeSmartPrintNativePdfPreviews():Array<string|null>|undefined {
@@ -4709,12 +4720,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     if(files.length===0)return;
     const containsIdDocument=files.some(isSmartPrintIdDocument);
-    const effectivePrivatePrinting=privatePrinting||containsIdDocument;
-    if(containsIdDocument&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
-      setError("Prepared ID cards must use Private Printing for the whole batch. Finish the current Standard batch, then start a new batch for your ID sheet.");
+    const containsPrivatePhotoDocument=files.some(isSmartPrintPhotoDocument);
+    const effectivePrivatePrinting=privatePrinting||containsIdDocument||containsPrivatePhotoDocument;
+    if((containsIdDocument||containsPrivatePhotoDocument)&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
+      setError("Prepared studio documents use Private Printing for the whole batch. Finish the current Standard batch, then start a new batch for your private studio sheet.");
       return;
     }
-    if(containsIdDocument&&!privatePrinting)setPrivatePrinting(true);
+    if((containsIdDocument||containsPrivatePhotoDocument)&&!privatePrinting)setPrivatePrinting(true);
     const effectiveUploadMode: "LOCAL"|"CLOUD"=effectivePrivatePrinting?"LOCAL":uploadMode;
     if(effectivePrivatePrinting&&(!localAgent||!canOfferPrivatePrinting)) {
       setError("Private Printing is not ready at this shop yet. No document has been uploaded. Ask the shop operator to reconnect the paired computer.");
@@ -5080,7 +5092,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     setError("");
   }
-  function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>) {
+  function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
       return;
@@ -5098,6 +5110,16 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         }
       });
     }
+    if(nativePhotoSettings?.length===next.length) {
+      next.forEach((candidate,index)=>{
+        const settings=nativePhotoSettings[index];
+        if(settings&&["35x45","25x35","2x2","4x6"].includes(settings.sizeCode)&&
+          Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
+          Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=49) {
+          (candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings=settings;
+        }
+      });
+    }
     let nestedSkipped=0;
     const rootFiles=next.filter(candidate=>{
       const relativePath=(candidate as File & {webkitRelativePath?:string}).webkitRelativePath??"";
@@ -5107,14 +5129,25 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     });
     const supported=rootFiles.filter(candidate=>/\.(pdf|jpe?g|png)$/i.test(candidate.name));
     const incomingIdDocument=supported.some(isSmartPrintIdDocument);
-    if(incomingIdDocument&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
+    const incomingPhotoDocument=supported.some(isSmartPrintPhotoDocument);
+    if((incomingIdDocument||incomingPhotoDocument)&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
       setError("Prepared ID cards use Private Printing for the entire batch. Finish the current Standard batch, then start a new batch for the ID sheet.");
       return;
     }
-    if(incomingIdDocument) {
+    if(incomingIdDocument||incomingPhotoDocument) {
       setPrivatePrinting(true);
       setUploadMode("LOCAL");
       setUploadModeManuallySelected(true);
+    }
+    if(incomingPhotoDocument){
+      setPhotoSettingsByFileFingerprint(current=>{
+        const updated={...current};
+        supported.forEach(candidate=>{
+          const settings=(candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings;
+          if(settings)updated[customerFileFingerprint(candidate)]=settings;
+        });
+        return updated;
+      });
     }
     for(const candidate of supported){
       const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
@@ -5324,13 +5357,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
       onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>Select documents or images</strong>
         <small>Choose PDF documents or JPG/PNG images</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
         <small>{nativeAppMode?"Select multiple folders at once":"Choose one folder; select again to add another to this batch"}</small>
