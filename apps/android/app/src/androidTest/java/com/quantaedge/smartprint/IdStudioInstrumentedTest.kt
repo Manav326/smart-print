@@ -150,6 +150,43 @@ class IdStudioInstrumentedTest {
         }
     }
 
+    @Test
+    fun idReviewDefaultsToPhysicalCardAndOffersA4SheetView() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("smartprint.customer.last-shop", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        val store = IdStudioStore(context.filesDir, context.cacheDir)
+        val draftId = store.createDraft()
+        store.saveScan(draftId, "front", ByteArrayInputStream(testJpeg()))
+        store.saveScan(draftId, "back", ByteArrayInputStream(testJpeg()))
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredField("idStudioDraftId").apply {
+                        isAccessible = true
+                    }.set(activity, draftId)
+                    MainActivity::class.java.getDeclaredMethod("showIdStudioReview").apply {
+                        isAccessible = true
+                    }.invoke(activity)
+                }
+                onView(withContentDescription("ID front card preview. Pinch to zoom."))
+                    .check(matches(isDisplayed()))
+                onView(withText("Front")).check(matches(isDisplayed()))
+                onView(withText("Back")).check(matches(isDisplayed()))
+                onView(withText("A4 sheet")).perform(click())
+                onView(withContentDescription("A4 ID front and back print sheet preview. Pinch to zoom."))
+                    .check(matches(isDisplayed()))
+                onView(withText("Prepare A4 print sheet")).check(matches(isDisplayed()))
+                onView(withText("ID card")).perform(click())
+                onView(withContentDescription("ID front card preview. Pinch to zoom."))
+                    .check(matches(isDisplayed()))
+            }
+        } finally {
+            store.deleteDraft(draftId)
+        }
+    }
+
     private fun testJpeg(): ByteArray {
         val bitmap = Bitmap.createBitmap(1000, 630, Bitmap.Config.ARGB_8888)
         try {

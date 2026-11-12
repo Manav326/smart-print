@@ -545,6 +545,35 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun homeStudioShortcutsOpenTheCorrectStudiosAndReturnHome() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            onView(withText("ID Studio")).perform(click())
+            onView(withText("SmartPrint ID Studio")).check(matches(isDisplayed()))
+            onView(withContentDescription("Change ID card dimensions")).check(doesNotExist())
+
+            scenario.onActivity { activity ->
+                assertTrue("Opening ID Studio from Home must activate its private screen.",
+                    activity.window.attributes.flags and android.view.WindowManager.LayoutParams.FLAG_SECURE != 0)
+                MainActivity::class.java.getDeclaredMethod("showHome").apply {
+                    isAccessible = true
+                }.invoke(activity)
+            }
+            onView(withText("Your space")).check(matches(isDisplayed()))
+
+            onView(withText("Photo Studio")).perform(click())
+            scenario.onActivity { activity ->
+                val privatePage = MainActivity::class.java.getDeclaredField("privatePhotoStudioPageOpen")
+                    .apply { isAccessible = true }.getBoolean(activity)
+                val webView = MainActivity::class.java.getDeclaredField("webView")
+                    .apply { isAccessible = true }.get(activity) as? android.webkit.WebView
+                assertTrue("Photo Studio Home shortcut must open its private library route.", privatePage)
+                assertNotNull("Photo Studio route must be hosted in the app WebView.", webView)
+                assertEquals("/photo-studio", Uri.parse(webView?.url).path)
+            }
+        }
+    }
+
+    @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))

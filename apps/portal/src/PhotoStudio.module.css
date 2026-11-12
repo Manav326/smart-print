@@ -122,3 +122,43 @@
 @media(max-width:720px){
  .rangeControl input[type=range]{width:calc(100% - 128px);margin-inline:64px}
 }
+
+
+/* Mobile Photo Studio: protect canvas height and keep actions on one compact row. */
+@media(max-width:720px){
+  .editor{grid-template-rows:38px minmax(0,1fr) auto}
+  .toolRail{min-height:38px;gap:4px;padding:2px 5px}
+  .toolRail button{min-width:64px;min-height:34px;padding:4px 7px;gap:4px}
+  .toolPanel{max-height:min(22vh,180px);padding:7px 9px;gap:7px}
+  .panelHeading{padding-bottom:5px}
+  .panelHeading small{display:none}
+  .fieldLabel select,.fieldLabel input{min-height:34px;padding:6px 8px}
+  .sheetSummary{gap:5px;padding:8px}
+  .privacyNote{padding:7px;font-size:8px;line-height:1.35}
+  .canvasWorkspace{grid-template-rows:30px minmax(0,1fr) 23px}
+  .canvasViewport{padding:4px}
+  .sheetFrame{width:min(100%,340px);padding:3px}
+  .previewStage{width:min(100%,calc((100dvh - 350px)*210/297))}
+  .canvasFooter{padding:3px 6px;gap:5px;font-size:7.5px}
+  .canvasFooter small{display:none}
+  .footer{min-height:46px;padding:4px 7px;align-items:center;flex-direction:row;gap:6px}
+  .footerHint{display:none}
+  .footerActions{width:auto;flex:1;justify-content:flex-end;gap:6px}
+  .footerActions .cancelButton{flex:0 0 76px;min-height:38px;padding:6px}
+  .footerActions .applyButton{flex:1;min-height:38px;padding:6px 9px}
+  .errorToast{bottom:54px;right:7px;max-width:calc(100vw - 14px)}
+}
+@media(max-width:520px){
+  .toolPanel{grid-template-columns:1fr}
+  .toolRail{justify-content:flex-start;overflow-x:auto}
+}
+@media(max-width:390px){
+  .topbarMeta span:first-child{display:none}
+  .toolRail button{min-width:58px;font-size:8px}
+}
+@media(max-width:720px) and (max-height:620px){
+  .editor{grid-template-rows:34px minmax(0,1fr) auto}
+  .toolPanel{max-height:min(20vh,120px);padding:5px 8px}
+  .canvasWorkspace{grid-template-rows:27px minmax(0,1fr) 20px}
+  .footer{min-height:42px;padding:3px 6px}
+}

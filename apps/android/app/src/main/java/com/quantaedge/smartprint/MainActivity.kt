@@ -125,6 +125,9 @@ class MainActivity : AppCompatActivity() {
     private var idStudioBackRotation = 0
     private var idStudioCardWidthMm = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
     private var idStudioCardHeightMm = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
+    private var idStudioPreviewMode = "CARD"
+    private var idStudioPreviewSide = "front"
+    private var idStudioReviewBitmap: Bitmap? = null
     private var customerUploadPdfPreviewOpen = false
     private val customerUploadPdfPreviews = java.util.concurrent.ConcurrentHashMap<String, File>()
     private var webView: WebView? = null
@@ -219,6 +222,8 @@ class MainActivity : AppCompatActivity() {
         idStudioCardHeightMm = savedInstanceState?.getFloat(
             "idStudioCardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
         ) ?: IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
+        idStudioPreviewMode = savedInstanceState?.getString("idStudioPreviewMode")?.takeIf { it == "CARD" || it == "A4" } ?: "CARD"
+        idStudioPreviewSide = savedInstanceState?.getString("idStudioPreviewSide")?.takeIf { it == "front" || it == "back" } ?: "front"
         idStudioScreenOpen = savedInstanceState?.getBoolean("idStudioScreenOpen") ?: false
         customerAccountStore = CustomerAccountStore(this)
         customerPrintSessionStore = CustomerPrintSessionStore(this)
@@ -307,6 +312,8 @@ class MainActivity : AppCompatActivity() {
         outState.putInt("idStudioBackRotation", idStudioBackRotation)
         outState.putFloat("idStudioCardWidthMm", idStudioCardWidthMm)
         outState.putFloat("idStudioCardHeightMm", idStudioCardHeightMm)
+        outState.putString("idStudioPreviewMode", idStudioPreviewMode)
+        outState.putString("idStudioPreviewSide", idStudioPreviewSide)
         outState.putBoolean("idStudioScreenOpen", idStudioScreenOpen)
         webView?.let { view ->
             val webState = Bundle()
@@ -494,6 +501,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        releaseIdStudioReviewBitmap()
         documentViewer?.dispose()
         documentViewer = null
         privateIdViewerTempFile?.let(idStudioStore::releaseTransientFile)
@@ -1191,19 +1199,21 @@ class MainActivity : AppCompatActivity() {
             iconPadding = dp(4)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             textSize = 11f
-            minHeight = dp(40)
+            minHeight = dp(48)
+            contentDescription = "ID Studio — scan both sides of an ID"
             setOnClickListener { showIdStudioHome() }
-        }, LinearLayout.LayoutParams(0, dp(40), 1f))
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
         studioActions.addView(button("Photo Studio", false).apply {
             icon = getDrawable(R.drawable.ic_file_image)
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
             iconPadding = dp(4)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             textSize = 11f
-            minHeight = dp(40)
+            minHeight = dp(48)
+            contentDescription = "Photo Studio — prepare photo sheets"
             setOnClickListener { showDedicatedPhotoStudio() }
-        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(8) })
-        heroContent.addView(studioActions, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(10) })
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) })
+        heroContent.addView(studioActions, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
         hero.addView(heroContent)
         column.addView(hero, linearParams().apply { bottomMargin = dp(17) })
 
@@ -1213,9 +1223,13 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(2), dp(1), dp(2), dp(12))
         }
         val summaryCopy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val privateIdCount = idStudioStore.listPrepared().size
+        val privatePhotoCount = photoStudioStore.listPrepared().size
         summaryCopy.addView(text("Your space", 17, R.color.qp_text, true))
         summaryCopy.addView(text("${recentFiles.size} saved files  ·  ${used} used", 11, R.color.qp_muted, false)
             .apply { setPadding(0, dp(3), 0, 0) })
+        summaryCopy.addView(text("$privateIdCount ID cards  ·  $privatePhotoCount photo sheets", 10, R.color.qp_muted, false)
+            .apply { setPadding(0, dp(2), 0, 0) })
         spaceSummary.addView(summaryCopy, LinearLayout.LayoutParams(0, -2, 1f))
         spaceSummary.addView(text("PRIVATE ON THIS DEVICE", 8, R.color.qp_muted, true))
         column.addView(spaceSummary, linearParams())
@@ -3549,6 +3563,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIdStudioHome() {
+        releaseIdStudioReviewBitmap()
         idStudioScreenOpen = true
         privateIdViewerOpen = false
         privateIdPreviewCaptureAllowed = false
@@ -3569,9 +3584,9 @@ class MainActivity : AppCompatActivity() {
         }
         column.addView(text("SmartPrint ID Studio", 21, R.color.qp_text, true))
         column.addView(text(
-            "Create your ID whenever you need it. Scanning, reviewing and saving work on this device without connecting to a shop.",
-            12, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(5), 0, dp(14)) })
+            "Scan both sides. Review and save your ID privately.",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(3), 0, dp(8)) })
         column.addView(button("Create a new ID card", true).apply {
             setOnClickListener { startIdStudioCapture() }
         }, linearParams().apply { bottomMargin = dp(9) })
@@ -3785,6 +3800,8 @@ class MainActivity : AppCompatActivity() {
         }
         idStudioFrontRotation = 0
         idStudioBackRotation = 0
+        idStudioPreviewMode = "CARD"
+        idStudioPreviewSide = "front"
         idStudioCardWidthMm = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
         idStudioCardHeightMm = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
         startIdStudioSideScan("front")
@@ -3847,6 +3864,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIdStudioBackStep() {
+        releaseIdStudioReviewBitmap()
         idStudioScreenOpen = true
         privateIdViewerOpen = false
         applySensitiveWindowProtection()
@@ -3882,6 +3900,11 @@ class MainActivity : AppCompatActivity() {
         content.addView(column, frameParams())
     }
 
+    private fun releaseIdStudioReviewBitmap() {
+        idStudioReviewBitmap?.takeUnless { it.isRecycled }?.recycle()
+        idStudioReviewBitmap = null
+    }
+
     private fun showIdStudioReview() {
         val draftId = idStudioDraftId
         if (draftId == null || !idStudioStore.draftExists(draftId) ||
@@ -3890,10 +3913,11 @@ class MainActivity : AppCompatActivity() {
             showIdStudioHome()
             return
         }
+        releaseIdStudioReviewBitmap()
         idStudioScreenOpen = true
         privateIdViewerOpen = false
         applySensitiveWindowProtection()
-        setToolbarPage("Review ID card")
+        setToolbarPage("Review ID")
         setToolbarBackAction("Back to ID Studio", ::showIdStudioHome)
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
@@ -3905,165 +3929,245 @@ class MainActivity : AppCompatActivity() {
         val back = idStudioStore.readScanBytes(draftId, "back")
         var cardWidthMm = idStudioCardWidthMm
         var cardHeightMm = idStudioCardHeightMm
-        val column = LinearLayout(this).apply {
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(22))
+            setPadding(dp(12), dp(7), dp(12), dp(9))
         }
-        column.addView(text("Review the A4 print sheet", 20, R.color.qp_text, true))
-        column.addView(text(
-            "Check that both sides are upright, clear and complete. The preview shows their final positions and cut guides.",
-            12, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(4), 0, dp(10)) })
 
-        val previewCard = card()
-        previewCard.setCardBackgroundColor(getColor(R.color.qp_surface))
-        val preview = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "A4 ID front and back print sheet preview"
-            setPadding(dp(6), dp(6), dp(6), dp(6))
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        fun updatePreview(width: Float, height: Float) {
-            val image = IdCardPdfComposer.renderSheetPreview(
-                front, back, idStudioFrontRotation, idStudioBackRotation, width, height
-            )
-            preview.setImageBitmap(image)
+        heading.addView(text("Review your ID", 17, R.color.qp_text, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        heading.addView(text("FRONT + BACK", 9, R.color.qp_muted, true))
+        root.addView(heading, linearParams().apply { bottomMargin = dp(5) })
+
+        val viewModes = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
+        viewModes.addView(button("ID card", idStudioPreviewMode == "CARD").apply {
+            minHeight = dp(38)
+            textSize = 11f
+            setOnClickListener {
+                idStudioPreviewMode = "CARD"
+                showIdStudioReview()
+            }
+        }, LinearLayout.LayoutParams(0, dp(38), 1f))
+        viewModes.addView(button("A4 sheet", idStudioPreviewMode == "A4").apply {
+            minHeight = dp(38)
+            textSize = 11f
+            setOnClickListener {
+                idStudioPreviewMode = "A4"
+                showIdStudioReview()
+            }
+        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(7) })
+        root.addView(viewModes, linearParams().apply { bottomMargin = dp(6) })
+
+        val previewStage = FrameLayout(this).apply {
+            background = roundedDrawable(getColor(R.color.qp_card), dp(12), getColor(R.color.qp_outline))
+            clipToPadding = true
+            clipChildren = true
+        }
+        val preview = ZoomableDocumentImageView(this) {}
+        preview.contentDescription = if (idStudioPreviewMode == "CARD") {
+            "ID front card preview. Pinch to zoom."
+        } else {
+            "A4 ID front and back print sheet preview. Pinch to zoom."
+        }
+        previewStage.addView(preview, FrameLayout.LayoutParams(-1, -1))
+        addPrivatePreviewWatermarks(previewStage)
+        root.addView(previewStage, LinearLayout.LayoutParams(-1, 0, 1f).apply {
+            bottomMargin = dp(5)
+        })
+
+        val frontDpi = IdCardPdfComposer.sourceResolutionDpi(front, cardWidthMm, cardHeightMm)
+        val backDpi = IdCardPdfComposer.sourceResolutionDpi(back, cardWidthMm, cardHeightMm)
+        val qualityNote = text(
+            if (minOf(frontDpi, backDpi) >= 300) {
+                "Scan detail · Front $frontDpi DPI  ·  Back $backDpi DPI"
+            } else {
+                "Small text may look soft · Front $frontDpi DPI  ·  Back $backDpi DPI"
+            },
+            10,
+            if (minOf(frontDpi, backDpi) >= 300) R.color.qp_muted else R.color.qp_primary,
+            false
+        ).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        root.addView(qualityNote, linearParams().apply { bottomMargin = dp(5) })
+
+        val cardControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val sheetControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        fun updatePreview() {
+            val bitmap = if (idStudioPreviewMode == "CARD") {
+                val source = if (idStudioPreviewSide == "front") front else back
+                val rotation = if (idStudioPreviewSide == "front") idStudioFrontRotation else idStudioBackRotation
+                IdCardPdfComposer.renderSidePreview(source, rotation)
+            } else {
+                val previewWidth = (resources.displayMetrics.widthPixels - dp(48)).coerceIn(900, 1600)
+                IdCardPdfComposer.renderSheetPreview(
+                    front,
+                    back,
+                    idStudioFrontRotation,
+                    idStudioBackRotation,
+                    cardWidthMm,
+                    cardHeightMm,
+                    previewWidth
+                )
+            }
+            releaseIdStudioReviewBitmap()
+            idStudioReviewBitmap = bitmap
+            preview.contentDescription = if (idStudioPreviewMode == "CARD") {
+                "ID ${idStudioPreviewSide} card preview. Pinch to zoom."
+            } else {
+                "A4 ID front and back print sheet preview. Pinch to zoom."
+            }
+            preview.setDocumentBitmap(bitmap)
+        }
+
+        if (idStudioPreviewMode == "CARD") {
+            cardControls.addView(button("Front", idStudioPreviewSide == "front").apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    idStudioPreviewSide = "front"
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 0.85f))
+            cardControls.addView(button("Back", idStudioPreviewSide == "back").apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    idStudioPreviewSide = "back"
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 0.85f).apply { marginStart = dp(5) })
+            cardControls.addView(button("Rotate", false).apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    if (idStudioPreviewSide == "front") idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
+                    else idStudioBackRotation = (idStudioBackRotation + 180) % 360
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(5) })
+            cardControls.addView(button("Retake", false).apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener { startIdStudioSideScan(idStudioPreviewSide) }
+            }, LinearLayout.LayoutParams(0, dp(40), 0.9f).apply { marginStart = dp(5) })
+            root.addView(cardControls, linearParams().apply { bottomMargin = dp(5) })
+        } else {
+            sheetControls.addView(button("Rotate front", false).apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 1f))
+            sheetControls.addView(button("Rotate back", false).apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    idStudioBackRotation = (idStudioBackRotation + 180) % 360
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(6) })
+            root.addView(sheetControls, linearParams().apply { bottomMargin = dp(5) })
+        }
+
+        val sizeAction = text(
+            "Card size · ${"%.1f".format(Locale.ROOT, cardWidthMm)} × ${"%.1f".format(Locale.ROOT, cardHeightMm)} mm · Edit",
+            10,
+            R.color.qp_primary,
+            true
+        ).apply {
+            gravity = Gravity.CENTER
+            contentDescription = "Change ID card dimensions"
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setOnClickListener {
+                val sizeFields = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(dp(16), dp(8), dp(16), dp(4))
+                }
+                fun dimensionField(label: String, value: Float): EditText = EditText(this@MainActivity).apply {
+                    hint = label
+                    setSingleLine(true)
+                    inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                    textSize = 14f
+                    setText(value.toString())
+                    setPadding(dp(10), dp(7), dp(10), dp(7))
+                    background = roundedDrawable(getColor(R.color.qp_card), dp(8), getColor(R.color.qp_outline))
+                }
+                val widthInput = dimensionField("Width mm", cardWidthMm)
+                val heightInput = dimensionField("Height mm", cardHeightMm)
+                sizeFields.addView(widthInput, LinearLayout.LayoutParams(0, dp(48), 1f))
+                sizeFields.addView(heightInput, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) })
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("ID card size · mm")
+                    .setView(sizeFields)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Apply") { _, _ ->
+                        val width = widthInput.text.toString().toFloatOrNull()
+                        val height = heightInput.text.toString().toFloatOrNull()
+                        if (width == null || height == null) {
+                            toast("Enter valid card dimensions.")
+                            return@setPositiveButton
+                        }
+                        try {
+                            IdCardLayoutPolicy.calculate(width, height)
+                            cardWidthMm = width
+                            cardHeightMm = height
+                            idStudioCardWidthMm = width
+                            idStudioCardHeightMm = height
+                            showIdStudioReview()
+                        } catch (error: Exception) {
+                            toast(message(error))
+                        }
+                    }
+                    .show()
+            }
+        }
+        root.addView(sizeAction, LinearLayout.LayoutParams(-1, dp(25)).apply {
+            bottomMargin = dp(4)
+        })
+
+        root.addView(button("Prepare A4 print sheet", true).apply {
+            minHeight = dp(46)
+            setOnClickListener {
+                try {
+                    IdCardLayoutPolicy.calculate(cardWidthMm, cardHeightMm)
+                    prepareIdStudioSheet(draftId, cardWidthMm, cardHeightMm)
+                } catch (error: Exception) {
+                    toast(message(error))
+                }
+            }
+        }, LinearLayout.LayoutParams(-1, dp(46)))
+
         try {
-            updatePreview(cardWidthMm, cardHeightMm)
+            updatePreview()
         } catch (error: Exception) {
-            toast("Could not preview the ID sheet: " + message(error))
+            releaseIdStudioReviewBitmap()
+            front.fill(0)
+            back.fill(0)
+            toast("Could not preview the ID: " + message(error))
             showIdStudioBackStep()
             return
         }
-        previewCard.addView(preview, LinearLayout.LayoutParams(-1, dp(360)))
-        column.addView(previewCard, linearParams().apply { bottomMargin = dp(9) })
-
-        val orientationRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val detailRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun showSideDetail(title: String, bytes: ByteArray, rotation: Int) {
-            val bitmap = IdCardPdfComposer.renderSidePreview(bytes, rotation)
-            val zoomable = ZoomableDocumentImageView(this) {}
-            zoomable.contentDescription = "$title ID scan detail"
-            zoomable.setDocumentBitmap(bitmap)
-            val panel = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                addView(text("Pinch to zoom · Drag to inspect small text and card details", 11, R.color.qp_muted, false)
-                    .apply { setPadding(0, 0, 0, dp(8)) })
-                addView(zoomable, LinearLayout.LayoutParams(-1, dp(440)))
-            }
-            AlertDialog.Builder(this)
-                .setTitle(title)
-                .setView(panel)
-                .setPositiveButton("Done", null)
-                .create()
-                .also { dialog ->
-                    dialog.setOnDismissListener { if (!bitmap.isRecycled) bitmap.recycle() }
-                    dialog.show()
-                }
-        }
-        detailRow.addView(button("Inspect front", false).apply {
-            setOnClickListener { showSideDetail("Front side detail", front, idStudioFrontRotation) }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        detailRow.addView(button("Inspect back", false).apply {
-            setOnClickListener { showSideDetail("Back side detail", back, idStudioBackRotation) }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(7) })
-        column.addView(detailRow, linearParams().apply { bottomMargin = dp(12) })
-
-        orientationRow.addView(button(
-            if (idStudioFrontRotation == 0) "Rotate front 180°" else "Front upright",
-            false
-        ).apply {
-            setOnClickListener {
-                idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
-                showIdStudioReview()
-            }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        orientationRow.addView(button(
-            if (idStudioBackRotation == 0) "Rotate back 180°" else "Back upright",
-            false
-        ).apply {
-            setOnClickListener {
-                idStudioBackRotation = (idStudioBackRotation + 180) % 360
-                showIdStudioReview()
-            }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(7) })
-        column.addView(orientationRow, linearParams().apply { bottomMargin = dp(12) })
-
-        column.addView(text("Card dimensions · millimetres", 12, R.color.qp_text, true)
-            .apply { setPadding(0, 0, 0, dp(5)) })
-        fun dimensionInput(hintText: String, value: String): EditText = EditText(this).apply {
-            setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
-                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-            textSize = 14f
-            setTextColor(getColor(R.color.qp_text))
-            setHintTextColor(getColor(R.color.qp_muted))
-            hint = hintText
-            setText(value)
-            background = roundedDrawable(getColor(R.color.qp_card), dp(9), getColor(R.color.qp_outline))
-            setPadding(dp(10), dp(7), dp(10), dp(7))
-        }
-        val widthInput = dimensionInput("Width mm", cardWidthMm.toString())
-        val heightInput = dimensionInput("Height mm", cardHeightMm.toString())
-        val sizeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        sizeRow.addView(widthInput, LinearLayout.LayoutParams(0, dp(46), 1f))
-        sizeRow.addView(heightInput, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(8) })
-        column.addView(sizeRow, linearParams().apply { bottomMargin = dp(6) })
-        column.addView(text(
-            "Default: 85.6 × 53.98 mm. Enter the physical size of your card. Both faces stay identical and are centred one above the other on A4 portrait.",
-            10, R.color.qp_muted, false
-        ).apply { setPadding(0, 0, 0, dp(8)) })
-        column.addView(button("Update A4 preview", false).apply {
-            setOnClickListener {
-                val width = widthInput.text.toString().toFloatOrNull()
-                val height = heightInput.text.toString().toFloatOrNull()
-                if (width == null || height == null) {
-                    toast("Enter valid card dimensions in millimetres.")
-                    return@setOnClickListener
-                }
-                try {
-                    IdCardLayoutPolicy.calculate(width, height)
-                    cardWidthMm = width
-                    cardHeightMm = height
-                    idStudioCardWidthMm = width
-                    idStudioCardHeightMm = height
-                    updatePreview(width, height)
-                } catch (error: Exception) {
-                    toast(message(error))
-                }
-            }
-        }, linearParams().apply { bottomMargin = dp(10) })
-
-        column.addView(button("Retake front side", false).apply {
-            setOnClickListener { startIdStudioSideScan("front") }
-        }, linearParams().apply { bottomMargin = dp(7) })
-        column.addView(button("Retake back side", false).apply {
-            setOnClickListener { startIdStudioSideScan("back") }
-        }, linearParams().apply { bottomMargin = dp(12) })
-        column.addView(button("Prepare private ID print sheet", true).apply {
-            setOnClickListener {
-                val width = widthInput.text.toString().toFloatOrNull()
-                val height = heightInput.text.toString().toFloatOrNull()
-                if (width == null || height == null) {
-                    toast("Enter valid card dimensions in millimetres.")
-                    return@setOnClickListener
-                }
-                try {
-                    IdCardLayoutPolicy.calculate(width, height)
-                    updatePreview(width, height)
-                    idStudioCardWidthMm = width
-                    idStudioCardHeightMm = height
-                    prepareIdStudioSheet(draftId, width, height)
-                } catch (error: Exception) {
-                    toast(message(error))
-                }
-            }
-        }, linearParams())
-        content.addView(ScrollView(this).apply {
-            isFillViewport = true
-            addView(column)
-        }, frameParams())
+        content.addView(root, frameParams())
     }
 
     private fun prepareIdStudioSheet(draftId: String, cardWidthMm: Float, cardHeightMm: Float) {
