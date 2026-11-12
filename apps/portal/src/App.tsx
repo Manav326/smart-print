@@ -118,6 +118,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
   const [preview,setPreview]=useState<{id:string;title:string;pageIndex:number;pageCount:number;image:string|null}|null>(null);
   const [renameTarget,setRenameTarget]=useState<PrivatePhotoStudioDocument|null>(null);
   const [renameValue,setRenameValue]=useState("");
+  const [deleteTarget,setDeleteTarget]=useState<PrivatePhotoStudioDocument|null>(null);
   const [menuDocumentId,setMenuDocumentId]=useState<string|null>(null);
   const nativeBridge=()=> (window as Window & {SmartPrintNative?:PrivatePhotoStudioBridge}).SmartPrintNative;
 
@@ -311,8 +312,13 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
 
   function deleteDocument(document:PrivatePhotoStudioDocument){
     setMenuDocumentId(null);
-    if(!window.confirm("Delete “"+document.title+"” and its saved original photo from this device?"))return;
-    nativeBridge()?.postMessage("deletePhotoStudioDocument|"+document.id);
+    setDeleteTarget(document);
+  }
+
+  function confirmDeleteDocument(){
+    if(!deleteTarget)return;
+    nativeBridge()?.postMessage("deletePhotoStudioDocument|"+deleteTarget.id);
+    setDeleteTarget(null);
   }
 
   if(source){
@@ -402,6 +408,17 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
           <button type="submit" style={{...actionStyle,background:"var(--accent,#4f5fc4)",color:"#fff",borderColor:"transparent"}}>Save name</button>
         </div>
       </form>
+    </div>}
+
+    {deleteTarget&&<div role="presentation" onClick={event=>{if(event.target===event.currentTarget)setDeleteTarget(null);}} style={{position:"fixed",inset:0,zIndex:1050,display:"grid",placeItems:"center",padding:18,background:"rgba(10,18,32,.56)"}}>
+      <section role="dialog" aria-modal="true" aria-labelledby="photo-delete-title" style={{width:"min(100%,380px)",padding:20,borderRadius:14,background:"var(--card,#fff)",color:"var(--text,#172033)",boxShadow:"0 20px 54px rgba(0,0,0,.22)"}}>
+        <h2 id="photo-delete-title" style={{fontSize:17,margin:"0 0 10px"}}>Delete private photo document?</h2>
+        <p style={{fontSize:13,lineHeight:1.55,color:"var(--muted,#64748b)",margin:"0 0 16px"}}>Delete “{deleteTarget.title}” and its saved original photo from this device? This cannot be undone.</p>
+        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
+          <button type="button" onClick={()=>setDeleteTarget(null)} style={actionStyle}>Keep document</button>
+          <button type="button" onClick={confirmDeleteDocument} style={{...actionStyle,background:"#b42318",color:"#fff",borderColor:"transparent"}}>Delete</button>
+        </div>
+      </section>
     </div>}
 
     {preview&&<div role="presentation" onClick={event=>{if(event.target===event.currentTarget)closePreview();}} style={{position:"fixed",inset:0,zIndex:1100,display:"grid",gridTemplateRows:"auto minmax(0,1fr) auto",padding:14,background:"rgba(4,10,20,.94)",color:"#fff"}}>

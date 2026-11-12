@@ -2802,17 +2802,18 @@ class MainActivity : AppCompatActivity() {
                 setOf(trustedOrigin)
             ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
                 // Only the fixed configured origin and the top-level document may use this bridge.
+                val data = message.data.orEmpty()
                 if (isMainFrame &&
                     sourceOrigin.scheme == trustedPage.scheme &&
                     sourceOrigin.host.equals(trustedPage.host, true) &&
                     sourceOrigin.port == trustedPage.port) {
-                    if (message.data == "requestLocalNetworkAccess") {
+                    if (data == "requestLocalNetworkAccess") {
                         runOnUiThread {
                             if (!isFinishing && !isDestroyed) requestLocalNetworkAccess(replyProxy)
                             else runCatching { replyProxy.postMessage("localNetworkAccess:denied") }
                         }
                     } else {
-                        val parts = message.data.orEmpty().split("|", limit = 3)
+                        val parts = data.split("|", limit = 3)
                         when {
                             parts.size == 2 && parts[0] == "setPhotoStudioOpen" &&
                                 parts[1] in setOf("on", "off") -> {
@@ -2845,10 +2846,10 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }
                             }
-                            message.data.startsWith("savePhotoStudioDocument|") -> {
+                            data.startsWith("savePhotoStudioDocument|") -> {
                                 Thread {
                                     val response = try {
-                                        val payload = JSONObject(message.data.substringAfter('|'))
+                                        val payload = JSONObject(data.substringAfter('|'))
                                         val pdfBytes = android.util.Base64.decode(payload.getString("pdfBase64"), android.util.Base64.DEFAULT)
                                         val sourceBytes = android.util.Base64.decode(payload.getString("sourceBase64"), android.util.Base64.DEFAULT)
                                         try {
@@ -2867,10 +2868,10 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }.start()
                             }
-                            message.data == "listPhotoStudioDocuments" -> {
+                            data == "listPhotoStudioDocuments" -> {
                                 Thread {
                                     val response = try {
-                                        org.json.JSONArray().apply {
+                                        val library = org.json.JSONArray().apply {
                                             photoStudioStore.listPrepared().forEach { file ->
                                                 val metadata = photoStudioStore.readMetadata(file)
                                                 put(JSONObject(metadata.toString()).apply {
@@ -2880,7 +2881,7 @@ class MainActivity : AppCompatActivity() {
                                                 })
                                             }
                                         }
-                                        "PHOTO_LIBRARY|" + response.toString()
+                                        "PHOTO_LIBRARY|" + library.toString()
                                     } catch (error: Exception) {
                                         "PHOTO_LIBRARY_FAILED|" + message(error)
                                     }

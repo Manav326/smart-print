@@ -52,13 +52,34 @@ test("photo PDF generation rejects empty or incomplete JPEG pages",()=>{
 
 test("name and DOB are opt-in and are absent from the default photo sheet",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- assert.match(studio,/const \[includeFormDetails,setIncludeFormDetails\]=useState\(false\)/);
+ assert.match(studio,/const \[includeFormDetails,setIncludeFormDetails\]=useState\(initialSettings\?\.includeFormDetails \?\? false\)/);
  assert.match(studio,/const hasCaption=includeFormDetails&&Boolean\(photoName\.trim\(\)\|\|dateOfBirth\.trim\(\)\)/);
  assert.match(studio,/checked=\{includeFormDetails\}/);
  assert.match(studio,/\{includeFormDetails&&<>[\s\S]*?Name for form[\s\S]*?Date of birth/);
  assert.ok(studio.includes('if(!enabled){setPhotoName("");setDateOfBirth("");}'));
 });
 
+
+test("private Photo Studio saves one photo locally with editable metadata and branded preview only",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
+ assert.match(app,/function PrivatePhotoStudioEntry/);
+ assert.match(app,/accept="image\/jpeg,image\/png,.jpg,.jpeg,.png"/);
+ assert.match(app,/savePhotoStudioDocument\|/);
+ assert.match(app,/updatePhotoStudioDocument\|/);
+ assert.match(app,/getPhotoStudioSource\|/);
+ assert.match(app,/renamePhotoStudioDocument\|/);
+ assert.match(app,/deletePhotoStudioDocument\|/);
+ assert.match(app,/mode="private-library"/);
+ assert.match(app,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
+ assert.match(app,/SmartPrint by QuantaEdge/);
+ assert.match(studio,/resolutionDpi:300,editorSettings/);
+ assert.match(studio,/mode === "private-library"/);
+ assert.match(css,/\.previewProtection::before/);
+ assert.match(css,/\.previewProtection::after/);
+ assert.match(css,/SmartPrint by QuantaEdge/);
+});
 
 test("customer Photo Studio cannot turn an already uploaded original into a second print job",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");

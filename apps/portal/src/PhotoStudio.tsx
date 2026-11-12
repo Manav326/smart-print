@@ -246,7 +246,7 @@ export default function PhotoStudio({
   const [photosPerPageInput,setPhotosPerPageInput]=useState(() =>
     initialSettings?.photosPerPageInput === "auto" ||
     (Number.isInteger(Number(initialSettings?.photosPerPageInput)) && Number(initialSettings?.photosPerPageInput) >= 1)
-      ? String(initialSettings.photosPerPageInput) : "auto"
+      ? String(initialSettings?.photosPerPageInput) : "auto"
   );
   const [previewPage,setPreviewPage]=useState(0);
   const [zoom, setZoom] = useState(() => Math.min(3, Math.max(1, initialSettings?.zoom ?? 1)));
@@ -376,7 +376,11 @@ export default function PhotoStudio({
     const bridge=(window as Window & {SmartPrintNative?:{postMessage:(value:string)=>void}}).SmartPrintNative;
     try {
       bridge?.postMessage("setPhotoStudioOpen|on");
-      bridge?.postMessage(mode === "private-library" ? "setSensitivePreview|off" : "setSensitivePreview|on");
+      if (mode === "private-library") {
+        bridge?.postMessage("setSensitivePreview|off");
+      } else {
+        bridge?.postMessage("setSensitivePreview|on");
+      }
     } catch {/* Native modal state and screenshot protection are best-effort outside supported Android builds. */}
     return ()=>{
       try {
