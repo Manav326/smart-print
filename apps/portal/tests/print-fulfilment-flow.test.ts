@@ -46,6 +46,19 @@ test("private Photo Studio vault operations are scoped to the dedicated native r
   assert.match(main, /photoStudioLibraryCommand && !photoStudioRouteActive/);
 });
 
+test("saved Photo Studio sheets attach to the existing upload form rather than sending directly to a shop", () => {
+  const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+  const app = read("../src/App.tsx");
+  const start = main.indexOf("private fun addPhotoStudioPickerSection(parent: LinearLayout)");
+  const end = main.indexOf("\\n    private fun ", start + 1);
+  assert.ok(start >= 0 && end > start);
+  const picker = main.slice(start, end);
+  assert.match(picker, /Select one to attach it to the upload form/);
+  assert.match(picker, /chooseFiles\\(listOf\\(file\\), listOf\\("Photo Studio"\\)\\)/);
+  assert.doesNotMatch(picker, /uploadCustomerDocument|dispatchShopPrintJob/);
+  assert.match(app, /privatePrinting\\?"Upload "\\+pendingFilesCount\\+" file\\(s\\) securely"/);
+});
+
 test("after upload only the decrypted picker copy is released and the saved library document remains", () => {
   const app = read("../src/App.tsx");
   const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
