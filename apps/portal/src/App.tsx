@@ -4555,13 +4555,22 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   );
   const [uploadModeManuallySelected,setUploadModeManuallySelected]=useState(false);
   const privatePrintingStorageKey="smartprint.private-printing:"+sessionToken;
+  const privacyChoiceManualStorageKey="smartprint.privacy-choice-manual:"+sessionToken;
   const [privatePrinting,setPrivatePrinting]=useState(()=>sessionStorage.getItem("smartprint.private-printing:"+sessionToken)==="true");
+  const [privacyChoiceManuallySelected,setPrivacyChoiceManuallySelected]=useState(
+    ()=>sessionStorage.getItem("smartprint.privacy-choice-manual:"+sessionToken)==="true"
+  );
   const canOfferPrivatePrinting=Boolean(localAgent?.agentDeviceId && localAgent.documentEncryptionPublicKey);
 
   useEffect(()=>{
     if(privatePrinting)sessionStorage.setItem(privatePrintingStorageKey,"true");
     else sessionStorage.removeItem(privatePrintingStorageKey);
   },[privatePrinting,privatePrintingStorageKey]);
+
+  useEffect(()=>{
+    if(privacyChoiceManuallySelected)sessionStorage.setItem(privacyChoiceManualStorageKey,"true");
+    else sessionStorage.removeItem(privacyChoiceManualStorageKey);
+  },[privacyChoiceManuallySelected,privacyChoiceManualStorageKey]);
 
   const secureQueueFallbackEnabled = cloudAssistedPrintingEnabled || !localAgent?.endpoints.length || localFallbackSuggested;
 
@@ -4747,13 +4756,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     if(files.length===0)return;
     const containsIdDocument=files.some(isSmartPrintIdDocument);
-    const containsPrivatePhotoDocument=files.some(isSmartPrintPhotoDocument);
-    const effectivePrivatePrinting=privatePrinting||containsIdDocument||containsPrivatePhotoDocument;
-    if((containsIdDocument||containsPrivatePhotoDocument)&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
-      setError("Prepared studio documents use Private Printing for the whole batch. Finish the current Standard batch, then start a new batch for your private studio sheet.");
+    const containsPhotoStudioDocument=files.some(isSmartPrintPhotoDocument);
+    const effectivePrivatePrinting=privatePrinting||containsIdDocument;
+    if(containsIdDocument&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
+      setError("Prepared ID cards require Private Printing. Finish the current Standard batch, then start a new private batch for this ID sheet.");
       return;
     }
-    if((containsIdDocument||containsPrivatePhotoDocument)&&!privatePrinting)setPrivatePrinting(true);
+    if(containsIdDocument&&!privatePrinting)setPrivatePrinting(true);
     const effectiveUploadMode: "LOCAL"|"CLOUD"=effectivePrivatePrinting?"LOCAL":uploadMode;
     if(effectivePrivatePrinting&&(!localAgent||!canOfferPrivatePrinting)) {
       setError("Private Printing is not ready at this shop yet. No document has been uploaded. Ask the shop operator to reconnect the paired computer.");
@@ -4785,12 +4794,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const idDocument=isSmartPrintIdDocument(candidate);
         const photoSettings=photoSettingsByFileFingerprint[fingerprint];
         const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
-        const isPrivateStudioDocument=idDocument||isSmartPrintPhotoDocument(candidate);
-        if(isPrivateStudioDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID and Photo Studio documents must use Private Printing. No normal cloud upload is allowed.",409);
+        // ID Studio sheets remain Private Printing only. Saved Photo Studio sheets
+        // follow the customer's selected batch privacy mode (Private by default).
+        if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards must use Private Printing. No normal cloud upload is allowed.",409);
         const created=effectiveUploadMode==="LOCAL"&&localAgent
           ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)
-          : isPrivateStudioDocument
-            ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No private studio document was uploaded or sent to cloud storage.",409);})()
+          : idDocument
+            ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded or sent to cloud storage.",409);})()
             : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings);
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
@@ -5166,14 +5176,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(malformedPhotoDocument){setError("This saved Photo Studio sheet is missing its print details. Refresh the private document library and select it again.");return;}
     const incomingIdDocument=supported.some(isSmartPrintIdDocument);
     const incomingPhotoDocument=supported.some(isSmartPrintPhotoDocument);
-    if((incomingIdDocument||incomingPhotoDocument)&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
-      setError("Prepared ID and Photo Studio documents use Private Printing for the entire batch. Finish the current Standard batch, then start a new private batch.");
+    if(incomingIdDocument&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
+      setError("Prepared ID cards require Private Printing. Finish the current Standard batch, then start a new private batch for this ID sheet.");
       return;
     }
-    if(incomingIdDocument||incomingPhotoDocument) {
+    if(incomingIdDocument) {
+      // ID Studio remains Private Printing only.
       setPrivatePrinting(true);
       setUploadMode("LOCAL");
       setUploadModeManuallySelected(true);
+    } else if(incomingPhotoDocument&&uploadedBatch.length===0&&!privacyChoiceManuallySelected) {
+      // A saved Photo Studio sheet defaults to Private Printing, but the
+      // customer can change the batch choice to Standard before uploading.
+      setPrivatePrinting(true);
     }
     for(const candidate of supported){
       const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
@@ -5369,15 +5384,21 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     <section className="customer-privacy-choice" aria-label="Document privacy choice">
       <div className="customer-privacy-choice-heading"><div><span>CHOOSE YOUR PRIVACY</span><strong>How should SmartPrint handle your documents?</strong></div><small>This choice applies to every file in this batch.</small></div>
       <div className="customer-privacy-choice-grid">
-        <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
+        <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
           <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>Encrypted before leaving your device. Sent over shop Wi-Fi or a temporary encrypted relay. The paired computer erases its copy after confirmed printing; your original file stays on your device.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
         </button>
-        <button type="button" aria-pressed={!privatePrinting} disabled={busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>setPrivatePrinting(false)}>
+        <button type="button" aria-pressed={!privatePrinting} disabled={busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false);}}>
           <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Use the shop's normal document workflow. Completed source copies are automatically deleted 7 days after confirmed output under the standard retention policy.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
       {!canOfferPrivatePrinting&&<small className="customer-privacy-unavailable">Private Printing becomes available when the shop's paired Windows computer is connected and has enabled its secure document key.</small>}
       {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on.</strong> The paired computer erases its working copy after physical output is confirmed. Your original file stays on your device.</span></div>}
+      {files.some(isSmartPrintPhotoDocument)&&<div className="customer-private-confirmation" role="status">
+        <ShieldCheck size={16}/>
+        <span>{privatePrinting
+          ? <><strong>Private Printing is preselected for this saved Photo Studio sheet.</strong> You can still choose Standard Printing above before uploading.</>
+          : <><strong>Standard Printing is selected for this saved Photo Studio sheet.</strong> The shop's normal document retention rules apply.</>}</span>
+      </div>}
     </section>
     {privatePrinting
       ? <div className="customer-private-transfer-note"><Lock size={16}/><span>End-to-end encrypted · Shop Wi-Fi first, secure relay automatically if needed · Physical printing only</span></div>

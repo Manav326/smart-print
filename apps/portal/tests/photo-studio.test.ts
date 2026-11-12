@@ -83,7 +83,7 @@ test("private Photo Studio saves one photo locally with editable metadata and br
 
 test("ordinary customer Photo Studio remains inside the existing upload privacy choice",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/const isPrivateStudioDocument=idDocument\|\|isSmartPrintPhotoDocument\(candidate\)/);
+ assert.match(app,/const isPrivateStudioDocument=idDocument/);
  assert.match(app,/const photoSettings=photoSettingsByFileFingerprint\[fingerprint\]/);
  assert.match(app,/photoSettings\?\"PHOTO\":\"DOCUMENT\"/);
  assert.match(app,/const incomingPhotoDocument=supported\.some\(isSmartPrintPhotoDocument\)/);
@@ -503,3 +503,25 @@ test("Photo Studio text layers are independently selectable, editable, draggable
  assert.match(studio,/captionHeightMm,textLayers/);
  assert.match(studio,/data-testid="photo-studio-text-layer"/);
 });
+
+
+test("saved Photo Studio documents default to Private Printing but allow Standard Printing when selected",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/privacyChoiceManualStorageKey="smartprint\.privacy-choice-manual:"/);
+ assert.match(app,/incomingPhotoDocument&&uploadedBatch\.length===0&&!privacyChoiceManuallySelected/);
+ assert.match(app,/setPrivatePrinting\(true\);\s*\}\s*for\(const candidate of supported\)/);
+ assert.match(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument/);
+ assert.match(app,/if\(idDocument&&!effectivePrivatePrinting\)/);
+ assert.doesNotMatch(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument\|\|containsPhotoStudioDocument/);
+ assert.match(app,/setPrivacyChoiceManuallySelected\(true\);setPrivatePrinting\(false\)/);
+ assert.match(app,/Standard Printing is selected for this saved Photo Studio sheet/);
+ assert.match(app,/uploadCustomerDocument\(sessionToken,candidate,currentBatchId/);
+});
+
+test("ID Studio remains private-only while saved Photo Studio sheets can use the user's selected mode",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/if\(incomingIdDocument\)\s*\{\s*\/\/ ID Studio remains Private Printing only/);
+ assert.match(app,/if\(idDocument&&!effectivePrivatePrinting\)/);
+ assert.match(app,/const isPrivateStudioDocument=idDocument/);
+});
+
