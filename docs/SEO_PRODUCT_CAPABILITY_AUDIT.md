@@ -278,7 +278,7 @@ Recommended public content cluster:
 Every statement must be product-accurate and distinguish source-implemented behaviour from plan-gated behaviour and physical-release validation. No competitor comparison pages are part of this strategy.
 
 
-## 11. Customer and shop problems SmartPrint is designed to solve
+## 10. Customer and shop problems SmartPrint is designed to solve
 
 The SmartPrint cinematic advertising production master (11 November 2026) adds a human, problem-led explanation of the product. Its central problems are supported by the current code and should guide the public SEO narrative:
 
@@ -293,7 +293,7 @@ Recommended public narrative: **“No scattered file messages. No repeating copy
 
 The ad production master is a creative brief, not evidence that the Android app is publicly listed or a Windows installer is currently available. Use public Play Store/download claims only after verifying the exact live listing/release. The ad's QA capture plan specifically requires fresh evidence for per-file controls, a successful Private Printing setup, shop review/authorisation and real output confirmation.
 
-## 10. Files audited
+## 11. Files audited
 
 - apps/portal/src/App.tsx
 - apps/portal/src/PublicLandingPage.tsx
