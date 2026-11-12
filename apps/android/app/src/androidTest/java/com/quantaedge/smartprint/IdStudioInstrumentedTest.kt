@@ -62,8 +62,8 @@ class IdStudioInstrumentedTest {
                 android.util.Base64.DEFAULT
             )
             try {
-                val thumbnailBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeByteArray(cardFaceThumbnail, 0, cardFaceThumbnail.size, thumbnailBounds)
+                val thumbnailBounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                android.graphics.BitmapFactory.decodeByteArray(cardFaceThumbnail, 0, cardFaceThumbnail.size, thumbnailBounds)
                 assertTrue("The ID Studio library thumbnail displays the physical card face in landscape.",
                     thumbnailBounds.outWidth > thumbnailBounds.outHeight)
                 assertTrue("The ID card face thumbnail retains useful display detail.", thumbnailBounds.outWidth >= 500)
