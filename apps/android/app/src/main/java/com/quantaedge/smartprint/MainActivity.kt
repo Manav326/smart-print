@@ -1274,7 +1274,9 @@ class MainActivity : AppCompatActivity() {
             scaleType = ImageView.ScaleType.CENTER_INSIDE
             setPadding(dp(9), dp(9), dp(9), dp(9))
             background = roundedDrawable(getColor(R.color.qp_shop_action_icon_surface), dp(12))
-            contentDescription = if (portalUrl == null) "Find a print shop" else "Connected shop"
+            // The parent card is the single action when unconnected; do not
+            // duplicate its accessibility label on this decorative icon.
+            contentDescription = if (portalUrl == null) null else "Connected shop icon"
         }
         if (portalUrl != null) loadShopLogo(shopGlyph)
         shopActionRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
@@ -1826,8 +1828,8 @@ class MainActivity : AppCompatActivity() {
                             part.addView(text(label, 9, R.color.qp_muted, false))
                             part.addView(text(
                                 "%.2f %s".format(Locale.ROOT, value / 100.0, identity.currency),
-                                10, tint, true
-                            ))
+                                10, R.color.qp_text, true
+                            ).apply { setTextColor(tint) })
                             moneyRow.addView(part, LinearLayout.LayoutParams(0, -2, 1f))
                         }
                         amount("Paid", paid, android.graphics.Color.rgb(36, 139, 94))
