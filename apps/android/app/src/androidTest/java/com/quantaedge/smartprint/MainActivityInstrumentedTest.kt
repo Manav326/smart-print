@@ -610,10 +610,11 @@ class MainActivityInstrumentedTest {
             onView(withText("Recent files")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
             onView(withText("Choose files")).check(matches(isDisplayed()))
+            onView(withContentDescription("Find a print shop")).check(matches(isDisplayed()))
             onView(allOf(
                 withText("Find a print shop"),
                 isAssignableFrom(com.google.android.material.button.MaterialButton::class.java)
-            )).check(matches(isDisplayed()))
+            )).check(doesNotExist())
             onView(withContentDescription("Shop connection")).check(doesNotExist())
             onView(withText("ID Studio")).check(matches(isDisplayed()))
             onView(withText("Photo Studio")).check(matches(isDisplayed()))
