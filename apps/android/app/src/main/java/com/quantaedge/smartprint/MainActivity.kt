@@ -1697,6 +1697,7 @@ class MainActivity : AppCompatActivity() {
         val pager = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            contentDescription = "History pagination"
             setPadding(0, dp(10), 0, 0)
         }
         val pageLabel = text("", 10, R.color.qp_muted, true)
@@ -1728,6 +1729,9 @@ class MainActivity : AppCompatActivity() {
                     CustomerOrderStatusPresentation.batchSummaryStatus(batch.map { it.status }) == selectedStatus
                 }
                 val pageCount = maxOf(1, (filtered.size + 9) / 10)
+                // Keep the History screen uncluttered until there is more than one
+                // complete page. This is based on the filtered result count.
+                pager.visibility = if (filtered.size > 10) View.VISIBLE else View.GONE
                 selectedPage = selectedPage.coerceIn(0, pageCount - 1)
                 val startIndex = selectedPage * 10
                 val pageGroups = filtered.drop(startIndex).take(10)
