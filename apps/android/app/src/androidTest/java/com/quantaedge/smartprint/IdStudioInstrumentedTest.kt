@@ -155,8 +155,8 @@ class IdStudioInstrumentedTest {
 
                 scenario.onActivity { activity ->
                     assertTrue(
-                        "Only the explicitly watermarked ID preview allows capture.",
-                        activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0
+                        "Viewing a saved ID keeps private card details protected from screenshots.",
+                        activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
                     )
                 }
 
