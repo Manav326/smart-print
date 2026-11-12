@@ -106,6 +106,27 @@ public sealed class DocumentStorageTests
     }
 
     [Fact]
+    public async Task DeletingAStoredDocumentRemovesItsPayloadFileAndReleasesItsStorageEntry()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            using var storage = CreateStorage(root);
+            var stored = await StorePngAsync(storage);
+            var path = Path.Combine(root, stored.StorageKey.Replace('/', Path.DirectorySeparatorChar));
+
+            Assert.True(File.Exists(path));
+            Assert.True(new FileInfo(path).Length > 0);
+
+            await storage.DeleteAsync(stored.StorageKey);
+
+            Assert.False(File.Exists(path));
+            Assert.Throws<FileNotFoundException>(() => storage.OpenRead(stored.StorageKey));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public async Task DetectsTamperingOfEncryptedDocument()
     {
         var root = CreateTemporaryDirectory();
