@@ -1906,13 +1906,18 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val local = store.read(email).orEmpty()
-                val firstPage = authenticated { token ->
-                    CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = 10)
+                val serverCount = authenticated { token ->
+                    CustomerAccountClient.historyCount(accountServiceUrl(), token)
                 }
-                val serverCount = firstPage.totalItems
                 if (serverCount <= local.size.toLong()) {
                     local
                 } else {
+                    val firstPage = authenticated { token ->
+                        CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = 10)
+                    }
+                    require(firstPage.totalItems == serverCount) {
+                        "The server history changed during refresh. Your saved history has not changed."
+                    }
                     require(firstPage.page == 0 && firstPage.size == 10) {
                         "The server returned an invalid first history page. Your saved history has not changed."
                     }
