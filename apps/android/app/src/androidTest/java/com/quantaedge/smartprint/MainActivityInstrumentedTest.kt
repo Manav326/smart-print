@@ -653,7 +653,7 @@ class MainActivityInstrumentedTest {
                 val serviceUri = Uri.parse(origin)
                 val wrongPort = if (serviceUri.port in 1..65534) serviceUri.port + 1 else 444
                 val wrongOrigin = serviceUri.buildUpon()
-                    .port(wrongPort)
+                    .encodedAuthority("${serviceUri.host}:$wrongPort")
                     .appendPath("photo-studio")
                     .build()
                 assertFalse(method.invoke(activity, wrongOrigin.toString()) as Boolean)
