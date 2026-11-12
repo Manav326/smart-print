@@ -2871,6 +2871,7 @@ class MainActivity : AppCompatActivity() {
                                         // The encrypted .spph PDF, source photo and metadata stay in the library.
                                         privatePhotoUploadTempFiles.toList().forEach(photoStudioStore::releaseTransientFile)
                                         privatePhotoUploadTempFiles.clear()
+                                        clearCustomerUploadPdfPreviews()
                                         replyProxy.postMessage("OK")
                                     }
                                 }
@@ -4599,6 +4600,10 @@ class MainActivity : AppCompatActivity() {
         customerUploadPdfPreviews.values.forEach { file ->
             val parent = runCatching { file.canonicalFile.parentFile }.getOrNull()
             if (parent == previewDirectory) file.delete()
+            // Prepared Photo Studio previews live in the Photo Studio transient cache,
+            // not the generic customer-preview folder. Release them through its
+            // canonical-path guard; original selected files remain untouched.
+            if (::photoStudioStore.isInitialized) photoStudioStore.releaseTransientFile(file)
         }
         customerUploadPdfPreviews.clear()
         previewDirectory.deleteRecursively()

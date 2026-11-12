@@ -54,6 +54,13 @@ test("after upload only the decrypted picker copy is released and the saved libr
   assert.match(main, /data == "releasePhotoStudioUploadFiles"/);
   assert.match(main, /privatePhotoUploadTempFiles\.toList\(\)\.forEach\(photoStudioStore::releaseTransientFile\)/);
   assert.match(main, /privatePhotoUploadTempFiles\.clear\(\)/);
+  assert.match(main, /privatePhotoUploadTempFiles\.clear\(\)[\s\S]*clearCustomerUploadPdfPreviews\(\)/);
+  const previewCleanupStart = main.indexOf("private fun clearCustomerUploadPdfPreviews()");
+  const previewCleanupEnd = main.indexOf("private fun cancelPicker()", previewCleanupStart);
+  assert.ok(previewCleanupStart >= 0 && previewCleanupEnd > previewCleanupStart);
+  const previewCleanup = main.slice(previewCleanupStart, previewCleanupEnd);
+  assert.match(previewCleanup, /photoStudioStore\.releaseTransientFile\(file\)/);
+  assert.match(previewCleanup, /if \(parent == previewDirectory\) file\.delete\(\)/);
   assert.match(store, /fun releaseTransientFile\(file: File\)/);
   assert.match(store, /fun deletePrepared\(file: File\)/);
   assert.match(store, /sourceFile\(id\)\.delete\(\)/);
