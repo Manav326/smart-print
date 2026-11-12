@@ -8283,10 +8283,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     var isIdDocumentUpload = request.PrintKind == "ID_DOCUMENT";
     var hasPhotoMetadata = request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null;
     var validPhotoMetadata = request.PrintKind == "PHOTO" &&
-        request.PhotoSizeCode is "35x45" or "25x35" or "2x2" or "4x6" &&
+        request.PhotoSizeCode is string photoSizeCode &&
+        (photoSizeCode is "35x45" or "25x35" or "2x2" or "4x6") &&
         request.PhotoCount is >= 1 and <= 100 &&
         request.PhotosPerPage is int photosPerPage &&
-        photosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(request.PhotoSizeCode);
+        photosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
     var invalidPrivatePhotoUpload = request.PrivatePrinting && request.PrintKind == "PHOTO" &&
         (!validPhotoMetadata || mediaType != "application/pdf" ||
          request.ColourMode != "Colour" || request.PaperSize != "A4" ||
