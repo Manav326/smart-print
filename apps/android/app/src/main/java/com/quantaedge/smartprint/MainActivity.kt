@@ -4121,7 +4121,7 @@ class MainActivity : AppCompatActivity() {
         }
         section.addView(text("Photo Studio · Private documents", 14, R.color.qp_text, true))
         section.addView(text(
-            "Saved photo sheets stay on this device. Select one to send it privately to the connected shop.",
+            "Saved photo sheets stay on this device. Select one to attach it to the upload form. The saved copy remains in Photo Studio.",
             11, R.color.qp_muted, false
         ).apply { setPadding(0, dp(4), 0, dp(8)) })
         prepared.forEach { file ->
