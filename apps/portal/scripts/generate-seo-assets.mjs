@@ -40,7 +40,7 @@ const sitemapEntries = publicPaths.map(path => `  <url><loc>${origin}${path}</lo
 await writeFile(join(distRoot, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapEntries}\n</urlset>\n`, "utf8");
 
 const protectedPaths = "Disallow: /api/\nDisallow: /health/\nDisallow: /downloads/";
-const searchAgents = ["OAI-SearchBot", "PerplexityBot", "Claude-SearchBot", "Claude-User"];
+const searchAgents = ["OAI-SearchBot", "ChatGPT-User", "PerplexityBot", "Perplexity-User", "Claude-SearchBot", "Claude-User"];
 // Search and user-directed answer retrieval are permitted independently of model training.
 const searchAgentRules = searchAgents
   .map(agent => `User-agent: ${agent}\nAllow: /\n${protectedPaths}`)
