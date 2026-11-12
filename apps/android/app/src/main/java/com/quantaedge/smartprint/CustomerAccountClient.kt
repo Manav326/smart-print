@@ -56,9 +56,11 @@ data class CustomerPrintHistoryItem(
 
 data class CustomerHistoryPage(
     val items: List<CustomerPrintHistoryItem>,
-    val totalCount: Int,
     val page: Int,
-    val pageSize: Int
+    val size: Int,
+    val totalItems: Long,
+    val totalPages: Int,
+    val hasNext: Boolean
 )
 
 /**
@@ -189,22 +191,17 @@ object CustomerAccountClient {
     fun profile(baseUrl: String, accessToken: String): JSONObject =
         request(baseUrl, "/api/v1/customer/me", null, accessToken)
 
-    fun historyCount(baseUrl: String, accessToken: String): Int {
-        val response = request(baseUrl, "/api/v1/customer/jobs/count", null, accessToken)
-        return response.optInt("totalCount").coerceAtLeast(0)
-    }
-
     fun historyPage(
         baseUrl: String,
         accessToken: String,
         page: Int,
-        pageSize: Int = 100
+        size: Int = 20
     ): CustomerHistoryPage {
-        require(page >= 1) { "History page must be at least 1." }
-        require(pageSize in 1..100) { "History page size must be between 1 and 100." }
+        require(page >= 0) { "History page must be zero or greater." }
+        require(size in 1..100) { "History page size must be between 1 and 100." }
         val response = request(
             baseUrl,
-            "/api/v1/customer/jobs?page=$page&pageSize=$pageSize",
+            "/api/v1/customer/jobs?page=$page&size=$size",
             null,
             accessToken
         )
@@ -237,11 +234,20 @@ object CustomerAccountClient {
                 photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage")
             )
         }
+        val totalItems = response.optLong("totalItems", items.size.toLong()).coerceAtLeast(0L)
+        val responsePage = response.optInt("page", page)
+        val responseSize = response.optInt("size", size)
+        val totalPages = response.optInt(
+            "totalPages",
+            if (totalItems == 0L) 0 else ((totalItems + responseSize - 1) / responseSize).toInt()
+        )
         return CustomerHistoryPage(
             items = items,
-            totalCount = response.optInt("totalCount", items.size).coerceAtLeast(0),
-            page = response.optInt("page", page).coerceAtLeast(1),
-            pageSize = response.optInt("pageSize", pageSize).coerceIn(1, 100)
+            page = responsePage,
+            size = responseSize,
+            totalItems = totalItems,
+            totalPages = totalPages,
+            hasNext = response.optBoolean("hasNext", responsePage + 1 < totalPages)
         )
     }
 
