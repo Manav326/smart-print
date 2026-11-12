@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const portalRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const distRoot = join(portalRoot, "dist");
-const fallbackOrigin = "https://smartprint.quantardge.in";
+const fallbackOrigin = "https://smartprint.quantaedge.in";
 const configuredOrigin = process.env.VITE_PUBLIC_BASE_URL
   || process.env.SMARTPRINT_PUBLIC_BASE_URL
   || process.env.PUBLIC_BASE_URL
