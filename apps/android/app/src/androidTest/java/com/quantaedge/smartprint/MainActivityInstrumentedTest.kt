@@ -574,6 +574,30 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun photoStudioPickerReturnReattachesThePrivateStudioInsteadOfOpeningShopUpload() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            onView(withText("Photo Studio")).perform(click())
+            scenario.onActivity { activity ->
+                val webView = MainActivity::class.java.getDeclaredField("webView")
+                    .apply { isAccessible = true }.get(activity) as WebView
+                assertEquals("/photo-studio", Uri.parse(webView.url.orEmpty()).path)
+                MainActivity::class.java.getDeclaredField("fileChooserReturnToPhotoStudio")
+                    .apply { isAccessible = true }.setBoolean(activity, true)
+                MainActivity::class.java.getDeclaredMethod("showPicker", Boolean::class.javaPrimitiveType!!)
+                    .apply { isAccessible = true }.invoke(activity, true)
+                assertNull("The studio WebView is detached only while the picker is visible.", webView.parent)
+                MainActivity::class.java.getDeclaredMethod("cancelPicker").apply {
+                    isAccessible = true
+                }.invoke(activity)
+                assertEquals("/photo-studio", Uri.parse(webView.url.orEmpty()).path)
+                assertNotNull("The same studio WebView must be reattached after picker cancellation.", webView.parent)
+                assertEquals("The selected shop-print route must not replace the private studio.",
+                    "/photo-studio", Uri.parse(webView.url.orEmpty()).path)
+            }
+        }
+    }
+
+    @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))

@@ -141,6 +141,9 @@ class MainActivity : AppCompatActivity() {
     private var photoStudioOpen = false
     private var photoStudioCaptureAllowed = false
     private var privatePhotoStudioPageOpen = false
+    // Remember which WebView flow opened Android's shared document picker.
+    // Photo Studio needs its own source picker and must not return to shop upload.
+    private var fileChooserReturnToPhotoStudio = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val pendingLocalNetworkPermissionReplies = mutableListOf<JavaScriptReplyProxy>()
     private var localNetworkPermissionRequestInProgress = false
@@ -182,6 +185,7 @@ class MainActivity : AppCompatActivity() {
         photoStudioOpen = savedInstanceState?.getBoolean("photoStudioOpen") ?: false
         photoStudioCaptureAllowed = savedInstanceState?.getBoolean("photoStudioCaptureAllowed") ?: false
         privatePhotoStudioPageOpen = savedInstanceState?.getBoolean("privatePhotoStudioPageOpen") ?: false
+        fileChooserReturnToPhotoStudio = savedInstanceState?.getBoolean("fileChooserReturnToPhotoStudio") ?: false
         if ((photoStudioOpen || privatePhotoStudioPageOpen) && !photoStudioCaptureAllowed) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
@@ -306,6 +310,7 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean("photoStudioOpen", photoStudioOpen)
         outState.putBoolean("photoStudioCaptureAllowed", photoStudioCaptureAllowed)
         outState.putBoolean("privatePhotoStudioPageOpen", privatePhotoStudioPageOpen)
+        outState.putBoolean("fileChooserReturnToPhotoStudio", fileChooserReturnToPhotoStudio)
         outState.putString("idStudioDraftId", idStudioDraftId)
         outState.putString("idStudioEditingFilePath", idStudioEditingFile?.absolutePath)
         outState.putString("pendingIdStudioSide", pendingIdStudioSide)
@@ -338,12 +343,14 @@ class MainActivity : AppCompatActivity() {
                     null
                 )
             }
+            // The picker is a child workflow of the page that opened it. Handle
+            // Back here before the enclosing Photo Studio route.
+            pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
+            pickerMode -> cancelPicker()
             privatePhotoStudioPageOpen -> showHome()
             documentViewer != null -> if (customerUploadPdfPreviewOpen) closeCustomerUploadPdfPreview() else closeDocumentViewer()
             idStudioScreenOpen -> showIdStudioHome()
             profileVisible -> returnFromProfile()
-            pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
-            pickerMode -> cancelPicker()
             editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
             navigation.selectedItemId == FILES && folderPath.isNotEmpty() -> {
@@ -1355,7 +1362,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showDedicatedPhotoStudio() {
-        if (Uri.parse(webView?.url.orEmpty()).path == "/photo-studio" && privatePhotoStudioPageOpen) return
+        // Do not early-return merely because the WebView URL is already /photo-studio:
+        // the native file picker detaches the WebView from the content container.
+        // Every entry must restore the WebView to the visible screen.
         idStudioScreenOpen = false
         privateIdViewerOpen = false
         photoStudioOpen = false
@@ -3199,6 +3208,8 @@ class MainActivity : AppCompatActivity() {
             ): Boolean {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
+                fileChooserReturnToPhotoStudio =
+                    privatePhotoStudioPageOpen && Uri.parse(view.url.orEmpty()).path == "/photo-studio"
                 fileChooserSelectFolders = params.acceptTypes.any { accepted ->
                     accepted.split(',').any { it.trim().equals(FOLDER_PICKER_ACCEPT, ignoreCase = true) }
                 }
@@ -4597,12 +4608,18 @@ class MainActivity : AppCompatActivity() {
                 chooserSelectedFolderPaths.clear()
                 fileChooserAllowsMultiple = false
                 fileChooserSelectFolders = false
-                showPrint()
-                val activeWebView = webView
-                if (activeWebView != null) {
-                    activeWebView.evaluateJavascript(metadataScript) { callback.onReceiveValue(uris) }
-                } else {
+                if (fileChooserReturnToPhotoStudio) {
+                    fileChooserReturnToPhotoStudio = false
+                    showDedicatedPhotoStudio()
                     callback.onReceiveValue(uris)
+                } else {
+                    showPrint()
+                    val activeWebView = webView
+                    if (activeWebView != null) {
+                        activeWebView.evaluateJavascript(metadataScript) { callback.onReceiveValue(uris) }
+                    } else {
+                        callback.onReceiveValue(uris)
+                    }
                 }
             }
             deliverSelection()
@@ -4629,6 +4646,13 @@ class MainActivity : AppCompatActivity() {
         chooserSelectedFolderPaths.clear()
         fileChooserAllowsMultiple = false
         fileChooserSelectFolders = false
+        if (fileChooserReturnToPhotoStudio) {
+            fileChooserReturnToPhotoStudio = false
+            showDedicatedPhotoStudio()
+            runCatching { callback.onReceiveValue(selected.toTypedArray()) }
+                .onFailure { toast("Could not attach the selected photo.") }
+            return
+        }
         showPrint()
         val previewTokens = JSONArray().apply {
             selected.forEach { put(createCustomerUploadPdfPreview(it) ?: JSONObject.NULL) }
@@ -4742,7 +4766,9 @@ class MainActivity : AppCompatActivity() {
         chooserSelectedFolderPaths.clear()
         fileChooserAllowsMultiple = false
         fileChooserSelectFolders = false
-        showPrint()
+        val returnToPhotoStudio = fileChooserReturnToPhotoStudio
+        fileChooserReturnToPhotoStudio = false
+        if (returnToPhotoStudio) showDedicatedPhotoStudio() else showPrint()
     }
 
     private fun importUri(uri: Uri, destination: String) {
