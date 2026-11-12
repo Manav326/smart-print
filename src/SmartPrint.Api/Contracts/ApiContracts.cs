@@ -119,7 +119,10 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     int Copies = 1,
     string Orientation = "AUTO",
     bool PrivatePrinting = false,
-    string PrintKind = "DOCUMENT");
+    string PrintKind = "DOCUMENT",
+    string? PhotoSizeCode = null,
+    int? PhotoCount = null,
+    int? PhotosPerPage = null);
 
 public sealed record RecordPrintRefundRequest(
     string RefundMethod,

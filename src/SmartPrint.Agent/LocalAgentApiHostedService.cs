@@ -516,6 +516,11 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Conflict(new { code = "local_photo_revision_authorization_mismatch", message = "The cloud service authorization did not match this original and prepared photo sheet." });
                 }
 
+                var completionRequest = revisionRequest with
+                {
+                    ExpectedQuotedAmountMinor = authorization.QuotedAmountMinor,
+                    ExpectedPricingVersion = authorization.PricingVersion
+                };
                 var outputName = $"photo-sheet-{entry.JobNumber}.pdf";
                 try
                 {
@@ -535,7 +540,7 @@ public sealed class LocalAgentApiHostedService(
                                     HttpMethod.Post,
                                     $"api/v1/agent/local-document-photo-revisions/{jobId}/complete")
                                 {
-                                    Content = JsonContent.Create(revisionRequest)
+                                    Content = JsonContent.Create(completionRequest)
                                 };
                                 completeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
                                 completeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);

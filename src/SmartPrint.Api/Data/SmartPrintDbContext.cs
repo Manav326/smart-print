@@ -550,6 +550,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.ColourMode).HasMaxLength(12).IsRequired();
             entity.Property(x => x.PaperSize).HasMaxLength(12).IsRequired();
             entity.Property(x => x.Orientation).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.PhotoSizeCode).HasMaxLength(8);
             entity.HasIndex(x => x.GrantHash).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.CustomerSessionId, x.IdempotencyKey }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.PrintJobId }).IsUnique();

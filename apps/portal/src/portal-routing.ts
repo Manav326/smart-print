@@ -2,7 +2,8 @@ export type PortalRoute =
   | { kind: "public" }
   | { kind: "admin" }
   | { kind: "shop" }
-  | { kind: "station"; publicCode: string };
+  | { kind: "station"; publicCode: string }
+  | { kind: "photo-studio" };
 
 function normalizePath(pathname: string): string {
   if (!pathname || pathname === "/") return "/";
@@ -17,6 +18,7 @@ export function resolvePortalRoute(pathname: string): PortalRoute {
   const path = normalizePath(pathname);
   const station = path.match(/^\/s\/([A-Za-z0-9_-]+)$/);
   if (station) return { kind: "station", publicCode: station[1] };
+  if (path === "/photo-studio") return { kind: "photo-studio" };
 
   if (path === "/admin" || path.startsWith("/admin/")) {
     return { kind: "admin" };

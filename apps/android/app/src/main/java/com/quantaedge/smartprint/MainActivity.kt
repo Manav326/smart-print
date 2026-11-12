@@ -97,6 +97,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var store: LocalDocumentStore
     private lateinit var idStudioStore: IdStudioStore
+    private lateinit var photoStudioStore: PhotoStudioStore
     private lateinit var customerAccountStore: CustomerAccountStore
     private lateinit var customerPrintSessionStore: CustomerPrintSessionStore
     private lateinit var toolbar: MaterialToolbar
@@ -112,15 +113,22 @@ class MainActivity : AppCompatActivity() {
     private var viewingDocument: File? = null
     private var documentViewerReturnToIdStudio = false
     private var privateIdViewerOpen = false
+    private var privateIdPreviewCaptureAllowed = false
     private var privateIdViewerTempFile: File? = null
     private val privateIdUploadTempFiles = mutableListOf<File>()
+    private val privatePhotoUploadTempFiles = mutableListOf<File>()
     private var idStudioScreenOpen = false
     private var idStudioDraftId: String? = null
+    private var idStudioEditingFile: File? = null
     private var pendingIdStudioSide: String? = null
     private var idStudioFrontRotation = 0
     private var idStudioBackRotation = 0
     private var idStudioCardWidthMm = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
     private var idStudioCardHeightMm = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
+    private var idStudioPreviewMode = "CARD"
+    private var idStudioPreviewSide = "front"
+    private var idStudioReviewBitmap: Bitmap? = null
+    private var idStudioReviewScans: Pair<ByteArray, ByteArray>? = null
     private var customerUploadPdfPreviewOpen = false
     private val customerUploadPdfPreviews = java.util.concurrent.ConcurrentHashMap<String, File>()
     private var webView: WebView? = null
@@ -131,6 +139,8 @@ class MainActivity : AppCompatActivity() {
     private var portalUrl: String? = null
     private var portalHost: String? = null
     private var photoStudioOpen = false
+    private var photoStudioCaptureAllowed = false
+    private var privatePhotoStudioPageOpen = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val pendingLocalNetworkPermissionReplies = mutableListOf<JavaScriptReplyProxy>()
     private var localNetworkPermissionRequestInProgress = false
@@ -170,7 +180,11 @@ class MainActivity : AppCompatActivity() {
         SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
         photoStudioOpen = savedInstanceState?.getBoolean("photoStudioOpen") ?: false
-        if (photoStudioOpen) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        photoStudioCaptureAllowed = savedInstanceState?.getBoolean("photoStudioCaptureAllowed") ?: false
+        privatePhotoStudioPageOpen = savedInstanceState?.getBoolean("privatePhotoStudioPageOpen") ?: false
+        if ((photoStudioOpen || privatePhotoStudioPageOpen) && !photoStudioCaptureAllowed) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (handleBackNavigation()) return
@@ -196,7 +210,10 @@ class MainActivity : AppCompatActivity() {
         }
         store = LocalDocumentStore(filesDir)
         idStudioStore = IdStudioStore(filesDir, cacheDir)
+        photoStudioStore = PhotoStudioStore(filesDir, cacheDir)
         idStudioDraftId = savedInstanceState?.getString("idStudioDraftId")
+        idStudioEditingFile = savedInstanceState?.getString("idStudioEditingFilePath")
+            ?.let { path -> runCatching { File(path).canonicalFile.takeIf(idStudioStore::isPreparedDocument) }.getOrNull() }
         pendingIdStudioSide = savedInstanceState?.getString("pendingIdStudioSide")
         idStudioFrontRotation = savedInstanceState?.getInt("idStudioFrontRotation", 0) ?: 0
         idStudioBackRotation = savedInstanceState?.getInt("idStudioBackRotation", 0) ?: 0
@@ -206,6 +223,8 @@ class MainActivity : AppCompatActivity() {
         idStudioCardHeightMm = savedInstanceState?.getFloat(
             "idStudioCardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
         ) ?: IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
+        idStudioPreviewMode = savedInstanceState?.getString("idStudioPreviewMode")?.takeIf { it == "CARD" || it == "A4" } ?: "CARD"
+        idStudioPreviewSide = savedInstanceState?.getString("idStudioPreviewSide")?.takeIf { it == "front" || it == "back" } ?: "front"
         idStudioScreenOpen = savedInstanceState?.getBoolean("idStudioScreenOpen") ?: false
         customerAccountStore = CustomerAccountStore(this)
         customerPrintSessionStore = CustomerPrintSessionStore(this)
@@ -285,12 +304,17 @@ class MainActivity : AppCompatActivity() {
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
         outState.putBoolean("photoStudioOpen", photoStudioOpen)
+        outState.putBoolean("photoStudioCaptureAllowed", photoStudioCaptureAllowed)
+        outState.putBoolean("privatePhotoStudioPageOpen", privatePhotoStudioPageOpen)
         outState.putString("idStudioDraftId", idStudioDraftId)
+        outState.putString("idStudioEditingFilePath", idStudioEditingFile?.absolutePath)
         outState.putString("pendingIdStudioSide", pendingIdStudioSide)
         outState.putInt("idStudioFrontRotation", idStudioFrontRotation)
         outState.putInt("idStudioBackRotation", idStudioBackRotation)
         outState.putFloat("idStudioCardWidthMm", idStudioCardWidthMm)
         outState.putFloat("idStudioCardHeightMm", idStudioCardHeightMm)
+        outState.putString("idStudioPreviewMode", idStudioPreviewMode)
+        outState.putString("idStudioPreviewSide", idStudioPreviewSide)
         outState.putBoolean("idStudioScreenOpen", idStudioScreenOpen)
         webView?.let { view ->
             val webState = Bundle()
@@ -314,6 +338,7 @@ class MainActivity : AppCompatActivity() {
                     null
                 )
             }
+            privatePhotoStudioPageOpen -> showHome()
             documentViewer != null -> if (customerUploadPdfPreviewOpen) closeCustomerUploadPdfPreview() else closeDocumentViewer()
             idStudioScreenOpen -> showIdStudioHome()
             profileVisible -> returnFromProfile()
@@ -477,6 +502,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        releaseIdStudioReviewBitmap()
         documentViewer?.dispose()
         documentViewer = null
         privateIdViewerTempFile?.let(idStudioStore::releaseTransientFile)
@@ -484,6 +510,10 @@ class MainActivity : AppCompatActivity() {
         if (::idStudioStore.isInitialized && !isChangingConfigurations) {
             privateIdUploadTempFiles.forEach(idStudioStore::releaseTransientFile)
             privateIdUploadTempFiles.clear()
+        }
+        if (::photoStudioStore.isInitialized && !isChangingConfigurations) {
+            privatePhotoUploadTempFiles.forEach(photoStudioStore::releaseTransientFile)
+            privatePhotoUploadTempFiles.clear()
         }
         clearCustomerUploadPdfPreviews()
         window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -1098,8 +1128,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHome() {
+        photoStudioOpen = false
+        photoStudioCaptureAllowed = false
+        privatePhotoStudioPageOpen = false
         idStudioScreenOpen = false
         privateIdViewerOpen = false
+        privateIdPreviewCaptureAllowed = false
         documentViewerReturnToIdStudio = false
         applySensitiveWindowProtection()
         clearLibrarySelection()
@@ -1118,7 +1152,7 @@ class MainActivity : AppCompatActivity() {
         }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(17), dp(18), dp(28))
+            setPadding(dp(18), dp(11), dp(18), dp(20))
         }
         scroll.addView(column)
 
@@ -1134,42 +1168,80 @@ class MainActivity : AppCompatActivity() {
         }
         val heroContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(19), dp(18), dp(18))
+            setPadding(dp(18), dp(14), dp(18), dp(13))
         }
         heroContent.addView(text("SMARTPRINT  ·  YOUR PRINT SPACE", 10, R.color.qp_hero_muted, true))
         heroContent.addView(text(
             if (portalUrl == null) "Your next print starts here." else "Everything ready for your next print.",
-            25, R.color.qp_hero_text, true
+            22, R.color.qp_hero_text, true
         ).apply {
             id = R.id.smartprint_home_heading
-            setPadding(0, dp(9), 0, dp(7))
+            maxLines = 2
+            setPadding(0, dp(5), 0, dp(4))
         })
         heroContent.addView(text(
-            if (portalUrl == null) "Keep your documents close. Find a participating shop when you're ready to print."
-            else "You're connected to ${shopDisplayName ?: "your print shop"}. Choose a document whenever you're ready.",
-            12, R.color.qp_hero_muted, false
-        ).apply { setLineSpacing(dp(3).toFloat(), 1f); setPadding(0, 0, 0, dp(15)) })
+            if (portalUrl == null) "Your files stay private. Print when ready."
+            else "Connected to ${shopDisplayName ?: "your print shop"}.",
+            11, R.color.qp_hero_muted, false
+        ).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            setPadding(0, 0, 0, dp(7))
+        })
         heroContent.addView(button(
-            if (portalUrl == null) "Find a print shop" else "Continue to your shop",
+            if (portalUrl == null) "Find a print shop" else "Manage connected shop",
             true
         ).apply {
             minHeight = dp(46)
-            setOnClickListener { if (portalUrl == null) showScanPrint() else showPrint() }
+            setOnClickListener { if (portalUrl == null) showScanPrint() else showShopManager() }
         }, LinearLayout.LayoutParams(-1, dp(46)))
+        val studioActions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        studioActions.addView(button("ID Studio", false).apply {
+            icon = getDrawable(R.drawable.ic_file)
+            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
+            iconPadding = dp(4)
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            textSize = 11f
+            minHeight = dp(48)
+            contentDescription = "ID Studio — scan both sides of an ID"
+            setOnClickListener { showIdStudioHome() }
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
+        studioActions.addView(button("Photo Studio", false).apply {
+            icon = getDrawable(R.drawable.ic_file_image)
+            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
+            iconPadding = dp(4)
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            textSize = 11f
+            minHeight = dp(48)
+            contentDescription = "Photo Studio — prepare photo sheets"
+            setOnClickListener { showDedicatedPhotoStudio() }
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) })
+        heroContent.addView(studioActions, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
         hero.addView(heroContent)
-        column.addView(hero, linearParams().apply { bottomMargin = dp(17) })
+        column.addView(hero, linearParams().apply { bottomMargin = dp(11) })
 
         val spaceSummary = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(1), dp(2), dp(12))
+            setPadding(dp(2), dp(1), dp(2), dp(7))
         }
         val summaryCopy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val privateIdCount = idStudioStore.listPrepared().size
+        val privatePhotoCount = photoStudioStore.listPrepared().size
         summaryCopy.addView(text("Your space", 17, R.color.qp_text, true))
-        summaryCopy.addView(text("${recentFiles.size} saved files  ·  ${used} used", 11, R.color.qp_muted, false)
-            .apply { setPadding(0, dp(3), 0, 0) })
+        summaryCopy.addView(text(
+            "${recentFiles.size} files · $used · $privateIdCount IDs · $privatePhotoCount photo sheets",
+            10, R.color.qp_muted, false
+        ).apply {
+            setPadding(0, dp(3), 0, 0)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
         spaceSummary.addView(summaryCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        spaceSummary.addView(text("PRIVATE ON THIS DEVICE", 8, R.color.qp_muted, true))
+        spaceSummary.addView(text("PRIVATE", 8, R.color.qp_muted, true))
         column.addView(spaceSummary, linearParams())
 
         val quickActions = LinearLayout(this).apply {
@@ -1187,17 +1259,6 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        secondaryActions.addView(button("Prepare ID card", false).apply {
-            icon = getDrawable(R.drawable.ic_file)
-            iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            iconPadding = dp(5)
-            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
-            textSize = 11f
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            minHeight = dp(48)
-            setOnClickListener { showIdStudioHome() }
-        }, LinearLayout.LayoutParams(0, dp(48), 1f))
         secondaryActions.addView(button("Choose files", false).apply {
             icon = getDrawable(R.drawable.ic_file)
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
@@ -1213,12 +1274,15 @@ class MainActivity : AppCompatActivity() {
                 importFiles.launch(arrayOf("*/*"))
                 navigation.selectedItemId = FILES
             }
-        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(9) })
+        }, LinearLayout.LayoutParams(-1, dp(48)))
         quickActions.addView(secondaryActions, LinearLayout.LayoutParams(-1, dp(48)).apply {
             topMargin = dp(9)
         })
         column.addView(quickActions, linearParams().apply { bottomMargin = dp(17) })
 
+        // Keep the shop connection visible and independently accessible on Home.
+        // This preserves the existing connection entry point while the hero remains
+        // focused on the primary print action.
         val shopCard = card().apply {
             strokeWidth = dp(1)
             setOnClickListener { if (portalUrl != null) showShopManager() else showScanPrint() }
@@ -1287,39 +1351,31 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // This is owned SmartPrint promotion, not a third-party ad slot.
-        val promotion = card().apply {
-            radius = dp(18).toFloat()
-            setCardBackgroundColor(getColor(R.color.qp_glass_card))
-        }
-        val promoRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), dp(13), dp(13), dp(13))
-        }
-        val promoIcon = ImageView(this).apply {
-            setImageResource(R.drawable.ic_file_image)
-            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-        }
-        promoRow.addView(promoIcon, LinearLayout.LayoutParams(dp(46), dp(46)))
-        val promoCopy = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(11), 0, 0, 0)
-        }
-        promoCopy.addView(text("FROM SMARTPRINT", 8, R.color.qp_primary, true))
-        promoCopy.addView(text("Make every photo print-ready", 13, R.color.qp_text, true)
-            .apply { setPadding(0, dp(4), 0, dp(3)) })
-        promoCopy.addView(text("Prepare beautiful photo sheets with Photo Studio.", 10, R.color.qp_muted, false))
-        promoRow.addView(promoCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        promoRow.addView(text("›", 24, R.color.qp_primary, true))
-        promotion.addView(promoRow)
-        promotion.setOnClickListener { if (portalUrl != null) showPrint() else showScanPrint() }
-        promotion.isClickable = true
-        promotion.isFocusable = true
-        column.addView(promotion, linearParams().apply { topMargin = dp(18) })
         return scroll
+    }
+
+    private fun showDedicatedPhotoStudio() {
+        if (Uri.parse(webView?.url.orEmpty()).path == "/photo-studio" && privatePhotoStudioPageOpen) return
+        idStudioScreenOpen = false
+        privateIdViewerOpen = false
+        photoStudioOpen = false
+        photoStudioCaptureAllowed = false
+        privatePhotoStudioPageOpen = true
+        applySensitiveWindowProtection()
+        pickerMode = false
+        clearLibrarySelection()
+        setToolbarPage("Photo Studio")
+        setToolbarBackAction("Back to Home", ::showHome)
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
+        toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
+        accountAction.visibility = View.GONE
+        setBottomNavigationVisible(false)
+        content.removeAllViews()
+        val view = ensureWebView()
+        (view.parent as? ViewGroup)?.removeView(view)
+        content.addView(view, frameParams())
+        val studioUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/photo-studio"
+        if (view.url != studioUrl) view.loadUrl(studioUrl)
     }
 
     private fun showScanPrint() {
@@ -1755,8 +1811,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPrint() {
+        privatePhotoStudioPageOpen = false
+        photoStudioOpen = false
+        photoStudioCaptureAllowed = false
         idStudioScreenOpen = false
         privateIdViewerOpen = false
+        privateIdPreviewCaptureAllowed = false
+        privateIdPreviewCaptureAllowed = false
         applySensitiveWindowProtection()
         clearLibrarySelection()
         pickerMode = false
@@ -1774,6 +1835,8 @@ class MainActivity : AppCompatActivity() {
         val view = ensureWebView()
         (view.parent as? ViewGroup)?.removeView(view)
         content.addView(view, frameParams())
+        val activeShopUrl = portalUrl
+        if (activeShopUrl != null && view.url?.contains("/photo-studio") == true) view.loadUrl(activeShopUrl)
     }
 
     private fun refreshLibrary(preserveScroll: Boolean = true) {
@@ -1897,7 +1960,10 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(-2, dp(40)).apply { marginStart = dp(8) })
             column.addView(sourceRow, linearParams().apply { bottomMargin = dp(4) })
         }
-        if (isPicker && !fileChooserSelectFolders) addIdStudioPickerSection(column)
+        if (isPicker && !fileChooserSelectFolders) {
+            addIdStudioPickerSection(column)
+            addPhotoStudioPickerSection(column)
+        }
         if (!isPicker) {
             val folderActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -2719,6 +2785,45 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    private fun addPrivatePreviewWatermarks(container: FrameLayout) {
+        val securityMark = TextView(this).apply {
+            text = "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"
+            textSize = 9f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.12f
+            gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.argb(45, 38, 52, 78))
+            rotation = -28f
+            isClickable = false
+            isFocusable = false
+            includeFontPadding = false
+        }
+        container.addView(
+            securityMark,
+            FrameLayout.LayoutParams(-1, dp(48), Gravity.CENTER)
+        )
+        val brandMark = TextView(this).apply {
+            text = "SmartPrint by QuantaEdge"
+            textSize = 10f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.08f
+            gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.argb(190, 28, 43, 69))
+            background = roundedDrawable(android.graphics.Color.argb(90, 255, 255, 255), dp(5))
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+            isClickable = false
+            isFocusable = false
+        }
+        container.addView(
+            brandMark,
+            FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                leftMargin = dp(10)
+                rightMargin = dp(10)
+                bottomMargin = dp(10)
+            }
+        )
+    }
+
     private fun roundedDrawable(fillColor: Int, radiusDp: Int, strokeColor: Int? = null): android.graphics.drawable.GradientDrawable =
         android.graphics.drawable.GradientDrawable().apply {
             setColor(fillColor)
@@ -2760,23 +2865,51 @@ class MainActivity : AppCompatActivity() {
                 setOf(trustedOrigin)
             ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
                 // Only the fixed configured origin and the top-level document may use this bridge.
+                val data = message.data.orEmpty()
                 if (isMainFrame &&
                     sourceOrigin.scheme == trustedPage.scheme &&
                     sourceOrigin.host.equals(trustedPage.host, true) &&
                     sourceOrigin.port == trustedPage.port) {
-                    if (message.data == "requestLocalNetworkAccess") {
+                    if (data == "requestLocalNetworkAccess") {
                         runOnUiThread {
                             if (!isFinishing && !isDestroyed) requestLocalNetworkAccess(replyProxy)
                             else runCatching { replyProxy.postMessage("localNetworkAccess:denied") }
                         }
                     } else {
-                        val parts = message.data.orEmpty().split("|", limit = 3)
+                        val parts = data.split("|", limit = 3)
+                        val photoStudioLibraryCommand =
+                            data == "listPhotoStudioDocuments" ||
+                            data.startsWith("savePhotoStudioDocument|") ||
+                            data.startsWith("updatePhotoStudioDocument|") ||
+                            data.startsWith("getPhotoStudioPreviewPage|") ||
+                            data.startsWith("getPhotoStudioSource|") ||
+                            data.startsWith("renamePhotoStudioDocument|") ||
+                            data.startsWith("deletePhotoStudioDocument|")
+                        val photoStudioRouteActive = privatePhotoStudioPageOpen &&
+                            Uri.parse(webView?.url.orEmpty()).path == "/photo-studio"
                         when {
+                            data == "releasePhotoStudioUploadFiles" -> {
+                                runOnUiThread {
+                                    if (!isFinishing && !isDestroyed) {
+                                        // Remove only decrypted temporary picker copies.
+                                        // The encrypted .spph PDF, source photo and metadata stay in the library.
+                                        privatePhotoUploadTempFiles.toList().forEach(photoStudioStore::releaseTransientFile)
+                                        privatePhotoUploadTempFiles.clear()
+                                        clearCustomerUploadPdfPreviews()
+                                        replyProxy.postMessage("OK")
+                                    }
+                                }
+                            }
+                            photoStudioLibraryCommand && !photoStudioRouteActive -> {
+                                replyProxy.postMessage("PHOTO_LIBRARY_FAILED|Open the dedicated Photo Studio screen to access private documents.")
+                            }
                             parts.size == 2 && parts[0] == "setPhotoStudioOpen" &&
                                 parts[1] in setOf("on", "off") -> {
                                 runOnUiThread {
                                     if (!isFinishing && !isDestroyed) {
                                         photoStudioOpen = parts[1] == "on"
+                                        if (parts[1] == "off") photoStudioCaptureAllowed = false
+                                        applySensitiveWindowProtection()
                                         replyProxy.postMessage("OK")
                                     }
                                 }
@@ -2785,11 +2918,8 @@ class MainActivity : AppCompatActivity() {
                                 parts[1] in setOf("on", "off") -> {
                                 runOnUiThread {
                                     if (!isFinishing && !isDestroyed) {
-                                        if (parts[1] == "on") {
-                                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                                        } else {
-                                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                                        }
+                                        photoStudioCaptureAllowed = parts[1] == "off"
+                                        applySensitiveWindowProtection()
                                         replyProxy.postMessage("OK")
                                     }
                                 }
@@ -2803,6 +2933,137 @@ class MainActivity : AppCompatActivity() {
                                         replyProxy.postMessage("OK")
                                     }
                                 }
+                            }
+                            data.startsWith("savePhotoStudioDocument|") -> {
+                                Thread {
+                                    val response = try {
+                                        val payload = JSONObject(data.substringAfter('|'))
+                                        val pdfBytes = android.util.Base64.decode(payload.getString("pdfBase64"), android.util.Base64.DEFAULT)
+                                        val sourceBytes = android.util.Base64.decode(payload.getString("sourceBase64"), android.util.Base64.DEFAULT)
+                                        try {
+                                            val output = photoStudioStore.savePreparedOutput(pdfBytes, sourceBytes, payload)
+                                            val id = output.name.removePrefix(PhotoStudioStore.FILE_PREFIX).removeSuffix(".spph")
+                                            "PHOTO_SAVED|$id"
+                                        } finally {
+                                            pdfBytes.fill(0)
+                                            sourceBytes.fill(0)
+                                        }
+                                    } catch (error: Exception) {
+                                        "PHOTO_SAVE_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            data == "listPhotoStudioDocuments" -> {
+                                Thread {
+                                    val response = try {
+                                        val library = org.json.JSONArray().apply {
+                                            photoStudioStore.listPrepared().forEach { file ->
+                                                val metadata = photoStudioStore.readMetadata(file)
+                                                put(JSONObject(metadata.toString()).apply {
+                                                    put("id", file.name.removePrefix(PhotoStudioStore.FILE_PREFIX).removeSuffix(".spph"))
+                                                    put("sizeBytes", file.length())
+                                                    photoStudioStore.createThumbnailBase64(file)?.let { put("thumbnailBase64", it) }
+                                                })
+                                            }
+                                        }
+                                        "PHOTO_LIBRARY|" + library.toString()
+                                    } catch (error: Exception) {
+                                        "PHOTO_LIBRARY_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            parts.size == 3 && parts[0] == "updatePhotoStudioDocument" -> {
+                                Thread {
+                                    val response = try {
+                                        val payload = JSONObject(parts[2])
+                                        val pdfBytes = android.util.Base64.decode(payload.getString("pdfBase64"), android.util.Base64.DEFAULT)
+                                        val sourceBytes = android.util.Base64.decode(payload.getString("sourceBase64"), android.util.Base64.DEFAULT)
+                                        try {
+                                            photoStudioStore.updatePreparedOutput(parts[1], pdfBytes, sourceBytes, payload)
+                                            "PHOTO_UPDATED|" + parts[1]
+                                        } finally {
+                                            pdfBytes.fill(0)
+                                            sourceBytes.fill(0)
+                                        }
+                                    } catch (error: Exception) {
+                                        "PHOTO_UPDATE_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            parts.size == 3 && parts[0] == "getPhotoStudioPreviewPage" -> {
+                                Thread {
+                                    val response = try {
+                                        val file = photoStudioStore.findById(parts[1]) ?: error("This private photo sheet is no longer available.")
+                                        val pageIndex = parts[2].toIntOrNull() ?: error("Choose a valid preview page.")
+                                        val image = photoStudioStore.renderPageBase64(file, pageIndex, 1200)
+                                            ?: error("The requested private preview page could not be rendered.")
+                                        "PHOTO_PREVIEW_PAGE|" + parts[1] + "|" + pageIndex + "|" + image
+                                    } catch (error: Exception) {
+                                        "PHOTO_PREVIEW_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            parts.size == 2 && parts[0] == "getPhotoStudioSource" -> {
+                                Thread {
+                                    val response = try {
+                                        val file = photoStudioStore.findById(parts[1]) ?: error("This private photo sheet is no longer available.")
+                                        val metadata = photoStudioStore.readMetadata(file)
+                                        val source = photoStudioStore.readOriginalPhoto(file)
+                                        try {
+                                            val payload = JSONObject()
+                                                .put("metadata", metadata)
+                                                .put("sourceBase64", android.util.Base64.encodeToString(source, android.util.Base64.NO_WRAP))
+                                            "PHOTO_SOURCE|" + payload.toString()
+                                        } finally {
+                                            source.fill(0)
+                                        }
+                                    } catch (error: Exception) {
+                                        "PHOTO_SOURCE_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            parts.size == 3 && parts[0] == "renamePhotoStudioDocument" -> {
+                                Thread {
+                                    val response = try {
+                                        val file = photoStudioStore.findById(parts[1]) ?: error("This private photo sheet is no longer available.")
+                                        photoStudioStore.renamePrepared(file, parts[2])
+                                        "PHOTO_RENAMED|" + parts[1]
+                                    } catch (error: Exception) {
+                                        "PHOTO_RENAME_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            parts.size == 2 && parts[0] == "deletePhotoStudioDocument" -> {
+                                Thread {
+                                    val response = try {
+                                        val file = photoStudioStore.findById(parts[1]) ?: error("This private photo sheet is no longer available.")
+                                        photoStudioStore.deletePrepared(file)
+                                        "PHOTO_DELETED|" + parts[1]
+                                    } catch (error: Exception) {
+                                        "PHOTO_DELETE_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
                             }
                             parts.size == 2 && parts[0] == "retainCustomerPdfPreviews" -> {
                                 runOnUiThread {
@@ -3300,7 +3561,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applySensitiveWindowProtection() {
-        if (photoStudioOpen || idStudioScreenOpen || privateIdViewerOpen) {
+        val privateStudioCaptureBlocked =
+            (photoStudioOpen || privatePhotoStudioPageOpen) && !photoStudioCaptureAllowed
+        val idCaptureBlocked = idStudioScreenOpen ||
+            (privateIdViewerOpen && !privateIdPreviewCaptureAllowed)
+        if (privateStudioCaptureBlocked || idCaptureBlocked) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -3308,8 +3573,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIdStudioHome() {
+        releaseIdStudioReviewBitmap()
         idStudioScreenOpen = true
         privateIdViewerOpen = false
+        privateIdPreviewCaptureAllowed = false
         applySensitiveWindowProtection()
         pickerMode = false
         clearLibrarySelection()
@@ -3327,9 +3594,9 @@ class MainActivity : AppCompatActivity() {
         }
         column.addView(text("SmartPrint ID Studio", 21, R.color.qp_text, true))
         column.addView(text(
-            "Create your ID whenever you need it. Scanning, reviewing and saving work on this device without connecting to a shop.",
-            12, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(5), 0, dp(14)) })
+            "Scan both sides. Review and save your ID privately.",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(3), 0, dp(8)) })
         column.addView(button("Create a new ID card", true).apply {
             setOnClickListener { startIdStudioCapture() }
         }, linearParams().apply { bottomMargin = dp(9) })
@@ -3367,41 +3634,105 @@ class MainActivity : AppCompatActivity() {
             ).apply { setPadding(dp(2), dp(5), dp(2), dp(15)) })
         } else {
             prepared.forEach { file ->
+                val metadata = runCatching { idStudioStore.readMetadata(file) }.getOrDefault(JSONObject())
+                val displayName = metadata.optString("title").ifBlank { "ID card" }
                 val item = card()
-                val body = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(12), dp(11), dp(12), dp(11))
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(11), dp(11), dp(11), dp(11))
                 }
-                body.addView(text(file.name.removeSuffix(".spid") + ".pdf", 13, R.color.qp_text, true).apply { maxLines = 2 })
-                body.addView(text(
-                    android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()) +
-                        " · Private to SmartPrint · A4 front/back sheet",
-                    10, R.color.qp_muted, false
-                ).apply { setPadding(0, dp(4), 0, dp(8)) })
-                val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-                actions.addView(button("View", false).apply {
-                    setOnClickListener { showDocumentViewer(file) }
-                }, LinearLayout.LayoutParams(0, dp(38), 1f))
-                actions.addView(button("Delete", false).apply {
-                    setOnClickListener {
-                        showConfirmSheet(
-                            "Delete prepared ID?",
-                            "This removes the private sheet from this device. It does not change a print request already sent to a shop.",
-                            "Delete",
-                            destructive = true
-                        ) {
-                            try {
-                                idStudioStore.deletePrepared(file)
-                                showIdStudioHome()
-                                toast("Prepared ID deleted from this device.")
-                            } catch (error: Exception) {
-                                toast("Could not delete the prepared ID: " + message(error))
-                            }
+                val thumbnail = ImageView(this).apply {
+                    setImageResource(R.drawable.ic_file)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = "ID card front preview"
+                    background = roundedDrawable(getColor(R.color.qp_soft), dp(8))
+                    (idStudioStore.createCardFaceThumbnailBase64(file, "front")
+                        ?: idStudioStore.createThumbnailBase64(file))?.let { encoded ->
+                        val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                        try {
+                            setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                        } finally {
+                            bytes.fill(0)
                         }
                     }
-                }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(8) })
-                body.addView(actions)
-                item.addView(body)
+                }
+                val thumbnailFrame = FrameLayout(this).apply {
+                    addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
+                    addPrivatePreviewWatermarks(this)
+                }
+                row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(88), dp(58)))
+                val details = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(10), 0, dp(6), 0)
+                }
+                details.addView(text(displayName, 13, R.color.qp_text, true).apply {
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+                details.addView(text(
+                    "${metadata.optDouble("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble()).toFloat().let { "%.1f".format(Locale.ROOT, it) }} × ${metadata.optDouble("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble()).toFloat().let { "%.1f".format(Locale.ROOT, it) }} mm · Front + back",
+                    10, R.color.qp_muted, false
+                ).apply { setPadding(0, dp(4), 0, 0); maxLines = 2 })
+                details.addView(text(
+                    android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()),
+                    10, R.color.qp_muted, false
+                ).apply { setPadding(0, dp(3), 0, dp(7)) })
+                val actions = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
+                actions.addView(button("A4 sheet", false).apply {
+                    minHeight = dp(34)
+                    textSize = 11f
+                    contentDescription = "View A4 print sheet for $displayName"
+                    setOnClickListener { showDocumentViewer(file) }
+                }, LinearLayout.LayoutParams(0, dp(36), 1f))
+                actions.addView(button("⋮", false).apply {
+                    minHeight = dp(34)
+                    minWidth = dp(40)
+                    contentDescription = "More actions for $displayName"
+                    setOnClickListener {
+                        val menu = mutableListOf<Pair<String, () -> Unit>>()
+                        menu += "Rename" to {
+                            nameDialog("Rename ID document", displayName) { nextName ->
+                                try {
+                                    idStudioStore.renamePrepared(file, nextName)
+                                    showIdStudioHome()
+                                    toast("ID document renamed.")
+                                } catch (error: Exception) {
+                                    toast("Could not rename the ID document: " + message(error))
+                                }
+                            }
+                        }
+                        menu += "Edit" to { editPreparedId(file) }
+                        menu += "Delete" to {
+                            showConfirmSheet(
+                                "Delete prepared ID?",
+                                "This removes the private sheet and its saved scan from this device. It does not change a print request already sent to a shop.",
+                                "Delete",
+                                destructive = true
+                            ) {
+                                try {
+                                    if (idStudioEditingFile?.canonicalPath == file.canonicalPath) {
+                                        idStudioDraftId?.takeIf(idStudioStore::draftExists)?.let(idStudioStore::deleteDraft)
+                                        idStudioDraftId = null
+                                        idStudioEditingFile = null
+                                    }
+                                    idStudioStore.deletePrepared(file)
+                                    showIdStudioHome()
+                                    toast("Prepared ID deleted from this device.")
+                                } catch (error: Exception) {
+                                    toast("Could not delete the prepared ID: " + message(error))
+                                }
+                            }
+                        }
+                        showOptionSheet("ID document actions", menu)
+                    }
+                }, LinearLayout.LayoutParams(dp(40), dp(36)).apply { marginStart = dp(6) })
+                details.addView(actions)
+                row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+                item.addView(row)
                 column.addView(item, linearParams().apply { bottomMargin = dp(8) })
             }
         }
@@ -3418,6 +3749,40 @@ class MainActivity : AppCompatActivity() {
         }, frameParams())
     }
 
+    private fun editPreparedId(file: File) {
+        if (!idStudioStore.canEditPreparedDocument(file)) {
+            toast("This older ID sheet has no saved original scans, so it can still be viewed, renamed and printed but cannot be edited.")
+            return
+        }
+        try {
+            val metadata = idStudioStore.readMetadata(file)
+            val draftId = idStudioStore.createDraft()
+            val frontBytes = idStudioStore.readPreparedSideBytes(file, "front")
+            val backBytes = idStudioStore.readPreparedSideBytes(file, "back")
+            try {
+                idStudioStore.saveScan(draftId, "front", java.io.ByteArrayInputStream(frontBytes))
+                idStudioStore.saveScan(draftId, "back", java.io.ByteArrayInputStream(backBytes))
+            } catch (error: Exception) {
+                idStudioStore.deleteDraft(draftId)
+                throw error
+            } finally {
+                frontBytes.fill(0)
+                backBytes.fill(0)
+            }
+            idStudioDraftId = draftId
+            idStudioEditingFile = file
+            idStudioFrontRotation = metadata.optInt("frontRotation", 0).takeIf { it in setOf(0, 180) } ?: 0
+            idStudioBackRotation = metadata.optInt("backRotation", 0).takeIf { it in setOf(0, 180) } ?: 0
+            idStudioCardWidthMm = metadata.optDouble("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble()).toFloat()
+            idStudioCardHeightMm = metadata.optDouble("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble()).toFloat()
+            IdCardLayoutPolicy.calculate(idStudioCardWidthMm, idStudioCardHeightMm)
+            showIdStudioReview()
+        } catch (error: Exception) {
+            toast("Could not reopen this ID for editing: " + message(error))
+            showIdStudioHome()
+        }
+    }
+
     private fun startIdStudioCapture() {
         val current = idStudioDraftId?.takeIf(idStudioStore::draftExists)
         if (current != null && (idStudioStore.hasFront(current) || idStudioStore.hasBack(current))) {
@@ -3429,6 +3794,7 @@ class MainActivity : AppCompatActivity() {
             ) {
                 try {
                     idStudioStore.deleteDraft(current)
+                    idStudioEditingFile = null
                     idStudioDraftId = idStudioStore.createDraft()
                     idStudioFrontRotation = 0
                     idStudioBackRotation = 0
@@ -3440,6 +3806,7 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
+        idStudioEditingFile = null
         idStudioDraftId = try {
             current ?: idStudioStore.createDraft()
         } catch (error: Exception) {
@@ -3448,6 +3815,8 @@ class MainActivity : AppCompatActivity() {
         }
         idStudioFrontRotation = 0
         idStudioBackRotation = 0
+        idStudioPreviewMode = "CARD"
+        idStudioPreviewSide = "front"
         idStudioCardWidthMm = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
         idStudioCardHeightMm = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
         startIdStudioSideScan("front")
@@ -3465,6 +3834,7 @@ class MainActivity : AppCompatActivity() {
             showIdStudioHome()
             return
         }
+        releaseIdStudioReviewBitmap()
         pendingIdStudioSide = side
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
@@ -3510,6 +3880,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIdStudioBackStep() {
+        releaseIdStudioReviewBitmap()
         idStudioScreenOpen = true
         privateIdViewerOpen = false
         applySensitiveWindowProtection()
@@ -3545,6 +3916,16 @@ class MainActivity : AppCompatActivity() {
         content.addView(column, frameParams())
     }
 
+    private fun releaseIdStudioReviewBitmap() {
+        idStudioReviewBitmap?.takeUnless { it.isRecycled }?.recycle()
+        idStudioReviewBitmap = null
+        idStudioReviewScans?.let { (front, back) ->
+            front.fill(0)
+            back.fill(0)
+        }
+        idStudioReviewScans = null
+    }
+
     private fun showIdStudioReview() {
         val draftId = idStudioDraftId
         if (draftId == null || !idStudioStore.draftExists(draftId) ||
@@ -3553,10 +3934,11 @@ class MainActivity : AppCompatActivity() {
             showIdStudioHome()
             return
         }
+        releaseIdStudioReviewBitmap()
         idStudioScreenOpen = true
         privateIdViewerOpen = false
         applySensitiveWindowProtection()
-        setToolbarPage("Review ID card")
+        setToolbarPage("Review ID")
         setToolbarBackAction("Back to ID Studio", ::showIdStudioHome)
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
         toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
@@ -3566,192 +3948,352 @@ class MainActivity : AppCompatActivity() {
 
         val front = idStudioStore.readScanBytes(draftId, "front")
         val back = idStudioStore.readScanBytes(draftId, "back")
+        idStudioReviewScans = front to back
         var cardWidthMm = idStudioCardWidthMm
         var cardHeightMm = idStudioCardHeightMm
-        val column = LinearLayout(this).apply {
+        val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(16), dp(12), dp(16), dp(22))
+            setPadding(dp(12), dp(7), dp(12), dp(9))
         }
-        column.addView(text("Review the A4 print sheet", 20, R.color.qp_text, true))
-        column.addView(text(
-            "Check that both sides are upright, clear and complete. The preview shows their final positions and cut guides.",
-            12, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(4), 0, dp(10)) })
 
-        val previewCard = card()
-        previewCard.setCardBackgroundColor(getColor(R.color.qp_surface))
-        val preview = ImageView(this).apply {
-            scaleType = ImageView.ScaleType.FIT_CENTER
-            contentDescription = "A4 ID front and back print sheet preview"
-            setPadding(dp(6), dp(6), dp(6), dp(6))
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-        fun updatePreview(width: Float, height: Float) {
-            val image = IdCardPdfComposer.renderSheetPreview(
-                front, back, idStudioFrontRotation, idStudioBackRotation, width, height
-            )
-            preview.setImageBitmap(image)
+        heading.addView(text("Review your ID", 17, R.color.qp_text, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        heading.addView(text("FRONT + BACK", 9, R.color.qp_muted, true))
+        root.addView(heading, linearParams().apply { bottomMargin = dp(5) })
+
+        val viewModes = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
         }
+        viewModes.addView(button("ID card", idStudioPreviewMode == "CARD").apply {
+            minHeight = dp(38)
+            textSize = 11f
+            setOnClickListener {
+                idStudioPreviewMode = "CARD"
+                showIdStudioReview()
+            }
+        }, LinearLayout.LayoutParams(0, dp(38), 1f))
+        viewModes.addView(button("A4 sheet", idStudioPreviewMode == "A4").apply {
+            minHeight = dp(38)
+            textSize = 11f
+            setOnClickListener {
+                idStudioPreviewMode = "A4"
+                showIdStudioReview()
+            }
+        }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(7) })
+        root.addView(viewModes, linearParams().apply { bottomMargin = dp(6) })
+
+        val previewStage = FrameLayout(this).apply {
+            background = roundedDrawable(getColor(R.color.qp_card), dp(12), getColor(R.color.qp_outline))
+            clipToPadding = true
+            clipChildren = true
+        }
+        val preview = ZoomableDocumentImageView(this) {}
+        preview.contentDescription = if (idStudioPreviewMode == "CARD") {
+            "ID front card preview. Pinch to zoom."
+        } else {
+            "A4 ID front and back print sheet preview. Pinch to zoom."
+        }
+        previewStage.addView(preview, FrameLayout.LayoutParams(-1, -1))
+        addPrivatePreviewWatermarks(previewStage)
+        root.addView(previewStage, LinearLayout.LayoutParams(-1, 0, 1f).apply {
+            bottomMargin = dp(5)
+        })
+
+        val frontDpi = IdCardPdfComposer.sourceResolutionDpi(front, cardWidthMm, cardHeightMm)
+        val backDpi = IdCardPdfComposer.sourceResolutionDpi(back, cardWidthMm, cardHeightMm)
+        val qualityNote = text(
+            if (minOf(frontDpi, backDpi) >= 300) {
+                "Scan detail · Front $frontDpi DPI  ·  Back $backDpi DPI"
+            } else {
+                "Small text may look soft · Front $frontDpi DPI  ·  Back $backDpi DPI"
+            },
+            10,
+            if (minOf(frontDpi, backDpi) >= 300) R.color.qp_muted else R.color.qp_primary,
+            false
+        ).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        root.addView(qualityNote, linearParams().apply { bottomMargin = dp(5) })
+
+        val cardControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val sheetControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        fun updatePreview() {
+            val bitmap = if (idStudioPreviewMode == "CARD") {
+                val source = if (idStudioPreviewSide == "front") front else back
+                val rotation = if (idStudioPreviewSide == "front") idStudioFrontRotation else idStudioBackRotation
+                IdCardPdfComposer.renderSidePreview(source, rotation)
+            } else {
+                val previewWidth = (resources.displayMetrics.widthPixels - dp(48)).coerceIn(900, 1600)
+                IdCardPdfComposer.renderSheetPreview(
+                    front,
+                    back,
+                    idStudioFrontRotation,
+                    idStudioBackRotation,
+                    cardWidthMm,
+                    cardHeightMm,
+                    previewWidth
+                )
+            }
+            releaseIdStudioReviewBitmap()
+            idStudioReviewBitmap = bitmap
+            preview.contentDescription = if (idStudioPreviewMode == "CARD") {
+                "ID ${idStudioPreviewSide} card preview. Pinch to zoom."
+            } else {
+                "A4 ID front and back print sheet preview. Pinch to zoom."
+            }
+            preview.setDocumentBitmap(bitmap)
+        }
+
+        if (idStudioPreviewMode == "CARD") {
+            cardControls.addView(button("Front", idStudioPreviewSide == "front").apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    idStudioPreviewSide = "front"
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 0.85f))
+            cardControls.addView(button("Back", idStudioPreviewSide == "back").apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    idStudioPreviewSide = "back"
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 0.85f).apply { marginStart = dp(5) })
+            cardControls.addView(button("Rotate", false).apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    if (idStudioPreviewSide == "front") idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
+                    else idStudioBackRotation = (idStudioBackRotation + 180) % 360
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(5) })
+            cardControls.addView(button("Retake", false).apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener { startIdStudioSideScan(idStudioPreviewSide) }
+            }, LinearLayout.LayoutParams(0, dp(40), 0.9f).apply { marginStart = dp(5) })
+            root.addView(cardControls, linearParams().apply { bottomMargin = dp(5) })
+        } else {
+            sheetControls.addView(button("Rotate front", false).apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 1f))
+            sheetControls.addView(button("Rotate back", false).apply {
+                minHeight = dp(40)
+                textSize = 10f
+                setOnClickListener {
+                    idStudioBackRotation = (idStudioBackRotation + 180) % 360
+                    showIdStudioReview()
+                }
+            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(6) })
+            root.addView(sheetControls, linearParams().apply { bottomMargin = dp(5) })
+        }
+
+        val sizeAction = text(
+            "Card size · ${"%.1f".format(Locale.ROOT, cardWidthMm)} × ${"%.1f".format(Locale.ROOT, cardHeightMm)} mm · Edit",
+            10,
+            R.color.qp_primary,
+            true
+        ).apply {
+            gravity = Gravity.CENTER
+            contentDescription = "Change ID card dimensions"
+            isClickable = true
+            isFocusable = true
+            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setOnClickListener {
+                val sizeFields = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    setPadding(dp(16), dp(8), dp(16), dp(4))
+                }
+                fun dimensionField(label: String, value: Float): EditText = EditText(this@MainActivity).apply {
+                    hint = label
+                    setSingleLine(true)
+                    inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+                    textSize = 14f
+                    setText(value.toString())
+                    setPadding(dp(10), dp(7), dp(10), dp(7))
+                    background = roundedDrawable(getColor(R.color.qp_card), dp(8), getColor(R.color.qp_outline))
+                }
+                val widthInput = dimensionField("Width mm", cardWidthMm)
+                val heightInput = dimensionField("Height mm", cardHeightMm)
+                sizeFields.addView(widthInput, LinearLayout.LayoutParams(0, dp(48), 1f))
+                sizeFields.addView(heightInput, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) })
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("ID card size · mm")
+                    .setView(sizeFields)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Apply") { _, _ ->
+                        val width = widthInput.text.toString().toFloatOrNull()
+                        val height = heightInput.text.toString().toFloatOrNull()
+                        if (width == null || height == null) {
+                            toast("Enter valid card dimensions.")
+                            return@setPositiveButton
+                        }
+                        try {
+                            IdCardLayoutPolicy.calculate(width, height)
+                            cardWidthMm = width
+                            cardHeightMm = height
+                            idStudioCardWidthMm = width
+                            idStudioCardHeightMm = height
+                            showIdStudioReview()
+                        } catch (error: Exception) {
+                            toast(message(error))
+                        }
+                    }
+                    .show()
+            }
+        }
+        root.addView(sizeAction, LinearLayout.LayoutParams(-1, dp(25)).apply {
+            bottomMargin = dp(4)
+        })
+
+        root.addView(button("Prepare A4 print sheet", true).apply {
+            minHeight = dp(46)
+            setOnClickListener {
+                try {
+                    IdCardLayoutPolicy.calculate(cardWidthMm, cardHeightMm)
+                    prepareIdStudioSheet(draftId, cardWidthMm, cardHeightMm)
+                } catch (error: Exception) {
+                    toast(message(error))
+                }
+            }
+        }, LinearLayout.LayoutParams(-1, dp(46)))
+
         try {
-            updatePreview(cardWidthMm, cardHeightMm)
+            updatePreview()
         } catch (error: Exception) {
-            toast("Could not preview the ID sheet: " + message(error))
+            releaseIdStudioReviewBitmap()
+            front.fill(0)
+            back.fill(0)
+            toast("Could not preview the ID: " + message(error))
             showIdStudioBackStep()
             return
         }
-        previewCard.addView(preview, LinearLayout.LayoutParams(-1, dp(360)))
-        column.addView(previewCard, linearParams().apply { bottomMargin = dp(9) })
-
-        val orientationRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        val detailRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        fun showSideDetail(title: String, bytes: ByteArray, rotation: Int) {
-            val bitmap = IdCardPdfComposer.renderSidePreview(bytes, rotation)
-            val zoomable = ZoomableDocumentImageView(this) {}
-            zoomable.contentDescription = "$title ID scan detail"
-            zoomable.setDocumentBitmap(bitmap)
-            val panel = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(12), dp(8), dp(12), dp(8))
-                addView(text("Pinch to zoom · Drag to inspect small text and card details", 11, R.color.qp_muted, false)
-                    .apply { setPadding(0, 0, 0, dp(8)) })
-                addView(zoomable, LinearLayout.LayoutParams(-1, dp(440)))
-            }
-            AlertDialog.Builder(this)
-                .setTitle(title)
-                .setView(panel)
-                .setPositiveButton("Done", null)
-                .create()
-                .also { dialog ->
-                    dialog.setOnDismissListener { if (!bitmap.isRecycled) bitmap.recycle() }
-                    dialog.show()
-                }
-        }
-        detailRow.addView(button("Inspect front", false).apply {
-            setOnClickListener { showSideDetail("Front side detail", front, idStudioFrontRotation) }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        detailRow.addView(button("Inspect back", false).apply {
-            setOnClickListener { showSideDetail("Back side detail", back, idStudioBackRotation) }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(7) })
-        column.addView(detailRow, linearParams().apply { bottomMargin = dp(12) })
-
-        orientationRow.addView(button(
-            if (idStudioFrontRotation == 0) "Rotate front 180°" else "Front upright",
-            false
-        ).apply {
-            setOnClickListener {
-                idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
-                showIdStudioReview()
-            }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f))
-        orientationRow.addView(button(
-            if (idStudioBackRotation == 0) "Rotate back 180°" else "Back upright",
-            false
-        ).apply {
-            setOnClickListener {
-                idStudioBackRotation = (idStudioBackRotation + 180) % 360
-                showIdStudioReview()
-            }
-        }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(7) })
-        column.addView(orientationRow, linearParams().apply { bottomMargin = dp(12) })
-
-        column.addView(text("Card dimensions · millimetres", 12, R.color.qp_text, true)
-            .apply { setPadding(0, 0, 0, dp(5)) })
-        fun dimensionInput(hintText: String, value: String): EditText = EditText(this).apply {
-            setSingleLine(true)
-            inputType = android.text.InputType.TYPE_CLASS_NUMBER or
-                android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL
-            textSize = 14f
-            setTextColor(getColor(R.color.qp_text))
-            setHintTextColor(getColor(R.color.qp_muted))
-            hint = hintText
-            setText(value)
-            background = roundedDrawable(getColor(R.color.qp_card), dp(9), getColor(R.color.qp_outline))
-            setPadding(dp(10), dp(7), dp(10), dp(7))
-        }
-        val widthInput = dimensionInput("Width mm", cardWidthMm.toString())
-        val heightInput = dimensionInput("Height mm", cardHeightMm.toString())
-        val sizeRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        sizeRow.addView(widthInput, LinearLayout.LayoutParams(0, dp(46), 1f))
-        sizeRow.addView(heightInput, LinearLayout.LayoutParams(0, dp(46), 1f).apply { marginStart = dp(8) })
-        column.addView(sizeRow, linearParams().apply { bottomMargin = dp(6) })
-        column.addView(text(
-            "Default: 85.6 × 53.98 mm. Enter the physical size of your card. Both faces stay identical and are centred one above the other on A4 portrait.",
-            10, R.color.qp_muted, false
-        ).apply { setPadding(0, 0, 0, dp(8)) })
-        column.addView(button("Update A4 preview", false).apply {
-            setOnClickListener {
-                val width = widthInput.text.toString().toFloatOrNull()
-                val height = heightInput.text.toString().toFloatOrNull()
-                if (width == null || height == null) {
-                    toast("Enter valid card dimensions in millimetres.")
-                    return@setOnClickListener
-                }
-                try {
-                    IdCardLayoutPolicy.calculate(width, height)
-                    cardWidthMm = width
-                    cardHeightMm = height
-                    idStudioCardWidthMm = width
-                    idStudioCardHeightMm = height
-                    updatePreview(width, height)
-                } catch (error: Exception) {
-                    toast(message(error))
-                }
-            }
-        }, linearParams().apply { bottomMargin = dp(10) })
-
-        column.addView(button("Retake front side", false).apply {
-            setOnClickListener { startIdStudioSideScan("front") }
-        }, linearParams().apply { bottomMargin = dp(7) })
-        column.addView(button("Retake back side", false).apply {
-            setOnClickListener { startIdStudioSideScan("back") }
-        }, linearParams().apply { bottomMargin = dp(12) })
-        column.addView(button("Prepare private ID print sheet", true).apply {
-            setOnClickListener {
-                val width = widthInput.text.toString().toFloatOrNull()
-                val height = heightInput.text.toString().toFloatOrNull()
-                if (width == null || height == null) {
-                    toast("Enter valid card dimensions in millimetres.")
-                    return@setOnClickListener
-                }
-                try {
-                    IdCardLayoutPolicy.calculate(width, height)
-                    updatePreview(width, height)
-                    idStudioCardWidthMm = width
-                    idStudioCardHeightMm = height
-                    prepareIdStudioSheet(draftId, width, height)
-                } catch (error: Exception) {
-                    toast(message(error))
-                }
-            }
-        }, linearParams())
-        content.addView(ScrollView(this).apply {
-            isFillViewport = true
-            addView(column)
-        }, frameParams())
+        content.addView(root, frameParams())
     }
 
     private fun prepareIdStudioSheet(draftId: String, cardWidthMm: Float, cardHeightMm: Float) {
         try {
-            val pdfBytes = IdCardPdfComposer.compose(
-                idStudioStore.readScanBytes(draftId, "front"),
-                idStudioStore.readScanBytes(draftId, "back"),
-                cardWidthMm,
-                cardHeightMm,
-                idStudioFrontRotation,
-                idStudioBackRotation
-            )
-            val output = idStudioStore.savePreparedOutput(pdfBytes)
-            require(idStudioStore.isPreparedDocument(output)) {
-                "The private ID sheet could not be verified."
+            val frontBytes = idStudioStore.readScanBytes(draftId, "front")
+            val backBytes = idStudioStore.readScanBytes(draftId, "back")
+            try {
+                val pdfBytes = IdCardPdfComposer.compose(
+                    frontBytes,
+                    backBytes,
+                    cardWidthMm,
+                    cardHeightMm,
+                    idStudioFrontRotation,
+                    idStudioBackRotation
+                )
+                val metadata = JSONObject()
+                    .put("title", "ID card")
+                    .put("cardWidthMm", cardWidthMm.toDouble())
+                    .put("cardHeightMm", cardHeightMm.toDouble())
+                    .put("frontRotation", idStudioFrontRotation)
+                    .put("backRotation", idStudioBackRotation)
+                val existing = idStudioEditingFile
+                val output = if (existing != null) {
+                    idStudioStore.updatePreparedOutput(existing, pdfBytes, frontBytes, backBytes, metadata)
+                } else {
+                    idStudioStore.savePreparedOutput(pdfBytes, frontBytes, backBytes, metadata)
+                }
+                require(idStudioStore.isPreparedDocument(output)) {
+                    "The private ID sheet could not be verified."
+                }
+            } finally {
+                frontBytes.fill(0)
+                backBytes.fill(0)
             }
             idStudioStore.deleteDraft(draftId)
             idStudioDraftId = null
+            idStudioEditingFile = null
             pendingIdStudioSide = null
             showIdStudioHome()
-            toast("ID print sheet prepared privately. It will appear in the shop picker when you connect to a shop.")
+            toast("ID print sheet saved privately. It will appear in the shop picker when you connect to a shop.")
         } catch (error: Exception) {
-            toast("ID sheet was not prepared: " + message(error) +
-                ". Your scanned sides are still saved so you can retry.")
+            toast("ID sheet was not saved: " + message(error) +
+                ". Your scans remain private so you can retry.")
         }
+    }
+
+    private fun addPhotoStudioPickerSection(parent: LinearLayout) {
+        if (portalUrl == null) return
+        val prepared = photoStudioStore.listPrepared()
+        if (prepared.isEmpty()) return
+        val section = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), dp(10), dp(11), dp(10))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
+        }
+        section.addView(text("Photo Studio · Private documents", 14, R.color.qp_text, true))
+        section.addView(text(
+            "Saved photo sheets stay on this device. Select one to attach it to the upload form. The saved copy remains in Photo Studio.",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(4), 0, dp(8)) })
+        prepared.forEach { file ->
+            val metadata = runCatching { photoStudioStore.readMetadata(file) }.getOrNull() ?: return@forEach
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(5), 0, dp(5))
+            }
+            val thumbnail = ImageView(this).apply {
+                setImageResource(R.drawable.ic_file_image)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                contentDescription = "Photo sheet preview"
+                background = roundedDrawable(getColor(R.color.qp_card), dp(7))
+                photoStudioStore.createThumbnailBase64(file)?.let { encoded ->
+                    val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                    setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                    bytes.fill(0)
+                }
+            }
+            val thumbnailFrame = FrameLayout(this).apply {
+                addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
+                addPrivatePreviewWatermarks(this)
+            }
+            row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(58), dp(76)))
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(9), 0, dp(6), 0)
+            }
+            details.addView(text(metadata.optString("title", "Photo sheet"), 11, R.color.qp_text, true).apply { maxLines = 2 })
+            val sizeCode = metadata.optString("sizeCode")
+            val count = metadata.optInt("photoCount")
+            val perPage = metadata.optInt("photosPerPage")
+            val pageCount = metadata.optInt("pageCount")
+            details.addView(text(
+                "$sizeCode · $count photos · $perPage per A4 · $pageCount pages",
+                9, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(3), 0, 0); maxLines = 2 })
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(button("Select", true).apply {
+                minHeight = dp(36)
+                setOnClickListener { chooseFiles(listOf(file), listOf("Photo Studio")) }
+            }, LinearLayout.LayoutParams(dp(82), dp(36)).apply { marginStart = dp(4) })
+            section.addView(row)
+        }
+        parent.addView(section, linearParams().apply { bottomMargin = dp(8) })
     }
 
     private fun addIdStudioPickerSection(parent: LinearLayout) {
@@ -3774,8 +4316,27 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(5), 0, dp(5))
             }
-            val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            details.addView(text(file.name.removeSuffix(".spid") + ".pdf", 11, R.color.qp_text, true).apply { maxLines = 2 })
+            val thumbnail = ImageView(this).apply {
+                setImageResource(R.drawable.ic_file)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                contentDescription = "ID card sheet preview"
+                background = roundedDrawable(getColor(R.color.qp_card), dp(7))
+                idStudioStore.createThumbnailBase64(file)?.let { encoded ->
+                    val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                    setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                    bytes.fill(0)
+                }
+            }
+            val thumbnailFrame = FrameLayout(this).apply {
+                addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
+                addPrivatePreviewWatermarks(this)
+            }
+            row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(56), dp(74)))
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(8), 0, 0, 0)
+            }
+            details.addView(text(idStudioStore.readMetadata(file).optString("title").ifBlank { "ID card" }, 11, R.color.qp_text, true).apply { maxLines = 2 })
             details.addView(text(
                 android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()) +
                     " · A4 · Front + back",
@@ -3960,6 +4521,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun printBatchGroupName(file: File): String {
         if (idStudioStore.isPreparedDocument(file)) return "ID Studio"
+        if (photoStudioStore.isPreparedDocument(file)) return "Photo Studio"
         val parentPath = file.parentFile?.let { runCatching { store.pathOf(it) }.getOrDefault("") }.orEmpty()
         return parentPath.replace("/", " - ").take(80).ifBlank { "Loose files" }
     }
@@ -3969,8 +4531,8 @@ class MainActivity : AppCompatActivity() {
     private fun chooseFiles(files: List<File>, groupNames: List<String>? = null) {
         val callback = fileCallback
         if (callback == null) { toast("Open a document field in the print page first."); return }
-        if (files.any(idStudioStore::isPreparedDocument) && portalUrl == null) {
-            toast("Scan a shop QR code before selecting a prepared ID for printing.")
+        if (files.any { idStudioStore.isPreparedDocument(it) || photoStudioStore.isPreparedDocument(it) } && portalUrl == null) {
+            toast("Connect to a print shop before selecting a private studio document.")
             return
         }
         if (!fileChooserAllowsMultiple && files.size != 1) {
@@ -3979,14 +4541,20 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             val uploadFiles = files.map { file ->
-                if (idStudioStore.isPreparedDocument(file)) {
-                    idStudioStore.materializePreparedFile(file).also { privateIdUploadTempFiles.add(it) }
-                } else file
+                when {
+                    idStudioStore.isPreparedDocument(file) ->
+                        idStudioStore.materializePreparedFile(file).also { privateIdUploadTempFiles.add(it) }
+                    photoStudioStore.isPreparedDocument(file) ->
+                        photoStudioStore.materializePdf(file).also { privatePhotoUploadTempFiles.add(it) }
+                    else -> file
+                }
             }
             val error = PrintBatchSelectionPolicy.validationError(uploadFiles)
             if (error != null) {
                 uploadFiles.filter { candidate -> candidate in privateIdUploadTempFiles }
                     .forEach { idStudioStore.releaseTransientFile(it); privateIdUploadTempFiles.remove(it) }
+                uploadFiles.filter { candidate -> candidate in privatePhotoUploadTempFiles }
+                    .forEach { photoStudioStore.releaseTransientFile(it); privatePhotoUploadTempFiles.remove(it) }
                 toast(error)
                 return
             }
@@ -3999,12 +4567,30 @@ class MainActivity : AppCompatActivity() {
                 files.forEach { put(createCustomerUploadPdfPreview(it) ?: JSONObject.NULL) }
             }
             val nativePrintKinds = JSONArray().apply {
-                files.forEach { put(if (idStudioStore.isPreparedDocument(it)) "ID_DOCUMENT" else "DOCUMENT") }
+                files.forEach {
+                    put(when {
+                        idStudioStore.isPreparedDocument(it) -> "ID_DOCUMENT"
+                        photoStudioStore.isPreparedDocument(it) -> "PHOTO"
+                        else -> "DOCUMENT"
+                    })
+                }
+            }
+            val nativePhotoSettings = JSONArray().apply {
+                files.forEach { file ->
+                    if (photoStudioStore.isPreparedDocument(file)) {
+                        val metadata = photoStudioStore.readMetadata(file)
+                        put(JSONObject()
+                            .put("sizeCode", metadata.optString("sizeCode"))
+                            .put("photoCount", metadata.optInt("photoCount"))
+                            .put("photosPerPage", metadata.optInt("photosPerPage")))
+                    } else put(JSONObject.NULL)
+                }
             }
             val metadataScript = "window.__smartPrintNativePickerGroups = " +
                 JSONArray().apply { safeGroupNames.forEach { put(it) } }.toString() + ";" +
                 "window.__smartPrintNativePdfPreviews = " + previewTokens.toString() + ";" +
-                "window.__smartPrintNativePrintKinds = " + nativePrintKinds.toString() + ";"
+                "window.__smartPrintNativePrintKinds = " + nativePrintKinds.toString() + ";" +
+                "window.__smartPrintNativePhotoSettings = " + nativePhotoSettings.toString() + ";"
             val deliverSelection = {
                 fileCallback = null
                 chooserSelectedFilePaths.clear()
@@ -4061,6 +4647,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createCustomerUploadPdfPreview(file: File): String? {
+        if (photoStudioStore.isPreparedDocument(file)) {
+            val materialized = runCatching { photoStudioStore.materializePdf(file) }.getOrNull() ?: return null
+            val token = UUID.randomUUID().toString()
+            customerUploadPdfPreviews[token] = materialized
+            return token
+        }
         val source = runCatching { file.canonicalFile }.getOrNull() ?: return null
         if (!source.isFile || !source.name.endsWith(".pdf", true) ||
             source.length() !in 1..MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES) return null
@@ -4134,6 +4726,10 @@ class MainActivity : AppCompatActivity() {
         customerUploadPdfPreviews.values.forEach { file ->
             val parent = runCatching { file.canonicalFile.parentFile }.getOrNull()
             if (parent == previewDirectory) file.delete()
+            // Prepared Photo Studio previews live in the Photo Studio transient cache,
+            // not the generic customer-preview folder. Release them through its
+            // canonical-path guard; original selected files remain untouched.
+            if (::photoStudioStore.isInitialized) photoStudioStore.releaseTransientFile(file)
         }
         customerUploadPdfPreviews.clear()
         previewDirectory.deleteRecursively()
@@ -4267,12 +4863,16 @@ class MainActivity : AppCompatActivity() {
         viewingDocument = file
         documentViewerReturnToIdStudio = isPreparedId
         privateIdViewerOpen = documentViewerReturnToIdStudio
+        privateIdPreviewCaptureAllowed = isPreparedId
         if (documentViewerReturnToIdStudio) idStudioScreenOpen = false
         applySensitiveWindowProtection()
         pickerMode = false
         profileVisible = false
         clearLibrarySelection()
-        setToolbarPage(if (isPreparedId) file.name.removeSuffix(".spid") + ".pdf" else file.name)
+        setToolbarPage(if (isPreparedId) {
+            runCatching { idStudioStore.readMetadata(file).optString("title") }.getOrNull()
+                ?.takeIf { it.isNotBlank() } ?: "ID card preview"
+        } else file.name)
         setToolbarBackAction(
             if (documentViewerReturnToIdStudio) "Back to ID Studio" else "Back to My Files",
             ::closeDocumentViewer
@@ -4298,10 +4898,17 @@ class MainActivity : AppCompatActivity() {
         }
         val reader = SmartPrintDocumentViewer(this, documentFile, images, startPosition) { current ->
             viewingDocument = current
-            setToolbarPage(current.name)
+            setToolbarPage(if (isPreparedId) "ID card preview" else current.name)
         }
         documentViewer = reader
-        content.addView(reader, frameParams())
+        if (isPreparedId) {
+            val previewFrame = FrameLayout(this)
+            previewFrame.addView(reader, FrameLayout.LayoutParams(-1, -1))
+            addPrivatePreviewWatermarks(previewFrame)
+            content.addView(previewFrame, frameParams())
+        } else {
+            content.addView(reader, frameParams())
+        }
     }
 
     private fun showCustomerUploadPdfPreview(token: String) {
@@ -4349,6 +4956,7 @@ class MainActivity : AppCompatActivity() {
         privateIdViewerTempFile = null
         customerUploadPdfPreviewOpen = false
         privateIdViewerOpen = false
+        privateIdPreviewCaptureAllowed = false
         applySensitiveWindowProtection()
         if (documentViewerReturnToIdStudio) {
             documentViewerReturnToIdStudio = false

@@ -21,7 +21,7 @@ import kotlin.math.min
 object IdCardPdfComposer {
     const val MAX_OUTPUT_BYTES = 20L * 1024L * 1024L
     private const val MAX_DECODE_EDGE = 2800
-    private const val PREVIEW_DECODE_EDGE = 900
+    private const val PREVIEW_DECODE_EDGE = 2400
 
     fun compose(
         frontBytes: ByteArray,
@@ -68,20 +68,24 @@ object IdCardPdfComposer {
         frontRotationDegrees: Int,
         backRotationDegrees: Int,
         cardWidthMm: Float = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM,
-        cardHeightMm: Float = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
+        cardHeightMm: Float = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM,
+        previewWidthPixels: Int = 1190
     ): Bitmap {
+        require(previewWidthPixels in 595..1800) { "The A4 preview size is outside the supported range." }
         require(frontBytes.isNotEmpty() && backBytes.isNotEmpty()) { "Both sides of the card must be scanned." }
         require(frontRotationDegrees in setOf(0, 180) && backRotationDegrees in setOf(0, 180)) {
             "Card orientation must be 0 or 180 degrees."
         }
         val layout = IdCardLayoutPolicy.calculate(cardWidthMm, cardHeightMm)
+        val scale = previewWidthPixels.toFloat() / IdCardLayoutPolicy.PAGE_WIDTH_POINTS
         val preview = Bitmap.createBitmap(
-            IdCardLayoutPolicy.PAGE_WIDTH_POINTS.toInt(),
-            IdCardLayoutPolicy.PAGE_HEIGHT_POINTS.toInt(),
+            previewWidthPixels,
+            (IdCardLayoutPolicy.PAGE_HEIGHT_POINTS * scale).toInt(),
             Bitmap.Config.ARGB_8888
         )
         try {
             val canvas = Canvas(preview)
+            canvas.scale(scale, scale)
             canvas.drawColor(Color.WHITE)
             drawCard(canvas, frontBytes, layout.front, frontRotationDegrees, "FRONT", layout.frontLabelTop, layout, PREVIEW_DECODE_EDGE)
             drawCard(canvas, backBytes, layout.back, backRotationDegrees, "BACK", layout.backLabelTop, layout, PREVIEW_DECODE_EDGE)
@@ -90,6 +94,22 @@ object IdCardPdfComposer {
             preview.recycle()
             throw error
         }
+    }
+
+    fun sourceResolutionDpi(
+        sourceBytes: ByteArray,
+        cardWidthMm: Float = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM,
+        cardHeightMm: Float = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
+    ): Int {
+        require(sourceBytes.isNotEmpty()) { "The scanned card side is unavailable." }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(sourceBytes, 0, sourceBytes.size, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) { "The scanned card side could not be read." }
+        val longPixels = max(bounds.outWidth, bounds.outHeight).toFloat()
+        val shortPixels = min(bounds.outWidth, bounds.outHeight).toFloat()
+        val longInches = max(cardWidthMm, cardHeightMm) / 25.4f
+        val shortInches = min(cardWidthMm, cardHeightMm) / 25.4f
+        return min(longPixels / longInches, shortPixels / shortInches).toInt()
     }
 
     fun renderSidePreview(sourceBytes: ByteArray, rotationDegrees: Int): Bitmap {

@@ -845,7 +845,7 @@ class PhotoStudioWebViewInstrumentedTest {
             )
             assertTrue(
                 "Shop mode must explain that the prepared PDF replaces the unpaid job file.",
-                evaluate(scenario, "document.querySelector('[role=dialog]')?.innerText.includes('Save your prepared multi-page A4 photo PDF to this existing unpaid job.')") == "true"
+                evaluate(scenario, "document.querySelector('[role=dialog]')?.innerText.includes('Replace the unpaid job photo PDF; approval and dispatch still apply.')") == "true"
             )
             assertTrue(
                 "The shop owner must have the existing-job save action.",

@@ -9,4 +9,6 @@ public sealed record AgentLocalPhotoRevisionRequest(
     string PageSizesJson,
     string PhotoSizeCode,
     int PhotoCount,
-    int PhotosPerPage);
+    int PhotosPerPage,
+    long? ExpectedQuotedAmountMinor = null,
+    int? ExpectedPricingVersion = null);

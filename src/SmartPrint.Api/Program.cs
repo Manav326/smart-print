@@ -3661,14 +3661,16 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
     }
 
-    if (stored.Analysis.PageCount != expectedPageCount)
+    if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+        stored.Analysis.PageCount != expectedPageCount ||
+        !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount))
     {
         await storage.DeleteAsync(stored.StorageKey);
         await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new
         {
-            code = "photo_sheet_page_count_mismatch",
-            message = $"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for {photoCount} photos of the selected size."
+            code = "photo_sheet_layout_invalid",
+            message = $"The replacement Photo Studio PDF must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page 300-DPI photo raster."
         });
     }
 
@@ -4953,6 +4955,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
                 {
                     job.Id, job.PrivatePrinting, job.PrintKind, job.JobNumber, job.Status, job.PageCount,
                     job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
+                    job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage,
                     job.PricingVersion, job.Currency, job.QuotedAmountMinor, job.CreatedUtc
                 },
                 Document = new
@@ -5006,6 +5009,27 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             code = "id_document_pdf_invalid",
             message = "The ID card sheet must be a valid, single-page A4 portrait PDF. Recheck the prepared sheet before sending it."
         });
+
+    if (ticket.PrintKind == "PHOTO")
+    {
+        if (!string.Equals(ticket.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            ticket.PhotoSizeCode is not string photoSizeCode ||
+            ticket.PhotoCount is not int photoCount ||
+            ticket.PhotosPerPage is not int photosPerPage)
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_metadata_invalid",
+                message = "The photo sheet must be a PDF with complete photo size, quantity and A4 layout details. Select it again from the photo library."
+            });
+        var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+        if (request.PageCount != expectedPageCount ||
+            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, expectedPageCount))
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_sheet_layout_invalid",
+                message = $"The saved Photo Studio sheet must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page photo raster."
+            });
+    }
 
     var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
     if (!subscription.IsAccessActive)
@@ -5068,6 +5092,9 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         Orientation = locked.Orientation,
         PrivatePrinting = true,
         PrintKind = locked.PrintKind,
+        PhotoSizeCode = locked.PhotoSizeCode,
+        PhotoCount = locked.PhotoCount ?? 0,
+        PhotosPerPage = locked.PhotosPerPage,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -5594,6 +5621,9 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                     completedJob.PaperSize,
                     completedJob.IsDuplex,
                     completedJob.Orientation,
+                    completedJob.PhotoSizeCode,
+                    completedJob.PhotoCount,
+                    completedJob.PhotosPerPage,
                     completedJob.PricingVersion,
                     completedJob.Currency,
                     completedJob.QuotedAmountMinor,
@@ -5808,6 +5838,27 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             message = "The ID card sheet must be a valid, single-page A4 portrait PDF. Recheck the prepared sheet before sending it."
         });
 
+    if (ticket.PrintKind == "PHOTO")
+    {
+        if (!string.Equals(ticket.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            ticket.PhotoSizeCode is not string photoSizeCode ||
+            ticket.PhotoCount is not int photoCount ||
+            ticket.PhotosPerPage is not int photosPerPage)
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_metadata_invalid",
+                message = "The photo sheet must be a PDF with complete photo size, quantity and A4 layout details."
+            });
+        var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+        if (request.PageCount != expectedPageCount ||
+            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, expectedPageCount))
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_sheet_layout_invalid",
+                message = $"The Photo Studio PDF must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page photo raster."
+            });
+    }
+
     var now = DateTimeOffset.UtcNow;
     var privateRelayClaim = ticket.PrivatePrinting &&
         ticket.PrivateRelayUploadedUtc is not null &&
@@ -5868,6 +5919,9 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                     existingJob.PaperSize,
                     existingJob.IsDuplex,
                     existingJob.Orientation,
+                    existingJob.PhotoSizeCode,
+                    existingJob.PhotoCount,
+                    existingJob.PhotosPerPage,
                     existingJob.PricingVersion,
                     existingJob.Currency,
                     existingJob.QuotedAmountMinor,
@@ -5916,6 +5970,9 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         Orientation = ticket.Orientation,
         PrivatePrinting = ticket.PrivatePrinting,
         PrintKind = ticket.PrintKind,
+        PhotoSizeCode = ticket.PhotoSizeCode,
+        PhotoCount = ticket.PhotoCount ?? 0,
+        PhotosPerPage = ticket.PhotosPerPage,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -6437,10 +6494,17 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
 
     if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
         string.IsNullOrWhiteSpace(request.Sha256) || request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
-        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000 || !IsValidPageSizesJson(request.PageSizesJson))
+        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000 || !IsValidPageSizesJson(request.PageSizesJson))
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
             ["photoSheet"] = ["The prepared local photo sheet metadata is invalid."]
+        });
+
+    if (!PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, request.PageCount))
+        return Results.UnprocessableEntity(new
+        {
+            code = "photo_sheet_layout_invalid",
+            message = "The revised local photo PDF must contain only portrait A4 pages with one full-page 300-DPI photo raster on each page."
         });
 
     var hasPayment = await db.PrintPayments.AnyAsync(item =>
@@ -6522,6 +6586,24 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         !LocalDocumentPhotoRevisionGrant.IsFor(grant, device.TenantId, jobId, device.Id))
         return Results.Unauthorized();
 
+    if (string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000 ||
+        !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, request.PageCount))
+        return Results.UnprocessableEntity(new
+        {
+            code = "photo_sheet_layout_invalid",
+            message = "The completed local photo PDF must contain only portrait A4 pages with one full-page 300-DPI photo raster on each page."
+        });
+
+    if (request.ExpectedQuotedAmountMinor is not long expectedQuotedAmountMinor ||
+        expectedQuotedAmountMinor <= 0 ||
+        request.ExpectedPricingVersion is not int expectedPricingVersion ||
+        expectedPricingVersion <= 0)
+        return Results.BadRequest(new
+        {
+            code = "photo_revision_price_snapshot_missing",
+            message = "The local photo revision must include the price and pricing version returned by its authorization."
+        });
+
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
         $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {device.TenantId} FOR UPDATE")
@@ -6566,6 +6648,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.PhotoSizeCode == request.PhotoSizeCode &&
         job.PhotoCount == request.PhotoCount &&
         job.PhotosPerPage == request.PhotosPerPage &&
+        job.QuotedAmountMinor == request.ExpectedQuotedAmountMinor &&
+        job.PricingVersion == request.ExpectedPricingVersion &&
         string.Equals(
             job.PageRefundAllocationsJson,
             JsonSerializer.Serialize(PricingCalculator.CalculatePhotoPageRefundAllocations(
@@ -6629,7 +6713,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
 
     if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
         request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
-        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000)
+        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000)
     {
         await transaction.RollbackAsync(ct);
         return Results.BadRequest(new { code = "photo_revision_output_invalid", message = "The local Agent supplied invalid prepared-sheet metadata." });
@@ -6657,6 +6741,16 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
+    }
+
+    if (pricing.Version != expectedPricingVersion || amount != expectedQuotedAmountMinor)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "photo_revision_pricing_changed",
+            message = "Photo pricing changed while this sheet was being saved. The original photo is unchanged; reopen Photo Studio to review the current price."
+        });
     }
 
     var now = DateTimeOffset.UtcNow;
@@ -7808,6 +7902,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
     var requestedDuplexText = form["isDuplex"].FirstOrDefault() ?? "false";
     var requestedCopiesText = form["copies"].FirstOrDefault() ?? "1";
     var requestedOrientation = form["orientation"].FirstOrDefault() ?? "AUTO";
+    var requestedPrintKind = form["printKind"].FirstOrDefault() ?? "DOCUMENT";
     if (requestedColourMode is not ("Mono" or "Colour") ||
         requestedPaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         !bool.TryParse(requestedDuplexText, out var requestedDuplex) ||
@@ -7850,6 +7945,46 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded file name is invalid." });
     originalName = originalName[..Math.Min(originalName.Length, 255)];
 
+    var photoSizeCode = form["photoSizeCode"].FirstOrDefault();
+    var photoCountText = form["photoCount"].FirstOrDefault();
+    var photosPerPageText = form["photosPerPage"].FirstOrDefault();
+    var hasPhotoMetadata =
+        !string.IsNullOrWhiteSpace(photoSizeCode) ||
+        !string.IsNullOrWhiteSpace(photoCountText) ||
+        !string.IsNullOrWhiteSpace(photosPerPageText);
+    int? photoCount = int.TryParse(photoCountText, out var parsedPhotoCount) ? parsedPhotoCount : null;
+    int? photosPerPage = int.TryParse(photosPerPageText, out var parsedPhotosPerPage) ? parsedPhotosPerPage : null;
+    var validPhotoMetadata =
+        requestedPrintKind == "PHOTO" &&
+        photoSizeCode is string supportedPhotoSizeCode &&
+        supportedPhotoSizeCode is "35x45" or "25x35" or "2x2" or "4x6" &&
+        photoCount is >= 1 and <= 100 &&
+        photosPerPage is int requestedPhotosPerPage &&
+        requestedPhotosPerPage >= 1 &&
+        requestedPhotosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(supportedPhotoSizeCode);
+    var isPhotoUpload = requestedPrintKind == "PHOTO";
+    var invalidPhotoUpload =
+        isPhotoUpload &&
+        (!validPhotoMetadata ||
+         !Path.GetExtension(originalName).Equals(".pdf", StringComparison.OrdinalIgnoreCase) ||
+         requestedColourMode != "Colour" ||
+         requestedPaperSize != "A4" ||
+         requestedDuplex ||
+         requestedCopies != 1 ||
+         requestedOrientation != "AUTO");
+    if (requestedPrintKind is not ("DOCUMENT" or "PHOTO") ||
+        (hasPhotoMetadata && !validPhotoMetadata) ||
+        invalidPhotoUpload)
+    {
+        return Results.Conflict(new
+        {
+            code = requestedPrintKind == "ID_DOCUMENT" ? "id_document_private_printing_required" : "photo_metadata_invalid",
+            message = requestedPrintKind == "ID_DOCUMENT"
+                ? "ID Studio documents require Private Printing through the paired shop computer."
+                : "Photo Studio sheets must be a valid A4 colour PDF with a supported photo size, quantity and per-page layout. No document was uploaded."
+        });
+    }
+
     // A retry must be the exact original document and the exact original
     // settings. Do not return an existing job just because its key matches;
     // verify the body before treating this request as idempotent.
@@ -7859,7 +7994,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
         {
             job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId,
             job.JobNumber, job.Status, job.PageCount, job.Copies, job.ColourMode,
-            job.PaperSize, job.IsDuplex, job.Orientation, job.PricingVersion,
+            job.PaperSize, job.IsDuplex, job.Orientation, job.PrintKind,
+            job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PricingVersion,
             job.Currency, job.QuotedAmountMinor, job.CreatedUtc
         })
         .SingleOrDefaultAsync(ct);
@@ -7892,6 +8028,10 @@ publicApi.MapPost("/sessions/current/jobs", async (
             existing.PaperSize != requestedPaperSize ||
             existing.IsDuplex != requestedDuplex ||
             existing.Orientation != requestedOrientation ||
+            existing.PrintKind != requestedPrintKind ||
+            existing.PhotoSizeCode != photoSizeCode ||
+            existing.PhotoCount != (photoCount ?? 0) ||
+            existing.PhotosPerPage != photosPerPage ||
             (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
             existingDocument.OriginalFileName != originalName ||
             existingDocument.SizeBytes != file.Length ||
@@ -7967,6 +8107,24 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
     }
 
+    var photoPageCount = 0;
+    if (isPhotoUpload)
+    {
+        photoPageCount = PricingCalculator.PhotoPageCount(
+            photoCount ?? 0, photoSizeCode ?? string.Empty, photosPerPage ?? 0);
+        if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            stored.Analysis.PageCount != photoPageCount ||
+            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, photoPageCount))
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_sheet_layout_invalid",
+                message = $"The Photo Studio PDF must contain exactly {photoPageCount} portrait A4 page(s), each with one full-page 300-DPI photo raster."
+            });
+        }
+    }
+
     var job = new PrintJob
     {
         TenantId = session.TenantId,
@@ -7979,12 +8137,16 @@ publicApi.MapPost("/sessions/current/jobs", async (
         JobNumber = $"SP-{now:yyMMdd}-{Guid.NewGuid().ToString("N")[..8].ToUpperInvariant()}",
         Status = "AWAITING_CONFIGURATION",
         IdempotencyKey = idempotencyKey,
-        PageCount = stored.Analysis.PageCount,
+        PageCount = isPhotoUpload ? photoPageCount : stored.Analysis.PageCount,
         Copies = requestedCopies,
         ColourMode = requestedColourMode,
         PaperSize = requestedPaperSize,
         IsDuplex = requestedDuplex,
         Orientation = requestedOrientation,
+        PrintKind = requestedPrintKind,
+        PhotoSizeCode = photoSizeCode,
+        PhotoCount = photoCount ?? 0,
+        PhotosPerPage = photosPerPage,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -8015,7 +8177,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
             {
                 item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.BatchGroupName,
                 item.JobNumber, item.Status, item.PageCount, item.Copies, item.ColourMode,
-                item.PaperSize, item.IsDuplex, item.Orientation, item.PricingVersion,
+                item.PaperSize, item.IsDuplex, item.Orientation, item.PrintKind,
+                item.PhotoSizeCode, item.PhotoCount, item.PhotosPerPage, item.PricingVersion,
                 item.Currency, item.QuotedAmountMinor, item.CreatedUtc
             })
             .SingleOrDefaultAsync(ct);
@@ -8037,6 +8200,10 @@ publicApi.MapPost("/sessions/current/jobs", async (
                 racedJob.PaperSize != requestedPaperSize ||
                 racedJob.IsDuplex != requestedDuplex ||
                 racedJob.Orientation != requestedOrientation ||
+                racedJob.PrintKind != requestedPrintKind ||
+                racedJob.PhotoSizeCode != photoSizeCode ||
+                racedJob.PhotoCount != (photoCount ?? 0) ||
+                racedJob.PhotosPerPage != photosPerPage ||
                 (requestedBatchName is not null && racedJob.BatchName != requestedBatchName) ||
                 racedDocument.OriginalFileName != originalName ||
                 racedDocument.SizeBytes != file.Length ||
@@ -8279,6 +8446,19 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         _ => null
     };
     var isIdDocumentUpload = request.PrintKind == "ID_DOCUMENT";
+    var hasPhotoMetadata = request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null;
+    var validPhotoMetadata = request.PrintKind == "PHOTO" &&
+        request.PhotoSizeCode is string photoSizeCode &&
+        (photoSizeCode is "35x45" or "25x35" or "2x2" or "4x6") &&
+        request.PhotoCount is >= 1 and <= 100 &&
+        request.PhotosPerPage is int photosPerPage &&
+        photosPerPage >= 1 &&
+        photosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
+    var invalidPrivatePhotoUpload = request.PrivatePrinting && request.PrintKind == "PHOTO" &&
+        (!validPhotoMetadata || mediaType != "application/pdf" ||
+         request.ColourMode != "Colour" || request.PaperSize != "A4" ||
+         request.IsDuplex || request.Copies != 1 ||
+         request.Orientation is not ("AUTO" or "PORTRAIT"));
     if (request.PrintKind is not ("DOCUMENT" or "PHOTO" or "ID_DOCUMENT") ||
         (isIdDocumentUpload && (!request.PrivatePrinting ||
             mediaType != "application/pdf" ||
@@ -8286,11 +8466,15 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             request.PaperSize != "A4" ||
             request.IsDuplex ||
             request.Copies != 1 ||
-            request.Orientation != "PORTRAIT")))
+            request.Orientation != "PORTRAIT")) ||
+        (hasPhotoMetadata && !validPhotoMetadata) ||
+        invalidPrivatePhotoUpload)
         return Results.Conflict(new
         {
-            code = "id_document_private_printing_required",
-            message = "ID card sheets require Private Printing, a one-page A4 portrait PDF, colour, one copy and single-sided output. Start a new Private Printing batch."
+            code = isIdDocumentUpload ? "id_document_private_printing_required" : "photo_metadata_invalid",
+            message = isIdDocumentUpload
+                ? "ID card sheets require Private Printing, a one-page A4 portrait PDF, colour, one copy and single-sided output. Start a new Private Printing batch."
+                : "Private Photo Studio sheets require a supported photo size, quantity, A4 sheet layout and a single-sided colour A4 PDF. No document was uploaded."
         });
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (mediaType is null || request.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
@@ -8350,7 +8534,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.PaperSize != request.PaperSize ||
             existing.IsDuplex != request.IsDuplex ||
             existing.Copies != request.Copies ||
-            existing.Orientation != request.Orientation)
+            existing.Orientation != request.Orientation ||
+            existing.PhotoSizeCode != request.PhotoSizeCode ||
+            existing.PhotoCount != request.PhotoCount ||
+            existing.PhotosPerPage != request.PhotosPerPage)
         {
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document, batch or set of print options." });
         }
@@ -8584,6 +8771,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         Orientation = request.Orientation,
         PrivatePrinting = request.PrivatePrinting,
         PrintKind = request.PrintKind,
+        PhotoSizeCode = request.PhotoSizeCode,
+        PhotoCount = request.PhotoCount,
+        PhotosPerPage = request.PhotosPerPage,
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
@@ -8665,6 +8855,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             racedTicket.IsDuplex == request.IsDuplex &&
             racedTicket.Copies == request.Copies &&
             racedTicket.Orientation == request.Orientation &&
+            racedTicket.PhotoSizeCode == request.PhotoSizeCode &&
+            racedTicket.PhotoCount == request.PhotoCount &&
+            racedTicket.PhotosPerPage == request.PhotosPerPage &&
             CryptographicOperations.FixedTimeEquals(
                 Convert.FromHexString(racedTicket.GrantHash),
                 Convert.FromHexString(grantHash));
@@ -9329,6 +9522,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             PaperSize = ticket.PaperSize,
             IsDuplex = ticket.IsDuplex,
             Orientation = ticket.Orientation,
+            PrintKind = ticket.PrintKind,
+            PhotoSizeCode = ticket.PhotoSizeCode,
+            PhotoCount = ticket.PhotoCount ?? 0,
+            PhotosPerPage = ticket.PhotosPerPage,
             Currency = "INR",
             QuotedAmountMinor = 0,
             CreatedUtc = commitNow,
@@ -9473,7 +9670,14 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             request.PaperSize != "A4" ||
             request.IsDuplex ||
             request.Orientation != "PORTRAIT")) ||
+        (isPhotoPrint && (
+            job.PrintKind == "ID_DOCUMENT" ||
+            (job.PrintKind == "PHOTO" &&
+                (request.PhotoSizeCode != job.PhotoSizeCode ||
+                 request.PhotoCount != job.PhotoCount ||
+                 request.PhotosPerPage != job.PhotosPerPage)))) ||
         (job.PrintKind == "ID_DOCUMENT" && !isIdDocument) ||
+        (job.PrintKind == "PHOTO" && !isPhotoPrint) ||
         job.PageCount is <= 0 or > 500 ||
         request.Copies is < 1 or > 100 ||
         request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
@@ -9536,13 +9740,24 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         {
             var photoSizeCode = request.PhotoSizeCode!;
             var photoCount = request.PhotoCount!.Value;
-            var photosPerPage = request.PhotosPerPage ?? photoCount;
+            var photosPerPage = request.PhotosPerPage!.Value;
             var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
             if (job.PageCount != expectedPageCount)
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {
                     ["pageCount"] = [$"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for {photoCount} photos of the selected size."]
+                });
+            }
+
+            var photoDocument = await db.PrintDocuments.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.TenantId == job.TenantId && item.PrintJobId == job.Id, ct);
+            if (photoDocument is null ||
+                !PhotoSheetPdfRules.HasExactlyA4PortraitPages(photoDocument.PageSizesJson, expectedPageCount))
+            {
+                return Results.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["photoSheet"] = ["The saved Photo Studio document must contain the selected number of portrait A4 pages with a full-page photo raster."]
                 });
             }
 
