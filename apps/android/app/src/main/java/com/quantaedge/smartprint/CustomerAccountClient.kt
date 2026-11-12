@@ -205,9 +205,21 @@ object CustomerAccountClient {
             null,
             accessToken
         )
-        val jobs = response.optJSONArray("items") ?: JSONArray()
-        val items = (0 until jobs.length()).mapNotNull { index ->
-            val job = jobs.optJSONObject(index) ?: return@mapNotNull null
+        return parseHistoryPage(response, page, size)
+    }
+
+    internal fun parseHistoryPage(
+        response: JSONObject,
+        requestedPage: Int,
+        requestedSize: Int
+    ): CustomerHistoryPage {
+        require(requestedPage >= 0) { "History page must be zero or greater." }
+        require(requestedSize in 1..100) { "History page size must be between 1 and 100." }
+        val itemsJson = response.optJSONArray("items")
+            ?: throw IllegalStateException("The server returned a history page without its items.")
+        val items = (0 until itemsJson.length()).mapNotNull { index ->
+            val job = itemsJson.optJSONObject(index)
+                ?: throw IllegalStateException("The server returned an invalid history record.")
             CustomerPrintHistoryItem(
                 id = job.optString("id"),
                 batchId = job.optString("batchId").takeUnless { it.isBlank() || it == "null" },
@@ -234,20 +246,35 @@ object CustomerAccountClient {
                 photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage")
             )
         }
-        val totalItems = response.optLong("totalItems", items.size.toLong()).coerceAtLeast(0L)
-        val responsePage = response.optInt("page", page)
-        val responseSize = response.optInt("size", size)
-        val totalPages = response.optInt(
-            "totalPages",
-            if (totalItems == 0L) 0 else ((totalItems + responseSize - 1) / responseSize).toInt()
-        )
+        val responsePage = response.getInt("page")
+        val responseSize = response.getInt("size")
+        val totalItems = response.getLong("totalItems")
+        val totalPages = response.getInt("totalPages")
+        val hasNext = response.getBoolean("hasNext")
+        require(responsePage == requestedPage && responseSize == requestedSize) {
+            "The server returned a different history page than requested."
+        }
+        require(totalItems >= 0L && totalPages >= 0) {
+            "The server returned an invalid history total."
+        }
+        val expectedTotalPages = if (totalItems == 0L) 0 else
+            ((totalItems + responseSize - 1L) / responseSize).toInt()
+        require(totalPages == expectedTotalPages && hasNext == (responsePage + 1 < totalPages)) {
+            "The server returned inconsistent history pagination."
+        }
+        val offset = responsePage.toLong() * responseSize
+        val expectedItemCount = if (offset >= totalItems) 0 else
+            minOf(responseSize.toLong(), totalItems - offset).toInt()
+        require(items.size == expectedItemCount) {
+            "The server returned an incomplete history page."
+        }
         return CustomerHistoryPage(
             items = items,
             page = responsePage,
             size = responseSize,
             totalItems = totalItems,
             totalPages = totalPages,
-            hasNext = response.optBoolean("hasNext", responsePage + 1 < totalPages)
+            hasNext = hasNext
         )
     }
 
