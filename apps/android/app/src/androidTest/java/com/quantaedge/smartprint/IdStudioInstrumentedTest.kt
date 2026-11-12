@@ -199,7 +199,7 @@ class IdStudioInstrumentedTest {
                 onView(withText("Front")).check(matches(isDisplayed()))
                 onView(withText("Back")).check(matches(isDisplayed()))
                 onView(withText("Save")).check(matches(isDisplayed()))
-                onView(withText("A4 sheet")).perform(click())
+                onView(withText("View")).perform(click())
                 onView(withContentDescription("A4 ID front and back print sheet preview. Pinch to zoom."))
                     .check(matches(isDisplayed()))
                 onView(withText("Save")).check(matches(isDisplayed()))
@@ -209,6 +209,45 @@ class IdStudioInstrumentedTest {
             }
         } finally {
             store.deleteDraft(draftId)
+        }
+    }
+
+    @Test
+    fun viewingAPreparedIdIsStrictlyReadOnlyAndCanPreviewItsA4Sheet() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("smartprint.customer.last-shop", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        val store = IdStudioStore(context.filesDir, context.cacheDir)
+        val front = testJpeg()
+        val back = testJpeg()
+        val file = store.savePreparedOutput(
+            IdCardPdfComposer.compose(front, back),
+            front,
+            back
+        )
+        front.fill(0)
+        back.fill(0)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredMethod(
+                        "viewPreparedId",
+                        File::class.java
+                    ).apply { isAccessible = true }.invoke(activity, file)
+                }
+                onView(withText("View your ID")).check(matches(isDisplayed()))
+                onView(withText("View mode")).check(matches(isDisplayed()))
+                onView(withText("Save")).check(doesNotExist())
+                onView(withContentDescription("Change ID card dimensions")).check(doesNotExist())
+                onView(withText("View")).perform(click())
+                onView(withContentDescription("A4 ID front and back print sheet preview. Pinch to zoom."))
+                    .check(matches(isDisplayed()))
+                onView(withText("View mode")).check(matches(isDisplayed()))
+                onView(withText("Save")).check(doesNotExist())
+                onView(withText("Prepare A4 Print Sheet")).check(doesNotExist())
+            }
+        } finally {
+            store.deletePrepared(file)
         }
     }
 
