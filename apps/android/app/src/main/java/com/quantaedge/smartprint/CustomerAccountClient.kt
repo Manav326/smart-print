@@ -191,6 +191,13 @@ object CustomerAccountClient {
     fun profile(baseUrl: String, accessToken: String): JSONObject =
         request(baseUrl, "/api/v1/customer/me", null, accessToken)
 
+    fun historyCount(baseUrl: String, accessToken: String): Long {
+        val response = request(baseUrl, "/api/v1/customer/jobs/count", null, accessToken)
+        val totalCount = response.getLong("totalCount")
+        require(totalCount >= 0L) { "The server returned an invalid history count." }
+        return totalCount
+    }
+
     fun historyPage(
         baseUrl: String,
         accessToken: String,
