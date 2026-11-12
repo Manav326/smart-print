@@ -5010,13 +5010,14 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
 
     if (ticket.PrintKind == "PHOTO")
     {
-        if (ticket.PhotoSizeCode is not string photoSizeCode ||
+        if (!string.Equals(ticket.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            ticket.PhotoSizeCode is not string photoSizeCode ||
             ticket.PhotoCount is not int photoCount ||
             ticket.PhotosPerPage is not int photosPerPage)
             return Results.UnprocessableEntity(new
             {
                 code = "photo_metadata_invalid",
-                message = "The saved Photo Studio document has incomplete print details. Select it again from the private library."
+                message = "The photo sheet must be a PDF with complete photo size, quantity and A4 layout details. Select it again from the photo library."
             });
         var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
         if (request.PageCount != expectedPageCount ||
@@ -5837,14 +5838,14 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
 
     if (ticket.PrintKind == "PHOTO")
     {
-        if (!ticket.PrivatePrinting ||
+        if (!string.Equals(ticket.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
             ticket.PhotoSizeCode is not string photoSizeCode ||
             ticket.PhotoCount is not int photoCount ||
             ticket.PhotosPerPage is not int photosPerPage)
             return Results.UnprocessableEntity(new
             {
                 code = "photo_metadata_invalid",
-                message = "This saved Photo Studio sheet is missing its private print details."
+                message = "The photo sheet must be a PDF with complete photo size, quantity and A4 layout details."
             });
         var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
         if (request.PageCount != expectedPageCount ||
@@ -8339,6 +8340,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         (photoSizeCode is "35x45" or "25x35" or "2x2" or "4x6") &&
         request.PhotoCount is >= 1 and <= 100 &&
         request.PhotosPerPage is int photosPerPage &&
+        photosPerPage >= 1 &&
         photosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
     var invalidPrivatePhotoUpload = request.PrivatePrinting && request.PrintKind == "PHOTO" &&
         (!validPhotoMetadata || mediaType != "application/pdf" ||
@@ -9556,11 +9558,12 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             request.PaperSize != "A4" ||
             request.IsDuplex ||
             request.Orientation != "PORTRAIT")) ||
-        (isPhotoPrint && (!job.PrivatePrinting ||
-            job.PrintKind != "PHOTO" ||
-            request.PhotoSizeCode != job.PhotoSizeCode ||
-            request.PhotoCount != job.PhotoCount ||
-            request.PhotosPerPage != job.PhotosPerPage)) ||
+        (isPhotoPrint && (
+            job.PrintKind == "ID_DOCUMENT" ||
+            (job.PrintKind == "PHOTO" &&
+                (request.PhotoSizeCode != job.PhotoSizeCode ||
+                 request.PhotoCount != job.PhotoCount ||
+                 request.PhotosPerPage != job.PhotosPerPage)))) ||
         (job.PrintKind == "ID_DOCUMENT" && !isIdDocument) ||
         (job.PrintKind == "PHOTO" && !isPhotoPrint) ||
         job.PageCount is <= 0 or > 500 ||

@@ -5,7 +5,7 @@ using SmartPrint.Api.Data;
 namespace SmartPrint.Api.Migrations;
 
 [DbContext(typeof(SmartPrintDbContext))]
-[Migration("202611120001_AddLocalUploadTicketPhotoMetadata")]
+[Migration("202611120002_AddLocalUploadTicketPhotoMetadata")]
 public sealed class AddLocalUploadTicketPhotoMetadata : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
