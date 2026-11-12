@@ -545,6 +545,102 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun launcherMarkUsesTheFullSmartPrintArtworkInsideAdaptiveIconSafePadding() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val foreground = context.getDrawable(R.drawable.ic_launcher_foreground)
+            ?: throw AssertionError("The launcher must provide its foreground logo.")
+        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        try {
+            foreground.setBounds(0, 0, 256, 256)
+            foreground.draw(android.graphics.Canvas(bitmap))
+            var left = bitmap.width
+            var top = bitmap.height
+            var right = -1
+            var bottom = -1
+            for (y in 0 until bitmap.height) {
+                for (x in 0 until bitmap.width) {
+                    if (android.graphics.Color.alpha(bitmap.getPixel(x, y)) > 0) {
+                        left = minOf(left, x)
+                        top = minOf(top, y)
+                        right = maxOf(right, x)
+                        bottom = maxOf(bottom, y)
+                    }
+                }
+            }
+            val width = right - left + 1
+            val height = bottom - top + 1
+            assertTrue("The full SmartPrint mark must not be reduced to a tiny central glyph.", width >= 145)
+            assertTrue("The full SmartPrint mark must preserve its intended height.", height >= 150)
+            assertTrue("The logo must retain balanced adaptive-icon padding.", left >= 45 && top >= 45)
+            assertTrue("The logo must stay inside the safe area instead of spilling into the mask.", right <= 211 && bottom <= 215)
+            assertTrue("The logo must not be stretched.", width.toFloat() / height.toFloat() in 0.88f..1.08f)
+        } finally {
+            bitmap.recycle()
+        }
+
+        val standard = context.getDrawable(R.mipmap.ic_launcher) as? android.graphics.drawable.AdaptiveIconDrawable
+        val round = context.getDrawable(R.mipmap.ic_launcher_round) as? android.graphics.drawable.AdaptiveIconDrawable
+        assertNotNull("The standard launcher icon must use adaptive foreground/background layers.", standard)
+        assertNotNull("The round launcher icon must use the same adaptive artwork.", round)
+        assertNotNull(standard?.foreground)
+        assertNotNull(standard?.background)
+        assertNotNull(round?.foreground)
+        assertNotNull(round?.background)
+    }
+
+    @Test
+    fun connectedShopUsesOneWhiteHeroActionAndKeepsTheSavedShopNameVisible() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("portalUrl").apply { isAccessible = true }
+                    .set(activity, "https://shop.example.test/station/ci")
+                MainActivity::class.java.getDeclaredField("portalHost").apply { isAccessible = true }
+                    .set(activity, "shop.example.test")
+                MainActivity::class.java.getDeclaredField("shopDisplayName").apply { isAccessible = true }
+                    .set(activity, "Study Print Shop")
+                MainActivity::class.java.getDeclaredMethod("showHome").apply { isAccessible = true }
+                    .invoke(activity)
+
+                fun findByDescription(view: View): View? {
+                    if (view.contentDescription?.toString() == "Manage connected shop: Study Print Shop") return view
+                    if (view is ViewGroup) {
+                        for (index in 0 until view.childCount) {
+                            findByDescription(view.getChildAt(index))?.let { return it }
+                        }
+                    }
+                    return null
+                }
+                val action = findByDescription(activity.window.decorView)
+                assertNotNull("The replacement shop row must be a tappable action.", action)
+                assertTrue("The replacement shop row must open shop management.", action!!.isClickable)
+            }
+            onView(withText("Study Print Shop")).check(matches(isDisplayed()))
+            onView(withText("Connected · tap to manage")).check(matches(isDisplayed()))
+            onView(withContentDescription("Manage connected shop: Study Print Shop")).check(matches(isDisplayed()))
+            onView(withText("Manage connected shop")).check(doesNotExist())
+            onView(withText("Find a print shop")).check(doesNotExist())
+        }
+    }
+
+    @Test
+    fun photoStudioRouteRecognitionSurvivesTrailingSlashAndQueryParameters() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val method = MainActivity::class.java.getDeclaredMethod(
+                    "isPhotoStudioPageUrl",
+                    String::class.java
+                ).apply { isAccessible = true }
+                val origin = BuildConfig.SERVICE_BASE_URL.trimEnd('/')
+                assertTrue(method.invoke(activity, "$origin/photo-studio") as Boolean)
+                assertTrue(method.invoke(activity, "$origin/photo-studio/") as Boolean)
+                assertTrue(method.invoke(activity, "$origin/photo-studio/?source=library") as Boolean)
+                assertFalse(method.invoke(activity, "$origin/") as Boolean)
+                assertFalse(method.invoke(activity, "https://other.example/photo-studio") as Boolean)
+            }
+        }
+    }
+
+    @Test
     fun homeStudioShortcutsOpenTheCorrectStudiosAndReturnHome() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("ID Studio")).perform(click())
