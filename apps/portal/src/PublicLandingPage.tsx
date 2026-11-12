@@ -43,7 +43,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
               <a className="sp-button-primary" href="/shop?mode=register">Bring your shop online <ArrowRight size={17}/></a>
               <a className="sp-button-quiet" href="#how-it-works">See how it works <ChevronRight size={17}/></a>
             </div>
-            <div className="sp-hero-trust"><span><ShieldCheck size={15}/> Shop-controlled print approval</span><span><LockKeyhole size={14}/> Secure job handoff</span></div>
+            <div className="sp-hero-trust"><span><ShieldCheck size={15}/> Shop-controlled print approval</span><span><LockKeyhole size={14}/> Shop-authorised job handoff</span></div>
           </div>
 
           <div className="sp-hero-art" aria-label="Illustration of a customer phone connecting to a print shop">
@@ -59,7 +59,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
               </div>
               <div className="sp-art-phone-caption"><Smartphone size={12}/> CUSTOMER</div>
             </div>
-            <div className="sp-art-connection"><span/><span/><span/><small>SECURE CONNECTION</small></div>
+            <div className="sp-art-connection"><span/><span/><span/><small>SHOP CONNECTION</small></div>
             <div className="sp-art-shop">
               <div className="sp-art-shop-head"><span className="sp-art-shop-icon"><Store size={16}/></span><div><b>Your print shop</b><small>Workspace connected</small></div><i/></div>
               <div className="sp-art-printer"><span><Printer size={25}/></span><div><b>Shop printer</b><small>Ready for the next job</small></div><em><Check size={12}/></em></div>
