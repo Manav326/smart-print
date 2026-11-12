@@ -113,6 +113,7 @@ class MainActivity : AppCompatActivity() {
     private var viewingDocument: File? = null
     private var documentViewerReturnToIdStudio = false
     private var privateIdViewerOpen = false
+    private var privateIdPreviewCaptureAllowed = false
     private var privateIdViewerTempFile: File? = null
     private val privateIdUploadTempFiles = mutableListOf<File>()
     private val privatePhotoUploadTempFiles = mutableListOf<File>()
@@ -2716,6 +2717,45 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    private fun addPrivatePreviewWatermarks(container: FrameLayout) {
+        val securityMark = TextView(this).apply {
+            text = "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"
+            textSize = 9f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.12f
+            gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.argb(45, 38, 52, 78))
+            rotation = -28f
+            isClickable = false
+            isFocusable = false
+            includeFontPadding = false
+        }
+        container.addView(
+            securityMark,
+            FrameLayout.LayoutParams(-1, dp(48), Gravity.CENTER)
+        )
+        val brandMark = TextView(this).apply {
+            text = "SmartPrint by QuantaEdge"
+            textSize = 10f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            letterSpacing = 0.08f
+            gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.argb(190, 28, 43, 69))
+            background = roundedDrawable(android.graphics.Color.argb(90, 255, 255, 255), dp(5))
+            setPadding(dp(8), dp(5), dp(8), dp(5))
+            isClickable = false
+            isFocusable = false
+        }
+        container.addView(
+            brandMark,
+            FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                leftMargin = dp(10)
+                rightMargin = dp(10)
+                bottomMargin = dp(10)
+            }
+        )
+    }
+
     private fun roundedDrawable(fillColor: Int, radiusDp: Int, strokeColor: Int? = null): android.graphics.drawable.GradientDrawable =
         android.graphics.drawable.GradientDrawable().apply {
             setColor(fillColor)
@@ -3429,7 +3469,9 @@ class MainActivity : AppCompatActivity() {
     private fun applySensitiveWindowProtection() {
         val privateStudioCaptureBlocked =
             (photoStudioOpen || privatePhotoStudioPageOpen) && !photoStudioCaptureAllowed
-        if (privateStudioCaptureBlocked || idStudioScreenOpen || privateIdViewerOpen) {
+        val idCaptureBlocked = idStudioScreenOpen ||
+            (privateIdViewerOpen && !privateIdPreviewCaptureAllowed)
+        if (privateStudioCaptureBlocked || idCaptureBlocked) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -3439,6 +3481,7 @@ class MainActivity : AppCompatActivity() {
     private fun showIdStudioHome() {
         idStudioScreenOpen = true
         privateIdViewerOpen = false
+        privateIdPreviewCaptureAllowed = false
         applySensitiveWindowProtection()
         pickerMode = false
         clearLibrarySelection()
@@ -3515,7 +3558,11 @@ class MainActivity : AppCompatActivity() {
                         bytes.fill(0)
                     }
                 }
-                row.addView(thumbnail, LinearLayout.LayoutParams(dp(62), dp(88)))
+                val thumbnailFrame = FrameLayout(this).apply {
+                    addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
+                    addPrivatePreviewWatermarks(this)
+                }
+                row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(62), dp(88)))
                 val details = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(10), 0, dp(6), 0)
@@ -4593,12 +4640,16 @@ class MainActivity : AppCompatActivity() {
         viewingDocument = file
         documentViewerReturnToIdStudio = isPreparedId
         privateIdViewerOpen = documentViewerReturnToIdStudio
+        privateIdPreviewCaptureAllowed = isPreparedId
         if (documentViewerReturnToIdStudio) idStudioScreenOpen = false
         applySensitiveWindowProtection()
         pickerMode = false
         profileVisible = false
         clearLibrarySelection()
-        setToolbarPage(if (isPreparedId) file.name.removeSuffix(".spid") + ".pdf" else file.name)
+        setToolbarPage(if (isPreparedId) {
+            runCatching { idStudioStore.readMetadata(file).optString("title") }.getOrNull()
+                ?.takeIf { it.isNotBlank() } ?: "ID card preview"
+        } else file.name)
         setToolbarBackAction(
             if (documentViewerReturnToIdStudio) "Back to ID Studio" else "Back to My Files",
             ::closeDocumentViewer
@@ -4624,10 +4675,17 @@ class MainActivity : AppCompatActivity() {
         }
         val reader = SmartPrintDocumentViewer(this, documentFile, images, startPosition) { current ->
             viewingDocument = current
-            setToolbarPage(current.name)
+            setToolbarPage(if (isPreparedId) "ID card preview" else current.name)
         }
         documentViewer = reader
-        content.addView(reader, frameParams())
+        if (isPreparedId) {
+            val previewFrame = FrameLayout(this)
+            previewFrame.addView(reader, FrameLayout.LayoutParams(-1, -1))
+            addPrivatePreviewWatermarks(previewFrame)
+            content.addView(previewFrame, frameParams())
+        } else {
+            content.addView(reader, frameParams())
+        }
     }
 
     private fun showCustomerUploadPdfPreview(token: String) {
@@ -4675,6 +4733,7 @@ class MainActivity : AppCompatActivity() {
         privateIdViewerTempFile = null
         customerUploadPdfPreviewOpen = false
         privateIdViewerOpen = false
+        privateIdPreviewCaptureAllowed = false
         applySensitiveWindowProtection()
         if (documentViewerReturnToIdStudio) {
             documentViewerReturnToIdStudio = false
