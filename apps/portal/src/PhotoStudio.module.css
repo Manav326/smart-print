@@ -138,13 +138,14 @@
   .canvasWorkspace{grid-template-rows:30px minmax(0,1fr) 23px}
   .canvasViewport{padding:4px}
   .sheetFrame{width:min(100%,340px);padding:3px}
-  .previewStage{width:min(100%,calc((100dvh - 350px)*210/297))}
+  .previewStage{width:min(100%,calc((100dvh - 365px)*210/297))}
   .canvasFooter{padding:3px 6px;gap:5px;font-size:7.5px}
   .canvasFooter small{display:none}
   .footer{min-height:46px;padding:4px 7px;align-items:center;flex-direction:row;gap:6px}
-  .footerHint{display:none}
-  .footerActions{width:auto;flex:1;justify-content:flex-end;gap:6px}
-  .footerActions .cancelButton{flex:0 0 76px;min-height:38px;padding:6px}
+  .footerHint{display:flex;max-width:38%;min-width:0;font-size:7px;line-height:1.2;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .footerHint svg{width:12px;height:12px}
+  .footerActions{width:auto;flex:1;min-width:0;justify-content:flex-end;gap:5px}
+  .footerActions .cancelButton{flex:0 0 68px;min-height:38px;padding:6px}
   .footerActions .applyButton{flex:1;min-height:38px;padding:6px 9px}
   .errorToast{bottom:54px;right:7px;max-width:calc(100vw - 14px)}
 }

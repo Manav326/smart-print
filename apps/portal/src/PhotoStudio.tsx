@@ -571,12 +571,12 @@ export default function PhotoStudio({
 
   const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
   const footerHint = mode === "private-library"
-    ? "Your original stays private on this device. Only this unwatermarked A4 sheet is saved for shop printing; the on-screen preview remains branded."
+    ? "Original stays private · Only the A4 sheet is saved."
     : mode === "shop-create"
-      ? "Create one new shop-owned photo order from this original. The original photo stays unchanged; payment remains pending until the shop verifies receipt, and printing still requires explicit dispatch."
+      ? "New order · Payment must be verified before printing."
       : mode === "shop"
-        ? "Save your prepared multi-page A4 photo PDF to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
-        : "The original upload stays untouched. This prepared multi-page A4 photo PDF replaces it in your batch when you submit your print request.";
+        ? "Updates this unpaid job · Approval and dispatch still required."
+        : "Original stays untouched · Prepared A4 joins this upload.";
   const actionLabel = mode === "private-library" ? "Save private sheet" : mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
   const busyLabel = mode === "private-library" ? "Saving privately…" : mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your A4 sheet…";
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
