@@ -930,7 +930,7 @@ customerApi.MapGet("/me", async (
     });
 });
 
-customerApi.MapGet("/jobs", async (
+customerApi.MapGet("/jobs/count", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
     CancellationToken ct) =>
@@ -941,7 +941,39 @@ customerApi.MapGet("/jobs", async (
         return Results.Forbid();
     }
 
-    var jobs = await (
+    var totalCount = await (
+        from job in db.PrintJobs.AsNoTracking()
+        join profile in db.ShopProfiles.AsNoTracking()
+            on job.TenantId equals profile.TenantId
+        where job.CustomerUserId == customerId ||
+              (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                  session.TenantId == job.TenantId &&
+                  session.Id == job.CustomerSessionId &&
+                  session.CustomerUserId == customerId))
+        select job.Id
+    ).CountAsync(ct);
+
+    return Results.Ok(new { TotalCount = totalCount });
+});
+
+customerApi.MapGet("/jobs", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct,
+    int? page,
+    int? pageSize) =>
+{
+    var customerId = CustomerIdentity.GetCustomerId(principal);
+    if (customerId is null)
+    {
+        return Results.Forbid();
+    }
+
+    var pageNumber = Math.Clamp(page ?? 1, 1, 100_000);
+    var take = Math.Clamp(pageSize ?? 100, 1, 100);
+    var skip = checked((pageNumber - 1) * take);
+
+    var customerJobs = (
         from job in db.PrintJobs.AsNoTracking()
         join profile in db.ShopProfiles.AsNoTracking()
             on job.TenantId equals profile.TenantId
@@ -991,11 +1023,21 @@ customerApi.MapGet("/jobs", async (
                 .OrderByDescending(payment => payment.UpdatedUtc)
                 .Select(payment => payment.Method)
                 .FirstOrDefault()
-        })
-        .Take(100)
+        });
+
+    var totalCount = await customerJobs.CountAsync(ct);
+    var jobs = await customerJobs
+        .Skip(skip)
+        .Take(take)
         .ToListAsync(ct);
 
-    return Results.Ok(new { Jobs = jobs });
+    return Results.Ok(new
+    {
+        Jobs = jobs,
+        TotalCount = totalCount,
+        Page = pageNumber,
+        PageSize = take
+    });
 });
 
 

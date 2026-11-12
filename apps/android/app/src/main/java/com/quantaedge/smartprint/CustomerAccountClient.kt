@@ -54,6 +54,13 @@ data class CustomerPrintHistoryItem(
     val photosPerPage: Int?
 )
 
+data class CustomerHistoryPage(
+    val items: List<CustomerPrintHistoryItem>,
+    val totalCount: Int,
+    val page: Int,
+    val pageSize: Int
+)
+
 /**
  * Stores the customer session encrypted with an Android Keystore AES-GCM key.
  * Guest document files remain available independently of this account state.
@@ -182,10 +189,27 @@ object CustomerAccountClient {
     fun profile(baseUrl: String, accessToken: String): JSONObject =
         request(baseUrl, "/api/v1/customer/me", null, accessToken)
 
-    fun history(baseUrl: String, accessToken: String): List<CustomerPrintHistoryItem> {
-        val response = request(baseUrl, "/api/v1/customer/jobs", null, accessToken)
+    fun historyCount(baseUrl: String, accessToken: String): Int {
+        val response = request(baseUrl, "/api/v1/customer/jobs/count", null, accessToken)
+        return response.optInt("totalCount").coerceAtLeast(0)
+    }
+
+    fun historyPage(
+        baseUrl: String,
+        accessToken: String,
+        page: Int,
+        pageSize: Int = 100
+    ): CustomerHistoryPage {
+        require(page >= 1) { "History page must be at least 1." }
+        require(pageSize in 1..100) { "History page size must be between 1 and 100." }
+        val response = request(
+            baseUrl,
+            "/api/v1/customer/jobs?page=$page&pageSize=$pageSize",
+            null,
+            accessToken
+        )
         val jobs = response.optJSONArray("jobs") ?: JSONArray()
-        return (0 until jobs.length()).mapNotNull { index ->
+        val items = (0 until jobs.length()).mapNotNull { index ->
             val job = jobs.optJSONObject(index) ?: return@mapNotNull null
             CustomerPrintHistoryItem(
                 id = job.optString("id"),
@@ -213,6 +237,12 @@ object CustomerAccountClient {
                 photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage")
             )
         }
+        return CustomerHistoryPage(
+            items = items,
+            totalCount = response.optInt("totalCount", items.size).coerceAtLeast(0),
+            page = response.optInt("page", page).coerceAtLeast(1),
+            pageSize = response.optInt("pageSize", pageSize).coerceIn(1, 100)
+        )
     }
 
     /** Reads the current state and audit timeline of a job owned by this signed-in customer. */
