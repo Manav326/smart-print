@@ -142,6 +142,7 @@ class MainActivity : AppCompatActivity() {
     private var photoStudioOpen = false
     private var photoStudioCaptureAllowed = false
     private var privatePhotoStudioPageOpen = false
+    private var photoStudioLoadingOverlay: View? = null
     private var customerHistoryRefreshing = false
     // Remember which WebView flow opened Android's shared document picker.
     // Photo Studio needs its own source picker and must not return to shop upload.
@@ -1147,6 +1148,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHome() {
         fileChooserReturnToPhotoStudio = false
+        photoStudioLoadingOverlay = null
         photoStudioOpen = false
         photoStudioCaptureAllowed = false
         privatePhotoStudioPageOpen = false
@@ -1431,9 +1433,30 @@ class MainActivity : AppCompatActivity() {
         content.removeAllViews()
         val view = ensureWebView()
         (view.parent as? ViewGroup)?.removeView(view)
-        content.addView(view, frameParams())
+        photoStudioLoadingOverlay = null
         val studioUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/photo-studio"
-        if (view.url != studioUrl) view.loadUrl(studioUrl)
+        val pageReady = isPhotoStudioPageUrl(view.url) && view.progress >= 100
+        val host = FrameLayout(this)
+        host.addView(view, FrameLayout.LayoutParams(-1, -1))
+        if (!pageReady) {
+            val loading = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(24), dp(24), dp(24), dp(24))
+                setBackgroundColor(getColor(R.color.qp_surface))
+                addView(ProgressBar(this@MainActivity), LinearLayout.LayoutParams(dp(34), dp(34)))
+                addView(text("Opening Photo Studio…", 13, R.color.qp_muted, true).apply {
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(12), 0, 0)
+                })
+                isClickable = true
+                isFocusable = true
+            }
+            photoStudioLoadingOverlay = loading
+            host.addView(loading, FrameLayout.LayoutParams(-1, -1))
+        }
+        content.addView(host, frameParams())
+        if (!isPhotoStudioPageUrl(view.url)) view.loadUrl(studioUrl)
     }
 
     private fun showScanPrint() {
@@ -2040,6 +2063,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPrint() {
         fileChooserReturnToPhotoStudio = false
+        photoStudioLoadingOverlay = null
         privatePhotoStudioPageOpen = false
         photoStudioOpen = false
         photoStudioCaptureAllowed = false
@@ -3390,6 +3414,10 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
+                if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(url)) {
+                    photoStudioLoadingOverlay?.visibility = View.GONE
+                    photoStudioLoadingOverlay = null
+                }
                 val loadedUrl = runCatching { Uri.parse(url) }.getOrNull() ?: return
                 if (!loadedUrl.scheme.equals(trustedPage.scheme, true) ||
                     !loadedUrl.host.equals(trustedPage.host, true) ||
@@ -3419,9 +3447,28 @@ class MainActivity : AppCompatActivity() {
                 """.trimIndent()
                 view.evaluateJavascript(script, null)
             }
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: WebResourceError
+            ) {
+                super.onReceivedError(view, request, error)
+                if (request.isForMainFrame && privatePhotoStudioPageOpen &&
+                    isPhotoStudioPageUrl(request.url.toString())) {
+                    photoStudioLoadingOverlay?.visibility = View.GONE
+                    photoStudioLoadingOverlay = null
+                    toast("Photo Studio could not load. Check your connection and try again.")
+                }
+            }
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: android.net.http.SslError) {
                 handler.cancel()
-                toast("The shop connection could not be verified securely.")
+                if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(view.url)) {
+                    photoStudioLoadingOverlay?.visibility = View.GONE
+                    photoStudioLoadingOverlay = null
+                    toast("Photo Studio could not connect securely. Your saved photo sheets are unchanged.")
+                } else {
+                    toast("The shop connection could not be verified securely.")
+                }
             }
         }
         view.webChromeClient = object : WebChromeClient() {
