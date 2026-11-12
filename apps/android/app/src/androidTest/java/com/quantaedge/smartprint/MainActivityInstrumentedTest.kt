@@ -570,10 +570,10 @@ class MainActivityInstrumentedTest {
             }
             val width = right - left + 1
             val height = bottom - top + 1
-            assertTrue("The full SmartPrint mark must not be reduced to a tiny central glyph.", width >= 145)
+            assertTrue("The full SmartPrint mark must not be reduced to a tiny central glyph.", width >= 140)
             assertTrue("The full SmartPrint mark must preserve its intended height.", height >= 150)
-            assertTrue("The logo must retain balanced adaptive-icon padding.", left >= 45 && top >= 45)
-            assertTrue("The logo must stay inside the safe area instead of spilling into the mask.", right <= 211 && bottom <= 215)
+            assertTrue("The logo must retain balanced adaptive-icon padding.", left >= 50 && top >= 50)
+            assertTrue("The logo must stay inside the safe area instead of spilling into the mask.", right <= 206 && bottom <= 216)
             assertTrue("The logo must not be stretched.", width.toFloat() / height.toFloat() in 0.88f..1.08f)
         } finally {
             bitmap.recycle()
