@@ -4412,9 +4412,10 @@ class MainActivity : AppCompatActivity() {
             "A4 ID front and back print sheet preview. Pinch to zoom."
         }
         previewStage.addView(preview, FrameLayout.LayoutParams(-1, -1))
-        // Keep the existing security mark in both preview modes. The A4 preview
-        // adds the faded logo + wordmark independently inside the front and back faces.
-        addPrivateSecurityWatermark(previewStage)
+        // The physical-card preview retains the existing private-use mark.
+        // On A4, the real logo + faded wordmark is drawn inside each ID face;
+        // do not overlay the older sentence watermark across the whole sheet.
+        if (idStudioPreviewMode == "CARD") addPrivateSecurityWatermark(previewStage)
         root.addView(previewStage, LinearLayout.LayoutParams(-1, 0, 1f).apply {
             bottomMargin = dp(5)
         })
