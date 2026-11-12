@@ -56,7 +56,7 @@ const trainingAgentRules = modelTrainingAgents
 
 // Google-Extended is explicitly allowed for Gemini Apps / Vertex AI grounding,
 // with the site owner's consent to Google's associated Gemini model-training use.
-const googleExtendedRules = `User-agent: Google-Extended\\nAllow: /\\n${protectedPaths}`;
+const googleExtendedRules = `User-agent: Google-Extended\nAllow: /\n${protectedPaths}`;
 
 // Draft IETF AIPREF token: express the site owner's preference against model training.
 const trainingPreference = "User-agent: __usage_ai-training\nDisallow: /";
