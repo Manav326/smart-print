@@ -793,14 +793,14 @@ class MainActivityInstrumentedTest {
                     Boolean::class.javaPrimitiveType!!
                 ).apply { isAccessible = true }
 
-                fun history(count: Int) = (0 until count).map { index ->
+                fun history(count: Int, failLast: Boolean = false) = (0 until count).map { index ->
                     CustomerPrintHistoryItem(
                         id = "history-$index",
                         batchId = "batch-$index",
                         batchName = "Print batch $index",
                         batchGroupName = null,
                         jobNumber = "QE-${index + 1}",
-                        status = "COMPLETED",
+                        status = if (failLast && index == count - 1) "FAILED" else "COMPLETED",
                         pageCount = 1,
                         copies = 1,
                         currency = "INR",
@@ -821,24 +821,40 @@ class MainActivityInstrumentedTest {
                     )
                 }
 
-                fun pagerVisibility(records: List<CustomerPrintHistoryItem>): Int {
+                fun find(view: View, description: String): View? {
+                    if (view.contentDescription == description) return view
+                    if (view is ViewGroup) {
+                        for (index in 0 until view.childCount) {
+                            find(view.getChildAt(index), description)?.let { return it }
+                        }
+                    }
+                    return null
+                }
+
+                fun pagerVisibility(
+                    records: List<CustomerPrintHistoryItem>,
+                    filteredStatusPosition: Int? = null
+                ): Int {
                     val container = LinearLayout(activity)
                     render.invoke(activity, container, "test@example.com", records, null, false)
-                    fun find(view: View): View? {
-                        if (view.contentDescription == "History pagination") return view
-                        if (view is ViewGroup) {
-                            for (index in 0 until view.childCount) {
-                                find(view.getChildAt(index))?.let { return it }
-                            }
-                        }
-                        return null
+                    if (filteredStatusPosition != null) {
+                        val filter = find(container, "History status filter") as? android.widget.Spinner
+                            ?: throw AssertionError("The History status filter was not created.")
+                        filter.onItemSelectedListener?.onItemSelected(
+                            filter,
+                            null,
+                            filteredStatusPosition,
+                            filteredStatusPosition.toLong()
+                        )
                     }
-                    return (find(container)
+                    return (find(container, "History pagination")
                         ?: throw AssertionError("History pager container was not created.")).visibility
                 }
 
                 assertEquals("10 history results must not show pagination.", View.GONE, pagerVisibility(history(10)))
                 assertEquals("11 history results must show pagination.", View.VISIBLE, pagerVisibility(history(11)))
+                assertEquals("A status filter leaving 10 results must hide pagination.", View.GONE,
+                    pagerVisibility(history(11, failLast = true), filteredStatusPosition = 1))
                 assertEquals("Fewer than 10 results must not show pagination.", View.GONE, pagerVisibility(history(9)))
             }
         }
