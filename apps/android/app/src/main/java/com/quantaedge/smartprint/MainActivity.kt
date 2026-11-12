@@ -1152,7 +1152,7 @@ class MainActivity : AppCompatActivity() {
         }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(17), dp(18), dp(28))
+            setPadding(dp(18), dp(11), dp(18), dp(20))
         }
         scroll.addView(column)
 
@@ -1168,7 +1168,7 @@ class MainActivity : AppCompatActivity() {
         }
         val heroContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(19), dp(18), dp(18))
+            setPadding(dp(18), dp(14), dp(18), dp(13))
         }
         heroContent.addView(text("SMARTPRINT  ·  YOUR PRINT SPACE", 10, R.color.qp_hero_muted, true))
         heroContent.addView(text(
@@ -1176,13 +1176,13 @@ class MainActivity : AppCompatActivity() {
             25, R.color.qp_hero_text, true
         ).apply {
             id = R.id.smartprint_home_heading
-            setPadding(0, dp(9), 0, dp(7))
+            setPadding(0, dp(6), 0, dp(5))
         })
         heroContent.addView(text(
             if (portalUrl == null) "Keep your documents close. Find a participating shop when you're ready to print."
             else "You're connected to ${shopDisplayName ?: "your print shop"}. Choose a document whenever you're ready.",
             12, R.color.qp_hero_muted, false
-        ).apply { setLineSpacing(dp(3).toFloat(), 1f); setPadding(0, 0, 0, dp(15)) })
+        ).apply { setLineSpacing(dp(2).toFloat(), 1f); setPadding(0, 0, 0, dp(9)) })
         heroContent.addView(button(
             if (portalUrl == null) "Find a print shop" else "Manage connected shop",
             true
@@ -1216,12 +1216,12 @@ class MainActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) })
         heroContent.addView(studioActions, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
         hero.addView(heroContent)
-        column.addView(hero, linearParams().apply { bottomMargin = dp(17) })
+        column.addView(hero, linearParams().apply { bottomMargin = dp(11) })
 
         val spaceSummary = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(2), dp(1), dp(2), dp(12))
+            setPadding(dp(2), dp(1), dp(2), dp(7))
         }
         val summaryCopy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val privateIdCount = idStudioStore.listPrepared().size
@@ -3635,20 +3635,23 @@ class MainActivity : AppCompatActivity() {
                 }
                 val thumbnail = ImageView(this).apply {
                     setImageResource(R.drawable.ic_file)
-                    scaleType = ImageView.ScaleType.CENTER_CROP
-                    contentDescription = "ID card sheet preview"
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                    contentDescription = "ID card front preview"
                     background = roundedDrawable(getColor(R.color.qp_soft), dp(8))
-                    idStudioStore.createThumbnailBase64(file)?.let { encoded ->
+                    idStudioStore.createCardFaceThumbnailBase64(file, "front")?.let { encoded ->
                         val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
-                        setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
-                        bytes.fill(0)
+                        try {
+                            setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                        } finally {
+                            bytes.fill(0)
+                        }
                     }
                 }
                 val thumbnailFrame = FrameLayout(this).apply {
                     addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
                     addPrivatePreviewWatermarks(this)
                 }
-                row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(62), dp(88)))
+                row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(88), dp(58)))
                 val details = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(10), 0, dp(6), 0)
@@ -3658,7 +3661,7 @@ class MainActivity : AppCompatActivity() {
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 })
                 details.addView(text(
-                    "A4 · Front + back · Private to SmartPrint",
+                    "${metadata.optDouble("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble()).toFloat().let { "%.1f".format(Locale.ROOT, it) }} × ${metadata.optDouble("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble()).toFloat().let { "%.1f".format(Locale.ROOT, it) }} mm · Front + back",
                     10, R.color.qp_muted, false
                 ).apply { setPadding(0, dp(4), 0, 0); maxLines = 2 })
                 details.addView(text(
@@ -3669,9 +3672,10 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                 }
-                actions.addView(button("View", false).apply {
+                actions.addView(button("A4 sheet", false).apply {
                     minHeight = dp(34)
                     textSize = 11f
+                    contentDescription = "View A4 print sheet for $displayName"
                     setOnClickListener { showDocumentViewer(file) }
                 }, LinearLayout.LayoutParams(0, dp(36), 1f))
                 actions.addView(button("⋮", false).apply {

@@ -56,7 +56,20 @@ class IdStudioInstrumentedTest {
             val encryptedPreparedBytes = prepared.readBytes()
             assertTrue("Prepared PDFs are AES-GCM vault envelopes.", encryptedPreparedBytes.take(4).toByteArray().contentEquals(byteArrayOf(83, 80, 73, 68)))
             assertTrue("New ID documents retain both encrypted original scans.", idStore.canEditPreparedDocument(prepared))
-            assertTrue("ID library entries can render an A4 thumbnail.", idStore.createThumbnailBase64(prepared)?.isNotBlank() == true)
+            assertTrue("ID library entries can render an A4 thumbnail for print selection.", idStore.createThumbnailBase64(prepared)?.isNotBlank() == true)
+            val cardFaceThumbnail = android.util.Base64.decode(
+                idStore.createCardFaceThumbnailBase64(prepared, "front") ?: error("The ID front-face preview could not be rendered."),
+                android.util.Base64.DEFAULT
+            )
+            try {
+                val thumbnailBounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(cardFaceThumbnail, 0, cardFaceThumbnail.size, thumbnailBounds)
+                assertTrue("The ID Studio library thumbnail displays the physical card face in landscape.",
+                    thumbnailBounds.outWidth > thumbnailBounds.outHeight)
+                assertTrue("The ID card face thumbnail retains useful display detail.", thumbnailBounds.outWidth >= 500)
+            } finally {
+                cardFaceThumbnail.fill(0)
+            }
             assertTrue("The title is saved independently of the opaque file name.", idStore.readMetadata(prepared).optString("title") == "School ID")
             idStore.renamePrepared(prepared, "Student ID")
             assertTrue("Renaming persists in encrypted metadata.", idStore.readMetadata(prepared).optString("title") == "Student ID")
@@ -123,7 +136,7 @@ class IdStudioInstrumentedTest {
 
                 onView(withText("Create a new ID card")).check(matches(isDisplayed()))
                 onView(withText("Student ID")).check(matches(isDisplayed()))
-                onView(withText("View")).perform(click())
+                onView(withText("A4 sheet")).perform(click())
                 onView(withText("Page 1 of 1")).check(matches(isDisplayed()))
                 onView(withText("SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW")).check(matches(isDisplayed()))
                 onView(withText("SmartPrint by QuantaEdge")).check(matches(isDisplayed()))

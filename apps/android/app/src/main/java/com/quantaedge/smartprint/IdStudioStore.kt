@@ -215,6 +215,35 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
         return readVaultOrMigrate(preparedSidecar(idFromPreparedFile(file), side), MAX_SCAN_BYTES)
     }
 
+    fun createCardFaceThumbnailBase64(file: File, side: String = "front"): String? = runCatching {
+        require(side == "front" || side == "back") { "Choose the front or back side of the card." }
+        val metadata = readMetadata(file)
+        val sourceBytes = readPreparedSideBytes(file, side)
+        try {
+            val rotation = metadata.optInt(if (side == "front") "frontRotation" else "backRotation", 0)
+                .takeIf { it == 0 || it == 180 } ?: 0
+            val source = IdCardPdfComposer.renderSidePreview(sourceBytes, rotation)
+            try {
+                val width = minOf(CARD_THUMBNAIL_WIDTH, source.width).coerceAtLeast(1)
+                val height = maxOf(1, (source.height.toFloat() * width / source.width).toInt())
+                val thumbnail = if (width == source.width) source
+                    else Bitmap.createScaledBitmap(source, width, height, true)
+                try {
+                    ByteArrayOutputStream().use { output ->
+                        thumbnail.compress(Bitmap.CompressFormat.JPEG, 86, output)
+                        Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
+                    }
+                } finally {
+                    if (thumbnail !== source) thumbnail.recycle()
+                }
+            } finally {
+                source.recycle()
+            }
+        } finally {
+            sourceBytes.fill(0)
+        }
+    }.getOrNull()
+
     fun createThumbnailBase64(file: File): String? {
         val materialized = runCatching { materializePreparedFile(file) }.getOrNull() ?: return null
         return try {
@@ -458,6 +487,7 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
         private const val MAX_PREPARED_BYTES = 20L * 1024L * 1024L
         private const val MAX_METADATA_BYTES = 64L * 1024L
         private const val THUMBNAIL_WIDTH = 320
+        private const val CARD_THUMBNAIL_WIDTH = 600
         private const val VAULT_OVERHEAD_BYTES = 64L
         private const val DRAFT_RETENTION_MILLIS = 48L * 60L * 60L * 1000L
         private const val TRANSIENT_RETENTION_MILLIS = 30L * 60L * 1000L
