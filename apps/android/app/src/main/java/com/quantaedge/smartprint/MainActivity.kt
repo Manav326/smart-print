@@ -1122,6 +1122,7 @@ class MainActivity : AppCompatActivity() {
         privatePhotoStudioPageOpen = false
         idStudioScreenOpen = false
         privateIdViewerOpen = false
+        privateIdPreviewCaptureAllowed = false
         documentViewerReturnToIdStudio = false
         applySensitiveWindowProtection()
         clearLibrarySelection()
@@ -1750,6 +1751,7 @@ class MainActivity : AppCompatActivity() {
         photoStudioCaptureAllowed = false
         idStudioScreenOpen = false
         privateIdViewerOpen = false
+        privateIdPreviewCaptureAllowed = false
         applySensitiveWindowProtection()
         clearLibrarySelection()
         pickerMode = false
@@ -4072,7 +4074,11 @@ class MainActivity : AppCompatActivity() {
                     bytes.fill(0)
                 }
             }
-            row.addView(thumbnail, LinearLayout.LayoutParams(dp(58), dp(76)))
+            val thumbnailFrame = FrameLayout(this).apply {
+                addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
+                addPrivatePreviewWatermarks(this)
+            }
+            row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(58), dp(76)))
             val details = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(9), 0, dp(6), 0)
@@ -4116,8 +4122,27 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(5), 0, dp(5))
             }
-            val details = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            details.addView(text(file.name.removeSuffix(".spid") + ".pdf", 11, R.color.qp_text, true).apply { maxLines = 2 })
+            val thumbnail = ImageView(this).apply {
+                setImageResource(R.drawable.ic_file)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                contentDescription = "ID card sheet preview"
+                background = roundedDrawable(getColor(R.color.qp_card), dp(7))
+                idStudioStore.createThumbnailBase64(file)?.let { encoded ->
+                    val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                    setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                    bytes.fill(0)
+                }
+            }
+            val thumbnailFrame = FrameLayout(this).apply {
+                addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
+                addPrivatePreviewWatermarks(this)
+            }
+            row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(56), dp(74)))
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(8), 0, 0, 0)
+            }
+            details.addView(text(idStudioStore.readMetadata(file).optString("title").ifBlank { "ID card" }, 11, R.color.qp_text, true).apply { maxLines = 2 })
             details.addView(text(
                 android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()) +
                     " · A4 · Front + back",
