@@ -9,6 +9,7 @@ const pages = [
   ["index.html", "/"],
   ["print-shop-software/index.html", "/print-shop-software/"],
   ["qr-code-print-ordering/index.html", "/qr-code-print-ordering/"],
+  ["qr-printing-for-xerox-shops/index.html", "/qr-printing-for-xerox-shops/"],
   ["print-job-management/index.html", "/print-job-management/"],
   ["windows-print-agent/index.html", "/windows-print-agent/"],
   ["smartprint-faq/index.html", "/smartprint-faq/"]
