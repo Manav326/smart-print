@@ -3901,7 +3901,6 @@ class MainActivity : AppCompatActivity() {
                 }
                 loadIdStudioCardFaceThumbnail(thumbnail, file)
                 row.addView(thumbnail, LinearLayout.LayoutParams(dp(88), dp(58)))
-                }
                 val details = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(10), 0, dp(6), 0)
