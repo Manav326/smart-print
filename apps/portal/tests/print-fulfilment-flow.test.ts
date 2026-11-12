@@ -42,7 +42,7 @@ test("standard Cloud-assisted Photo Studio uploads keep photo identity through t
 
 test("private Photo Studio vault operations are scoped to the dedicated native route", () => {
   const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
-assert.match(main, /privatePhotoStudioPageOpen &&[\\s\\S]*isPhotoStudioPageUrl\\(webView\\?\\.url\\)/);
+assert.match(main, /privatePhotoStudioPageOpen &&[\s\S]*isPhotoStudioPageUrl\\(webView\\?\\.url\\)/);
   assert.match(main, /photoStudioLibraryCommand && !photoStudioRouteActive/);
 });
 
