@@ -1697,32 +1697,59 @@ class MainActivity : AppCompatActivity() {
 
         val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         container.addView(results, linearParams())
-        val pager = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            contentDescription = "History pagination"
-            setPadding(0, dp(10), 0, 0)
-        }
-        val pageLabel = text("", 10, R.color.qp_muted, true)
-        val previous = button("Previous", false).apply {
-            minHeight = dp(36)
-            textSize = 10f
-        }
-        val next = button("Next", false).apply {
-            minHeight = dp(36)
-            textSize = 10f
-        }
-        pager.addView(previous, LinearLayout.LayoutParams(dp(92), dp(36)))
-        pager.addView(pageLabel, LinearLayout.LayoutParams(0, -2, 1f).apply {
-            marginStart = dp(9)
-            marginEnd = dp(9)
-        })
-        pager.addView(next, LinearLayout.LayoutParams(dp(74), dp(36)))
-        container.addView(pager, linearParams())
 
         var selectedStatus = "ALL"
         var selectedPage = 0
+        var selectedPageSize = 10
         var rendering = false
+        val pager = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            contentDescription = "History pagination"
+            setPadding(0, dp(9), 0, 0)
+            visibility = View.GONE
+        }
+        val pagerSummary = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val pageRange = text("", 10, R.color.qp_muted, true).apply {
+            contentDescription = "History page range"
+        }
+        val pageSizeChoices = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        pagerSummary.addView(pageRange, LinearLayout.LayoutParams(0, -2, 1f))
+        pagerSummary.addView(pageSizeChoices, LinearLayout.LayoutParams(-2, dp(34)))
+        pager.addView(pagerSummary, linearParams())
+
+        val pageNavigation = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(3), 0, 0)
+        }
+        val previous = button("‹", false).apply {
+            minHeight = dp(34)
+            minWidth = dp(0)
+            textSize = 19f
+            contentDescription = "Previous page"
+        }
+        val pageLabel = text("", 10, R.color.qp_text, true).apply {
+            gravity = Gravity.CENTER
+            contentDescription = "History page indicator"
+        }
+        val next = button("›", false).apply {
+            minHeight = dp(34)
+            minWidth = dp(0)
+            textSize = 19f
+            contentDescription = "Next page"
+        }
+        pageNavigation.addView(previous, LinearLayout.LayoutParams(dp(42), dp(34)))
+        pageNavigation.addView(pageLabel, LinearLayout.LayoutParams(0, -2, 1f))
+        pageNavigation.addView(next, LinearLayout.LayoutParams(dp(42), dp(34)))
+        pager.addView(pageNavigation, linearParams())
+        container.addView(pager, linearParams())
+
         fun renderPage() {
             if (rendering) return
             rendering = true
@@ -1731,13 +1758,13 @@ class MainActivity : AppCompatActivity() {
                 val filtered = if (selectedStatus == "ALL") groups else groups.filter { batch ->
                     CustomerOrderStatusPresentation.batchSummaryStatus(batch.map { it.status }) == selectedStatus
                 }
-                val pageCount = maxOf(1, (filtered.size + 9) / 10)
-                // Keep the History screen uncluttered until there is more than one
-                // complete page. This is based on the filtered result count.
+                val pageCount = maxOf(1, (filtered.size + selectedPageSize - 1) / selectedPageSize)
+                // Match mPay: don't show any pagination controls for 10 or fewer
+                // filtered orders, even when the selected page size is smaller.
                 pager.visibility = if (filtered.size > 10) View.VISIBLE else View.GONE
                 selectedPage = selectedPage.coerceIn(0, pageCount - 1)
-                val startIndex = selectedPage * 10
-                val pageGroups = filtered.drop(startIndex).take(10)
+                val startIndex = selectedPage * selectedPageSize
+                val pageGroups = filtered.drop(startIndex).take(selectedPageSize)
                 if (pageGroups.isEmpty()) {
                     results.addView(text("No orders match this status.", 12, R.color.qp_muted, false)
                         .apply {
@@ -1851,10 +1878,30 @@ class MainActivity : AppCompatActivity() {
                         results.addView(item, linearParams().apply { bottomMargin = dp(8) })
                     }
                 }
-                pageLabel.text = if (filtered.isEmpty()) "0 orders" else
-                    "${startIndex + 1}–${minOf(startIndex + pageGroups.size, filtered.size)} of ${filtered.size}"
+                pageRange.text = if (filtered.isEmpty()) "Showing 0 of 0" else
+                    "Showing ${startIndex + 1}–${minOf(startIndex + pageGroups.size, filtered.size)} of ${filtered.size}"
+                pageLabel.text = "${selectedPage + 1} / $pageCount"
                 previous.isEnabled = selectedPage > 0
                 next.isEnabled = selectedPage + 1 < pageCount
+                pageSizeChoices.removeAllViews()
+                listOf(10, 20, 50).forEachIndexed { index, size ->
+                    pageSizeChoices.addView(button(size.toString(), selectedPageSize == size).apply {
+                        minHeight = dp(30)
+                        minWidth = dp(0)
+                        textSize = 10f
+                        contentDescription = "Show $size orders per page"
+                        setPadding(dp(8), dp(4), dp(8), dp(4))
+                        setOnClickListener {
+                            if (selectedPageSize != size) {
+                                selectedPageSize = size
+                                selectedPage = 0
+                                renderPage()
+                            }
+                        }
+                    }, LinearLayout.LayoutParams(dp(42), dp(30)).apply {
+                        if (index > 0) marginStart = dp(4)
+                    })
+                }
             } finally {
                 rendering = false
             }
