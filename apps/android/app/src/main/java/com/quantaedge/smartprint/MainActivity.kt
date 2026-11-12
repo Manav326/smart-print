@@ -178,7 +178,9 @@ class MainActivity : AppCompatActivity() {
         photoStudioOpen = savedInstanceState?.getBoolean("photoStudioOpen") ?: false
         photoStudioCaptureAllowed = savedInstanceState?.getBoolean("photoStudioCaptureAllowed") ?: false
         privatePhotoStudioPageOpen = savedInstanceState?.getBoolean("privatePhotoStudioPageOpen") ?: false
-        if (photoStudioOpen && !photoStudioCaptureAllowed) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        if ((photoStudioOpen || privatePhotoStudioPageOpen) && !photoStudioCaptureAllowed) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (handleBackNavigation()) return
@@ -1751,6 +1753,7 @@ class MainActivity : AppCompatActivity() {
         photoStudioCaptureAllowed = false
         idStudioScreenOpen = false
         privateIdViewerOpen = false
+        privateIdPreviewCaptureAllowed = false
         privateIdPreviewCaptureAllowed = false
         applySensitiveWindowProtection()
         clearLibrarySelection()
