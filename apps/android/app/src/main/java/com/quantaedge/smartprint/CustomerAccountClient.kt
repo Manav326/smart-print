@@ -195,7 +195,7 @@ object CustomerAccountClient {
         baseUrl: String,
         accessToken: String,
         page: Int,
-        size: Int = 20
+        size: Int = 10
     ): CustomerHistoryPage {
         require(page >= 0) { "History page must be zero or greater." }
         require(size in 1..100) { "History page size must be between 1 and 100." }
@@ -205,7 +205,7 @@ object CustomerAccountClient {
             null,
             accessToken
         )
-        val jobs = response.optJSONArray("jobs") ?: JSONArray()
+        val jobs = response.optJSONArray("items") ?: JSONArray()
         val items = (0 until jobs.length()).mapNotNull { index ->
             val job = jobs.optJSONObject(index) ?: return@mapNotNull null
             CustomerPrintHistoryItem(
