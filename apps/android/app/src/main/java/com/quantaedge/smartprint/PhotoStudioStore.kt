@@ -91,6 +91,48 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         return output
     }
 
+    fun updatePreparedOutput(id: String, pdfBytes: ByteArray, sourceBytes: ByteArray, suppliedMetadata: JSONObject): File {
+        val output = findById(id) ?: error("This private photo sheet is no longer available.")
+        require(pdfBytes.size.toLong() in 1L..MAX_PREPARED_BYTES) {
+            "The prepared photo sheet exceeds SmartPrint's private document limit."
+        }
+        require(sourceBytes.size.toLong() in 1L..MAX_SOURCE_BYTES) {
+            "The original photo exceeds SmartPrint's private source limit."
+        }
+        require(hasPdfSignature(pdfBytes)) { "The prepared photo sheet could not be verified." }
+        val sizeCode = suppliedMetadata.optString("sizeCode")
+        require(sizeCode in PHOTO_SIZE_LIMITS.keys) { "Choose a supported photo size before saving." }
+        val photoCount = suppliedMetadata.optInt("photoCount", 0)
+        val photosPerPage = suppliedMetadata.optInt("photosPerPage", 0)
+        require(photoCount in 1..100) { "The photo count must be between 1 and 100." }
+        require(photosPerPage in 1..(PHOTO_SIZE_LIMITS[sizeCode] ?: 0)) {
+            "The photos-per-A4-page setting is invalid."
+        }
+        val pageCount = (photoCount + photosPerPage - 1) / photosPerPage
+        require(suppliedMetadata.optInt("pageCount", pageCount) == pageCount) {
+            "The prepared A4 page count does not match the selected photo quantity."
+        }
+        require(suppliedMetadata.optInt("resolutionDpi", 0) == OUTPUT_DPI) {
+            "The prepared photo resolution could not be verified."
+        }
+        val existing = readMetadata(output)
+        val metadata = JSONObject(suppliedMetadata.toString()).apply {
+            put("id", id)
+            put("title", safeTitle(existing.optString("title", optString("title")), sizeCode))
+            put("sizeCode", sizeCode)
+            put("photoCount", photoCount)
+            put("photosPerPage", photosPerPage)
+            put("pageCount", pageCount)
+            put("resolutionDpi", OUTPUT_DPI)
+            put("createdUtc", existing.optLong("createdUtc", System.currentTimeMillis()))
+            put("updatedUtc", System.currentTimeMillis())
+        }
+        writeEncryptedAtomically(output, pdfBytes)
+        writeEncryptedAtomically(sourceFile(id), sourceBytes)
+        writeEncryptedAtomically(metadataFile(id), metadata.toString().toByteArray(Charsets.UTF_8))
+        return output
+    }
+
     fun listPrepared(): List<File> =
         (root.listFiles() ?: emptyArray())
             .filter { isPreparedDocument(it) }
@@ -145,21 +187,23 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         return writeTransient(bytes, ".$extension")
     }
 
-    fun createThumbnailBase64(file: File): String? {
+    fun createThumbnailBase64(file: File): String? = renderPageBase64(file, 0, THUMBNAIL_WIDTH)
+
+    fun renderPageBase64(file: File, pageIndex: Int, requestedWidth: Int = 960): String? {
         val materialized = runCatching { materializePdf(file) }.getOrNull() ?: return null
         return try {
             val descriptor = android.os.ParcelFileDescriptor.open(materialized, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
             descriptor.use { parcel ->
                 PdfRenderer(parcel).use { renderer ->
-                    if (renderer.pageCount < 1) return null
-                    renderer.openPage(0).use { page ->
-                        val width = THUMBNAIL_WIDTH
+                    if (pageIndex !in 0 until renderer.pageCount) return null
+                    renderer.openPage(pageIndex).use { page ->
+                        val width = requestedWidth.coerceIn(240, 1600)
                         val height = maxOf(1, (width.toFloat() * page.height / page.width).toInt())
                         val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                         try {
                             page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                             ByteArrayOutputStream().use { output ->
-                                bitmap.compress(Bitmap.CompressFormat.JPEG, 78, output)
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, if (width <= THUMBNAIL_WIDTH) 78 else 86, output)
                                 Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP)
                             }
                         } finally {
