@@ -1256,6 +1256,45 @@ class MainActivity : AppCompatActivity() {
         })
         column.addView(quickActions, linearParams().apply { bottomMargin = dp(17) })
 
+        // Keep the shop connection visible and independently accessible on Home.
+        // This preserves the existing connection entry point while the hero remains
+        // focused on the primary print action.
+        val shopCard = card().apply {
+            strokeWidth = dp(1)
+            setOnClickListener { if (portalUrl != null) showShopManager() else showScanPrint() }
+        }
+        val shopRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), dp(13), dp(13), dp(13))
+        }
+        val shopGlyph = ImageView(this).apply {
+            setImageResource(R.drawable.ic_store)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
+            contentDescription = if (portalUrl == null) "Shop connection" else "Connected shop icon"
+        }
+        if (portalUrl != null) loadShopLogo(shopGlyph)
+        shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val shopCopy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), 0, 0, 0)
+        }
+        shopCopy.addView(text(
+            if (portalUrl == null) "Find a print shop" else shopDisplayName ?: "Connected shop",
+            14, R.color.qp_text, true
+        ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+        shopCopy.addView(text(
+            if (portalUrl == null) "Scan the QR code at the counter to connect" else "Connected · tap to manage your shop",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(3), 0, 0) })
+        shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
+        shopRow.addView(text(if (portalUrl == null) "›" else "⋮", 22, R.color.qp_muted, false))
+        shopCard.addView(shopRow)
+        column.addView(shopCard, linearParams().apply { bottomMargin = dp(22) })
+
         val recentHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
