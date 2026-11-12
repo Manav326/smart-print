@@ -104,11 +104,19 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
         return readVaultOrMigrate(file, MAX_SCAN_BYTES)
     }
 
-    fun hasFront(draftId: String): Boolean =
-        runCatching { readScanBytes(draftId, "front").isNotEmpty() }.getOrDefault(false)
+    // Draft-list state only needs to know whether a protected scan exists.
+    // Avoid decrypting full-resolution images on the UI thread just to label Resume.
+    fun hasFront(draftId: String): Boolean = hasScan(draftId, "front")
 
-    fun hasBack(draftId: String): Boolean =
-        runCatching { readScanBytes(draftId, "back").isNotEmpty() }.getOrDefault(false)
+    fun hasBack(draftId: String): Boolean = hasScan(draftId, "back")
+
+    private fun hasScan(draftId: String, side: String): Boolean = runCatching {
+        require(side == "front" || side == "back")
+        val directory = draftDirectory(draftId)
+        val scan = File(directory, "$side.jpg").canonicalFile
+        scan.parentFile?.canonicalPath == directory.canonicalPath &&
+            scan.isFile && scan.length() > 0L
+    }.getOrDefault(false)
 
     fun savePreparedOutput(
         pdfBytes: ByteArray,
