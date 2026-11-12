@@ -4586,7 +4586,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
 
   // Keep the customer informed as the shop reviews, verifies payment and prints.
-  // Terminal states stop polling; transient network failures are retried silently.
+  // Private jobs keep polling after print completion until shop-computer deletion is acknowledged.
   useEffect(()=>{
     if(!uploaded||!jobStatus)return;
     const liveStates=new Set([
@@ -4596,7 +4596,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       "PRINT_AUTHORISED","PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING",
       "OUTPUT_UNCONFIRMED"
     ]);
-    if(!liveStates.has(jobStatus.status))return;
+    const waitingForPrivatePurge =
+      jobStatus.status==="COMPLETED" &&
+      Boolean(jobStatus.privatePrinting) &&
+      !jobStatus.privateDocumentPurgedUtc;
+    if(!liveStates.has(jobStatus.status)&&!waitingForPrivatePurge)return;
     let active=true;
     const timer=window.setInterval(()=>{
       void getCustomerJobStatus(sessionToken,uploaded.job.id).then(refreshed=>{
@@ -4609,7 +4613,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       active=false;
       window.clearInterval(timer);
     };
-  },[sessionToken,uploaded?.job.id,jobStatus?.status]);
+  },[sessionToken,uploaded?.job.id,jobStatus?.status,jobStatus?.privatePrinting,jobStatus?.privateDocumentPurgedUtc]);
 
   async function refreshBatchStatuses() {
     const items=uploadedBatch.length?uploadedBatch:(uploaded?[uploaded]:[]);
