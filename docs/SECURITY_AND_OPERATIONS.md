@@ -1,5 +1,14 @@
 # Security and Operations
 
+## 0. Production availability (24/7)
+
+- The production public website at `https://smartprint.quantaedge.in/` must remain publicly available 24 hours a day, 7 days a week. This is a standing production requirement, not a launch milestone or optional target.
+- Do not schedule a maintenance page, planned offline window or website shutdown for SEO work, content updates, routine releases or crawler verification.
+- Roll out portal/API changes with health checks and a rollback path. Keep the currently healthy version serving production traffic until the replacement is healthy; do not switch traffic to a failed or partially ready release.
+- Continuously monitor the public HTTPS homepage and important public routes from an external probe, alongside API/container health, DNS resolution and TLS certificate expiry. Alert and recover promptly when checks fail.
+- Treat a single crawler, search tool or research service fetch failure as an unverified fetch. Confirm suspected outages independently before classifying them as downtime; distinguish bot-specific blocks and rate limits from service unavailability.
+- If an unplanned incident occurs, use the incident recovery and rollback procedure. Do not convert a transient tool or crawler failure into an intentional maintenance state.
+
 ## 1. Tenant and identity security
 
 - Derive tenant scope from verified user membership or registered device identity.
