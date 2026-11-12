@@ -575,7 +575,7 @@ export default function PhotoStudio({
     : mode === "shop-create"
       ? "New order · Verify payment before printing."
       : mode === "shop"
-        ? "Replace this unpaid job's photo PDF; approval and dispatch still apply."
+        ? "Replace the unpaid job photo PDF; approval and dispatch still apply."
         : "Prepared A4 replaces this upload; original stays untouched.";
   const actionLabel = mode === "private-library" ? "Save private sheet" : mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
   const busyLabel = mode === "private-library" ? "Saving privately…" : mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your A4 sheet…";

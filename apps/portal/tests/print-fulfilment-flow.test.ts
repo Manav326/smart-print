@@ -333,6 +333,7 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  assert.match(studio,/mode === "shop" \? "Save sheet to this job"/);
  assert.match(studio,/: "Prepare A4 sheet"/);
  assert.match(studio,/Prepared A4 replaces this upload; original stays untouched/);
+ assert.match(studio,/Replace the unpaid job photo PDF; approval and dispatch still apply/);
  assert.match(studio,/type="date"/);
  assert.match(studio,/formatDobForPrint/);
 });
