@@ -961,7 +961,7 @@ customerApi.MapGet("/jobs", async (
     SmartPrintDbContext db,
     CancellationToken ct,
     int? page,
-    int? pageSize) =>
+    int? size) =>
 {
     var customerId = CustomerIdentity.GetCustomerId(principal);
     if (customerId is null)
@@ -969,9 +969,20 @@ customerApi.MapGet("/jobs", async (
         return Results.Forbid();
     }
 
-    var pageNumber = Math.Clamp(page ?? 1, 1, 100_000);
-    var take = Math.Clamp(pageSize ?? 100, 1, 100);
-    var skip = checked((pageNumber - 1) * take);
+    // Match the zero-based page/size contract used by mPay. Reject invalid
+    // values rather than silently changing the page the customer requested.
+    var pageNumber = page ?? 0;
+    var pageSize = size ?? 20;
+    if (pageNumber < 0 || pageSize is < 1 or > 100)
+    {
+        return Results.BadRequest(new { message = "Page must be zero or greater and size must be between 1 and 100." });
+    }
+
+    var skipLong = (long)pageNumber * pageSize;
+    if (skipLong > int.MaxValue)
+    {
+        return Results.BadRequest(new { message = "The requested history page is outside the supported range." });
+    }
 
     var customerJobs = (
         from job in db.PrintJobs.AsNoTracking()
@@ -982,7 +993,7 @@ customerApi.MapGet("/jobs", async (
                   session.TenantId == job.TenantId &&
                   session.Id == job.CustomerSessionId &&
                   session.CustomerUserId == customerId))
-        orderby job.CreatedUtc descending
+        orderby job.CreatedUtc descending, job.Id descending
         select new
         {
             job.Id,
@@ -1025,18 +1036,23 @@ customerApi.MapGet("/jobs", async (
                 .FirstOrDefault()
         });
 
-    var totalCount = await customerJobs.CountAsync(ct);
+    var totalItems = await customerJobs.CountAsync(ct);
+    var totalPages = totalItems == 0
+        ? 0
+        : (int)Math.Ceiling(totalItems / (double)pageSize);
     var jobs = await customerJobs
-        .Skip(skip)
-        .Take(take)
+        .Skip((int)skipLong)
+        .Take(pageSize)
         .ToListAsync(ct);
 
     return Results.Ok(new
     {
         Jobs = jobs,
-        TotalCount = totalCount,
         Page = pageNumber,
-        PageSize = take
+        Size = pageSize,
+        TotalItems = totalItems,
+        TotalPages = totalPages,
+        HasNext = (long)pageNumber + 1 < totalPages
     });
 });
 
