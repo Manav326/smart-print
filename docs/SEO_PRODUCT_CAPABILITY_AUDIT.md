@@ -277,6 +277,22 @@ Recommended public content cluster:
 
 Every statement must be product-accurate and distinguish source-implemented behaviour from plan-gated behaviour and physical-release validation. No competitor comparison pages are part of this strategy.
 
+
+## 11. Customer and shop problems SmartPrint is designed to solve
+
+The SmartPrint cinematic advertising production master (11 November 2026) adds a human, problem-led explanation of the product. Its central problems are supported by the current code and should guide the public SEO narrative:
+
+- **Scattered document collection:** customers may be asked to join a shop messaging group and send files in separate messages; owners then download and sort them. SmartPrint provides a shop Upload QR and a station-bound submission flow so the file request reaches the shop workspace.
+- **Repeated copy/colour questions:** the customer chooses copies and Mono/Colour per file, with folder defaults and per-file overrides. The shop sees those settings with the corresponding job before approving it.
+- **Mix-ups between document sets:** keeping file settings attached to separate jobs in one batch helps reduce avoidable confusion about which file needs which output. This is a workflow improvement, not a guarantee that mistakes are impossible.
+- **Unclear print responsibility:** the shop reviews the request, confirms the quote and payment according to its own process, then explicitly authorises printer dispatch. Uploading a file does not start printing automatically.
+- **Sensitive document concerns:** customers can choose Private Printing where the paired shop Agent/key requirements are met. Ordinary direct Shop Wi-Fi transfer is not encrypted in transit and must never be described as end-to-end encrypted.
+- **Unclear completion:** spooler acceptance and physical output are different states; the shop checks the actual pages and confirms output.
+
+Recommended public narrative: **“No scattered file messages. No repeating copy and colour instructions. Customers submit through your shop QR; your team reviews each file and decides when printing starts.”** Use measured phrases such as “designed to reduce back-and-forth” and “helps keep instructions with the right file.” Do not claim zero mistakes, guaranteed time/paper savings, instant printing, automatic printing on upload or universal printer compatibility.
+
+The ad production master is a creative brief, not evidence that the Android app is publicly listed or a Windows installer is currently available. Use public Play Store/download claims only after verifying the exact live listing/release. The ad's QA capture plan specifically requires fresh evidence for per-file controls, a successful Private Printing setup, shop review/authorisation and real output confirmation.
+
 ## 10. Files audited
 
 - apps/portal/src/App.tsx
