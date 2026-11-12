@@ -103,7 +103,13 @@ jobs:
         run: pnpm typecheck
       - name: Build portal and shared packages
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        env:
+          VITE_PUBLIC_BASE_URL: ${{ env.SMARTPRINT_PUBLIC_BASE_URL }}
         run: pnpm build
+      - name: Validate generated public SEO assets
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        run: pnpm --filter @smart-print/portal validate:seo
+
       - name: Ensure production portal build excludes QA-only Photo Studio fixture
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         shell: bash
@@ -955,6 +961,7 @@ jobs:
           push: true
           build-args: |
             SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
+            PUBLIC_BASE_URL=${{ env.SMARTPRINT_PUBLIC_BASE_URL }}
           tags: |
             ${{ steps.image_namespace.outputs.value }}/smart-print-portal:latest
             ${{ steps.image_namespace.outputs.value }}/smart-print-portal:sha-${{ github.sha }}

@@ -817,6 +817,12 @@ public sealed class AgentLocalQueueStoreTests
             await store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None);
             Assert.False(store.Find(job.Id)!.PrivatePurgePending);
             Assert.Empty(store.GetPrivatePurgePendingJobs());
+
+            // The sanitized manifest remains for job reconciliation. A later
+            // standard-retention sweep must skip it rather than resolve an empty path.
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                DateTimeOffset.UtcNow.AddDays(10), TimeSpan.FromDays(7), root, CancellationToken.None));
+            Assert.NotNull(store.Find(job.Id));
         }
         finally
         {

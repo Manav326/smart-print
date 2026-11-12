@@ -474,6 +474,11 @@ public sealed class AgentLocalQueueStore
                 completedUtc > cutoff)
                 continue;
 
+            // Private Printing keeps a sanitized completion manifest for job
+            // reconciliation after its source document has already been erased.
+            if (string.IsNullOrWhiteSpace(entry.DocumentPath))
+                continue;
+
             var documentPath = Path.GetFullPath(entry.DocumentPath);
             if (!documentPath.StartsWith(queuePrefix, comparison))
                 continue;
