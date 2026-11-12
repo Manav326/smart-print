@@ -3661,14 +3661,16 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
     }
 
-    if (stored.Analysis.PageCount != expectedPageCount)
+    if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+        stored.Analysis.PageCount != expectedPageCount ||
+        !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount))
     {
         await storage.DeleteAsync(stored.StorageKey);
         await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new
         {
-            code = "photo_sheet_page_count_mismatch",
-            message = $"The prepared PDF must contain exactly {expectedPageCount} A4 page(s) for {photoCount} photos of the selected size."
+            code = "photo_sheet_layout_invalid",
+            message = $"The replacement Photo Studio PDF must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page 300-DPI photo raster."
         });
     }
 

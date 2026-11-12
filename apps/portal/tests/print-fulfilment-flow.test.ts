@@ -479,6 +479,21 @@ test("native customer account identity accompanies QR session renewal",()=>{
 });
 
 
+test("cloud shop Photo Studio revisions validate complete A4 raster geometry before replacing the saved job",()=>{
+  const program=read("../../../src/SmartPrint.Api/Program.cs");
+  const start=program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision"');
+  const end=program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/preview-source"',start);
+  assert.ok(start>=0&&end>start);
+  const endpoint=program.slice(start,end);
+  const validation=endpoint.indexOf("PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount)");
+  const replacement=endpoint.indexOf("document.StorageKey = stored.StorageKey");
+  assert.match(endpoint,/string\.Equals\(stored\.Analysis\.MediaType, "application\/pdf"/);
+  assert.ok(validation>=0&&replacement>validation,
+    "The new PDF's A4 pages and full-page photo raster must be verified before replacing the existing document.");
+  assert.match(endpoint,/await storage\.DeleteAsync\(stored\.StorageKey\);[\s\S]*?await transaction\.RollbackAsync\(ct\)/);
+  assert.match(endpoint,/The replacement Photo Studio PDF must contain exactly/);
+});
+
 test("shop-originated photo orders use their own tenant-owned job and the shared Photo Studio",()=>{
  const app=read("../src/App.tsx");
  const studio=read("../src/PhotoStudio.tsx");
