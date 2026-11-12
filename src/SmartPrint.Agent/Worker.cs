@@ -31,9 +31,9 @@ public sealed class Worker(
     private readonly string pdfExportDirectory = ResolvePdfExportDirectory(configuration);
     private readonly object retentionPolicySync = new();
     private TimeSpan completedDocumentRetention = TimeSpan.FromDays(
-        Math.Clamp(configuration.GetValue<int?>("Agent:CompletedDocumentRetentionDays") ?? 30, 1, 3650));
+        Math.Clamp(configuration.GetValue<int?>("Agent:CompletedDocumentRetentionDays") ?? 7, 1, 3650));
     private TimeSpan retentionSweepInterval = TimeSpan.FromHours(
-        Math.Clamp(configuration.GetValue<int?>("Agent:RetentionSweepHours") ?? 6, 1, 24));
+        Math.Clamp(configuration.GetValue<int?>("Agent:RetentionSweepHours") ?? 1, 1, 24));
     private bool hasReceivedPlatformRetentionPolicy;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

@@ -26,8 +26,8 @@ Implementation is on `feature/phase-1-2-security-data-hardening`; merge acceptan
 - [x] Local and cloud batch upload capacity share one overflow-safe 20-file / 50-MB rule; local ticket reservation, idempotency and monthly quota checks are serialized with the tenant quota lock.
 - [x] Monthly print-job quota counts unexpired local reservations and completed-but-not-yet-materialised tickets until their PrintJob exists.
 - [x] Gross payment collections are reported by payment verification date; refunds are a separate event stream by the date the shop records sending the refund.
-- [x] Cloud document retention purges source documents only after confirmed completion; configurable default 30 days, with a persistent purge timestamp and HTTP 410 for purged previews.
-- [x] Windows Agent retention removes expired unfinished staging and confirmed print/PDF source documents after its configurable retention period; output-unconfirmed documents are preserved for recovery.
+- [x] Cloud document retention purges standard source documents 7 days after confirmed completion by default; hourly cleanup, persistent purge timestamp and HTTP 410 for purged previews. Private Printing erases the paired-Agent working source immediately after confirmed physical output and then redacts server source metadata.
+- [x] Windows Agent retention removes standard completed print/PDF source documents after the 7-day default window (hourly sweep); Private Printing securely erases the paired-computer working copy immediately after confirmed physical output. Output-unconfirmed documents are preserved for recovery.
 - [x] Regression tests cover tenant status transitions, batch bounds, cloud retention eligibility and safe local-queue retention.
 - [x] Android guest-account instrumentation test clears persistent customer-account state before asserting guest UI.
 

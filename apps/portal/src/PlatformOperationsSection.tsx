@@ -25,15 +25,15 @@ type NumericKey =
 
 const fields: Array<{ key: NumericKey; label: string; hint: string; min: number; max: number }> = [
   { key: "trialMaxMonthlyPrintJobs", label: "Trial monthly print quota", hint: "Print jobs per calendar month. Default is 3,000. Paid plan quotas remain versioned under Plans & entitlements.", min: 1, max: 10_000_000 },
-  { key: "cloudCompletedDocumentRetentionDays", label: "Cloud completed documents", hint: "Days after confirmed physical output or verified PDF export before source files are purged.", min: 1, max: 3650 },
-  { key: "agentCompletedDocumentRetentionDays", label: "Windows Agent completed documents", hint: "Days local source documents and managed PDF exports remain after output confirmation.", min: 1, max: 3650 },
+  { key: "cloudCompletedDocumentRetentionDays", label: "Cloud completed documents", hint: "Standard completed source files are kept for 7 days after confirmed output by default, then purged on the hourly API sweep.", min: 1, max: 3650 },
+  { key: "agentCompletedDocumentRetentionDays", label: "Windows Agent completed documents", hint: "Standard local source files remain for 7 days after output confirmation by default, then are removed on the hourly Agent sweep. Private Printing is erased after confirmed physical output.", min: 1, max: 3650 },
   { key: "abandonedDocumentRetentionDays", label: "Rejected / fully refunded documents", hint: "Days terminal rejected, quote-expired or fully refunded files are retained when no financial hold exists.", min: 1, max: 3650 },
   { key: "pendingLocalUploadRetentionDays", label: "Pending local uploads", hint: "Days after a local upload becomes terminal unpaid before the API authorises the Agent to delete it.", min: 1, max: 3650 },
   { key: "expiredUploadTicketRetentionDays", label: "Expired upload tickets", hint: "Extra days after an unfinished local upload expires before its ticket record is removed.", min: 1, max: 3650 },
   { key: "emptyCustomerSessionRetentionDays", label: "Empty customer sessions", hint: "Days expired sessions without jobs or upload tickets are kept.", min: 1, max: 3650 },
   { key: "staleRefreshTokenRetentionDays", label: "Expired/revoked refresh tokens", hint: "Additional days before expired or revoked authentication-token records are removed.", min: 1, max: 3650 },
-  { key: "apiRetentionSweepHours", label: "API retention sweep interval", hint: "How often the API cleans cloud documents and database records.", min: 1, max: 168 },
-  { key: "agentRetentionSweepHours", label: "Windows Agent retention sweep interval", hint: "How often paired Windows Agents clean confirmed local documents.", min: 1, max: 24 }
+  { key: "apiRetentionSweepHours", label: "API retention sweep interval", hint: "How often the API checks for documents whose retention period has elapsed. Default: hourly.", min: 1, max: 168 },
+  { key: "agentRetentionSweepHours", label: "Windows Agent retention sweep interval", hint: "How often paired Windows Agents remove standard completed source files after the retention window. Default: hourly.", min: 1, max: 24 }
 ];
 
 type Draft = Omit<PlatformOperationalSettings, "updatedByUserId" | "updatedUtc">;
