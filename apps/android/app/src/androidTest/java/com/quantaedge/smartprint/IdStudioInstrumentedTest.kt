@@ -57,6 +57,17 @@ class IdStudioInstrumentedTest {
             assertTrue("Prepared PDFs are AES-GCM vault envelopes.", encryptedPreparedBytes.take(4).toByteArray().contentEquals(byteArrayOf(83, 80, 73, 68)))
             assertTrue("New ID documents retain both encrypted original scans.", idStore.canEditPreparedDocument(prepared))
             assertTrue("ID library entries can render an A4 thumbnail for print selection.", idStore.createThumbnailBase64(prepared)?.isNotBlank() == true)
+            val a4BrandPreview = IdCardPdfComposer.renderSheetPreview(
+                frontBytes, backBytes, 0, 0,
+                previewWidthPixels = 900,
+                brandMark = context.getDrawable(R.drawable.smartprint_mark_watermark)
+            )
+            try {
+                assertTrue("A4 ID branding is rendered on the sheet preview without changing the saved print PDF.",
+                    a4BrandPreview.width == 900 && a4BrandPreview.height > a4BrandPreview.width)
+            } finally {
+                a4BrandPreview.recycle()
+            }
             val cardFaceThumbnail = android.util.Base64.decode(
                 idStore.createCardFaceThumbnailBase64(prepared, "front") ?: error("The ID front-face preview could not be rendered."),
                 android.util.Base64.DEFAULT

@@ -187,7 +187,6 @@ class MainActivity : AppCompatActivity() {
         photoStudioOpen = savedInstanceState?.getBoolean("photoStudioOpen") ?: false
         photoStudioCaptureAllowed = savedInstanceState?.getBoolean("photoStudioCaptureAllowed") ?: false
         privatePhotoStudioPageOpen = savedInstanceState?.getBoolean("privatePhotoStudioPageOpen") ?: false
-        fileChooserReturnToPhotoStudio = savedInstanceState?.getBoolean("fileChooserReturnToPhotoStudio") ?: false
         if ((photoStudioOpen || privatePhotoStudioPageOpen) && !photoStudioCaptureAllowed) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
@@ -285,6 +284,8 @@ class MainActivity : AppCompatActivity() {
                     savedInstanceState?.getInt("viewerPosition", 0) ?: 0
                 )
             }
+        } else if (savedInstanceState?.getBoolean("privatePhotoStudioPageOpen") == true) {
+            showDedicatedPhotoStudio()
         } else if (savedInstanceState?.getBoolean("idStudioScreenOpen") == true) {
             if (idStudioReadOnlyView && idStudioEditingFile?.let(idStudioStore::canEditPreparedDocument) == true) {
                 showIdStudioReview()
@@ -320,7 +321,6 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean("photoStudioOpen", photoStudioOpen)
         outState.putBoolean("photoStudioCaptureAllowed", photoStudioCaptureAllowed)
         outState.putBoolean("privatePhotoStudioPageOpen", privatePhotoStudioPageOpen)
-        outState.putBoolean("fileChooserReturnToPhotoStudio", fileChooserReturnToPhotoStudio)
         outState.putString("idStudioDraftId", idStudioDraftId)
         outState.putString("idStudioEditingFilePath", idStudioEditingFile?.absolutePath)
         outState.putString("pendingIdStudioSide", pendingIdStudioSide)
@@ -348,16 +348,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleBackNavigation(): Boolean {
         when {
+            // The native picker is a child workflow of the page that opened it.
+            // Cancel it before dispatching Escape to the underlying studio WebView.
+            pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
+            pickerMode -> cancelPicker()
             photoStudioOpen -> {
                 webView?.evaluateJavascript(
                     "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));",
                     null
                 )
             }
-            // The picker is a child workflow of the page that opened it. Handle
-            // Back here before the enclosing Photo Studio route.
-            pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
-            pickerMode -> cancelPicker()
             privatePhotoStudioPageOpen -> showHome()
             documentViewer != null -> if (customerUploadPdfPreviewOpen) closeCustomerUploadPdfPreview() else closeDocumentViewer()
             idStudioScreenOpen -> showIdStudioHome()
@@ -1146,6 +1146,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHome() {
+        fileChooserReturnToPhotoStudio = false
         photoStudioOpen = false
         photoStudioCaptureAllowed = false
         privatePhotoStudioPageOpen = false
@@ -1996,6 +1997,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPrint() {
+        fileChooserReturnToPhotoStudio = false
         privatePhotoStudioPageOpen = false
         photoStudioOpen = false
         photoStudioCaptureAllowed = false
@@ -3803,12 +3805,21 @@ class MainActivity : AppCompatActivity() {
                 !idStudioStore.hasBack(draftId) -> "back"
                 else -> "review"
             }
-            column.addView(button(
-                if (nextSide == "front") "Continue front-side scan"
-                else if (nextSide == "back") "Continue back-side scan"
-                else "Review scanned ID",
-                false
-            ).apply {
+            val draftStatus = when (nextSide) {
+                "front" -> "No side scanned yet"
+                "back" -> "Front saved · Back side needed"
+                else -> "Both sides saved · Ready to review"
+            }
+            val resumeCard = card()
+            val resumeContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
+            resumeContent.addView(text("Unfinished ID setup", 12, R.color.qp_text, true))
+            resumeContent.addView(text(draftStatus, 10, R.color.qp_muted, false)
+                .apply { setPadding(0, dp(3), 0, dp(8)) })
+            resumeContent.addView(button("Resume", false).apply {
+                minHeight = dp(36)
                 setOnClickListener {
                     when (nextSide) {
                         "front" -> startIdStudioSideScan("front")
@@ -3816,7 +3827,9 @@ class MainActivity : AppCompatActivity() {
                         else -> showIdStudioReview()
                     }
                 }
-            }, linearParams().apply { bottomMargin = dp(15) })
+            }, LinearLayout.LayoutParams(-1, dp(36)))
+            resumeCard.addView(resumeContent)
+            column.addView(resumeCard, linearParams().apply { bottomMargin = dp(12) })
         }
 
         val prepared = idStudioStore.listPrepared()
@@ -4224,7 +4237,9 @@ class MainActivity : AppCompatActivity() {
             "A4 ID front and back print sheet preview. Pinch to zoom."
         }
         previewStage.addView(preview, FrameLayout.LayoutParams(-1, -1))
-        addPrivateSecurityWatermark(previewStage)
+        // Keep the secure-mark sentence on an individual card view. The A4 sheet
+        // uses the paired logo + wordmark inside each front/back face instead.
+        if (idStudioPreviewMode == "CARD") addPrivateSecurityWatermark(previewStage)
         root.addView(previewStage, LinearLayout.LayoutParams(-1, 0, 1f).apply {
             bottomMargin = dp(5)
         })

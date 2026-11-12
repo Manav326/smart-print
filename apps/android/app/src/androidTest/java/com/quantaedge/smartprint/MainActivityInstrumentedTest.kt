@@ -591,6 +591,10 @@ class MainActivityInstrumentedTest {
                 }.invoke(activity)
                 assertEquals("/photo-studio", Uri.parse(webView.url.orEmpty()).path)
                 assertNotNull("The same studio WebView must be reattached after picker cancellation.", webView.parent)
+                MainActivity::class.java.getDeclaredMethod("showDedicatedPhotoStudio").apply {
+                    isAccessible = true
+                }.invoke(activity)
+                assertNotNull("Repeated Photo Studio entry must reattach the existing WebView.", webView.parent)
                 assertEquals("The selected shop-print route must not replace the private studio.",
                     "/photo-studio", Uri.parse(webView.url.orEmpty()).path)
             }

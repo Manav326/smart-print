@@ -191,15 +191,15 @@ object IdCardPdfComposer {
     private fun drawPreviewBranding(canvas: Canvas, target: RectF, brandMark: Drawable) {
         canvas.save()
         canvas.clipRect(target)
-        val markWidth = target.height() * 0.40f
-        val markHeight = target.height() * 0.40f
+        // A large, softly faded mark spans the face without obscuring text.
+        val markSize = min(target.width() * 0.78f, target.height() * 1.22f)
         val markRect = RectF(
-            target.centerX() - markWidth / 2f,
-            target.centerY() - markHeight * 0.66f,
-            target.centerX() + markWidth / 2f,
-            target.centerY() + markHeight * 0.34f
+            target.centerX() - markSize / 2f,
+            target.centerY() - markSize / 2f,
+            target.centerX() + markSize / 2f,
+            target.centerY() + markSize / 2f
         )
-        val layer = canvas.saveLayerAlpha(target, 20)
+        val layer = canvas.saveLayerAlpha(target, 24)
         brandMark.setBounds(
             markRect.left.toInt(), markRect.top.toInt(),
             markRect.right.toInt(), markRect.bottom.toInt()
@@ -208,8 +208,8 @@ object IdCardPdfComposer {
         canvas.restoreToCount(layer)
 
         val wordmark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.argb(38, 40, 55, 78)
-            textSize = target.height() * 0.068f
+            color = Color.argb(34, 40, 55, 78)
+            textSize = target.height() * 0.060f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             textAlign = Paint.Align.CENTER
         }
