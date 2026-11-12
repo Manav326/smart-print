@@ -155,7 +155,11 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
     fun readMetadata(file: File): JSONObject {
         require(isPreparedDocument(file)) { "Only a private Photo Studio document can be opened here." }
         val bytes = readEncrypted(metadataFile(idFromFile(file)), MAX_METADATA_BYTES)
-        return JSONObject(String(bytes, Charsets.UTF_8))
+        return try {
+            JSONObject(String(bytes, Charsets.UTF_8))
+        } finally {
+            bytes.fill(0)
+        }
     }
 
     fun renamePrepared(file: File, title: String): JSONObject {
@@ -170,8 +174,12 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
     fun materializePdf(file: File): File {
         require(isPreparedDocument(file)) { "Only a private Photo Studio PDF can be opened or printed." }
         val bytes = readEncrypted(file, MAX_PREPARED_BYTES)
-        require(hasPdfSignature(bytes)) { "The private photo sheet is damaged. Prepare it again from the original photo." }
-        return writeTransient(bytes, ".pdf")
+        return try {
+            require(hasPdfSignature(bytes)) { "The private photo sheet is damaged. Prepare it again from the original photo." }
+            writeTransient(bytes, ".pdf")
+        } finally {
+            bytes.fill(0)
+        }
     }
 
     fun readOriginalPhoto(file: File): ByteArray {
@@ -181,10 +189,14 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
 
     fun materializeOriginalPhoto(file: File): File {
         val bytes = readOriginalPhoto(file)
-        val metadata = readMetadata(file)
-        val extension = metadata.optString("sourceName").substringAfterLast('.', "jpg")
-            .lowercase().takeIf { it in setOf("jpg", "jpeg", "png") } ?: "jpg"
-        return writeTransient(bytes, ".$extension")
+        return try {
+            val metadata = readMetadata(file)
+            val extension = metadata.optString("sourceName").substringAfterLast('.', "jpg")
+                .lowercase().takeIf { it in setOf("jpg", "jpeg", "png") } ?: "jpg"
+            writeTransient(bytes, ".$extension")
+        } finally {
+            bytes.fill(0)
+        }
     }
 
     fun createThumbnailBase64(file: File): String? = renderPageBase64(file, 0, THUMBNAIL_WIDTH)
