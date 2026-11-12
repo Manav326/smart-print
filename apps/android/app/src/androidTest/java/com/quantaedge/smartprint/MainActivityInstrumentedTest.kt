@@ -790,7 +790,7 @@ class MainActivityInstrumentedTest {
                     String::class.java,
                     List::class.java,
                     String::class.java,
-                    Boolean::class.javaPrimitiveType
+                    Boolean::class.javaPrimitiveType!!
                 ).apply { isAccessible = true }
 
                 fun history(count: Int) = (0 until count).map { index ->
