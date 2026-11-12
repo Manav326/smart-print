@@ -36,15 +36,15 @@ public sealed class PlatformOperationalSettings
 
     public int Id { get; set; } = SingletonIdValue;
     public int TrialMaxMonthlyPrintJobs { get; set; } = DefaultTrialMaxMonthlyPrintJobs;
-    public int CloudCompletedDocumentRetentionDays { get; set; } = 30;
-    public int AgentCompletedDocumentRetentionDays { get; set; } = 30;
+    public int CloudCompletedDocumentRetentionDays { get; set; } = 7;
+    public int AgentCompletedDocumentRetentionDays { get; set; } = 7;
     public int AbandonedDocumentRetentionDays { get; set; } = 30;
     public int PendingLocalUploadRetentionDays { get; set; } = 30;
     public int ExpiredUploadTicketRetentionDays { get; set; } = 7;
     public int EmptyCustomerSessionRetentionDays { get; set; } = 90;
     public int StaleRefreshTokenRetentionDays { get; set; } = 30;
-    public int ApiRetentionSweepHours { get; set; } = 24;
-    public int AgentRetentionSweepHours { get; set; } = 6;
+    public int ApiRetentionSweepHours { get; set; } = 1;
+    public int AgentRetentionSweepHours { get; set; } = 1;
     public bool AllowPaidJobClaimsWhenSuspended { get; set; } = true;
     public Guid? UpdatedByUserId { get; set; }
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;

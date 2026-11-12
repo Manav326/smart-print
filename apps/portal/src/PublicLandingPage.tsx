@@ -182,6 +182,14 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
         <a className="sp-public-brand" href="/"><BrandLockup className="sp-public-brand-lockup" /></a>
         <span>© {new Date().getFullYear()} SmartPrint by QuantaEdge</span>
         <div><a href="#how-it-works">How it works</a><a href="#downloads">Downloads</a><a href="/shop">For print shops</a></div>
+      <nav className="sp-public-footer-resources" aria-label="Print shop resources">
+          <span>PRINT SHOP RESOURCES</span>
+          <a href="/print-shop-software/">Print shop software</a>
+          <a href="/qr-code-print-ordering/">QR code ordering</a>
+          <a href="/print-job-management/">Print job management</a>
+          <a href="/windows-print-agent/">Windows Print Agent</a>
+          <a href="/smartprint-faq/">SmartPrint FAQ</a>
+        </nav>
       </footer>
     </div>
   );

@@ -62,6 +62,8 @@ services:
     build:
       context: .
       dockerfile: apps/portal/Dockerfile
+      args:
+        PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
     restart: unless-stopped
     networks:
       default: {}

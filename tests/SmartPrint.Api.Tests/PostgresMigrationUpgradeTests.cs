@@ -39,9 +39,11 @@ public sealed class PostgresMigrationUpgradeTests
             item => item.Id == PlatformOperationalSettings.SingletonIdValue);
 
         Assert.Equal(3000, settings.TrialMaxMonthlyPrintJobs);
-        Assert.Equal(30, settings.CloudCompletedDocumentRetentionDays);
-        Assert.Equal(30, settings.AgentCompletedDocumentRetentionDays);
+        Assert.Equal(7, settings.CloudCompletedDocumentRetentionDays);
+        Assert.Equal(7, settings.AgentCompletedDocumentRetentionDays);
         Assert.Equal(30, settings.PendingLocalUploadRetentionDays);
+        Assert.Equal(1, settings.ApiRetentionSweepHours);
+        Assert.Equal(1, settings.AgentRetentionSweepHours);
         Assert.True(settings.AllowPaidJobClaimsWhenSuspended);
         Assert.Contains(
             "202611010003_AddPlatformOperationalSettings",

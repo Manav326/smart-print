@@ -145,6 +145,14 @@
 .customer-private-confirmation svg,.customer-private-transfer-note svg{flex:0 0 auto;margin-top:1px}
 .customer-private-confirmation strong{color:#175b3d}
 .customer-private-transfer-note{align-items:center;margin:0 0 11px;background:#edf7f2}
+.customer-private-purge-status{display:flex;align-items:flex-start;gap:8px;margin:10px 0;padding:10px 11px;border:1px solid transparent;border-radius:9px;font-size:9px;line-height:1.5}
+.customer-private-purge-status svg{flex:0 0 auto;margin-top:1px}
+.customer-private-purge-status strong{display:block;margin-bottom:2px;color:inherit}
+.customer-private-purge-pending{background:#fff6e4;border-color:#f0ddb2;color:#72511d}
+.customer-private-purge-complete{background:#eaf7f1;border-color:#c8e8d8;color:#24654b}
+.customer-entry.smartprint-native .customer-private-purge-status{font-size:10px;padding:10px}
+html[data-theme="dark"] .customer-private-purge-pending{background:#3a2d18;border-color:#68512b;color:#f4d99c}
+html[data-theme="dark"] .customer-private-purge-complete{background:#18372d;border-color:#376b57;color:#c2f0da}
 .customer-entry:not(.smartprint-native) .customer-privacy-choice{padding:17px;border-radius:14px;margin-bottom:14px}
 .customer-entry:not(.smartprint-native) .customer-privacy-choice-heading>div>span{font-size:10px}
 .customer-entry:not(.smartprint-native) .customer-privacy-choice-heading>div>strong{font-size:15px}
