@@ -97,6 +97,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var store: LocalDocumentStore
     private lateinit var idStudioStore: IdStudioStore
+    private lateinit var photoStudioStore: PhotoStudioStore
     private lateinit var customerAccountStore: CustomerAccountStore
     private lateinit var customerPrintSessionStore: CustomerPrintSessionStore
     private lateinit var toolbar: MaterialToolbar
@@ -114,6 +115,7 @@ class MainActivity : AppCompatActivity() {
     private var privateIdViewerOpen = false
     private var privateIdViewerTempFile: File? = null
     private val privateIdUploadTempFiles = mutableListOf<File>()
+    private val privatePhotoUploadTempFiles = mutableListOf<File>()
     private var idStudioScreenOpen = false
     private var idStudioDraftId: String? = null
     private var pendingIdStudioSide: String? = null
@@ -196,6 +198,7 @@ class MainActivity : AppCompatActivity() {
         }
         store = LocalDocumentStore(filesDir)
         idStudioStore = IdStudioStore(filesDir, cacheDir)
+        photoStudioStore = PhotoStudioStore(filesDir, cacheDir)
         idStudioDraftId = savedInstanceState?.getString("idStudioDraftId")
         pendingIdStudioSide = savedInstanceState?.getString("pendingIdStudioSide")
         idStudioFrontRotation = savedInstanceState?.getInt("idStudioFrontRotation", 0) ?: 0
@@ -484,6 +487,10 @@ class MainActivity : AppCompatActivity() {
         if (::idStudioStore.isInitialized && !isChangingConfigurations) {
             privateIdUploadTempFiles.forEach(idStudioStore::releaseTransientFile)
             privateIdUploadTempFiles.clear()
+        }
+        if (::photoStudioStore.isInitialized && !isChangingConfigurations) {
+            privatePhotoUploadTempFiles.forEach(photoStudioStore::releaseTransientFile)
+            privatePhotoUploadTempFiles.clear()
         }
         clearCustomerUploadPdfPreviews()
         window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -1897,7 +1904,10 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(-2, dp(40)).apply { marginStart = dp(8) })
             column.addView(sourceRow, linearParams().apply { bottomMargin = dp(4) })
         }
-        if (isPicker && !fileChooserSelectFolders) addIdStudioPickerSection(column)
+        if (isPicker && !fileChooserSelectFolders) {
+            addIdStudioPickerSection(column)
+            addPhotoStudioPickerSection(column)
+        }
         if (!isPicker) {
             val folderActions = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -2803,6 +2813,100 @@ class MainActivity : AppCompatActivity() {
                                         replyProxy.postMessage("OK")
                                     }
                                 }
+                            }
+                            message.data.startsWith("savePhotoStudioDocument|") -> {
+                                Thread {
+                                    val response = try {
+                                        val payload = JSONObject(message.data.substringAfter('|'))
+                                        val pdfBytes = android.util.Base64.decode(payload.getString("pdfBase64"), android.util.Base64.DEFAULT)
+                                        val sourceBytes = android.util.Base64.decode(payload.getString("sourceBase64"), android.util.Base64.DEFAULT)
+                                        try {
+                                            val output = photoStudioStore.savePreparedOutput(pdfBytes, sourceBytes, payload)
+                                            val id = output.name.removePrefix(PhotoStudioStore.FILE_PREFIX).removeSuffix(".spph")
+                                            "PHOTO_SAVED|$id"
+                                        } finally {
+                                            pdfBytes.fill(0)
+                                            sourceBytes.fill(0)
+                                        }
+                                    } catch (error: Exception) {
+                                        "PHOTO_SAVE_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            message.data == "listPhotoStudioDocuments" -> {
+                                Thread {
+                                    val response = try {
+                                        org.json.JSONArray().apply {
+                                            photoStudioStore.listPrepared().forEach { file ->
+                                                val metadata = photoStudioStore.readMetadata(file)
+                                                put(JSONObject(metadata.toString()).apply {
+                                                    put("id", file.name.removePrefix(PhotoStudioStore.FILE_PREFIX).removeSuffix(".spph"))
+                                                    put("sizeBytes", file.length())
+                                                    photoStudioStore.createThumbnailBase64(file)?.let { put("thumbnailBase64", it) }
+                                                })
+                                            }
+                                        }
+                                        "PHOTO_LIBRARY|" + response.toString()
+                                    } catch (error: Exception) {
+                                        "PHOTO_LIBRARY_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            parts.size == 2 && parts[0] == "getPhotoStudioSource" -> {
+                                Thread {
+                                    val response = try {
+                                        val file = photoStudioStore.findById(parts[1]) ?: error("This private photo sheet is no longer available.")
+                                        val metadata = photoStudioStore.readMetadata(file)
+                                        val source = photoStudioStore.readOriginalPhoto(file)
+                                        try {
+                                            val payload = JSONObject()
+                                                .put("metadata", metadata)
+                                                .put("sourceBase64", android.util.Base64.encodeToString(source, android.util.Base64.NO_WRAP))
+                                            "PHOTO_SOURCE|" + payload.toString()
+                                        } finally {
+                                            source.fill(0)
+                                        }
+                                    } catch (error: Exception) {
+                                        "PHOTO_SOURCE_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            parts.size == 3 && parts[0] == "renamePhotoStudioDocument" -> {
+                                Thread {
+                                    val response = try {
+                                        val file = photoStudioStore.findById(parts[1]) ?: error("This private photo sheet is no longer available.")
+                                        photoStudioStore.renamePrepared(file, parts[2])
+                                        "PHOTO_RENAMED|" + parts[1]
+                                    } catch (error: Exception) {
+                                        "PHOTO_RENAME_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
+                            }
+                            parts.size == 2 && parts[0] == "deletePhotoStudioDocument" -> {
+                                Thread {
+                                    val response = try {
+                                        val file = photoStudioStore.findById(parts[1]) ?: error("This private photo sheet is no longer available.")
+                                        photoStudioStore.deletePrepared(file)
+                                        "PHOTO_DELETED|" + parts[1]
+                                    } catch (error: Exception) {
+                                        "PHOTO_DELETE_FAILED|" + message(error)
+                                    }
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+                                    }
+                                }.start()
                             }
                             parts.size == 2 && parts[0] == "retainCustomerPdfPreviews" -> {
                                 runOnUiThread {
@@ -3754,6 +3858,62 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun addPhotoStudioPickerSection(parent: LinearLayout) {
+        if (portalUrl == null) return
+        val prepared = photoStudioStore.listPrepared()
+        if (prepared.isEmpty()) return
+        val section = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), dp(10), dp(11), dp(10))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
+        }
+        section.addView(text("Photo Studio · Private documents", 14, R.color.qp_text, true))
+        section.addView(text(
+            "Saved photo sheets stay on this device. Select one to send it privately to the connected shop.",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(4), 0, dp(8)) })
+        prepared.forEach { file ->
+            val metadata = runCatching { photoStudioStore.readMetadata(file) }.getOrNull() ?: return@forEach
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, dp(5), 0, dp(5))
+            }
+            val thumbnail = ImageView(this).apply {
+                setImageResource(R.drawable.ic_file_image)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                contentDescription = "Photo sheet preview"
+                background = roundedDrawable(getColor(R.color.qp_card), dp(7))
+                photoStudioStore.createThumbnailBase64(file)?.let { encoded ->
+                    val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                    setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                    bytes.fill(0)
+                }
+            }
+            row.addView(thumbnail, LinearLayout.LayoutParams(dp(58), dp(76)))
+            val details = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(9), 0, dp(6), 0)
+            }
+            details.addView(text(metadata.optString("title", "Photo sheet"), 11, R.color.qp_text, true).apply { maxLines = 2 })
+            val sizeCode = metadata.optString("sizeCode")
+            val count = metadata.optInt("photoCount")
+            val perPage = metadata.optInt("photosPerPage")
+            val pageCount = metadata.optInt("pageCount")
+            details.addView(text(
+                "$sizeCode · $count photos · $perPage per A4 · $pageCount pages",
+                9, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(3), 0, 0); maxLines = 2 })
+            row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+            row.addView(button("Select", true).apply {
+                minHeight = dp(36)
+                setOnClickListener { chooseFiles(listOf(file), listOf("Photo Studio")) }
+            }, LinearLayout.LayoutParams(dp(82), dp(36)).apply { marginStart = dp(4) })
+            section.addView(row)
+        }
+        parent.addView(section, linearParams().apply { bottomMargin = dp(8) })
+    }
+
     private fun addIdStudioPickerSection(parent: LinearLayout) {
         if (portalUrl == null) return
         val prepared = idStudioStore.listPrepared()
@@ -3960,6 +4120,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun printBatchGroupName(file: File): String {
         if (idStudioStore.isPreparedDocument(file)) return "ID Studio"
+        if (photoStudioStore.isPreparedDocument(file)) return "Photo Studio"
         val parentPath = file.parentFile?.let { runCatching { store.pathOf(it) }.getOrDefault("") }.orEmpty()
         return parentPath.replace("/", " - ").take(80).ifBlank { "Loose files" }
     }
@@ -3969,8 +4130,8 @@ class MainActivity : AppCompatActivity() {
     private fun chooseFiles(files: List<File>, groupNames: List<String>? = null) {
         val callback = fileCallback
         if (callback == null) { toast("Open a document field in the print page first."); return }
-        if (files.any(idStudioStore::isPreparedDocument) && portalUrl == null) {
-            toast("Scan a shop QR code before selecting a prepared ID for printing.")
+        if (files.any { idStudioStore.isPreparedDocument(it) || photoStudioStore.isPreparedDocument(it) } && portalUrl == null) {
+            toast("Connect to a print shop before selecting a private studio document.")
             return
         }
         if (!fileChooserAllowsMultiple && files.size != 1) {
@@ -3979,14 +4140,20 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             val uploadFiles = files.map { file ->
-                if (idStudioStore.isPreparedDocument(file)) {
-                    idStudioStore.materializePreparedFile(file).also { privateIdUploadTempFiles.add(it) }
-                } else file
+                when {
+                    idStudioStore.isPreparedDocument(file) ->
+                        idStudioStore.materializePreparedFile(file).also { privateIdUploadTempFiles.add(it) }
+                    photoStudioStore.isPreparedDocument(file) ->
+                        photoStudioStore.materializePdf(file).also { privatePhotoUploadTempFiles.add(it) }
+                    else -> file
+                }
             }
             val error = PrintBatchSelectionPolicy.validationError(uploadFiles)
             if (error != null) {
                 uploadFiles.filter { candidate -> candidate in privateIdUploadTempFiles }
                     .forEach { idStudioStore.releaseTransientFile(it); privateIdUploadTempFiles.remove(it) }
+                uploadFiles.filter { candidate -> candidate in privatePhotoUploadTempFiles }
+                    .forEach { photoStudioStore.releaseTransientFile(it); privatePhotoUploadTempFiles.remove(it) }
                 toast(error)
                 return
             }
@@ -3999,12 +4166,30 @@ class MainActivity : AppCompatActivity() {
                 files.forEach { put(createCustomerUploadPdfPreview(it) ?: JSONObject.NULL) }
             }
             val nativePrintKinds = JSONArray().apply {
-                files.forEach { put(if (idStudioStore.isPreparedDocument(it)) "ID_DOCUMENT" else "DOCUMENT") }
+                files.forEach {
+                    put(when {
+                        idStudioStore.isPreparedDocument(it) -> "ID_DOCUMENT"
+                        photoStudioStore.isPreparedDocument(it) -> "PHOTO"
+                        else -> "DOCUMENT"
+                    })
+                }
+            }
+            val nativePhotoSettings = JSONArray().apply {
+                files.forEach { file ->
+                    if (photoStudioStore.isPreparedDocument(file)) {
+                        val metadata = photoStudioStore.readMetadata(file)
+                        put(JSONObject()
+                            .put("sizeCode", metadata.optString("sizeCode"))
+                            .put("photoCount", metadata.optInt("photoCount"))
+                            .put("photosPerPage", metadata.optInt("photosPerPage")))
+                    } else put(JSONObject.NULL)
+                }
             }
             val metadataScript = "window.__smartPrintNativePickerGroups = " +
                 JSONArray().apply { safeGroupNames.forEach { put(it) } }.toString() + ";" +
                 "window.__smartPrintNativePdfPreviews = " + previewTokens.toString() + ";" +
-                "window.__smartPrintNativePrintKinds = " + nativePrintKinds.toString() + ";"
+                "window.__smartPrintNativePrintKinds = " + nativePrintKinds.toString() + ";" +
+                "window.__smartPrintNativePhotoSettings = " + nativePhotoSettings.toString() + ";"
             val deliverSelection = {
                 fileCallback = null
                 chooserSelectedFilePaths.clear()
@@ -4061,6 +4246,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createCustomerUploadPdfPreview(file: File): String? {
+        if (photoStudioStore.isPreparedDocument(file)) {
+            val materialized = runCatching { photoStudioStore.materializePdf(file) }.getOrNull() ?: return null
+            val token = UUID.randomUUID().toString()
+            customerUploadPdfPreviews[token] = materialized
+            return token
+        }
         val source = runCatching { file.canonicalFile }.getOrNull() ?: return null
         if (!source.isFile || !source.name.endsWith(".pdf", true) ||
             source.length() !in 1..MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES) return null
