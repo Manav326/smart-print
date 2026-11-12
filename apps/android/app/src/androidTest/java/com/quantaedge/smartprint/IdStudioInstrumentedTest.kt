@@ -248,7 +248,7 @@ class IdStudioInstrumentedTest {
                 onView(withContentDescription("A4 ID front and back print sheet preview. Pinch to zoom."))
                     .check(matches(isDisplayed()))
                 onView(withText("SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"))
-                    .check(matches(isDisplayed()))
+                    .check(doesNotExist())
                 onView(withText("View mode")).check(matches(isDisplayed()))
                 onView(withText("Save")).check(doesNotExist())
                 onView(withText("Prepare A4 Print Sheet")).check(doesNotExist())
