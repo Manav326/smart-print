@@ -83,7 +83,8 @@ test("private Photo Studio saves one photo locally with editable metadata and br
 
 test("ordinary customer Photo Studio remains inside the existing upload privacy choice",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/const isPrivateStudioDocument=idDocument/);
+ assert.match(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument/);
+ assert.doesNotMatch(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument\|\|containsPhotoStudioDocument/);
  assert.match(app,/const photoSettings=photoSettingsByFileFingerprint\[fingerprint\]/);
  assert.match(app,/photoSettings\?\"PHOTO\":\"DOCUMENT\"/);
  assert.match(app,/const incomingPhotoDocument=supported\.some\(isSmartPrintPhotoDocument\)/);
@@ -522,6 +523,6 @@ test("ID Studio remains private-only while saved Photo Studio sheets can use the
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/if\(incomingIdDocument\)\s*\{\s*\/\/ ID Studio remains Private Printing only/);
  assert.match(app,/if\(idDocument&&!effectivePrivatePrinting\)/);
- assert.match(app,/const isPrivateStudioDocument=idDocument/);
+ assert.match(app,/if\(incomingPhotoDocument&&uploadedBatch\.length===0&&!privacyChoiceManuallySelected\)/);
 });
 
