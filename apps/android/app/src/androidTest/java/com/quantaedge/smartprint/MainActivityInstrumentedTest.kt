@@ -558,7 +558,10 @@ class MainActivityInstrumentedTest {
                 isAssignableFrom(com.google.android.material.button.MaterialButton::class.java)
             )).check(matches(isDisplayed()))
             onView(withContentDescription("Shop connection")).check(matches(isDisplayed()))
-            onView(withText("FROM SMARTPRINT")).perform(scrollTo()).check(matches(isDisplayed()))
+            onView(withText("ID Studio")).check(matches(isDisplayed()))
+            onView(withText("Photo Studio")).check(matches(isDisplayed()))
+            onView(withText("FROM SMARTPRINT")).check(doesNotExist())
+            onView(withText("Make every photo print-ready")).check(doesNotExist())
             scenario.onActivity { activity ->
                 val customBar = MainActivity::class.java.getDeclaredField("bottomNavigationContent").apply {
                     isAccessible = true
