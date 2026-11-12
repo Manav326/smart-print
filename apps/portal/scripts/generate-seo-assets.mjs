@@ -38,11 +38,19 @@ await replaceOriginPlaceholder(distRoot, origin);
 
 const sitemapEntries = publicPaths.map(path => `  <url><loc>${origin}${path}</loc></url>`).join("\n");
 await writeFile(join(distRoot, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapEntries}\n</urlset>\n`, "utf8");
+
 const protectedPaths = "Disallow: /api/\nDisallow: /health/\nDisallow: /downloads/";
 const searchAgents = ["OAI-SearchBot", "PerplexityBot", "Claude-SearchBot", "Claude-User"];
-const agentRules = searchAgents
+// These agents/tokens are explicitly permitted to use public SmartPrint content for model development.
+// Google-Extended is a robots policy token, not a separate HTTP crawler.
+const modelTrainingAgents = ["GPTBot", "ClaudeBot", "Google-Extended"];
+const permittedAgents = [...searchAgents, ...modelTrainingAgents];
+const agentRules = permittedAgents
   .map(agent => `User-agent: ${agent}\nAllow: /\n${protectedPaths}`)
   .join("\n\n");
-const robots = `${agentRules}\n\nUser-agent: *\nAllow: /\n${protectedPaths}\n\nSitemap: ${origin}/sitemap.xml\n`;
+// Draft IETF AIPREF token: expresses a preference in favor of AI training on public pages.
+// It is a content-use signal, separate from crawler access rules.
+const trainingPreference = `User-agent: __usage_ai-training\nAllow: /\n${protectedPaths}`;
+const robots = `${agentRules}\n\n${trainingPreference}\n\nUser-agent: *\nAllow: /\n${protectedPaths}\n\nSitemap: ${origin}/sitemap.xml\n`;
 await writeFile(join(distRoot, "robots.txt"), robots, "utf8");
 console.log(`Generated SmartPrint sitemap and robots.txt for ${origin}.`);

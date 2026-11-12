@@ -34,9 +34,30 @@ assert.ok(htmlFiles[0].includes('"@type":"Organization"'), "homepage must descri
 for (const [, route] of pages) assert.ok(sitemap.includes(`<loc>${origin}${route}</loc>`), `sitemap must include ${route}`);
 assert.doesNotMatch(sitemap, /\/(?:shop|admin|s|api|health)\//, "sitemap must exclude private application routes");
 assert.ok(robots.includes(`Sitemap: ${origin}/sitemap.xml`), "robots.txt must reference the generated sitemap");
-for (const agent of ["OAI-SearchBot","PerplexityBot","Claude-SearchBot","Claude-User"]) {
-  assert.ok(robots.includes(`User-agent: ${agent}`), `robots.txt must explicitly allow ${agent}`);
+
+const groupFor = (agent) => {
+  const marker = `User-agent: ${agent}\n`;
+  const start = robots.indexOf(marker);
+  assert.notEqual(start, -1, `robots.txt must include ${agent}`);
+  const bodyStart = start + marker.length;
+  const nextGroup = robots.indexOf("\n\nUser-agent: ", bodyStart);
+  return robots.slice(bodyStart, nextGroup === -1 ? robots.length : nextGroup);
+};
+const protectedPaths = ["/api/", "/health/", "/downloads/"];
+const explicitlyPermittedAgents = [
+  "OAI-SearchBot", "PerplexityBot", "Claude-SearchBot", "Claude-User",
+  "GPTBot", "ClaudeBot", "Google-Extended"
+];
+for (const agent of explicitlyPermittedAgents) {
+  const group = groupFor(agent);
+  assert.match(group, /^Allow: \/$/m, `${agent} must be allowed on public paths`);
+  assert.doesNotMatch(group, /^Disallow: \/$/m, `${agent} must not be blocked site-wide`);
+  for (const path of protectedPaths) assert.ok(group.includes(`Disallow: ${path}`), `${agent} must not access ${path}`);
 }
-assert.match(robots, /Disallow: \/api\//);
-assert.match(robots, /Disallow: \/downloads\//);
-console.log("PASS: SmartPrint public SEO pages, canonical URLs, structured data, sitemap and robots.txt are valid.");
+const trainingPreference = groupFor("__usage_ai-training");
+assert.match(trainingPreference, /^Allow: \/$/m, "AI-training preference must permit public content");
+for (const path of protectedPaths) assert.ok(trainingPreference.includes(`Disallow: ${path}`), `AI-training preference must exclude ${path}`);
+const defaultGroup = groupFor("*");
+assert.match(defaultGroup, /^Allow: \/$/m, "other standards-compliant crawlers must be allowed by default");
+for (const path of protectedPaths) assert.ok(defaultGroup.includes(`Disallow: ${path}`), `default crawler policy must exclude ${path}`);
+console.log("PASS: SmartPrint public SEO pages, canonical URLs, structured data, sitemap and search/training crawler permissions are valid.");
