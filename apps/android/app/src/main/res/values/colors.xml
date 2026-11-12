@@ -17,6 +17,11 @@
     <color name="qp_hero_start">#EFF8FF</color>
     <color name="qp_hero_middle">#DCEEFF</color>
     <color name="qp_hero_end">#CFE4F8</color>
+    <color name="qp_shop_action_surface">#FFFFFF</color>
+    <color name="qp_shop_action_outline">#D7E1ED</color>
+    <color name="qp_shop_action_icon_surface">#EAF2FC</color>
+    <color name="qp_shop_action_text">#202C3E</color>
+    <color name="qp_shop_action_muted">#53657D</color>
     <color name="qp_hero_outline">#B6D0E9</color>
     <color name="qp_text">#202638</color>
     <color name="qp_muted">#5F6B80</color>
