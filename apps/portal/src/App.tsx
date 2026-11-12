@@ -4756,7 +4756,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     if(files.length===0)return;
     const containsIdDocument=files.some(isSmartPrintIdDocument);
-    const containsPhotoStudioDocument=files.some(isSmartPrintPhotoDocument);
     const effectivePrivatePrinting=privatePrinting||containsIdDocument;
     if(containsIdDocument&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
       setError("Prepared ID cards require Private Printing. Finish the current Standard batch, then start a new private batch for this ID sheet.");
