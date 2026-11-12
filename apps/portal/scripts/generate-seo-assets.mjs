@@ -39,18 +39,24 @@ await replaceOriginPlaceholder(distRoot, origin);
 const sitemapEntries = publicPaths.map(path => `  <url><loc>${origin}${path}</loc></url>`).join("\n");
 await writeFile(join(distRoot, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${sitemapEntries}\n</urlset>\n`, "utf8");
 
-const protectedPaths = "Disallow: /api/\nDisallow: /health/\nDisallow: /downloads/";
+const protectedPaths = "Disallow: /api/\\nDisallow: /health/\\nDisallow: /downloads/";
 const searchAgents = ["OAI-SearchBot", "PerplexityBot", "Claude-SearchBot", "Claude-User"];
-// These agents/tokens are explicitly permitted to use public SmartPrint content for model development.
-// Google-Extended is a robots policy token, not a separate HTTP crawler.
+// Search and user-directed answer retrieval are permitted independently of model training.
+const searchAgentRules = searchAgents
+  .map(agent => `User-agent: ${agent}\\nAllow: /\\n${protectedPaths}`)
+  .join("\\n\\n");
+
+// Model-training access is not required for search visibility. Keep it blocked unless
+// the site owner explicitly chooses to permit it. Google-Extended additionally
+// controls Gemini Apps / Vertex AI grounding, not just training.
 const modelTrainingAgents = ["GPTBot", "ClaudeBot", "Google-Extended"];
-const permittedAgents = [...searchAgents, ...modelTrainingAgents];
-const agentRules = permittedAgents
-  .map(agent => `User-agent: ${agent}\nAllow: /\n${protectedPaths}`)
-  .join("\n\n");
-// Draft IETF AIPREF token: expresses a preference in favor of AI training on public pages.
-// It is a content-use signal, separate from crawler access rules.
-const trainingPreference = `User-agent: __usage_ai-training\nAllow: /\n${protectedPaths}`;
-const robots = `${agentRules}\n\n${trainingPreference}\n\nUser-agent: *\nAllow: /\n${protectedPaths}\n\nSitemap: ${origin}/sitemap.xml\n`;
+const trainingAgentRules = modelTrainingAgents
+  .map(agent => `User-agent: ${agent}\\nDisallow: /`)
+  .join("\\n\\n");
+
+// Draft IETF AIPREF token: express the site owner's preference against model training.
+const trainingPreference = "User-agent: __usage_ai-training\\nDisallow: /";
+const defaultRules = `User-agent: *\\nAllow: /\\n${protectedPaths}`;
+const robots = `${searchAgentRules}\\n\\n${trainingAgentRules}\\n\\n${trainingPreference}\\n\\n${defaultRules}\\n\\nSitemap: ${origin}/sitemap.xml\\n`;
 await writeFile(join(distRoot, "robots.txt"), robots, "utf8");
 console.log(`Generated SmartPrint sitemap and robots.txt for ${origin}.`);
