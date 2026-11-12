@@ -449,8 +449,8 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
         private const val GCM_TAG_BYTES = 16
         private const val IV_BYTES = 12
         private const val MIN_SCAN_BYTES = 512
-        private const val MIN_IMAGE_SHORT_EDGE = 425 // 200 dpi at the default card height
-        private const val MIN_IMAGE_LONG_EDGE = 674 // 200 dpi at the default card width
+        private const val MIN_IMAGE_SHORT_EDGE = 530 // approximately 250 dpi at the default card height
+        private const val MIN_IMAGE_LONG_EDGE = 842 // approximately 250 dpi at the default card width
         private const val MAX_IMAGE_PIXELS = 30_000_000L
         private const val MIN_CARD_ASPECT_RATIO = 1.15f
         private const val MAX_CARD_ASPECT_RATIO = 2.1f

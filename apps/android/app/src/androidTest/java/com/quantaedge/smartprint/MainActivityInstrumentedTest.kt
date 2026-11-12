@@ -568,7 +568,7 @@ class MainActivityInstrumentedTest {
                     .apply { isAccessible = true }.get(activity) as? android.webkit.WebView
                 assertTrue("Photo Studio Home shortcut must open its private library route.", privatePage)
                 assertNotNull("Photo Studio route must be hosted in the app WebView.", webView)
-                assertEquals("/photo-studio", Uri.parse(webView?.url).path)
+                assertEquals("/photo-studio", Uri.parse(webView?.url.orEmpty()).path)
             }
         }
     }

@@ -128,6 +128,7 @@ class MainActivity : AppCompatActivity() {
     private var idStudioPreviewMode = "CARD"
     private var idStudioPreviewSide = "front"
     private var idStudioReviewBitmap: Bitmap? = null
+    private var idStudioReviewScans: Pair<ByteArray, ByteArray>? = null
     private var customerUploadPdfPreviewOpen = false
     private val customerUploadPdfPreviews = java.util.concurrent.ConcurrentHashMap<String, File>()
     private var webView: WebView? = null
@@ -3819,6 +3820,7 @@ class MainActivity : AppCompatActivity() {
             showIdStudioHome()
             return
         }
+        releaseIdStudioReviewBitmap()
         pendingIdStudioSide = side
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
@@ -3903,6 +3905,11 @@ class MainActivity : AppCompatActivity() {
     private fun releaseIdStudioReviewBitmap() {
         idStudioReviewBitmap?.takeUnless { it.isRecycled }?.recycle()
         idStudioReviewBitmap = null
+        idStudioReviewScans?.let { (front, back) ->
+            front.fill(0)
+            back.fill(0)
+        }
+        idStudioReviewScans = null
     }
 
     private fun showIdStudioReview() {
@@ -3927,6 +3934,7 @@ class MainActivity : AppCompatActivity() {
 
         val front = idStudioStore.readScanBytes(draftId, "front")
         val back = idStudioStore.readScanBytes(draftId, "back")
+        idStudioReviewScans = front to back
         var cardWidthMm = idStudioCardWidthMm
         var cardHeightMm = idStudioCardHeightMm
         val root = LinearLayout(this).apply {
