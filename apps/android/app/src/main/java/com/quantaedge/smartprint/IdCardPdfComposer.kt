@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
+import android.graphics.drawable.Drawable
 import android.graphics.pdf.PdfDocument
 import java.io.ByteArrayOutputStream
 import kotlin.math.max
@@ -69,7 +70,8 @@ object IdCardPdfComposer {
         backRotationDegrees: Int,
         cardWidthMm: Float = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM,
         cardHeightMm: Float = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM,
-        previewWidthPixels: Int = 1190
+        previewWidthPixels: Int = 1190,
+        brandMark: Drawable? = null
     ): Bitmap {
         require(previewWidthPixels in 595..1800) { "The A4 preview size is outside the supported range." }
         require(frontBytes.isNotEmpty() && backBytes.isNotEmpty()) { "Both sides of the card must be scanned." }
@@ -87,8 +89,8 @@ object IdCardPdfComposer {
             val canvas = Canvas(preview)
             canvas.scale(scale, scale)
             canvas.drawColor(Color.WHITE)
-            drawCard(canvas, frontBytes, layout.front, frontRotationDegrees, "FRONT", layout.frontLabelTop, layout, PREVIEW_DECODE_EDGE)
-            drawCard(canvas, backBytes, layout.back, backRotationDegrees, "BACK", layout.backLabelTop, layout, PREVIEW_DECODE_EDGE)
+            drawCard(canvas, frontBytes, layout.front, frontRotationDegrees, "FRONT", layout.frontLabelTop, layout, PREVIEW_DECODE_EDGE, brandMark)
+            drawCard(canvas, backBytes, layout.back, backRotationDegrees, "BACK", layout.backLabelTop, layout, PREVIEW_DECODE_EDGE, brandMark)
             return preview
         } catch (error: Exception) {
             preview.recycle()
@@ -136,7 +138,8 @@ object IdCardPdfComposer {
         label: String,
         labelTop: Float,
         layout: IdCardLayoutPolicy.Layout,
-        maxDecodeEdge: Int
+        maxDecodeEdge: Int,
+        brandMark: Drawable? = null
     ) {
         val bitmap = decode(sourceBytes, maxDecodeEdge)
         try {
@@ -161,6 +164,7 @@ object IdCardPdfComposer {
                 )
                 canvas.drawBitmap(displayBitmap, null, imageRect, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
                 canvas.restore()
+                if (brandMark != null) drawPreviewBranding(canvas, target, brandMark)
 
                 val border = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                     color = Color.rgb(28, 34, 44)
@@ -182,6 +186,40 @@ object IdCardPdfComposer {
         } finally {
             bitmap.recycle()
         }
+    }
+
+    private fun drawPreviewBranding(canvas: Canvas, target: RectF, brandMark: Drawable) {
+        canvas.save()
+        canvas.clipRect(target)
+        // A large, softly faded mark spans the face without obscuring text.
+        val markSize = min(target.width() * 0.78f, target.height() * 1.22f)
+        val markRect = RectF(
+            target.centerX() - markSize / 2f,
+            target.centerY() - markSize / 2f,
+            target.centerX() + markSize / 2f,
+            target.centerY() + markSize / 2f
+        )
+        val layer = canvas.saveLayerAlpha(target, 24)
+        brandMark.setBounds(
+            markRect.left.toInt(), markRect.top.toInt(),
+            markRect.right.toInt(), markRect.bottom.toInt()
+        )
+        brandMark.draw(canvas)
+        canvas.restoreToCount(layer)
+
+        val wordmark = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(34, 40, 55, 78)
+            textSize = target.height() * 0.060f
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            textAlign = Paint.Align.CENTER
+        }
+        canvas.drawText(
+            "SmartPrint by QuantaEdge",
+            target.centerX(),
+            target.centerY() + target.height() * 0.37f,
+            wordmark
+        )
+        canvas.restore()
     }
 
     private fun decode(bytes: ByteArray, maxEdge: Int): Bitmap {

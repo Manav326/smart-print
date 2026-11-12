@@ -32,6 +32,7 @@ import android.widget.CheckBox
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
@@ -127,6 +128,7 @@ class MainActivity : AppCompatActivity() {
     private var idStudioCardHeightMm = IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
     private var idStudioPreviewMode = "CARD"
     private var idStudioPreviewSide = "front"
+    private var idStudioReadOnlyView = false
     private var idStudioReviewBitmap: Bitmap? = null
     private var idStudioReviewScans: Pair<ByteArray, ByteArray>? = null
     private var customerUploadPdfPreviewOpen = false
@@ -141,6 +143,13 @@ class MainActivity : AppCompatActivity() {
     private var photoStudioOpen = false
     private var photoStudioCaptureAllowed = false
     private var privatePhotoStudioPageOpen = false
+    private var photoStudioLoadingOverlay: View? = null
+    private var photoStudioLoadFailed = false
+    private var webViewWarmupScheduled = false
+    private var customerHistoryRefreshing = false
+    // Remember which WebView flow opened Android's shared document picker.
+    // Photo Studio needs its own source picker and must not return to shop upload.
+    private var fileChooserReturnToPhotoStudio = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val pendingLocalNetworkPermissionReplies = mutableListOf<JavaScriptReplyProxy>()
     private var localNetworkPermissionRequestInProgress = false
@@ -225,6 +234,7 @@ class MainActivity : AppCompatActivity() {
         ) ?: IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM
         idStudioPreviewMode = savedInstanceState?.getString("idStudioPreviewMode")?.takeIf { it == "CARD" || it == "A4" } ?: "CARD"
         idStudioPreviewSide = savedInstanceState?.getString("idStudioPreviewSide")?.takeIf { it == "front" || it == "back" } ?: "front"
+        idStudioReadOnlyView = savedInstanceState?.getBoolean("idStudioReadOnlyView") ?: false
         idStudioScreenOpen = savedInstanceState?.getBoolean("idStudioScreenOpen") ?: false
         customerAccountStore = CustomerAccountStore(this)
         customerPrintSessionStore = CustomerPrintSessionStore(this)
@@ -278,8 +288,17 @@ class MainActivity : AppCompatActivity() {
                     savedInstanceState?.getInt("viewerPosition", 0) ?: 0
                 )
             }
+        } else if (savedInstanceState?.getBoolean("privatePhotoStudioPageOpen") == true) {
+            showDedicatedPhotoStudio()
         } else if (savedInstanceState?.getBoolean("idStudioScreenOpen") == true) {
-            showIdStudioHome()
+            if (idStudioReadOnlyView && idStudioEditingFile?.let(idStudioStore::canEditPreparedDocument) == true) {
+                showIdStudioReview()
+            } else if (idStudioDraftId?.let(idStudioStore::draftExists) == true &&
+                idStudioStore.hasFront(idStudioDraftId!!) && idStudioStore.hasBack(idStudioDraftId!!)) {
+                showIdStudioReview()
+            } else {
+                showIdStudioHome()
+            }
         } else if (savedInstanceState?.getBoolean("profileVisible") == true) {
             profileReturnDestination = savedInstanceState.getInt(
                 "profileReturnDestination",
@@ -315,6 +334,7 @@ class MainActivity : AppCompatActivity() {
         outState.putFloat("idStudioCardHeightMm", idStudioCardHeightMm)
         outState.putString("idStudioPreviewMode", idStudioPreviewMode)
         outState.putString("idStudioPreviewSide", idStudioPreviewSide)
+        outState.putBoolean("idStudioReadOnlyView", idStudioReadOnlyView)
         outState.putBoolean("idStudioScreenOpen", idStudioScreenOpen)
         webView?.let { view ->
             val webState = Bundle()
@@ -332,6 +352,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun handleBackNavigation(): Boolean {
         when {
+            // The native picker is a child workflow of the page that opened it.
+            // Cancel it before dispatching Escape to the underlying studio WebView.
+            pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
+            pickerMode -> cancelPicker()
             photoStudioOpen -> {
                 webView?.evaluateJavascript(
                     "document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));",
@@ -342,8 +366,6 @@ class MainActivity : AppCompatActivity() {
             documentViewer != null -> if (customerUploadPdfPreviewOpen) closeCustomerUploadPdfPreview() else closeDocumentViewer()
             idStudioScreenOpen -> showIdStudioHome()
             profileVisible -> returnFromProfile()
-            pickerMode && pickerPath.isNotBlank() -> { pickerPath = parent(pickerPath); refreshLibrary(preserveScroll = false) }
-            pickerMode -> cancelPicker()
             editingPdf != null -> showFiles()
             navigation.selectedItemId == SCAN_PRINT && webView?.canGoBack() == true -> webView?.goBack()
             navigation.selectedItemId == FILES && folderPath.isNotEmpty() -> {
@@ -1128,6 +1150,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHome() {
+        fileChooserReturnToPhotoStudio = false
+        photoStudioLoadingOverlay = null
         photoStudioOpen = false
         photoStudioCaptureAllowed = false
         privatePhotoStudioPageOpen = false
@@ -1143,6 +1167,22 @@ class MainActivity : AppCompatActivity() {
         updateBottomNavigationSelection(HOME)
         content.removeAllViews()
         content.addView(homeView(), frameParams())
+        warmWebViewWhenHomeIsIdle()
+    }
+
+    private fun warmWebViewWhenHomeIsIdle() {
+        if (webView != null || webViewWarmupScheduled || portalUrl != null) return
+        webViewWarmupScheduled = true
+        content.post {
+            webViewWarmupScheduled = false
+            if (!isFinishing && !isDestroyed && webView == null &&
+                portalUrl == null && navigation.selectedItemId == HOME) {
+                // Initialize the one shared WebView after the first Home frame.
+                // Do not navigate it or create a second WebView: Photo Studio then
+                // pays only the service-page load cost when the customer taps it.
+                ensureWebView()
+            }
+        }
     }
 
     private fun homeView(): View {
@@ -1160,11 +1200,29 @@ class MainActivity : AppCompatActivity() {
         val used = android.text.format.Formatter.formatShortFileSize(this, store.storageUsageBytes())
 
         // A calm, high-contrast welcome surface makes the first action unmistakable.
+        val heroBackground = android.graphics.drawable.LayerDrawable(arrayOf(
+            android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                intArrayOf(
+                    getColor(R.color.qp_hero_start),
+                    getColor(R.color.qp_hero_middle),
+                    getColor(R.color.qp_hero_end)
+                )
+            ).apply {
+                cornerRadius = dp(24).toFloat()
+                setStroke(dp(1), getColor(R.color.qp_hero_outline))
+            },
+            android.graphics.drawable.GradientDrawable(
+                android.graphics.drawable.GradientDrawable.Orientation.LEFT_RIGHT,
+                intArrayOf(0x35FFFFFF, 0x12FFFFFF, 0x00FFFFFF)
+            ).apply { cornerRadius = dp(24).toFloat() }
+        )).apply { setLayerInset(1, dp(1), dp(1), dp(1), dp(1)) }
         val hero = card().apply {
             radius = dp(24).toFloat()
             cardElevation = dp(4).toFloat()
             strokeWidth = dp(0)
-            setCardBackgroundColor(getColor(R.color.qp_hero))
+            setCardBackgroundColor(android.graphics.Color.TRANSPARENT)
+            background = heroBackground
         }
         val heroContent = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1188,20 +1246,72 @@ class MainActivity : AppCompatActivity() {
             ellipsize = android.text.TextUtils.TruncateAt.END
             setPadding(0, 0, 0, dp(7))
         })
-        heroContent.addView(button(
-            if (portalUrl == null) "Find a print shop" else "Manage connected shop",
-            true
-        ).apply {
-            minHeight = dp(46)
+        // This is the single shop action on Home. It replaces the old hero
+        // button; the same row carries the saved shop identity when connected.
+        val shopAction = card().apply {
+            radius = dp(14).toFloat()
+            cardElevation = dp(1).toFloat()
+            strokeWidth = dp(1)
+            strokeColor = getColor(R.color.qp_shop_action_outline)
+            setCardBackgroundColor(getColor(R.color.qp_shop_action_surface))
+            isClickable = true
+            isFocusable = true
+            contentDescription = if (portalUrl == null) {
+                "Find a print shop"
+            } else {
+                "Manage connected shop: ${shopDisplayName ?: "Connected shop"}"
+            }
             setOnClickListener { if (portalUrl == null) showScanPrint() else showShopManager() }
-        }, LinearLayout.LayoutParams(-1, dp(46)))
+        }
+        val shopActionRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(12), dp(9), dp(12), dp(9))
+        }
+        val shopGlyph = ImageView(this).apply {
+            setImageResource(if (portalUrl == null) R.drawable.ic_nav_scan_print else R.drawable.ic_store)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            background = roundedDrawable(getColor(R.color.qp_shop_action_icon_surface), dp(12))
+            // The parent card is the single action when unconnected; do not
+            // duplicate its accessibility label on this decorative icon.
+            contentDescription = if (portalUrl == null) null else "Connected shop icon"
+        }
+        if (portalUrl != null) loadShopLogo(shopGlyph)
+        shopActionRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val shopActionCopy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), 0, dp(8), 0)
+        }
+        shopActionCopy.addView(text(
+            if (portalUrl == null) "Find a print shop" else shopDisplayName ?: "Connected shop",
+            14, R.color.qp_shop_action_text, true
+        ).apply {
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        shopActionCopy.addView(text(
+            if (portalUrl == null) "Scan the shop QR to connect" else "Connected · tap to manage",
+            11, R.color.qp_shop_action_muted, false
+        ).apply {
+            setPadding(0, dp(3), 0, 0)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        })
+        shopActionRow.addView(shopActionCopy, LinearLayout.LayoutParams(0, -2, 1f))
+        shopActionRow.addView(text("›", 25, R.color.qp_shop_action_muted, false))
+        shopAction.addView(shopActionRow)
+        heroContent.addView(shopAction, LinearLayout.LayoutParams(-1, dp(64)).apply {
+            bottomMargin = dp(2)
+        })
         val studioActions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         studioActions.addView(button("ID Studio", false).apply {
             icon = getDrawable(R.drawable.ic_file)
-            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
+            iconTint = ColorStateList.valueOf(android.graphics.Color.rgb(91, 72, 204))
             iconPadding = dp(4)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             textSize = 11f
@@ -1211,7 +1321,7 @@ class MainActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(0, dp(48), 1f))
         studioActions.addView(button("Photo Studio", false).apply {
             icon = getDrawable(R.drawable.ic_file_image)
-            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
+            iconTint = ColorStateList.valueOf(android.graphics.Color.rgb(213, 112, 63))
             iconPadding = dp(4)
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             textSize = 11f
@@ -1280,45 +1390,6 @@ class MainActivity : AppCompatActivity() {
         })
         column.addView(quickActions, linearParams().apply { bottomMargin = dp(17) })
 
-        // Keep the shop connection visible and independently accessible on Home.
-        // This preserves the existing connection entry point while the hero remains
-        // focused on the primary print action.
-        val shopCard = card().apply {
-            strokeWidth = dp(1)
-            setOnClickListener { if (portalUrl != null) showShopManager() else showScanPrint() }
-        }
-        val shopRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(13), dp(13), dp(13), dp(13))
-        }
-        val shopGlyph = ImageView(this).apply {
-            setImageResource(R.drawable.ic_store)
-            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
-            contentDescription = if (portalUrl == null) "Shop connection" else "Connected shop icon"
-        }
-        if (portalUrl != null) loadShopLogo(shopGlyph)
-        shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
-        val shopCopy = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(11), 0, 0, 0)
-        }
-        shopCopy.addView(text(
-            if (portalUrl == null) "Find a print shop" else shopDisplayName ?: "Connected shop",
-            14, R.color.qp_text, true
-        ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
-        shopCopy.addView(text(
-            if (portalUrl == null) "Scan the QR code at the counter to connect" else "Connected · tap to manage your shop",
-            11, R.color.qp_muted, false
-        ).apply { setPadding(0, dp(3), 0, 0) })
-        shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
-        shopRow.addView(text(if (portalUrl == null) "›" else "⋮", 22, R.color.qp_muted, false))
-        shopCard.addView(shopRow)
-        column.addView(shopCard, linearParams().apply { bottomMargin = dp(22) })
-
         val recentHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1354,8 +1425,55 @@ class MainActivity : AppCompatActivity() {
         return scroll
     }
 
+    private fun isPhotoStudioPageUrl(rawUrl: String?): Boolean {
+        val uri = runCatching { Uri.parse(rawUrl.orEmpty()) }.getOrNull() ?: return false
+        val service = Uri.parse(BuildConfig.SERVICE_BASE_URL)
+        return uri.scheme.equals(service.scheme, ignoreCase = true) &&
+            uri.host.equals(service.host, ignoreCase = true) &&
+            uri.port == service.port &&
+            uri.path.orEmpty().trimEnd('/').equals("/photo-studio", ignoreCase = true)
+    }
+
+    private fun showPhotoStudioLoadError(message: String) {
+        photoStudioLoadFailed = true
+        val host = webView?.parent as? FrameLayout ?: return
+        photoStudioLoadingOverlay?.let { overlay ->
+            (overlay.parent as? ViewGroup)?.removeView(overlay)
+        }
+        val errorState = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+            setBackgroundColor(getColor(R.color.qp_surface))
+            addView(text("Photo Studio couldn’t open", 17, R.color.qp_text, true).apply {
+                gravity = Gravity.CENTER
+                textAlignment = View.TEXT_ALIGNMENT_CENTER
+            })
+            addView(text(message, 12, R.color.qp_muted, false).apply {
+                gravity = Gravity.CENTER
+                textAlignment = View.TEXT_ALIGNMENT_CENTER
+                setPadding(0, dp(7), 0, dp(16))
+            })
+            addView(button("Try again", true).apply {
+                setOnClickListener { showDedicatedPhotoStudio() }
+            }, LinearLayout.LayoutParams(-1, dp(46)))
+            addView(button("Back to Home", false).apply {
+                setOnClickListener { showHome() }
+            }, LinearLayout.LayoutParams(-1, dp(42)).apply {
+                topMargin = dp(8)
+            })
+            isClickable = true
+            isFocusable = true
+        }
+        photoStudioLoadingOverlay = errorState
+        host.addView(errorState, FrameLayout.LayoutParams(-1, -1))
+    }
+
     private fun showDedicatedPhotoStudio() {
-        if (Uri.parse(webView?.url.orEmpty()).path == "/photo-studio" && privatePhotoStudioPageOpen) return
+        fileChooserReturnToPhotoStudio = false
+        // Do not early-return merely because the WebView URL is already /photo-studio:
+        // the native file picker detaches the WebView from the content container.
+        // Every entry must restore the WebView to the visible screen.
         idStudioScreenOpen = false
         privateIdViewerOpen = false
         photoStudioOpen = false
@@ -1373,9 +1491,33 @@ class MainActivity : AppCompatActivity() {
         content.removeAllViews()
         val view = ensureWebView()
         (view.parent as? ViewGroup)?.removeView(view)
-        content.addView(view, frameParams())
+        photoStudioLoadingOverlay = null
         val studioUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/photo-studio"
-        if (view.url != studioUrl) view.loadUrl(studioUrl)
+        val pageReady = !photoStudioLoadFailed && isPhotoStudioPageUrl(view.url) && view.progress >= 100
+        val host = FrameLayout(this)
+        host.addView(view, FrameLayout.LayoutParams(-1, -1))
+        if (!pageReady) {
+            val loading = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(24), dp(24), dp(24), dp(24))
+                setBackgroundColor(getColor(R.color.qp_surface))
+                addView(ProgressBar(this@MainActivity), LinearLayout.LayoutParams(dp(34), dp(34)))
+                addView(text("Opening Photo Studio…", 13, R.color.qp_muted, true).apply {
+                    gravity = Gravity.CENTER
+                    setPadding(0, dp(12), 0, 0)
+                })
+                isClickable = true
+                isFocusable = true
+            }
+            photoStudioLoadingOverlay = loading
+            host.addView(loading, FrameLayout.LayoutParams(-1, -1))
+        }
+        content.addView(host, frameParams())
+        if (photoStudioLoadFailed || !isPhotoStudioPageUrl(view.url)) {
+            photoStudioLoadFailed = false
+            view.loadUrl(studioUrl)
+        }
     }
 
     private fun showScanPrint() {
@@ -1446,23 +1588,30 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(18), dp(16), dp(18), dp(24))
         }
         scroll.addView(column)
-        column.addView(text("Your print activity", 23, R.color.qp_text, true))
-        column.addView(text("Every order, organised by month.", 11, R.color.qp_muted, false)
-            .apply { setPadding(0, dp(4), 0, dp(12)) })
+
+        val heading = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        heading.addView(text("Print history", 23, R.color.qp_text, true),
+            LinearLayout.LayoutParams(0, -2, 1f))
+        column.addView(heading, linearParams())
+
         val auth = customerAccountStore.read()
         if (auth == null) {
-            column.addView(text("Sign in to sync jobs.", 13, R.color.qp_muted, false)
-                .apply { setPadding(0, dp(5), 0, dp(16)) })
+            column.addView(text("Sign in to see your print orders.", 13, R.color.qp_muted, false)
+                .apply { setPadding(0, dp(9), 0, dp(14)) })
             column.addView(button("Sign in", true).apply {
                 setOnClickListener { showProfile() }
             }, linearParams())
         } else {
-            column.addView(text(auth.email, 12, R.color.qp_muted, false)
-                .apply { setPadding(0, dp(4), 0, dp(14)) })
+            column.addView(text(auth.email, 11, R.color.qp_muted, false)
+                .apply { setPadding(0, dp(3), 0, dp(12)) })
             val history = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-            history.addView(text("Loading…", 12, R.color.qp_muted, false))
             column.addView(history, linearParams())
-            loadCustomerHistory(history)
+            // Opening History is intentionally offline-first: do not call the API here.
+            val cached = CustomerHistoryStore(this).read(auth.email).orEmpty()
+            renderCustomerHistory(history, auth.email, cached)
         }
         content.addView(scroll, frameParams())
     }
@@ -1470,200 +1619,420 @@ class MainActivity : AppCompatActivity() {
     private fun activityStatusLabel(status: String): String =
         CustomerOrderStatusPresentation.activityStatusLabel(status)
 
-    private fun loadCustomerHistory(container: LinearLayout) {
-        Thread {
-            try {
-                var auth = customerAccountStore.read() ?: error("Sign in to view history.")
-                fun fetchHistory(): List<CustomerPrintHistoryItem> {
-                    if (CustomerAccountClient.accessTokenIsExpired(auth)) {
-                        auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
-                        customerAccountStore.save(auth)
-                    }
-                    return try {
-                        CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
-                    } catch (error: CustomerApiException) {
-                        if (error.statusCode != 401) throw error
-                        auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
-                        customerAccountStore.save(auth)
-                        CustomerAccountClient.history(accountServiceUrl(), auth.accessToken)
-                    }
-                }
-                val jobs = fetchHistory()
-                runOnUiThread {
-                    if (navigation.selectedItemId != ACTIVITY || isFinishing) return@runOnUiThread
-                    container.removeAllViews()
-                    if (jobs.isEmpty()) {
-                        container.addView(text("No jobs yet", 13, R.color.qp_muted, false)
-                            .apply { setPadding(0, dp(14), 0, dp(14)) })
-                        return@runOnUiThread
-                    }
+    private fun renderCustomerHistory(
+        container: LinearLayout,
+        email: String,
+        jobs: List<CustomerPrintHistoryItem>,
+        refreshError: String? = null,
+        refreshing: Boolean = false
+    ) {
+        container.removeAllViews()
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(10))
+        }
+        val groups = jobs.groupBy { it.batchId?.takeIf(String::isNotBlank) ?: it.id }
+            .values
+            .sortedByDescending { batch ->
+                batch.maxOfOrNull {
+                    runCatching { Instant.parse(it.createdUtc).toEpochMilli() }.getOrDefault(0L)
+                } ?: 0L
+            }
+        header.addView(text(
+            if (groups.isEmpty()) "No saved orders" else "${groups.size} saved orders",
+            11, R.color.qp_muted, true
+        ), LinearLayout.LayoutParams(0, -2, 1f))
+        val refreshButton = android.widget.ImageButton(this).apply {
+            setImageResource(android.R.drawable.ic_popup_sync)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            background = roundedDrawable(getColor(R.color.qp_card), dp(10), getColor(R.color.qp_outline))
+            contentDescription = "Refresh print history"
+            isEnabled = !refreshing
+            alpha = if (refreshing) 0.55f else 1f
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            setOnClickListener { refreshCustomerHistory(container, email) }
+        }
+        header.addView(refreshButton, LinearLayout.LayoutParams(dp(40), dp(40)))
+        container.addView(header, linearParams())
+        if (refreshing) {
+            container.addView(text("Checking for new orders…", 10, R.color.qp_muted, false)
+                .apply { setPadding(0, 0, 0, dp(8)) })
+        }
+        if (refreshError != null) {
+            container.addView(text(refreshError, 11, R.color.qp_danger, false)
+                .apply { setPadding(0, 0, 0, dp(8)) })
+        }
+        if (groups.isEmpty()) {
+            container.addView(text(
+                "Your print orders will appear here. Tap refresh to check for new orders.",
+                12, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(14), 0, dp(14)) })
+            return
+        }
 
-                    val filters = LinearLayout(this).apply {
-                        orientation = LinearLayout.VERTICAL
-                        setPadding(0, 0, 0, dp(12))
-                    }
-                    val query = EditText(this).apply {
-                        hint = "Search orders, files or shops"
-                        setSingleLine(true)
-                        inputType = InputType.TYPE_CLASS_TEXT
-                        textSize = 14f
-                        includeFontPadding = false
-                        gravity = Gravity.CENTER_VERTICAL
-                        minHeight = dp(50)
-                        setTextColor(getColor(R.color.qp_text))
-                        setHintTextColor(getColor(R.color.qp_muted))
-                        setPadding(dp(14), dp(6), dp(14), dp(6))
-                        setCompoundDrawablesRelativeWithIntrinsicBounds(android.R.drawable.ic_menu_search, 0, 0, 0)
-                        compoundDrawablePadding = dp(10)
-                        compoundDrawableTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
-                        background = roundedDrawable(getColor(R.color.qp_card), 12, getColor(R.color.qp_outline))
-                    }
-                    val filterActions = LinearLayout(this).apply {
+        val statusValues = groups.map { batch ->
+            CustomerOrderStatusPresentation.batchSummaryStatus(batch.map { it.status })
+        }.distinct().sorted()
+        val statusOptions = listOf("ALL") + statusValues
+        val filterRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(9))
+        }
+        filterRow.addView(text("Status", 11, R.color.qp_muted, true),
+            LinearLayout.LayoutParams(dp(55), -2))
+        val statusSpinner = android.widget.Spinner(this).apply {
+            contentDescription = "History status filter"
+            val labels = listOf("All statuses") + statusValues.map(::activityStatusLabel)
+            adapter = android.widget.ArrayAdapter(
+                this@MainActivity,
+                android.R.layout.simple_spinner_item,
+                labels
+            ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+            background = roundedDrawable(getColor(R.color.qp_card), dp(9), getColor(R.color.qp_outline))
+        }
+        filterRow.addView(statusSpinner, LinearLayout.LayoutParams(0, dp(42), 1f))
+        container.addView(filterRow, linearParams())
+
+        val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        container.addView(results, linearParams())
+
+        var selectedStatus = "ALL"
+        var selectedPage = 0
+        var selectedPageSize = 10
+        var rendering = false
+        val pager = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            contentDescription = "History pagination"
+            setPadding(0, dp(9), 0, 0)
+            visibility = View.GONE
+        }
+        val pagerSummary = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val pageRange = text("", 10, R.color.qp_muted, true).apply {
+            contentDescription = "History page range"
+        }
+        val pageSizeChoices = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        pagerSummary.addView(pageRange, LinearLayout.LayoutParams(0, -2, 1f))
+        pagerSummary.addView(pageSizeChoices, LinearLayout.LayoutParams(-2, dp(34)))
+        pager.addView(pagerSummary, linearParams())
+
+        val pageNavigation = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(3), 0, 0)
+        }
+        val previous = button("‹", false).apply {
+            minHeight = dp(34)
+            minWidth = dp(0)
+            textSize = 19f
+            contentDescription = "Previous page"
+        }
+        val pageLabel = text("", 10, R.color.qp_text, true).apply {
+            gravity = Gravity.CENTER
+            contentDescription = "History page indicator"
+        }
+        val next = button("›", false).apply {
+            minHeight = dp(34)
+            minWidth = dp(0)
+            textSize = 19f
+            contentDescription = "Next page"
+        }
+        pageNavigation.addView(previous, LinearLayout.LayoutParams(dp(42), dp(34)))
+        pageNavigation.addView(pageLabel, LinearLayout.LayoutParams(0, -2, 1f))
+        pageNavigation.addView(next, LinearLayout.LayoutParams(dp(42), dp(34)))
+        pager.addView(pageNavigation, linearParams())
+        container.addView(pager, linearParams())
+
+        fun renderPage() {
+            if (rendering) return
+            rendering = true
+            try {
+                results.removeAllViews()
+                val filtered = if (selectedStatus == "ALL") groups else groups.filter { batch ->
+                    CustomerOrderStatusPresentation.batchSummaryStatus(batch.map { it.status }) == selectedStatus
+                }
+                val pageCount = maxOf(1, (filtered.size + selectedPageSize - 1) / selectedPageSize)
+                // Match mPay: don't show any pagination controls for 10 or fewer
+                // filtered orders, even when the selected page size is smaller.
+                pager.visibility = if (filtered.size > 10) View.VISIBLE else View.GONE
+                selectedPage = selectedPage.coerceIn(0, pageCount - 1)
+                val startIndex = selectedPage * selectedPageSize
+                val pageGroups = filtered.drop(startIndex).take(selectedPageSize)
+                if (pageGroups.isEmpty()) {
+                    results.addView(text("No orders match this status.", 12, R.color.qp_muted, false)
+                        .apply {
+                            gravity = Gravity.CENTER
+                            setPadding(0, dp(20), 0, dp(20))
+                        })
+                }
+                pageGroups.groupBy { batch ->
+                    CustomerHistoryDatePresentation.monthHeading(batch.first().createdUtc)
+                }.forEach { (monthLabel, monthBatches) ->
+                    val monthHeader = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
                         gravity = Gravity.CENTER_VERTICAL
+                        setPadding(dp(2), dp(8), dp(2), dp(6))
                     }
-                    var selectedDate: String? = null
-                    val dateButton = button("Any date", false)
-                    val clearButton = button("Clear", false)
-                    val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-                    val grouped = jobs.groupBy { it.batchId?.takeIf(String::isNotBlank) ?: it.id }
-                        .values
-                        .sortedByDescending { batch -> batch.maxOfOrNull { runCatching { Instant.parse(it.createdUtc).toEpochMilli() }.getOrDefault(0L) } ?: 0L }
+                    monthHeader.addView(text(monthLabel, 15, R.color.qp_text, true),
+                        LinearLayout.LayoutParams(0, -2, 1f))
+                    monthHeader.addView(text("${monthBatches.size} orders", 10, R.color.qp_muted, true))
+                    results.addView(monthHeader, linearParams())
 
-                    fun renderCards() {
-                        results.removeAllViews()
-                        val needle = query.text.toString().trim().lowercase(Locale.ROOT)
-                        val matches = grouped.filter { batch ->
-                            val dateMatch = selectedDate == null || batch.any { job ->
-                                runCatching { Instant.parse(job.createdUtc).atZone(ZoneId.systemDefault()).toLocalDate().toString() == selectedDate }.getOrDefault(false)
-                            }
-                            val searchMatch = needle.isBlank() || batch.any { job ->
-                                listOf(job.batchId.orEmpty(), job.batchName.orEmpty(), job.batchGroupName.orEmpty(),
-                                    job.jobNumber, job.originalFileName, job.shopName)
-                                    .any { it.lowercase(Locale.ROOT).contains(needle) }
-                            }
-                            dateMatch && searchMatch
+                    monthBatches.forEach { batch ->
+                        val item = card()
+                        val body = LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(dp(13), dp(11), dp(13), dp(11))
                         }
-                        if (matches.isEmpty()) {
-                            results.addView(text("No matching batches", 12, R.color.qp_muted, false)
-                                .apply { gravity = Gravity.CENTER; setPadding(0, dp(20), 0, dp(20)) })
-                            return
+                        val status = CustomerOrderStatusPresentation.batchSummaryStatus(batch.map { it.status })
+                        val darkMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                            android.content.res.Configuration.UI_MODE_NIGHT_YES
+                        val palette = when (status.uppercase(Locale.ROOT)) {
+                            "COMPLETED", "PDF_EXPORTED" ->
+                                if (darkMode) 0xFF173D2E.toInt() to 0xFF9BE5B8.toInt()
+                                else 0xFFE5F7EC.toInt() to 0xFF20774D.toInt()
+                            "REJECTED", "PAYMENT_REJECTED", "REFUNDED", "CANCELLED", "FAILED" ->
+                                if (darkMode) 0xFF49232C.toInt() to 0xFFFFA8B2.toInt()
+                                else 0xFFFCE8EB.toInt() to 0xFFAB3347.toInt()
+                            "PRINTING", "PRINT_SUBMITTING", "SPOOLER_ACCEPTED", "LOCAL_QUEUE_READY" ->
+                                if (darkMode) 0xFF1B3550.toInt() to 0xFF9DD0FF.toInt()
+                                else 0xFFE6F2FF.toInt() to 0xFF275F93.toInt()
+                            else ->
+                                if (darkMode) 0xFF3B315B.toInt() to 0xFFD2C7FF.toInt()
+                                else 0xFFF0EDFF.toInt() to 0xFF5B43B7.toInt()
                         }
-                        val monthGroups = matches.groupBy { batch ->
-                            CustomerHistoryDatePresentation.monthHeading(batch.first().createdUtc)
+                        val identity = batch.first()
+                        val title = identity.batchName?.takeIf(String::isNotBlank)
+                            ?: identity.batchGroupName?.takeIf(String::isNotBlank)
+                            ?: if (batch.size > 1) "Print batch" else "Order ${identity.jobNumber}"
+                        val top = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
                         }
-                        monthGroups.forEach { (monthLabel, monthBatches) ->
-                            val monthHeader = LinearLayout(this).apply {
-                                orientation = LinearLayout.HORIZONTAL
-                                gravity = Gravity.CENTER_VERTICAL
-                                setPadding(dp(2), dp(11), dp(2), dp(8))
+                        top.addView(text(title, 13, R.color.qp_text, true),
+                            LinearLayout.LayoutParams(0, -2, 1f))
+                        top.addView(text(activityStatusLabel(status), 9, R.color.qp_primary, true).apply {
+                            setPadding(dp(8), dp(5), dp(8), dp(5))
+                            setTextColor(palette.second)
+                            background = roundedDrawable(palette.first, 10)
+                        })
+                        body.addView(top)
+                        body.addView(text(
+                            "${identity.shopName} · ${CustomerHistoryDatePresentation.dateTime(identity.createdUtc)}",
+                            10, R.color.qp_muted, false
+                        ).apply { setPadding(0, dp(5), 0, dp(5)) })
+                        body.addView(text(
+                            "${batch.size} file(s) · ${batch.sumOf { it.pageCount }} pages",
+                            10, R.color.qp_primary, true
+                        ))
+                        val photos = batch.filter { it.printKind == "PHOTO" }
+                        if (photos.isNotEmpty()) {
+                            val photoSummary = photos.joinToString(" · ") { photo ->
+                                "${photo.photoCount} × ${photo.photoSizeCode ?: "photo"} · ${photo.photosPerPage ?: "—"}/A4"
                             }
-                            monthHeader.addView(text(monthLabel, 16, R.color.qp_text, true),
-                                LinearLayout.LayoutParams(0, -2, 1f))
-                            monthHeader.addView(text("${monthBatches.size} ${if (monthBatches.size == 1) "order" else "orders"}",
-                                10, R.color.qp_muted, true))
-                            results.addView(monthHeader, linearParams())
-                            monthBatches.forEach { batch ->
-                            val item = card()
-                            val body = LinearLayout(this).apply {
+                            body.addView(text("Photo layout · ${photoSummary}", 10, R.color.qp_muted, false)
+                                .apply { setPadding(0, dp(4), 0, 0) })
+                        }
+                        val paid = batch.sumOf { it.paidAmountMinor }
+                        val refunded = batch.sumOf { it.refundedAmountMinor }
+                        val net = maxOf(0L, paid - refunded)
+                        val moneyRow = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                            setPadding(0, dp(7), 0, dp(2))
+                        }
+                        fun amount(label: String, value: Long, tint: Int) {
+                            val part = LinearLayout(this@MainActivity).apply {
                                 orientation = LinearLayout.VERTICAL
-                                setPadding(dp(13), dp(12), dp(13), dp(12))
                             }
-                            val status = CustomerOrderStatusPresentation.batchSummaryStatus(batch.map { it.status })
-                            val tagPalette = when (status.uppercase(Locale.ROOT)) {
-                                "COMPLETED", "PDF_EXPORTED" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
-                                    0xFF173D2E.toInt() to 0xFF9BE5B8.toInt() else 0xFFE5F7EC.toInt() to 0xFF20774D.toInt()
-                                "REJECTED", "PAYMENT_REJECTED", "REFUNDED", "CANCELLED", "FAILED" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
-                                    0xFF49232C.toInt() to 0xFFFFA8B2.toInt() else 0xFFFCE8EB.toInt() to 0xFFAB3347.toInt()
-                                "PRINTING", "PRINT_SUBMITTING", "SPOOLER_ACCEPTED", "LOCAL_QUEUE_READY" -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
-                                    0xFF1B3550.toInt() to 0xFF9DD0FF.toInt() else 0xFFE6F2FF.toInt() to 0xFF275F93.toInt()
-                                else -> if ((resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
-                                    0xFF3B315B.toInt() to 0xFFD2C7FF.toInt() else 0xFFF0EDFF.toInt() to 0xFF5B43B7.toInt()
-                            }
-                            val top = LinearLayout(this).apply {
-                                orientation = LinearLayout.HORIZONTAL
-                                gravity = Gravity.CENTER_VERTICAL
-                            }
-                            val identity = batch.first()
-                            val batchTitle = identity.batchName?.takeIf(String::isNotBlank)
-                                ?: identity.batchGroupName?.takeIf(String::isNotBlank)
-                                ?: if (batch.size > 1) "Print batch" else "Print order · " + identity.jobNumber
-                            top.addView(text(batchTitle, 13, R.color.qp_text, true), LinearLayout.LayoutParams(0, -2, 1f))
-                            top.addView(text(activityStatusLabel(status), 9, R.color.qp_primary, true).apply {
-                                setPadding(dp(8), dp(5), dp(8), dp(5))
-                                setTextColor(tagPalette.second)
-                                background = roundedDrawable(tagPalette.first, 10)
-                            })
-                            body.addView(top)
-                            val date = runCatching { Instant.parse(identity.createdUtc).atZone(ZoneId.systemDefault())
-                                .format(DateTimeFormatter.ofPattern("dd MMMM yyyy · hh:mm a", Locale.ENGLISH)) }
-                                .getOrDefault("Date unavailable")
-                            body.addView(text(identity.shopName + " · " + date, 10, R.color.qp_muted, false)
-                                .apply { setPadding(0, dp(5), 0, dp(5)) })
-                            body.addView(text(batch.size.toString() + " file(s) · " +
-                                batch.sumOf { it.pageCount } + " pages", 10, R.color.qp_muted, false))
-                            val photoLayouts = batch.filter { it.printKind == "PHOTO" }
-                            if (photoLayouts.isNotEmpty()) {
-                                val layoutSummary = photoLayouts.joinToString(" · ") { photo ->
-                                    val density = photo.photosPerPage?.let { "$it/A4" } ?: "layout not recorded"
-                                    "${photo.photoCount} × ${photo.photoSizeCode ?: "photo"} · ${density} · ${photo.pageCount} A4 page(s)"
-                                }
-                                body.addView(text("Photo layout · " + layoutSummary, 10, R.color.qp_muted, false)
-                                    .apply { setPadding(0, dp(5), 0, 0) })
-                            }
-                            val paid = batch.sumOf { it.paidAmountMinor }
-                            val refunded = batch.sumOf { it.refundedAmountMinor }
-                            val net = maxOf(0L, paid - refunded)
-                            body.addView(text("Paid " + "%.2f".format(Locale.ROOT, paid / 100.0) +
-                                " · Returned " + "%.2f".format(Locale.ROOT, refunded / 100.0) +
-                                " · Net " + "%.2f".format(Locale.ROOT, net / 100.0) + " " + identity.currency,
-                                10, R.color.qp_muted, false).apply { setPadding(0, dp(5), 0, dp(3)) })
-                            body.addView(button("View details", false).apply {
-                                setOnClickListener { showCustomerJobDetails(batch) }
-                            }, linearParams().apply { topMargin = dp(7) })
-                            item.addView(body)
-                            results.addView(item, linearParams().apply { bottomMargin = dp(8) })
+                            part.addView(text(label, 9, R.color.qp_muted, false))
+                            part.addView(text(
+                                "%.2f %s".format(Locale.ROOT, value / 100.0, identity.currency),
+                                10, R.color.qp_text, true
+                            ).apply { setTextColor(tint) })
+                            moneyRow.addView(part, LinearLayout.LayoutParams(0, -2, 1f))
+                        }
+                        amount("Paid", paid, android.graphics.Color.rgb(36, 139, 94))
+                        amount("Returned", refunded, android.graphics.Color.rgb(184, 74, 88))
+                        amount("Net", net, getColor(R.color.qp_primary))
+                        body.addView(moneyRow)
+                        val actionRow = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.END
+                        }
+                        actionRow.addView(button("View details", false).apply {
+                            minHeight = dp(28)
+                            textSize = 9f
+                            contentDescription = "View details for $title"
+                            setOnClickListener { showCustomerJobDetails(batch) }
+                        }, LinearLayout.LayoutParams(dp(84), dp(28)))
+                        body.addView(actionRow, linearParams().apply { topMargin = dp(5) })
+                        item.addView(body)
+                        results.addView(item, linearParams().apply { bottomMargin = dp(8) })
+                    }
+                }
+                pageRange.text = if (filtered.isEmpty()) "Showing 0 of 0" else
+                    "Showing ${startIndex + 1}–${minOf(startIndex + pageGroups.size, filtered.size)} of ${filtered.size}"
+                pageLabel.text = "${selectedPage + 1} / $pageCount"
+                previous.isEnabled = selectedPage > 0
+                next.isEnabled = selectedPage + 1 < pageCount
+                pageSizeChoices.removeAllViews()
+                listOf(10, 20, 50).forEachIndexed { index, size ->
+                    pageSizeChoices.addView(button(size.toString(), selectedPageSize == size).apply {
+                        minHeight = dp(30)
+                        minWidth = dp(0)
+                        textSize = 10f
+                        contentDescription = "Show $size orders per page"
+                        setPadding(dp(8), dp(4), dp(8), dp(4))
+                        setOnClickListener {
+                            if (selectedPageSize != size) {
+                                selectedPageSize = size
+                                selectedPage = 0
+                                renderPage()
                             }
                         }
+                    }, LinearLayout.LayoutParams(dp(42), dp(30)).apply {
+                        if (index > 0) marginStart = dp(4)
+                    })
+                }
+            } finally {
+                rendering = false
+            }
+        }
+        statusSpinner.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+            override fun onItemSelected(
+                parent: android.widget.AdapterView<*>?,
+                view: View?,
+                position: Int,
+                id: Long
+            ) {
+                selectedStatus = statusOptions.getOrElse(position) { "ALL" }
+                selectedPage = 0
+                renderPage()
+            }
+        }
+        previous.setOnClickListener { selectedPage--; renderPage() }
+        next.setOnClickListener { selectedPage++; renderPage() }
+        renderPage()
+    }
+
+    private fun refreshCustomerHistory(container: LinearLayout, email: String) {
+        if (customerHistoryRefreshing) return
+        customerHistoryRefreshing = true
+        val store = CustomerHistoryStore(this)
+        renderCustomerHistory(
+            container,
+            email,
+            store.read(email).orEmpty(),
+            refreshing = true
+        )
+        Thread {
+            var auth = customerAccountStore.read()
+            val result = runCatching {
+                require(auth != null && auth.email.equals(email, ignoreCase = true)) {
+                    "Sign in again to refresh this account's history."
+                }
+                var signedIn = auth!!
+                fun freshToken(): String {
+                    if (CustomerAccountClient.accessTokenIsExpired(signedIn)) {
+                        signedIn = CustomerAccountClient.refresh(accountServiceUrl(), signedIn)
+                        customerAccountStore.save(signedIn)
+                    }
+                    return signedIn.accessToken
+                }
+                fun <T> authenticated(action: (String) -> T): T {
+                    return try {
+                        action(freshToken())
+                    } catch (error: CustomerApiException) {
+                        if (error.statusCode != 401) throw error
+                        signedIn = CustomerAccountClient.refresh(accountServiceUrl(), signedIn)
+                        customerAccountStore.save(signedIn)
+                        action(signedIn.accessToken)
+                    }
+                }
+
+                val local = store.read(email).orEmpty()
+                val serverCount = authenticated { token ->
+                    CustomerAccountClient.historyCount(accountServiceUrl(), token)
+                }
+                if (serverCount <= local.size.toLong()) {
+                    local
+                } else {
+                    val firstPage = authenticated { token ->
+                        CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = 10)
+                    }
+                    require(firstPage.totalItems == serverCount) {
+                        "The server history changed during refresh. Your saved history has not changed."
+                    }
+                    require(firstPage.page == 0 && firstPage.size == 10) {
+                        "The server returned an invalid first history page. Your saved history has not changed."
+                    }
+                    val downloaded = linkedMapOf<String, CustomerPrintHistoryItem>()
+                    firstPage.items.forEach { downloaded[it.id] = it }
+                    var currentPage = firstPage
+                    while (currentPage.hasNext) {
+                        val nextPageNumber = currentPage.page + 1
+                        require(nextPageNumber < firstPage.totalPages) {
+                            "The server returned inconsistent history pagination. Your saved history has not changed."
+                        }
+                        currentPage = authenticated { token ->
+                            CustomerAccountClient.historyPage(
+                                accountServiceUrl(),
+                                token,
+                                page = nextPageNumber,
+                                size = firstPage.size
+                            )
+                        }
+                        require(
+                            currentPage.page == nextPageNumber &&
+                                currentPage.size == firstPage.size &&
+                                currentPage.totalItems == serverCount &&
+                                currentPage.totalPages == firstPage.totalPages &&
+                                currentPage.items.isNotEmpty()
+                        ) {
+                            "The server history changed or returned an incomplete page. Your saved history has not changed."
+                        }
+                        currentPage.items.forEach { downloaded[it.id] = it }
+                    }
+                    require(!currentPage.hasNext && downloaded.size.toLong() == serverCount) {
+                        "History download was incomplete. Your saved history has not changed."
                     }
 
-                    dateButton.setOnClickListener {
-                        val calendar = java.util.Calendar.getInstance()
-                        android.app.DatePickerDialog(this, { _, year, month, day ->
-                            selectedDate = "%04d-%02d-%02d".format(Locale.ROOT, year, month + 1, day)
-                            dateButton.text = "%02d %s %04d".format(Locale.ROOT, day,
-                                java.text.DateFormatSymbols.getInstance(Locale.ENGLISH).months[month], year)
-                            renderCards()
-                        }, calendar.get(java.util.Calendar.YEAR), calendar.get(java.util.Calendar.MONTH),
-                            calendar.get(java.util.Calendar.DAY_OF_MONTH)).show()
+                    // Offset pages can shift if a new order arrives during the sync.
+                    // Verify the first page again before replacing the local snapshot.
+                    val latestFirstPage = authenticated { token ->
+                        CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = firstPage.size)
                     }
-                    clearButton.setOnClickListener {
-                        selectedDate = null
-                        query.setText("")
-                        dateButton.text = "Any date"
-                        renderCards()
+                    require(
+                        latestFirstPage.totalItems == serverCount &&
+                            latestFirstPage.totalPages == firstPage.totalPages &&
+                            latestFirstPage.items.map { it.id } == firstPage.items.map { it.id }
+                    ) {
+                        "New orders arrived during sync. Tap refresh again to get the complete history."
                     }
-                    filterActions.addView(dateButton, LinearLayout.LayoutParams(0, dp(40), 1f))
-                    filterActions.addView(clearButton, LinearLayout.LayoutParams(dp(90), dp(40)).apply { marginStart = dp(8) })
-                    filters.addView(query, linearParams().apply { bottomMargin = dp(8) })
-                    filters.addView(filterActions, linearParams())
-                    container.addView(filters, linearParams())
-                    container.addView(results, linearParams())
-                    query.addTextChangedListener(object : android.text.TextWatcher {
-                        override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                        override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = renderCards()
-                        override fun afterTextChanged(s: android.text.Editable?) = Unit
-                    })
-                    renderCards()
+                    downloaded.values.toList().also { store.replace(email, it) }
                 }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    if (navigation.selectedItemId != ACTIVITY || isFinishing) return@runOnUiThread
-                    container.removeAllViews()
-                    container.addView(text("History unavailable.", 13, R.color.qp_muted, false))
-                    container.addView(button("Retry", false).apply {
-                        setOnClickListener { showActivity() }
-                    }, linearParams().apply { topMargin = dp(8) })
+            }
+            runOnUiThread {
+                customerHistoryRefreshing = false
+                if (isFinishing || isDestroyed || navigation.selectedItemId != ACTIVITY) return@runOnUiThread
+                result.onSuccess { updated ->
+                    renderCustomerHistory(container, email, updated)
+                }.onFailure { error ->
+                    renderCustomerHistory(
+                        container,
+                        email,
+                        store.read(email).orEmpty(),
+                        error.message?.takeIf(String::isNotBlank) ?: "Could not refresh history."
+                    )
                 }
             }
         }.start()
@@ -1806,11 +2175,21 @@ class MainActivity : AppCompatActivity() {
         })
         setToolbarBackAction("Back", ::cancelPicker)
         setBottomNavigationVisible(false)
+        if (fileChooserReturnToPhotoStudio) {
+            // The private studio WebView is retained in memory, but its host is
+            // removed while the library picker is visible. Re-entry attaches the
+            // same instance through showDedicatedPhotoStudio().
+            val studioView = webView
+            val studioHost = studioView?.parent as? ViewGroup
+            (studioHost?.parent as? ViewGroup)?.removeView(studioHost)
+        }
         content.removeAllViews()
         content.addView(libraryView(true), frameParams())
     }
 
     private fun showPrint() {
+        fileChooserReturnToPhotoStudio = false
+        photoStudioLoadingOverlay = null
         privatePhotoStudioPageOpen = false
         photoStudioOpen = false
         photoStudioCaptureAllowed = false
@@ -1836,7 +2215,7 @@ class MainActivity : AppCompatActivity() {
         (view.parent as? ViewGroup)?.removeView(view)
         content.addView(view, frameParams())
         val activeShopUrl = portalUrl
-        if (activeShopUrl != null && view.url?.contains("/photo-studio") == true) view.loadUrl(activeShopUrl)
+        if (activeShopUrl != null && isPhotoStudioPageUrl(view.url)) view.loadUrl(activeShopUrl)
     }
 
     private fun refreshLibrary(preserveScroll: Boolean = true) {
@@ -2785,7 +3164,7 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun addPrivatePreviewWatermarks(container: FrameLayout) {
+    private fun addPrivateSecurityWatermark(container: FrameLayout) {
         val securityMark = TextView(this).apply {
             text = "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"
             textSize = 9f
@@ -2802,6 +3181,10 @@ class MainActivity : AppCompatActivity() {
             securityMark,
             FrameLayout.LayoutParams(-1, dp(48), Gravity.CENTER)
         )
+    }
+
+    private fun addPrivatePreviewWatermarks(container: FrameLayout) {
+        addPrivateSecurityWatermark(container)
         val brandMark = TextView(this).apply {
             text = "SmartPrint by QuantaEdge"
             textSize = 10f
@@ -2886,7 +3269,7 @@ class MainActivity : AppCompatActivity() {
                             data.startsWith("renamePhotoStudioDocument|") ||
                             data.startsWith("deletePhotoStudioDocument|")
                         val photoStudioRouteActive = privatePhotoStudioPageOpen &&
-                            Uri.parse(webView?.url.orEmpty()).path == "/photo-studio"
+                            isPhotoStudioPageUrl(webView?.url)
                         when {
                             data == "releasePhotoStudioUploadFiles" -> {
                                 runOnUiThread {
@@ -3157,6 +3540,13 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
+                if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(url)) {
+                    photoStudioLoadingOverlay?.let { overlay ->
+                        (overlay.parent as? ViewGroup)?.removeView(overlay)
+                    }
+                    photoStudioLoadingOverlay = null
+                    photoStudioLoadFailed = false
+                }
                 val loadedUrl = runCatching { Uri.parse(url) }.getOrNull() ?: return
                 if (!loadedUrl.scheme.equals(trustedPage.scheme, true) ||
                     !loadedUrl.host.equals(trustedPage.host, true) ||
@@ -3186,9 +3576,26 @@ class MainActivity : AppCompatActivity() {
                 """.trimIndent()
                 view.evaluateJavascript(script, null)
             }
+            override fun onReceivedError(
+                view: WebView,
+                request: WebResourceRequest,
+                error: android.webkit.WebResourceError
+            ) {
+                super.onReceivedError(view, request, error)
+                if (request.isForMainFrame && privatePhotoStudioPageOpen &&
+                    isPhotoStudioPageUrl(request.url.toString())) {
+                    showPhotoStudioLoadError("Check your connection and try again.")
+                }
+            }
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: android.net.http.SslError) {
                 handler.cancel()
-                toast("The shop connection could not be verified securely.")
+                if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(view.url)) {
+                    showPhotoStudioLoadError(
+                        "The secure connection failed. Your saved photo sheets remain on this device."
+                    )
+                } else {
+                    toast("The shop connection could not be verified securely.")
+                }
             }
         }
         view.webChromeClient = object : WebChromeClient() {
@@ -3199,6 +3606,8 @@ class MainActivity : AppCompatActivity() {
             ): Boolean {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
+                fileChooserReturnToPhotoStudio =
+                    privatePhotoStudioPageOpen && isPhotoStudioPageUrl(webView.url)
                 fileChooserSelectFolders = params.acceptTypes.any { accepted ->
                     accepted.split(',').any { it.trim().equals(FOLDER_PICKER_ACCEPT, ignoreCase = true) }
                 }
@@ -3574,6 +3983,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun showIdStudioHome() {
         releaseIdStudioReviewBitmap()
+        if (idStudioReadOnlyView) {
+            idStudioEditingFile = null
+            idStudioReadOnlyView = false
+        }
         idStudioScreenOpen = true
         privateIdViewerOpen = false
         privateIdPreviewCaptureAllowed = false
@@ -3608,12 +4021,21 @@ class MainActivity : AppCompatActivity() {
                 !idStudioStore.hasBack(draftId) -> "back"
                 else -> "review"
             }
-            column.addView(button(
-                if (nextSide == "front") "Continue front-side scan"
-                else if (nextSide == "back") "Continue back-side scan"
-                else "Review scanned ID",
-                false
-            ).apply {
+            val draftStatus = when (nextSide) {
+                "front" -> "No side scanned yet"
+                "back" -> "Front saved · Back side needed"
+                else -> "Both sides saved · Ready to review"
+            }
+            val resumeCard = card()
+            val resumeContent = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(10), dp(12), dp(10))
+            }
+            resumeContent.addView(text("Unfinished ID setup", 12, R.color.qp_text, true))
+            resumeContent.addView(text(draftStatus, 10, R.color.qp_muted, false)
+                .apply { setPadding(0, dp(3), 0, dp(8)) })
+            resumeContent.addView(button("Resume", false).apply {
+                minHeight = dp(36)
                 setOnClickListener {
                     when (nextSide) {
                         "front" -> startIdStudioSideScan("front")
@@ -3621,7 +4043,9 @@ class MainActivity : AppCompatActivity() {
                         else -> showIdStudioReview()
                     }
                 }
-            }, linearParams().apply { bottomMargin = dp(15) })
+            }, LinearLayout.LayoutParams(-1, dp(36)))
+            resumeCard.addView(resumeContent)
+            column.addView(resumeCard, linearParams().apply { bottomMargin = dp(12) })
         }
 
         val prepared = idStudioStore.listPrepared()
@@ -3647,21 +4071,10 @@ class MainActivity : AppCompatActivity() {
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     contentDescription = "ID card front preview"
                     background = roundedDrawable(getColor(R.color.qp_soft), dp(8))
-                    (idStudioStore.createCardFaceThumbnailBase64(file, "front")
-                        ?: idStudioStore.createThumbnailBase64(file))?.let { encoded ->
-                        val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
-                        try {
-                            setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
-                        } finally {
-                            bytes.fill(0)
-                        }
-                    }
+                    tag = runCatching { file.canonicalPath }.getOrDefault(file.name)
                 }
-                val thumbnailFrame = FrameLayout(this).apply {
-                    addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
-                    addPrivatePreviewWatermarks(this)
-                }
-                row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(88), dp(58)))
+                loadIdStudioCardFaceThumbnail(thumbnail, file)
+                row.addView(thumbnail, LinearLayout.LayoutParams(dp(88), dp(58)))
                 val details = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(10), 0, dp(6), 0)
@@ -3674,19 +4087,15 @@ class MainActivity : AppCompatActivity() {
                     "${metadata.optDouble("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble()).toFloat().let { "%.1f".format(Locale.ROOT, it) }} × ${metadata.optDouble("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble()).toFloat().let { "%.1f".format(Locale.ROOT, it) }} mm · Front + back",
                     10, R.color.qp_muted, false
                 ).apply { setPadding(0, dp(4), 0, 0); maxLines = 2 })
-                details.addView(text(
-                    android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()),
-                    10, R.color.qp_muted, false
-                ).apply { setPadding(0, dp(3), 0, dp(7)) })
                 val actions = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                 }
-                actions.addView(button("A4 sheet", false).apply {
+                actions.addView(button("View", false).apply {
                     minHeight = dp(34)
                     textSize = 11f
-                    contentDescription = "View A4 print sheet for $displayName"
-                    setOnClickListener { showDocumentViewer(file) }
+                    contentDescription = "View ID card for $displayName"
+                    setOnClickListener { viewPreparedId(file) }
                 }, LinearLayout.LayoutParams(0, dp(36), 1f))
                 actions.addView(button("⋮", false).apply {
                     minHeight = dp(34)
@@ -3737,9 +4146,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         val printHelp = if (portalUrl == null) {
-            "When you are ready to print, scan a shop QR code. Your prepared ID will then appear in that shop's document picker."
+            "Scan a shop QR when ready, then add this saved ID in the upload form."
         } else {
-            "When ready, open the connected shop's Print page and select this ID from the private ID Studio section."
+            "Open the connected shop's upload form and add this saved ID."
         }
         column.addView(text(printHelp, 11, R.color.qp_muted, false)
             .apply { setPadding(dp(2), dp(12), dp(2), dp(3)) })
@@ -3749,7 +4158,59 @@ class MainActivity : AppCompatActivity() {
         }, frameParams())
     }
 
+    private fun loadIdStudioCardFaceThumbnail(target: ImageView, file: File) {
+        val canonicalPath = runCatching { file.canonicalPath }.getOrNull() ?: return
+        target.tag = canonicalPath
+        Thread {
+            val bitmap = runCatching {
+                val encoded = idStudioStore.createCardFaceThumbnailBase64(file, "front")
+                    ?: return@runCatching null
+                val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                try {
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                } finally {
+                    bytes.fill(0)
+                }
+            }.getOrNull()
+            runOnUiThread {
+                if (bitmap == null) return@runOnUiThread
+                if (isFinishing || isDestroyed || target.tag != canonicalPath) {
+                    bitmap.recycle()
+                } else {
+                    target.setImageBitmap(bitmap)
+                }
+            }
+        }.start()
+    }
+
+    private fun viewPreparedId(file: File) {
+        if (!idStudioStore.canEditPreparedDocument(file)) {
+            toast("This older ID sheet has no saved original scans. Showing its saved print sheet.")
+            showDocumentViewer(file)
+            return
+        }
+        try {
+            val metadata = idStudioStore.readMetadata(file)
+            idStudioEditingFile = file
+            idStudioReadOnlyView = true
+            idStudioFrontRotation = metadata.optInt("frontRotation", 0).takeIf { it in setOf(0, 180) } ?: 0
+            idStudioBackRotation = metadata.optInt("backRotation", 0).takeIf { it in setOf(0, 180) } ?: 0
+            idStudioCardWidthMm = metadata.optDouble("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble()).toFloat()
+            idStudioCardHeightMm = metadata.optDouble("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble()).toFloat()
+            idStudioPreviewMode = "CARD"
+            idStudioPreviewSide = "front"
+            IdCardLayoutPolicy.calculate(idStudioCardWidthMm, idStudioCardHeightMm)
+            showIdStudioReview()
+        } catch (error: Exception) {
+            idStudioReadOnlyView = false
+            idStudioEditingFile = null
+            toast("Could not open this ID: " + message(error))
+            showIdStudioHome()
+        }
+    }
+
     private fun editPreparedId(file: File) {
+        idStudioReadOnlyView = false
         if (!idStudioStore.canEditPreparedDocument(file)) {
             toast("This older ID sheet has no saved original scans, so it can still be viewed, renamed and printed but cannot be edited.")
             return
@@ -3927,10 +4388,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showIdStudioReview() {
+        val readOnly = idStudioReadOnlyView
+        val preparedFile = idStudioEditingFile
         val draftId = idStudioDraftId
-        if (draftId == null || !idStudioStore.draftExists(draftId) ||
-            !idStudioStore.hasFront(draftId) || !idStudioStore.hasBack(draftId)) {
-            toast("Scan both sides before preparing the ID sheet.")
+        val canShowSavedId = readOnly && preparedFile != null &&
+            idStudioStore.canEditPreparedDocument(preparedFile)
+        val canShowDraft = !readOnly && draftId != null && idStudioStore.draftExists(draftId) &&
+            idStudioStore.hasFront(draftId) && idStudioStore.hasBack(draftId)
+        if (!canShowSavedId && !canShowDraft) {
+            toast("Scan both sides before reviewing the ID.")
             showIdStudioHome()
             return
         }
@@ -3946,8 +4412,10 @@ class MainActivity : AppCompatActivity() {
         setBottomNavigationVisible(false)
         content.removeAllViews()
 
-        val front = idStudioStore.readScanBytes(draftId, "front")
-        val back = idStudioStore.readScanBytes(draftId, "back")
+        val front = if (readOnly) idStudioStore.readPreparedSideBytes(preparedFile!!, "front")
+            else idStudioStore.readScanBytes(draftId!!, "front")
+        val back = if (readOnly) idStudioStore.readPreparedSideBytes(preparedFile!!, "back")
+            else idStudioStore.readScanBytes(draftId!!, "back")
         idStudioReviewScans = front to back
         var cardWidthMm = idStudioCardWidthMm
         var cardHeightMm = idStudioCardHeightMm
@@ -3960,7 +4428,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
-        heading.addView(text("Review your ID", 17, R.color.qp_text, true),
+        heading.addView(text(if (readOnly) "View your ID" else "Review your ID", 17, R.color.qp_text, true),
             LinearLayout.LayoutParams(0, -2, 1f))
         heading.addView(text("FRONT + BACK", 9, R.color.qp_muted, true))
         root.addView(heading, linearParams().apply { bottomMargin = dp(5) })
@@ -3977,7 +4445,7 @@ class MainActivity : AppCompatActivity() {
                 showIdStudioReview()
             }
         }, LinearLayout.LayoutParams(0, dp(38), 1f))
-        viewModes.addView(button("A4 sheet", idStudioPreviewMode == "A4").apply {
+        viewModes.addView(button("View", idStudioPreviewMode == "A4").apply {
             minHeight = dp(38)
             textSize = 11f
             setOnClickListener {
@@ -3999,7 +4467,10 @@ class MainActivity : AppCompatActivity() {
             "A4 ID front and back print sheet preview. Pinch to zoom."
         }
         previewStage.addView(preview, FrameLayout.LayoutParams(-1, -1))
-        addPrivatePreviewWatermarks(previewStage)
+        // The physical-card preview retains the existing private-use mark.
+        // On A4, the real logo + faded wordmark is drawn inside each ID face;
+        // do not overlay the older sentence watermark across the whole sheet.
+        if (idStudioPreviewMode == "CARD") addPrivateSecurityWatermark(previewStage)
         root.addView(previewStage, LinearLayout.LayoutParams(-1, 0, 1f).apply {
             bottomMargin = dp(5)
         })
@@ -4044,7 +4515,8 @@ class MainActivity : AppCompatActivity() {
                     idStudioBackRotation,
                     cardWidthMm,
                     cardHeightMm,
-                    previewWidth
+                    previewWidth,
+                    getDrawable(R.drawable.smartprint_mark_watermark)?.mutate()
                 )
             }
             releaseIdStudioReviewBitmap()
@@ -4074,22 +4546,24 @@ class MainActivity : AppCompatActivity() {
                     showIdStudioReview()
                 }
             }, LinearLayout.LayoutParams(0, dp(40), 0.85f).apply { marginStart = dp(5) })
-            cardControls.addView(button("Rotate", false).apply {
-                minHeight = dp(40)
-                textSize = 10f
-                setOnClickListener {
-                    if (idStudioPreviewSide == "front") idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
-                    else idStudioBackRotation = (idStudioBackRotation + 180) % 360
-                    showIdStudioReview()
-                }
-            }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(5) })
-            cardControls.addView(button("Retake", false).apply {
-                minHeight = dp(40)
-                textSize = 10f
-                setOnClickListener { startIdStudioSideScan(idStudioPreviewSide) }
-            }, LinearLayout.LayoutParams(0, dp(40), 0.9f).apply { marginStart = dp(5) })
+            if (!readOnly) {
+                cardControls.addView(button("Rotate", false).apply {
+                    minHeight = dp(40)
+                    textSize = 10f
+                    setOnClickListener {
+                        if (idStudioPreviewSide == "front") idStudioFrontRotation = (idStudioFrontRotation + 180) % 360
+                        else idStudioBackRotation = (idStudioBackRotation + 180) % 360
+                        showIdStudioReview()
+                    }
+                }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(5) })
+                cardControls.addView(button("Retake", false).apply {
+                    minHeight = dp(40)
+                    textSize = 10f
+                    setOnClickListener { startIdStudioSideScan(idStudioPreviewSide) }
+                }, LinearLayout.LayoutParams(0, dp(40), 0.9f).apply { marginStart = dp(5) })
+            }
             root.addView(cardControls, linearParams().apply { bottomMargin = dp(5) })
-        } else {
+        } else if (!readOnly) {
             sheetControls.addView(button("Rotate front", false).apply {
                 minHeight = dp(40)
                 textSize = 10f
@@ -4163,21 +4637,28 @@ class MainActivity : AppCompatActivity() {
                     .show()
             }
         }
-        root.addView(sizeAction, LinearLayout.LayoutParams(-1, dp(25)).apply {
-            bottomMargin = dp(4)
-        })
-
-        root.addView(button("Prepare A4 print sheet", true).apply {
-            minHeight = dp(46)
-            setOnClickListener {
-                try {
-                    IdCardLayoutPolicy.calculate(cardWidthMm, cardHeightMm)
-                    prepareIdStudioSheet(draftId, cardWidthMm, cardHeightMm)
-                } catch (error: Exception) {
-                    toast(message(error))
+        if (!readOnly) {
+            root.addView(sizeAction, LinearLayout.LayoutParams(-1, dp(25)).apply {
+                bottomMargin = dp(4)
+            })
+            root.addView(button("Save", true).apply {
+                minHeight = dp(46)
+                setOnClickListener {
+                    try {
+                        IdCardLayoutPolicy.calculate(cardWidthMm, cardHeightMm)
+                        prepareIdStudioSheet(draftId!!, cardWidthMm, cardHeightMm)
+                    } catch (error: Exception) {
+                        toast(message(error))
+                    }
                 }
-            }
-        }, LinearLayout.LayoutParams(-1, dp(46)))
+            }, LinearLayout.LayoutParams(-1, dp(46)))
+        } else {
+            root.addView(button("View mode", false).apply {
+                minHeight = dp(42)
+                isEnabled = false
+                alpha = 0.68f
+            }, LinearLayout.LayoutParams(-1, dp(42)))
+        }
 
         try {
             updatePreview()
@@ -4186,7 +4667,14 @@ class MainActivity : AppCompatActivity() {
             front.fill(0)
             back.fill(0)
             toast("Could not preview the ID: " + message(error))
-            showIdStudioBackStep()
+            if (readOnly) {
+                showIdStudioHome()
+            } else if (draftId != null && idStudioStore.draftExists(draftId) &&
+                idStudioStore.hasFront(draftId)) {
+                showIdStudioBackStep()
+            } else {
+                showIdStudioHome()
+            }
             return
         }
         content.addView(root, frameParams())
@@ -4327,11 +4815,7 @@ class MainActivity : AppCompatActivity() {
                     bytes.fill(0)
                 }
             }
-            val thumbnailFrame = FrameLayout(this).apply {
-                addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
-                addPrivatePreviewWatermarks(this)
-            }
-            row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(56), dp(74)))
+            row.addView(thumbnail, LinearLayout.LayoutParams(dp(56), dp(74)))
             val details = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(8), 0, 0, 0)
@@ -4597,12 +5081,18 @@ class MainActivity : AppCompatActivity() {
                 chooserSelectedFolderPaths.clear()
                 fileChooserAllowsMultiple = false
                 fileChooserSelectFolders = false
-                showPrint()
-                val activeWebView = webView
-                if (activeWebView != null) {
-                    activeWebView.evaluateJavascript(metadataScript) { callback.onReceiveValue(uris) }
-                } else {
+                if (fileChooserReturnToPhotoStudio) {
+                    fileChooserReturnToPhotoStudio = false
+                    showDedicatedPhotoStudio()
                     callback.onReceiveValue(uris)
+                } else {
+                    showPrint()
+                    val activeWebView = webView
+                    if (activeWebView != null) {
+                        activeWebView.evaluateJavascript(metadataScript) { callback.onReceiveValue(uris) }
+                    } else {
+                        callback.onReceiveValue(uris)
+                    }
                 }
             }
             deliverSelection()
@@ -4629,6 +5119,13 @@ class MainActivity : AppCompatActivity() {
         chooserSelectedFolderPaths.clear()
         fileChooserAllowsMultiple = false
         fileChooserSelectFolders = false
+        if (fileChooserReturnToPhotoStudio) {
+            fileChooserReturnToPhotoStudio = false
+            showDedicatedPhotoStudio()
+            runCatching { callback.onReceiveValue(selected.toTypedArray()) }
+                .onFailure { toast("Could not attach the selected photo.") }
+            return
+        }
         showPrint()
         val previewTokens = JSONArray().apply {
             selected.forEach { put(createCustomerUploadPdfPreview(it) ?: JSONObject.NULL) }
@@ -4742,7 +5239,9 @@ class MainActivity : AppCompatActivity() {
         chooserSelectedFolderPaths.clear()
         fileChooserAllowsMultiple = false
         fileChooserSelectFolders = false
-        showPrint()
+        val returnToPhotoStudio = fileChooserReturnToPhotoStudio
+        fileChooserReturnToPhotoStudio = false
+        if (returnToPhotoStudio) showDedicatedPhotoStudio() else showPrint()
     }
 
     private fun importUri(uri: Uri, destination: String) {
@@ -4904,7 +5403,7 @@ class MainActivity : AppCompatActivity() {
         if (isPreparedId) {
             val previewFrame = FrameLayout(this)
             previewFrame.addView(reader, FrameLayout.LayoutParams(-1, -1))
-            addPrivatePreviewWatermarks(previewFrame)
+            addPrivateSecurityWatermark(previewFrame)
             content.addView(previewFrame, frameParams())
         } else {
             content.addView(reader, frameParams())

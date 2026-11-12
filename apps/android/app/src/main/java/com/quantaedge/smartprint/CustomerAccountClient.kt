@@ -54,6 +54,15 @@ data class CustomerPrintHistoryItem(
     val photosPerPage: Int?
 )
 
+data class CustomerHistoryPage(
+    val items: List<CustomerPrintHistoryItem>,
+    val page: Int,
+    val size: Int,
+    val totalItems: Long,
+    val totalPages: Int,
+    val hasNext: Boolean
+)
+
 /**
  * Stores the customer session encrypted with an Android Keystore AES-GCM key.
  * Guest document files remain available independently of this account state.
@@ -182,11 +191,42 @@ object CustomerAccountClient {
     fun profile(baseUrl: String, accessToken: String): JSONObject =
         request(baseUrl, "/api/v1/customer/me", null, accessToken)
 
-    fun history(baseUrl: String, accessToken: String): List<CustomerPrintHistoryItem> {
-        val response = request(baseUrl, "/api/v1/customer/jobs", null, accessToken)
-        val jobs = response.optJSONArray("jobs") ?: JSONArray()
-        return (0 until jobs.length()).mapNotNull { index ->
-            val job = jobs.optJSONObject(index) ?: return@mapNotNull null
+    fun historyCount(baseUrl: String, accessToken: String): Long {
+        val response = request(baseUrl, "/api/v1/customer/jobs/count", null, accessToken)
+        val totalCount = response.getLong("totalCount")
+        require(totalCount >= 0L) { "The server returned an invalid history count." }
+        return totalCount
+    }
+
+    fun historyPage(
+        baseUrl: String,
+        accessToken: String,
+        page: Int,
+        size: Int = 10
+    ): CustomerHistoryPage {
+        require(page >= 0) { "History page must be zero or greater." }
+        require(size in 1..100) { "History page size must be between 1 and 100." }
+        val response = request(
+            baseUrl,
+            "/api/v1/customer/jobs?page=$page&size=$size",
+            null,
+            accessToken
+        )
+        return parseHistoryPage(response, page, size)
+    }
+
+    internal fun parseHistoryPage(
+        response: JSONObject,
+        requestedPage: Int,
+        requestedSize: Int
+    ): CustomerHistoryPage {
+        require(requestedPage >= 0) { "History page must be zero or greater." }
+        require(requestedSize in 1..100) { "History page size must be between 1 and 100." }
+        val itemsJson = response.optJSONArray("items")
+            ?: throw IllegalStateException("The server returned a history page without its items.")
+        val items = (0 until itemsJson.length()).mapNotNull { index ->
+            val job = itemsJson.optJSONObject(index)
+                ?: throw IllegalStateException("The server returned an invalid history record.")
             CustomerPrintHistoryItem(
                 id = job.optString("id"),
                 batchId = job.optString("batchId").takeUnless { it.isBlank() || it == "null" },
@@ -213,6 +253,36 @@ object CustomerAccountClient {
                 photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage")
             )
         }
+        val responsePage = response.getInt("page")
+        val responseSize = response.getInt("size")
+        val totalItems = response.getLong("totalItems")
+        val totalPages = response.getInt("totalPages")
+        val hasNext = response.getBoolean("hasNext")
+        require(responsePage == requestedPage && responseSize == requestedSize) {
+            "The server returned a different history page than requested."
+        }
+        require(totalItems >= 0L && totalPages >= 0) {
+            "The server returned an invalid history total."
+        }
+        val expectedTotalPages = if (totalItems == 0L) 0 else
+            ((totalItems + responseSize - 1L) / responseSize).toInt()
+        require(totalPages == expectedTotalPages && hasNext == (responsePage + 1 < totalPages)) {
+            "The server returned inconsistent history pagination."
+        }
+        val offset = responsePage.toLong() * responseSize
+        val expectedItemCount = if (offset >= totalItems) 0 else
+            minOf(responseSize.toLong(), totalItems - offset).toInt()
+        require(items.size == expectedItemCount) {
+            "The server returned an incomplete history page."
+        }
+        return CustomerHistoryPage(
+            items = items,
+            page = responsePage,
+            size = responseSize,
+            totalItems = totalItems,
+            totalPages = totalPages,
+            hasNext = hasNext
+        )
     }
 
     /** Reads the current state and audit timeline of a job owned by this signed-in customer. */

@@ -44,6 +44,8 @@ import android.view.ViewGroup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
@@ -254,6 +256,8 @@ class MainActivityInstrumentedTest {
                     assertTrue("Light primary button contrast", contrast(activity.getColor(R.color.qp_primary_content), activity.getColor(R.color.qp_primary)) >= 4.5)
                     assertTrue("Light danger button contrast", contrast(activity.getColor(R.color.qp_danger_content), activity.getColor(R.color.qp_danger)) >= 4.5)
                     assertTrue("Light hero secondary text contrast", contrast(activity.getColor(R.color.qp_hero_muted), activity.getColor(R.color.qp_hero)) >= 4.5)
+                    assertTrue("Light shop-action primary text contrast", contrast(activity.getColor(R.color.qp_shop_action_text), activity.getColor(R.color.qp_shop_action_surface)) >= 4.5)
+                    assertTrue("Light shop-action secondary text contrast", contrast(activity.getColor(R.color.qp_shop_action_muted), activity.getColor(R.color.qp_shop_action_surface)) >= 4.5)
                 }
             }
 
@@ -266,6 +270,8 @@ class MainActivityInstrumentedTest {
                     assertTrue("Dark primary button contrast", contrast(activity.getColor(R.color.qp_primary_content), activity.getColor(R.color.qp_primary)) >= 4.5)
                     assertTrue("Dark danger button contrast", contrast(activity.getColor(R.color.qp_danger_content), activity.getColor(R.color.qp_danger)) >= 4.5)
                     assertTrue("Dark hero secondary text contrast", contrast(activity.getColor(R.color.qp_hero_muted), activity.getColor(R.color.qp_hero)) >= 4.5)
+                    assertTrue("Dark shop-action primary text contrast", contrast(activity.getColor(R.color.qp_shop_action_text), activity.getColor(R.color.qp_shop_action_surface)) >= 4.5)
+                    assertTrue("Dark shop-action secondary text contrast", contrast(activity.getColor(R.color.qp_shop_action_muted), activity.getColor(R.color.qp_shop_action_surface)) >= 4.5)
                 }
             }
         } finally {
@@ -545,6 +551,117 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun launcherMarkUsesTheFullSmartPrintArtworkInsideAdaptiveIconSafePadding() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val foreground = context.getDrawable(R.drawable.ic_launcher_foreground)
+            ?: throw AssertionError("The launcher must provide its foreground logo.")
+        val bitmap = Bitmap.createBitmap(256, 256, Bitmap.Config.ARGB_8888)
+        try {
+            foreground.setBounds(0, 0, 256, 256)
+            foreground.draw(android.graphics.Canvas(bitmap))
+            var left = bitmap.width
+            var top = bitmap.height
+            var right = -1
+            var bottom = -1
+            for (y in 0 until bitmap.height) {
+                for (x in 0 until bitmap.width) {
+                    if (android.graphics.Color.alpha(bitmap.getPixel(x, y)) > 0) {
+                        left = minOf(left, x)
+                        top = minOf(top, y)
+                        right = maxOf(right, x)
+                        bottom = maxOf(bottom, y)
+                    }
+                }
+            }
+            val width = right - left + 1
+            val height = bottom - top + 1
+            assertTrue("The full SmartPrint mark must not be reduced to a tiny central glyph.", width >= 140)
+            assertTrue("The full SmartPrint mark must preserve its intended height.", height >= 150)
+            assertTrue("The logo must retain balanced adaptive-icon padding.", left >= 50 && top >= 50)
+            assertTrue("The logo must stay inside the safe area instead of spilling into the mask.", right <= 206 && bottom <= 216)
+            assertTrue("The logo must not be stretched.", width.toFloat() / height.toFloat() in 0.88f..1.08f)
+        } finally {
+            bitmap.recycle()
+        }
+
+        val standard = context.getDrawable(R.mipmap.ic_launcher) as? android.graphics.drawable.AdaptiveIconDrawable
+        val round = context.getDrawable(R.mipmap.ic_launcher_round) as? android.graphics.drawable.AdaptiveIconDrawable
+        assertNotNull("The standard launcher icon must use adaptive foreground/background layers.", standard)
+        assertNotNull("The round launcher icon must use the same adaptive artwork.", round)
+        assertNotNull(standard?.foreground)
+        assertNotNull(standard?.background)
+        assertNotNull(round?.foreground)
+        assertNotNull(round?.background)
+    }
+
+    @Test
+    fun connectedShopUsesOneWhiteHeroActionAndKeepsTheSavedShopNameVisible() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("portalUrl").apply { isAccessible = true }
+                    .set(activity, "https://shop.example.test/station/ci")
+                MainActivity::class.java.getDeclaredField("portalHost").apply { isAccessible = true }
+                    .set(activity, "shop.example.test")
+                MainActivity::class.java.getDeclaredField("shopDisplayName").apply { isAccessible = true }
+                    .set(activity, "Study Print Shop")
+                MainActivity::class.java.getDeclaredMethod("showHome").apply { isAccessible = true }
+                    .invoke(activity)
+
+                fun findByDescription(view: View): View? {
+                    if (view.contentDescription?.toString() == "Manage connected shop: Study Print Shop") return view
+                    if (view is ViewGroup) {
+                        for (index in 0 until view.childCount) {
+                            findByDescription(view.getChildAt(index))?.let { return it }
+                        }
+                    }
+                    return null
+                }
+                val action = findByDescription(activity.window.decorView)
+                assertNotNull("The replacement shop row must be a tappable action.", action)
+                assertTrue("The replacement shop row must open shop management.", action!!.isClickable)
+                val shopAction = action as? com.google.android.material.card.MaterialCardView
+                    ?: throw AssertionError("The shop action must use the designed white card surface.")
+                assertEquals(
+                    "The replacement shop action must be white in both app themes.",
+                    activity.getColor(R.color.qp_shop_action_surface),
+                    shopAction.cardBackgroundColor.defaultColor
+                )
+            }
+            onView(withText("Study Print Shop")).check(matches(isDisplayed()))
+            onView(withText("Connected · tap to manage")).check(matches(isDisplayed()))
+            onView(withContentDescription("Manage connected shop: Study Print Shop")).check(matches(isDisplayed()))
+            onView(withText("Manage connected shop")).check(doesNotExist())
+            onView(withText("Find a print shop")).check(doesNotExist())
+        }
+    }
+
+    @Test
+    fun photoStudioRouteRecognitionSurvivesTrailingSlashAndQueryParameters() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val method = MainActivity::class.java.getDeclaredMethod(
+                    "isPhotoStudioPageUrl",
+                    String::class.java
+                ).apply { isAccessible = true }
+                val origin = BuildConfig.SERVICE_BASE_URL.trimEnd('/')
+                assertTrue(method.invoke(activity, "$origin/photo-studio") as Boolean)
+                assertTrue(method.invoke(activity, "$origin/photo-studio/") as Boolean)
+                assertTrue(method.invoke(activity, "$origin/photo-studio/?source=library") as Boolean)
+                assertFalse(method.invoke(activity, "$origin/") as Boolean)
+                assertFalse(method.invoke(activity, "$origin/station/ci?next=/photo-studio") as Boolean)
+                assertFalse(method.invoke(activity, "https://other.example/photo-studio") as Boolean)
+                val serviceUri = Uri.parse(origin)
+                val wrongPort = if (serviceUri.port in 1..65534) serviceUri.port + 1 else 444
+                val wrongOrigin = serviceUri.buildUpon()
+                    .encodedAuthority("${serviceUri.host}:$wrongPort")
+                    .appendPath("photo-studio")
+                    .build()
+                assertFalse(method.invoke(activity, wrongOrigin.toString()) as Boolean)
+            }
+        }
+    }
+
+    @Test
     fun homeStudioShortcutsOpenTheCorrectStudiosAndReturnHome() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("ID Studio")).perform(click())
@@ -574,6 +691,208 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun openingPhotoStudioAfterShopPrintAlwaysUsesConfiguredServiceOrigin() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val shopUrl = "https://shop.example.test/station/12345678901234567890123456789012"
+                MainActivity::class.java.getDeclaredField("portalUrl").apply { isAccessible = true }
+                    .set(activity, shopUrl)
+                MainActivity::class.java.getDeclaredField("portalHost").apply { isAccessible = true }
+                    .set(activity, "shop.example.test")
+                val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
+                    isAccessible = true
+                }.invoke(activity) as WebView
+                webView.loadUrl(shopUrl)
+                MainActivity::class.java.getDeclaredMethod("showDedicatedPhotoStudio").apply {
+                    isAccessible = true
+                }.invoke(activity)
+                val studioUrl = Uri.parse(webView.url)
+                assertEquals("The Photo Studio route must not inherit the QR-selected shop host.",
+                    Uri.parse(BuildConfig.SERVICE_BASE_URL).host, studioUrl.host)
+                assertEquals("/photo-studio", studioUrl.path)
+                assertTrue(
+                    "Photo Studio must activate its route-scoped private library bridge.",
+                    MainActivity::class.java.getDeclaredField("privatePhotoStudioPageOpen")
+                        .apply { isAccessible = true }.getBoolean(activity)
+                )
+                assertFalse(
+                    "The shop-print route must not remain active when Photo Studio opens.",
+                    MainActivity::class.java.getDeclaredField("fileChooserReturnToPhotoStudio")
+                        .apply { isAccessible = true }.getBoolean(activity)
+                )
+            }
+        }
+    }
+
+    @Test
+    fun enteringShopPrintFromPhotoStudioUsesOnlyTheQrSelectedShopRoute() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            onView(withText("Photo Studio")).perform(click())
+            scenario.onActivity { activity ->
+                val webView = MainActivity::class.java.getDeclaredField("webView")
+                    .apply { isAccessible = true }.get(activity) as WebView
+                assertEquals("/photo-studio", Uri.parse(webView.url).path)
+                MainActivity::class.java.getDeclaredField("portalUrl").apply { isAccessible = true }
+                    .set(activity, "https://shop.example.test/station/12345678901234567890123456789012")
+                MainActivity::class.java.getDeclaredField("portalHost").apply { isAccessible = true }
+                    .set(activity, "shop.example.test")
+                MainActivity::class.java.getDeclaredMethod("showPrint").apply { isAccessible = true }
+                    .invoke(activity)
+                assertEquals(
+                    "The shop print page must use the selected QR route, not the private studio route.",
+                    "/station/12345678901234567890123456789012",
+                    Uri.parse(webView.url).path
+                )
+                assertFalse(
+                    "The shop print route must not retain the private Photo Studio flag.",
+                    MainActivity::class.java.getDeclaredField("privatePhotoStudioPageOpen")
+                        .apply { isAccessible = true }.getBoolean(activity)
+                )
+            }
+        }
+    }
+
+    @Test
+    fun photoStudioPickerReturnReattachesThePrivateStudioInsteadOfOpeningShopUpload() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            onView(withText("Photo Studio")).perform(click())
+            scenario.onActivity { activity ->
+                val webView = MainActivity::class.java.getDeclaredField("webView")
+                    .apply { isAccessible = true }.get(activity) as WebView
+                assertEquals("/photo-studio", Uri.parse(webView.url.orEmpty()).path)
+                MainActivity::class.java.getDeclaredField("fileChooserReturnToPhotoStudio")
+                    .apply { isAccessible = true }.setBoolean(activity, true)
+                MainActivity::class.java.getDeclaredMethod("showPicker", Boolean::class.javaPrimitiveType!!)
+                    .apply { isAccessible = true }.invoke(activity, true)
+                val pickerHost = webView.parent as? ViewGroup
+                    ?: throw AssertionError("The private Photo Studio WebView must remain in its existing host.")
+                assertNull(
+                    "The studio host must be removed from the visible content while the native picker is open.",
+                    pickerHost.parent
+                )
+                MainActivity::class.java.getDeclaredMethod("cancelPicker").apply {
+                    isAccessible = true
+                }.invoke(activity)
+                assertEquals("/photo-studio", Uri.parse(webView.url.orEmpty()).path)
+                assertNotNull("The same studio WebView must be reattached after picker cancellation.", webView.parent)
+                MainActivity::class.java.getDeclaredMethod("showDedicatedPhotoStudio").apply {
+                    isAccessible = true
+                }.invoke(activity)
+                assertNotNull("Repeated Photo Studio entry must reattach the existing WebView.", webView.parent)
+                assertEquals("The selected shop-print route must not replace the private studio.",
+                    "/photo-studio", Uri.parse(webView.url.orEmpty()).path)
+            }
+        }
+    }
+
+    @Test
+    fun historyPaginationAppearsOnlyWhenFilteredResultsExceedTen() {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val render = MainActivity::class.java.getDeclaredMethod(
+                    "renderCustomerHistory",
+                    LinearLayout::class.java,
+                    String::class.java,
+                    List::class.java,
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType!!
+                ).apply { isAccessible = true }
+
+                fun history(count: Int, failLast: Boolean = false) = (0 until count).map { index ->
+                    CustomerPrintHistoryItem(
+                        id = "history-$index",
+                        batchId = "batch-$index",
+                        batchName = "Print batch $index",
+                        batchGroupName = null,
+                        jobNumber = "QE-${index + 1}",
+                        status = if (failLast && index == count - 1) "FAILED" else "COMPLETED",
+                        pageCount = 1,
+                        copies = 1,
+                        currency = "INR",
+                        quotedAmountMinor = 1000,
+                        createdUtc = "2026-11-12T10:00:00Z",
+                        shopName = "Test Print Shop",
+                        originalFileName = "document-$index.pdf",
+                        paidAmountMinor = 1000,
+                        refundedAmountMinor = 0,
+                        paymentStatus = "VERIFIED",
+                        paymentMethod = "UPI",
+                        rejectedPageNumbersJson = "[]",
+                        outputCompletedUtc = null,
+                        printKind = "DOCUMENT",
+                        photoSizeCode = null,
+                        photoCount = 0,
+                        photosPerPage = null
+                    )
+                }
+
+                fun find(view: View, description: String): View? {
+                    if (view.contentDescription == description) return view
+                    if (view is ViewGroup) {
+                        for (index in 0 until view.childCount) {
+                            find(view.getChildAt(index), description)?.let { return it }
+                        }
+                    }
+                    return null
+                }
+
+                fun pagerVisibility(
+                    records: List<CustomerPrintHistoryItem>,
+                    filteredStatusPosition: Int? = null
+                ): Int {
+                    val container = LinearLayout(activity)
+                    render.invoke(activity, container, "test@example.com", records, null, false)
+                    if (filteredStatusPosition != null) {
+                        val filter = find(container, "History status filter") as? android.widget.Spinner
+                            ?: throw AssertionError("The History status filter was not created.")
+                        filter.onItemSelectedListener?.onItemSelected(
+                            filter,
+                            null,
+                            filteredStatusPosition,
+                            filteredStatusPosition.toLong()
+                        )
+                    }
+                    return (find(container, "History pagination")
+                        ?: throw AssertionError("History pager container was not created.")).visibility
+                }
+
+                assertEquals("10 history results must not show pagination.", View.GONE, pagerVisibility(history(10)))
+                assertEquals("11 history results must show pagination.", View.VISIBLE, pagerVisibility(history(11)))
+                assertEquals("A status filter leaving 10 results must hide pagination.", View.GONE,
+                    pagerVisibility(history(11, failLast = true), filteredStatusPosition = 1))
+                assertEquals("Fewer than 10 results must not show pagination.", View.GONE, pagerVisibility(history(9)))
+
+                val pageContainer = LinearLayout(activity)
+                render.invoke(activity, pageContainer, "test@example.com", history(25), null, false)
+                assertEquals(View.VISIBLE,
+                    find(pageContainer, "History pagination")?.visibility)
+                assertNotNull("mPay's 10-item page size must be offered.",
+                    find(pageContainer, "Show 10 orders per page"))
+                assertNotNull("mPay's 20-item page size must be offered.",
+                    find(pageContainer, "Show 20 orders per page"))
+                assertNotNull("mPay's 50-item page size must be offered.",
+                    find(pageContainer, "Show 50 orders per page"))
+
+                (find(pageContainer, "Show 20 orders per page")
+                    ?: throw AssertionError("20-item page size is missing.")).performClick()
+                assertEquals("Showing 1–20 of 25",
+                    (find(pageContainer, "History page range") as TextView).text.toString())
+                assertEquals("1 / 2",
+                    (find(pageContainer, "History page indicator") as TextView).text.toString())
+
+                (find(pageContainer, "Show 10 orders per page")
+                    ?: throw AssertionError("10-item page size is missing.")).performClick()
+                (find(pageContainer, "Next page")
+                    ?: throw AssertionError("Next page action is missing.")).performClick()
+                assertEquals("Showing 11–20 of 25",
+                    (find(pageContainer, "History page range") as TextView).text.toString())
+                assertEquals("2 / 3",
+                    (find(pageContainer, "History page indicator") as TextView).text.toString())
+            }
+        }
+    }
+
+    @Test
     fun rendersCompactSmartPrintHomeAndFourDestinations() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             onView(withText("Your space")).check(matches(isDisplayed()))
@@ -582,11 +901,12 @@ class MainActivityInstrumentedTest {
             onView(withText("Recent files")).check(matches(isDisplayed()))
             onView(withText("Scan document")).check(matches(isDisplayed()))
             onView(withText("Choose files")).check(matches(isDisplayed()))
+            onView(withContentDescription("Find a print shop")).check(matches(isDisplayed()))
             onView(allOf(
                 withText("Find a print shop"),
                 isAssignableFrom(com.google.android.material.button.MaterialButton::class.java)
-            )).check(matches(isDisplayed()))
-            onView(withContentDescription("Shop connection")).check(matches(isDisplayed()))
+            )).check(doesNotExist())
+            onView(withContentDescription("Shop connection")).check(doesNotExist())
             onView(withText("ID Studio")).check(matches(isDisplayed()))
             onView(withText("Photo Studio")).check(matches(isDisplayed()))
             onView(withText("FROM SMARTPRINT")).check(doesNotExist())
@@ -915,11 +1235,11 @@ class MainActivityInstrumentedTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         CustomerAccountStore(context).clear()
         ActivityScenario.launch(MainActivity::class.java).use {
-            openNavigationDestination(4, "Your print activity")
+            openNavigationDestination(4, "Print history")
             onView(withContentDescription("Account")).perform(click())
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
-            onView(withText("Your print activity")).check(matches(isDisplayed()))
+            onView(withText("Print history")).check(matches(isDisplayed()))
         }
     }
 

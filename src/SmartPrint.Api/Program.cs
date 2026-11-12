@@ -930,7 +930,7 @@ customerApi.MapGet("/me", async (
     });
 });
 
-customerApi.MapGet("/jobs", async (
+customerApi.MapGet("/jobs/count", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
     CancellationToken ct) =>
@@ -941,7 +941,7 @@ customerApi.MapGet("/jobs", async (
         return Results.Forbid();
     }
 
-    var jobs = await (
+    var totalCount = await (
         from job in db.PrintJobs.AsNoTracking()
         join profile in db.ShopProfiles.AsNoTracking()
             on job.TenantId equals profile.TenantId
@@ -950,7 +950,50 @@ customerApi.MapGet("/jobs", async (
                   session.TenantId == job.TenantId &&
                   session.Id == job.CustomerSessionId &&
                   session.CustomerUserId == customerId))
-        orderby job.CreatedUtc descending
+        select job.Id
+    ).CountAsync(ct);
+
+    return Results.Ok(new { TotalCount = totalCount });
+});
+
+customerApi.MapGet("/jobs", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct,
+    int? page,
+    int? size) =>
+{
+    var customerId = CustomerIdentity.GetCustomerId(principal);
+    if (customerId is null)
+    {
+        return Results.Forbid();
+    }
+
+    // Match the zero-based page/size contract used by mPay. Reject invalid
+    // values rather than silently changing the page the customer requested.
+    var pageNumber = page ?? 0;
+    var pageSize = size ?? 10;
+    if (pageNumber < 0 || pageSize is < 1 or > 100)
+    {
+        return Results.BadRequest(new { message = "Page must be zero or greater and size must be between 1 and 100." });
+    }
+
+    var skipLong = (long)pageNumber * pageSize;
+    if (skipLong > int.MaxValue)
+    {
+        return Results.BadRequest(new { message = "The requested history page is outside the supported range." });
+    }
+
+    var customerJobs = (
+        from job in db.PrintJobs.AsNoTracking()
+        join profile in db.ShopProfiles.AsNoTracking()
+            on job.TenantId equals profile.TenantId
+        where job.CustomerUserId == customerId ||
+              (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                  session.TenantId == job.TenantId &&
+                  session.Id == job.CustomerSessionId &&
+                  session.CustomerUserId == customerId))
+        orderby job.CreatedUtc descending, job.Id descending
         select new
         {
             job.Id,
@@ -991,11 +1034,26 @@ customerApi.MapGet("/jobs", async (
                 .OrderByDescending(payment => payment.UpdatedUtc)
                 .Select(payment => payment.Method)
                 .FirstOrDefault()
-        })
-        .Take(100)
+        });
+
+    var totalItems = await customerJobs.CountAsync(ct);
+    var totalPages = totalItems == 0
+        ? 0
+        : (int)Math.Ceiling(totalItems / (double)pageSize);
+    var jobs = await customerJobs
+        .Skip((int)skipLong)
+        .Take(pageSize)
         .ToListAsync(ct);
 
-    return Results.Ok(new { Jobs = jobs });
+    return Results.Ok(new
+    {
+        Items = jobs,
+        Page = pageNumber,
+        Size = pageSize,
+        TotalItems = totalItems,
+        TotalPages = totalPages,
+        HasNext = (long)pageNumber + 1 < totalPages
+    });
 });
 
 

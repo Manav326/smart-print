@@ -8,6 +8,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
@@ -57,6 +58,17 @@ class IdStudioInstrumentedTest {
             assertTrue("Prepared PDFs are AES-GCM vault envelopes.", encryptedPreparedBytes.take(4).toByteArray().contentEquals(byteArrayOf(83, 80, 73, 68)))
             assertTrue("New ID documents retain both encrypted original scans.", idStore.canEditPreparedDocument(prepared))
             assertTrue("ID library entries can render an A4 thumbnail for print selection.", idStore.createThumbnailBase64(prepared)?.isNotBlank() == true)
+            val a4BrandPreview = IdCardPdfComposer.renderSheetPreview(
+                frontBytes, backBytes, 0, 0,
+                previewWidthPixels = 900,
+                brandMark = context.getDrawable(R.drawable.smartprint_mark_watermark)
+            )
+            try {
+                assertTrue("A4 ID branding is rendered on the sheet preview without changing the saved print PDF.",
+                    a4BrandPreview.width == 900 && a4BrandPreview.height > a4BrandPreview.width)
+            } finally {
+                a4BrandPreview.recycle()
+            }
             val cardFaceThumbnail = android.util.Base64.decode(
                 idStore.createCardFaceThumbnailBase64(prepared, "front") ?: error("The ID front-face preview could not be rendered."),
                 android.util.Base64.DEFAULT
@@ -136,15 +148,15 @@ class IdStudioInstrumentedTest {
 
                 onView(withText("Create a new ID card")).check(matches(isDisplayed()))
                 onView(withText("Student ID")).check(matches(isDisplayed()))
-                onView(withText("A4 sheet")).perform(click())
-                onView(withText("Page 1 of 1")).check(matches(isDisplayed()))
-                onView(withText("SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW")).check(matches(isDisplayed()))
-                onView(withText("SmartPrint by QuantaEdge")).check(matches(isDisplayed()))
+                onView(withText("View")).perform(click())
+                onView(withContentDescription("ID front card preview. Pinch to zoom.")).check(matches(isDisplayed()))
+                onView(withText("View mode")).check(matches(isDisplayed()))
+                onView(withText("Prepare A4 print sheet")).check(doesNotExist())
 
                 scenario.onActivity { activity ->
                     assertTrue(
-                        "Only the explicitly watermarked ID preview allows capture.",
-                        activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE == 0
+                        "Viewing a saved ID keeps private card details protected from screenshots.",
+                        activity.window.attributes.flags and WindowManager.LayoutParams.FLAG_SECURE != 0
                     )
                 }
 
@@ -187,16 +199,62 @@ class IdStudioInstrumentedTest {
                     .check(matches(isDisplayed()))
                 onView(withText("Front")).check(matches(isDisplayed()))
                 onView(withText("Back")).check(matches(isDisplayed()))
-                onView(withText("A4 sheet")).perform(click())
+                onView(withText("SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"))
+                    .check(matches(isDisplayed()))
+                onView(withText("Save")).check(matches(isDisplayed()))
+                onView(withText("View")).perform(click())
                 onView(withContentDescription("A4 ID front and back print sheet preview. Pinch to zoom."))
                     .check(matches(isDisplayed()))
-                onView(withText("Prepare A4 print sheet")).check(matches(isDisplayed()))
+                onView(withText("SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"))
+                    .check(doesNotExist())
+                onView(withText("Save")).check(matches(isDisplayed()))
                 onView(withText("ID card")).perform(click())
                 onView(withContentDescription("ID front card preview. Pinch to zoom."))
                     .check(matches(isDisplayed()))
             }
         } finally {
             store.deleteDraft(draftId)
+        }
+    }
+
+    @Test
+    fun viewingAPreparedIdIsStrictlyReadOnlyAndCanPreviewItsA4Sheet() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("smartprint.customer.last-shop", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        val store = IdStudioStore(context.filesDir, context.cacheDir)
+        val front = testJpeg()
+        val back = testJpeg()
+        val file = store.savePreparedOutput(
+            IdCardPdfComposer.compose(front, back),
+            front,
+            back
+        )
+        front.fill(0)
+        back.fill(0)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredMethod(
+                        "viewPreparedId",
+                        File::class.java
+                    ).apply { isAccessible = true }.invoke(activity, file)
+                }
+                onView(withText("View your ID")).check(matches(isDisplayed()))
+                onView(withText("View mode")).check(matches(isDisplayed()))
+                onView(withText("Save")).check(doesNotExist())
+                onView(withContentDescription("Change ID card dimensions")).check(doesNotExist())
+                onView(withText("View")).perform(click())
+                onView(withContentDescription("A4 ID front and back print sheet preview. Pinch to zoom."))
+                    .check(matches(isDisplayed()))
+                onView(withText("SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"))
+                    .check(doesNotExist())
+                onView(withText("View mode")).check(matches(isDisplayed()))
+                onView(withText("Save")).check(doesNotExist())
+                onView(withText("Prepare A4 Print Sheet")).check(doesNotExist())
+            }
+        } finally {
+            store.deletePrepared(file)
         }
     }
 
