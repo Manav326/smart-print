@@ -4952,6 +4952,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
                 {
                     job.Id, job.PrivatePrinting, job.PrintKind, job.JobNumber, job.Status, job.PageCount,
                     job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
+                    job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage,
                     job.PricingVersion, job.Currency, job.QuotedAmountMinor, job.CreatedUtc
                 },
                 Document = new
@@ -5005,6 +5006,26 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             code = "id_document_pdf_invalid",
             message = "The ID card sheet must be a valid, single-page A4 portrait PDF. Recheck the prepared sheet before sending it."
         });
+
+    if (ticket.PrintKind == "PHOTO")
+    {
+        if (ticket.PhotoSizeCode is not string photoSizeCode ||
+            ticket.PhotoCount is not int photoCount ||
+            ticket.PhotosPerPage is not int photosPerPage)
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_metadata_invalid",
+                message = "The saved Photo Studio document has incomplete print details. Select it again from the private library."
+            });
+        var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+        if (request.PageCount != expectedPageCount ||
+            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, expectedPageCount))
+            return Results.UnprocessableEntity(new
+            {
+                code = "photo_sheet_layout_invalid",
+                message = $"The saved Photo Studio sheet must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page photo raster."
+            });
+    }
 
     var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
     if (!subscription.IsAccessActive)
@@ -5067,6 +5088,9 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         Orientation = locked.Orientation,
         PrivatePrinting = true,
         PrintKind = locked.PrintKind,
+        PhotoSizeCode = locked.PhotoSizeCode,
+        PhotoCount = locked.PhotoCount ?? 0,
+        PhotosPerPage = locked.PhotosPerPage,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
