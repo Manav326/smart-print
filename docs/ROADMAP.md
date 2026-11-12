@@ -137,4 +137,4 @@ Acceptance: CI and packaging are green. Production rollout is not signed off unt
 
 ## Explicit non-goals for this release
 
-Play Store apps, universal support for every printer, multi-file/Office conversion, advanced OCR/AI document editing, unsupported finishing options, franchise management, loyalty programmes and fully offline quote/payment/printing.
+Public Play Store distribution until the native Android app's real-device release matrix is complete, universal support for every printer, Office-file conversion, advanced OCR/AI document editing, unsupported finishing options, franchise management, loyalty programmes and fully offline quote/payment/printing. Multi-file PDF/JPG/JPEG/PNG batches are implemented; this line does not defer them.
