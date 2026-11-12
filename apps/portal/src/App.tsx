@@ -4785,7 +4785,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const idDocument=isSmartPrintIdDocument(candidate);
         const photoSettings=photoSettingsByFileFingerprint[fingerprint];
         const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
-        const isPrivateStudioDocument=idDocument||Boolean(photoSettings);
+        const isPrivateStudioDocument=idDocument||isSmartPrintPhotoDocument(candidate);
         if(isPrivateStudioDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID and Photo Studio documents must use Private Printing. No normal cloud upload is allowed.",409);
         const created=effectiveUploadMode==="LOCAL"&&localAgent
           ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)

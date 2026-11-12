@@ -81,6 +81,15 @@ test("private Photo Studio saves one photo locally with editable metadata and br
  assert.match(css,/SmartPrint by QuantaEdge/);
 });
 
+test("ordinary customer Photo Studio remains inside the existing upload privacy choice",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/const isPrivateStudioDocument=idDocument\|\|isSmartPrintPhotoDocument\(candidate\)/);
+ assert.match(app,/const photoSettings=photoSettingsByFileFingerprint\[fingerprint\]/);
+ assert.match(app,/photoSettings\?\"PHOTO\":\"DOCUMENT\"/);
+ assert.match(app,/const incomingPhotoDocument=supported\.some\(isSmartPrintPhotoDocument\)/);
+ assert.match(app,/mode=\"customer\"/);
+});
+
 test("customer Photo Studio cannot turn an already uploaded original into a second print job",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/if\(uploadedFileFingerprints\.includes\(fingerprint\)\)/);
