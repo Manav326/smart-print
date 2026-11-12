@@ -4387,7 +4387,7 @@ class MainActivity : AppCompatActivity() {
                 showIdStudioReview()
             }
         }, LinearLayout.LayoutParams(0, dp(38), 1f))
-        viewModes.addView(button("A4 sheet", idStudioPreviewMode == "A4").apply {
+        viewModes.addView(button("View", idStudioPreviewMode == "A4").apply {
             minHeight = dp(38)
             textSize = 11f
             setOnClickListener {
