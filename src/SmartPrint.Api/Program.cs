@@ -1059,6 +1059,7 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.OutputCompletedUtc,
             item.UpdatedUtc,
             item.PrivatePrinting,
+            item.PrivateDocumentPurgedUtc,
             OriginalFileName = item.PrivatePrinting
                 ? "Private document"
                 : db.PrintDocuments.AsNoTracking()

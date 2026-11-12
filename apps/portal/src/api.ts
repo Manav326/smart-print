@@ -1838,6 +1838,8 @@ export interface CustomerJobStatus {
   quoteExpiresUtc?: string | null;
   rejectedPageNumbersJson?: string;
   pdfBrandingEnabled?: boolean;
+  privatePrinting?: boolean;
+  privateDocumentPurgedUtc?: string | null;
   updatedUtc: string;
   timeline?: Array<{ newStatus: string; actorType: string; createdUtc: string }>;
   payment?: CustomerPayment | null;
