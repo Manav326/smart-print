@@ -3897,17 +3897,11 @@ class MainActivity : AppCompatActivity() {
                     scaleType = ImageView.ScaleType.FIT_CENTER
                     contentDescription = "ID card front preview"
                     background = roundedDrawable(getColor(R.color.qp_soft), dp(8))
-                    (idStudioStore.createCardFaceThumbnailBase64(file, "front")
-                        ?: idStudioStore.createThumbnailBase64(file))?.let { encoded ->
-                        val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
-                        try {
-                            setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
-                        } finally {
-                            bytes.fill(0)
-                        }
-                    }
+                    tag = runCatching { file.canonicalPath }.getOrDefault(file.name)
                 }
+                loadIdStudioCardFaceThumbnail(thumbnail, file)
                 row.addView(thumbnail, LinearLayout.LayoutParams(dp(88), dp(58)))
+                }
                 val details = LinearLayout(this).apply {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(10), 0, dp(6), 0)
@@ -3993,6 +3987,31 @@ class MainActivity : AppCompatActivity() {
             isFillViewport = true
             addView(column)
         }, frameParams())
+    }
+
+    private fun loadIdStudioCardFaceThumbnail(target: ImageView, file: File) {
+        val canonicalPath = runCatching { file.canonicalPath }.getOrNull() ?: return
+        target.tag = canonicalPath
+        Thread {
+            val bitmap = runCatching {
+                val encoded = idStudioStore.createCardFaceThumbnailBase64(file, "front")
+                    ?: return@runCatching null
+                val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                try {
+                    android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                } finally {
+                    bytes.fill(0)
+                }
+            }.getOrNull()
+            runOnUiThread {
+                if (bitmap == null) return@runOnUiThread
+                if (isFinishing || isDestroyed || target.tag != canonicalPath) {
+                    bitmap.recycle()
+                } else {
+                    target.setImageBitmap(bitmap)
+                }
+            }
+        }.start()
     }
 
     private fun viewPreparedId(file: File) {
