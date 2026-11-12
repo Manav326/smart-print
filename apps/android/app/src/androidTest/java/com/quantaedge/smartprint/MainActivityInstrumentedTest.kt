@@ -861,6 +861,33 @@ class MainActivityInstrumentedTest {
                 assertEquals("A status filter leaving 10 results must hide pagination.", View.GONE,
                     pagerVisibility(history(11, failLast = true), filteredStatusPosition = 1))
                 assertEquals("Fewer than 10 results must not show pagination.", View.GONE, pagerVisibility(history(9)))
+
+                val pageContainer = LinearLayout(activity)
+                render.invoke(activity, pageContainer, "test@example.com", history(25), null, false)
+                assertEquals(View.VISIBLE,
+                    find(pageContainer, "History pagination")?.visibility)
+                assertNotNull("mPay's 10-item page size must be offered.",
+                    find(pageContainer, "Show 10 orders per page"))
+                assertNotNull("mPay's 20-item page size must be offered.",
+                    find(pageContainer, "Show 20 orders per page"))
+                assertNotNull("mPay's 50-item page size must be offered.",
+                    find(pageContainer, "Show 50 orders per page"))
+
+                (find(pageContainer, "Show 20 orders per page")
+                    ?: throw AssertionError("20-item page size is missing.")).performClick()
+                assertEquals("Showing 1–20 of 25",
+                    (find(pageContainer, "History page range") as TextView).text.toString())
+                assertEquals("1 / 2",
+                    (find(pageContainer, "History page indicator") as TextView).text.toString())
+
+                (find(pageContainer, "Show 10 orders per page")
+                    ?: throw AssertionError("10-item page size is missing.")).performClick()
+                (find(pageContainer, "Next page")
+                    ?: throw AssertionError("Next page action is missing.")).performClick()
+                assertEquals("Showing 11–20 of 25",
+                    (find(pageContainer, "History page range") as TextView).text.toString())
+                assertEquals("2 / 3",
+                    (find(pageContainer, "History page indicator") as TextView).text.toString())
             }
         }
     }
