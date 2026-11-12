@@ -1238,7 +1238,7 @@ class MainActivity : AppCompatActivity() {
             contentDescription = if (portalUrl == null) {
                 "Find a print shop"
             } else {
-                "Manage connected shop: \${shopDisplayName ?: "Connected shop"}"
+                "Manage connected shop: ${shopDisplayName ?: "Connected shop"}"
             }
             setOnClickListener { if (portalUrl == null) showScanPrint() else showShopManager() }
         }
@@ -1402,7 +1402,15 @@ class MainActivity : AppCompatActivity() {
         return scroll
     }
 
+    private fun isPhotoStudioPageUrl(rawUrl: String?): Boolean {
+        val uri = runCatching { Uri.parse(rawUrl.orEmpty()) }.getOrNull() ?: return false
+        return uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host.equals(Uri.parse(BuildConfig.SERVICE_BASE_URL).host, ignoreCase = true) &&
+            uri.path.orEmpty().trimEnd('/').equals("/photo-studio", ignoreCase = true)
+    }
+
     private fun showDedicatedPhotoStudio() {
+        fileChooserReturnToPhotoStudio = false
         // Do not early-return merely because the WebView URL is already /photo-studio:
         // the native file picker detaches the WebView from the content container.
         // Every entry must restore the WebView to the visible screen.
@@ -1743,11 +1751,12 @@ class MainActivity : AppCompatActivity() {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.END
                         }
-                        actionRow.addView(button("Details", false).apply {
-                            minHeight = dp(32)
-                            textSize = 10f
+                        actionRow.addView(button("View details", false).apply {
+                            minHeight = dp(28)
+                            textSize = 9f
+                            contentDescription = "View details for $title"
                             setOnClickListener { showCustomerJobDetails(batch) }
-                        }, LinearLayout.LayoutParams(dp(88), dp(32)))
+                        }, LinearLayout.LayoutParams(dp(84), dp(28)))
                         body.addView(actionRow, linearParams().apply { topMargin = dp(5) })
                         item.addView(body)
                         results.addView(item, linearParams().apply { bottomMargin = dp(8) })
@@ -1816,13 +1825,13 @@ class MainActivity : AppCompatActivity() {
 
                 val local = store.read(email).orEmpty()
                 val firstPage = authenticated { token ->
-                    CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = 100)
+                    CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = 10)
                 }
                 val serverCount = firstPage.totalItems
                 if (serverCount <= local.size.toLong()) {
                     local
                 } else {
-                    require(firstPage.page == 0 && firstPage.size == 100) {
+                    require(firstPage.page == 0 && firstPage.size == 10) {
                         "The server returned an invalid first history page. Your saved history has not changed."
                     }
                     val downloaded = linkedMapOf<String, CustomerPrintHistoryItem>()
@@ -3424,7 +3433,7 @@ class MainActivity : AppCompatActivity() {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
                 fileChooserReturnToPhotoStudio =
-                    privatePhotoStudioPageOpen && Uri.parse(view.url.orEmpty()).path == "/photo-studio"
+                    privatePhotoStudioPageOpen && isPhotoStudioPageUrl(webView.url)
                 fileChooserSelectFolders = params.acceptTypes.any { accepted ->
                     accepted.split(',').any { it.trim().equals(FOLDER_PICKER_ACCEPT, ignoreCase = true) }
                 }
