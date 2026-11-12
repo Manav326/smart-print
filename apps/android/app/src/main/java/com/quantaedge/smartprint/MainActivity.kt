@@ -131,6 +131,8 @@ class MainActivity : AppCompatActivity() {
     private var portalUrl: String? = null
     private var portalHost: String? = null
     private var photoStudioOpen = false
+    private var photoStudioCaptureAllowed = false
+    private var privatePhotoStudioPageOpen = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val pendingLocalNetworkPermissionReplies = mutableListOf<JavaScriptReplyProxy>()
     private var localNetworkPermissionRequestInProgress = false
@@ -170,7 +172,8 @@ class MainActivity : AppCompatActivity() {
         SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
         photoStudioOpen = savedInstanceState?.getBoolean("photoStudioOpen") ?: false
-        if (photoStudioOpen) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        photoStudioCaptureAllowed = savedInstanceState?.getBoolean("photoStudioCaptureAllowed") ?: false
+        privatePhotoStudioPageOpen = savedInstanceState?.getBoolean("privatePhotoStudioPageOpen") ?: false
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (handleBackNavigation()) return
@@ -285,6 +288,8 @@ class MainActivity : AppCompatActivity() {
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
         outState.putBoolean("photoStudioOpen", photoStudioOpen)
+        outState.putBoolean("photoStudioCaptureAllowed", photoStudioCaptureAllowed)
+        outState.putBoolean("privatePhotoStudioPageOpen", privatePhotoStudioPageOpen)
         outState.putString("idStudioDraftId", idStudioDraftId)
         outState.putString("pendingIdStudioSide", pendingIdStudioSide)
         outState.putInt("idStudioFrontRotation", idStudioFrontRotation)
@@ -314,6 +319,7 @@ class MainActivity : AppCompatActivity() {
                     null
                 )
             }
+            privatePhotoStudioPageOpen -> showHome()
             documentViewer != null -> if (customerUploadPdfPreviewOpen) closeCustomerUploadPdfPreview() else closeDocumentViewer()
             idStudioScreenOpen -> showIdStudioHome()
             profileVisible -> returnFromProfile()
@@ -1098,6 +1104,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHome() {
+        photoStudioOpen = false
+        photoStudioCaptureAllowed = false
+        privatePhotoStudioPageOpen = false
         idStudioScreenOpen = false
         privateIdViewerOpen = false
         documentViewerReturnToIdStudio = false
@@ -1264,6 +1273,30 @@ class MainActivity : AppCompatActivity() {
         }
 
         return scroll
+    }
+
+    private fun showDedicatedPhotoStudio() {
+        if (privatePhotoStudioPageOpen && webView?.url?.contains("/photo-studio") == true) return
+        idStudioScreenOpen = false
+        privateIdViewerOpen = false
+        photoStudioOpen = false
+        photoStudioCaptureAllowed = false
+        privatePhotoStudioPageOpen = true
+        applySensitiveWindowProtection()
+        pickerMode = false
+        clearLibrarySelection()
+        setToolbarPage("Photo Studio")
+        setToolbarBackAction("Back to Home", ::showHome)
+        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
+        toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
+        accountAction.visibility = View.GONE
+        setBottomNavigationVisible(false)
+        content.removeAllViews()
+        val view = ensureWebView()
+        (view.parent as? ViewGroup)?.removeView(view)
+        content.addView(view, frameParams())
+        val studioUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/photo-studio"
+        if (view.url != studioUrl) view.loadUrl(studioUrl)
     }
 
     private fun showScanPrint() {
@@ -1699,6 +1732,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPrint() {
+        privatePhotoStudioPageOpen = false
+        photoStudioOpen = false
+        photoStudioCaptureAllowed = false
         idStudioScreenOpen = false
         privateIdViewerOpen = false
         applySensitiveWindowProtection()
@@ -1718,6 +1754,8 @@ class MainActivity : AppCompatActivity() {
         val view = ensureWebView()
         (view.parent as? ViewGroup)?.removeView(view)
         content.addView(view, frameParams())
+        val activeShopUrl = portalUrl
+        if (activeShopUrl != null && view.url?.contains("/photo-studio") == true) view.loadUrl(activeShopUrl)
     }
 
     private fun refreshLibrary(preserveScroll: Boolean = true) {
@@ -2721,6 +2759,7 @@ class MainActivity : AppCompatActivity() {
                                 runOnUiThread {
                                     if (!isFinishing && !isDestroyed) {
                                         photoStudioOpen = parts[1] == "on"
+                                        applySensitiveWindowProtection()
                                         replyProxy.postMessage("OK")
                                     }
                                 }
@@ -2729,11 +2768,8 @@ class MainActivity : AppCompatActivity() {
                                 parts[1] in setOf("on", "off") -> {
                                 runOnUiThread {
                                     if (!isFinishing && !isDestroyed) {
-                                        if (parts[1] == "on") {
-                                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                                        } else {
-                                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                                        }
+                                        photoStudioCaptureAllowed = parts[1] == "off"
+                                        applySensitiveWindowProtection()
                                         replyProxy.postMessage("OK")
                                     }
                                 }
@@ -3244,7 +3280,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applySensitiveWindowProtection() {
-        if (photoStudioOpen || idStudioScreenOpen || privateIdViewerOpen) {
+        // Preview capture is allowed only when the visible SmartPrint security
+        // watermark is present. ID editing and the private ID viewer stay protected.
+        val captureMustBeBlocked = idStudioScreenOpen || privateIdViewerOpen ||
+            (photoStudioOpen && !photoStudioCaptureAllowed)
+        if (captureMustBeBlocked) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)

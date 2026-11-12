@@ -64,7 +64,6 @@
 /* The watermark deters casual capture on web and complements native desktop protection. */
 .sheetFrame{position:relative;overflow:hidden;user-select:none;-webkit-user-select:none}
 .previewProtection{position:absolute;inset:0;z-index:2;pointer-events:none;overflow:hidden;display:grid;place-items:center;background:repeating-linear-gradient(135deg,transparent 0 44px,rgba(32,45,70,.025) 44px 46px)}
-.previewProtection::after{content:"SmartPrint by QuantaEdge";position:absolute;left:8%;right:8%;bottom:7%;display:block;padding:7px 8px;border:1px solid rgba(44,59,84,.18);border-radius:5px;background:rgba(255,255,255,.42);color:rgba(28,43,69,.62);font-size:clamp(9px,1.45vw,13px);font-weight:800;letter-spacing:.12em;text-align:center;text-transform:none;text-shadow:0 1px 1px rgba(255,255,255,.5)}
 .previewProtection::before{content:"SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW";position:absolute;inset:-30%;display:grid;place-items:center;transform:rotate(-28deg);font-size:clamp(9px,1.8vw,16px);font-weight:800;letter-spacing:.18em;color:rgba(44,59,84,.14);text-align:center;white-space:normal;line-height:8}
 .previewCanvas{user-select:none;-webkit-user-select:none;-webkit-user-drag:none}
 
