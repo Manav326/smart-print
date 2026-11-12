@@ -930,6 +930,32 @@ customerApi.MapGet("/me", async (
     });
 });
 
+customerApi.MapGet("/jobs/count", async (
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var customerId = CustomerIdentity.GetCustomerId(principal);
+    if (customerId is null)
+    {
+        return Results.Forbid();
+    }
+
+    var totalCount = await (
+        from job in db.PrintJobs.AsNoTracking()
+        join profile in db.ShopProfiles.AsNoTracking()
+            on job.TenantId equals profile.TenantId
+        where job.CustomerUserId == customerId ||
+              (job.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                  session.TenantId == job.TenantId &&
+                  session.Id == job.CustomerSessionId &&
+                  session.CustomerUserId == customerId))
+        select job.Id
+    ).CountAsync(ct);
+
+    return Results.Ok(new { TotalCount = totalCount });
+});
+
 customerApi.MapGet("/jobs", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
@@ -946,7 +972,7 @@ customerApi.MapGet("/jobs", async (
     // Match the zero-based page/size contract used by mPay. Reject invalid
     // values rather than silently changing the page the customer requested.
     var pageNumber = page ?? 0;
-    var pageSize = size ?? 20;
+    var pageSize = size ?? 10;
     if (pageNumber < 0 || pageSize is < 1 or > 100)
     {
         return Results.BadRequest(new { message = "Page must be zero or greater and size must be between 1 and 100." });
