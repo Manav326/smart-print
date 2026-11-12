@@ -486,6 +486,23 @@ test("native customer account identity accompanies QR session renewal",()=>{
 });
 
 
+test("local shop Photo Studio revision authorization and completion enforce the A4 raster contract",()=>{
+  const program=read("../../../src/SmartPrint.Api/Program.cs");
+  const authorizeStart=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize"');
+  const authorizeEnd=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"',authorizeStart);
+  const completeStart=authorizeEnd;
+  const completeEnd=program.indexOf("\\nagentApi.MapPost(",completeStart+30);
+  assert.ok(authorizeStart>=0&&authorizeEnd>authorizeStart);
+  assert.ok(completeStart>=0&&completeEnd>completeStart);
+  const authorize=program.slice(authorizeStart,authorizeEnd);
+  const complete=program.slice(completeStart,completeEnd);
+  assert.match(authorize,/request\\.PageSizesJson\\.Length > 64_000/);
+  assert.match(authorize,/PhotoSheetPdfRules\\.HasExactlyA4PortraitPages\\(request\\.PageSizesJson, request\\.PageCount\\)/);
+  assert.match(complete,/PhotoSheetPdfRules\\.HasExactlyA4PortraitPages\\(request\\.PageSizesJson, request\\.PageCount\\)/);
+  assert.match(authorize,/photo_sheet_layout_invalid/);
+  assert.match(complete,/photo_sheet_layout_invalid/);
+});
+
 test("cloud shop Photo Studio revisions validate complete A4 raster geometry before replacing the saved job",()=>{
   const program=read("../../../src/SmartPrint.Api/Program.cs");
   const start=program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision"');

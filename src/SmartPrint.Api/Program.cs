@@ -6494,10 +6494,17 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
 
     if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
         string.IsNullOrWhiteSpace(request.Sha256) || request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
-        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000 || !IsValidPageSizesJson(request.PageSizesJson))
+        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000 || !IsValidPageSizesJson(request.PageSizesJson))
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
             ["photoSheet"] = ["The prepared local photo sheet metadata is invalid."]
+        });
+
+    if (!PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, request.PageCount))
+        return Results.UnprocessableEntity(new
+        {
+            code = "photo_sheet_layout_invalid",
+            message = "The revised local photo PDF must contain only portrait A4 pages with one full-page 300-DPI photo raster on each page."
         });
 
     var hasPayment = await db.PrintPayments.AnyAsync(item =>
@@ -6578,6 +6585,14 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
             grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
         !LocalDocumentPhotoRevisionGrant.IsFor(grant, device.TenantId, jobId, device.Id))
         return Results.Unauthorized();
+
+    if (string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000 ||
+        !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, request.PageCount))
+        return Results.UnprocessableEntity(new
+        {
+            code = "photo_sheet_layout_invalid",
+            message = "The completed local photo PDF must contain only portrait A4 pages with one full-page 300-DPI photo raster on each page."
+        });
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
@@ -6686,7 +6701,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
 
     if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
         request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
-        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 4000)
+        string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000)
     {
         await transaction.RollbackAsync(ct);
         return Results.BadRequest(new { code = "photo_revision_output_invalid", message = "The local Agent supplied invalid prepared-sheet metadata." });
