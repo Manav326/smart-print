@@ -50,7 +50,7 @@ test("after upload only the decrypted picker copy is released and the saved libr
   const app = read("../src/App.tsx");
   const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
   const store = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/PhotoStudioStore.kt");
-  assert.match(app, /setFiles\(\);[\s\S]*postSmartPrintNativeMessage\("releasePhotoStudioUploadFiles"\)/);
+  assert.match(app, /setFiles\(\[\]\);[\s\S]*postSmartPrintNativeMessage\("releasePhotoStudioUploadFiles"\)/);
   assert.match(main, /data == "releasePhotoStudioUploadFiles"/);
   assert.match(main, /privatePhotoUploadTempFiles\.toList\(\)\.forEach\(photoStudioStore::releaseTransientFile\)/);
   assert.match(main, /privatePhotoUploadTempFiles\.clear\(\)/);
