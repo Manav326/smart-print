@@ -5,3 +5,18 @@
 .seo-panel{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:28px;margin:0 0 18px;box-shadow:0 8px 30px #17203308}.seo-panel h2{font-size:25px;line-height:1.2;letter-spacing:-.65px;margin:0 0 13px}.seo-panel h3{font-size:17px;line-height:1.3;margin:0 0 8px}.seo-panel p{color:var(--muted);margin:0 0 13px}.seo-panel p:last-child{margin-bottom:0}.seo-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px;margin:18px 0 30px}.seo-feature{padding:23px;border:1px solid var(--line);border-radius:15px;background:#fff}.seo-feature h3{margin:0 0 8px;font-size:16px}.seo-feature p{margin:0;color:var(--muted);font-size:14px}
 .seo-steps{counter-reset:step;display:grid;gap:12px;margin:20px 0 30px}.seo-step{counter-increment:step;display:grid;grid-template-columns:42px 1fr;gap:14px;padding:18px 20px;border:1px solid var(--line);border-radius:14px;background:#fff}.seo-step:before{content:counter(step,decimal-leading-zero);font-size:12px;font-weight:850;color:var(--accent-dark);background:var(--soft);border-radius:11px;width:42px;height:42px;display:grid;place-items:center}.seo-step h3{font-size:16px;margin:0 0 5px}.seo-step p{font-size:14px;color:var(--muted);margin:0}.seo-faq details{border-top:1px solid var(--line);padding:16px 0}.seo-faq summary{cursor:pointer;font-weight:750}.seo-faq details p{margin:9px 0 0}.seo-cta{margin:28px 0 55px;padding:34px;border-radius:20px;background:#211b45;color:#fff}.seo-cta h2{margin:0 0 10px;font-size:27px;letter-spacing:-.7px}.seo-cta p{margin:0 0 20px;color:#d6d1f3}.seo-cta .seo-button{background:#fff;color:#4535a1!important}.seo-related{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0 28px}.seo-related a{display:inline-flex;padding:8px 12px;background:#fff;border:1px solid var(--line);border-radius:999px;text-decoration:none;font-size:13px;font-weight:650}.seo-footer{background:#fff;border-top:1px solid var(--line);padding:25px 26px;color:#7b879b;font-size:12px}.seo-footer-inner{max-width:1000px;margin:auto;display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap}.seo-footer nav{display:flex;gap:16px;flex-wrap:wrap}.seo-footer a{color:#68758a}
 @media(max-width:680px){.seo-header-inner{padding:15px 18px;align-items:flex-start;flex-direction:column;gap:12px}.seo-nav{gap:12px 17px}.seo-wrap{padding:0 18px}.seo-hero{padding:38px 0 30px}.seo-hero h1{font-size:38px;letter-spacing:-1.45px}.seo-hero>p:last-of-type{font-size:16px}.seo-grid{grid-template-columns:1fr}.seo-panel{padding:22px}.seo-cta{padding:26px 22px}}
+
+
+/* Accessible, horizontally scrollable comparison tables. */
+.seo-updated{margin:18px 0 0!important;font-size:13px!important;color:var(--muted)}
+.seo-table-wrap{width:100%;overflow-x:auto;border:1px solid var(--line);border-radius:14px;margin:18px 0 12px;background:#fff;overscroll-behavior-inline:contain}
+.seo-compare-table{width:100%;min-width:760px;border-collapse:collapse;text-align:left;line-height:1.55;font-size:14px}
+.seo-compare-table th,.seo-compare-table td{padding:15px 16px;border-bottom:1px solid var(--line);vertical-align:top}
+.seo-compare-table thead th{background:#f0edff;color:#35286f;font-weight:800}
+.seo-compare-table thead th:first-child{width:21%}
+.seo-compare-table tbody th{background:#fafbfe;color:var(--ink);font-weight:750;width:21%}
+.seo-compare-table tbody td{color:var(--muted);width:39%}
+.seo-compare-table tbody tr:last-child th,.seo-compare-table tbody tr:last-child td{border-bottom:0}
+.seo-table-note{font-size:12px!important;color:#778398!important}
+.seo-list{margin:10px 0 0;padding-left:20px;color:var(--muted)}
+.seo-list li{margin:0 0 8px}
