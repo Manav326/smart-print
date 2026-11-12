@@ -131,8 +131,6 @@ class MainActivity : AppCompatActivity() {
     private var portalUrl: String? = null
     private var portalHost: String? = null
     private var photoStudioOpen = false
-    private var photoStudioCaptureAllowed = false
-    private var privatePhotoStudioPageOpen = false
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private val pendingLocalNetworkPermissionReplies = mutableListOf<JavaScriptReplyProxy>()
     private var localNetworkPermissionRequestInProgress = false
@@ -172,8 +170,7 @@ class MainActivity : AppCompatActivity() {
         SmartPrintThemePreference.apply(this)
         super.onCreate(savedInstanceState)
         photoStudioOpen = savedInstanceState?.getBoolean("photoStudioOpen") ?: false
-        photoStudioCaptureAllowed = savedInstanceState?.getBoolean("photoStudioCaptureAllowed") ?: false
-        privatePhotoStudioPageOpen = savedInstanceState?.getBoolean("privatePhotoStudioPageOpen") ?: false
+        if (photoStudioOpen) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
                 if (handleBackNavigation()) return
@@ -288,8 +285,6 @@ class MainActivity : AppCompatActivity() {
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
         outState.putBoolean("photoStudioOpen", photoStudioOpen)
-        outState.putBoolean("photoStudioCaptureAllowed", photoStudioCaptureAllowed)
-        outState.putBoolean("privatePhotoStudioPageOpen", privatePhotoStudioPageOpen)
         outState.putString("idStudioDraftId", idStudioDraftId)
         outState.putString("pendingIdStudioSide", pendingIdStudioSide)
         outState.putInt("idStudioFrontRotation", idStudioFrontRotation)
@@ -319,7 +314,6 @@ class MainActivity : AppCompatActivity() {
                     null
                 )
             }
-            privatePhotoStudioPageOpen -> showHome()
             documentViewer != null -> if (customerUploadPdfPreviewOpen) closeCustomerUploadPdfPreview() else closeDocumentViewer()
             idStudioScreenOpen -> showIdStudioHome()
             profileVisible -> returnFromProfile()
@@ -1104,9 +1098,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHome() {
-        photoStudioOpen = false
-        photoStudioCaptureAllowed = false
-        privatePhotoStudioPageOpen = false
         idStudioScreenOpen = false
         privateIdViewerOpen = false
         documentViewerReturnToIdStudio = false
@@ -1159,35 +1150,12 @@ class MainActivity : AppCompatActivity() {
             12, R.color.qp_hero_muted, false
         ).apply { setLineSpacing(dp(3).toFloat(), 1f); setPadding(0, 0, 0, dp(15)) })
         heroContent.addView(button(
-            if (portalUrl == null) "Find a print shop" else "Manage connected shop",
+            if (portalUrl == null) "Find a print shop" else "Continue to your shop",
             true
         ).apply {
             minHeight = dp(46)
-            setOnClickListener { if (portalUrl == null) showScanPrint() else showShopManager() }
+            setOnClickListener { if (portalUrl == null) showScanPrint() else showPrint() }
         }, LinearLayout.LayoutParams(-1, dp(46)))
-        val studioActions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
-        }
-        studioActions.addView(button("ID Studio", false).apply {
-            icon = getDrawable(R.drawable.ic_file)
-            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
-            iconPadding = dp(4)
-            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
-            textSize = 11f
-            minHeight = dp(40)
-            setOnClickListener { showIdStudioHome() }
-        }, LinearLayout.LayoutParams(0, dp(40), 1f))
-        studioActions.addView(button("Photo Studio", false).apply {
-            icon = getDrawable(R.drawable.ic_file_image)
-            iconTint = ColorStateList.valueOf(getColor(R.color.qp_hero_text))
-            iconPadding = dp(4)
-            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
-            textSize = 11f
-            minHeight = dp(40)
-            setOnClickListener { showDedicatedPhotoStudio() }
-        }, LinearLayout.LayoutParams(0, dp(40), 1f).apply { marginStart = dp(8) })
-        heroContent.addView(studioActions, LinearLayout.LayoutParams(-1, dp(40)).apply { topMargin = dp(10) })
         hero.addView(heroContent)
         column.addView(hero, linearParams().apply { bottomMargin = dp(17) })
 
@@ -1219,6 +1187,17 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        secondaryActions.addView(button("Prepare ID card", false).apply {
+            icon = getDrawable(R.drawable.ic_file)
+            iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            iconPadding = dp(5)
+            iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
+            textSize = 11f
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            minHeight = dp(48)
+            setOnClickListener { showIdStudioHome() }
+        }, LinearLayout.LayoutParams(0, dp(48), 1f))
         secondaryActions.addView(button("Choose files", false).apply {
             icon = getDrawable(R.drawable.ic_file)
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
@@ -1234,11 +1213,47 @@ class MainActivity : AppCompatActivity() {
                 importFiles.launch(arrayOf("*/*"))
                 navigation.selectedItemId = FILES
             }
-        }, LinearLayout.LayoutParams(-1, dp(48)))
+        }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(9) })
         quickActions.addView(secondaryActions, LinearLayout.LayoutParams(-1, dp(48)).apply {
             topMargin = dp(9)
         })
         column.addView(quickActions, linearParams().apply { bottomMargin = dp(17) })
+
+        val shopCard = card().apply {
+            strokeWidth = dp(1)
+            setOnClickListener { if (portalUrl != null) showShopManager() else showScanPrint() }
+        }
+        val shopRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), dp(13), dp(13), dp(13))
+        }
+        val shopGlyph = ImageView(this).apply {
+            setImageResource(R.drawable.ic_store)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
+            contentDescription = if (portalUrl == null) "Shop connection" else "Connected shop icon"
+        }
+        if (portalUrl != null) loadShopLogo(shopGlyph)
+        shopRow.addView(shopGlyph, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val shopCopy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), 0, 0, 0)
+        }
+        shopCopy.addView(text(
+            if (portalUrl == null) "Find a print shop" else shopDisplayName ?: "Connected shop",
+            14, R.color.qp_text, true
+        ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
+        shopCopy.addView(text(
+            if (portalUrl == null) "Scan the QR code at the counter to connect" else "Connected · tap to manage your shop",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(3), 0, 0) })
+        shopRow.addView(shopCopy, LinearLayout.LayoutParams(0, -2, 1f))
+        shopRow.addView(text(if (portalUrl == null) "›" else "⋮", 22, R.color.qp_muted, false))
+        shopCard.addView(shopRow)
+        column.addView(shopCard, linearParams().apply { bottomMargin = dp(22) })
 
         val recentHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1272,31 +1287,39 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        // This is owned SmartPrint promotion, not a third-party ad slot.
+        val promotion = card().apply {
+            radius = dp(18).toFloat()
+            setCardBackgroundColor(getColor(R.color.qp_glass_card))
+        }
+        val promoRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(13), dp(13), dp(13), dp(13))
+        }
+        val promoIcon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_file_image)
+            imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+            background = roundedDrawable(getColor(R.color.qp_soft), dp(13))
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+        }
+        promoRow.addView(promoIcon, LinearLayout.LayoutParams(dp(46), dp(46)))
+        val promoCopy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(11), 0, 0, 0)
+        }
+        promoCopy.addView(text("FROM SMARTPRINT", 8, R.color.qp_primary, true))
+        promoCopy.addView(text("Make every photo print-ready", 13, R.color.qp_text, true)
+            .apply { setPadding(0, dp(4), 0, dp(3)) })
+        promoCopy.addView(text("Prepare beautiful photo sheets with Photo Studio.", 10, R.color.qp_muted, false))
+        promoRow.addView(promoCopy, LinearLayout.LayoutParams(0, -2, 1f))
+        promoRow.addView(text("›", 24, R.color.qp_primary, true))
+        promotion.addView(promoRow)
+        promotion.setOnClickListener { if (portalUrl != null) showPrint() else showScanPrint() }
+        promotion.isClickable = true
+        promotion.isFocusable = true
+        column.addView(promotion, linearParams().apply { topMargin = dp(18) })
         return scroll
-    }
-
-    private fun showDedicatedPhotoStudio() {
-        if (privatePhotoStudioPageOpen && webView?.url?.contains("/photo-studio") == true) return
-        idStudioScreenOpen = false
-        privateIdViewerOpen = false
-        photoStudioOpen = false
-        photoStudioCaptureAllowed = false
-        privatePhotoStudioPageOpen = true
-        applySensitiveWindowProtection()
-        pickerMode = false
-        clearLibrarySelection()
-        setToolbarPage("Photo Studio")
-        setToolbarBackAction("Back to Home", ::showHome)
-        toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
-        toolbar.menu.findItem(OPEN_WITH)?.isVisible = false
-        accountAction.visibility = View.GONE
-        setBottomNavigationVisible(false)
-        content.removeAllViews()
-        val view = ensureWebView()
-        (view.parent as? ViewGroup)?.removeView(view)
-        content.addView(view, frameParams())
-        val studioUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/photo-studio"
-        if (view.url != studioUrl) view.loadUrl(studioUrl)
     }
 
     private fun showScanPrint() {
@@ -1732,9 +1755,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showPrint() {
-        privatePhotoStudioPageOpen = false
-        photoStudioOpen = false
-        photoStudioCaptureAllowed = false
         idStudioScreenOpen = false
         privateIdViewerOpen = false
         applySensitiveWindowProtection()
@@ -1754,8 +1774,6 @@ class MainActivity : AppCompatActivity() {
         val view = ensureWebView()
         (view.parent as? ViewGroup)?.removeView(view)
         content.addView(view, frameParams())
-        val activeShopUrl = portalUrl
-        if (activeShopUrl != null && view.url?.contains("/photo-studio") == true) view.loadUrl(activeShopUrl)
     }
 
     private fun refreshLibrary(preserveScroll: Boolean = true) {
@@ -2759,7 +2777,6 @@ class MainActivity : AppCompatActivity() {
                                 runOnUiThread {
                                     if (!isFinishing && !isDestroyed) {
                                         photoStudioOpen = parts[1] == "on"
-                                        applySensitiveWindowProtection()
                                         replyProxy.postMessage("OK")
                                     }
                                 }
@@ -2768,8 +2785,11 @@ class MainActivity : AppCompatActivity() {
                                 parts[1] in setOf("on", "off") -> {
                                 runOnUiThread {
                                     if (!isFinishing && !isDestroyed) {
-                                        photoStudioCaptureAllowed = parts[1] == "off"
-                                        applySensitiveWindowProtection()
+                                        if (parts[1] == "on") {
+                                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                                        } else {
+                                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                                        }
                                         replyProxy.postMessage("OK")
                                     }
                                 }
@@ -3280,11 +3300,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applySensitiveWindowProtection() {
-        // Preview capture is allowed only when the visible SmartPrint security
-        // watermark is present. ID editing and the private ID viewer stay protected.
-        val captureMustBeBlocked = idStudioScreenOpen || privateIdViewerOpen ||
-            (photoStudioOpen && !photoStudioCaptureAllowed)
-        if (captureMustBeBlocked) {
+        if (photoStudioOpen || idStudioScreenOpen || privateIdViewerOpen) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
