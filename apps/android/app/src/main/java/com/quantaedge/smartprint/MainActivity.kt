@@ -2181,7 +2181,7 @@ class MainActivity : AppCompatActivity() {
             // same instance through showDedicatedPhotoStudio().
             val studioView = webView
             val studioHost = studioView?.parent as? ViewGroup
-            if (studioHost?.parent === content) content.removeView(studioHost)
+            (studioHost?.parent as? ViewGroup)?.removeView(studioHost)
         }
         content.removeAllViews()
         content.addView(libraryView(true), frameParams())
