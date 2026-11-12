@@ -118,6 +118,7 @@ class MainActivity : AppCompatActivity() {
     private val privatePhotoUploadTempFiles = mutableListOf<File>()
     private var idStudioScreenOpen = false
     private var idStudioDraftId: String? = null
+    private var idStudioEditingFile: File? = null
     private var pendingIdStudioSide: String? = null
     private var idStudioFrontRotation = 0
     private var idStudioBackRotation = 0
@@ -204,6 +205,8 @@ class MainActivity : AppCompatActivity() {
         idStudioStore = IdStudioStore(filesDir, cacheDir)
         photoStudioStore = PhotoStudioStore(filesDir, cacheDir)
         idStudioDraftId = savedInstanceState?.getString("idStudioDraftId")
+        idStudioEditingFile = savedInstanceState?.getString("idStudioEditingFilePath")
+            ?.let { path -> runCatching { File(path).canonicalFile.takeIf(idStudioStore::isPreparedDocument) }.getOrNull() }
         pendingIdStudioSide = savedInstanceState?.getString("pendingIdStudioSide")
         idStudioFrontRotation = savedInstanceState?.getInt("idStudioFrontRotation", 0) ?: 0
         idStudioBackRotation = savedInstanceState?.getInt("idStudioBackRotation", 0) ?: 0
@@ -295,6 +298,7 @@ class MainActivity : AppCompatActivity() {
         outState.putBoolean("photoStudioCaptureAllowed", photoStudioCaptureAllowed)
         outState.putBoolean("privatePhotoStudioPageOpen", privatePhotoStudioPageOpen)
         outState.putString("idStudioDraftId", idStudioDraftId)
+        outState.putString("idStudioEditingFilePath", idStudioEditingFile?.absolutePath)
         outState.putString("pendingIdStudioSide", pendingIdStudioSide)
         outState.putInt("idStudioFrontRotation", idStudioFrontRotation)
         outState.putInt("idStudioBackRotation", idStudioBackRotation)
@@ -3492,41 +3496,96 @@ class MainActivity : AppCompatActivity() {
             ).apply { setPadding(dp(2), dp(5), dp(2), dp(15)) })
         } else {
             prepared.forEach { file ->
+                val metadata = runCatching { idStudioStore.readMetadata(file) }.getOrDefault(JSONObject())
+                val displayName = metadata.optString("title").ifBlank { "ID card" }
                 val item = card()
-                val body = LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(12), dp(11), dp(12), dp(11))
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(11), dp(11), dp(11), dp(11))
                 }
-                body.addView(text(file.name.removeSuffix(".spid") + ".pdf", 13, R.color.qp_text, true).apply { maxLines = 2 })
-                body.addView(text(
-                    android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()) +
-                        " · Private to SmartPrint · A4 front/back sheet",
+                val thumbnail = ImageView(this).apply {
+                    setImageResource(R.drawable.ic_file)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    contentDescription = "ID card sheet preview"
+                    background = roundedDrawable(getColor(R.color.qp_soft), dp(8))
+                    idStudioStore.createThumbnailBase64(file)?.let { encoded ->
+                        val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
+                        setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+                        bytes.fill(0)
+                    }
+                }
+                row.addView(thumbnail, LinearLayout.LayoutParams(dp(62), dp(88)))
+                val details = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(10), 0, dp(6), 0)
+                }
+                details.addView(text(displayName, 13, R.color.qp_text, true).apply {
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                })
+                details.addView(text(
+                    "A4 · Front + back · Private to SmartPrint",
                     10, R.color.qp_muted, false
-                ).apply { setPadding(0, dp(4), 0, dp(8)) })
-                val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+                ).apply { setPadding(0, dp(4), 0, 0); maxLines = 2 })
+                details.addView(text(
+                    android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()),
+                    10, R.color.qp_muted, false
+                ).apply { setPadding(0, dp(3), 0, dp(7)) })
+                val actions = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                }
                 actions.addView(button("View", false).apply {
+                    minHeight = dp(34)
+                    textSize = 11f
                     setOnClickListener { showDocumentViewer(file) }
-                }, LinearLayout.LayoutParams(0, dp(38), 1f))
-                actions.addView(button("Delete", false).apply {
+                }, LinearLayout.LayoutParams(0, dp(36), 1f))
+                actions.addView(button("⋮", false).apply {
+                    minHeight = dp(34)
+                    minWidth = dp(40)
+                    contentDescription = "More actions for $displayName"
                     setOnClickListener {
-                        showConfirmSheet(
-                            "Delete prepared ID?",
-                            "This removes the private sheet from this device. It does not change a print request already sent to a shop.",
-                            "Delete",
-                            destructive = true
-                        ) {
-                            try {
-                                idStudioStore.deletePrepared(file)
-                                showIdStudioHome()
-                                toast("Prepared ID deleted from this device.")
-                            } catch (error: Exception) {
-                                toast("Could not delete the prepared ID: " + message(error))
+                        val menu = mutableListOf<Pair<String, () -> Unit>>()
+                        menu += "Rename" to {
+                            nameDialog("Rename ID document", displayName) { nextName ->
+                                try {
+                                    idStudioStore.renamePrepared(file, nextName)
+                                    showIdStudioHome()
+                                    toast("ID document renamed.")
+                                } catch (error: Exception) {
+                                    toast("Could not rename the ID document: " + message(error))
+                                }
                             }
                         }
+                        menu += "Edit" to { editPreparedId(file) }
+                        menu += "Delete" to {
+                            showConfirmSheet(
+                                "Delete prepared ID?",
+                                "This removes the private sheet and its saved scan from this device. It does not change a print request already sent to a shop.",
+                                "Delete",
+                                destructive = true
+                            ) {
+                                try {
+                                    if (idStudioEditingFile?.canonicalPath == file.canonicalPath) {
+                                        idStudioDraftId?.takeIf(idStudioStore::draftExists)?.let(idStudioStore::deleteDraft)
+                                        idStudioDraftId = null
+                                        idStudioEditingFile = null
+                                    }
+                                    idStudioStore.deletePrepared(file)
+                                    showIdStudioHome()
+                                    toast("Prepared ID deleted from this device.")
+                                } catch (error: Exception) {
+                                    toast("Could not delete the prepared ID: " + message(error))
+                                }
+                            }
+                        }
+                        showOptionSheet("ID document actions", menu)
                     }
-                }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(8) })
-                body.addView(actions)
-                item.addView(body)
+                }, LinearLayout.LayoutParams(dp(40), dp(36)).apply { marginStart = dp(6) })
+                details.addView(actions)
+                row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
+                item.addView(row)
                 column.addView(item, linearParams().apply { bottomMargin = dp(8) })
             }
         }
@@ -3543,6 +3602,40 @@ class MainActivity : AppCompatActivity() {
         }, frameParams())
     }
 
+    private fun editPreparedId(file: File) {
+        if (!idStudioStore.canEditPreparedDocument(file)) {
+            toast("This older ID sheet has no saved original scans, so it can still be viewed, renamed and printed but cannot be edited.")
+            return
+        }
+        try {
+            val metadata = idStudioStore.readMetadata(file)
+            val draftId = idStudioStore.createDraft()
+            val frontBytes = idStudioStore.readPreparedSideBytes(file, "front")
+            val backBytes = idStudioStore.readPreparedSideBytes(file, "back")
+            try {
+                idStudioStore.saveScan(draftId, "front", java.io.ByteArrayInputStream(frontBytes))
+                idStudioStore.saveScan(draftId, "back", java.io.ByteArrayInputStream(backBytes))
+            } catch (error: Exception) {
+                idStudioStore.deleteDraft(draftId)
+                throw error
+            } finally {
+                frontBytes.fill(0)
+                backBytes.fill(0)
+            }
+            idStudioDraftId = draftId
+            idStudioEditingFile = file
+            idStudioFrontRotation = metadata.optInt("frontRotation", 0).takeIf { it in setOf(0, 180) } ?: 0
+            idStudioBackRotation = metadata.optInt("backRotation", 0).takeIf { it in setOf(0, 180) } ?: 0
+            idStudioCardWidthMm = metadata.optDouble("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble()).toFloat()
+            idStudioCardHeightMm = metadata.optDouble("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble()).toFloat()
+            IdCardLayoutPolicy.calculate(idStudioCardWidthMm, idStudioCardHeightMm)
+            showIdStudioReview()
+        } catch (error: Exception) {
+            toast("Could not reopen this ID for editing: " + message(error))
+            showIdStudioHome()
+        }
+    }
+
     private fun startIdStudioCapture() {
         val current = idStudioDraftId?.takeIf(idStudioStore::draftExists)
         if (current != null && (idStudioStore.hasFront(current) || idStudioStore.hasBack(current))) {
@@ -3554,6 +3647,7 @@ class MainActivity : AppCompatActivity() {
             ) {
                 try {
                     idStudioStore.deleteDraft(current)
+                    idStudioEditingFile = null
                     idStudioDraftId = idStudioStore.createDraft()
                     idStudioFrontRotation = 0
                     idStudioBackRotation = 0
@@ -3565,6 +3659,7 @@ class MainActivity : AppCompatActivity() {
             }
             return
         }
+        idStudioEditingFile = null
         idStudioDraftId = try {
             current ?: idStudioStore.createDraft()
         } catch (error: Exception) {
@@ -3856,26 +3951,45 @@ class MainActivity : AppCompatActivity() {
 
     private fun prepareIdStudioSheet(draftId: String, cardWidthMm: Float, cardHeightMm: Float) {
         try {
-            val pdfBytes = IdCardPdfComposer.compose(
-                idStudioStore.readScanBytes(draftId, "front"),
-                idStudioStore.readScanBytes(draftId, "back"),
-                cardWidthMm,
-                cardHeightMm,
-                idStudioFrontRotation,
-                idStudioBackRotation
-            )
-            val output = idStudioStore.savePreparedOutput(pdfBytes)
-            require(idStudioStore.isPreparedDocument(output)) {
-                "The private ID sheet could not be verified."
+            val frontBytes = idStudioStore.readScanBytes(draftId, "front")
+            val backBytes = idStudioStore.readScanBytes(draftId, "back")
+            try {
+                val pdfBytes = IdCardPdfComposer.compose(
+                    frontBytes,
+                    backBytes,
+                    cardWidthMm,
+                    cardHeightMm,
+                    idStudioFrontRotation,
+                    idStudioBackRotation
+                )
+                val metadata = JSONObject()
+                    .put("title", "ID card")
+                    .put("cardWidthMm", cardWidthMm.toDouble())
+                    .put("cardHeightMm", cardHeightMm.toDouble())
+                    .put("frontRotation", idStudioFrontRotation)
+                    .put("backRotation", idStudioBackRotation)
+                val existing = idStudioEditingFile
+                val output = if (existing != null) {
+                    idStudioStore.updatePreparedOutput(existing, pdfBytes, frontBytes, backBytes, metadata)
+                } else {
+                    idStudioStore.savePreparedOutput(pdfBytes, frontBytes, backBytes, metadata)
+                }
+                require(idStudioStore.isPreparedDocument(output)) {
+                    "The private ID sheet could not be verified."
+                }
+            } finally {
+                frontBytes.fill(0)
+                backBytes.fill(0)
             }
             idStudioStore.deleteDraft(draftId)
             idStudioDraftId = null
+            idStudioEditingFile = null
             pendingIdStudioSide = null
             showIdStudioHome()
-            toast("ID print sheet prepared privately. It will appear in the shop picker when you connect to a shop.")
+            toast("ID print sheet saved privately. It will appear in the shop picker when you connect to a shop.")
         } catch (error: Exception) {
-            toast("ID sheet was not prepared: " + message(error) +
-                ". Your scanned sides are still saved so you can retry.")
+            toast("ID sheet was not saved: " + message(error) +
+                ". Your scans remain private so you can retry.")
         }
     }
 
