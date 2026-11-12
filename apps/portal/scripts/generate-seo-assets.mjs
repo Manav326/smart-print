@@ -33,7 +33,7 @@ async function replaceOriginPlaceholder(directory, origin) {
 }
 
 const origin = canonicalOrigin(configuredOrigin);
-const publicPaths = ["/", "/print-shop-software/", "/qr-code-print-ordering/", "/print-job-management/", "/windows-print-agent/", "/smartprint-faq/"];
+const publicPaths = ["/", "/print-shop-software/", "/qr-code-print-ordering/", "/qr-printing-for-xerox-shops/", "/print-job-management/", "/windows-print-agent/", "/smartprint-faq/"];
 await replaceOriginPlaceholder(distRoot, origin);
 
 const sitemapEntries = publicPaths.map(path => `  <url><loc>${origin}${path}</loc></url>`).join("\n");
