@@ -39,8 +39,12 @@ assert.equal(origin, expectedUrl.origin, "generated canonicals must match the co
 for (let index = 0; index < pages.length; index += 1) {
   const [path, route] = pages[index];
   const html = htmlFiles[index];
-  assert.match(html, /<title>[^<]{10,}<\/title>/, `${path} needs a descriptive title`);
-  assert.match(html, /<meta name="description" content="[^"]{50,}"/, `${path} needs a useful meta description`);
+  const titleMatch = html.match(/<title>([^<]+)<\/title>/);
+  const descriptionMatch = html.match(/<meta name="description" content="([^"]+)"/);
+  assert.ok(titleMatch && titleMatch[1].length >= 10, `${path} needs a descriptive title`);
+  assert.ok(titleMatch[1].length <= 60, `${path} title must be 60 characters or fewer`);
+  assert.ok(descriptionMatch && descriptionMatch[1].length >= 50, `${path} needs a useful meta description`);
+  assert.ok(descriptionMatch[1].length <= 160, `${path} meta description must be 160 characters or fewer`);
   assert.ok(html.includes(`<link rel="canonical" href="${origin}${route}"`), `${path} canonical must match its public route`);
   assert.ok(!html.includes("__SMARTPRINT_ORIGIN__"), `${path} has an unresolved origin placeholder`);
   assert.match(html, /<h1[ >]/, `${path} needs a primary heading`);
@@ -55,6 +59,11 @@ for (let index = 0; index < pages.length; index += 1) {
 }
 assert.ok(htmlFiles[0].includes('"@type":"SoftwareApplication"'), "homepage must describe the app with structured data");
 assert.ok(htmlFiles[0].includes('"@type":"Organization"'), "homepage must describe its publisher");
+const faqHtml = htmlFiles[pages.findIndex(([, route]) => route === "/smartprint-faq/")];
+const faqSchemas = [...faqHtml.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)]
+  .map(match => JSON.parse(match[1]));
+assert.ok(faqSchemas.some(schema => (schema["@graph"] ?? [schema]).some(node => node["@type"] === "FAQPage" && node.mainEntity?.length === 16)),
+  "the existing FAQ page must expose its 16 visible questions as FAQPage structured data");
 const sitemapLocations = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map(match => match[1]);
 assert.deepEqual(sitemapLocations, pages.map(([, route]) => `${origin}${route}`), "sitemap must contain exactly the intended public pages");
 assert.doesNotMatch(sitemap, /\/(?:shop|admin|s|api|health|downloads)\//, "sitemap must exclude private application and download routes");
@@ -85,19 +94,23 @@ const groupFor = (agent) => {
   return robots.slice(bodyStart, nextGroup === -1 ? robots.length : nextGroup);
 };
 const protectedPaths = ["/api/", "/health/", "/downloads/"];
-const explicitlyPermittedAgents = [
-  "OAI-SearchBot", "PerplexityBot", "Claude-SearchBot", "Claude-User",
-  "GPTBot", "ClaudeBot", "Google-Extended"
-];
-for (const agent of explicitlyPermittedAgents) {
+const searchAgents = ["OAI-SearchBot", "ChatGPT-User", "PerplexityBot", "Perplexity-User", "Claude-SearchBot", "Claude-User"];
+for (const agent of searchAgents) {
   const group = groupFor(agent);
   assert.match(group, /^Allow: \/$/m, `${agent} must be allowed on public paths`);
   assert.doesNotMatch(group, /^Disallow: \/$/m, `${agent} must not be blocked site-wide`);
   for (const path of protectedPaths) assert.ok(group.includes(`Disallow: ${path}`), `${agent} must not access ${path}`);
 }
+const modelTrainingAgents = ["GPTBot", "ClaudeBot"];
+for (const agent of modelTrainingAgents) {
+  const group = groupFor(agent);
+  assert.match(group, /^Disallow: \/$/m, `${agent} must remain blocked until the site owner explicitly permits model training / Gemini grounding`);
+}
+const googleExtendedGroup = groupFor("Google-Extended");
+assert.match(googleExtendedGroup, /^Allow: \/$/m, "Google-Extended must be explicitly allowed for Gemini grounding by site-owner choice");
+for (const path of protectedPaths) assert.ok(googleExtendedGroup.includes(`Disallow: ${path}`), `Google-Extended must not access ${path}`);
 const trainingPreference = groupFor("__usage_ai-training");
-assert.match(trainingPreference, /^Allow: \/$/m, "AI-training preference must permit public content");
-for (const path of protectedPaths) assert.ok(trainingPreference.includes(`Disallow: ${path}`), `AI-training preference must exclude ${path}`);
+assert.match(trainingPreference, /^Disallow: \/$/m, "the shared AI-training preference must opt out of training");
 const defaultGroup = groupFor("*");
 assert.match(defaultGroup, /^Allow: \/$/m, "other standards-compliant crawlers must be allowed by default");
 for (const path of protectedPaths) assert.ok(defaultGroup.includes(`Disallow: ${path}`), `default crawler policy must exclude ${path}`);
