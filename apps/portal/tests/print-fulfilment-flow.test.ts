@@ -501,12 +501,15 @@ test("native customer account identity accompanies QR session renewal",()=>{
 
 test("local shop Photo Studio revision completion commits the exact authorized price snapshot",()=>{
   const agent=read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
+  const agentModels=read("../../../src/SmartPrint.Agent/AgentQueueModels.cs");
   const program=read("../../../src/SmartPrint.Api/Program.cs");
   assert.match(agent,/ExpectedQuotedAmountMinor = authorization\.QuotedAmountMinor/);
   assert.match(agent,/ExpectedPricingVersion = authorization\.PricingVersion/);
   assert.match(agent,/JsonContent\.Create\(completionRequest\)/);
+  assert.match(agentModels,/long\? ExpectedQuotedAmountMinor = null/);
+  assert.match(agentModels,/int\? ExpectedPricingVersion = null/);
   const start=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"');
-  const end=program.indexOf("\\nagentApi.MapPost(",start+30);
+  const end=program.indexOf("\nagentApi.",start+30);
   assert.ok(start>=0&&end>start);
   const complete=program.slice(start,end);
   assert.match(complete,/expectedQuotedAmountMinor <= 0/);
