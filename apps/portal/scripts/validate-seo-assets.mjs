@@ -7,9 +7,14 @@ const portalRoot = fileURLToPath(new URL("..", import.meta.url));
 const dist = join(portalRoot, "dist");
 const pages = [
   ["index.html", "/"],
+  ["features/index.html", "/features/"],
+  ["whatsapp-printing-alternative/index.html", "/whatsapp-printing-alternative/"],
   ["print-shop-software/index.html", "/print-shop-software/"],
   ["qr-code-print-ordering/index.html", "/qr-code-print-ordering/"],
+  ["qr-printing-for-xerox-shops/index.html", "/qr-printing-for-xerox-shops/"],
   ["print-job-management/index.html", "/print-job-management/"],
+  ["document-privacy-private-printing/index.html", "/document-privacy-private-printing/"],
+  ["photo-id-printing/index.html", "/photo-id-printing/"],
   ["windows-print-agent/index.html", "/windows-print-agent/"],
   ["smartprint-faq/index.html", "/smartprint-faq/"]
 ];
