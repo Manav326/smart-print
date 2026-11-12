@@ -94,7 +94,7 @@ const groupFor = (agent) => {
   return robots.slice(bodyStart, nextGroup === -1 ? robots.length : nextGroup);
 };
 const protectedPaths = ["/api/", "/health/", "/downloads/"];
-const searchAgents = ["OAI-SearchBot", "PerplexityBot", "Claude-SearchBot", "Claude-User"];
+const searchAgents = ["OAI-SearchBot", "ChatGPT-User", "PerplexityBot", "Perplexity-User", "Claude-SearchBot", "Claude-User"];
 for (const agent of searchAgents) {
   const group = groupFor(agent);
   assert.match(group, /^Allow: \/$/m, `${agent} must be allowed on public paths`);
