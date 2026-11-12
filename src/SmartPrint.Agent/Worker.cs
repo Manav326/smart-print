@@ -47,7 +47,8 @@ public sealed class Worker(
             RunHeartbeatLoopAsync(stoppingToken),
             RunPrinterInventoryLoopAsync(stoppingToken),
             RunPrintWorkLoopAsync(stoppingToken),
-            RunPrivateRelayLoopAsync(stoppingToken));
+            RunPrivateRelayLoopAsync(stoppingToken),
+            RunPrivateDocumentPurgeLoopAsync(stoppingToken));
     }
 
     // A PostgreSQL-backed long poll wakes this Agent as soon as its own shop
@@ -612,7 +613,6 @@ public sealed class Worker(
                 await RetrySpoolerReceiptsAsync(client, credentials, cancellationToken);
                 await ProcessAuthorizedPrintJobsAsync(client, credentials, cancellationToken);
                 await MonitorSpoolerJobsAsync(client, credentials, cancellationToken);
-                await ReconcilePrivateDocumentPurgesAsync(client, credentials, cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -754,6 +754,40 @@ public sealed class Worker(
             {
                 logger.LogError(exception, "Could not secure paid job {JobNumber} in the local queue.", job.JobNumber);
             }
+        }
+    }
+
+    private async Task RunPrivateDocumentPurgeLoopAsync(CancellationToken cancellationToken)
+    {
+        // Private source files are deleted immediately after the shop confirms
+        // physical output. Keep this cleanup independent from the normal print
+        // polling interval (which may be configured as high as five minutes).
+        // The short poll means the Agent receives a server confirmation promptly
+        // without delaying or duplicating ordinary print work.
+        var pollInterval = TimeSpan.FromSeconds(3);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var credentials = LoadSecureCredentials();
+                if (credentials is not null)
+                {
+                    using var client = httpClientFactory.CreateClient("cloud");
+                    client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+                    await ReconcilePrivateDocumentPurgesAsync(client, credentials, cancellationToken);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Private source-document cleanup check failed; the Agent will retry without delaying normal print work.");
+            }
+
+            try { await Task.Delay(pollInterval, cancellationToken); }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
         }
     }
 
