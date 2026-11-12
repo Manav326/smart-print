@@ -416,6 +416,14 @@ async function exerciseComponentViewport(browser, scenario) {
   const pageErrors = [];
   page.on("pageerror", error => pageErrors.push(error.message));
   await page.goto(baseUrl + "/tests/photo-studio.browser.html?mode=" + scenario.mode + "&theme=" + scenario.theme, { waitUntil: "networkidle" });
+  // On Windows, networkidle may resolve before React has mounted the fixture
+  // and encoded the synthetic source image. Match the explicit ready-state
+  // guard used by the full-flow scenarios before looking for the opener.
+  await page.waitForFunction(() => {
+    const ready = document.querySelector("#photo-studio-result")?.getAttribute("data-ready") === "true";
+    const fingerprint = document.querySelector("#photo-studio-source-fingerprint")?.textContent?.trim();
+    return ready && Boolean(fingerprint);
+  }, null, { timeout: 15000 });
   await openComponentStudio(page);
   await assertNoPageOverflow(page, scenario.label);
   for (const tool of ["Sheet", "Crop", "Looks", "Background"]) {
