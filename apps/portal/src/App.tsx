@@ -69,127 +69,6 @@ const sectionGroups: { label: string; items: Section[] }[] = [
   { label: "INSIGHTS", items: ["Reports"] }
 ];
 
-type PrivatePhotoStudioBridge = {
-  postMessage: (value: string) => void;
-  addEventListener?: (type: "message", listener: (event: MessageEvent) => void) => void;
-  removeEventListener?: (type: "message", listener: (event: MessageEvent) => void) => void;
-  onmessage?: ((event: MessageEvent) => void) | null;
-};
-
-function bytesToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize)));
-  }
-  return btoa(binary);
-}
-
-function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
-  const [source,setSource]=useState<File|null>(null);
-  const [saving,setSaving]=useState(false);
-  const [status,setStatus]=useState("");
-  const [error,setError]=useState("");
-  const [inputKey,setInputKey]=useState(0);
-  const nativeBridge=()=> (window as Window & {SmartPrintNative?:PrivatePhotoStudioBridge}).SmartPrintNative;
-
-  useEffect(()=>{
-    const bridge=nativeBridge();
-    if(!bridge)return;
-    const onMessage=(event:MessageEvent)=>{
-      const message=String(event.data??"");
-      if(message.startsWith("PHOTO_SAVED|")){
-        setSaving(false);
-        setSource(null);
-        setInputKey(value=>value+1);
-        setStatus("Saved privately on this device. Connect to a shop whenever you are ready to print.");
-        setError("");
-      }else if(message.startsWith("PHOTO_SAVE_FAILED|")){
-        setSaving(false);
-        setError(message.slice("PHOTO_SAVE_FAILED|".length)||"The private photo sheet could not be saved.");
-      }
-    };
-    bridge.addEventListener?.("message",onMessage);
-    const previous=bridge.onmessage;
-    bridge.onmessage=onMessage;
-    return ()=>{
-      bridge.removeEventListener?.("message",onMessage);
-      if(bridge.onmessage===onMessage)bridge.onmessage=previous??null;
-    };
-  },[]);
-
-  function chooseSource(event:ChangeEvent<HTMLInputElement>){
-    const selected=event.currentTarget.files?.[0]??null;
-    if(!selected)return;
-    const supported=selected.type.toLowerCase().startsWith("image/")||/\.(jpe?g|png)$/i.test(selected.name);
-    if(!supported){setError("Choose one JPG or PNG photo.");event.currentTarget.value="";return;}
-    if(selected.size<=0||selected.size>20*1024*1024){setError("Choose a photo up to 20 MB.");event.currentTarget.value="";return;}
-    setSource(selected);setStatus("");setError("");
-  }
-
-  async function savePreparedSheets(sheets:PreparedPhotoSheet[]){
-    const sheet=sheets[0];
-    if(!source||!sheet||saving)return;
-    const bridge=nativeBridge();
-    if(!bridge){setError("Open Photo Studio from the SmartPrint Android app to save a private sheet.");return;}
-    if(source.size+sheet.file.size>25*1024*1024){
-      setError("This photo and its prepared sheet exceed the private transfer limit. Choose a smaller original or reduce the photo count.");
-      return;
-    }
-    setSaving(true);setError("");setStatus("Saving securely on this device…");
-    try{
-      const [sourceBuffer,pdfBuffer]=await Promise.all([source.arrayBuffer(),sheet.file.arrayBuffer()]);
-      const payload={
-        title:source.name.replace(/\.[^.]+$/,"").slice(0,80)||"Photo sheet",
-        sourceName:source.name.slice(0,180),
-        sourceMime:source.type||"image/jpeg",
-        sourceBase64:bytesToBase64(sourceBuffer),
-        pdfBase64:bytesToBase64(pdfBuffer),
-        sizeCode:sheet.sizeCode,
-        photoCount:sheet.photoCount,
-        photosPerPage:sheet.photosPerPage,
-        pageCount:Math.ceil(sheet.photoCount/sheet.photosPerPage),
-        resolutionDpi:300,
-        captionHeightMm:sheet.captionHeightMm
-      };
-      bridge.postMessage("savePhotoStudioDocument|"+JSON.stringify(payload));
-    }catch(cause){
-      setSaving(false);
-      setError(cause instanceof Error?cause.message:"The private photo sheet could not be transferred to this device.");
-    }
-  }
-
-  if(!source){
-    return <main className="private-photo-studio-entry" style={{minHeight:"100dvh",padding:"28px 18px",display:"grid",placeItems:"center",background:"var(--surface,#f6f8fc)",color:"var(--text,#172033)"}}>
-      <section style={{width:"min(100%,520px)",padding:24,borderRadius:18,border:"1px solid var(--border,#dbe2ec)",background:"var(--card,#fff)",boxShadow:"0 12px 36px rgba(20,38,66,.08)"}}>
-        <div style={{fontSize:11,fontWeight:800,letterSpacing:".14em",color:"var(--accent,#5366c9)"}}>SMARTPRINT BY QUANTAEDGE</div>
-        <h1 style={{fontSize:26,lineHeight:1.2,margin:"10px 0 8px"}}>Photo Studio</h1>
-        <p style={{fontSize:14,lineHeight:1.55,margin:"0 0 18px",color:"var(--muted,#64748b)"}}>Prepare one photo at a time. Your original and finished sheet stay private on this device. You can connect to a print shop later.</p>
-        <label htmlFor="private-photo-source" style={{display:"block",padding:16,border:"1px dashed var(--border,#b9c5d5)",borderRadius:12,fontWeight:700,cursor:"pointer"}}>
-          Choose one photo
-          <input key={inputKey} id="private-photo-source" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={chooseSource} style={{display:"block",marginTop:12,width:"100%"}}/>
-        </label>
-        {status&&<p role="status" style={{fontSize:13,marginTop:14}}>{status}</p>}
-        {error&&<p role="alert" style={{fontSize:13,color:"#bd3434",marginTop:14}}>{error}</p>}
-        <p style={{fontSize:11,marginTop:18,color:"var(--muted,#64748b)"}}>A preview watermark identifies SmartPrint by QuantaEdge. The saved print sheet itself is clean.</p>
-      </section>
-    </main>;
-  }
-  return <>
-    <PhotoStudio
-      source={source}
-      mode="private-library"
-      dark={dark}
-      photoPrices={{"35x45":1,"25x35":1,"2x2":1,"4x6":1}}
-      onCancel={()=>{setSource(null);setError("");}}
-      onApply={savePreparedSheets}
-    />
-    {saving&&<div role="status" style={{position:"fixed",inset:0,zIndex:10000,display:"grid",placeItems:"center",background:"rgba(8,16,30,.62)",color:"#fff",fontWeight:700}}>Saving privately…</div>}
-    {error&&<div role="alert" style={{position:"fixed",left:16,right:16,bottom:16,zIndex:10001,padding:14,borderRadius:10,background:"#fff0f0",color:"#9a2626",fontSize:13}}>{error}</div>}
-  </>;
-}
-
 export default function App() {
   const route = resolvePortalRoute(window.location.pathname);
   const [dark, setDark] = useState(readDarkModePreference);
@@ -211,10 +90,6 @@ export default function App() {
       : route.kind === "shop" ? readStoredTokens("shop")
       : null
   );
-
-  if (route.kind === "photo-studio") {
-    return <PrivatePhotoStudioEntry dark={dark} />;
-  }
 
   if (route.kind === "station") {
     return <CustomerEntry publicCode={route.publicCode} dark={dark} onToggleTheme={toggleTheme} />;

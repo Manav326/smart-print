@@ -7,7 +7,7 @@ import styles from "./PhotoStudio.module.css";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
 import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "./photo-studio-layout";
 
-export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number; captionHeightMm: number; resolutionDpi?: number; previewPages?: Blob[] };
+export type PreparedPhotoSheet = { file: File; sizeCode: string; photoCount: number; photosPerPage: number; captionHeightMm: number; previewPages?: Blob[] };
 
 type PhotoSize = {
   id: string;
@@ -186,7 +186,7 @@ export default function PhotoStudio({
   onCancel: () => void;
   photoPrices: Record<string, number>;
   onApply: (sheets: PreparedPhotoSheet[]) => void | Promise<void>;
-  mode?: "customer" | "shop" | "shop-create" | "private-library";
+  mode?: "customer" | "shop" | "shop-create";
   dark?: boolean;
   initialPhotoCount?: number;
 }) {
@@ -232,9 +232,7 @@ export default function PhotoStudio({
   const [backgroundTolerance,setBackgroundTolerance]=useState(30);
   const [pickingBackground,setPickingBackground]=useState(false);
 
-  const availableSizes = mode === "private-library"
-    ? PHOTO_SIZES
-    : PHOTO_SIZES.filter(item => (photoPrices[item.id] ?? 0) > 0);
+  const availableSizes = PHOTO_SIZES.filter(item => (photoPrices[item.id] ?? 0) > 0);
   const size = availableSizes.find(item => item.id === sizeId) ?? availableSizes[0] ?? PHOTO_SIZES[0];
   const hasCaption=includeFormDetails&&Boolean(photoName.trim()||dateOfBirth.trim());
   const selectedTextLayer=textLayers.find(layer=>layer.id===selectedTextLayerId)??null;
@@ -309,16 +307,15 @@ export default function PhotoStudio({
 
   useEffect(()=>{
     if(!isDesktopApp())return;
-    const protect = mode !== "private-library";
-    void setDesktopContentProtection(protect);
+    void setDesktopContentProtection(true);
     return ()=>{void setDesktopContentProtection(false);};
-  },[mode]);
+  },[]);
 
   useEffect(()=>{
     const bridge=(window as Window & {SmartPrintNative?:{postMessage:(value:string)=>void}}).SmartPrintNative;
     try {
       bridge?.postMessage("setPhotoStudioOpen|on");
-      bridge?.postMessage(mode === "private-library" ? "setSensitivePreview|off" : "setSensitivePreview|on");
+      bridge?.postMessage("setSensitivePreview|on");
     } catch {/* Native modal state and screenshot protection are best-effort outside supported Android builds. */}
     return ()=>{
       try {
@@ -326,13 +323,13 @@ export default function PhotoStudio({
         bridge?.postMessage("setPhotoStudioOpen|off");
       } catch {/* The WebView may already be closing. */}
     };
-  },[mode]);
+  },[]);
 
   useEffect(()=>{
     const protectContextMenu=(event:globalThis.MouseEvent)=>event.preventDefault();
     const protectShortcuts=(event:KeyboardEvent)=>{
       const key=event.key.toLowerCase();
-      if((mode !== "private-library" && key==="printscreen")||((event.ctrlKey||event.metaKey)&&["s","p"].includes(key)))event.preventDefault();
+      if(key==="printscreen"||((event.ctrlKey||event.metaKey)&&["s","p"].includes(key)))event.preventDefault();
     };
     document.addEventListener("contextmenu",protectContextMenu,true);
     window.addEventListener("keydown",protectShortcuts,true);
@@ -483,21 +480,19 @@ export default function PhotoStudio({
       const pdf=new Blob([buffer],{type:"application/pdf"});
       if(pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's 20 MB file limit. Use a smaller original photo or reduce the number of copies.");
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
-      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage,captionHeightMm,resolutionDpi:300,previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))}]);
+      await onApply([{file:output,sizeCode:size.id,photoCount:parsedCopies,photosPerPage,captionHeightMm,previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))}]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
     finally{busyRef.current=false;setBusy(false);}
   }
 
   const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
-  const footerHint = mode === "private-library"
-    ? "Your original stays private on this device. Only this unwatermarked A4 sheet is saved for shop printing; the on-screen preview remains branded."
-    : mode === "shop-create"
-      ? "Create one new shop-owned photo order from this original. The original photo stays unchanged; payment remains pending until the shop verifies receipt, and printing still requires explicit dispatch."
-      : mode === "shop"
-        ? "Save your prepared multi-page A4 photo PDF to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
-        : "The original upload stays untouched. This prepared multi-page A4 photo PDF replaces it in your batch when you submit your print request.";
-  const actionLabel = mode === "private-library" ? "Save private sheet" : mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
-  const busyLabel = mode === "private-library" ? "Saving privately…" : mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your A4 sheet…";
+  const footerHint = mode === "shop-create"
+    ? "Create one new shop-owned photo order from this original. The original photo stays unchanged; payment remains pending until the shop verifies receipt, and printing still requires explicit dispatch."
+    : mode === "shop"
+      ? "Save your prepared multi-page A4 photo PDF to this existing unpaid job. It returns to the review queue; printing still requires shop approval, verified payment and dispatch."
+      : "The original upload stays untouched. This prepared multi-page A4 photo PDF replaces it in your batch when you submit your print request.";
+  const actionLabel = mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
+  const busyLabel = mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your A4 sheet…";
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
 
   return (
@@ -505,7 +500,7 @@ export default function PhotoStudio({
       <header className={styles.topbar}>
         <div className={styles.brand}>
           <span className={styles.brandMark}><ImageIcon size={17}/></span>
-          <span><strong id="photo-studio-title">Photo Studio</strong><small>{mode === "private-library" ? "PRIVATE · ON THIS DEVICE" : mode === "shop-create" ? "SHOP · NEW PHOTO ORDER" : mode === "shop" ? "SHOP · EDIT EXISTING JOB" : "CUSTOMER · BEFORE UPLOAD"}</small></span>
+          <span><strong id="photo-studio-title">Photo Studio</strong><small>{mode === "shop-create" ? "SHOP · NEW PHOTO ORDER" : mode === "shop" ? "SHOP · EDIT EXISTING JOB" : "CUSTOMER · BEFORE UPLOAD"}</small></span>
         </div>
         <div className={styles.topbarMeta}><span>A4 · 210 × 297 mm</span><span>300 DPI</span></div>
         <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label="Close Photo Studio" title="Close"><X size={18}/></button>
