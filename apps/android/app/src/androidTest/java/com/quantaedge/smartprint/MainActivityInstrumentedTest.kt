@@ -764,7 +764,12 @@ class MainActivityInstrumentedTest {
                     .apply { isAccessible = true }.setBoolean(activity, true)
                 MainActivity::class.java.getDeclaredMethod("showPicker", Boolean::class.javaPrimitiveType!!)
                     .apply { isAccessible = true }.invoke(activity, true)
-                assertNull("The studio WebView is detached only while the picker is visible.", webView.parent)
+                val pickerHost = webView.parent as? ViewGroup
+                    ?: throw AssertionError("The private Photo Studio WebView must remain in its existing host.")
+                assertNull(
+                    "The studio host must be removed from the visible content while the native picker is open.",
+                    pickerHost.parent
+                )
                 MainActivity::class.java.getDeclaredMethod("cancelPicker").apply {
                     isAccessible = true
                 }.invoke(activity)
@@ -1207,7 +1212,7 @@ class MainActivityInstrumentedTest {
             onView(withContentDescription("Account")).perform(click())
             onView(withText("Guest access is ready")).check(matches(isDisplayed()))
             androidx.test.espresso.Espresso.pressBack()
-            onView(withText("Your print activity")).check(matches(isDisplayed()))
+            onView(withText("Print history")).check(matches(isDisplayed()))
         }
     }
 
