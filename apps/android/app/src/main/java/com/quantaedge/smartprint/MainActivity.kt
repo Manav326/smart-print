@@ -4025,10 +4025,6 @@ class MainActivity : AppCompatActivity() {
                     "${metadata.optDouble("cardWidthMm", IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM.toDouble()).toFloat().let { "%.1f".format(Locale.ROOT, it) }} × ${metadata.optDouble("cardHeightMm", IdCardLayoutPolicy.DEFAULT_CARD_HEIGHT_MM.toDouble()).toFloat().let { "%.1f".format(Locale.ROOT, it) }} mm · Front + back",
                     10, R.color.qp_muted, false
                 ).apply { setPadding(0, dp(4), 0, 0); maxLines = 2 })
-                details.addView(text(
-                    android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()),
-                    10, R.color.qp_muted, false
-                ).apply { setPadding(0, dp(3), 0, dp(7)) })
                 val actions = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
@@ -4088,9 +4084,9 @@ class MainActivity : AppCompatActivity() {
             }
         }
         val printHelp = if (portalUrl == null) {
-            "When you are ready to print, scan a shop QR code. Your prepared ID will then appear in that shop's document picker."
+            "Scan a shop QR when ready, then add this saved ID in the upload form."
         } else {
-            "When ready, open the connected shop's Print page and select this ID from the private ID Studio section."
+            "Open the connected shop's upload form and add this saved ID."
         }
         column.addView(text(printHelp, 11, R.color.qp_muted, false)
             .apply { setPadding(dp(2), dp(12), dp(2), dp(3)) })
