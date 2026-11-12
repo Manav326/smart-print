@@ -11,7 +11,8 @@ const pages = [
   ["qr-code-print-ordering/index.html", "/qr-code-print-ordering/"],
   ["print-job-management/index.html", "/print-job-management/"],
   ["windows-print-agent/index.html", "/windows-print-agent/"],
-  ["smartprint-faq/index.html", "/smartprint-faq/"]
+  ["smartprint-faq/index.html", "/smartprint-faq/"],
+  ["smartprint-vs-qr-se-print/index.html", "/smartprint-vs-qr-se-print/"]
 ];
 const htmlFiles = await Promise.all(pages.map(([path]) => readFile(join(dist, path), "utf8")));
 const sitemap = await readFile(join(dist, "sitemap.xml"), "utf8");
