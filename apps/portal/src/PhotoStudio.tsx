@@ -676,7 +676,7 @@ export default function PhotoStudio({
             </>}
             <label className={styles.fieldLabel}>Photo size
               <select id="photo-studio-photo-size" value={sizeId} onChange={event => setSizeId(event.target.value)}>
-                {availableSizes.map(item => <option key={item.id} value={item.id}>{item.label} · {item.detail} · {formatPhotoRate(photoPrices[item.id])}/photo</option>)}
+                {availableSizes.map(item => <option key={item.id} value={item.id}>{item.label} · {item.detail}{mode === "private-library" ? "" : " · "+formatPhotoRate(photoPrices[item.id])+"/photo"}</option>)}
               </select>
             </label>
             <label className={styles.fieldLabel}>Number of photos
@@ -717,7 +717,7 @@ export default function PhotoStudio({
               <div><span>A4 pages in this job</span><strong>{sheetCount}</strong></div>
               <div><span>Preview page</span><strong>{previewPageIndex+1} of {sheetCount}</strong></div>
               {copies>photosPerPage&&copies%photosPerPage!==0&&<small>Final A4 page: {copies%photosPerPage} photos, with the remaining sheet area left blank.</small>}
-              <small>Shop rate: {formatPhotoRate(photoPrices[size.id] ?? 0)} per photo. The server confirms the final total in your quote.</small>
+              {mode !== "private-library"&&<small>Shop rate: {formatPhotoRate(photoPrices[size.id] ?? 0)} per photo. The server confirms the final total in your quote.</small>}
             </div>
           </>}
 
