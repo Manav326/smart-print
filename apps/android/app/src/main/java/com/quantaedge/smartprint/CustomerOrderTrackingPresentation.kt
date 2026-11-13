@@ -96,8 +96,6 @@ internal object CustomerOrderTrackingPresentation {
             allReady -> CustomerTrackingStepState.DONE
             allOutputResolved && normalized.any { it in ready } -> CustomerTrackingStepState.DONE
             allOutputResolved && normalized.none { it in ready } -> CustomerTrackingStepState.SKIPPED
-            paymentState == CustomerTrackingStepState.DONE && normalized.any { it in ready } ->
-                CustomerTrackingStepState.CURRENT
             else -> CustomerTrackingStepState.UPCOMING
         }
 
