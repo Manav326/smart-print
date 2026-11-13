@@ -718,8 +718,6 @@ public sealed class LocalAgentApiHostedService(
                 }
                 else
                 {
-                    if (!File.Exists(entry.DocumentPath))
-                        return Results.NotFound(new { code = "local_preview_document_missing", message = "The original file is no longer present on this shop computer." });
                     if (entry.MediaType is not ("application/pdf" or "image/jpeg" or "image/png"))
                         return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
                     if (entry.SizeBytes != authorizedDocument.SizeBytes ||
@@ -730,14 +728,28 @@ public sealed class LocalAgentApiHostedService(
 
                     try
                     {
+                        // Read the protected file directly instead of using File.Exists:
+                        // Windows can report false for inaccessible paths, which made
+                        // an ACL denial look like a deleted upload and hid the real issue.
                         bytes = localQueueStore.ReadDocument(jobId);
+                    }
+                    catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+                    {
+                        return Results.NotFound(new { code = "local_preview_document_missing", message = "The original file is no longer present on this shop computer." });
+                    }
+                    catch (UnauthorizedAccessException exception)
+                    {
+                        logger.LogError(exception, "Windows denied access to the protected local preview for job {JobId}.", jobId);
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status500InternalServerError,
+                            title: "The SmartPrint background service cannot access this protected local file. Repair the Agent's local storage permissions, then try preview again.");
                     }
                     catch (Exception exception) when (exception is IOException or CryptographicException or InvalidDataException)
                     {
                         logger.LogError(exception, "Local document preview integrity check failed for job {JobId}.", jobId);
                         return Results.Problem(
                             statusCode: StatusCodes.Status500InternalServerError,
-                            title: "The protected local document could not be read safely.");
+                            title: "The protected local document could not be read or verified safely.");
                     }
                     mediaType = entry.MediaType;
                 }
