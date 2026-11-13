@@ -213,7 +213,7 @@ test("customers are told when the shop has not enabled photo printing",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/Photo printing unavailable/);
  assert.match(app,/InfoTooltip label="Photo printing details"/);
- assert.match(app,/Photo printing unavailable\. Ask the shop owner\./);
+ assert.match(app,/Photo printing unavailable\. Contact shop\./);
  assert.match(app,/This shop must enable photo printing and configure its photo sizes and rates/);
 });
 
