@@ -109,6 +109,7 @@ internal object CustomerOrderTrackingPresentation {
             CustomerTrackingStep(
                 when {
                     allOutputResolved && !allReady && readyCount > 0 -> "Order outcome"
+                    allOutputResolved && readyCount == 0 -> "Order closed"
                     normalized.any { it == "PDF_EXPORTED" } && normalized.none { it == "COMPLETED" } -> "PDF ready"
                     else -> "Ready for collection"
                 },
