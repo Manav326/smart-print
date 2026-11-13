@@ -125,7 +125,8 @@ public sealed record LocalAgentPhotoRevisionRequest(
     int PhotoCount,
     int PhotosPerPage,
     long? ExpectedQuotedAmountMinor = null,
-    int? ExpectedPricingVersion = null);
+    int? ExpectedPricingVersion = null,
+    string? EditorSettingsJson = null);
 
 public sealed record LocalAgentPhotoRevisionAuthorizationResponse(
     Guid Id,
