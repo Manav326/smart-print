@@ -4,13 +4,15 @@ import { readFileSync } from "node:fs";
 import { UPLOAD_LIMITS } from "../src/upload-limits.generated.ts";
 import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
 
-test("customer upload limits come from the shared generated policy",()=>{
- assert.equal(UPLOAD_LIMITS.maxFileBytes,50*1024*1024);
- assert.equal(UPLOAD_LIMITS.maxPhotoCount,100);
- assert.equal(UPLOAD_LIMITS.maxBatchFiles,20);
- assert.equal(UPLOAD_LIMITS.maxBatchBytes,500*1024*1024);
- assert.equal(UPLOAD_LIMITS.maxMultipartRequestBytes,51*1024*1024);
- assert.equal(UPLOAD_LIMITS.privateRelayEncryptionOverheadBytes,16);
+const UPLOAD_LIMITS_CONFIG = JSON.parse(readFileSync(new URL("../../../config/upload-limits.json", import.meta.url), "utf8"));
+
+test("customer upload limits are generated from the shared policy",()=>{
+ assert.equal(UPLOAD_LIMITS.maxFileBytes,UPLOAD_LIMITS_CONFIG.maxFileBytes);
+ assert.equal(UPLOAD_LIMITS.maxPhotoCount,UPLOAD_LIMITS_CONFIG.maxPhotoCount);
+ assert.equal(UPLOAD_LIMITS.maxBatchFiles,UPLOAD_LIMITS_CONFIG.maxBatchFiles);
+ assert.equal(UPLOAD_LIMITS.maxBatchBytes,UPLOAD_LIMITS_CONFIG.maxBatchBytes);
+ assert.equal(UPLOAD_LIMITS.maxMultipartRequestBytes,UPLOAD_LIMITS_CONFIG.maxFileBytes+UPLOAD_LIMITS_CONFIG.multipartOverheadBytes);
+ assert.equal(UPLOAD_LIMITS.privateRelayEncryptionOverheadBytes,UPLOAD_LIMITS_CONFIG.privateRelayEncryptionOverheadBytes);
 });
 
 test("exact physical photo layout starts at the top safe margin on A4",()=>{
