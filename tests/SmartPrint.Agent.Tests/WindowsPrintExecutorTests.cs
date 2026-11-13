@@ -271,8 +271,7 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
             await store.MarkPrivatePurgeAcknowledgedAsync(jobId, CancellationToken.None);
             Assert.False(store.Find(jobId)!.PrivatePurgePending);
             Assert.True(File.Exists(outputPath), "Purging the source must not delete the retained QA PDF.");
-            Assert.Equal("TEST_OUTPUT_SOURCE_PURGED", store.Find(jobId)!.State,
-                "A virtual test PDF must never be marked as physical output or collection-ready.");
+            Assert.Equal("TEST_OUTPUT_SOURCE_PURGED", store.Find(jobId)!.State);
         }
         finally
         {
