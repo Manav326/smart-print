@@ -229,8 +229,7 @@ export default function PhotoStudio({
   mode = "customer",
   dark = false,
   initialPhotoCount,
-  initialSettings,
-  onDraftChange
+  initialSettings
 }: {
   source: File;
   onCancel: () => void;
@@ -240,7 +239,6 @@ export default function PhotoStudio({
   dark?: boolean;
   initialPhotoCount?: number;
   initialSettings?: Partial<PhotoStudioEditorSettings>;
-  onDraftChange?: (settings: PhotoStudioEditorSettings) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -278,10 +276,8 @@ export default function PhotoStudio({
   const [error, setError] = useState("");
   const busyRef = useRef(busy);
   const onCancelRef = useRef(onCancel);
-  const onDraftChangeRef = useRef(onDraftChange);
   busyRef.current = busy;
   onCancelRef.current = onCancel;
-  onDraftChangeRef.current = onDraftChange;
   const [includeFormDetails,setIncludeFormDetails]=useState(initialSettings?.includeFormDetails ?? false);
   const [photoName,setPhotoName]=useState((initialSettings?.photoName ?? "").slice(0,48));
   const [dateOfBirth,setDateOfBirth]=useState((initialSettings?.dateOfBirth ?? "").slice(0,24));
@@ -313,32 +309,6 @@ export default function PhotoStudio({
   );
   const [backgroundTolerance,setBackgroundTolerance]=useState(Math.min(100,Math.max(1,initialSettings?.backgroundTolerance ?? 30)));
   const [pickingBackground,setPickingBackground]=useState(false);
-
-  const editorSettingsSnapshot = useMemo<PhotoStudioEditorSettings>(()=>({
-    sizeId,
-    look,
-    adjustments:{...adjustments},
-    copiesInput,
-    photosPerPageInput,
-    zoom,
-    focusX,
-    focusY,
-    includeFormDetails,
-    photoName,
-    dateOfBirth,
-    captionFontSizePt,
-    captionColor,
-    textLayers:textLayers.map(layer=>({...layer})),
-    targetBackgroundColor,
-    sourceBackgroundColor,
-    backgroundTolerance
-  }),[sizeId,look,adjustments,copiesInput,photosPerPageInput,zoom,focusX,focusY,includeFormDetails,photoName,dateOfBirth,captionFontSizePt,captionColor,textLayers,targetBackgroundColor,sourceBackgroundColor,backgroundTolerance]);
-
-  useEffect(()=>{
-    if(!onDraftChangeRef.current)return;
-    const timeout=window.setTimeout(()=>onDraftChangeRef.current?.(editorSettingsSnapshot),120);
-    return ()=>window.clearTimeout(timeout);
-  },[editorSettingsSnapshot]);
 
   const availableSizes = mode === "private-library"
     ? PHOTO_SIZES

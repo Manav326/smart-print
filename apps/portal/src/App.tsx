@@ -8,8 +8,6 @@ import {
 import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } from "./PhotoStudio";
 import { isSupportedPhotoSource, resolvePhotoSourceMimeType } from "./photo-source-policy";
-import { copyCustomerUploadFileMetadata, normalizeCustomerUploadFile } from "./customer-upload-file-policy";
-import { clearCustomerPendingSelection, clearCustomerPendingSelectionsForStation, customerPendingSelectionStorageKey, loadCustomerPendingSelection, saveCustomerPendingFiles, saveCustomerPendingSelectionMetadata } from "./customer-upload-draft-store";
 import CustomerUpiQr from "./CustomerUpiQr";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
@@ -3813,11 +3811,9 @@ function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
 }
 
 function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:boolean;onToggleTheme:()=>void}) {
-  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [result,setResult]=useState<Awaited<ReturnType<typeof createCustomerSession>>|null>(null);
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
-  const [restoredSession,setRestoredSession]=useState(false);
   const [localReady,setLocalReady]=useState(false);
   const [localFallbackSuggested,setLocalFallbackSuggested]=useState(false);
   const handleLocalReady=useCallback((ready:boolean)=>{
@@ -3833,46 +3829,26 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     let mounted=true;
     const stationKey=`qrtoprint.customer-session:${publicCode}`;
     const restore=async()=>{
-      // Android Keystore is authoritative in the native app. A stale WebView
-      // sessionStorage token must never erase a still-valid native token.
-      const nativeToken=await getNativeCustomerPrintSession(publicCode);
-      const browserToken=sessionStorage.getItem(stationKey) ?? "";
-      const candidates=Array.from(new Set(
-        (nativeAppMode?[nativeToken,browserToken]:[browserToken,nativeToken]).filter(Boolean)
-      ));
+      const storedToken=sessionStorage.getItem(stationKey) ||
+        await getNativeCustomerPrintSession(publicCode);
       let existing:Awaited<ReturnType<typeof createCustomerSession>>|null=null;
-      const invalidTokens:string[]=[];
-      for(const token of candidates){
-        try{
-          existing=await resumeCustomerSession(token,publicCode);
-          break;
-        }catch(exception){
+      if(storedToken){
+        try {
+          existing=await resumeCustomerSession(storedToken,publicCode);
+        } catch(exception) {
           if(exception instanceof ApiError&&exception.status===401){
-            invalidTokens.push(token);
-            continue;
-          }
-          // A network/server error is not proof that a session is invalid.
-          // Preserve both tokens and all unsent files for a later retry.
-          throw exception;
+            sessionStorage.removeItem(stationKey);
+            sessionStorage.removeItem("qrtoprint.customer-session");
+            await clearNativeCustomerPrintSession(publicCode);
+          } else throw exception;
         }
       }
-      for(const token of invalidTokens){
-        await clearCustomerPendingSelection(customerPendingSelectionStorageKey(publicCode,token)).catch(()=>undefined);
-      }
-      if(invalidTokens.includes(browserToken))sessionStorage.removeItem(stationKey);
-      if(invalidTokens.includes(nativeToken))await clearNativeCustomerPrintSession(publicCode);
-      if(!existing){
-        // No usable guest capability means this is a genuinely new customer
-        // session. Never carry unsent files or old order metadata into it.
-        await clearCustomerPendingSelectionsForStation(publicCode).catch(()=>undefined);
-        localStorage.removeItem(`qrtoprint.customer-active-job:${publicCode}`);
-      }
       const value=existing??await createCustomerSession(publicCode);
-      // Persist the confirmed token before showing the connected session.
+      // Wait for native encrypted persistence before presenting the connected session.
+      // In a regular browser the bridge is absent and this safely becomes a no-op.
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       await saveNativeCustomerShopProfile(publicCode,value.shop);
       if(!mounted)return;
-      setRestoredSession(Boolean(existing));
       setResult(value);
       if(storedNatively)sessionStorage.removeItem(stationKey);
       else sessionStorage.setItem(stationKey,value.sessionToken);
@@ -3882,7 +3858,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       if(mounted)setError(exception instanceof Error?exception.message:"This QR station is unavailable.");
     }).finally(()=>{if(mounted)setLoading(false);});
     return ()=>{mounted=false;};
-  },[publicCode,nativeAppMode]);
+  },[publicCode]);
 
   const startNewSession=useCallback(async()=>{
     setLoading(true);
@@ -3890,12 +3866,6 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     setLocalReady(false);
     setLocalFallbackSuggested(false);
     try{
-      const previousSessionKey=result
-        ?customerPendingSelectionStorageKey(publicCode,result.sessionToken)
-        :null;
-      // Clear the completed/abandoned draft before asking the server for a new
-      // session. A storage failure must not leave an orphan session behind.
-      if(previousSessionKey)await clearCustomerPendingSelection(previousSessionKey);
       const value=await createCustomerSession(publicCode);
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       await saveNativeCustomerShopProfile(publicCode,value.shop);
@@ -3903,14 +3873,13 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       if(storedNatively)sessionStorage.removeItem(stationKey);
       else sessionStorage.setItem(stationKey,value.sessionToken);
       sessionStorage.removeItem("qrtoprint.customer-session");
-      setRestoredSession(false);
       setResult(value);
     }catch(exception){
       setError(exception instanceof Error?exception.message:"Could not start a new print session.");
     }finally{
       setLoading(false);
     }
-  },[publicCode,result]);
+  },[publicCode]);
 
   useEffect(()=>{
     if(!result)return;
@@ -3946,12 +3915,13 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     };
   },[result?.sessionToken,result?.expiresUtc]);
 
+  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
     <header className="customer-entry-brand"><BrandLockup className="customer-entry-brand-lockup" /><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
     <main className={result ? "customer-entry-card customer-entry-card--upload" : "customer-entry-card"}>
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?"Connecting…":"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
-      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">{restoredSession?"SESSION RESTORED":"SECURE SESSION CREATED"}</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{restoredSession?"Your existing print session and order progress are ready.":nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
+      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
@@ -4500,9 +4470,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   void printerCapabilitiesJson;
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
-  const pendingSelectionStorageKey=customerPendingSelectionStorageKey(publicCode,sessionToken);
-  const [pendingSelectionRestored,setPendingSelectionRestored]=useState(false);
-  const [draftPersistenceWarning,setDraftPersistenceWarning]=useState("");
   const [files,setFiles]=useState<File[]>([]);
   const [selectedFileIndex,setSelectedFileIndex]=useState(0);
   const file=files[selectedFileIndex]??null;
@@ -4525,9 +4492,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [photoSettingsByJobId,setPhotoSettingsByJobId]=useState<Record<string,CustomerPhotoSettings>>(()=>initialDraft?.photoSettingsByJobId??{});
   const [photoStudioSource,setPhotoStudioSource]=useState<File|null>(null);
   const [photoStudioSourceFingerprint,setPhotoStudioSourceFingerprint]=useState<string|null>(null);
-  const [photoStudioEditorDraft,setPhotoStudioEditorDraft]=useState<{fingerprint:string;settings:Partial<PhotoStudioEditorSettings>}|null>(null);
-  const [validatingSelection,setValidatingSelection]=useState(false);
-  const validatingSelectionRef=useRef(false);
   const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number;currentFile:string|null}|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
@@ -4635,20 +4599,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   );
   const canOfferPrivatePrinting=Boolean(localAgent?.agentDeviceId && localAgent.documentEncryptionPublicKey);
 
-  async function persistPendingFiles(nextFiles:File[]) {
-    try {
-      await saveCustomerPendingFiles(pendingSelectionStorageKey,nextFiles,smartPrintNativePdfPreviewTokens);
-      setDraftPersistenceWarning("");
-    } catch {
-      setDraftPersistenceWarning("This selection is still available on this screen, but this device could not save a recovery copy. Keep SmartPrint open until upload finishes.");
-    }
-  }
-
-  const handlePhotoStudioDraftChange=useCallback((settings:PhotoStudioEditorSettings)=>{
-    if(!photoStudioSourceFingerprint)return;
-    setPhotoStudioEditorDraft({fingerprint:photoStudioSourceFingerprint,settings});
-  },[photoStudioSourceFingerprint]);
-
   useEffect(()=>{
     if(privatePrinting)sessionStorage.setItem(privatePrintingStorageKey,"true");
     else sessionStorage.removeItem(privatePrintingStorageKey);
@@ -4689,71 +4639,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
     else if(paymentOptions.upiEnabled)setPaymentMethod("UPI");
   },[paymentOptions.upiEnabled,paymentOptions.cashEnabled]);
-
-  useEffect(()=>{
-    let active=true;
-    void loadCustomerPendingSelection(pendingSelectionStorageKey).then(selection=>{
-      if(!active||!selection)return;
-      selection.files.forEach((candidate,index)=>{
-        const token=selection.nativePreviewTokens[index];
-        if(token)smartPrintNativePdfPreviewTokens.set(candidate,token);
-      });
-      setFiles(selection.files);
-      const savedPhotoDraft=selection.metadata.photoStudioDraft;
-      if(savedPhotoDraft){
-        const savedPhotoSource=selection.files.find(candidate=>customerFileFingerprint(candidate)===savedPhotoDraft.sourceFingerprint);
-        if(savedPhotoSource){
-          setPhotoStudioSource(savedPhotoSource);
-          setPhotoStudioSourceFingerprint(savedPhotoDraft.sourceFingerprint);
-          setPhotoStudioEditorDraft({fingerprint:savedPhotoDraft.sourceFingerprint,settings:savedPhotoDraft.settings});
-        }
-      }
-      setSelectedFileIndex(selection.metadata.selectedFileIndex);
-      setBatchName(selection.metadata.batchName);
-      setFileGroupNames(selection.metadata.fileGroupNames);
-      setGroupSettings(selection.metadata.groupSettings as Record<string,CustomerGroupSettings>);
-      setFileSettings(selection.metadata.fileSettings as Record<string,CustomerFileSettings>);
-      setPhotoSettingsByFileFingerprint(selection.metadata.photoSettingsByFileFingerprint);
-      setPrivatePrinting(selection.metadata.privatePrinting);
-      setPrivacyChoiceManuallySelected(selection.metadata.privacyChoiceManuallySelected);
-      setUploadMode(selection.metadata.privatePrinting?"LOCAL":selection.metadata.uploadMode);
-      setUploadModeManuallySelected(selection.metadata.uploadModeManuallySelected);
-      setPaymentMethod(selection.metadata.paymentMethod);
-      setPaymentReference(selection.metadata.paymentReference);
-    }).catch(()=>{
-      if(active)setDraftPersistenceWarning("SmartPrint could not restore the previous file selection from this device. Your saved shop orders are not affected.");
-    }).finally(()=>{
-      if(active)setPendingSelectionRestored(true);
-    });
-    return ()=>{active=false;};
-  },[pendingSelectionStorageKey]);
-
-  useEffect(()=>{
-    if(!pendingSelectionRestored)return;
-    if(files.length===0){
-      void clearCustomerPendingSelection(pendingSelectionStorageKey).catch(()=>undefined);
-      return;
-    }
-    void saveCustomerPendingSelectionMetadata(pendingSelectionStorageKey,{
-      selectedFileIndex,
-      batchName,
-      fileGroupNames,
-      groupSettings,
-      fileSettings,
-      photoSettingsByFileFingerprint,
-      privatePrinting,
-      privacyChoiceManuallySelected,
-      uploadMode,
-      uploadModeManuallySelected,
-      paymentMethod,
-      paymentReference,
-      photoStudioDraft:photoStudioEditorDraft
-        ?{sourceFingerprint:photoStudioEditorDraft.fingerprint,settings:photoStudioEditorDraft.settings}
-        :null
-    }).catch(()=>{
-      setDraftPersistenceWarning("Your files remain selected, but some print settings could not be saved for recovery.");
-    });
-  },[pendingSelectionRestored,pendingSelectionStorageKey,files.length,selectedFileIndex,batchName,fileGroupNames,groupSettings,fileSettings,photoSettingsByFileFingerprint,privatePrinting,privacyChoiceManuallySelected,uploadMode,uploadModeManuallySelected,paymentMethod,paymentReference,photoStudioEditorDraft]);
 
   useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
@@ -4902,7 +4787,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   },[file]);
 
   async function upload() {
-    if(validatingSelectionRef.current){setError("SmartPrint is still checking the selected files.");return;}
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
       return;
@@ -4982,7 +4866,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setUploaded(results[0]??null);
       setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
       setSelectedFileIndex(0);
-      await clearCustomerPendingSelection(pendingSelectionStorageKey).catch(()=>undefined);
       setFiles([]);
       // Upload succeeded; release only the temporary decrypted picker copies.
       // The saved encrypted Photo Studio document remains available in the app library.
@@ -5252,15 +5135,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     } finally {setBusy(false);}
   }
 
-  async function applyPhotoSheets(sheets:PreparedPhotoSheet[]) {
+  function applyPhotoSheets(sheets:PreparedPhotoSheet[]) {
     if(!photoStudioSourceFingerprint||!sheets.length)return;
     const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===photoStudioSourceFingerprint);
-    if(index<0)throw new Error("The source photo is no longer in this batch. Select it again.");
+    if(index<0){setError("The source photo is no longer in this batch. Select it again.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const generated=sheets.map(sheet=>sheet.file),nextFiles=[...files.slice(0,index),...generated,...files.slice(index+1)];
     const pending=nextFiles.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate)));
     const bytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,file)=>sum+file.size,0);
-    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||bytes>UPLOAD_LIMITS.maxBatchBytes)
-      throw new Error("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");
+    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||bytes>UPLOAD_LIMITS.maxBatchBytes){setError("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint},previews={...photoPreviewPagesByFingerprint};
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];delete previews[photoStudioSourceFingerprint];
     for(const sheet of sheets){
@@ -5270,9 +5152,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
       if(urls.length)previews[fp]=urls;
     }
-    // Commit the prepared PDF bytes before closing the editor.
-    await persistPendingFiles(nextFiles);
-    setFiles(nextFiles);setSelectedFileIndex(index);setSelectedPreparedPhotoPage(0);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoPreviewPagesByFingerprint(previews);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setPhotoStudioEditorDraft(null);setError("");
+    setFiles(nextFiles);setSelectedFileIndex(index);setSelectedPreparedPhotoPage(0);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoPreviewPagesByFingerprint(previews);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
   }
   function openPhotoStudio(candidate:File){
     const fingerprint=customerFileFingerprint(candidate);
@@ -5283,7 +5163,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(!photoRatesAvailable){setError("Photo printing is not configured at this shop yet. Please ask the shop owner to enable photo pricing.");return;}
     setPhotoStudioSource(candidate);
     setPhotoStudioSourceFingerprint(fingerprint);
-    if(photoStudioEditorDraft?.fingerprint!==fingerprint)setPhotoStudioEditorDraft(null);
     setError("");
   }
   function openCustomerPdfPreview(candidate:File) {
@@ -5294,178 +5173,128 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     setError("");
   }
-  async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
+  function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
       return;
     }
-    if(validatingSelectionRef.current){
-      setError("SmartPrint is checking the selected files. Try again when the check is complete.");
+    if(nativePreviewTokens?.length===next.length) {
+      next.forEach((candidate,index)=>{
+        const token=nativePreviewTokens[index];
+        if(token&&isCustomerPdf(candidate))smartPrintNativePdfPreviewTokens.set(candidate,token);
+      });
+    }
+    if(nativePrintKinds?.length===next.length) {
+      next.forEach((candidate,index)=>{
+        if(nativePrintKinds[index]==="ID_DOCUMENT"||nativePrintKinds[index]==="PHOTO") {
+          (candidate as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind=nativePrintKinds[index]!;
+        }
+      });
+    }
+    if(nativePhotoSettings?.length===next.length) {
+      next.forEach((candidate,index)=>{
+        const settings=nativePhotoSettings[index];
+        if(settings&&isValidNativePhotoSettings(settings)) {
+          (candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings=settings;
+        }
+      });
+    }
+    let nestedSkipped=0;
+    const rootFiles=next.filter(candidate=>{
+      const relativePath=(candidate as File & {webkitRelativePath?:string}).webkitRelativePath??"";
+      const parts=relativePath.split("/").filter(Boolean);
+      if(relativePath&&parts.length>2){nestedSkipped++;return false;}
+      return true;
+    });
+    const supported=rootFiles.filter(candidate=>/\.(pdf|jpe?g|png)$/i.test(candidate.name));
+    const malformedPhotoDocument=supported.some(candidate=>
+      (candidate as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="PHOTO"&&!isValidNativePhotoSettings(
+        (candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings
+      )
+    );
+    if(malformedPhotoDocument){setError("This saved Photo Studio sheet is missing its print details. Refresh the private document library and select it again.");return;}
+    const incomingIdDocument=supported.some(isSmartPrintIdDocument);
+    const incomingPhotoDocument=supported.some(isSmartPrintPhotoDocument);
+    if(incomingIdDocument&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
+      setError("Prepared ID cards require Private Printing. Finish the current Standard batch, then start a new private batch for this ID sheet.");
       return;
     }
-    validatingSelectionRef.current=true;
-    setValidatingSelection(true);
-    try {
-      if(nativePreviewTokens?.length===next.length) {
-        next.forEach((candidate,index)=>{
-          const token=nativePreviewTokens[index];
-          if(token)smartPrintNativePdfPreviewTokens.set(candidate,token);
-        });
-      }
-      if(nativePrintKinds?.length===next.length) {
-        next.forEach((candidate,index)=>{
-          if(nativePrintKinds[index]==="ID_DOCUMENT"||nativePrintKinds[index]==="PHOTO") {
-            (candidate as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind=nativePrintKinds[index]!;
-          }
-        });
-      }
-      if(nativePhotoSettings?.length===next.length) {
-        next.forEach((candidate,index)=>{
-          const settings=nativePhotoSettings[index];
-          if(settings&&isValidNativePhotoSettings(settings)) {
-            (candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings=settings;
-          }
-        });
-      }
-
-      let nestedSkipped=0;
-      const rootEntries=next.map((candidate,index)=>({candidate,index})).filter(({candidate})=>{
-        const relativePath=(candidate as File & {webkitRelativePath?:string}).webkitRelativePath??"";
-        const parts=relativePath.split("/").filter(Boolean);
-        if(relativePath&&parts.length>2){nestedSkipped++;return false;}
-        return true;
-      });
-
-      // Android document providers can return valid PDF/JPEG/PNG files with
-      // an empty/generic MIME type or without an extension. Verify a bounded
-      // file signature and normalize the filename before the API derives type.
-      const checkedEntries=await Promise.all(rootEntries.map(async entry=>({
-        ...entry,
-        normalized:await normalizeCustomerUploadFile(entry.candidate)
-      })));
-      const supportedEntries=checkedEntries.filter(
-        (entry):entry is {candidate:File;index:number;normalized:File}=>entry.normalized!==null
-      );
-      const supported=supportedEntries.map(entry=>entry.normalized);
-      const incomingGroupByFile=new Map<File,string>();
-      for(const entry of supportedEntries){
-        const candidate=entry.normalized;
-        copyCustomerUploadFileMetadata(entry.candidate,candidate,smartPrintNativePdfPreviewTokens);
-        const nativeGroup=nativeGroupNames?.[entry.index]?.trim().slice(0,80);
-        const group=nativeGroup||customerBatchGroupName(entry.candidate);
-        if(group&&group!=="Loose files")
-          (candidate as File & {__smartPrintBatchGroup?:string}).__smartPrintBatchGroup=group;
-        incomingGroupByFile.set(candidate,group);
-      }
-      const incomingGroupFor=(candidate:File)=>incomingGroupByFile.get(candidate)??customerBatchGroupName(candidate);
-
-      const malformedPhotoDocument=supported.some(candidate=>
-        (candidate as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="PHOTO"&&!isValidNativePhotoSettings(
-          (candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings
-        )
-      );
-      if(malformedPhotoDocument){
-        setError("This saved Photo Studio sheet is missing its print details. Refresh the private document library and select it again.");
-        return;
-      }
-      const incomingIdDocument=supported.some(isSmartPrintIdDocument);
-      const incomingPhotoDocument=supported.some(isSmartPrintPhotoDocument);
-      if(incomingIdDocument&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
-        setError("Prepared ID cards require Private Printing. Finish the current Standard batch, then start a new private batch for this ID sheet.");
-        return;
-      }
-      if(incomingIdDocument) {
-        // ID Studio remains Private Printing only.
-        setPrivatePrinting(true);
-        setUploadMode("LOCAL");
-        setUploadModeManuallySelected(true);
-      } else if(incomingPhotoDocument&&uploadedBatch.length===0&&!privacyChoiceManuallySelected) {
-        // A saved Photo Studio sheet defaults to Private Printing, but the
-        // customer can change the batch choice to Standard before uploading.
-        setPrivatePrinting(true);
-      }
-      if(incomingPhotoDocument){
-        setPhotoSettingsByFileFingerprint(current=>{
-          const updated={...current};
-          supported.forEach(candidate=>{
-            const settings=(candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings;
-            if(settings)updated[customerFileFingerprint(candidate)]=settings;
-          });
-          return updated;
-        });
-      }
-
-      const unsupportedSkipped=rootEntries.length-supportedEntries.length;
-      if(supported.length===0){
-        setError("Choose printable PDF, JPG or PNG files. Files without an extension are supported when their type or contents can be verified.");
-        return;
-      }
-      const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
-      if(oversized){
-        setError(`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file transfer limit.`);
-        return;
-      }
-      const merged=new Map(files.map(candidate=>[customerFileFingerprint(candidate),candidate]));
-      for(const candidate of supported)merged.set(customerFileFingerprint(candidate),candidate);
-      const selected=Array.from(merged.values());
-      const alreadyUploaded=new Set(uploadedFileFingerprints);
-      const pending=selected.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
-      const totalBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,candidate)=>sum+candidate.size,0);
-      if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||totalBytes>UPLOAD_LIMITS.maxBatchBytes){
-        setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchFiles} files · ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB max.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchFiles} files and ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB in total.`);
-        return;
-      }
-      setFileGroupNames(current=>{
-        const updated={...current};
-        for(const candidate of supported)
-          updated[customerFileFingerprint(candidate)]=incomingGroupFor(candidate);
-        return updated;
-      });
-      setGroupSettings(current=>{
-        const updated={...current};
-        for(const candidate of supported) {
-          const group=incomingGroupFor(candidate);
-          if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
-        }
-        return updated;
-      });
-      setFileSettings(current=>{
-        const updated={...current};
-        for(const candidate of supported) {
-          const key=customerFileFingerprint(candidate);
-          if(!updated[key])updated[key]={...defaultsForGroup(incomingGroupFor(candidate)),custom:false};
-        }
-        return updated;
-      });
-      await persistPendingFiles(selected);
-      setFiles(selected);
-      setSelectedFileIndex(0);
-      setError(nestedSkipped
-        ? "Nested folders are skipped; only files directly inside each selected folder are included."
-        : unsupportedSkipped ? "Unsupported file types were skipped." : "");
-    } catch(cause) {
-      setError(cause instanceof Error
-        ? `A selected file could not be checked. ${cause.message}`
-        : "The selected files could not be checked. Select them again.");
-    } finally {
-      validatingSelectionRef.current=false;
-      setValidatingSelection(false);
+    if(incomingIdDocument) {
+      // ID Studio remains Private Printing only.
+      setPrivatePrinting(true);
+      setUploadMode("LOCAL");
+      setUploadModeManuallySelected(true);
+    } else if(incomingPhotoDocument&&uploadedBatch.length===0&&!privacyChoiceManuallySelected) {
+      // A saved Photo Studio sheet defaults to Private Printing, but the
+      // customer can change the batch choice to Standard before uploading.
+      setPrivatePrinting(true);
     }
+    for(const candidate of supported){
+      const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
+      if(nativeGroup)(candidate as File & {__smartPrintBatchGroup?:string}).__smartPrintBatchGroup=nativeGroup;
+    }
+    if(incomingPhotoDocument){
+      setPhotoSettingsByFileFingerprint(current=>{
+        const updated={...current};
+        supported.forEach(candidate=>{
+          const settings=(candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings;
+          if(settings)updated[customerFileFingerprint(candidate)]=settings;
+        });
+        return updated;
+      });
+    }
+    const unsupportedSkipped=rootFiles.length-supported.length;
+    if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
+    const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
+    if(oversized){setError(`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file limit.`);return;}
+    const merged=new Map(files.map(candidate=>[customerFileFingerprint(candidate),candidate]));
+    for(const candidate of supported)merged.set(customerFileFingerprint(candidate),candidate);
+    const selected=Array.from(merged.values());
+    const alreadyUploaded=new Set(uploadedFileFingerprints);
+    const pending=selected.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
+    const totalBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,candidate)=>sum+candidate.size,0);
+    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||totalBytes>UPLOAD_LIMITS.maxBatchBytes){
+      setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchFiles} files · ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB max.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchFiles} files and ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB in total.`);
+      return;
+    }
+    setFileGroupNames(current=>{
+      const updated={...current};
+      for(const candidate of supported){
+        const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
+        updated[customerFileFingerprint(candidate)]=nativeGroup||customerBatchGroupName(candidate);
+      }
+      return updated;
+    });
+    setGroupSettings(current=>{
+      const updated={...current};
+      for(const candidate of supported) {
+        const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
+        const group=nativeGroup||customerBatchGroupName(candidate);
+        if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
+      }
+      return updated;
+    });
+    setFileSettings(current=>{
+      const updated={...current};
+      for(const candidate of supported) {
+        const key=customerFileFingerprint(candidate);
+        if(!updated[key])updated[key]={...defaultsForGroup(fileGroupNames[key]??customerBatchGroupName(candidate)),custom:false};
+      }
+      return updated;
+    });
+    setFiles(selected);setSelectedFileIndex(0);
+    setError(nestedSkipped? "Nested folders are skipped; only files directly inside each selected folder are included.":unsupportedSkipped? "Unsupported file types were skipped.": "");
   }
 
-  async function removeSelectedFile(fingerprint: string) {
+  function removeSelectedFile(fingerprint: string) {
     if (busy) return;
     const index = files.findIndex(candidate => customerFileFingerprint(candidate) === fingerprint);
     if (index < 0) return;
     const nextFiles = files.filter(candidate => customerFileFingerprint(candidate) !== fingerprint);
-    await persistPendingFiles(nextFiles);
     setFiles(nextFiles);
     setSelectedFileIndex(current => current === index
       ? Math.min(index, Math.max(0, nextFiles.length - 1))
       : current > index ? current - 1 : current);
-    if(photoStudioEditorDraft?.fingerprint===fingerprint){
-      setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setPhotoStudioEditorDraft(null);
-    }
     setFileGroupNames(current => {
       const next = { ...current };
       delete next[fingerprint];
@@ -5589,17 +5418,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   const photoAlreadyUploaded=Boolean(file&&uploadedFileFingerprints.includes(customerFileFingerprint(file)));
-  return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} initialSettings={photoStudioEditorDraft?.fingerprint===photoStudioSourceFingerprint?photoStudioEditorDraft.settings:undefined} onDraftChange={handlePhotoStudioDraftChange} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setPhotoStudioEditorDraft(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
-    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · {UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per file · {UPLOAD_LIMITS.maxBatchFiles} files / {UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB total</span></div>
-    {!pendingSelectionRestored&&<small className="customer-upload-local-note" role="status">Restoring your saved selection…</small>}
-    {draftPersistenceWarning&&<small className="customer-upload-local-note" role="status">{draftPersistenceWarning}</small>}
+  return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
+    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · Up to {UPLOAD_LIMITS.maxBatchFiles} files / {UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB</span></div>
     <section className="customer-privacy-choice" aria-label="Document privacy choice">
       <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>Choose how files are handled</strong></div><small>Applies to all files</small></div>
       <div className="customer-privacy-choice-grid">
-        <button type="button" aria-pressed={privatePrinting} disabled={!pendingSelectionRestored||busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
+        <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
           <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>Encrypted. Erased after printing.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
         </button>
-        <button type="button" aria-pressed={!privatePrinting} disabled={!pendingSelectionRestored||busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false);}}>
+        <button type="button" aria-pressed={!privatePrinting} disabled={busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false);}}>
           <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Normal print queue. 7-day auto-delete.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
@@ -5617,30 +5444,29 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       ? <div className="customer-private-transfer-note"><Lock size={16}/><span>End-to-end encrypted · Physical printing only</span></div>
       : <div className="customer-upload-modes">
       {localAgent?.endpoints.length
-        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} disabled={!pendingSelectionRestored} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Local transfer · not encrypted</small></button>
+        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Local transfer · not encrypted</small></button>
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Unavailable</small></button>}
-      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} disabled={!pendingSelectionRestored} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Secure upload · print when ready</small></button>}
+      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Secure upload · print when ready</small></button>}
     </div>}
     {!localAgent?.endpoints.length&&<small className="customer-upload-local-note">Shop connection details <InfoTooltip label="Shop connection unavailable"><span>The paired shop computer has not reported a reachable local connection.</span></InfoTooltip></small>}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload unavailable. <InfoTooltip label="Upload unavailable"><span>No document was uploaded. Ask the shop to reconnect its print service, then try again.</span></InfoTooltip></div>}
     {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<div className="customer-upload-local-note" role="status">Encrypted online relay in use. <InfoTooltip label="Secure relay details"><span>Shop Wi-Fi is not verified. SmartPrint uses the encrypted online relay automatically; no Wi-Fi setup is needed.</span></InfoTooltip></div>}
     <div className="customer-upload-picker-grid"
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
-      onDrop={event=>{event.preventDefault();if(batchLockedForPayment||busy||validatingSelection)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
+      onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
-        <input type="file" multiple disabled={!pendingSelectionRestored||batchLockedForPayment||busy||validatingSelection} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>{nativeAppMode?"Select files":"Select documents or images"}</strong>
         <small>PDF, JPG or PNG</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple disabled={!pendingSelectionRestored||batchLockedForPayment||busy||validatingSelection} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
         <small>{nativeAppMode?"Select multiple folders":"One folder at a time"}</small>
       </label>
     </div>
-    {validatingSelection&&<small className="customer-upload-local-note" role="status">Checking selected files…</small>}
     {files.length>0&&<div className="customer-selected-files">
       <div className="customer-selected-files-head"><strong>{files.length} selected</strong><span>{formatBytes(files.reduce((total,item)=>total+item.size,0))} in this selection</span></div>
       <div className="customer-batch-groups">{uploadGroups.map(group=>{
@@ -5698,7 +5524,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
               {!isSmartPrintIdDocument(selected)&&<button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
-              <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>void removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
+              <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&!isSmartPrintIdDocument(selected)&&<div className="customer-file-overrides">
                 <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
                    onChange={event=>{
@@ -5752,7 +5578,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply. <InfoTooltip label="Folder settings"><span>Settings apply to every file in this folder. Use Custom on a file to change its settings.</span></InfoTooltip></small>}
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<button type="button" className="customer-flow-button" onClick={()=>openCustomerPdfPreview(file)}><FileText size={16}/> Preview PDF</button>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
-    {files.length>0&&<button className="customer-flow-button" disabled={!pendingSelectionRestored||busy||validatingSelection||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{validatingSelection?<><span className="button-spinner"/>Checking files…</>:busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
+    {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div>{!nativeAppMode&&<small>Updates after each file.</small>}</div>}
     {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?<>Local transfer is not encrypted. <InfoTooltip label="Local transfer security"><span>Shop Wi-Fi uses local HTTP. Choose Cloud-assisted for encrypted HTTPS transfer.</span></InfoTooltip></>:<>Check shop Wi-Fi first. <InfoTooltip label="Shop Wi-Fi access"><span>In a browser, tap Check shop Wi-Fi above to grant local network access.</span></InfoTooltip></>}</small>}
     {files.length>0&&uploadMode==="CLOUD"&&<small className="customer-upload-local-note">Encrypted HTTPS upload. <InfoTooltip label="Secure upload details"><span>Files are encrypted in transit and stored in the existing print queue until the shop computer is ready.</span></InfoTooltip></small>}
