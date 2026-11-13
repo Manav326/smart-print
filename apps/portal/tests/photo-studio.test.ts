@@ -545,24 +545,29 @@ test("Photo Studio text layers are independently selectable, editable, draggable
 });
 
 
-test("saved Photo Studio documents default to Private Printing but allow Standard Printing when selected",()=>{
+test("both Photo Studio entry points use one privacy default and respect an explicit customer choice",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/privacyChoiceManualStorageKey="smartprint\.privacy-choice-manual:"/);
- assert.match(app,/incomingPhotoDocument&&uploadedBatch\.length===0&&!privacyChoiceManuallySelected/);
- assert.match(app,/setPrivatePrinting\(true\);\s*\}\s*for\(const candidate of supported\)/);
+ const helperStart=app.indexOf("function preselectPhotoStudioPrivacy()");
+ const applyStart=app.indexOf("function applyPhotoSheets(");
+ const chooseStart=app.indexOf("function chooseFiles(next:File[]");
+ const chooseEnd=app.indexOf("function selectUploadedFile(",chooseStart);
+ assert.ok(helperStart>=0&&applyStart>helperStart&&chooseStart>applyStart&&chooseEnd>chooseStart);
+ const helper=app.slice(helperStart,applyStart);
+ const apply=app.slice(applyStart,chooseStart);
+ const choose=app.slice(chooseStart,chooseEnd);
+ assert.match(helper,/uploadedBatch\.length===0&&!privacyChoiceManuallySelected\)setPrivatePrinting\(true\)/);
+ assert.match(apply,/preselectPhotoStudioPrivacy\(\)/);
+ assert.match(choose,/else if\(incomingPhotoDocument\)[\s\S]*?preselectPhotoStudioPrivacy\(\)/);
+ assert.match(app,/setPrivacyChoiceManuallySelected\(true\);setPrivatePrinting\(false\)/);
+ assert.match(app,/setPrivacyChoiceManuallySelected\(true\);setPrivatePrinting\(true\)/);
  assert.match(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument/);
  assert.match(app,/if\(idDocument&&!effectivePrivatePrinting\)/);
- assert.doesNotMatch(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument\|\|containsPhotoStudioDocument/);
- assert.match(app,/setPrivacyChoiceManuallySelected\(true\);setPrivatePrinting\(false\)/);
- assert.match(app,/Standard Printing selected\./);
- assert.match(app,/uploadCustomerDocument\(sessionToken,candidate,currentBatchId/);
 });
 
-test("ID Studio remains private-only while saved Photo Studio sheets can use the user's selected mode",()=>{
+test("ID Studio remains Private Printing only",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/if\(incomingIdDocument\)\s*\{\s*\/\/ ID Studio remains Private Printing only/);
  assert.match(app,/if\(idDocument&&!effectivePrivatePrinting\)/);
- assert.match(app,/if\(incomingPhotoDocument&&uploadedBatch\.length===0&&!privacyChoiceManuallySelected\)/);
 });
 
 
