@@ -532,9 +532,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        chooserPreparationGeneration++
-        chooserPreparationTask?.cancel(true)
-        chooserPreparationTask = null
+        cancelActiveChooserPreparation()
         chooserPreparationExecutor.shutdownNow()
         releaseIdStudioReviewBitmap()
         documentViewer?.dispose()
@@ -3692,6 +3690,7 @@ class MainActivity : AppCompatActivity() {
                 callback: ValueCallback<Array<Uri>>,
                 params: FileChooserParams
             ): Boolean {
+                cancelActiveChooserPreparation()
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
                 fileChooserReturnToPhotoStudio =
@@ -5105,6 +5104,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun chooseFile(file: File) = chooseFiles(listOf(file), listOf(printBatchGroupName(file)))
 
+    private fun cancelActiveChooserPreparation() {
+        chooserPreparationTask?.cancel(true)
+        chooserPreparationTask = null
+        chooserPreparationGeneration++
+        pickerPreparingSelection = false
+    }
+
     private fun releaseFailedPickerPreparation(
         idTemps: List<File>,
         photoTemps: List<File>,
@@ -5206,7 +5212,7 @@ class MainActivity : AppCompatActivity() {
                     val stillCurrent = generation == chooserPreparationGeneration &&
                         fileCallback === callback && !isFinishing && !isDestroyed
                     if (!stillCurrent) {
-                        chooserPreparationTask = null
+                        if (generation == chooserPreparationGeneration) chooserPreparationTask = null
                         releaseFailedPickerPreparation(idTemps, photoTemps, previewTokens)
                         return@runOnUiThread
                     }
@@ -5244,10 +5250,10 @@ class MainActivity : AppCompatActivity() {
                 releaseFailedPickerPreparation(idTemps, photoTemps, previewTokens)
                 val failureMessage = message(error)
                 runOnUiThread {
+                    if (generation == chooserPreparationGeneration) chooserPreparationTask = null
                     if (generation == chooserPreparationGeneration &&
                         fileCallback === callback && !isFinishing && !isDestroyed
                     ) {
-                        chooserPreparationTask = null
                         pickerPreparingSelection = false
                         showPicker(resetPath = false)
                         toast("Could not add the selected documents: " + failureMessage)
@@ -5390,10 +5396,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cancelPicker() {
-        chooserPreparationTask?.cancel(true)
-        chooserPreparationTask = null
-        chooserPreparationGeneration++
-        pickerPreparingSelection = false
+        cancelActiveChooserPreparation()
         fileCallback?.onReceiveValue(null)
         fileCallback = null
         chooserSelectedFilePaths.clear()
