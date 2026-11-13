@@ -41,36 +41,37 @@ class PrintBatchSelectionPolicyTest {
     }
 
     @Test
-    fun uploadPolicyUsesFiftyMegabytesPerFileAndFiveHundredMegabytesPerBatch() {
-        assertEquals(50L * 1024L * 1024L, DocumentNamePolicy.MAX_PRINT_BYTES)
-        assertEquals(500L * 1024L * 1024L, PrintBatchSelectionPolicy.MAX_TOTAL_BYTES)
+    fun uploadLimitsUseTheSharedGeneratedPolicy() {
+        assertEquals(UploadLimits.MAX_FILE_BYTES, DocumentNamePolicy.MAX_PRINT_BYTES)
+        assertEquals(UploadLimits.MAX_BATCH_BYTES, PrintBatchSelectionPolicy.MAX_TOTAL_BYTES)
+        assertEquals(UploadLimits.MAX_BATCH_FILES, PrintBatchSelectionPolicy.MAX_FILES)
     }
 
     @Test
-    fun acceptsAnIndividualFileExactlyAtFiftyMegabytes() {
+    fun acceptsAnIndividualFileExactlyAtTheSharedLimit() {
         val file = createFile("exact-limit.pdf", DocumentNamePolicy.MAX_PRINT_BYTES)
         assertNull(PrintBatchSelectionPolicy.validationError(listOf(file)))
     }
 
     @Test
-    fun rejectsAnIndividualFileAboveFiftyMegabytes() {
+    fun rejectsAnIndividualFileAboveTheSharedLimit() {
         val file = createFile("large.pdf", DocumentNamePolicy.MAX_PRINT_BYTES + 1L)
 
         assertNotNull(PrintBatchSelectionPolicy.validationError(listOf(file)))
     }
 
     @Test
-    fun acceptsCombinedSizeExactlyAtFiveHundredMegabytes() {
+    fun acceptsCombinedSizeExactlyAtTheSharedBatchLimit() {
         val files = (1..10).map {
             createFile("document-$it.pdf", DocumentNamePolicy.MAX_PRINT_BYTES)
         }
 
-        assertEquals(500L * 1024L * 1024L, files.sumOf { it.length() })
+        assertEquals(PrintBatchSelectionPolicy.MAX_TOTAL_BYTES, files.sumOf { it.length() })
         assertNull(PrintBatchSelectionPolicy.validationError(files))
     }
 
     @Test
-    fun rejectsCombinedSizeAboveFiveHundredMegabytes() {
+    fun rejectsCombinedSizeAboveTheSharedBatchLimit() {
         val fileBytes = PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / 11 + 1L
         val files = (1..11).map { createFile("document-$it.pdf", fileBytes) }
 
