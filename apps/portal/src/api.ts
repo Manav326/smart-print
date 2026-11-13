@@ -1,5 +1,6 @@
 import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
+import { identifySupportedDocument } from "./document-content-policy";
 import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "./local-preview-routing";
 import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 import { authStorageKey } from "./portal-routing";
@@ -1291,14 +1292,16 @@ async function requestCustomerLocalUploadTicket(
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
   photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
 ): Promise<CustomerLocalUploadTicket> {
-  const hashInput = await file.arrayBuffer();
+  const identified=await identifySupportedDocument(file);
+  if(!identified)throw new ApiError("The file contents are not a supported PDF, JPEG or PNG. Choose a valid document.",415,"document_content_unsupported");
+  const hashInput=await file.arrayBuffer();
   let digest: ArrayBuffer;
   try {
     digest = await crypto.subtle.digest("SHA-256", hashInput);
   } finally {
     new Uint8Array(hashInput).fill(0);
   }
-  const privateExtension = file.name.match(/\.(pdf|jpe?g|png)$/i)?.[0]?.toLowerCase() ?? "";
+  const privateExtension=identified.extension;
   const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
   new Uint8Array(digest).fill(0);
   const ticket = await apiRequest<Omit<CustomerLocalUploadTicket, "sha256">>("/api/v1/public/sessions/current/local-upload-tickets", {
@@ -1324,7 +1327,8 @@ async function requestCustomerLocalUploadTicket(
       printKind,
       photoSizeCode: photoSettings?.sizeCode ?? null,
       photoCount: photoSettings?.photoCount ?? null,
-      photosPerPage: photoSettings?.photosPerPage ?? null
+      photosPerPage: photoSettings?.photosPerPage ?? null,
+      detectedFileExtension: identified.extension
     })
   });
   return { ...ticket, sha256 };
@@ -1362,6 +1366,8 @@ export async function uploadCustomerDocument(
   photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
 ) {
   validateUploadFileSize(file);
+  const identified=await identifySupportedDocument(file);
+  if(!identified)throw new ApiError("The file contents are not a supported PDF, JPEG or PNG. Choose a valid document.",415,"document_content_unsupported");
   const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
   const pendingLocalGrant = sessionStorage.getItem(localKeys.grant);
