@@ -545,19 +545,20 @@ test("Photo Studio text layers are independently selectable, editable, draggable
 });
 
 
-test("both Photo Studio entry points use one privacy default and respect an explicit customer choice",()=>{
+test("both Photo Studio entry points inherit the same batch privacy without silently changing it",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- const helperStart=app.indexOf("function preselectPhotoStudioPrivacy()");
  const applyStart=app.indexOf("function applyPhotoSheets(");
  const chooseStart=app.indexOf("function chooseFiles(next:File[]");
  const chooseEnd=app.indexOf("function selectUploadedFile(",chooseStart);
- assert.ok(helperStart>=0&&applyStart>helperStart&&chooseStart>applyStart&&chooseEnd>chooseStart);
- const helper=app.slice(helperStart,applyStart);
+ assert.ok(applyStart>=0&&chooseStart>applyStart&&chooseEnd>chooseStart);
  const apply=app.slice(applyStart,chooseStart);
  const choose=app.slice(chooseStart,chooseEnd);
- assert.match(helper,/uploadedBatch\.length===0&&!privacyChoiceManuallySelected\)setPrivatePrinting\(true\)/);
- assert.match(apply,/preselectPhotoStudioPrivacy\(\)/);
- assert.match(choose,/else if\(incomingPhotoDocument\)[\s\S]*?preselectPhotoStudioPrivacy\(\)/);
+ assert.doesNotMatch(app,/function preselectPhotoStudioPrivacy\(/);
+ assert.doesNotMatch(apply,/setPrivatePrinting\(/);
+ assert.match(apply,/Photo Studio output inherits the customer's current batch privacy choice/);
+ assert.match(choose,/incomingPhotoDocument/);
+ assert.match(choose,/Prepared Photo Studio documents use the same current batch privacy choice/);
+ assert.doesNotMatch(choose,/if\(incomingPhotoDocument\)[\s\S]{0,200}setPrivatePrinting\(true\)/);
  assert.match(app,/setPrivacyChoiceManuallySelected\(true\);setPrivatePrinting\(false\)/);
  assert.match(app,/setPrivacyChoiceManuallySelected\(true\);setPrivatePrinting\(true\)/);
  assert.match(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument/);
