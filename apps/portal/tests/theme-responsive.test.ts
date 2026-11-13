@@ -360,7 +360,8 @@ test("customer print settings are preserved independently of printer capability 
     "The shared customer print flow must remain present.");
   const flow = app.slice(flowStart, flowEnd);
 
-  assert.ok(flow.includes("Customer requests are captured independently of current hardware reports."));
+  assert.ok(flow.includes("Private Printing is available only with a live paired Agent/key and a ready"));
+  assert.ok(flow.includes("const privateQueueReady = localAgent?.printerStatus === \"Ready\""));
   assert.ok(flow.includes("void printerCapabilitiesJson;"));
   assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
   // Settings are derived from the selected file/group defaults, while ID Studio

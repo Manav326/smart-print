@@ -2,4 +2,5 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <files-path name="documents" path="documents/" />
     <cache-path name="id-studio-transient" path="id-studio-transient/" />
+    <cache-path name="photo-studio-transient" path="photo-studio-transient/" />
 </paths>

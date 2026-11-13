@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Hosting;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -1714,13 +1715,26 @@ shop.MapPost("/qr-stations", async (
         });
     }
 
-    if (request.PrinterDeviceId is Guid printerId &&
-        !await db.PrinterDevices.AnyAsync(printer => printer.Id == printerId && printer.TenantId == tenantId, ct))
+    if (request.PrinterDeviceId is Guid printerId)
     {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
+        var selectedPrinterOutputMode = await db.PrinterDevices.AsNoTracking()
+            .Where(printer => printer.Id == printerId && printer.TenantId == tenantId && printer.IsActive)
+            .Select(printer => printer.OutputMode)
+            .SingleOrDefaultAsync(ct);
+        if (selectedPrinterOutputMode is null)
         {
-            ["printerDeviceId"] = ["The selected printer does not belong to this shop."]
-        });
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["printerDeviceId"] = ["Select an active printer that belongs to this shop."]
+            });
+        }
+        if (selectedPrinterOutputMode is not ("PHYSICAL" or "PDF_EXPORT"))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["printerDeviceId"] = ["This virtual/document driver is not supported for SmartPrint output. Select a physical printer or Microsoft Print to PDF for non-production testing."]
+            });
+        }
     }
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -2921,6 +2935,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     AssignPrintJobPrinterRequest request,
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
@@ -2987,7 +3002,8 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
                        item.TenantId == tenantId &&
                        item.IsActive &&
                        item.AgentDeviceId != null &&
-                       (item.OutputMode == "PDF_EXPORT" ||
+                       (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT") &&
+                       ((item.OutputMode == "PDF_EXPORT" && !selectedJob.PrivatePrinting) ||
                         (item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
                          (item.Status == "Ready" || item.Status == "Busy"))) &&
                        db.AgentDevices.Any(agent =>
@@ -3015,10 +3031,16 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
             message = "Select a printer on a paired, online computer with a recent heartbeat and a ready or busy Windows queue."
         });
     }
-    if (selectedJob.PrivatePrinting && printer.OutputMode == "PDF_EXPORT")
+    var allowPrivateVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+    if (selectedJob.PrivatePrinting &&
+        !PrivatePrintingOutputPolicy.IsEligible(allowPrivateVirtualOutput, environment.IsProduction(), printer.OutputMode))
     {
         await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = "private_printing_physical_output_required", message = "Private Printing must be sent to a physical printer. Saving the source as a managed PDF is not available." });
+        return Results.Conflict(new
+        {
+            code = "private_printing_physical_output_required",
+            message = "Private Printing requires a connected physical printer. Virtual printers are available only when the Company Main Admin enables non-production test output."
+        });
     }
 
     var activeJobs = batchJobs
@@ -3251,7 +3273,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
     });
 });
 
-shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, IHostEnvironment environment, CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
 
@@ -3315,7 +3337,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
         where printer.Id == job.PrinterDeviceId && printer.TenantId == tenantId &&
               printer.AgentDeviceId == job.ClaimedByAgentDeviceId && printer.IsActive &&
               printer.QueueName != null && printer.QueueName != "" &&
-              (printer.OutputMode == "PDF_EXPORT" ||
+              (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
+              ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
                (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                 (printer.Status == "Ready" || printer.Status == "Busy"))) &&
               agent.RevokedUtc == null && agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
@@ -3325,18 +3348,27 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
         (x.Status == "VERIFIED" || x.Status == "PARTIALLY_REFUNDED"), ct);
     if (ready is null || !verified)
         return Results.Conflict(new { code = "print_prerequisites_not_met", message = "Verified payment and the same paired computer's live printer queue are required." });
-    if (job.PrivatePrinting && ready.OutputMode == "PDF_EXPORT")
-        return Results.Conflict(new { code = "private_printing_physical_output_required", message = "Private Printing must be sent to a physical printer, not exported as a managed PDF." });
+    var allowPrivateVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+    if (job.PrivatePrinting &&
+        !PrivatePrintingOutputPolicy.IsEligible(allowPrivateVirtualOutput, environment.IsProduction(), ready.OutputMode))
+        return Results.Conflict(new
+        {
+            code = "private_printing_physical_output_required",
+            message = "Private Printing requires a connected physical printer. Virtual printers are available only for enabled non-production test output."
+        });
 
+    var isPrivateTestOutput = job.PrivatePrinting && ready.OutputMode == "PDF_EXPORT";
     var previous = job.Status;
     job.Status = "PRINT_AUTHORISED";
-    job.OutputType = ready.OutputMode;
+    job.OutputType = isPrivateTestOutput
+        ? PrivatePrintingOutputPolicy.TestVirtual
+        : ready.OutputMode;
     job.PrinterNameSnapshot = ready.DisplayName;
     job.PrinterQueueNameSnapshot = ready.QueueName;
     job.PrinterAgentNameSnapshot = ready.AgentName;
     job.PrinterSnapshotUtc = now;
     job.SpoolerJobName = ready.OutputMode == "PDF_EXPORT"
-        ? $"PDF-EXPORT-{job.JobNumber}-{job.Id:N}"
+        ? $"{(isPrivateTestOutput ? "PRIVATE-TEST-PDF" : "PDF-EXPORT")}-{job.JobNumber}-{job.Id:N}"
         : $"SmartPrint-{job.JobNumber}-{job.Id:N}";
     job.SpoolerJobId = null;
     job.SpoolerStatus = "AWAITING_AGENT";
@@ -3347,9 +3379,11 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
     {
         TenantId = tenantId, PrintJobId = job.Id, PreviousStatus = previous, NewStatus = job.Status,
         ActorType = "ShopUser", ActorId = GetActorId(principal),
-        ReasonCode = ready.OutputMode == "PDF_EXPORT"
-            ? "SHOP_EXPLICITLY_AUTHORISED_PDF_EXPORT"
-            : "SHOP_EXPLICITLY_AUTHORISED_PHYSICAL_PRINT",
+        ReasonCode = isPrivateTestOutput
+            ? "SHOP_EXPLICITLY_AUTHORISED_PRIVATE_TEST_VIRTUAL_OUTPUT"
+            : ready.OutputMode == "PDF_EXPORT"
+                ? "SHOP_EXPLICITLY_AUTHORISED_PDF_EXPORT"
+                : "SHOP_EXPLICITLY_AUTHORISED_PHYSICAL_PRINT",
         CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
@@ -3426,13 +3460,138 @@ shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export", async (
     return Results.Ok(new { job.Id, job.JobNumber, job.Status, OutputMode = "PDF_EXPORT", PrinterName = output.DisplayName });
 });
 
+
+shop.MapPost("/print-jobs/{jobId:guid}/retry-private-test-output", async (
+    Guid jobId,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    IHostEnvironment environment,
+    CancellationToken ct) =>
+{
+    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"Id\" = {jobId} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
+    if (job is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
+
+    var allowPrivateVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+    if (environment.IsProduction() || !allowPrivateVirtualOutput ||
+        !job.PrivatePrinting || job.OutputType != PrivatePrintingOutputPolicy.TestVirtual ||
+        job.Status != "OUTPUT_UNCONFIRMED")
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "private_test_output_not_recoverable",
+            message = "Only an output-unconfirmed Private Printing test job can be retried while non-production virtual output is enabled."
+        });
+    }
+
+    if (job.PrinterDeviceId is not Guid printerId ||
+        job.ClaimedByAgentDeviceId is not Guid agentId ||
+        job.LocalQueueReceivedUtc is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "private_test_local_copy_missing",
+            message = "The original protected local copy and its paired Agent are required. No cloud copy can be used for this retry."
+        });
+    }
+
+    var now = DateTimeOffset.UtcNow;
+    var onlineAfter = now.AddMinutes(-2);
+    var destination = await (
+        from printer in db.PrinterDevices.AsNoTracking()
+        join agent in db.AgentDevices.AsNoTracking()
+            on new { printer.TenantId, AgentId = printer.AgentDeviceId!.Value }
+            equals new { agent.TenantId, AgentId = agent.Id }
+        where printer.Id == printerId && printer.TenantId == tenantId &&
+              printer.AgentDeviceId == agentId && printer.IsActive &&
+              printer.OutputMode == "PDF_EXPORT" &&
+              !string.IsNullOrWhiteSpace(printer.QueueName) &&
+              printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+              (printer.Status == "Ready" || printer.Status == "Busy") &&
+              agent.RevokedUtc == null && agent.Status != "Revoked" &&
+              agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
+        select new { printer.DisplayName, printer.QueueName }
+    ).SingleOrDefaultAsync(ct);
+    var verifiedPayment = await db.PrintPayments.AnyAsync(payment =>
+        payment.TenantId == tenantId && payment.PrintJobId == job.Id &&
+        (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED"), ct);
+    if (destination is null || !verifiedPayment)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "private_test_output_prerequisites_not_met",
+            message = "The same paired Agent, its ready virtual test queue and verified payment are required before retrying."
+        });
+    }
+
+    var previous = job.Status;
+    job.Status = "LOCAL_QUEUE_READY";
+    job.OutputType = PrivatePrintingOutputPolicy.TestVirtual;
+    job.OutputFilePath = null;
+    job.OutputFileName = null;
+    job.OutputSha256 = null;
+    job.OutputSizeBytes = null;
+    job.OutputCompletedUtc = null;
+    job.OutputConfirmedUtc = null;
+    job.SpoolerJobId = null;
+    job.SpoolerJobName = null;
+    job.SpoolerSubmittedUtc = null;
+    job.SpoolerObservedUtc = null;
+    job.PrintDispatchLeaseExpiresUtc = null;
+    job.FailureCode = null;
+    job.SpoolerStatus = null;
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = tenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previous,
+        NewStatus = job.Status,
+        ActorType = "ShopUser",
+        ActorId = GetActorId(principal),
+        ReasonCode = "SHOP_CONFIRMED_NO_PRIVATE_TEST_PDF_AND_RETRY_REQUESTED",
+        CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+    return Results.Ok(new
+    {
+        job.Id,
+        job.JobNumber,
+        job.Status,
+        OutputMode = "PDF_EXPORT",
+        OutputType = PrivatePrintingOutputPolicy.TestVirtual,
+        PrinterName = destination.DisplayName,
+        QueueName = destination.QueueName,
+        PhysicalOutputConfirmed = false
+    });
+});
+
 shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == tenantId, ct);
     if (job is null) return Results.NotFound();
-    if (job.OutputType == "PDF_EXPORT")
-        return Results.Conflict(new { code = "pdf_export_not_physical_output", message = "PDF exports are confirmed when the local PDF file is saved and verified. Physical paper-output confirmation does not apply." });
+    if (job.OutputType is "PDF_EXPORT" or "TEST_VIRTUAL")
+        return Results.Conflict(new
+        {
+            code = job.OutputType == "TEST_VIRTUAL" ? "test_virtual_output_not_physical" : "pdf_export_not_physical_output",
+            message = job.OutputType == "TEST_VIRTUAL"
+                ? "The test PDF was generated locally. It is not a physical print and cannot be marked as physically collected."
+                : "PDF exports are confirmed when the local PDF file is saved and verified. Physical paper-output confirmation does not apply."
+        });
     if (job.Status == "COMPLETED" && job.OutputConfirmedUtc != null)
         return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc, DuplicateRequest = true });
     if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED"))
@@ -4885,9 +5044,12 @@ agentApi.MapGet("/jobs/private-purge", async (
         .Where(job => job.TenantId == device.TenantId &&
                       job.ClaimedByAgentDeviceId == device.Id &&
                       job.PrivatePrinting &&
-                      job.Status == "COMPLETED" &&
-                      job.OutputType == "PHYSICAL" &&
-                      job.OutputConfirmedUtc != null &&
+                      ((job.Status == "COMPLETED" &&
+                        job.OutputType == "PHYSICAL" &&
+                        job.OutputConfirmedUtc != null) ||
+                       (job.Status == "TEST_OUTPUT_READY" &&
+                        job.OutputType == PrivatePrintingOutputPolicy.TestVirtual &&
+                        job.OutputCompletedUtc != null)) &&
                       job.PrivateDocumentPurgeRequestedUtc != null &&
                       job.PrivateDocumentPurgedUtc == null)
         .OrderBy(job => job.PrivateDocumentPurgeRequestedUtc)
@@ -4913,17 +5075,19 @@ agentApi.MapPost("/jobs/{jobId:guid}/private-document-purged", async (
     if (job.PrivateDocumentPurgedUtc is not null)
         return Results.Ok(new { job.Id, job.PrivateDocumentPurgedUtc, DuplicateRequest = true });
 
+    var physicalOutputConfirmed = job.Status == "COMPLETED" &&
+        job.OutputType == "PHYSICAL" && job.OutputConfirmedUtc is not null;
+    var testOutputVerified = job.Status == "TEST_OUTPUT_READY" &&
+        job.OutputType == PrivatePrintingOutputPolicy.TestVirtual && job.OutputCompletedUtc is not null;
     if (!job.PrivatePrinting ||
-        job.Status != "COMPLETED" ||
-        job.OutputType != "PHYSICAL" ||
-        job.OutputConfirmedUtc is null ||
+        (!physicalOutputConfirmed && !testOutputVerified) ||
         job.PrivateDocumentPurgeRequestedUtc is null ||
         job.ClaimedByAgentDeviceId != device.Id)
     {
         return Results.Conflict(new
         {
             code = "private_document_purge_not_authorized",
-            message = "The shop has not confirmed physical output for this private job. The source document must remain available for reconciliation."
+            message = "The private source can be purged only after verified physical output or a separately recorded non-production test output. The source must remain available for reconciliation."
         });
     }
 
@@ -4980,11 +5144,13 @@ agentApi.MapGet("/private-relays/pending", async (
     HttpContext context,
     SmartPrintDbContext db,
     PrivateRelayWakeupService relayWakeups,
+    IHostEnvironment environment,
     int? waitSeconds,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
+    var allowPrivateVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
 
     async Task<List<AgentPrivateRelayItem>> ReadPendingItemsAsync()
     {
@@ -5004,7 +5170,10 @@ agentApi.MapGet("/private-relays/pending", async (
                   ticket.ExpiresUtc > now &&
                   printer.AgentDeviceId == device.Id &&
                   printer.IsActive &&
-                  printer.OutputMode == "PHYSICAL" &&
+                  (printer.OutputMode == "PHYSICAL" ||
+                   (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
+                  printer.LastSeenUtc != null && printer.LastSeenUtc >= now.AddMinutes(-2) &&
+                  (printer.Status == "Ready" || printer.Status == "Busy") &&
                   printer.QueueName != null && printer.QueueName != ""
             orderby ticket.PrivateRelayUploadedUtc
             select new AgentPrivateRelayItem(
@@ -5012,7 +5181,7 @@ agentApi.MapGet("/private-relays/pending", async (
                 printer.DisplayName, printer.QueueName!, ticket.FileExtension, ticket.MediaType,
                 ticket.SizeBytes, ticket.Sha256, ticket.ColourMode, ticket.PaperSize,
                 ticket.IsDuplex, ticket.Copies, ticket.Orientation, ticket.ExpiresUtc,
-                ticket.PrintKind))
+                ticket.PrintKind, printer.OutputMode))
             .Take(50)
             .ToListAsync(ct);
     }
@@ -5042,6 +5211,7 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     HttpContext context,
     SmartPrintDbContext db,
     DocumentStorage storage,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -5059,13 +5229,21 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
         {
             item.PrivateRelayStorageKey,
             item.PrivateRelayWrappedKey,
-            item.PrivateRelayIv
+            item.PrivateRelayIv,
+            item.PrinterDeviceId
         })
         .SingleOrDefaultAsync(ct);
     if (relay is null || string.IsNullOrWhiteSpace(relay.PrivateRelayStorageKey) ||
         string.IsNullOrWhiteSpace(relay.PrivateRelayWrappedKey) ||
         string.IsNullOrWhiteSpace(relay.PrivateRelayIv))
         return Results.NotFound();
+    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, device.TenantId, device.Id, relay.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document could be delivered. No payload was downloaded."
+        });
 
     MemoryStream ciphertext;
     try { ciphertext = storage.OpenRead(relay.PrivateRelayStorageKey); }
@@ -5085,6 +5263,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     SmartPrintDbContext db,
     DocumentStorage storage,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -5131,6 +5310,14 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
 
     if (ticket.CompletedUtc is not null)
         return await ExistingResultAsync(true);
+
+    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, ticket.TenantId, device.Id, ticket.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted handoff completed. The protected local copy is retained for safe retry."
+        });
 
     if (ticket.PrivateRelayFailedUtc is not null ||
         string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey) ||
@@ -5720,6 +5907,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
     Guid ticketId,
     HttpContext context,
     SmartPrintDbContext db,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -5824,6 +6012,14 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
             message = "The original printer assignment changed. SmartPrint will keep this request in the secure queue for the shop owner to reassign."
         });
     }
+    if (ticket.PrivatePrinting &&
+        !await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, ticket.TenantId, device.Id, ticket.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document was transferred. Reconnect and retry the same upload."
+        });
 
     ticket.ClaimedUtc ??= now;
     ticket.ClaimLeaseExpiresUtc = ticket.ExpiresUtc;
@@ -5840,6 +6036,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         PrinterDeviceId = stationPrinter.Id,
         PrinterName = stationPrinter.DisplayName,
         QueueName = stationPrinter.QueueName,
+        OutputMode = stationPrinter.OutputMode,
         ticket.OriginalFileName,
         ticket.FileExtension,
         ticket.PrivatePrinting,
@@ -5863,6 +6060,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     SmartPrintDbContext db,
     DocumentStorage storage,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -5960,6 +6158,15 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             }
         });
     }
+
+    if (ticket.PrivatePrinting &&
+        !await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, ticket.TenantId, device.Id, ticket.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's Private Printing output policy or printer readiness changed before the upload could be finalised. Keep the protected local copy and retry the same request after the shop is ready."
+        });
 
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (request.PageCount is < 1 or > 500 ||
@@ -6298,10 +6505,11 @@ agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
     });
 });
 
-agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, HttpContext context, SmartPrintDbContext db, CancellationToken ct) =>
+agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, HttpContext context, SmartPrintDbContext db, IHostEnvironment environment, CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
+    var allowPrivateVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
     if (request.LocalJobs is null || request.LocalJobs.Count is < 1 or > 100)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["localJobs"] = ["Provide between 1 and 100 local queue proofs."] });
     var proofs = request.LocalJobs
@@ -6347,7 +6555,10 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                       other.PrinterDeviceId != job.PrinterDeviceId)) &&
                   printer.AgentDeviceId == device.Id && printer.IsActive &&
                   printer.QueueName != null && printer.QueueName != "" &&
-                  (printer.OutputMode == "PDF_EXPORT" ||
+                  (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
+                  (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
+                   (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
+                  ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
                    (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                     (printer.Status == "Ready" || printer.Status == "Busy"))) &&
                   db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId &&
@@ -6376,7 +6587,10 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                 other.PrinterDeviceId != job.PrinterDeviceId)) &&
             db.PrinterDevices.Any(printer => printer.Id == job.PrinterDeviceId && printer.TenantId == device.TenantId &&
                 printer.AgentDeviceId == device.Id && printer.IsActive && printer.QueueName != null && printer.QueueName != "" &&
-                (printer.OutputMode == "PDF_EXPORT" ||
+                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
+                (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
+                 (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
+                ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
                  (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                   (printer.Status == "Ready" || printer.Status == "Busy")))) &&
             db.AgentDevices.Any(agent => agent.Id == device.Id && agent.TenantId == device.TenantId &&
@@ -6434,12 +6648,13 @@ agentApi.MapPost("/jobs/{jobId:guid}/pdf-exported", async (
         string.Equals(job.OutputFilePath, request.OutputPath, StringComparison.OrdinalIgnoreCase))
         return Results.Ok(new { job.Id, job.Status, job.OutputFilePath, DuplicateRequest = true });
 
-    if (job.Status != "PRINT_SUBMITTING" || job.ClaimedByAgentDeviceId != device.Id ||
+    if (job.PrivatePrinting ||
+        job.Status != "PRINT_SUBMITTING" || job.ClaimedByAgentDeviceId != device.Id ||
         job.PrinterDeviceId is not Guid printerId ||
         !await db.PrinterDevices.AnyAsync(printer =>
             printer.Id == printerId && printer.TenantId == device.TenantId &&
             printer.AgentDeviceId == device.Id && printer.OutputMode == "PDF_EXPORT", ct))
-        return Results.Conflict(new { code = "pdf_export_dispatch_lease_invalid", message = "This Agent does not own an active PDF export dispatch for the selected destination." });
+        return Results.Conflict(new { code = "pdf_export_dispatch_lease_invalid", message = "This Agent does not own an active standard PDF export dispatch for the selected destination." });
 
     var now = DateTimeOffset.UtcNow;
     var previous = job.Status;
@@ -6465,6 +6680,95 @@ agentApi.MapPost("/jobs/{jobId:guid}/pdf-exported", async (
     return Results.Ok(new { job.Id, job.Status, job.OutputFilePath, job.OutputFileName, job.OutputSha256, job.OutputSizeBytes, job.OutputCompletedUtc });
 });
 
+
+agentApi.MapPost("/jobs/{jobId:guid}/private-test-output", async (
+    Guid jobId,
+    AgentPrivateTestOutputRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    IHostEnvironment environment,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(request.FileName) || request.FileName.Length > 255 ||
+        request.FileName != Path.GetFileName(request.FileName) ||
+        !request.FileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||
+        request.FileName.Any(char.IsControl) ||
+        request.SizeBytes is <= 0 or > 1_000_000_000 ||
+        request.Sha256 is not { Length: 64 } || !request.Sha256.All(Uri.IsHexDigit))
+        return Results.BadRequest(new { code = "invalid_private_test_output_receipt" });
+
+    var job = await db.PrintJobs.SingleOrDefaultAsync(item =>
+        item.Id == jobId && item.TenantId == device.TenantId, ct);
+    if (job is null) return Results.NotFound();
+    if (job.Status == "TEST_OUTPUT_READY" &&
+        job.OutputType == PrivatePrintingOutputPolicy.TestVirtual &&
+        job.ClaimedByAgentDeviceId == device.Id &&
+        string.Equals(job.OutputSha256, request.Sha256, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(job.OutputFileName, request.FileName, StringComparison.Ordinal))
+        return Results.Ok(new { job.Id, job.Status, job.OutputType, DuplicateRequest = true, PhysicalOutputConfirmed = false });
+
+    // The central policy and current printer readiness were validated when the
+    // server authorised this job for TEST_VIRTUAL at dispatch. Do not recheck
+    // the toggle here: an administrator may turn testing off while an already
+    // authorised Agent is reporting its completed file. The receipt is required
+    // to finish source deletion safely, not to grant another output attempt.
+    var now = DateTimeOffset.UtcNow;
+    var paymentVerified = await db.PrintPayments.AnyAsync(payment =>
+        payment.TenantId == device.TenantId && payment.PrintJobId == job.Id &&
+        (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED"), ct);
+    if (environment.IsProduction() || !paymentVerified ||
+        !job.PrivatePrinting || job.PrinterDeviceId is null ||
+        job.OutputType != PrivatePrintingOutputPolicy.TestVirtual ||
+        job.Status != "PRINT_SUBMITTING" || job.ClaimedByAgentDeviceId != device.Id ||
+        job.LocalQueueReceivedUtc is null)
+        return Results.Conflict(new
+        {
+            code = "private_test_output_not_authorised",
+            message = "This private test output is no longer authorised. Keep the protected source and retry only after the Company Main Admin policy, Agent and test printer are ready."
+        });
+
+    var previous = job.Status;
+    job.Status = "TEST_OUTPUT_READY";
+    job.OutputType = PrivatePrintingOutputPolicy.TestVirtual;
+    job.OutputFilePath = null;
+    job.OutputFileName = request.FileName;
+    job.OutputSha256 = request.Sha256.ToLowerInvariant();
+    job.OutputSizeBytes = request.SizeBytes;
+    job.OutputCompletedUtc = now;
+    job.OutputConfirmedUtc = null;
+    job.PrivateDocumentPurgeRequestedUtc ??= now;
+    job.PrintDispatchLeaseExpiresUtc = null;
+    job.SpoolerStatus = "TEST_VIRTUAL_FILE_SAVED";
+    job.SpoolerObservedUtc = now;
+    job.FailureCode = null;
+    job.UpdatedUtc = now;
+    db.PrintJobEvents.Add(new PrintJobEvent
+    {
+        TenantId = device.TenantId,
+        PrintJobId = job.Id,
+        PreviousStatus = previous,
+        NewStatus = job.Status,
+        ActorType = "PrintAgent",
+        ActorId = device.Id,
+        ReasonCode = "PRIVATE_TEST_VIRTUAL_OUTPUT_CREATED_NOT_PHYSICALLY_PRINTED",
+        CreatedUtc = now
+    });
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new
+    {
+        job.Id,
+        job.JobNumber,
+        job.Status,
+        job.OutputType,
+        job.OutputFileName,
+        job.OutputSha256,
+        job.OutputSizeBytes,
+        job.OutputCompletedUtc,
+        PhysicalOutputConfirmed = false
+    });
+});
 agentApi.MapPost("/jobs/{jobId:guid}/spooler-accepted", async (Guid jobId, AgentSpoolerAcceptedRequest request, HttpContext context, SmartPrintDbContext db, CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -7250,7 +7554,7 @@ agentApi.MapPost("/printers/sync", async (
                           printer.QueueName.Length <= 160 &&
                           !string.IsNullOrWhiteSpace(printer.DriverName) &&
                           printer.DriverName.Length <= 160 &&
-                          (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT") &&
+                          (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT" or "UNSUPPORTED_VIRTUAL") &&
                           (printer.PortName?.Length ?? 0) <= 255 &&
                           (printer.CapabilitiesJson?.Length ?? 0) <= 16000 && validStatuses.Contains(printer.Status, StringComparer.Ordinal))
         .GroupBy(printer => printer.QueueName.Trim(), StringComparer.OrdinalIgnoreCase)
@@ -8615,6 +8919,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     HttpContext context,
     SmartPrintDbContext db,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -8945,9 +9250,21 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 : "The shop computer is temporarily unavailable. SmartPrint can keep this request securely online; the shop can release it when an Agent is ready."
         });
     }
-    if (request.PrivatePrinting && stationPrinter.OutputMode == "PDF_EXPORT")
+    if (request.PrivatePrinting)
     {
-        return Results.Conflict(new { code = "private_printing_physical_output_required", message = "Private Printing is available only when the shop has assigned a physical printer." });
+        var allowPrivateVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+        var printerIsLive = stationPrinter.LastSeenUtc is DateTimeOffset printerSeen &&
+            printerSeen >= now.AddMinutes(-2) &&
+            stationPrinter.Status is "Ready" or "Busy";
+        if (!PrivatePrintingOutputPolicy.IsEligible(allowPrivateVirtualOutput, environment.IsProduction(), stationPrinter.OutputMode) ||
+            !printerIsLive)
+        {
+            return Results.Conflict(new
+            {
+                code = "private_printing_physical_output_required",
+                message = "Private Printing requires a connected physical printer. Approved virtual printers are available only when the Company Main Admin enables non-production test output."
+            });
+        }
     }
     if (request.PrivatePrinting && string.IsNullOrWhiteSpace(stationPrinter.DocumentEncryptionPublicKey))
     {
@@ -9221,6 +9538,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     DocumentStorage storage,
     PrivateRelayWakeupService relayWakeups,
     ILoggerFactory loggerFactory,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -9274,6 +9592,13 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         return Results.Conflict(new { code = "private_relay_already_completed", message = "This private print request has already reached the shop queue." });
     if (ticket.PrivateRelayFailedUtc is not null)
         return Results.Conflict(new { code = "private_relay_validation_failed", message = ticket.PrivateRelayFailureMessage });
+    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, ticket.TenantId, ticket.AgentDeviceId, ticket.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's private-printing output eligibility changed before the encrypted transfer started. No relay file was accepted. Refresh the shop connection and retry."
+        });
 
     // An accepted relay already has an immutable ticket and grant. A retry must
     // continue polling that same transfer rather than replace a possibly claimed payload.
@@ -10866,6 +11191,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
 publicApi.MapPost("/sessions/current/renew", async (
     HttpContext context,
     SmartPrintDbContext db,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -10938,7 +11264,14 @@ publicApi.MapPost("/sessions/current/renew", async (
         })
         .SingleAsync(ct);
 
-    return Results.Ok(new { session.ExpiresUtc, LocalAgent = localAgent, PaymentOptions = paymentOptions });
+    var privatePrintingVirtualOutputEnabled = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+    return Results.Ok(new
+    {
+        session.ExpiresUtc,
+        LocalAgent = localAgent,
+        PaymentOptions = paymentOptions,
+        PrivatePrintingVirtualOutputEnabled = privatePrintingVirtualOutputEnabled
+    });
 }).RequireRateLimiting("qr-session");
 
 publicApi.MapGet("/jobs/{jobId:guid}/status", async (
@@ -10991,6 +11324,9 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.QuoteExpiresUtc,
             item.RejectedPageNumbersJson,
             item.PdfBrandingEnabled,
+            item.OutputType,
+            item.OutputCompletedUtc,
+            item.PrivateDocumentPurgedUtc,
             item.UpdatedUtc
         })
         .SingleOrDefaultAsync(ct);
@@ -11086,6 +11422,7 @@ publicApi.MapPost("/sessions/current/resume", async (
     HttpContext context,
     SmartPrintDbContext db,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -11155,6 +11492,7 @@ publicApi.MapPost("/sessions/current/resume", async (
         Printer = printer,
         LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct),
         CloudAssistedPrintingEnabled = customerEntitlements.CloudAssistedPrintingEnabled,
+        PrivatePrintingVirtualOutputEnabled = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct),
         PhotoPricing = await db.ShopPricingProfiles.AsNoTracking()
             .Where(item => item.TenantId == station.TenantId)
             .Select(item => new
@@ -11173,6 +11511,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
     HttpContext context,
     SmartPrintDbContext db,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var codeHash = HashOpaqueToken(publicCode);
@@ -11220,6 +11559,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
             .SingleAsync(ct),
         LocalAgent = await GetLocalAgentInfoAsync(db, station.TenantId, station.PrinterDeviceId, now, ct),
         CloudAssistedPrintingEnabled = customerEntitlements.CloudAssistedPrintingEnabled,
+        PrivatePrintingVirtualOutputEnabled = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct),
         PhotoPricing = await db.ShopPricingProfiles.AsNoTracking()
             .Where(item => item.TenantId == station.TenantId)
             .Select(item => new
@@ -11274,6 +11614,53 @@ publicApi.MapGet("/sessions/current", async (
     return Results.Ok(new { session.Id, session.ExpiresUtc, Shop = shopProfile, LocalAgent = localAgent });
 });
 
+
+static async Task<bool> GetPrivatePrintingVirtualOutputEnabledAsync(
+    SmartPrintDbContext db,
+    IHostEnvironment environment,
+    CancellationToken ct)
+{
+    // Production is an independent fail-closed boundary. A stale or mistakenly
+    // enabled database value can never permit virtual output in a live deployment.
+    if (environment.IsProduction()) return false;
+    return await db.PlatformOperationalSettings.AsNoTracking()
+        .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
+        .Select(item => (bool?)item.AllowPrivatePrintingVirtualOutput)
+        .SingleOrDefaultAsync(ct) ?? false;
+}
+
+static async Task<bool> IsPrivatePrintingOutputQueueReadyAsync(
+    SmartPrintDbContext db,
+    IHostEnvironment environment,
+    Guid tenantId,
+    Guid agentDeviceId,
+    Guid printerDeviceId,
+    CancellationToken ct)
+{
+    var allowVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+    var printer = await db.PrinterDevices.AsNoTracking()
+        .Where(item => item.Id == printerDeviceId &&
+                       item.TenantId == tenantId &&
+                       item.AgentDeviceId == agentDeviceId &&
+                       item.IsActive &&
+                       item.QueueName != null && item.QueueName != "")
+        .Select(item => new { item.OutputMode, item.Status, item.LastSeenUtc })
+        .SingleOrDefaultAsync(ct);
+    var now = DateTimeOffset.UtcNow;
+    if (printer is null ||
+        !PrivatePrintingOutputPolicy.IsEligible(allowVirtualOutput, environment.IsProduction(), printer.OutputMode) ||
+        printer.LastSeenUtc is null || printer.LastSeenUtc < now.AddMinutes(-2) ||
+        printer.Status is not ("Ready" or "Busy"))
+        return false;
+
+    return await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
+        agent.Id == agentDeviceId &&
+        agent.TenantId == tenantId &&
+        agent.RevokedUtc == null &&
+        agent.Status != "Revoked" &&
+        agent.LastSeenUtc != null &&
+        agent.LastSeenUtc >= now.AddMinutes(-2), ct);
+}
 
 static string GetRateLimitPartitionKey(HttpContext context) =>
     context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -11347,6 +11734,8 @@ static bool IsTenantRecoveryOperation(
         path.EndsWith("/printers/sync", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/received", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/pdf-exported", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/private-test-output", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/private-document-purged", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/spooler-accepted", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/print-blocked", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/output-unconfirmed", StringComparison.OrdinalIgnoreCase) ||
@@ -11439,7 +11828,15 @@ static async Task<object?> GetLocalAgentInfoAsync(
               printer.IsActive && printer.AgentDeviceId != null &&
               device.RevokedUtc == null && device.LastSeenUtc != null &&
               device.LastSeenUtc >= now.AddMinutes(-2)
-        select new { device.Id, device.LocalEndpointsJson, device.DocumentEncryptionPublicKey }
+        select new
+        {
+            device.Id,
+            device.LocalEndpointsJson,
+            device.DocumentEncryptionPublicKey,
+            PrinterOutputMode = printer.OutputMode,
+            PrinterStatus = printer.Status,
+            PrinterLastSeenUtc = printer.LastSeenUtc
+        }
     ).SingleOrDefaultAsync(ct);
 
     if (agent is null) return null;
@@ -11448,7 +11845,10 @@ static async Task<object?> GetLocalAgentInfoAsync(
     {
         AgentDeviceId = agent.Id,
         Endpoints = endpoints,
-        DocumentEncryptionPublicKey = agent.DocumentEncryptionPublicKey
+        DocumentEncryptionPublicKey = agent.DocumentEncryptionPublicKey,
+        agent.PrinterOutputMode,
+        agent.PrinterStatus,
+        agent.PrinterLastSeenUtc
     };
 }
 

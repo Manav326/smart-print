@@ -579,6 +579,38 @@ public sealed class AgentLocalQueueStoreTests
 
 
     [Fact]
+    public async Task DispatchOutputModeReplacesStaleUploadTimeModeBeforePhysicalSubmission()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Reassigned private test document"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                PrivatePrinting = true,
+                OutputMode = PrinterOutputModeRules.PdfExport
+            };
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+
+            await store.MarkSubmissionStartedAsync(
+                job.Id, "SmartPrint-Physical-Reassignment", CancellationToken.None, "PHYSICAL");
+
+            var dispatched = store.Find(job.Id)!;
+            Assert.Equal("SUBMITTING", dispatched.State);
+            Assert.Equal("PHYSICAL", dispatched.OutputMode);
+            Assert.Equal("SmartPrint-Physical-Reassignment", dispatched.SpoolerJobName);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ShopOutputConfirmationStopsLocalSpoolerMonitoring()
     {
         var root = CreateTemporaryDirectory();
@@ -1111,6 +1143,63 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal(0, await store.PruneRetainedEntriesAsync(
                 DateTimeOffset.UtcNow.AddDays(10), TimeSpan.FromDays(7), root, CancellationToken.None));
             Assert.NotNull(store.Find(job.Id));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PrivateTestOutputPurgesOnlyTheSourceThenErasesItsPdfAfter24Hours()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var sourceBytes = "private synthetic test document"u8.ToArray();
+            var job = CreateJob(sourceBytes) with
+            {
+                PrivatePrinting = true,
+                OutputMode = PrinterOutputModeRules.PdfExport,
+                StorageMode = "LOCAL_AGENT"
+            };
+            var entry = await store.EnqueueAsync(job, sourceBytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+
+            var testDirectory = store.EnsurePrivateTestOutputDirectory();
+            var outputPath = Path.Combine(testDirectory, $"{job.Id:N}.pdf");
+            var outputBytes = "%PDF-1.4\nprivate test artifact"u8.ToArray();
+            await store.MarkPdfExportStartedAsync(job.Id, outputPath, CancellationToken.None);
+            await File.WriteAllBytesAsync(outputPath, outputBytes);
+            var receipt = new PdfExportReceipt(
+                Path.GetFileName(outputPath), outputPath, outputBytes.LongLength,
+                Convert.ToHexString(SHA256.HashData(outputBytes)).ToLowerInvariant());
+            await store.MarkPdfExportedAsync(job.Id, receipt, CancellationToken.None);
+            await store.MarkPdfExportReceiptReportedAsync(job.Id, CancellationToken.None);
+
+            await store.PurgePrivateSourceAfterConfirmedOutputAsync(job.Id, CancellationToken.None);
+            var sanitized = store.Find(job.Id)!;
+            Assert.Equal("TEST_OUTPUT_SOURCE_PURGED", sanitized.State);
+            Assert.True(sanitized.PrivatePurgePending);
+            Assert.Equal(string.Empty, sanitized.DocumentPath);
+            Assert.False(File.Exists(entry.DocumentPath));
+            Assert.True(File.Exists(outputPath));
+
+            await store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None);
+            Assert.False(store.Find(job.Id)!.PrivatePurgePending);
+
+            var completed = sanitized.CompletedUtc!.Value;
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                completed.AddHours(23), TimeSpan.FromDays(7), root, testDirectory, CancellationToken.None));
+            Assert.True(File.Exists(outputPath));
+            Assert.NotNull(store.Find(job.Id));
+
+            Assert.Equal(1, await store.PruneRetainedEntriesAsync(
+                completed.AddHours(25), TimeSpan.FromDays(7), root, testDirectory, CancellationToken.None));
+            Assert.False(File.Exists(outputPath));
+            Assert.Null(store.Find(job.Id));
         }
         finally
         {

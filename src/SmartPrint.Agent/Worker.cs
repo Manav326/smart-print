@@ -184,7 +184,7 @@ public sealed class Worker(
                     ticket.IsDuplex, "INR", 0, ticket.PrinterDeviceId, ticket.PrinterName,
                     ticket.QueueName, "Private document", ticket.MediaType, ticket.SizeBytes,
                     ticket.Sha256, ticket.ExpiresUtc, "LOCAL_AGENT",
-                    PrinterOutputModeRules.Physical, ticket.Orientation,
+                    ticket.OutputMode, ticket.Orientation,
                     PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind);
 
                 // DPAPI-protect the document on this paired Windows computer before
@@ -563,7 +563,8 @@ public sealed class Worker(
                 try
                 {
                     var removed = await localQueueStore.PruneRetainedEntriesAsync(
-                        sweepNow, completedRetention, pdfExportDirectory, cancellationToken);
+                        sweepNow, completedRetention, pdfExportDirectory,
+                        localQueueStore.EnsurePrivateTestOutputDirectory(), cancellationToken);
                     if (removed > 0)
                         logger.LogInformation("Removed {RemovedCount} expired or retained local document entries.", removed);
                 }
@@ -833,12 +834,22 @@ public sealed class Worker(
                 {
                     if (!entry.PrivatePrinting)
                         throw new InvalidDataException("The server requested a private purge for a non-private local queue item.");
-                    if (entry.State is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING"))
+                    if (entry.State is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING" or "PDF_EXPORT_REPORTED" or "TEST_OUTPUT_SOURCE_PURGED"))
                         throw new InvalidOperationException("The local job has not reached a state that permits a server-confirmed source purge.");
 
-                    if (entry.State is not ("OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING") || entry.CompletedUtc is null)
-                        await localQueueStore.MarkOutputConfirmedAsync(jobId, cancellationToken);
-                    await localQueueStore.PurgePrivateSourceAfterConfirmedOutputAsync(jobId, cancellationToken);
+                    if (entry.State is "PDF_EXPORT_REPORTED" or "TEST_OUTPUT_SOURCE_PURGED")
+                    {
+                        // A verified test PDF is not physical output. Purge only
+                        // the protected source while retaining the test artifact
+                        // for its separate short retention window.
+                        await localQueueStore.PurgePrivateSourceAfterConfirmedOutputAsync(jobId, cancellationToken);
+                    }
+                    else
+                    {
+                        if (entry.State is not ("OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING") || entry.CompletedUtc is null)
+                            await localQueueStore.MarkOutputConfirmedAsync(jobId, cancellationToken);
+                        await localQueueStore.PurgePrivateSourceAfterConfirmedOutputAsync(jobId, cancellationToken);
+                    }
                 }
 
                 using var acknowledgement = await SendAgentRequestAsync(
@@ -1057,9 +1068,7 @@ public sealed class Worker(
         {
             ct.ThrowIfCancellationRequested();
             var entry = localQueueStore.Find(job.Id);
-            var isPdfExport = job.OutputMode == PrinterOutputModeRules.PdfExport ||
-                entry?.OutputMode == PrinterOutputModeRules.PdfExport ||
-                PrinterOutputModeRules.IsPdfExport(job.QueueName, entry?.PrinterName);
+            var isPdfExport = AgentOutputModeRules.IsPdfExport(job.OutputMode);
             var localStateValid = entry is not null &&
                 (entry.State == "ACKNOWLEDGED" ||
                  (isPdfExport && entry.State == "OUTPUT_UNCONFIRMED"));
@@ -1079,15 +1088,19 @@ public sealed class Worker(
 
                 if (isPdfExport)
                 {
+                    var privateTestOutput = entry.PrivatePrinting;
+                    var exportDirectory = privateTestOutput
+                        ? localQueueStore.EnsurePrivateTestOutputDirectory()
+                        : pdfExportDirectory;
                     var exportEntry = entry with { OutputMode = PrinterOutputModeRules.PdfExport, RejectedPageNumbers = rejectedPages };
-                    var destination = printExecutor.GetPdfExportPath(exportEntry, pdfExportDirectory);
+                    var destination = printExecutor.GetPdfExportPath(exportEntry, exportDirectory);
                     await localQueueStore.MarkPdfExportStartedAsync(job.Id, destination, ct);
                     var documentBytes = localQueueStore.ReadDocument(job.Id);
                     PdfExportExecutionResult exportResult;
                     try
                     {
                         exportResult = await printExecutor.ExportPdfUsingWindowsPrinterOrFallbackAsync(
-                            exportEntry, documentBytes, destination, pdfExportDirectory, ct);
+                            exportEntry, documentBytes, destination, exportDirectory, ct);
                     }
                     finally { CryptographicOperations.ZeroMemory(documentBytes); }
 
@@ -1095,15 +1108,26 @@ public sealed class Worker(
                     await localQueueStore.MarkPdfExportedAsync(job.Id, receipt, ct);
                     await ReportPdfExportedAsync(client, credentials, job.Id, receipt, ct);
                     logger.LogInformation(
-                        "Job {JobNumber} was exported as {FileName} to {OutputPath} using {ExportMethod}; spooler job {SpoolerJobId}.",
+                        privateTestOutput
+                            ? "Private test output for {JobNumber} was saved locally as {FileName}; it is not physical fulfilment. The protected source remains pending platform-authorised cleanup."
+                            : "Job {JobNumber} was exported as {FileName} to {OutputPath} using {ExportMethod}; spooler job {SpoolerJobId}.",
                         job.JobNumber, receipt.FileName, receipt.OutputPath, exportResult.Method, exportResult.SpoolerJobId);
                     continue;
                 }
 
-                await localQueueStore.MarkSubmissionStartedAsync(job.Id, job.SpoolerJobName, ct);
+                await localQueueStore.MarkSubmissionStartedAsync(
+                    job.Id, job.SpoolerJobName, ct, job.OutputMode);
                 var bytes = localQueueStore.ReadDocument(job.Id);
                 SpoolerPrintReceipt spoolerReceipt;
-                try { spoolerReceipt = printExecutor.Print(entry with { SpoolerJobName = job.SpoolerJobName, RejectedPageNumbers = rejectedPages }, bytes, ct); }
+                try
+                {
+                    spoolerReceipt = printExecutor.Print(entry with
+                    {
+                        OutputMode = job.OutputMode,
+                        SpoolerJobName = job.SpoolerJobName,
+                        RejectedPageNumbers = rejectedPages
+                    }, bytes, ct);
+                }
                 finally { CryptographicOperations.ZeroMemory(bytes); }
 
                 await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
@@ -1218,16 +1242,20 @@ public sealed class Worker(
     private async Task ReportPdfExportedAsync(
         HttpClient client, AgentCredentials credentials, Guid jobId, PdfExportReceipt receipt, CancellationToken ct)
     {
-        using var response = await SendAgentRequestAsync(
-            client, credentials, $"api/v1/agent/jobs/{jobId}/pdf-exported",
-            new AgentPdfExportedRequest(receipt.FileName, receipt.OutputPath, receipt.SizeBytes, receipt.Sha256), ct);
+        var entry = localQueueStore.Find(jobId);
+        using var response = entry?.PrivatePrinting == true
+            ? await SendAgentRequestAsync(
+                client, credentials, $"api/v1/agent/jobs/{jobId}/private-test-output",
+                new AgentPrivateTestOutputRequest(receipt.FileName, receipt.SizeBytes, receipt.Sha256), ct)
+            : await SendAgentRequestAsync(
+                client, credentials, $"api/v1/agent/jobs/{jobId}/pdf-exported",
+                new AgentPdfExportedRequest(receipt.FileName, receipt.OutputPath, receipt.SizeBytes, receipt.Sha256), ct);
         if (response.IsSuccessStatusCode)
         {
-            var entry = localQueueStore.Find(jobId);
             if (entry?.State == "PDF_EXPORTED")
                 await localQueueStore.MarkPdfExportReceiptReportedAsync(jobId, ct);
         }
-        else logger.LogWarning("PDF export receipt for {JobId} returned HTTP {StatusCode}; it will be retried.", jobId, (int)response.StatusCode);
+        else logger.LogWarning("PDF output receipt for {JobId} returned HTTP {StatusCode}; it will be retried.", jobId, (int)response.StatusCode);
     }
 
     private static string ResolvePdfExportDirectory(IConfiguration configuration)

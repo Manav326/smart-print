@@ -299,13 +299,20 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
     fun materializePreparedFile(file: File): File {
         require(isPreparedDocument(file)) { "Only a prepared ID document can be opened here." }
         val bytes = readVaultOrMigrate(file, MAX_PREPARED_BYTES)
-        require(hasPdfSignature(bytes)) { "The prepared ID sheet is damaged. Please prepare it again." }
         val target = File(transientRoot, "id-studio-" + UUID.randomUUID().toString() + ".pdf")
-        FileOutputStream(target).use { output ->
-            output.write(bytes)
-            output.fd.sync()
+        try {
+            require(hasPdfSignature(bytes)) { "The prepared ID sheet is damaged. Please prepare it again." }
+            FileOutputStream(target).use { output ->
+                output.write(bytes)
+                output.fd.sync()
+            }
+            return target
+        } catch (error: Exception) {
+            target.delete()
+            throw error
+        } finally {
+            bytes.fill(0)
         }
-        return target
     }
 
     fun releaseTransientFile(file: File) {

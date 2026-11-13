@@ -13,5 +13,6 @@ public sealed class PlatformOperationalSettingsPolicyTests
         Assert.Equal(7, settings.AgentCompletedDocumentRetentionDays);
         Assert.Equal(1, settings.ApiRetentionSweepHours);
         Assert.Equal(1, settings.AgentRetentionSweepHours);
+        Assert.False(settings.AllowPrivatePrintingVirtualOutput);
     }
 }

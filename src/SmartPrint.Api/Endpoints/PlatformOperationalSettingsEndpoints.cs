@@ -65,6 +65,7 @@ public static class PlatformOperationalSettingsEndpoints
             locked.ApiRetentionSweepHours = request.ApiRetentionSweepHours;
             locked.AgentRetentionSweepHours = request.AgentRetentionSweepHours;
             locked.AllowPaidJobClaimsWhenSuspended = request.AllowPaidJobClaimsWhenSuspended;
+            locked.AllowPrivatePrintingVirtualOutput = request.AllowPrivatePrintingVirtualOutput;
             locked.UpdatedByUserId = actorId;
             locked.UpdatedUtc = DateTimeOffset.UtcNow;
 
@@ -123,6 +124,7 @@ public static class PlatformOperationalSettingsEndpoints
         settings.ApiRetentionSweepHours,
         settings.AgentRetentionSweepHours,
         settings.AllowPaidJobClaimsWhenSuspended,
+        settings.AllowPrivatePrintingVirtualOutput,
         settings.UpdatedByUserId,
         settings.UpdatedUtc);
 }
@@ -139,6 +141,7 @@ public sealed record PlatformOperationalSettingsRequest(
     int ApiRetentionSweepHours,
     int AgentRetentionSweepHours,
     bool AllowPaidJobClaimsWhenSuspended,
+    bool AllowPrivatePrintingVirtualOutput,
     string Reason);
 
 public sealed record PlatformOperationalSettingsResponse(
@@ -153,5 +156,6 @@ public sealed record PlatformOperationalSettingsResponse(
     int ApiRetentionSweepHours,
     int AgentRetentionSweepHours,
     bool AllowPaidJobClaimsWhenSuspended,
+    bool AllowPrivatePrintingVirtualOutput,
     Guid? UpdatedByUserId,
     DateTimeOffset UpdatedUtc);

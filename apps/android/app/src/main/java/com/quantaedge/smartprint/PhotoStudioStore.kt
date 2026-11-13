@@ -144,6 +144,30 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
             isValidId(idFromFile(file))
     }.getOrDefault(false)
 
+    /**
+     * Lightweight chooser metadata lookup. Do not pull a legacy duplicated Base64 payload
+     * into memory or trigger its migration merely to display a picker row.
+     */
+    fun readPickerMetadata(file: File): JSONObject? {
+        require(isPreparedDocument(file)) { "Only a private Photo Studio document can be opened here." }
+        val source = metadataFile(idFromFile(file))
+        if (!source.isFile || source.length() > MAX_METADATA_BYTES + VAULT_OVERHEAD_BYTES) return null
+
+        // Do not call readMetadata() here: that method intentionally migrates older
+        // records which duplicated large Base64 PDF/source payloads into JSON.
+        // A picker row needs only a small modern metadata record, never that migration.
+        val bytes = runCatching { readEncrypted(source, MAX_METADATA_BYTES) }.getOrNull() ?: return null
+        return try {
+            val stored = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
+                ?: return null
+            if (bytes.size.toLong() > MAX_METADATA_BYTES ||
+                stored.has("pdfBase64") || stored.has("sourceBase64")) return null
+            compactMetadata(stored)
+        } finally {
+            bytes.fill(0)
+        }
+    }
+
     fun readMetadata(file: File): JSONObject {
         require(isPreparedDocument(file)) { "Only a private Photo Studio document can be opened here." }
         val metadataFile = metadataFile(idFromFile(file))
@@ -251,11 +275,16 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
 
     private fun writeTransient(bytes: ByteArray, extension: String): File {
         val target = File(transientRoot, "photo-studio-" + UUID.randomUUID().toString() + extension)
-        FileOutputStream(target).use { output ->
-            output.write(bytes)
-            output.fd.sync()
+        try {
+            FileOutputStream(target).use { output ->
+                output.write(bytes)
+                output.fd.sync()
+            }
+            return target
+        } catch (error: Exception) {
+            target.delete()
+            throw error
         }
-        return target
     }
 
     private fun cleanupTransientFiles() {

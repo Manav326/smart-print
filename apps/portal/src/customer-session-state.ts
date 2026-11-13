@@ -7,7 +7,7 @@ export type CustomerBatchStatusLookup = Readonly<Record<
 >>;
 
 const terminalCustomerJobStatuses = new Set([
-  "COMPLETED", "PDF_EXPORTED", "REJECTED", "REFUNDED", "CANCELLED", "FAILED"
+  "COMPLETED", "PDF_EXPORTED", "TEST_OUTPUT_READY", "REJECTED", "REFUNDED", "CANCELLED", "FAILED"
 ]);
 
 export function isCustomerJobTerminalStatus(status: string | null | undefined): boolean {

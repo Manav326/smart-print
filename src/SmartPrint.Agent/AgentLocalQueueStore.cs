@@ -551,10 +551,28 @@ public sealed class AgentLocalQueueStore
         await Task.CompletedTask;
     }
 
+    public string EnsurePrivateTestOutputDirectory()
+    {
+        Directory.CreateDirectory(queueRoot);
+        if (applyWindowsAcl) SecureDirectory(queueRoot);
+        var directory = Path.Combine(queueRoot, "PrivateTestExports");
+        Directory.CreateDirectory(directory);
+        if (applyWindowsAcl) SecureDirectory(directory);
+        return Path.GetFullPath(directory);
+    }
+
+    public Task<int> PruneRetainedEntriesAsync(
+        DateTimeOffset now,
+        TimeSpan completedRetention,
+        string pdfExportDirectory,
+        CancellationToken cancellationToken) =>
+        PruneRetainedEntriesAsync(now, completedRetention, pdfExportDirectory, null, cancellationToken);
+
     public async Task<int> PruneRetainedEntriesAsync(
         DateTimeOffset now,
         TimeSpan completedRetention,
         string pdfExportDirectory,
+        string? privateTestOutputDirectory,
         CancellationToken cancellationToken)
     {
         if (completedRetention <= TimeSpan.Zero)
@@ -568,11 +586,38 @@ public sealed class AgentLocalQueueStore
         var outputPrefix = outputRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var cutoff = now - completedRetention;
+        var privateTestCutoff = now - TimeSpan.FromHours(24);
+        var privateTestPrefix = string.IsNullOrWhiteSpace(privateTestOutputDirectory)
+            ? null
+            : Path.GetFullPath(privateTestOutputDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var removed = 0;
 
         foreach (var entry in ReadEntries())
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (entry.PrivatePrinting &&
+                entry.OutputMode == PrinterOutputModeRules.PdfExport &&
+                entry.CompletedUtc is DateTimeOffset privateTestCompletedUtc &&
+                privateTestCompletedUtc <= privateTestCutoff &&
+                !entry.PrivatePurgePending &&
+                string.IsNullOrWhiteSpace(entry.DocumentPath))
+            {
+                // Test output is a local sensitive artifact, not a customer PDF.
+                // Keep it for 24 hours after the private source purge is confirmed,
+                // then securely erase it and its sanitized reconciliation manifest.
+                if (privateTestPrefix is null) continue;
+                if (!string.IsNullOrWhiteSpace(entry.OutputFilePath))
+                {
+                    var outputPath = Path.GetFullPath(entry.OutputFilePath);
+                    if (!outputPath.StartsWith(privateTestPrefix, comparison)) continue;
+                    await EraseProtectedQueueFileAsync(outputPath, queuePrefix, comparison, cancellationToken);
+                }
+                var privateManifestPath = GetManifestPath(entry.JobId);
+                if (File.Exists(privateManifestPath)) File.Delete(privateManifestPath);
+                removed++;
+                continue;
+            }
 
             if (entry.State == "LOCAL_UPLOAD_STAGED" && entry.LeaseExpiresUtc <= now)
             {
@@ -690,7 +735,11 @@ public sealed class AgentLocalQueueStore
         await SaveManifestAsync(entry with { RejectedPageNumbers = pages }, ct);
     }
 
-    public async Task MarkSubmissionStartedAsync(Guid jobId, string spoolerJobName, CancellationToken ct)
+    public async Task MarkSubmissionStartedAsync(
+        Guid jobId,
+        string spoolerJobName,
+        CancellationToken ct,
+        string? outputMode = null)
     {
         if (string.IsNullOrWhiteSpace(spoolerJobName) || spoolerJobName.Length > 180)
             throw new ArgumentException("A stable Windows spooler document name is required.", nameof(spoolerJobName));
@@ -701,7 +750,8 @@ public sealed class AgentLocalQueueStore
         await SaveManifestAsync(entry with
         {
             State = "SUBMITTING", SpoolerJobName = spoolerJobName, SpoolerJobId = null,
-            SpoolerSubmittedUtc = null, SpoolerStatus = "SUBMISSION_STARTED", FailureCode = null
+            SpoolerSubmittedUtc = null, SpoolerStatus = "SUBMISSION_STARTED", FailureCode = null,
+            OutputMode = outputMode ?? entry.OutputMode
         }, ct);
     }
 
@@ -864,8 +914,10 @@ public sealed class AgentLocalQueueStore
         try
         {
             var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
-            if (!entry.PrivatePrinting || entry.State is not ("PRIVATE_PURGE_PENDING" or "OUTPUT_CONFIRMED") || entry.CompletedUtc is null)
-                throw new InvalidOperationException("A private source can be purged only after confirmed physical output.");
+            if (!entry.PrivatePrinting ||
+                entry.State is not ("PRIVATE_PURGE_PENDING" or "OUTPUT_CONFIRMED" or "PDF_EXPORT_REPORTED" or "TEST_OUTPUT_SOURCE_PURGED") ||
+                entry.CompletedUtc is null)
+                throw new InvalidOperationException("A private source can be purged only after verified physical output or a separately recorded test output.");
 
             var queueRootFull = Path.GetFullPath(queueRoot);
             var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
@@ -890,7 +942,10 @@ public sealed class AgentLocalQueueStore
 
             await SaveManifestAsync(entry with
             {
-                State = "OUTPUT_CONFIRMED",
+                State = entry.OutputMode == PrinterOutputModeRules.PdfExport &&
+                    entry.State is ("PDF_EXPORT_REPORTED" or "TEST_OUTPUT_SOURCE_PURGED")
+                    ? "TEST_OUTPUT_SOURCE_PURGED"
+                    : "OUTPUT_CONFIRMED",
                 DocumentPath = string.Empty,
                 DocumentName = "Private document",
                 MediaType = string.Empty,
@@ -913,7 +968,9 @@ public sealed class AgentLocalQueueStore
     public async Task MarkPrivatePurgeAcknowledgedAsync(Guid jobId, CancellationToken ct)
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
-        if (!entry.PrivatePrinting || entry.State != "OUTPUT_CONFIRMED" || !entry.PrivatePurgePending ||
+        if (!entry.PrivatePrinting ||
+            entry.State is not ("OUTPUT_CONFIRMED" or "TEST_OUTPUT_SOURCE_PURGED") ||
+            !entry.PrivatePurgePending ||
             !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256) ||
             !string.IsNullOrWhiteSpace(entry.PhotoSourcePath) ||
             entry.PhotoSourceDocumentName is not null || entry.PhotoSourceMediaType is not null ||

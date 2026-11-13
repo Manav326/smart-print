@@ -71,40 +71,49 @@ test("private Photo Studio vault operations are scoped to the dedicated native r
   assert.match(main, /photoStudioLibraryCommand && !photoStudioRouteActive/);
 });
 
-test("saved Photo Studio sheets attach to the existing upload form rather than sending directly to a shop", () => {
+test("saved Photo Studio sheets join the chooser selection and wait for the final Add action", () => {
   const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
   const app = read("../src/App.tsx");
   const start = main.indexOf("private fun addPhotoStudioPickerSection(parent: LinearLayout)");
   const end = main.indexOf("\n    private fun ", start + 1);
   assert.ok(start >= 0 && end > start);
   const picker = main.slice(start, end);
-  assert.match(picker, /Select one to attach it to the upload form/);
-  assert.match(picker, /chooseFiles\(listOf\(file\), listOf\("Photo Studio"\)\)/);
+  assert.match(picker, /Nothing is attached until you confirm below/);
+  assert.match(picker, /pickerStudioSelectionButton\(file, "Photo Studio document", 88\)/);
+  assert.doesNotMatch(picker, /chooseFiles\(listOf\(file\)/);
   assert.doesNotMatch(picker, /uploadCustomerDocument|dispatchShopPrintJob/);
+  assert.match(main, /Add selected files \(\$\{chooserSelection\.size\}\)/);
+  assert.match(main, /setChooserFileSelected\(file, !selected\)/);
   assert.match(app, /privatePrinting\?"Upload "\+pendingFilesCount\+" file\(s\) securely"/);
 });
 
-test("after upload only the decrypted picker copy is released and the saved library document remains", () => {
+test("successful upload releases decrypted ID and Photo Studio staging but preserves both encrypted libraries", () => {
   const app = read("../src/App.tsx");
   const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
-  const store = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/PhotoStudioStore.kt");
-  assert.match(app, /setFiles\(\[\]\);[\s\S]*postSmartPrintNativeMessage\("releasePhotoStudioUploadFiles"\)/);
-  assert.match(main, /data == "releasePhotoStudioUploadFiles"/);
+  const photoStore = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/PhotoStudioStore.kt");
+  const idStore = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/IdStudioStore.kt");
+  assert.match(app, /setFiles\(\[\]\);[\s\S]*postSmartPrintNativeMessage\("releaseStudioUploadFiles"\)/);
+  assert.match(main, /data == "releaseStudioUploadFiles"/);
+  assert.match(main, /privateIdUploadTempFiles\.toList\(\)\.forEach\(idStudioStore::releaseTransientFile\)/);
+  assert.match(main, /privateIdUploadTempFiles\.clear\(\)/);
   assert.match(main, /privatePhotoUploadTempFiles\.toList\(\)\.forEach\(photoStudioStore::releaseTransientFile\)/);
   assert.match(main, /privatePhotoUploadTempFiles\.clear\(\)/);
-  assert.match(main, /privatePhotoUploadTempFiles\.clear\(\)[\s\S]*clearCustomerUploadPdfPreviews\(\)/);
   const previewCleanupStart = main.indexOf("private fun clearCustomerUploadPdfPreviews()");
   const previewCleanupEnd = main.indexOf("private fun cancelPicker()", previewCleanupStart);
   assert.ok(previewCleanupStart >= 0 && previewCleanupEnd > previewCleanupStart);
   const previewCleanup = main.slice(previewCleanupStart, previewCleanupEnd);
   assert.match(previewCleanup, /photoStudioStore\.releaseTransientFile\(file\)/);
   assert.match(previewCleanup, /if \(parent == previewDirectory\) file\.delete\(\)/);
-  assert.match(store, /fun releaseTransientFile\(file: File\)/);
-  assert.match(store, /fun deletePrepared\(file: File\)/);
-  assert.match(store, /sourceFile\(id\)\.delete\(\)/);
-  const release = main.slice(main.indexOf('data == "releasePhotoStudioUploadFiles"'), main.indexOf('data == "releasePhotoStudioUploadFiles"') + 900);
-  assert.doesNotMatch(release, /deletePrepared|documentFile|sourceFile|metadataFile/,
-    "Upload cleanup must not delete the encrypted saved Photo Studio library entry.");
+  assert.match(photoStore, /fun releaseTransientFile\(file: File\)/);
+  assert.match(idStore, /fun releaseTransientFile\(file: File\)/);
+  assert.match(photoStore, /fun deletePrepared\(file: File\)/);
+  assert.match(idStore, /fun deletePrepared\(file: File\)/);
+  const releaseStart = main.indexOf("private fun releaseStudioUploadFiles()");
+  const releaseEnd = main.indexOf("private fun clearCustomerUploadPdfPreviews()", releaseStart);
+  assert.ok(releaseStart >= 0 && releaseEnd > releaseStart);
+  const release = main.slice(releaseStart, releaseEnd);
+  assert.doesNotMatch(release, /deletePrepared|sourceFile|metadataFile/,
+    "Upload cleanup must not delete either encrypted Studio library entry.");
 });
 
 test("owner quote edits are sent through the existing print-job API", () => {

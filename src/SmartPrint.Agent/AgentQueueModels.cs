@@ -1,5 +1,16 @@
 namespace SmartPrint.Agent;
 
+/// <summary>
+/// The output mode returned by the API at dispatch is authoritative. Local
+/// queue metadata records the upload-time state and may be stale after a
+/// printer reassignment.
+/// </summary>
+public static class AgentOutputModeRules
+{
+    public static bool IsPdfExport(string? dispatchOutputMode) =>
+        string.Equals(dispatchOutputMode, "PDF_EXPORT", StringComparison.OrdinalIgnoreCase);
+}
+
 public sealed record AgentClaimedJob(
     Guid Id,
     string JobNumber,
@@ -37,7 +48,9 @@ public sealed record AgentPrivateRelayItem(
     string PrinterName, string QueueName, string FileExtension, string MediaType,
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
-    string PrintKind = "DOCUMENT");
+    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL");
+
+public sealed record AgentPrivateTestOutputRequest(string FileName, long SizeBytes, string Sha256);
 
 public sealed record AgentPrivateRelayPendingResponse(IReadOnlyList<AgentPrivateRelayItem> Items);
 public sealed record AgentPrivateRelayRejectRequest(string Code, string Message);

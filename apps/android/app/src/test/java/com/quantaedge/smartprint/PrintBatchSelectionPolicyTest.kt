@@ -87,6 +87,52 @@ class PrintBatchSelectionPolicyTest {
         assertNotNull(PrintBatchSelectionPolicy.validationError(listOf(file, file)))
     }
 
+    @Test
+    fun nativePickerAcceptsPrivateStudioDocumentsAlongsideLooseFilesWithoutDecryption() {
+        val loose = createFile("assignment.pdf", 120_000L)
+        val photo = createFile("SmartPrint Photo - prepared.spph", 240_000L)
+        val id = createFile("SmartPrint ID - prepared.spid", 320_000L)
+
+        val error = PrintBatchSelectionPolicy.pickerValidationError(
+            listOf(loose, photo, id),
+            allowMultiple = true
+        ) { file ->
+            file.extension.equals("spph", ignoreCase = true) ||
+                file.extension.equals("spid", ignoreCase = true)
+        }
+
+        assertNull(error)
+    }
+
+    @Test
+    fun nativePickerAllowsOnlyOneFileForSingleFileInputs() {
+        val first = createFile("first.pdf", 100L)
+        val second = createFile("second.jpg", 200L)
+
+        assertEquals(
+            "This print field accepts one document at a time.",
+            PrintBatchSelectionPolicy.pickerValidationError(
+                listOf(first, second),
+                allowMultiple = false
+            ) { false }
+        )
+    }
+
+    @Test
+    fun nativePickerRejectsOversizedEncryptedStudioDocumentsBeforeMaterializingThem() {
+        val oversized = createFile(
+            "SmartPrint Photo - oversized.spph",
+            DocumentNamePolicy.MAX_PRINT_BYTES + 65L
+        )
+
+        assertNotNull(
+            PrintBatchSelectionPolicy.pickerValidationError(
+                listOf(oversized),
+                allowMultiple = true
+            ) { true }
+        )
+    }
+
     private fun createBatchWithTotalBytes(prefix: String, totalBytes: Long): List<File> {
         require(totalBytes > 0L)
         val fileCount = ((totalBytes - 1L) / DocumentNamePolicy.MAX_PRINT_BYTES + 1L).toInt()
