@@ -730,6 +730,63 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task FirstLocalPhotoRevisionRejectsCorruptedOriginalBeforeRetainingIt()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Original local image bytes"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                Status = "AWAITING_SHOP_APPROVAL",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+            var entry = store.Find(job.Id)!;
+            var corruptedProtectedBytes = "not a valid protected document"u8.ToArray();
+            await File.WriteAllBytesAsync(entry.DocumentPath, corruptedProtectedBytes);
+            var serverCommitAttempted = false;
+
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.ReplaceStagedPhotoDocumentAsync(
+                    job.Id,
+                    staged.Sha256,
+                    staged.SizeBytes,
+                    "photo-sheet.pdf",
+                    "%PDF-1.4\\nprepared-photo-sheet"u8.ToArray(),
+                    1,
+                    500,
+                    () =>
+                    {
+                        serverCommitAttempted = true;
+                        return Task.CompletedTask;
+                    },
+                    CancellationToken.None));
+
+            var unchanged = store.Find(job.Id)!;
+            Assert.False(serverCommitAttempted);
+            Assert.Equal("original.jpg", unchanged.DocumentName);
+            Assert.Equal(staged.Sha256, unchanged.Sha256);
+            Assert.Equal(staged.SizeBytes, unchanged.SizeBytes);
+            Assert.Null(unchanged.PhotoSourcePath);
+            Assert.Null(unchanged.PhotoSourceSha256);
+            Assert.Equal(corruptedProtectedBytes, await File.ReadAllBytesAsync(unchanged.DocumentPath));
+            Assert.Empty(Directory.GetFiles(root, "*.photo.source"));
+            Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+            Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task LocalPhotoRevisionReplacesTheProtectedDocumentAndCommitsTheServerSnapshot()
     {
         var root = CreateTemporaryDirectory();
