@@ -878,11 +878,15 @@ public sealed class AgentLocalQueueStore
                 await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, ct);
             }
 
+            // The deterministic sidecar name lets a purge retry remove a
+            // leftover source even when an older/partially sanitized manifest
+            // has already lost both DocumentPath and PhotoSourcePath.
             var photoSourcePath = entry.PhotoSourcePath;
-            if (string.IsNullOrWhiteSpace(photoSourcePath) && !string.IsNullOrWhiteSpace(entry.DocumentPath))
-                photoSourcePath = entry.DocumentPath + ".photo.source";
-            if (!string.IsNullOrWhiteSpace(photoSourcePath))
-                await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, ct);
+            if (string.IsNullOrWhiteSpace(photoSourcePath))
+                photoSourcePath = !string.IsNullOrWhiteSpace(entry.DocumentPath)
+                    ? entry.DocumentPath + ".photo.source"
+                    : Path.Combine(queueRootFull, jobId.ToString("N") + ".qdoc.photo.source");
+            await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, ct);
 
             await SaveManifestAsync(entry with
             {
