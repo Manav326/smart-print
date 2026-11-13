@@ -1620,31 +1620,37 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }finally{setBusyJobId(null);}
   }
 
-  async function openShopPhotoStudioForJob(job:ShopPrintJob){
+  async function openShopPhotoStudioForJob(job:ShopPrintJob,returningFromPreview?:NonNullable<typeof preview>){
     setBusyJobId(job.id);setError("");
     try{
       const blob=await downloadShopDocument(tokens.accessToken,job.id,"photo-source");
-      const stored=(job.document.mediaType||"").split(";")[0].trim().toLowerCase();
       const response=(blob.type||"").split(";")[0].trim().toLowerCase();
-      const extension=job.document.originalFileName.toLowerCase().split(".").pop();
-      const mediaType=stored==="image/jpeg"||stored==="image/png"?stored:response==="image/jpeg"||response==="image/png"?response:extension==="png"?"image/png":extension==="jpg"||extension==="jpeg"?"image/jpeg":"";
-      if(!mediaType)throw new Error("Photo Studio can open JPG and PNG originals. Preview this file first to confirm its format.");
+      const mediaType=response==="image/jpeg"||response==="image/png"?response:"";
+      if(!mediaType)throw new Error("The original JPG or PNG photo is not available for editing.");
       const sourceBlob=blob.type===mediaType?blob:new Blob([blob],{type:mediaType});
-      const source=new File([sourceBlob],job.document.originalFileName,{type:mediaType,lastModified:Date.now()});
-      const returnPreview={name:job.document.originalFileName,blob:sourceBlob,mediaType,job,readOnly:false};
+      const extension=mediaType==="image/png"?"png":"jpg";
+      const sourceName=job.document.mediaType==="image/jpeg"||job.document.mediaType==="image/png"
+        ?job.document.originalFileName
+        :`photo-${job.jobNumber}.${extension}`;
+      const source=new File([sourceBlob],sourceName,{type:mediaType,lastModified:Date.now()});
+      const returnPreview=returningFromPreview
+        ?{name:returningFromPreview.name,blob:returningFromPreview.blob,mediaType:returningFromPreview.mediaType,job:returningFromPreview.job,readOnly:returningFromPreview.readOnly}
+        :{name:sourceName,blob:sourceBlob,mediaType,job,readOnly:false};
+      if(returningFromPreview){
+        URL.revokeObjectURL(returningFromPreview.url);
+        setPreview(null);
+      }
+      setFocusShopPhotoEdit(false);
       setShopPhotoStudio({source,job,returnPreview});
     }catch(exception){setError(exception instanceof Error?exception.message:"Could not open Photo Studio for this file.");}
     finally{setBusyJobId(null);}
   }
 
   function openShopPhotoStudio(){
-    if(!preview||preview.readOnly||preview.mediaType!=="image/jpeg"&&preview.mediaType!=="image/png")return;
-    const source=new File([preview.blob],preview.name,{type:preview.mediaType,lastModified:Date.now()});
-    const returnPreview={name:preview.name,blob:preview.blob,mediaType:preview.mediaType,job:preview.job,readOnly:preview.readOnly};
-    URL.revokeObjectURL(preview.url);
-    setPreview(null);
-    setFocusShopPhotoEdit(false);
-    setShopPhotoStudio({source,job:preview.job,returnPreview});
+    if(!preview)return;
+    const canEditSource=preview.mediaType==="image/jpeg"||preview.mediaType==="image/png"||preview.job.printKind==="PHOTO";
+    if(!canEditSource)return;
+    void openShopPhotoStudioForJob(preview.job,preview);
   }
 
   function cancelShopPhotoStudio(){
@@ -1996,7 +2002,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={(acceptedIds,pdfBrandingEnabled)=>void applyBatchReview(batchReviewJobs,acceptedIds,pdfBrandingEnabled)}/>} 
-      {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} isSavedOutput={preview.isSavedOutput} focusEditOnMount={focusShopPhotoEdit} onEditPhoto={preview.mediaType.startsWith("image/")&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); setFocusShopPhotoEdit(false); }}/>} 
+      {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} isSavedOutput={preview.isSavedOutput} focusEditOnMount={focusShopPhotoEdit} onEditPhoto={(preview.mediaType==="image/jpeg"||preview.mediaType==="image/png"||preview.job.printKind==="PHOTO")&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); setFocusShopPhotoEdit(false); }}/>} 
       {shopPhotoStudio && <PhotoStudio source={shopPhotoStudio.source} mode="shop" dark={dark} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={cancelShopPhotoStudio} onApply={applyShopPhotoStudio}/>} 
       {shopPhotoOrderReceipt&&<ShopPhotoOrderReceipt receipt={shopPhotoOrderReceipt} onClose={()=>setShopPhotoOrderReceipt(null)} onOpenPayments={()=>{setShopPhotoOrderReceipt(null);navAction("Payments");}}/>}
       {shopPhotoOrderOpen&&<ShopPhotoOrderModal token={tokens.accessToken} paymentSettings={paymentSettings} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onClose={()=>setShopPhotoOrderOpen(false)} onContinue={draft=>{setShopPhotoOrderOpen(false);setShopPhotoOrderDraft(draft);}}/>}
