@@ -22,7 +22,7 @@ class DocumentNamePolicyTest {
 
     @Test fun detectsPdfContentAfterItsExtensionWasRemoved() {
         val file = File(temporaryFolder.root, "renamed-document")
-        val prefix = ByteArray(900) { ' '.code.toByte() }
+        val prefix = ByteArray(1023) { ' '.code.toByte() }
         file.writeBytes(prefix + "%PDF-1.7\n".toByteArray() + byteArrayOf(0x25, 0x25, 0x45, 0x4f, 0x46))
 
         assertEquals("application/pdf", DocumentNamePolicy.mimeType(file))
