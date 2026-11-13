@@ -149,7 +149,19 @@ class PrintBatchSelectionPolicyTest {
 
     private fun createFile(name: String, size: Long): File {
         val file = File(temporaryFolder.root, name)
-        RandomAccessFile(file, "rw").use { it.setLength(size) }
+        RandomAccessFile(file, "rw").use { output ->
+            output.setLength(size)
+            val signature = when (file.extension.lowercase()) {
+                "pdf" -> "%PDF-".toByteArray(Charsets.US_ASCII)
+                "jpg", "jpeg" -> byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte())
+                "png" -> byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+                else -> byteArrayOf()
+            }
+            if (size >= signature.size && signature.isNotEmpty()) {
+                output.seek(0)
+                output.write(signature)
+            }
+        }
         return file
     }
 }
