@@ -33,6 +33,18 @@ public sealed class PhotoStudioEditorSettingsRulesTests
         Assert.False(PhotoStudioEditorSettingsRules.TryNormalizeJson(json, out _));
     }
 
+    [Theory]
+    [InlineData("""{"photoName":42}""")]
+    [InlineData("""{"dateOfBirth":[]}""")]
+    [InlineData("""{"adjustments":"invalid"}""")]
+    [InlineData("""{"textLayers":"invalid"}""")]
+    [InlineData("""{"textLayers":[null]}""")]
+    [InlineData("""{"textLayers":[{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}]}""")]
+    public void RejectsMalformedPhotoStudioFieldShapes(string json)
+    {
+        Assert.False(PhotoStudioEditorSettingsRules.TryNormalizeJson(json, out _));
+    }
+
     [Fact]
     public void RejectsSettingsLargerThanTheBound()
     {
