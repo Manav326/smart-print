@@ -1,3 +1,5 @@
+import type { PhotoStudioEditorSettings } from "./PhotoStudio";
+
 export type CustomerPendingFileMetadata = {
   webkitRelativePath?: string;
   batchGroup?: string;
@@ -19,6 +21,7 @@ export type CustomerPendingSelectionMetadata = {
   uploadModeManuallySelected: boolean;
   paymentMethod: "UPI" | "CASH";
   paymentReference: string;
+  photoStudioDraft?: { sourceFingerprint: string; settings: Partial<PhotoStudioEditorSettings> } | null;
 };
 
 export type CustomerPendingSelection = {
@@ -238,7 +241,10 @@ export async function loadCustomerPendingSelection(storageKey: string): Promise<
         uploadMode: metadata.uploadMode === "CLOUD" ? "CLOUD" : "LOCAL",
         uploadModeManuallySelected: Boolean(metadata.uploadModeManuallySelected),
         paymentMethod: metadata.paymentMethod === "CASH" ? "CASH" : "UPI",
-        paymentReference: typeof metadata.paymentReference === "string" ? metadata.paymentReference.slice(0, 100) : ""
+        paymentReference: typeof metadata.paymentReference === "string" ? metadata.paymentReference.slice(0, 100) : "",
+        photoStudioDraft: metadata.photoStudioDraft && typeof metadata.photoStudioDraft.sourceFingerprint === "string"
+          ? metadata.photoStudioDraft
+          : null
       }
     };
   } finally {
