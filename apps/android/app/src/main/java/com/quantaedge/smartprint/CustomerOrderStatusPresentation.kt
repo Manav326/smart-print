@@ -2,9 +2,19 @@ package com.quantaedge.smartprint
 
 import java.util.Locale
 
+internal data class CustomerBatchOutcome(
+    val status: String,
+    val fileCount: Int,
+    val readyCount: Int,
+    val activeCount: Int,
+    val excludedCount: Int,
+    val progressPercent: Int
+)
+
 internal object CustomerOrderStatusPresentation {
     private val terminalStatuses = setOf(
-        "COMPLETED", "PDF_EXPORTED", "REJECTED", "REFUNDED", "CANCELLED", "FAILED"
+        "COMPLETED", "PDF_EXPORTED", "REJECTED", "REFUNDED", "CANCELLED", "FAILED",
+        "PARTIALLY_COMPLETED", "MIXED_OUTCOME"
     )
 
     fun activityStatusLabel(status: String): String = when (status.trim().uppercase(Locale.ROOT)) {
@@ -30,25 +40,69 @@ internal object CustomerOrderStatusPresentation {
         "CANCELLED" -> "Cancelled"
         "FAILED" -> "Failed"
         "QUOTE_EXPIRED" -> "Quote expired"
+        "PARTIALLY_COMPLETED" -> "Partially completed"
+        "MIXED_OUTCOME" -> "Mixed outcome"
         else -> "In progress"
     }
 
     fun isTerminalStatus(status: String): Boolean =
         terminalStatuses.contains(status.trim().uppercase(Locale.ROOT))
 
-    /** Prefer the live stage while any file is still active; otherwise show a terminal result. */
+    /** A deterministic batch result; never let file ordering decide the customer-facing status. */
     fun batchSummaryStatus(statuses: List<String>): String {
-        val normalized = statuses.map { it.trim().uppercase(Locale.ROOT) }
-        normalized.firstOrNull { !isTerminalStatus(it) }?.let { return it }
-        return when {
-            "COMPLETED" in normalized -> "COMPLETED"
-            "PDF_EXPORTED" in normalized -> "PDF_EXPORTED"
-            "REFUNDED" in normalized -> "REFUNDED"
-            "CANCELLED" in normalized -> "CANCELLED"
-            "FAILED" in normalized -> "FAILED"
-            "REJECTED" in normalized -> "REJECTED"
-            else -> normalized.firstOrNull().orEmpty()
+        val normalized = statuses.map { it.trim().uppercase(Locale.ROOT) }.filter(String::isNotBlank)
+        if (normalized.isEmpty()) return ""
+
+        val active = normalized.filterNot(::isTerminalStatus)
+        if (active.isNotEmpty()) {
+            val stageRank = mapOf(
+                "UPLOADED" to 0, "VALIDATING" to 0, "ANALYSING" to 0,
+                "AWAITING_CONFIGURATION" to 0, "AWAITING_CUSTOMER_APPROVAL" to 0,
+                "AWAITING_SHOP_APPROVAL" to 1,
+                "AWAITING_PAYMENT" to 2, "AWAITING_CUSTOMER_PAYMENT" to 2,
+                "AWAITING_COUNTER_PAYMENT" to 2, "CASH_AWAITING_PAYMENT" to 2,
+                "CUSTOMER_REPORTED" to 2, "PAYMENT_REPORTED" to 2,
+                "PAYMENT_REJECTED" to 2, "QUOTE_EXPIRED" to 2,
+                "PAID_AUTHORISED" to 3, "VERIFIED" to 3,
+                "LOCAL_QUEUE_CLAIMED" to 4, "LOCAL_QUEUE_READY" to 4,
+                "PRINT_AUTHORISED" to 4, "PRINT_SUBMITTING" to 4,
+                "SPOOLER_ACCEPTED" to 4, "PRINTING" to 4,
+                "OUTPUT_UNCONFIRMED" to 4, "PDF_EXPORTING" to 4,
+                "QUEUED" to 4, "SUBMITTING_TO_SPOOLER" to 4
+            )
+            return active.maxWithOrNull(
+                compareBy<String> { stageRank[it] ?: 0 }.thenBy { it }
+            ).orEmpty()
         }
+
+        val readyCount = normalized.count { it == "COMPLETED" || it == "PDF_EXPORTED" }
+        if (readyCount == normalized.size) {
+            return if (normalized.all { it == "PDF_EXPORTED" }) "PDF_EXPORTED" else "COMPLETED"
+        }
+        if (readyCount > 0) return "PARTIALLY_COMPLETED"
+
+        return when {
+            normalized.all { it == "REFUNDED" } -> "REFUNDED"
+            normalized.all { it == "CANCELLED" } -> "CANCELLED"
+            normalized.all { it == "REJECTED" } -> "REJECTED"
+            normalized.all { it == "FAILED" } -> "FAILED"
+            else -> "MIXED_OUTCOME"
+        }
+    }
+
+    fun batchOutcome(statuses: List<String>): CustomerBatchOutcome {
+        val normalized = statuses.map { it.trim().uppercase(Locale.ROOT) }.filter(String::isNotBlank)
+        val ready = normalized.count { it == "COMPLETED" || it == "PDF_EXPORTED" }
+        val excluded = normalized.count { it in setOf("REJECTED", "REFUNDED", "CANCELLED", "FAILED") }
+        val active = (normalized.size - ready - excluded).coerceAtLeast(0)
+        return CustomerBatchOutcome(
+            status = batchSummaryStatus(normalized),
+            fileCount = normalized.size,
+            readyCount = ready,
+            activeCount = active,
+            excludedCount = excluded,
+            progressPercent = if (normalized.isEmpty()) 0 else (ready * 100 / normalized.size)
+        )
     }
 
     fun filePaymentSummary(
