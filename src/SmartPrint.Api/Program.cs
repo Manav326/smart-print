@@ -11707,6 +11707,8 @@ static bool IsTenantRecoveryOperation(
         path.EndsWith("/printers/sync", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/received", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/pdf-exported", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/private-test-output", StringComparison.OrdinalIgnoreCase) ||
+        path.EndsWith("/private-document-purged", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/spooler-accepted", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/print-blocked", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith("/output-unconfirmed", StringComparison.OrdinalIgnoreCase) ||
