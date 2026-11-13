@@ -4516,6 +4516,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [photoSettingsByJobId,setPhotoSettingsByJobId]=useState<Record<string,CustomerPhotoSettings>>(()=>initialDraft?.photoSettingsByJobId??{});
   const [photoStudioSource,setPhotoStudioSource]=useState<File|null>(null);
   const [photoStudioSourceFingerprint,setPhotoStudioSourceFingerprint]=useState<string|null>(null);
+  const [photoStudioEditorDraft,setPhotoStudioEditorDraft]=useState<{fingerprint:string;settings:Partial<PhotoStudioEditorSettings>}|null>(null);
   const [validatingSelection,setValidatingSelection]=useState(false);
   const validatingSelectionRef=useRef(false);
   const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number;currentFile:string|null}|null>(null);
@@ -4634,6 +4635,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
   }
 
+  const handlePhotoStudioDraftChange=useCallback((settings:PhotoStudioEditorSettings)=>{
+    if(!photoStudioSourceFingerprint)return;
+    setPhotoStudioEditorDraft({fingerprint:photoStudioSourceFingerprint,settings});
+  },[photoStudioSourceFingerprint]);
+
   useEffect(()=>{
     if(privatePrinting)sessionStorage.setItem(privatePrintingStorageKey,"true");
     else sessionStorage.removeItem(privatePrintingStorageKey);
@@ -4684,6 +4690,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         if(token)smartPrintNativePdfPreviewTokens.set(candidate,token);
       });
       setFiles(selection.files);
+      const savedPhotoDraft=selection.metadata.photoStudioDraft;
+      if(savedPhotoDraft){
+        const savedPhotoSource=selection.files.find(candidate=>customerFileFingerprint(candidate)===savedPhotoDraft.sourceFingerprint);
+        if(savedPhotoSource){
+          setPhotoStudioSource(savedPhotoSource);
+          setPhotoStudioSourceFingerprint(savedPhotoDraft.sourceFingerprint);
+          setPhotoStudioEditorDraft({fingerprint:savedPhotoDraft.sourceFingerprint,settings:savedPhotoDraft.settings});
+        }
+      }
       setSelectedFileIndex(selection.metadata.selectedFileIndex);
       setBatchName(selection.metadata.batchName);
       setFileGroupNames(selection.metadata.fileGroupNames);
@@ -4722,11 +4737,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       uploadMode,
       uploadModeManuallySelected,
       paymentMethod,
-      paymentReference
+      paymentReference,
+      photoStudioDraft:photoStudioEditorDraft
+        ?{sourceFingerprint:photoStudioEditorDraft.fingerprint,settings:photoStudioEditorDraft.settings}
+        :null
     }).catch(()=>{
       setDraftPersistenceWarning("Your files remain selected, but some print settings could not be saved for recovery.");
     });
-  },[pendingSelectionRestored,pendingSelectionStorageKey,files.length,selectedFileIndex,batchName,fileGroupNames,groupSettings,fileSettings,photoSettingsByFileFingerprint,privatePrinting,privacyChoiceManuallySelected,uploadMode,uploadModeManuallySelected,paymentMethod,paymentReference]);
+  },[pendingSelectionRestored,pendingSelectionStorageKey,files.length,selectedFileIndex,batchName,fileGroupNames,groupSettings,fileSettings,photoSettingsByFileFingerprint,privatePrinting,privacyChoiceManuallySelected,uploadMode,uploadModeManuallySelected,paymentMethod,paymentReference,photoStudioEditorDraft]);
 
   useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
@@ -5243,7 +5261,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       if(urls.length)previews[fp]=urls;
     }
     void persistPendingFiles(nextFiles);
-    setFiles(nextFiles);setSelectedFileIndex(index);setSelectedPreparedPhotoPage(0);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoPreviewPagesByFingerprint(previews);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
+    setFiles(nextFiles);setSelectedFileIndex(index);setSelectedPreparedPhotoPage(0);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoPreviewPagesByFingerprint(previews);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setPhotoStudioEditorDraft(null);setError("");
   }
   function openPhotoStudio(candidate:File){
     const fingerprint=customerFileFingerprint(candidate);
@@ -5254,6 +5272,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(!photoRatesAvailable){setError("Photo printing is not configured at this shop yet. Please ask the shop owner to enable photo pricing.");return;}
     setPhotoStudioSource(candidate);
     setPhotoStudioSourceFingerprint(fingerprint);
+    if(photoStudioEditorDraft?.fingerprint!==fingerprint)setPhotoStudioEditorDraft(null);
     setError("");
   }
   function openCustomerPdfPreview(candidate:File) {
@@ -5556,7 +5575,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   const photoAlreadyUploaded=Boolean(file&&uploadedFileFingerprints.includes(customerFileFingerprint(file)));
-  return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
+  return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} initialSettings={photoStudioEditorDraft?.fingerprint===photoStudioSourceFingerprint?photoStudioEditorDraft.settings:undefined} onDraftChange={handlePhotoStudioDraftChange} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setPhotoStudioEditorDraft(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · {UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per file · {UPLOAD_LIMITS.maxBatchFiles} files / {UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB total</span></div>
     {!pendingSelectionRestored&&<small className="customer-upload-local-note" role="status">Restoring your saved selection…</small>}
     {draftPersistenceWarning&&<small className="customer-upload-local-note" role="status">{draftPersistenceWarning}</small>}
