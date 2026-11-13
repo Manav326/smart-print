@@ -8958,7 +8958,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         return Results.BadRequest(new { code = "invalid_file_name", message = "The uploaded document name is invalid." });
     }
     originalName = originalName[..Math.Min(originalName.Length, 255)];
-    var extension = Path.GetExtension(originalName).ToLowerInvariant();
+    var extension = string.IsNullOrWhiteSpace(request.DetectedFileExtension)
+        ? Path.GetExtension(originalName).ToLowerInvariant()
+        : request.DetectedFileExtension.Trim().ToLowerInvariant();
     if (request.PrivatePrinting)
     {
         originalName = "Private document";
@@ -9053,7 +9055,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.PrintKind != request.PrintKind ||
             (!completedPrivateTicket && (existing.SizeBytes != request.SizeBytes ||
                 !string.Equals(existing.Sha256, sha, StringComparison.OrdinalIgnoreCase) ||
-                existing.OriginalFileName != originalName)) ||
+                existing.OriginalFileName != originalName ||
+                existing.FileExtension != extension ||
+                !string.Equals(existing.MediaType, mediaType, StringComparison.OrdinalIgnoreCase))) ||
             (request.BatchId is Guid requestedBatchId && existing.BatchId != requestedBatchId) ||
             (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
             PrintBatchGroupRules.Normalize(existing.BatchGroupName) != batchGroupName ||
