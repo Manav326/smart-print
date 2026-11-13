@@ -1826,9 +1826,16 @@ class MainActivity : AppCompatActivity() {
                         })
                         body.addView(top)
                         body.addView(text(
-                            "${identity.shopName} · ${CustomerHistoryDatePresentation.dateTime(identity.createdUtc)}",
+                            "${identity.shopName} · Placed ${CustomerHistoryDatePresentation.dateTime(identity.createdUtc)}",
                             10, R.color.qp_muted, false
-                        ).apply { setPadding(0, dp(5), 0, dp(5)) })
+                        ).apply { setPadding(0, dp(5), 0, dp(3)) })
+                        val latestUpdate = batch.maxOfOrNull { it.updatedUtc }.orEmpty()
+                        if (latestUpdate.isNotBlank() && latestUpdate != identity.createdUtc) {
+                            body.addView(text(
+                                "Last update · ${CustomerHistoryDatePresentation.timelineDateTime(latestUpdate)}",
+                                9, R.color.qp_muted, false
+                            ).apply { setPadding(0, 0, 0, dp(5)) })
+                        }
                         body.addView(text(
                             "${batch.size} file(s) · ${batch.sumOf { it.pageCount }} pages",
                             10, R.color.qp_primary, true
@@ -1889,12 +1896,12 @@ class MainActivity : AppCompatActivity() {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.END
                         }
-                        actionRow.addView(button("View details", false).apply {
+                        actionRow.addView(button("Track order", false).apply {
                             minHeight = dp(28)
                             textSize = 9f
-                            contentDescription = "View details for $title"
+                            contentDescription = "Track order $title"
                             setOnClickListener { showCustomerJobDetails(batch) }
-                        }, LinearLayout.LayoutParams(dp(84), dp(28)))
+                        }, LinearLayout.LayoutParams(dp(96), dp(28)))
                         body.addView(actionRow, linearParams().apply { topMargin = dp(5) })
                         item.addView(body)
                         results.addView(item, linearParams().apply { bottomMargin = dp(8) })
