@@ -681,6 +681,55 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task PrivatePrintingPhotoRevisionCannotRetainAnEditableOriginalOrSettings()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Private customer photo bytes"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                PrivatePrinting = true,
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "private-original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.ReplaceStagedPhotoDocumentAsync(
+                    job.Id,
+                    staged.Sha256,
+                    staged.SizeBytes,
+                    "private-photo-sheet.pdf",
+                    "%PDF-1.4\\nprivate-photo-sheet"u8.ToArray(),
+                    1,
+                    500,
+                    () => Task.CompletedTask,
+                    CancellationToken.None));
+
+            var unchanged = store.Find(job.Id)!;
+            Assert.Equal("private-original.jpg", unchanged.DocumentName);
+            Assert.Equal(staged.Sha256, unchanged.Sha256);
+            Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.Null(unchanged.PhotoSourcePath);
+            Assert.Null(unchanged.PhotoSourceDocumentName);
+            Assert.Null(unchanged.PhotoSourceMediaType);
+            Assert.Null(unchanged.PhotoSourceSha256);
+            Assert.Null(unchanged.PhotoSourceSizeBytes);
+            Assert.Empty(Directory.GetFiles(root, "*.photo.source"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task LocalPhotoRevisionReplacesTheProtectedDocumentAndCommitsTheServerSnapshot()
     {
         var root = CreateTemporaryDirectory();
@@ -933,6 +982,10 @@ public sealed class AgentLocalQueueStoreTests
             File.Copy(entry.DocumentPath, retainedPhotoPath);
             var manifestWithUnexpectedPhotoSource = store.Find(job.Id)! with
             {
+                // Reproduce an older partially purged manifest: the main
+                // document path is already blank, but the retained photo sidecar
+                // and its sensitive metadata were left behind.
+                DocumentPath = string.Empty,
                 PhotoSourcePath = retainedPhotoPath,
                 PhotoSourceDocumentName = "private-original.jpg",
                 PhotoSourceMediaType = "image/jpeg",
@@ -942,6 +995,7 @@ public sealed class AgentLocalQueueStoreTests
             await File.WriteAllTextAsync(
                 Path.ChangeExtension(entry.DocumentPath, ".json"),
                 JsonSerializer.Serialize(manifestWithUnexpectedPhotoSource, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            File.Delete(entry.DocumentPath);
 
             await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
 
@@ -962,6 +1016,20 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Null(sanitized.PhotoSourceSizeBytes);
             Assert.Contains(store.GetPrivatePurgePendingJobs(), item => item.JobId == job.Id);
 
+            // Acknowledgement must not mask any source metadata left behind
+            // by a stale manifest, even after the files themselves are gone.
+            var staleMetadata = store.Find(job.Id)! with
+            {
+                PhotoSourceDocumentName = "private-original.jpg"
+            };
+            await File.WriteAllTextAsync(
+                Path.ChangeExtension(entry.DocumentPath, ".json"),
+                JsonSerializer.Serialize(staleMetadata, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None));
+
+            // The retry path scrubs stale metadata and can then be acknowledged.
+            await store.PurgePrivateSourceAfterConfirmedOutputAsync(job.Id, CancellationToken.None);
             await store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None);
             Assert.False(store.Find(job.Id)!.PrivatePurgePending);
             Assert.Empty(store.GetPrivatePurgePendingJobs());
