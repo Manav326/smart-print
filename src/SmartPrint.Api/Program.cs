@@ -3323,7 +3323,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
         where printer.Id == job.PrinterDeviceId && printer.TenantId == tenantId &&
               printer.AgentDeviceId == job.ClaimedByAgentDeviceId && printer.IsActive &&
               printer.QueueName != null && printer.QueueName != "" &&
-              (printer.OutputMode == "PDF_EXPORT" ||
+              ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
                (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                 (printer.Status == "Ready" || printer.Status == "Busy"))) &&
               agent.RevokedUtc == null && agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
@@ -6385,7 +6385,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                   printer.QueueName != null && printer.QueueName != "" &&
                   (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
                    (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
-                  (printer.OutputMode == "PDF_EXPORT" ||
+                  ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
                    (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                     (printer.Status == "Ready" || printer.Status == "Busy"))) &&
                   db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId &&
@@ -6416,7 +6416,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                 printer.AgentDeviceId == device.Id && printer.IsActive && printer.QueueName != null && printer.QueueName != "" &&
                 (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
                  (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
-                (printer.OutputMode == "PDF_EXPORT" ||
+                ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
                  (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                   (printer.Status == "Ready" || printer.Status == "Busy")))) &&
             db.AgentDevices.Any(agent => agent.Id == device.Id && agent.TenantId == device.TenantId &&
@@ -6543,7 +6543,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/private-test-output", async (
             printer.AgentDeviceId == device.Id && printer.IsActive &&
             printer.OutputMode == "PDF_EXPORT" &&
             printer.QueueName != null && printer.QueueName != "" &&
-            printer.LastSeenUtc != null && printer.LastSeenUtc >= now.AddMinutes(-2)) &&
+            printer.LastSeenUtc != null && printer.LastSeenUtc >= now.AddMinutes(-2) &&
+            (printer.Status == "Ready" || printer.Status == "Busy")) &&
         await db.AgentDevices.AnyAsync(agent =>
             agent.Id == device.Id && agent.TenantId == device.TenantId &&
             agent.RevokedUtc == null && agent.Status != "Revoked" &&

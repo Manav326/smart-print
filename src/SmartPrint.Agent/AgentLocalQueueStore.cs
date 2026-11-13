@@ -910,7 +910,7 @@ public sealed class AgentLocalQueueStore
         {
             var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
             if (!entry.PrivatePrinting ||
-                entry.State is not ("PRIVATE_PURGE_PENDING" or "OUTPUT_CONFIRMED" or "PDF_EXPORT_REPORTED") ||
+                entry.State is not ("PRIVATE_PURGE_PENDING" or "OUTPUT_CONFIRMED" or "PDF_EXPORT_REPORTED" or "TEST_OUTPUT_SOURCE_PURGED") ||
                 entry.CompletedUtc is null)
                 throw new InvalidOperationException("A private source can be purged only after verified physical output or a separately recorded test output.");
 
@@ -937,7 +937,8 @@ public sealed class AgentLocalQueueStore
 
             await SaveManifestAsync(entry with
             {
-                State = entry.State == "PDF_EXPORT_REPORTED" && entry.OutputMode == PrinterOutputModeRules.PdfExport
+                State = entry.OutputMode == PrinterOutputModeRules.PdfExport &&
+                    entry.State is ("PDF_EXPORT_REPORTED" or "TEST_OUTPUT_SOURCE_PURGED")
                     ? "TEST_OUTPUT_SOURCE_PURGED"
                     : "OUTPUT_CONFIRMED",
                 DocumentPath = string.Empty,
