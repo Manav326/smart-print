@@ -3516,13 +3516,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision-grant", async (
 
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageMode, item.AgentDeviceId, item.MediaType })
+        .Select(item => new { item.StorageMode, item.AgentDeviceId, item.MediaType, item.PhotoSourceMediaType })
         .SingleOrDefaultAsync(ct);
     if (document is null) return Results.NotFound();
     if (document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId is not Guid agentId)
         return Results.Conflict(new { code = "photo_revision_not_local", message = "This document is not stored on the paired local computer." });
-    if (document.MediaType is not ("image/jpeg" or "image/png"))
-        return Results.Conflict(new { code = "photo_revision_source_not_image", message = "The shop editor requires an original JPG or PNG image." });
+    var photoSourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+    if (photoSourceMediaType is not ("image/jpeg" or "image/png"))
+        return Results.Conflict(new { code = "photo_revision_source_not_image", message = "The shop editor requires a retained original JPG or PNG image." });
 
     var hasPayment = await db.PrintPayments.AnyAsync(item =>
         item.TenantId == tenantId && item.PrintJobId == jobId &&
@@ -3852,7 +3853,8 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
 
     var variant = context.Request.Query["variant"].FirstOrDefault();
     var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
-    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+    var photoSourcePreview = string.Equals(variant, "photo-source", StringComparison.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview && !photoSourcePreview &&
         !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
         return Results.BadRequest(new { code = "local_preview_variant_invalid" });
 
@@ -6551,7 +6553,17 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
 
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == device.TenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageMode, item.AgentDeviceId, item.Sha256, item.SizeBytes, item.MediaType })
+        .Select(item => new
+        {
+            item.StorageMode,
+            item.AgentDeviceId,
+            item.Sha256,
+            item.SizeBytes,
+            item.MediaType,
+            item.PhotoSourceSha256,
+            item.PhotoSourceSizeBytes,
+            item.PhotoSourceMediaType
+        })
         .SingleOrDefaultAsync(ct);
     if (document is null) return Results.NotFound();
 
@@ -6560,9 +6572,12 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
         document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId != device.Id)
         return Results.Conflict(new { code = "photo_revision_not_allowed", message = "This local document is no longer eligible for photo enhancement." });
 
-    if (document.MediaType is not ("image/jpeg" or "image/png") ||
-        !string.Equals(document.Sha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
-        document.SizeBytes != request.ExpectedOriginalSizeBytes)
+    var sourceSha256 = document.PhotoSourceSha256 ?? document.Sha256;
+    var sourceSizeBytes = document.PhotoSourceSizeBytes ?? document.SizeBytes;
+    var sourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+    if (sourceMediaType is not ("image/jpeg" or "image/png") ||
+        !string.Equals(sourceSha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
+        sourceSizeBytes != request.ExpectedOriginalSizeBytes)
         return Results.Conflict(new { code = "photo_revision_original_changed", message = "The local original no longer matches the document registered by the shop service. Reopen its preview." });
 
     if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
@@ -6615,8 +6630,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
     return Results.Ok(new
     {
         job.Id,
-        OriginalSha256 = document.Sha256,
-        OriginalSizeBytes = document.SizeBytes,
+        OriginalSha256 = sourceSha256,
+        OriginalSizeBytes = sourceSizeBytes,
         NewSha256 = request.Sha256,
         NewSizeBytes = request.SizeBytes,
         request.PhotoSizeCode,
@@ -6829,6 +6844,13 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     var now = DateTimeOffset.UtcNow;
     var previousStorageMode = document.StorageMode;
     var outputName = $"photo-sheet-{job.JobNumber}.pdf";
+    if (document.PhotoSourceOriginalFileName is null)
+    {
+        document.PhotoSourceOriginalFileName = document.OriginalFileName;
+        document.PhotoSourceMediaType = document.MediaType;
+        document.PhotoSourceSha256 = document.Sha256;
+        document.PhotoSourceSizeBytes = document.SizeBytes;
+    }
     document.OriginalFileName = outputName;
     document.MediaType = "application/pdf";
     document.FileExtension = ".pdf";
@@ -6975,10 +6997,33 @@ agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
             on new { job.TenantId, PrintJobId = job.Id } equals new { item.TenantId, item.PrintJobId }
         where job.Id == jobId && job.TenantId == device.TenantId &&
               item.StorageMode == "LOCAL_AGENT" && item.AgentDeviceId == device.Id
-        select new { item.MediaType, item.OriginalFileName, item.SizeBytes, item.Sha256 }
+        select new
+        {
+            item.MediaType,
+            item.OriginalFileName,
+            item.SizeBytes,
+            item.Sha256,
+            item.PhotoSourceOriginalFileName,
+            item.PhotoSourceMediaType,
+            item.PhotoSourceSha256,
+            item.PhotoSourceSizeBytes
+        }
     ).SingleOrDefaultAsync(ct);
 
     if (document is null) return Results.NotFound();
+    if (photoSourcePreview)
+    {
+        var mediaType = document.PhotoSourceMediaType ?? document.MediaType;
+        var originalFileName = document.PhotoSourceOriginalFileName ?? document.OriginalFileName;
+        var sizeBytes = document.PhotoSourceSizeBytes ?? document.SizeBytes;
+        var sha256 = document.PhotoSourceSha256 ?? document.Sha256;
+        if (mediaType is not ("image/jpeg" or "image/png") ||
+            sizeBytes <= 0 ||
+            string.IsNullOrWhiteSpace(sha256) || sha256.Length != 64 || !sha256.All(Uri.IsHexDigit) ||
+            string.IsNullOrWhiteSpace(originalFileName) || originalFileName.Length > 255)
+            return Results.Conflict(new { code = "local_photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
+        return Results.Ok(new { MediaType = mediaType, OriginalFileName = originalFileName, SizeBytes = sizeBytes, Sha256 = sha256 });
+    }
     return Results.Ok(new
     {
         document.MediaType,
