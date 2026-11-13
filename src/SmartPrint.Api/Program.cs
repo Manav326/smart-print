@@ -4058,7 +4058,7 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
     context.Response.Headers["Cache-Control"] = "private, no-store";
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Content-Security-Policy"] = "sandbox";
-    return Results.File(content, document.MediaType, enableRangeProcessing: false);
+    return Results.File(content, mediaType, enableRangeProcessing: false);
 });
 
 shop.MapPost("/print-batches/{batchId:guid}/review", async (
