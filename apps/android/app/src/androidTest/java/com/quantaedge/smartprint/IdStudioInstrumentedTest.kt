@@ -292,7 +292,7 @@ class IdStudioInstrumentedTest {
                 onView(withContentDescription("ID front scan preview")).check(matches(isDisplayed()))
                 onView(withContentDescription("ID back scan preview")).check(matches(isDisplayed()))
                 onView(withText("Next")).perform(click())
-                onView(withText("Prepare A4 print sheet")).check(matches(isDisplayed()))
+                onView(withText("Save")).check(matches(isDisplayed()))
             }
         } finally {
             store.deleteDraft(draftId)
