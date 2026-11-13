@@ -68,14 +68,20 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
-    public void UnknownThirdPartyPdfDriversAreNotAutomaticallyEligibleVirtualOutputs()
+    public void UnknownThirdPartyVirtualDriversFailClosedInsteadOfBecomingPhysical()
     {
         Assert.Equal(
-            PrinterOutputModeRules.Physical,
+            PrinterOutputModeRules.UnsupportedVirtual,
             PrinterOutputModeRules.Detect("Adobe PDF", "Adobe PDF"));
         Assert.Equal(
-            PrinterOutputModeRules.Physical,
+            PrinterOutputModeRules.UnsupportedVirtual,
             PrinterOutputModeRules.Detect("Foxit PDF Printer", "Foxit PDF Printer"));
+        Assert.Equal(
+            PrinterOutputModeRules.UnsupportedVirtual,
+            PrinterOutputModeRules.Detect("Microsoft XPS Document Writer", "Microsoft XPS Document Writer"));
+        Assert.Equal(
+            PrinterOutputModeRules.UnsupportedVirtual,
+            PrinterOutputModeRules.Detect("Generic PDF Queue", "Generic Driver", "PORTPROMPT:"));
     }
 
     [Fact]

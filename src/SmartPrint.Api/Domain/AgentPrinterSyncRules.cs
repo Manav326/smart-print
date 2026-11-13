@@ -50,7 +50,7 @@ public static class AgentPrinterSyncRules
                 printer.QueueName.Length <= MaximumQueueNameLength &&
                 !string.IsNullOrWhiteSpace(printer.DriverName) &&
                 printer.DriverName.Length <= MaximumDriverNameLength &&
-                (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT") &&
+                (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT" or "UNSUPPORTED_VIRTUAL") &&
                 (printer.PortName?.Length ?? 0) <= MaximumPortNameLength &&
                 (printer.CapabilitiesJson?.Length ?? 0) <= MaximumCapabilitiesJsonLength &&
                 ValidStatuses.Contains(printer.Status))

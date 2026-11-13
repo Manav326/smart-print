@@ -2989,6 +2989,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
                        item.TenantId == tenantId &&
                        item.IsActive &&
                        item.AgentDeviceId != null &&
+                       (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT") &&
                        ((item.OutputMode == "PDF_EXPORT" && !selectedJob.PrivatePrinting) ||
                         (item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
                          (item.Status == "Ready" || item.Status == "Busy"))) &&
@@ -3323,6 +3324,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
         where printer.Id == job.PrinterDeviceId && printer.TenantId == tenantId &&
               printer.AgentDeviceId == job.ClaimedByAgentDeviceId && printer.IsActive &&
               printer.QueueName != null && printer.QueueName != "" &&
+              (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
               ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
                (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                 (printer.Status == "Ready" || printer.Status == "Busy"))) &&
@@ -6540,6 +6542,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                       other.PrinterDeviceId != job.PrinterDeviceId)) &&
                   printer.AgentDeviceId == device.Id && printer.IsActive &&
                   printer.QueueName != null && printer.QueueName != "" &&
+                  (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
                   (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
                    (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
                   ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
@@ -6571,6 +6574,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                 other.PrinterDeviceId != job.PrinterDeviceId)) &&
             db.PrinterDevices.Any(printer => printer.Id == job.PrinterDeviceId && printer.TenantId == device.TenantId &&
                 printer.AgentDeviceId == device.Id && printer.IsActive && printer.QueueName != null && printer.QueueName != "" &&
+                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
                 (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
                  (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
                 ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||

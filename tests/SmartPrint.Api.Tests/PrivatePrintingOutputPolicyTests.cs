@@ -47,6 +47,7 @@ public sealed class PrivatePrintingOutputPolicyTests
     [InlineData("")]
     [InlineData("UNKNOWN")]
     [InlineData("PDF")]
+    [InlineData("UNSUPPORTED_VIRTUAL")]
     public void UnknownPrinterModesAreNeverEligible(string? outputMode)
     {
         Assert.False(PrivatePrintingOutputPolicy.IsEligible(

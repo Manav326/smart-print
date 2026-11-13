@@ -76,6 +76,21 @@ public sealed class AgentPrinterSyncRulesTests
     }
 
     [Fact]
+    public void AcceptsUnsupportedVirtualQueueClassificationForVisibilityButDoesNotMarkItPhysical()
+    {
+        var printer = Printer(
+            "Adobe PDF",
+            "Adobe PDF",
+            "PORTPROMPT:",
+            outputMode: "UNSUPPORTED_VIRTUAL");
+
+        var result = AgentPrinterSyncRules.Validate([printer]);
+
+        Assert.Equal(AgentPrinterSyncValidationFailure.None, result.Failure);
+        Assert.Equal("UNSUPPORTED_VIRTUAL", Assert.Single(result.Printers).OutputMode);
+    }
+
+    [Fact]
     public void RejectsDuplicateQueueNamesIgnoringCaseAndWhitespace()
     {
         var result = AgentPrinterSyncRules.Validate([
