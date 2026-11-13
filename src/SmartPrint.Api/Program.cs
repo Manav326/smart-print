@@ -1304,26 +1304,24 @@ customerApi.MapGet("/orders/{orderKey:guid}/tracking", async (
         .Select(item => item.BatchPaymentId!.Value)
         .Distinct()
         .ToArray();
-    var batchPayments = batchPaymentIds.Length == 0
-        ? []
-        : await db.PrintBatchPayments.AsNoTracking()
-            .Where(item => item.TenantId == anchorJob.TenantId && batchPaymentIds.Contains(item.Id))
-            .OrderByDescending(item => item.UpdatedUtc)
-            .Select(item => new
-            {
-                item.Id,
-                item.BatchId,
-                item.Method,
-                item.Status,
-                item.AmountMinor,
-                item.Currency,
-                item.PaymentReference,
-                item.RejectionReason,
-                item.CreatedUtc,
-                item.UpdatedUtc,
-                item.VerifiedUtc
-            })
-            .ToListAsync(ct);
+    var batchPayments = await db.PrintBatchPayments.AsNoTracking()
+        .Where(item => item.TenantId == anchorJob.TenantId && batchPaymentIds.Contains(item.Id))
+        .OrderByDescending(item => item.UpdatedUtc)
+        .Select(item => new
+        {
+            item.Id,
+            item.BatchId,
+            item.Method,
+            item.Status,
+            item.AmountMinor,
+            item.Currency,
+            item.PaymentReference,
+            item.RejectionReason,
+            item.CreatedUtc,
+            item.UpdatedUtc,
+            item.VerifiedUtc
+        })
+        .ToListAsync(ct);
 
     var first = jobs[0];
     return Results.Ok(new
