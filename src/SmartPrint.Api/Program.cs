@@ -3678,7 +3678,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         await transaction.RollbackAsync(ct);
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["photoDetails"] = ["Choose a supported ID photo size and a quantity from 1 to 100."]
+            ["photoDetails"] = [$"Choose a supported ID photo size and a quantity from 1 to {UploadLimits.MaxPhotoCount}."]
         });
     }
 
