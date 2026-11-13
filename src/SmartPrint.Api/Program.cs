@@ -3685,6 +3685,16 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
 
     var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+    if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(
+            form["editorSettingsJson"].FirstOrDefault(), out var editorSettingsJson))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.BadRequest(new
+        {
+            code = "photo_editor_settings_invalid",
+            message = "The saved Photo Studio editing settings are invalid. Reopen the editor and save again."
+        });
+    }
 
     var pricing = await db.ShopPricingProfiles.AsNoTracking()
         .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
@@ -3756,6 +3766,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     document.StorageMode = "CLOUD";
     document.AgentDeviceId = null;
     document.PageSizesJson = stored.Analysis.PageSizesJson;
+    document.PhotoEditorSettingsJson = editorSettingsJson;
     document.PurgedUtc = null;
 
     job.PageCount = expectedPageCount;
@@ -3829,7 +3840,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         job.QuoteExpiresUtc,
         document.OriginalFileName,
         document.MediaType,
-        document.SizeBytes
+        document.SizeBytes,
+        document.PhotoEditorSettingsJson
     });
 });
 
