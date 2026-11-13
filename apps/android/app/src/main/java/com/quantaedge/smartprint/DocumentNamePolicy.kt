@@ -55,12 +55,12 @@ object DocumentNamePolicy {
 
     fun isPrintable(file: File): Boolean {
         if (!file.isFile || file.length() !in 1..MAX_PRINT_BYTES) return false
-        return detectMimeType(file) in printableMimeTypes
+        return mimeType(file) in printableMimeTypes
     }
 
     fun isBatchSource(file: File): Boolean {
         if (!file.isFile) return false
-        return detectMimeType(file) in printableMimeTypes
+        return mimeType(file) in printableMimeTypes
     }
 
     fun isPdf(file: File): Boolean = mimeType(file) == "application/pdf"
