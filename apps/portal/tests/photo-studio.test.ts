@@ -181,7 +181,9 @@ test("short portrait phones keep Photo Studio preview, controls and save actions
 test("customer, shop order and private library share one strict JPG/PNG source policy",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  const policy=readFileSync(new URL("../src/photo-source-policy.ts",import.meta.url),"utf8");
- assert.match(app,/function isCustomerImage\(file:File\):boolean\s*\{\s*return isSupportedPhotoSource\(file\);/);
+ assert.match(app,/function isCustomerImage\(file:File\):boolean\s*\{\s*const identified=identifiedCustomerDocumentTypes\.get\(file\);/);
+ assert.match(app,/if\(identified\)return identified\.mediaType==="image\/jpeg"\|\|identified\.mediaType==="image\/png";/);
+ assert.match(app,/return isSupportedPhotoSource\(file\);/);
  assert.match(app,/resolvePhotoSourceMimeType\(selected\)/);
  assert.match(app,/resolvePhotoSourceMimeType\(candidate\)/);
  assert.match(policy,/declaredMime === "image\/jpeg" \|\| declaredMime === "image\/png"/);
