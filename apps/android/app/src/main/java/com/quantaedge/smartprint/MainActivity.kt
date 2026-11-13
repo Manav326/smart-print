@@ -1973,12 +1973,8 @@ class MainActivity : AppCompatActivity() {
                     val legacyItems = authenticated { token ->
                         CustomerAccountClient.legacyHistorySnapshot(accountServiceUrl(), token)
                     }
-                    val merged = linkedMapOf<String, CustomerPrintHistoryItem>()
-                    local.forEach { merged[it.id] = it }
-                    legacyItems.forEach { merged[it.id] = it }
-                    merged.values.sortedWith(
-                        compareByDescending<CustomerPrintHistoryItem> { it.createdUtc }.thenByDescending { it.id }
-                    ).also { store.replace(email, it) }
+                    CustomerAccountClient.mergeLegacyHistorySnapshot(local, legacyItems)
+                        .also { store.replace(email, it) }
                 } else if (serverCount <= local.size.toLong()) {
                     local
                 } else {
