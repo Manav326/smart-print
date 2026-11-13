@@ -455,13 +455,19 @@ class MainActivity : AppCompatActivity() {
                     pendingIdStudioSide = null
                     val nextSide = queuedIdStudioSide
                     queuedIdStudioSide = null
-                    toast("ID scan could not be saved: " + message(e))
-                    if (nextSide != null && idStudioDraftId?.let(idStudioStore::draftExists) == true) {
-                        startIdStudioSideScan(nextSide)
-                    } else if (idStudioDraftId?.let(idStudioStore::hasFront) == true) {
-                        showIdStudioBackStep()
+                    if (idSide != null) {
+                        toast("ID scan could not be saved: " + message(e))
+                        if (nextSide != null && idStudioDraftId?.let(idStudioStore::draftExists) == true) {
+                            startIdStudioSideScan(nextSide)
+                        } else if (idStudioDraftId?.let(idStudioStore::hasFront) == true) {
+                            showIdStudioBackStep()
+                        } else {
+                            showIdStudioHome()
+                        }
                     } else {
-                        showIdStudioHome()
+                        pendingScanNeedsDestination = false
+                        pendingScanDestinationPath = ""
+                        toast("Could not save the scan: " + message(e))
                     }
                 }
             } else {
@@ -4904,6 +4910,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun idStudioHasSide(draftId: String, side: String): Boolean =
+        if (side == "front") idStudioStore.hasFront(draftId) else idStudioStore.hasBack(draftId)
+
     private fun showIdCaptureOverlay() {
         if (!Settings.canDrawOverlays(this) || idCaptureOverlayView != null) return
         val manager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -4929,7 +4938,7 @@ class MainActivity : AppCompatActivity() {
             idCaptureOverlayWindowManager = manager
             idCaptureOverlayView = overlay
             idCaptureOverlayThumbnails.forEach { (side, image) ->
-                if (idStudioDraftId?.let(idStudioStore::hasSide) == true) {
+                if (idStudioDraftId?.let { draft -> idStudioHasSide(draft, side) } == true) {
                     loadIdStudioDraftThumbnail(image, side)
                 }
             }
@@ -4957,7 +4966,7 @@ class MainActivity : AppCompatActivity() {
         }
         listOf("front", "back").forEach { side ->
             val captured = idStudioDraftId?.let { draft ->
-                idStudioStore.draftExists(draft) && idStudioStore.hasSide(draft, side)
+                idStudioStore.draftExists(draft) && idStudioHasSide(draft, side)
             } == true
             val title = if (side == "front") "Front" else "Back"
             val tile = MaterialCardView(this).apply {
@@ -5021,7 +5030,7 @@ class MainActivity : AppCompatActivity() {
             tile.contentDescription = when {
                 selected -> "ID $side side selected to retake next"
                 idStudioDraftId?.let { draft ->
-                    idStudioStore.draftExists(draft) && idStudioStore.hasSide(draft, side)
+                    idStudioStore.draftExists(draft) && idStudioHasSide(draft, side)
                 } == true -> "Retake ID $side side after the current scan"
                 else -> "ID $side side not captured"
             }
