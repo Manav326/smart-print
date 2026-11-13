@@ -622,7 +622,8 @@ public sealed class LocalAgentApiHostedService(
             {
                 var variant = context.Request.Query["variant"].FirstOrDefault();
                 var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
-                if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+                var photoSourcePreview = string.Equals(variant, "photo-source", StringComparison.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(variant) && !outputPreview && !photoSourcePreview &&
                     !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
                     return Results.BadRequest(new { code = "local_preview_variant_invalid" });
 
@@ -646,7 +647,7 @@ public sealed class LocalAgentApiHostedService(
                 client.Timeout = TimeSpan.FromSeconds(15);
                 client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
                 var authorizePath = $"api/v1/agent/local-document-previews/{jobId}/authorize" +
-                    (outputPreview ? "?variant=output" : string.Empty);
+                    (outputPreview ? "?variant=output" : photoSourcePreview ? "?variant=photo-source" : string.Empty);
                 using var authorizeRequest = new HttpRequestMessage(HttpMethod.Get, authorizePath);
                 authorizeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
                 authorizeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
@@ -726,6 +727,43 @@ public sealed class LocalAgentApiHostedService(
                         return Results.Conflict(new { code = "local_preview_output_integrity_failed", message = "The saved PDF failed its integrity check and has not been shown." });
                     }
                     mediaType = "application/pdf";
+                }
+                else if (photoSourcePreview)
+                {
+                    if (authorizedDocument.MediaType is not ("image/jpeg" or "image/png"))
+                        return Results.Conflict(new { code = "local_photo_source_type_mismatch", message = "The retained source is not a supported JPG or PNG photo." });
+                    var sourceName = entry.PhotoSourceDocumentName ?? entry.DocumentName;
+                    var sourceMediaType = entry.PhotoSourceMediaType ?? entry.MediaType;
+                    var sourceSha256 = entry.PhotoSourceSha256 ?? entry.Sha256;
+                    var sourceSizeBytes = entry.PhotoSourceSizeBytes ?? entry.SizeBytes;
+                    if (sourceMediaType != authorizedDocument.MediaType ||
+                        sourceName != authorizedDocument.OriginalFileName ||
+                        sourceSizeBytes != authorizedDocument.SizeBytes ||
+                        !string.Equals(sourceSha256, authorizedDocument.Sha256, StringComparison.OrdinalIgnoreCase))
+                        return Results.Conflict(new { code = "local_photo_source_mismatch", message = "The retained original photo does not match the shop service's source record." });
+                    try
+                    {
+                        bytes = localQueueStore.ReadPhotoSource(jobId);
+                    }
+                    catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+                    {
+                        return Results.NotFound(new { code = "local_photo_source_missing", message = "The original photo is no longer present on this shop computer." });
+                    }
+                    catch (UnauthorizedAccessException exception)
+                    {
+                        logger.LogError(exception, "Windows denied access to the retained source photo for job {JobId}.", jobId);
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status500InternalServerError,
+                            title: "The SmartPrint background service cannot access the retained original photo. Repair the Agent's local storage permissions, then try again.");
+                    }
+                    catch (Exception exception) when (exception is IOException or CryptographicException or InvalidDataException)
+                    {
+                        logger.LogError(exception, "Retained source photo integrity check failed for job {JobId}.", jobId);
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status500InternalServerError,
+                            title: "The retained original photo could not be read or verified safely.");
+                    }
+                    mediaType = sourceMediaType;
                 }
                 else
                 {
