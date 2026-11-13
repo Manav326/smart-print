@@ -112,12 +112,44 @@ class NativeFilePickerInstrumentedTest {
                 }
                 assertTrue("The original encrypted Photo Studio document must remain saved.", photo.isFile)
                 assertTrue("The original encrypted ID Studio document must remain saved.", id.isFile)
+
+                val activity = scenarioActivity(scenario)
+                val photoTemps = studioTemps(activity, "privatePhotoUploadTempFiles")
+                val idTemps = studioTemps(activity, "privateIdUploadTempFiles")
+                assertEquals(1, photoTemps.size)
+                assertEquals(1, idTemps.size)
+                assertTrue(photoTemps.all { it.isFile })
+                assertTrue(idTemps.all { it.isFile })
+
+                MainActivity::class.java.getDeclaredMethod("releaseStudioUploadFiles").apply {
+                    isAccessible = true
+                }.invoke(activity)
+
+                assertTrue("Successful upload cleanup must remove Photo Studio plaintext.", photoTemps.none { it.exists() })
+                assertTrue("Successful upload cleanup must remove ID Studio plaintext.", idTemps.none { it.exists() })
+                assertTrue(studioTemps(activity, "privatePhotoUploadTempFiles").isEmpty())
+                assertTrue(studioTemps(activity, "privateIdUploadTempFiles").isEmpty())
+                assertTrue("Encrypted Photo Studio source remains available.", photo.isFile)
+                assertTrue("Encrypted ID Studio source remains available.", id.isFile)
             }
         } finally {
             photoStore.deletePrepared(photo)
             idStore.deletePrepared(id)
             jpeg.fill(0)
         }
+    }
+
+    private fun scenarioActivity(scenario: ActivityScenario<MainActivity>): MainActivity {
+        var activity: MainActivity? = null
+        scenario.onActivity { activity = it }
+        return checkNotNull(activity)
+    }
+
+    private fun studioTemps(activity: MainActivity, fieldName: String): List<File> {
+        val field = MainActivity::class.java.getDeclaredField(fieldName)
+        field.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        return (field.get(activity) as List<File>).toList()
     }
 
     private fun testJpeg(): ByteArray {

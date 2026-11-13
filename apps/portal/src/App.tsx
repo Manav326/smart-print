@@ -4769,7 +4769,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   useEffect(()=>{
     if(!nativeAppMode)return;
-    return ()=>{postSmartPrintNativeMessage("retainCustomerPdfPreviews|none");};
+    return ()=>{
+      postSmartPrintNativeMessage("retainCustomerPdfPreviews|none");
+      // Leaving the customer upload flow ends the lifetime of native plaintext
+      // staging files. Failed uploads remain available for retry while this
+      // component stays mounted.
+      postSmartPrintNativeMessage("releaseStudioUploadFiles");
+    };
   },[nativeAppMode]);
 
   useEffect(()=>()=>{photoPreviewUrlsRef.current.forEach(url=>URL.revokeObjectURL(url));photoPreviewUrlsRef.current.clear();},[]);
@@ -4867,9 +4873,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
       setSelectedFileIndex(0);
       setFiles([]);
-      // Upload succeeded; release only the temporary decrypted picker copies.
-      // The saved encrypted Photo Studio document remains available in the app library.
-      postSmartPrintNativeMessage("releasePhotoStudioUploadFiles");
+      // Upload succeeded; release both studios' temporary decrypted picker copies.
+      // The saved encrypted Photo Studio and ID Studio vault entries remain untouched.
+      postSmartPrintNativeMessage("releaseStudioUploadFiles");
       if(paymentOptions.instantPaymentEnabled)await getQuote(results,savedSettings,savedPhotoSettings,savedPrintKinds);
     } catch(exception) {
       setPrintSettingsByJobId(savedSettings);
@@ -5135,6 +5141,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     } finally {setBusy(false);}
   }
 
+  function preselectPhotoStudioPrivacy() {
+    // Both Photo Studio entry points use the same privacy default. Never override
+    // a customer choice or change the mode of a batch that has already started.
+    if(uploadedBatch.length===0&&!privacyChoiceManuallySelected)setPrivatePrinting(true);
+  }
+
   function applyPhotoSheets(sheets:PreparedPhotoSheet[]) {
     if(!photoStudioSourceFingerprint||!sheets.length)return;
     const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===photoStudioSourceFingerprint);
@@ -5152,6 +5164,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
       if(urls.length)previews[fp]=urls;
     }
+    preselectPhotoStudioPrivacy();
     setFiles(nextFiles);setSelectedFileIndex(index);setSelectedPreparedPhotoPage(0);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoPreviewPagesByFingerprint(previews);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
   }
   function openPhotoStudio(candidate:File){
@@ -5224,10 +5237,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setPrivatePrinting(true);
       setUploadMode("LOCAL");
       setUploadModeManuallySelected(true);
-    } else if(incomingPhotoDocument&&uploadedBatch.length===0&&!privacyChoiceManuallySelected) {
-      // A saved Photo Studio sheet defaults to Private Printing, but the
-      // customer can change the batch choice to Standard before uploading.
-      setPrivatePrinting(true);
+    } else if(incomingPhotoDocument) {
+      // Saved Photo Studio sheets use the same default and manual-choice rule
+      // as sheets prepared directly from the upload page.
+      preselectPhotoStudioPrivacy();
     }
     for(const candidate of supported){
       const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
@@ -5291,6 +5304,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const index = files.findIndex(candidate => customerFileFingerprint(candidate) === fingerprint);
     if (index < 0) return;
     const nextFiles = files.filter(candidate => customerFileFingerprint(candidate) !== fingerprint);
+    if(nextFiles.length===0&&nativeAppMode)postSmartPrintNativeMessage("releaseStudioUploadFiles");
     setFiles(nextFiles);
     setSelectedFileIndex(current => current === index
       ? Math.min(index, Math.max(0, nextFiles.length - 1))

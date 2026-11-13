@@ -546,15 +546,7 @@ class MainActivity : AppCompatActivity() {
         documentViewer = null
         privateIdViewerTempFile?.let(idStudioStore::releaseTransientFile)
         privateIdViewerTempFile = null
-        if (::idStudioStore.isInitialized && !isChangingConfigurations) {
-            privateIdUploadTempFiles.forEach(idStudioStore::releaseTransientFile)
-            privateIdUploadTempFiles.clear()
-        }
-        if (::photoStudioStore.isInitialized && !isChangingConfigurations) {
-            privatePhotoUploadTempFiles.forEach(photoStudioStore::releaseTransientFile)
-            privatePhotoUploadTempFiles.clear()
-        }
-        clearCustomerUploadPdfPreviews()
+        if (!isChangingConfigurations) releaseStudioUploadFiles()
         window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         super.onDestroy()
     }
@@ -3365,14 +3357,12 @@ class MainActivity : AppCompatActivity() {
                         val photoStudioRouteActive = privatePhotoStudioPageOpen &&
                             isPhotoStudioPageUrl(webView?.url)
                         when {
-                            data == "releasePhotoStudioUploadFiles" -> {
+                            data == "releaseStudioUploadFiles" || data == "releasePhotoStudioUploadFiles" -> {
                                 runOnUiThread {
                                     if (!isFinishing && !isDestroyed) {
-                                        // Remove only decrypted temporary picker copies.
-                                        // The encrypted .spph PDF, source photo and metadata stay in the library.
-                                        privatePhotoUploadTempFiles.toList().forEach(photoStudioStore::releaseTransientFile)
-                                        privatePhotoUploadTempFiles.clear()
-                                        clearCustomerUploadPdfPreviews()
+                                        // Remove only decrypted, short-lived picker copies for both studios.
+                                        // The encrypted ID/Photo Studio vault entries remain untouched.
+                                        releaseStudioUploadFiles()
                                         replyProxy.postMessage("OK")
                                     }
                                 }
@@ -5443,6 +5433,18 @@ class MainActivity : AppCompatActivity() {
                 if (parent == previewDirectory) entry.value.delete()
             }
         }
+    }
+
+    private fun releaseStudioUploadFiles() {
+        if (::idStudioStore.isInitialized) {
+            privateIdUploadTempFiles.toList().forEach(idStudioStore::releaseTransientFile)
+            privateIdUploadTempFiles.clear()
+        }
+        if (::photoStudioStore.isInitialized) {
+            privatePhotoUploadTempFiles.toList().forEach(photoStudioStore::releaseTransientFile)
+            privatePhotoUploadTempFiles.clear()
+        }
+        clearCustomerUploadPdfPreviews()
     }
 
     private fun clearCustomerUploadPdfPreviews() {

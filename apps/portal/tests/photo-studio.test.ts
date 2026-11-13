@@ -596,3 +596,22 @@ test("one processed 300-DPI crop is reused across all copies and every A4 page",
   "The export must create one tile before page rendering, pass it into every page, and release it afterwards.");
  assert.match(exporter,/finally\{\s*sharedPhotoTile\.width=0;\s*sharedPhotoTile\.height=0;/);
 });
+
+
+test("upload-page and saved Photo Studio documents share one privacy default and preserve explicit customer choice",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const helperStart=app.indexOf("function preselectPhotoStudioPrivacy()");
+ const applyStart=app.indexOf("function applyPhotoSheets(");
+ const pickerStart=app.indexOf("function chooseFiles(next:File[]");
+ assert.ok(helperStart>=0&&applyStart>helperStart&&pickerStart>applyStart);
+ const helper=app.slice(helperStart,applyStart);
+ const apply=app.slice(applyStart,pickerStart);
+ const pickerEnd=app.indexOf("function selectUploadedFile(",pickerStart);
+ const picker=app.slice(pickerStart,pickerEnd);
+ assert.ok(helper.includes("uploadedBatch.length===0&&!privacyChoiceManuallySelected"));
+ assert.ok(apply.includes("preselectPhotoStudioPrivacy()"));
+ assert.ok(picker.includes("else if(incomingPhotoDocument)"));
+ assert.ok(picker.includes("preselectPhotoStudioPrivacy()"));
+ assert.ok(app.includes("setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false)"));
+ assert.ok(app.includes("setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true)"));
+});
