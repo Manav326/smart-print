@@ -16,7 +16,8 @@ object DocumentNamePolicy {
     const val MAX_PRINT_BYTES = UploadLimits.MAX_FILE_BYTES
     const val MAX_IMPORT_BYTES = 100L * 1024L * 1024L
 
-    private const val MAX_HEADER_BYTES = 1028
+    const val PDF_HEADER_SCAN_BYTES = 1028
+    private const val MAX_HEADER_BYTES = PDF_HEADER_SCAN_BYTES
     private const val MAX_TYPE_CACHE_ENTRIES = 256
 
     private data class FileIdentity(
