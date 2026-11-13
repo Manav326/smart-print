@@ -9,6 +9,7 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -53,6 +54,7 @@ class PhotoStudioStoreInstrumentedTest {
             encryptedMetadata.take(4).toByteArray().contentEquals(byteArrayOf(83, 80, 80, 72)))
         assertEquals(1, store.listPrepared().size)
         assertEquals(13, store.readMetadata(prepared).optInt("photoCount"))
+        assertEquals("Passport photo", store.readPickerMetadata(prepared)?.optString("title"))
         assertEquals(2, store.readMetadata(prepared).optInt("pageCount"))
         assertEquals(300, store.readMetadata(prepared).optInt("resolutionDpi"))
         assertTrue("The original source photo survives app recreation.",
@@ -140,6 +142,17 @@ class PhotoStudioStoreInstrumentedTest {
             "writeEncryptedAtomically", File::class.java, ByteArray::class.java
         ).apply { isAccessible = true }
         writer.invoke(store, metadataFile, legacyMetadata.toString().toByteArray(Charsets.UTF_8))
+
+        val legacyTimestamp = metadataFile.lastModified()
+        assertNull(
+            "Opening the chooser must skip legacy metadata rather than migrate large embedded payloads.",
+            store.readPickerMetadata(prepared)
+        )
+        assertEquals(
+            "Picker metadata lookup must not rewrite an older record.",
+            legacyTimestamp,
+            metadataFile.lastModified()
+        )
 
         val repaired = store.readMetadata(prepared)
         assertEquals("Large private photo", repaired.optString("title"))

@@ -152,7 +152,20 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         require(isPreparedDocument(file)) { "Only a private Photo Studio document can be opened here." }
         val source = metadataFile(idFromFile(file))
         if (!source.isFile || source.length() > MAX_METADATA_BYTES + VAULT_OVERHEAD_BYTES) return null
-        return readMetadata(file)
+
+        // Do not call readMetadata() here: that method intentionally migrates older
+        // records which duplicated large Base64 PDF/source payloads into JSON.
+        // A picker row needs only a small modern metadata record, never that migration.
+        val bytes = runCatching { readEncrypted(source, MAX_METADATA_BYTES) }.getOrNull() ?: return null
+        return try {
+            val stored = runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrNull()
+                ?: return null
+            if (bytes.size.toLong() > MAX_METADATA_BYTES ||
+                stored.has("pdfBase64") || stored.has("sourceBase64")) return null
+            compactMetadata(stored)
+        } finally {
+            bytes.fill(0)
+        }
     }
 
     fun readMetadata(file: File): JSONObject {
