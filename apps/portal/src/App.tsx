@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } from "./PhotoStudio";
+import { isSupportedPhotoSource, resolvePhotoSourceMimeType } from "./photo-source-policy";
 import CustomerUpiQr from "./CustomerUpiQr";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
@@ -177,10 +178,15 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
             sourceBase64: string;
           };
           const metadata=payload.metadata;
-          const mime=typeof metadata.sourceMime==="string"?metadata.sourceMime:"image/jpeg";
+          const mime=typeof metadata.sourceMime==="string"?metadata.sourceMime:"";
           const name=typeof metadata.sourceName==="string"?metadata.sourceName:"photo.jpg";
+          const supportedMime=resolvePhotoSourceMimeType({type:mime,name});
+          if(!supportedMime){
+            setError("This saved original is not a JPG or PNG photo and cannot be reopened in Photo Studio.");
+            return;
+          }
           const bytes=base64ToBytes(payload.sourceBase64);
-          setSource(new File([bytes],name,{type:mime,lastModified:Date.now()}));
+          setSource(new File([bytes],name,{type:supportedMime,lastModified:Date.now()}));
           const saved=metadata.editorSettings;
           setInitialSettings(saved&&typeof saved==="object"?saved as Partial<PhotoStudioEditorSettings>:undefined);
           setEditingDocumentId(String(metadata.id??""));
@@ -227,10 +233,11 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
   function chooseSource(event:ChangeEvent<HTMLInputElement>){
     const selected=event.currentTarget.files?.[0]??null;
     if(!selected)return;
-    const supported=selected.type.toLowerCase().startsWith("image/")||/\.(jpe?g|png)$/i.test(selected.name);
-    if(!supported){setError("Choose one JPG or PNG photo.");event.currentTarget.value="";return;}
+    const supportedMime=resolvePhotoSourceMimeType(selected);
+    if(!supportedMime){setError("Choose one JPG or PNG photo.");event.currentTarget.value="";return;}
     if(selected.size<=0||selected.size>UPLOAD_LIMITS.maxFileBytes){setError(`Choose a photo up to ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB.`);event.currentTarget.value="";return;}
-    setSource(selected);setEditingDocumentId(null);setInitialSettings(undefined);setStatus("");setError("");
+    const normalized=selected.type===supportedMime?selected:new File([selected],selected.name,{type:supportedMime,lastModified:selected.lastModified});
+    setSource(normalized);setEditingDocumentId(null);setInitialSettings(undefined);setStatus("");setError("");
   }
 
   async function savePreparedSheets(sheets:PreparedPhotoSheet[]){
@@ -2089,11 +2096,8 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
   function selectFile(event:ChangeEvent<HTMLInputElement>) {
     const candidate=event.currentTarget.files?.[0]??null;setError("");
     if(!candidate){setFile(null);return;}
-    const extension=candidate.name.toLowerCase().split(".").pop();
-    const inferredType=candidate.type==="image/png"||candidate.type==="image/jpeg"
-      ?candidate.type
-      :extension==="png"?"image/png":extension==="jpg"||extension==="jpeg"?"image/jpeg":"";
-    if(!["image/jpeg","image/png"].includes(inferredType)){
+    const inferredType=resolvePhotoSourceMimeType(candidate);
+    if(!inferredType){
       setFile(null);setError("Choose a JPG, JPEG or PNG image. Other formats are not supported by Photo Studio.");event.currentTarget.value="";return;
     }
     if(candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes){
@@ -4261,7 +4265,7 @@ type StoredCustomerDraft = {
 };
 
 function isCustomerImage(file:File):boolean {
-  return file.type.toLowerCase().startsWith("image/") || /\.(jpe?g|png)$/i.test(file.name);
+  return isSupportedPhotoSource(file);
 }
 
 function customerFileFingerprint(file:File):string {
