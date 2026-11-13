@@ -482,7 +482,8 @@ public sealed class LocalAgentApiHostedService(
                     analysis.PageSizesJson,
                     photoSizeCode,
                     photoCount,
-                    photosPerPage);
+                    photosPerPage,
+                    EditorSettingsJson: form["editorSettingsJson"].FirstOrDefault());
 
                 var client = httpClientFactory.CreateClient("cloud");
                 client.Timeout = TimeSpan.FromSeconds(30);
