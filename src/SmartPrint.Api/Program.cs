@@ -3588,6 +3588,15 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
+    if (job.PrivatePrinting)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "private_printing_source_locked",
+            message = "Private Printing never transfers the original photo or editor settings to the shop. Ask the customer to submit a new document if a change is needed."
+        });
+    }
 
     if (job.Status != "AWAITING_SHOP_APPROVAL" ||
         job.LocalQueueReceivedUtc is not null ||
@@ -6624,6 +6633,12 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
     var job = await db.PrintJobs.AsNoTracking()
         .SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
+    if (job.PrivatePrinting)
+        return Results.Conflict(new
+        {
+            code = "private_printing_source_locked",
+            message = "Private Printing never transfers original-photo or Photo Studio editor metadata to the shop Agent."
+        });
 
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == device.TenantId && item.PrintJobId == jobId)
