@@ -114,25 +114,26 @@ export async function saveCustomerPendingFiles(storageKey: string, files: File[]
     const store = transaction.objectStore(FILE_STORE);
     const done = transactionDone(transaction);
     const range = IDBKeyRange.bound(`${storageKey}\u0000`, `${storageKey}\u0000\uffff`);
-    const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
-      const request = store.getAllKeys(range);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error ?? new Error("The previous file selection could not be read."));
-    });
-    keys.forEach(key => store.delete(key));
-    files.forEach((file, index) => {
-      const record: StoredFile = {
-        storageKey,
-        index,
-        name: file.name,
-        type: file.type,
-        size: file.size,
-        lastModified: file.lastModified,
-        blob: file,
-        fileMetadata: metadataForFile(file, previewTokens)
-      };
-      store.put(record, fileRecordKey(storageKey, index));
-    });
+    const request = store.getAllKeys(range);
+    request.onsuccess = () => {
+      request.result.forEach(key => store.delete(key));
+      files.forEach((file, index) => {
+        const record: StoredFile = {
+          storageKey,
+          index,
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          lastModified: file.lastModified,
+          blob: file,
+          fileMetadata: metadataForFile(file, previewTokens)
+        };
+        store.put(record, fileRecordKey(storageKey, index));
+      });
+    };
+    request.onerror = () => {
+      try { transaction.abort(); } catch { /* The transaction may already be inactive. */ }
+    };
     await done;
   } finally {
     database.close();
@@ -232,13 +233,14 @@ export async function clearCustomerPendingSelection(storageKey: string): Promise
     const done = transactionDone(transaction);
     const fileStore = transaction.objectStore(FILE_STORE);
     const range = IDBKeyRange.bound(`${storageKey}\u0000`, `${storageKey}\u0000\uffff`);
-    const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
-      const request = fileStore.getAllKeys(range);
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    keys.forEach(key => fileStore.delete(key));
-    transaction.objectStore(METADATA_STORE).delete(storageKey);
+    const request = fileStore.getAllKeys(range);
+    request.onsuccess = () => {
+      request.result.forEach(key => fileStore.delete(key));
+      transaction.objectStore(METADATA_STORE).delete(storageKey);
+    };
+    request.onerror = () => {
+      try { transaction.abort(); } catch { /* The transaction may already be inactive. */ }
+    };
     await done;
   } finally {
     database.close();
