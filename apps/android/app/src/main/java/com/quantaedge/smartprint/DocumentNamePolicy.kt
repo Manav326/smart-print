@@ -55,15 +55,12 @@ object DocumentNamePolicy {
 
     fun isPrintable(file: File): Boolean {
         if (!file.isFile || file.length() !in 1..MAX_PRINT_BYTES) return false
-        // Normal filenames need no file I/O; inspect content only for renamed or uncommon extensions.
-        return extension(file.name) in setOf("pdf", "jpg", "jpeg", "png") ||
-            mimeType(file) in printableMimeTypes
+        return detectMimeType(file) in printableMimeTypes
     }
 
     fun isBatchSource(file: File): Boolean {
         if (!file.isFile) return false
-        return extension(file.name) in setOf("pdf", "jpg", "jpeg", "png") ||
-            mimeType(file) in printableMimeTypes
+        return detectMimeType(file) in printableMimeTypes
     }
 
     fun isPdf(file: File): Boolean = mimeType(file) == "application/pdf"
@@ -90,7 +87,13 @@ object DocumentNamePolicy {
             detectedTypeCache[identity]?.let { return it }
         }
 
-        val detected = detectMimeType(file) ?: mimeType(file.name)
+        val detected = detectMimeType(file) ?: run {
+            // A printable extension must not turn corrupt or unreadable content
+            // into a PDF/JPEG/PNG viewer document. Other viewer formats retain
+            // their filename fallback.
+            val fallback = mimeType(file.name)
+            if (fallback in printableMimeTypes) "application/octet-stream" else fallback
+        }
         synchronized(detectedTypeCache) {
             detectedTypeCache[identity] = detected
         }
@@ -136,12 +139,13 @@ object DocumentNamePolicy {
             offset >= 0 && offset + signature.size <= bytesRead &&
                 signature.indices.all { header[offset + it] == signature[it] }
 
+        if (matches(0, JPEG_HEADER)) return "image/jpeg"
+        if (matches(0, PNG_HEADER)) return "image/png"
+
         // PDF permits its header to appear within the first 1024 bytes.
         for (offset in 0..(bytesRead - PDF_HEADER.size).coerceAtLeast(-1)) {
             if (matches(offset, PDF_HEADER)) return "application/pdf"
         }
-        if (matches(0, JPEG_HEADER)) return "image/jpeg"
-        if (matches(0, PNG_HEADER)) return "image/png"
         if (matches(0, BMP_HEADER)) return "image/bmp"
         if (matches(0, GIF87_HEADER) || matches(0, GIF89_HEADER)) return "image/gif"
         if (bytesRead >= 12 && matches(0, RIFF_HEADER) && matches(8, WEBP_HEADER)) return "image/webp"
