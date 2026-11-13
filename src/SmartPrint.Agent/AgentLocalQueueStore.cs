@@ -912,7 +912,6 @@ public sealed class AgentLocalQueueStore
                     CryptographicOperations.ZeroMemory(verifiedSource);
                 }
             }
-            }
 
             var newHash = Convert.ToHexString(SHA256.HashData(replacementBytes.Span)).ToLowerInvariant();
             var plaintext = replacementBytes.ToArray();
