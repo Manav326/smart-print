@@ -3810,7 +3810,7 @@ class MainActivity : AppCompatActivity() {
                 "Disconnect this device" to {
                     showConfirmSheet(
                         "Disconnect from " + shopName + "?",
-                        "This only removes the shop connection from this device. Shop orders, payments and your saved files are not deleted.",
+                        "This removes the shop from Home. Your short-lived guest print session stays protected on this device; scan the same QR again while it is active to resume your order. Shop orders, payments and saved files are not deleted.",
                         "Disconnect",
                         destructive = true
                     ) { detachShop() }
@@ -3820,28 +3820,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun detachShop() {
-        val url = portalUrl
-        val code = url?.let { Uri.parse(it).lastPathSegment }
-            ?.takeIf { it.matches(Regex("^[A-Za-z0-9_-]{32}$")) }
-        if (code != null) customerPrintSessionStore.clear(code)
-
+        // Disconnect the visible shop binding, not the customer order session.
+        // The station-scoped token is encrypted by Android Keystore and remains
+        // valid only until the server-side guest session naturally expires.
+        // Re-scanning the same QR during that window resumes the same orders.
         val page = webView
         if (page != null) {
             page.stopLoading()
-            if (code != null) {
-                val quotedCode = JSONObject.quote(code)
-                page.evaluateJavascript(
-                    "(function(){try{sessionStorage.removeItem('qrtoprint.customer-session');" +
-                        "sessionStorage.removeItem('qrtoprint.customer-session:' + " + quotedCode +
-                        ");}catch(e){}})();"
-                ) {
-                    page.loadUrl("about:blank")
-                    page.clearHistory()
-                }
-            } else {
-                page.loadUrl("about:blank")
-                page.clearHistory()
-            }
+            page.loadUrl("about:blank")
+            page.clearHistory()
         }
 
         getSharedPreferences("smartprint.customer.last-shop", MODE_PRIVATE).edit()
@@ -3853,9 +3840,8 @@ class MainActivity : AppCompatActivity() {
         clearShopProfile()
         toolbar.menu.findItem(SWITCH_SHOP)?.isVisible = false
         showHome()
-        toast("Disconnected from this shop on this device. Shop orders and payments are unchanged.")
+        toast("Shop disconnected. Scan the same QR again while your guest session is active to resume your order.")
     }
-
     private fun switchShop() {
         if (portalUrl == null) { scanQr(); return }
         showConfirmSheet(
