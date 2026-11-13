@@ -22,6 +22,25 @@ test("normalizes extensionless Android-provider JPEG, PNG and PDF files", async 
   assert.equal(normalizedPdf?.type, "application/pdf");
 });
 
+test("keeps the original File when only the provider MIME type is generic", async () => {
+  const source = new File([new Uint8Array([0xff, 0xd8, 0xff, 0xdb])], "photo.jpg", { type: "application/octet-stream" });
+  const normalized = await normalizeCustomerUploadFile(source);
+  assert.equal(normalized, source);
+  assert.equal(normalized?.name, "photo.jpg");
+});
+
+test("preserves ID Studio identity through extension normalization", async () => {
+  const source = new File([new TextEncoder().encode("%PDF-1.7")], "identity sheet", { type: "application/octet-stream" });
+  Object.assign(source, { __smartPrintPrintKind: "ID_DOCUMENT", __smartPrintBatchGroup: "ID Studio" });
+  const normalized = await normalizeCustomerUploadFile(source);
+  assert.ok(normalized);
+  copyCustomerUploadFileMetadata(source, normalized);
+  const tagged = normalized as File & { __smartPrintPrintKind?: string; __smartPrintBatchGroup?: string };
+  assert.equal(tagged.__smartPrintPrintKind, "ID_DOCUMENT");
+  assert.equal(tagged.__smartPrintBatchGroup, "ID Studio");
+  assert.equal(normalized.name, "identity sheet.pdf");
+});
+
 test("finds a PDF signature within the first 1024 bytes", async () => {
   const bytes = new Uint8Array(1028);
   bytes.set(new TextEncoder().encode("%PDF-1.4"), 1018);
