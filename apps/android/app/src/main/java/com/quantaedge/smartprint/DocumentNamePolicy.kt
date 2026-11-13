@@ -106,7 +106,8 @@ object DocumentNamePolicy {
 
     fun safeName(input: String): String {
         val value = input.map { c ->
-            if (c.isISOControl() || c in charArrayOf('/', '\\\\', ':', '*', '?', '"', '<', '>', '|')) '_' else c
+            if (c.isISOControl() || c == '/' || c == 92.toChar() ||
+                c in charArrayOf(':', '*', '?', '"', '<', '>', '|')) '_' else c
         }.joinToString("").trim().trim('.')
         return value.take(180).ifBlank { "Untitled document" }
     }
