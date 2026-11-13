@@ -51,10 +51,10 @@ const DATABASE_VERSION = 1;
 const FILE_STORE = "pending-files";
 const METADATA_STORE = "pending-metadata";
 
-export function customerPendingSelectionStorageKey(publicCode: string): string {
-  // Pending, not-yet-uploaded files belong to this station on this device,
-  // not to a server session that may expire while the customer is away.
-  return publicCode;
+export function customerPendingSelectionStorageKey(publicCode: string, sessionToken: string): string {
+  // Drafts are private to one customer session at this station. Never restore
+  // one customer’s files into a later guest session on a shared device.
+  return `${publicCode}:${sessionToken.slice(-16)}`;
 }
 
 function openDatabase(): Promise<IDBDatabase> {
@@ -270,6 +270,29 @@ export async function clearCustomerPendingSelection(storageKey: string): Promise
     request.onerror = () => {
       try { transaction.abort(); } catch { /* The transaction may already be inactive. */ }
     };
+    await done;
+  } finally {
+    database.close();
+  }
+}
+
+/** Clear every abandoned guest draft for a QR station after its saved session
+ * is missing, revoked or expired. This prevents cross-customer draft reuse. */
+export async function clearCustomerPendingSelectionsForStation(publicCode: string): Promise<void> {
+  const database = await openDatabase();
+  try {
+    const transaction = database.transaction([FILE_STORE, METADATA_STORE], "readwrite");
+    const done = transactionDone(transaction);
+    const prefix = `${publicCode}:`;
+    const range = IDBKeyRange.bound(prefix, `${prefix}\\uffff`);
+    const fileStore = transaction.objectStore(FILE_STORE);
+    const fileKeysRequest = fileStore.getAllKeys(range);
+    fileKeysRequest.onsuccess = () => fileKeysRequest.result.forEach(key => fileStore.delete(key));
+    fileKeysRequest.onerror = () => { try { transaction.abort(); } catch { /* Already inactive. */ } };
+    const metadataStore = transaction.objectStore(METADATA_STORE);
+    const metadataKeysRequest = metadataStore.getAllKeys(range);
+    metadataKeysRequest.onsuccess = () => metadataKeysRequest.result.forEach(key => metadataStore.delete(key));
+    metadataKeysRequest.onerror = () => { try { transaction.abort(); } catch { /* Already inactive. */ } };
     await done;
   } finally {
     database.close();
