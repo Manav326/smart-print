@@ -11270,6 +11270,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.PdfBrandingEnabled,
             item.OutputType,
             item.OutputCompletedUtc,
+            item.PrivateDocumentPurgedUtc,
             item.UpdatedUtc
         })
         .SingleOrDefaultAsync(ct);

@@ -1018,10 +1018,18 @@ export async function createCustomerSession(publicCode: string) {
     expiresUtc: string;
     sessionToken: string;
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
-    printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
+    printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string; outputMode?: string } | null;
     photoPricing: CustomerPhotoPricing | null;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
-    localAgent: { agentDeviceId: string; endpoints: string[]; documentEncryptionPublicKey?: string | null } | null;
+    localAgent: {
+      agentDeviceId: string;
+      endpoints: string[];
+      documentEncryptionPublicKey?: string | null;
+      printerOutputMode?: string;
+      printerStatus?: string;
+      printerLastSeenUtc?: string | null;
+    } | null;
+    privatePrintingVirtualOutputEnabled: boolean;
     cloudAssistedPrintingEnabled: boolean;
   }>(`/api/v1/public/stations/${encodeURIComponent(publicCode)}/sessions`, {
     method: "POST",
@@ -1033,7 +1041,15 @@ export async function createCustomerSession(publicCode: string) {
 export async function renewCustomerPrintSession(sessionToken: string) {
   return apiRequest<{
     expiresUtc: string;
-    localAgent: { agentDeviceId: string; endpoints: string[]; documentEncryptionPublicKey?: string | null } | null;
+    localAgent: {
+      agentDeviceId: string;
+      endpoints: string[];
+      documentEncryptionPublicKey?: string | null;
+      printerOutputMode?: string;
+      printerStatus?: string;
+      printerLastSeenUtc?: string | null;
+    } | null;
+    privatePrintingVirtualOutputEnabled: boolean;
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
   }>("/api/v1/public/sessions/current/renew", {
     method: "POST",
@@ -1049,9 +1065,17 @@ export function resumeCustomerSession(sessionToken: string, publicCode: string) 
     sessionToken: string;
     shop: { displayName: string; logoUrl?: string | null; accentColor: string; currency: string };
     paymentOptions: { upiEnabled: boolean; upiId?: string | null; payeeName?: string | null; cashEnabled: boolean; instantPaymentEnabled: boolean };
-    printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string } | null;
+    printer: { displayName: string; manufacturer: string; model: string; status: string; capabilitiesJson: string; outputMode?: string } | null;
     photoPricing: CustomerPhotoPricing | null;
-    localAgent: { agentDeviceId: string; endpoints: string[]; documentEncryptionPublicKey?: string | null } | null;
+    localAgent: {
+      agentDeviceId: string;
+      endpoints: string[];
+      documentEncryptionPublicKey?: string | null;
+      printerOutputMode?: string;
+      printerStatus?: string;
+      printerLastSeenUtc?: string | null;
+    } | null;
+    privatePrintingVirtualOutputEnabled: boolean;
     cloudAssistedPrintingEnabled: boolean;
   }>("/api/v1/public/sessions/current/resume", {
     method: "POST",
@@ -1130,7 +1154,7 @@ export interface ShopPrintJob {
   outputConfirmedUtc?: string | null;
   failureCode?: string | null;
   outputMode?: "PHYSICAL" | "PDF_EXPORT" | string;
-  outputType?: "PHYSICAL" | "PDF_EXPORT" | string;
+  outputType?: "PHYSICAL" | "PDF_EXPORT" | "TEST_VIRTUAL" | string;
   outputFilePath?: string | null;
   outputFileName?: string | null;
   outputSha256?: string | null;
@@ -1872,6 +1896,8 @@ export interface CustomerJobStatus {
   pdfBrandingEnabled?: boolean;
   privatePrinting?: boolean;
   privateDocumentPurgedUtc?: string | null;
+  outputType?: "PHYSICAL" | "PDF_EXPORT" | "TEST_VIRTUAL" | string;
+  outputCompletedUtc?: string | null;
   updatedUtc: string;
   timeline?: Array<{ newStatus: string; actorType: string; createdUtc: string }>;
   payment?: CustomerPayment | null;
@@ -1948,6 +1974,23 @@ export function dispatchShopPrintJob(token: string, jobId: string) {
 export function retryShopPdfExport(token: string, jobId: string) {
   return apiRequest<{ id: string; jobNumber: string; status: string; outputMode: string; printerName: string }>(
     `/api/v1/shop/print-jobs/${jobId}/retry-pdf-export`,
+    { method: "POST" },
+    token
+  );
+}
+
+export function retryShopPrivateTestOutput(token: string, jobId: string) {
+  return apiRequest<{
+    id: string;
+    jobNumber: string;
+    status: string;
+    outputMode: string;
+    outputType: "TEST_VIRTUAL";
+    printerName: string;
+    queueName: string;
+    physicalOutputConfirmed: false;
+  }>(
+    `/api/v1/shop/print-jobs/${jobId}/retry-private-test-output`,
     { method: "POST" },
     token
   );
