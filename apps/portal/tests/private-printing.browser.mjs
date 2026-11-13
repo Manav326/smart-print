@@ -57,16 +57,56 @@ async function waitForServer(child) {
 }
 
 function pdfFixture(label, pageCount) {
-  const safeLabel = label.replace(/[^\x20-\x7e]/g, "").replace(/[()\\]/g, "");
-  return Buffer.from([
-    "%PDF-1.4",
-    "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
-    "2 0 obj << /Type /Pages /Count " + pageCount + " /Kids [] >> endobj",
-    "3 0 obj << /Producer (SmartPrint private QA) /Title (" + safeLabel + ") >> endobj",
-    "% private QA PDF signature fixture",
-    "%%EOF",
-    ""
-  ].join("\n"), "ascii");
+  assert.ok(Number.isInteger(pageCount) && pageCount >= 1 && pageCount <= 500,
+    "PDF fixture page count must satisfy the Agent's document limit.");
+  const safeLabel = label.replace(/[^\x20-\x7e]/g, "").replace(/[()\\]/g, "").slice(0, 80);
+  const objects = [];
+  objects[1] = "<< /Type /Catalog /Pages 2 0 R >>";
+  const pageRefs = [];
+  for (let index = 0; index < pageCount; index += 1) {
+    const pageObjectId = 3 + index * 2;
+    const contentObjectId = pageObjectId + 1;
+    pageRefs.push(pageObjectId + " 0 R");
+    objects[pageObjectId] =
+      "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.275590551 841.88976378] " +
+      "/Resources << >> /Contents " + contentObjectId + " 0 R >>";
+    const stream = "q 0.96 g 0 0 595.275590551 841.88976378 re f Q\\n";
+    objects[contentObjectId] = "<< /Length " + Buffer.byteLength(stream, "ascii") +
+      " >>\\nstream\\n" + stream + "endstream";
+  }
+  objects[2] = "<< /Type /Pages /Count " + pageCount + " /Kids [" + pageRefs.join(" ") + "] >>";
+  const infoObjectId = 3 + pageCount * 2;
+  objects[infoObjectId] = "<< /Producer (SmartPrint private QA) /Title (" + safeLabel + ") >>";
+
+  let pdf = "%PDF-1.4\\n% SmartPrint structurally valid private QA fixture\\n";
+  const offsets = new Array(infoObjectId + 1).fill(0);
+  for (let objectId = 1; objectId <= infoObjectId; objectId += 1) {
+    const body = objects[objectId];
+    assert.ok(body, "PDF fixture is missing object " + objectId + ".");
+    offsets[objectId] = Buffer.byteLength(pdf, "ascii");
+    pdf += objectId + " 0 obj\\n" + body + "\\nendobj\\n";
+  }
+  const xrefOffset = Buffer.byteLength(pdf, "ascii");
+  pdf += "xref\\n0 " + (infoObjectId + 1) + "\\n";
+  pdf += "0000000000 65535 f \\n";
+  for (let objectId = 1; objectId <= infoObjectId; objectId += 1) {
+    pdf += String(offsets[objectId]).padStart(10, "0") + " 00000 n \\n";
+  }
+  pdf += "trailer\\n<< /Size " + (infoObjectId + 1) + " /Root 1 0 R /Info " + infoObjectId + " 0 R >>\\n";
+  pdf += "startxref\\n" + xrefOffset + "\\n%%EOF\\n";
+
+  const bytes = Buffer.from(pdf, "ascii");
+  const source = bytes.toString("latin1");
+  const startXref = Number(source.match(/startxref\\s+(\\d+)\\s+%%EOF/)?.[1] ?? -1);
+  assert.ok(startXref >= 0 && source.slice(startXref).startsWith("xref"),
+    "PDF fixture must include a valid cross-reference offset.");
+  for (let objectId = 1; objectId <= infoObjectId; objectId += 1) {
+    const match = source.match(new RegExp("^" + String(offsets[objectId]) + " 00000 n", "m"));
+    assert.ok(match, "PDF fixture cross-reference must index object " + objectId + ".");
+    assert.ok(source.slice(offsets[objectId]).startsWith(objectId + " 0 obj"),
+      "PDF fixture object offset must point to the correct object.");
+  }
+  return bytes;
 }
 
 function parsePdfPageCount(bytes) {
