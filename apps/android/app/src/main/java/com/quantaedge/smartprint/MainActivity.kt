@@ -2753,9 +2753,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun fileIconResource(file: File): Int {
         if (file.isDirectory) return R.drawable.ic_folder
-        return when (DocumentNamePolicy.mimeType(file)) {
-            "application/pdf" -> R.drawable.ic_file_pdf
-            "image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif" -> R.drawable.ic_file_image
+        return when (file.extension.lowercase(Locale.ROOT)) {
+            "pdf" -> R.drawable.ic_file_pdf
+            "jpg", "jpeg", "png", "webp", "bmp", "gif" -> R.drawable.ic_file_image
             else -> R.drawable.ic_file
         }
     }
@@ -5343,7 +5343,11 @@ class MainActivity : AppCompatActivity() {
     private fun supportsInAppViewer(file: File): Boolean =
         DocumentNamePolicy.supportsInAppViewer(file)
 
-    private fun showDocumentViewer(file: File, startPosition: Int? = null) {
+    private fun showDocumentViewer(
+        file: File,
+        startPosition: Int? = null,
+        detectedMimeType: String? = null
+    ) {
         val isPreparedId = idStudioStore.isPreparedDocument(file)
         val documentFile = if (isPreparedId) {
             try { idStudioStore.materializePreparedFile(file) }
@@ -5352,10 +5356,10 @@ class MainActivity : AppCompatActivity() {
                 return
             }
         } else file
-        val documentMimeType = DocumentNamePolicy.mimeType(documentFile)
-        if (!DocumentNamePolicy.supportsInAppViewer(documentFile)) {
+        val documentMimeType = detectedMimeType ?: DocumentNamePolicy.mimeType(documentFile)
+        if (!DocumentNamePolicy.supportsInAppViewer(documentMimeType)) {
             if (isPreparedId) idStudioStore.releaseTransientFile(documentFile)
-            else openDocumentExternally(file)
+            else openDocumentExternally(file, documentMimeType)
             return
         }
         if (!documentFile.exists() || !documentFile.isFile) {
@@ -5472,11 +5476,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openDocument(file: File) {
-        if (idStudioStore.isPreparedDocument(file) || supportsInAppViewer(file)) showDocumentViewer(file)
-        else openDocumentExternally(file)
+        val mediaType = DocumentNamePolicy.mimeType(file)
+        if (idStudioStore.isPreparedDocument(file) || DocumentNamePolicy.supportsInAppViewer(mediaType)) {
+            showDocumentViewer(file, detectedMimeType = mediaType)
+        } else {
+            openDocumentExternally(file, mediaType)
+        }
     }
 
-    private fun openDocumentExternally(file: File) {
+    private fun openDocumentExternally(file: File, mediaType: String = DocumentNamePolicy.mimeType(file)) {
         if (idStudioStore.isPreparedDocument(file)) {
             toast("Prepared ID documents can only be viewed and printed inside SmartPrint.")
             return
@@ -5484,7 +5492,7 @@ class MainActivity : AppCompatActivity() {
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.documents", file)
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, DocumentNamePolicy.mimeType(file))
+                setDataAndType(uri, mediaType)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(intent, "Open document"))
@@ -5498,8 +5506,9 @@ class MainActivity : AppCompatActivity() {
         }
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.documents", file)
+            val mediaType = DocumentNamePolicy.mimeType(file)
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = DocumentNamePolicy.mimeType(file)
+                type = mediaType
                 putExtra(Intent.EXTRA_STREAM, uri)
                 clipData = ClipData.newUri(contentResolver, file.name, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
