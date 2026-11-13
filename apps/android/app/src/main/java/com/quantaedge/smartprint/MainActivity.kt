@@ -76,6 +76,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.Executors
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.ZipEntry
@@ -162,6 +163,11 @@ class MainActivity : AppCompatActivity() {
     private val chooserSelectedFilePaths = linkedSetOf<String>()
     private val chooserSelectedFolderPaths = linkedSetOf<String>()
     private val expandedFolderPaths = linkedSetOf<String>()
+    private val chooserPreparationExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "SmartPrint-document-picker").apply { isDaemon = true }
+    }
+    private var chooserPreparationGeneration = 0
+    private var pickerPreparingSelection = false
     private var fileChooserAllowsMultiple = false
     private var fileChooserSelectFolders = false
     private var pendingScanNeedsDestination = false
@@ -524,6 +530,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        chooserPreparationGeneration++
+        chooserPreparationExecutor.shutdownNow()
         releaseIdStudioReviewBitmap()
         documentViewer?.dispose()
         documentViewer = null
@@ -2230,12 +2238,22 @@ class MainActivity : AppCompatActivity() {
         if (activeShopUrl != null && isPhotoStudioPageUrl(view.url)) view.loadUrl(activeShopUrl)
     }
 
+    private fun findLibraryScrollView(view: View?): ScrollView? {
+        if (view is ScrollView) return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                findLibraryScrollView(view.getChildAt(index))?.let { return it }
+            }
+        }
+        return null
+    }
+
     private fun refreshLibrary(preserveScroll: Boolean = true) {
-        val previousScroll = if (preserveScroll) (content.getChildAt(0) as? ScrollView)?.scrollY ?: 0 else 0
+        val previousScroll = if (preserveScroll) findLibraryScrollView(content.getChildAt(0))?.scrollY ?: 0 else 0
         if (pickerMode) showPicker(resetPath = false) else showFiles()
         if (preserveScroll) {
             content.post {
-                (content.getChildAt(0) as? ScrollView)?.scrollTo(0, previousScroll)
+                findLibraryScrollView(content.getChildAt(0))?.scrollTo(0, previousScroll)
             }
         }
     }
@@ -2284,12 +2302,14 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun libraryView(isPicker: Boolean): View {
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val scroll = ScrollView(this).apply { isFillViewport = true; clipToPadding = false }
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(16), dp(12), dp(16), dp(22))
         }
         scroll.addView(column)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         val path = if (isPicker) pickerPath else folderPath
         val rootFolder = try { store.folder(path) } catch (_: Exception) { store.root }
         val allEntries = store.list(rootFolder)
@@ -2452,7 +2472,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val selectedHere = selectedFilePaths.mapNotNull { runCatching { File(it).canonicalFile }.getOrNull() }.filter { it.isFile && it.exists() }
-        val chooserSelection = if (isPicker && fileChooserAllowsMultiple && !fileChooserSelectFolders) selectedChooserFiles() else emptyList()
+        val chooserSelection = if (isPicker && !fileChooserSelectFolders) selectedChooserFiles() else emptyList()
         val chooserFolderSelection = if (isPicker && fileChooserSelectFolders) selectedChooserFolders() else emptyList()
         if (isPicker && fileChooserSelectFolders) {
             val selectionRow = LinearLayout(this).apply {
@@ -2486,40 +2506,49 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { attachSelectedFolders() }
             }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(6) })
             column.addView(selectionRow, linearParams().apply { bottomMargin = dp(10) })
-        } else if (isPicker && fileChooserAllowsMultiple) {
+        } else if (isPicker) {
             val selectionRow = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(12), dp(8), dp(12), dp(8))
                 background = roundedDrawable(getColor(R.color.qp_soft), dp(12))
             }
-            selectionRow.addView(text("${chooserSelection.size} selected", 12, R.color.qp_text, true),
-                LinearLayout.LayoutParams(0, -2, 1f))
-            val selectablePickerFiles = visibleEntries.filter { !it.isDirectory && DocumentNamePolicy.isPrintable(it) }
-            val allVisiblePickerFilesSelected = selectablePickerFiles.isNotEmpty() && selectablePickerFiles.all { chooserSelectedFilePaths.contains(it.canonicalPath) }
-            selectionRow.addView(button(if (allVisiblePickerFilesSelected) "Deselect all" else "Select all", false).apply {
-                minHeight = dp(34)
-                setOnClickListener {
-                    selectablePickerFiles.forEach { file ->
-                        if (allVisiblePickerFilesSelected) chooserSelectedFilePaths.remove(file.canonicalPath)
-                        else chooserSelectedFilePaths.add(file.canonicalPath)
+            selectionRow.addView(text(
+                if (fileChooserAllowsMultiple) "Select files to add" else "Choose one file",
+                12, R.color.qp_text, true
+            ), LinearLayout.LayoutParams(0, -2, 1f))
+            val selectablePickerFiles = visibleEntries.filter {
+                !it.isDirectory && DocumentNamePolicy.isPrintable(it)
+            }
+            if (fileChooserAllowsMultiple) {
+                val allVisiblePickerFilesSelected = selectablePickerFiles.isNotEmpty() &&
+                    selectablePickerFiles.all { chooserSelectedFilePaths.contains(it.canonicalPath) }
+                selectionRow.addView(button(if (allVisiblePickerFilesSelected) "Deselect all" else "Select all", false).apply {
+                    minHeight = dp(34)
+                    isEnabled = !pickerPreparingSelection && selectablePickerFiles.isNotEmpty()
+                    setOnClickListener {
+                        if (allVisiblePickerFilesSelected) {
+                            selectablePickerFiles.forEach { chooserSelectedFilePaths.remove(it.canonicalPath) }
+                        } else {
+                            val candidate = (selectedChooserFiles().filterNot { selected ->
+                                selectablePickerFiles.any { it.canonicalPath == selected.canonicalPath }
+                            } + selectablePickerFiles)
+                            val error = chooserSelectionValidationError(candidate)
+                            if (error != null) {
+                                toast(error)
+                                return@setOnClickListener
+                            }
+                            selectablePickerFiles.forEach { chooserSelectedFilePaths.add(it.canonicalPath) }
+                        }
+                        refreshLibrary()
                     }
-                    refreshLibrary()
-                }
-            })
+                })
+            }
             selectionRow.addView(button("Clear", false).apply {
                 minHeight = dp(34)
-                isEnabled = chooserSelection.isNotEmpty()
+                isEnabled = !pickerPreparingSelection && chooserSelection.isNotEmpty()
                 setOnClickListener { chooserSelectedFilePaths.clear(); refreshLibrary() }
             }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(5) })
-            selectionRow.addView(button("Attach", true).apply {
-                minHeight = dp(34)
-                isEnabled = chooserSelection.isNotEmpty() &&
-                    PrintBatchSelectionPolicy.validationError(chooserSelection) == null
-                setOnClickListener {
-                    chooseFiles(chooserSelection, chooserSelection.map(::printBatchGroupName))
-                }
-            }, LinearLayout.LayoutParams(-2, dp(34)).apply { marginStart = dp(6) })
             column.addView(selectionRow, linearParams().apply { bottomMargin = dp(10) })
         }
         val selectableCurrentFiles = visibleEntries.filter { !it.isDirectory && it.isFile }
@@ -2587,7 +2616,38 @@ class MainActivity : AppCompatActivity() {
             column.addView(text("$used used on this device", 10, R.color.qp_muted, false)
                 .apply { setPadding(dp(2), dp(12), 0, 0) })
         }
-        return scroll
+
+        if (isPicker && !fileChooserSelectFolders) {
+            val footer = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(16), dp(9), dp(16), dp(12))
+                setBackgroundColor(getColor(R.color.qp_surface))
+                elevation = dp(8).toFloat()
+            }
+            footer.addView(text(
+                if (chooserSelection.size == 1) "1 file selected"
+                else "${chooserSelection.size} files selected",
+                11, R.color.qp_muted, true
+            ).apply { setPadding(dp(2), 0, 0, dp(7)) })
+            val actionLabel = when {
+                pickerPreparingSelection -> "Preparing selected documents…"
+                fileChooserAllowsMultiple && chooserSelection.isNotEmpty() ->
+                    "Add selected files (${chooserSelection.size})"
+                fileChooserAllowsMultiple -> "Add selected files (0)"
+                chooserSelection.isNotEmpty() -> "Add selected file"
+                else -> "Select a file to continue"
+            }
+            footer.addView(button(actionLabel, true).apply {
+                minHeight = dp(48)
+                isEnabled = !pickerPreparingSelection && chooserSelection.isNotEmpty()
+                setOnClickListener {
+                    chooseFiles(chooserSelection, chooserSelection.map(::printBatchGroupName))
+                }
+                if (pickerPreparingSelection) alpha = 0.75f
+            }, LinearLayout.LayoutParams(-1, dp(48)))
+            root.addView(footer, LinearLayout.LayoutParams(-1, -2))
+        }
+        return root
     }
 
     private fun addLibraryEntries(parentView: LinearLayout, entries: List<File>, isPicker: Boolean, depth: Int) {
@@ -2665,9 +2725,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 row.addView(selected, LinearLayout.LayoutParams(dp(40), dp(40)))
             }
-        } else if (isPicker && fileChooserAllowsMultiple) {
+        } else if (isPicker && !fileChooserSelectFolders) {
             val selected = CheckBox(this).apply {
                 isChecked = chooserSelectedFilePaths.contains(file.canonicalPath)
+                isEnabled = !pickerPreparingSelection
                 contentDescription = "Select " + file.name
                 setOnCheckedChangeListener { _, checked -> setChooserFileSelected(file, checked) }
             }
@@ -2710,7 +2771,7 @@ class MainActivity : AppCompatActivity() {
                     if (isPicker) pickerPath = store.pathOf(file) else folderPath = store.pathOf(file)
                     refreshLibrary(preserveScroll = false)
                 }
-                isPicker && fileChooserAllowsMultiple -> setChooserFileSelected(
+                isPicker && !fileChooserSelectFolders -> setChooserFileSelected(
                     file, !chooserSelectedFilePaths.contains(file.canonicalPath)
                 )
                 isPicker -> chooseFile(file)
@@ -4744,6 +4805,22 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun pickerStudioSelectionButton(file: File, description: String, widthDp: Int): View {
+        val selected = chooserSelectedFilePaths.contains(file.canonicalPath)
+        return button(if (selected) "Selected" else "Select", selected).apply {
+            minHeight = dp(36)
+            contentDescription = if (selected) "Deselect $description" else "Select $description"
+            isEnabled = !pickerPreparingSelection
+            setOnClickListener { setChooserFileSelected(file, !selected) }
+            layoutParams = LinearLayout.LayoutParams(dp(widthDp), dp(36)).apply {
+                marginStart = dp(6)
+            }
+        }
+    }
+
+    private fun pickerSavedDate(file: File): String =
+        SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()).format(Date(file.lastModified()))
+
     private fun addPhotoStudioPickerSection(parent: LinearLayout) {
         if (portalUrl == null) return
         val prepared = photoStudioStore.listPrepared()
@@ -4755,50 +4832,34 @@ class MainActivity : AppCompatActivity() {
         }
         section.addView(text("Photo Studio · Private documents", 14, R.color.qp_text, true))
         section.addView(text(
-            "Saved photo sheets stay on this device. Select one to attach it to the upload form. The saved copy remains in Photo Studio.",
+            "Choose prepared sheets here and combine them with files from My Files. Nothing is attached until you confirm below.",
             11, R.color.qp_muted, false
         ).apply { setPadding(0, dp(4), 0, dp(8)) })
         prepared.forEach { file ->
-            val metadata = runCatching { photoStudioStore.readMetadata(file) }.getOrNull() ?: return@forEach
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(5), 0, dp(5))
             }
-            val thumbnail = ImageView(this).apply {
+            val icon = ImageView(this).apply {
                 setImageResource(R.drawable.ic_file_image)
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                contentDescription = "Photo sheet preview"
+                imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+                contentDescription = "Prepared Photo Studio PDF"
                 background = roundedDrawable(getColor(R.color.qp_card), dp(7))
-                photoStudioStore.createThumbnailBase64(file)?.let { encoded ->
-                    val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
-                    setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
-                    bytes.fill(0)
-                }
+                setPadding(dp(9), dp(9), dp(9), dp(9))
             }
-            val thumbnailFrame = FrameLayout(this).apply {
-                addView(thumbnail, FrameLayout.LayoutParams(-1, -1))
-                addPrivatePreviewWatermarks(this)
-            }
-            row.addView(thumbnailFrame, LinearLayout.LayoutParams(dp(58), dp(76)))
+            row.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
             val details = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(9), 0, dp(6), 0)
             }
-            details.addView(text(metadata.optString("title", "Photo sheet"), 11, R.color.qp_text, true).apply { maxLines = 2 })
-            val sizeCode = metadata.optString("sizeCode")
-            val count = metadata.optInt("photoCount")
-            val perPage = metadata.optInt("photosPerPage")
-            val pageCount = metadata.optInt("pageCount")
+            details.addView(text("Prepared photo sheet", 12, R.color.qp_text, true).apply { maxLines = 1 })
             details.addView(text(
-                "$sizeCode · $count photos · $perPage per A4 · $pageCount pages",
+                "Private on this device · Saved ${pickerSavedDate(file)}",
                 9, R.color.qp_muted, false
             ).apply { setPadding(0, dp(3), 0, 0); maxLines = 2 })
             row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(button("Select", true).apply {
-                minHeight = dp(36)
-                setOnClickListener { chooseFiles(listOf(file), listOf("Photo Studio")) }
-            }, LinearLayout.LayoutParams(dp(82), dp(36)).apply { marginStart = dp(4) })
+            row.addView(pickerStudioSelectionButton(file, "Photo Studio document", 88))
             section.addView(row)
         }
         parent.addView(section, linearParams().apply { bottomMargin = dp(8) })
@@ -4815,7 +4876,7 @@ class MainActivity : AppCompatActivity() {
         }
         section.addView(text("ID Studio · Private documents", 14, R.color.qp_text, true))
         section.addView(text(
-            "These cards stay inside SmartPrint. Select one to attach it to this connected shop's print request.",
+            "Choose prepared ID sheets here and combine them with files from My Files. Nothing is attached until you confirm below.",
             11, R.color.qp_muted, false
         ).apply { setPadding(0, dp(4), 0, dp(8)) })
         prepared.forEach { file ->
@@ -4824,33 +4885,25 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(0, dp(5), 0, dp(5))
             }
-            val thumbnail = ImageView(this).apply {
+            val icon = ImageView(this).apply {
                 setImageResource(R.drawable.ic_file)
-                scaleType = ImageView.ScaleType.CENTER_CROP
-                contentDescription = "ID card sheet preview"
+                imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
+                contentDescription = "Prepared ID Studio PDF"
                 background = roundedDrawable(getColor(R.color.qp_card), dp(7))
-                idStudioStore.createThumbnailBase64(file)?.let { encoded ->
-                    val bytes = android.util.Base64.decode(encoded, android.util.Base64.DEFAULT)
-                    setImageBitmap(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
-                    bytes.fill(0)
-                }
+                setPadding(dp(9), dp(9), dp(9), dp(9))
             }
-            row.addView(thumbnail, LinearLayout.LayoutParams(dp(56), dp(74)))
+            row.addView(icon, LinearLayout.LayoutParams(dp(48), dp(48)))
             val details = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(8), 0, 0, 0)
+                setPadding(dp(9), 0, dp(6), 0)
             }
-            details.addView(text(idStudioStore.readMetadata(file).optString("title").ifBlank { "ID card" }, 11, R.color.qp_text, true).apply { maxLines = 2 })
+            details.addView(text("Prepared ID card", 12, R.color.qp_text, true).apply { maxLines = 1 })
             details.addView(text(
-                android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length()) +
-                    " · A4 · Front + back",
-                10, R.color.qp_muted, false
-            ).apply { setPadding(0, dp(2), 0, 0) })
+                "Private on this device · A4 front + back · Saved ${pickerSavedDate(file)}",
+                9, R.color.qp_muted, false
+            ).apply { setPadding(0, dp(3), 0, 0); maxLines = 2 })
             row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
-            row.addView(button("Select", true).apply {
-                minHeight = dp(36)
-                setOnClickListener { chooseFiles(listOf(file), listOf("ID Studio")) }
-            }, LinearLayout.LayoutParams(dp(92), dp(36)).apply { marginStart = dp(8) })
+            row.addView(pickerStudioSelectionButton(file, "ID Studio document", 88))
             section.addView(row)
         }
         parent.addView(section, linearParams().apply { bottomMargin = dp(12) })
@@ -5006,6 +5059,14 @@ class MainActivity : AppCompatActivity() {
         chooseFiles(documents.map { it.first }, documents.map { it.second })
     }
 
+    private fun chooserSelectionValidationError(files: List<File>): String? =
+        PrintBatchSelectionPolicy.pickerValidationError(
+            files,
+            allowMultiple = fileChooserAllowsMultiple
+        ) { candidate ->
+            idStudioStore.isPreparedDocument(candidate) || photoStudioStore.isPreparedDocument(candidate)
+        }
+
     private fun setChooserFileSelected(file: File, checked: Boolean) {
         val path = file.canonicalPath
         if (!checked) {
@@ -5013,12 +5074,17 @@ class MainActivity : AppCompatActivity() {
             refreshLibrary()
             return
         }
-        val candidate = selectedChooserFiles().filterNot { it.canonicalPath == path } + file
-        val error = PrintBatchSelectionPolicy.validationError(candidate)
+        val candidate = if (fileChooserAllowsMultiple) {
+            selectedChooserFiles().filterNot { it.canonicalPath == path } + file
+        } else {
+            listOf(file)
+        }
+        val error = chooserSelectionValidationError(candidate)
         if (error != null) {
             toast(error)
             return
         }
+        if (!fileChooserAllowsMultiple) chooserSelectedFilePaths.clear()
         chooserSelectedFilePaths.add(path)
         refreshLibrary()
     }
@@ -5032,9 +5098,21 @@ class MainActivity : AppCompatActivity() {
 
     private fun chooseFile(file: File) = chooseFiles(listOf(file), listOf(printBatchGroupName(file)))
 
+    private fun releaseFailedPickerPreparation(
+        idTemps: List<File>,
+        photoTemps: List<File>,
+        previewTokens: List<String>
+    ) {
+        previewTokens.forEach { customerUploadPdfPreviews.remove(it) }
+        idTemps.forEach(idStudioStore::releaseTransientFile)
+        photoTemps.forEach(photoStudioStore::releaseTransientFile)
+    }
+
     private fun chooseFiles(files: List<File>, groupNames: List<String>? = null) {
         val callback = fileCallback
         if (callback == null) { toast("Open a document field in the print page first."); return }
+        val selectionError = chooserSelectionValidationError(files)
+        if (selectionError != null) { toast(selectionError); return }
         if (files.any { idStudioStore.isPreparedDocument(it) || photoStudioStore.isPreparedDocument(it) } && portalUrl == null) {
             toast("Connect to a print shop before selecting a private studio document.")
             return
@@ -5043,82 +5121,129 @@ class MainActivity : AppCompatActivity() {
             toast("This print field accepts one document at a time.")
             return
         }
-        try {
-            val uploadFiles = files.map { file ->
-                when {
-                    idStudioStore.isPreparedDocument(file) ->
-                        idStudioStore.materializePreparedFile(file).also { privateIdUploadTempFiles.add(it) }
-                    photoStudioStore.isPreparedDocument(file) ->
-                        photoStudioStore.materializePdf(file).also { privatePhotoUploadTempFiles.add(it) }
-                    else -> file
+        if (pickerPreparingSelection) return
+
+        val generation = ++chooserPreparationGeneration
+        val returnToPhotoStudio = fileChooserReturnToPhotoStudio
+        pickerPreparingSelection = true
+        showPicker(resetPath = false)
+
+        chooserPreparationExecutor.execute {
+            val idTemps = mutableListOf<File>()
+            val photoTemps = mutableListOf<File>()
+            val previewTokens = mutableListOf<String>()
+            try {
+                fun ensureNotCancelled() {
+                    check(!Thread.currentThread().isInterrupted) {
+                        "Document preparation was cancelled."
+                    }
                 }
-            }
-            val error = PrintBatchSelectionPolicy.validationError(uploadFiles)
-            if (error != null) {
-                uploadFiles.filter { candidate -> candidate in privateIdUploadTempFiles }
-                    .forEach { idStudioStore.releaseTransientFile(it); privateIdUploadTempFiles.remove(it) }
-                uploadFiles.filter { candidate -> candidate in privatePhotoUploadTempFiles }
-                    .forEach { photoStudioStore.releaseTransientFile(it); privatePhotoUploadTempFiles.remove(it) }
-                toast(error)
-                return
-            }
-            val uris = uploadFiles.map { file ->
-                FileProvider.getUriForFile(this, "$packageName.documents", file)
-            }.toTypedArray()
-            val safeGroupNames = groupNames?.takeIf { it.size == files.size }
-                ?: files.map(::printBatchGroupName)
-            val previewTokens = JSONArray().apply {
-                files.forEach { put(createCustomerUploadPdfPreview(it) ?: JSONObject.NULL) }
-            }
-            val nativePrintKinds = JSONArray().apply {
-                files.forEach {
-                    put(when {
-                        idStudioStore.isPreparedDocument(it) -> "ID_DOCUMENT"
-                        photoStudioStore.isPreparedDocument(it) -> "PHOTO"
-                        else -> "DOCUMENT"
-                    })
+
+                val uploadFiles = files.map { file ->
+                    ensureNotCancelled()
+                    when {
+                        idStudioStore.isPreparedDocument(file) ->
+                            idStudioStore.materializePreparedFile(file).also(idTemps::add)
+                        photoStudioStore.isPreparedDocument(file) ->
+                            photoStudioStore.materializePdf(file).also(photoTemps::add)
+                        else -> file
+                    }
                 }
-            }
-            val nativePhotoSettings = JSONArray().apply {
-                files.forEach { file ->
-                    if (photoStudioStore.isPreparedDocument(file)) {
-                        val metadata = photoStudioStore.readMetadata(file)
-                        put(JSONObject()
-                            .put("sizeCode", metadata.optString("sizeCode"))
-                            .put("photoCount", metadata.optInt("photoCount"))
-                            .put("photosPerPage", metadata.optInt("photosPerPage")))
-                    } else put(JSONObject.NULL)
+                ensureNotCancelled()
+                val uploadError = PrintBatchSelectionPolicy.validationError(uploadFiles)
+                if (uploadError != null) throw IllegalArgumentException(uploadError)
+
+                val uris = uploadFiles.map { file ->
+                    FileProvider.getUriForFile(this, "$packageName.documents", file)
+                }.toTypedArray()
+                val safeGroupNames = groupNames?.takeIf { it.size == files.size }
+                    ?: files.map(::printBatchGroupName)
+                val previewTokensJson = JSONArray().apply {
+                    files.forEachIndexed { index, file ->
+                        ensureNotCancelled()
+                        // Reuse the upload-ready Photo Studio PDF instead of decrypting it again.
+                        val token = createCustomerUploadPdfPreview(file, uploadFiles[index])
+                        if (token != null) previewTokens.add(token)
+                        put(token ?: JSONObject.NULL)
+                    }
                 }
-            }
-            val metadataScript = "window.__smartPrintNativePickerGroups = " +
-                JSONArray().apply { safeGroupNames.forEach { put(it) } }.toString() + ";" +
-                "window.__smartPrintNativePdfPreviews = " + previewTokens.toString() + ";" +
-                "window.__smartPrintNativePrintKinds = " + nativePrintKinds.toString() + ";" +
-                "window.__smartPrintNativePhotoSettings = " + nativePhotoSettings.toString() + ";"
-            val deliverSelection = {
-                fileCallback = null
-                chooserSelectedFilePaths.clear()
-                chooserSelectedFolderPaths.clear()
-                fileChooserAllowsMultiple = false
-                fileChooserSelectFolders = false
-                if (fileChooserReturnToPhotoStudio) {
-                    fileChooserReturnToPhotoStudio = false
-                    showDedicatedPhotoStudio()
-                    callback.onReceiveValue(uris)
-                } else {
-                    showPrint()
-                    val activeWebView = webView
-                    if (activeWebView != null) {
-                        activeWebView.evaluateJavascript(metadataScript) { callback.onReceiveValue(uris) }
+                val nativePrintKinds = JSONArray().apply {
+                    files.forEach { file ->
+                        put(when {
+                            idStudioStore.isPreparedDocument(file) -> "ID_DOCUMENT"
+                            photoStudioStore.isPreparedDocument(file) -> "PHOTO"
+                            else -> "DOCUMENT"
+                        })
+                    }
+                }
+                val nativePhotoSettings = JSONArray().apply {
+                    files.forEach { file ->
+                        ensureNotCancelled()
+                        if (photoStudioStore.isPreparedDocument(file)) {
+                            // Decrypt this small metadata record only for selected sheets, never while listing.
+                            val metadata = photoStudioStore.readMetadata(file)
+                            put(JSONObject()
+                                .put("sizeCode", metadata.optString("sizeCode"))
+                                .put("photoCount", metadata.optInt("photoCount"))
+                                .put("photosPerPage", metadata.optInt("photosPerPage")))
+                        } else put(JSONObject.NULL)
+                    }
+                }
+                val metadataScript = "window.__smartPrintNativePickerGroups = " +
+                    JSONArray().apply { safeGroupNames.forEach { put(it) } }.toString() + ";" +
+                    "window.__smartPrintNativePdfPreviews = " + previewTokensJson.toString() + ";" +
+                    "window.__smartPrintNativePrintKinds = " + nativePrintKinds.toString() + ";" +
+                    "window.__smartPrintNativePhotoSettings = " + nativePhotoSettings.toString() + ";"
+
+                runOnUiThread {
+                    val stillCurrent = generation == chooserPreparationGeneration &&
+                        fileCallback === callback && !isFinishing && !isDestroyed
+                    if (!stillCurrent) {
+                        releaseFailedPickerPreparation(idTemps, photoTemps, previewTokens)
+                        return@runOnUiThread
+                    }
+
+                    privateIdUploadTempFiles.addAll(idTemps)
+                    privatePhotoUploadTempFiles.addAll(photoTemps)
+                    pickerPreparingSelection = false
+                    fileCallback = null
+                    chooserSelectedFilePaths.clear()
+                    chooserSelectedFolderPaths.clear()
+                    fileChooserAllowsMultiple = false
+                    fileChooserSelectFolders = false
+
+                    if (returnToPhotoStudio) {
+                        fileChooserReturnToPhotoStudio = false
+                        showDedicatedPhotoStudio()
+                        runCatching { callback.onReceiveValue(uris) }
+                            .onFailure { toast("Could not return the selected file to Photo Studio.") }
                     } else {
-                        callback.onReceiveValue(uris)
+                        showPrint()
+                        val activeWebView = webView
+                        if (activeWebView != null) {
+                            activeWebView.evaluateJavascript(metadataScript) {
+                                runCatching { callback.onReceiveValue(uris) }
+                                    .onFailure { toast("Could not add the selected documents to the upload form.") }
+                            }
+                        } else {
+                            runCatching { callback.onReceiveValue(uris) }
+                                .onFailure { toast("Could not add the selected documents to the upload form.") }
+                        }
+                    }
+                }
+            } catch (error: Exception) {
+                releaseFailedPickerPreparation(idTemps, photoTemps, previewTokens)
+                val failureMessage = message(error)
+                runOnUiThread {
+                    if (generation == chooserPreparationGeneration &&
+                        fileCallback === callback && !isFinishing && !isDestroyed
+                    ) {
+                        pickerPreparingSelection = false
+                        showPicker(resetPath = false)
+                        toast("Could not add the selected documents: " + failureMessage)
                     }
                 }
             }
-            deliverSelection()
-        } catch (e: Exception) {
-            cancelPicker()
-            toast("Could not attach the selected documents: " + message(e))
         }
     }
 
@@ -5163,9 +5288,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun createCustomerUploadPdfPreview(file: File): String? {
+    private fun createCustomerUploadPdfPreview(file: File, materializedPhotoPdf: File? = null): String? {
         if (photoStudioStore.isPreparedDocument(file)) {
-            val materialized = runCatching { photoStudioStore.materializePdf(file) }.getOrNull() ?: return null
+            val materialized = materializedPhotoPdf?.takeIf { it.isFile }
+                ?: runCatching { photoStudioStore.materializePdf(file) }.getOrNull()
+                ?: return null
             val token = UUID.randomUUID().toString()
             customerUploadPdfPreviews[token] = materialized
             return token
@@ -5253,6 +5380,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cancelPicker() {
+        chooserPreparationGeneration++
+        pickerPreparingSelection = false
         fileCallback?.onReceiveValue(null)
         fileCallback = null
         chooserSelectedFilePaths.clear()
