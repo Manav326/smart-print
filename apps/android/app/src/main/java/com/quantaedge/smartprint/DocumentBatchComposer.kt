@@ -25,7 +25,7 @@ object DocumentBatchComposer {
     private const val PAGE_MARGIN = 20f
 
     fun pageEdits(source: File): List<PdfPageEdit> {
-        require(source.isFile && source.extension.equals("pdf", true)) {
+        require(source.isFile && DocumentNamePolicy.isPdf(source)) {
             "Choose a saved PDF document."
         }
         ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
@@ -67,8 +67,8 @@ object DocumentBatchComposer {
         var pageNumber = 0
         try {
             files.forEach { file ->
-                when (file.extension.lowercase()) {
-                    "pdf" -> {
+                when (DocumentNamePolicy.mimeType(file)) {
+                    "application/pdf" -> {
                         ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                             PdfRenderer(descriptor).use { renderer ->
                                 require(renderer.pageCount > 0 && pageNumber + renderer.pageCount <= MAX_PAGES) {
@@ -88,7 +88,7 @@ object DocumentBatchComposer {
                             }
                         }
                     }
-                    "jpg", "jpeg", "png" -> {
+                    "image/jpeg", "image/png" -> {
                         val bitmap = decodeImage(file)
                         try {
                             require(pageNumber < MAX_PAGES) {
@@ -118,7 +118,7 @@ object DocumentBatchComposer {
      * Writes a new PDF; the source remains untouched.
      */
     fun editPdf(source: File, edits: List<PdfPageEdit>, output: File): Int {
-        require(source.isFile && source.extension.equals("pdf", true)) {
+        require(source.isFile && DocumentNamePolicy.isPdf(source)) {
             "Choose a saved PDF document."
         }
         require(source.length() in 1..MAX_SOURCE_BYTES) {
@@ -171,7 +171,7 @@ object DocumentBatchComposer {
         require(files.size in 2..20) {
             "Select between 2 and 20 documents to prepare a print batch."
         }
-        require(files.all { it.isFile && it.extension.lowercase() in setOf("pdf", "jpg", "jpeg", "png") }) {
+        require(files.all(DocumentNamePolicy::isBatchSource)) {
             "Print batches support PDF, JPG, JPEG and PNG files."
         }
         require(files.sumOf { it.length() } in 1..MAX_SOURCE_BYTES) {
