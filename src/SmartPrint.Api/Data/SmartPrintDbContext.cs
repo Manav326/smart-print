@@ -519,6 +519,10 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
             entity.Property(x => x.StorageKey).HasMaxLength(200).IsRequired();
             entity.Property(x => x.StorageMode).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.PhotoSourceStorageKey).HasMaxLength(200);
+            entity.Property(x => x.PhotoSourceOriginalFileName).HasMaxLength(255);
+            entity.Property(x => x.PhotoSourceMediaType).HasMaxLength(100);
+            entity.Property(x => x.PhotoSourceSha256).HasMaxLength(64);
             entity.Property(x => x.PageSizesJson).HasColumnType("jsonb").IsRequired();
             entity.HasOne<AgentDevice>().WithMany()
                 .HasForeignKey(x => new { x.TenantId, x.AgentDeviceId })
