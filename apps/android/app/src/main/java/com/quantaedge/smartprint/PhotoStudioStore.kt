@@ -48,7 +48,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         require(sizeCode in PHOTO_SIZE_LIMITS.keys) { "Choose a supported photo size before saving." }
         val photoCount = suppliedMetadata.optInt("photoCount", 0)
         val photosPerPage = suppliedMetadata.optInt("photosPerPage", 0)
-        require(photoCount in 1..100) { "The photo count must be between 1 and 100." }
+        require(photoCount in 1..UploadLimits.MAX_PHOTO_COUNT) { "The photo count must be between 1 and ${UploadLimits.MAX_PHOTO_COUNT}." }
         require(photosPerPage in 1..(PHOTO_SIZE_LIMITS[sizeCode] ?: 0)) {
             "The photos-per-A4-page setting is invalid."
         }
@@ -104,7 +104,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         require(sizeCode in PHOTO_SIZE_LIMITS.keys) { "Choose a supported photo size before saving." }
         val photoCount = suppliedMetadata.optInt("photoCount", 0)
         val photosPerPage = suppliedMetadata.optInt("photosPerPage", 0)
-        require(photoCount in 1..100) { "The photo count must be between 1 and 100." }
+        require(photoCount in 1..UploadLimits.MAX_PHOTO_COUNT) { "The photo count must be between 1 and ${UploadLimits.MAX_PHOTO_COUNT}." }
         require(photosPerPage in 1..(PHOTO_SIZE_LIMITS[sizeCode] ?: 0)) {
             "The photos-per-A4-page setting is invalid."
         }
