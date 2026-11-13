@@ -1720,4 +1720,42 @@ class QrScannerPermissionInstrumentedTest {
                 .check(matches(isDisplayed()))
         }
     }
+ 
+    @Test
+    fun selectedFilesCanBeMovedTogetherIntoAChosenMyFilesFolder() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val store = LocalDocumentStore(context.filesDir)
+        val suffix = System.currentTimeMillis().toString()
+        val source = store.createFolder("", "bulk-move-source-$suffix")
+        val destination = store.createFolder("", "bulk-move-target-$suffix")
+        val first = store.importFile(ByteArrayInputStream(byteArrayOf(1, 2, 3)), "first.pdf", store.pathOf(source))
+        val second = store.importFile(ByteArrayInputStream(byteArrayOf(4, 5, 6)), "second.pdf", store.pathOf(source))
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val selected = MainActivity::class.java.getDeclaredField("selectedFilePaths")
+                        .apply { isAccessible = true }.get(activity) as MutableSet<String>
+                    selected.add(first.canonicalPath)
+                    selected.add(second.canonicalPath)
+                    MainActivity::class.java.getDeclaredField("librarySelectionMode")
+                        .apply { isAccessible = true }.setBoolean(activity, true)
+                    MainActivity::class.java.getDeclaredField("folderPath")
+                        .apply { isAccessible = true }.set(activity, "")
+                    MainActivity::class.java.getDeclaredMethod("showFiles")
+                        .apply { isAccessible = true }.invoke(activity)
+                }
+                onView(withText("Move")).perform(click())
+                onView(withText("My Files  /  ${destination.name}")).perform(click())
+                assertTrue(File(destination, first.name).isFile)
+                assertTrue(File(destination, second.name).isFile)
+                assertFalse(first.exists())
+                assertFalse(second.exists())
+            }
+        } finally {
+            store.delete(source)
+            store.delete(destination)
+        }
+    }
+
 }

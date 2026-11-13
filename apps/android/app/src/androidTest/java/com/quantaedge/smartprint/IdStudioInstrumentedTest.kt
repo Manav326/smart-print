@@ -258,6 +258,47 @@ class IdStudioInstrumentedTest {
         }
     }
 
+
+    @Test
+    fun idCaptureStepKeepsFrontPreviewAndShowsNextOnlyAfterBothSidesAreSaved() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("smartprint.customer.last-shop", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        val store = IdStudioStore(context.filesDir, context.cacheDir)
+        val draftId = store.createDraft()
+        store.saveScan(draftId, "front", ByteArrayInputStream(testJpeg()))
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredField("idStudioDraftId").apply {
+                        isAccessible = true
+                    }.set(activity, draftId)
+                    MainActivity::class.java.getDeclaredMethod("showIdStudioBackStep").apply {
+                        isAccessible = true
+                    }.invoke(activity)
+                }
+                onView(withText("Capture back side")).check(matches(isDisplayed()))
+                onView(withContentDescription("ID front scan preview")).check(matches(isDisplayed()))
+                onView(withContentDescription("ID back scan preview")).check(matches(isDisplayed()))
+
+                store.saveScan(draftId, "back", ByteArrayInputStream(testJpeg()))
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredMethod("showIdStudioBackStep").apply {
+                        isAccessible = true
+                    }.invoke(activity)
+                }
+                onView(withText("Next")).check(matches(isDisplayed()))
+                onView(withContentDescription("ID front scan preview")).check(matches(isDisplayed()))
+                onView(withContentDescription("ID back scan preview")).check(matches(isDisplayed()))
+                onView(withText("Next")).perform(click())
+                onView(withText("Prepare A4 print sheet")).check(matches(isDisplayed()))
+            }
+        } finally {
+            store.deleteDraft(draftId)
+        }
+    }
+
     private fun testJpeg(): ByteArray {
         val bitmap = Bitmap.createBitmap(1000, 630, Bitmap.Config.ARGB_8888)
         try {
