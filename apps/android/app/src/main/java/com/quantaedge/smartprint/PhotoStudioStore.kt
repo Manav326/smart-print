@@ -251,11 +251,16 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
 
     private fun writeTransient(bytes: ByteArray, extension: String): File {
         val target = File(transientRoot, "photo-studio-" + UUID.randomUUID().toString() + extension)
-        FileOutputStream(target).use { output ->
-            output.write(bytes)
-            output.fd.sync()
+        try {
+            FileOutputStream(target).use { output ->
+                output.write(bytes)
+                output.fd.sync()
+            }
+            return target
+        } catch (error: Exception) {
+            target.delete()
+            throw error
         }
-        return target
     }
 
     private fun cleanupTransientFiles() {

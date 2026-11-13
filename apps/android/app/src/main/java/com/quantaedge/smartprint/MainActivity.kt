@@ -77,6 +77,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
+import java.util.concurrent.Future
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.ZipEntry
@@ -167,6 +168,7 @@ class MainActivity : AppCompatActivity() {
         Thread(task, "SmartPrint-document-picker").apply { isDaemon = true }
     }
     private var chooserPreparationGeneration = 0
+    private var chooserPreparationTask: Future<*>? = null
     private var pickerPreparingSelection = false
     private var fileChooserAllowsMultiple = false
     private var fileChooserSelectFolders = false
@@ -531,6 +533,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         chooserPreparationGeneration++
+        chooserPreparationTask?.cancel(true)
+        chooserPreparationTask = null
         chooserPreparationExecutor.shutdownNow()
         releaseIdStudioReviewBitmap()
         documentViewer?.dispose()
@@ -2324,7 +2328,10 @@ class MainActivity : AppCompatActivity() {
         val heading = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         copy.addView(text(
-            if (!isPicker) "My Files" else if (fileChooserSelectFolders) "Choose folders" else "Choose files",
+            if (!isPicker) "My Files"
+            else if (fileChooserSelectFolders) "Choose folders"
+            else if (fileChooserAllowsMultiple) "Choose files"
+            else "Choose a file",
             21, R.color.qp_text, true
         ).apply {
             if (!isPicker) id = R.id.smartprint_files_heading
@@ -5128,7 +5135,7 @@ class MainActivity : AppCompatActivity() {
         pickerPreparingSelection = true
         showPicker(resetPath = false)
 
-        chooserPreparationExecutor.execute {
+        chooserPreparationTask = chooserPreparationExecutor.submit {
             val idTemps = mutableListOf<File>()
             val photoTemps = mutableListOf<File>()
             val previewTokens = mutableListOf<String>()
@@ -5199,10 +5206,12 @@ class MainActivity : AppCompatActivity() {
                     val stillCurrent = generation == chooserPreparationGeneration &&
                         fileCallback === callback && !isFinishing && !isDestroyed
                     if (!stillCurrent) {
+                        chooserPreparationTask = null
                         releaseFailedPickerPreparation(idTemps, photoTemps, previewTokens)
                         return@runOnUiThread
                     }
 
+                    chooserPreparationTask = null
                     privateIdUploadTempFiles.addAll(idTemps)
                     privatePhotoUploadTempFiles.addAll(photoTemps)
                     pickerPreparingSelection = false
@@ -5238,6 +5247,7 @@ class MainActivity : AppCompatActivity() {
                     if (generation == chooserPreparationGeneration &&
                         fileCallback === callback && !isFinishing && !isDestroyed
                     ) {
+                        chooserPreparationTask = null
                         pickerPreparingSelection = false
                         showPicker(resetPath = false)
                         toast("Could not add the selected documents: " + failureMessage)
@@ -5380,6 +5390,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun cancelPicker() {
+        chooserPreparationTask?.cancel(true)
+        chooserPreparationTask = null
         chooserPreparationGeneration++
         pickerPreparingSelection = false
         fileCallback?.onReceiveValue(null)

@@ -9,6 +9,7 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
+import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
@@ -74,13 +75,14 @@ class NativeFilePickerInstrumentedTest {
                 }
 
                 onView(withText("Photo Studio · Private documents")).check(matches(isDisplayed()))
-                onView(withText("ID Studio · Private documents")).check(matches(isDisplayed()))
 
-                onView(withContentDescription("Select Photo Studio document")).perform(click())
+                onView(withContentDescription("Select Photo Studio document"))
+                    .perform(scrollTo(), click())
                 onView(withText("Add selected files (1)")).check(matches(isDisplayed()))
                 onView(withText("Photo Studio · Private documents")).check(matches(isDisplayed()))
 
-                onView(withContentDescription("Select ID Studio document")).perform(click())
+                onView(withContentDescription("Select ID Studio document"))
+                    .perform(scrollTo(), click())
                 onView(withText("Add selected files (2)")).check(matches(isDisplayed()))
                 onView(withText("ID Studio · Private documents")).check(matches(isDisplayed()))
 
