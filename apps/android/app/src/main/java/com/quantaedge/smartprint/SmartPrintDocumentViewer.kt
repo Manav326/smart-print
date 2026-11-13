@@ -40,6 +40,7 @@ class SmartPrintDocumentViewer(
     startFile: File,
     private val imageSiblings: List<File>,
     startPosition: Int? = null,
+    documentMimeType: String = DocumentNamePolicy.mimeType(startFile),
     private val onNavigateImage: (File) -> Unit
 ) : LinearLayout(context) {
     companion object {
@@ -105,7 +106,7 @@ class SmartPrintDocumentViewer(
     // another photo is imported, renamed or removed while the viewer is closed.
     private var currentImageIndex = imageSiblings.indexOfFirst { sameFile(it, startFile) }.coerceAtLeast(0)
     private val displayedBitmaps = mutableListOf<Bitmap>()
-    private val isPdf = startFile.extension.equals("pdf", ignoreCase = true)
+    private val isPdf = documentMimeType == "application/pdf"
 
     init {
         orientation = LinearLayout.VERTICAL
