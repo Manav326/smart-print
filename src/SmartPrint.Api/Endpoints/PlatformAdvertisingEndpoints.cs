@@ -97,8 +97,15 @@ public static class PlatformAdvertisingEndpoints
         group.MapGet("/active",async(string placement,SmartPrintDbContext db,CancellationToken ct)=>{
             if(!PlatformAdvertisingRules.IsSupportedPlacement(placement))return Results.ValidationProblem(new Dictionary<string,string[]>{{"placement",new[]{"Choose HOME, FILES or SHOP_OVERVIEW."}}});
             var now=DateTimeOffset.UtcNow;
-            var item=await db.PlatformAdCampaigns.AsNoTracking().Where(x=>x.Placement==placement&&x.Status=="Active"&&x.StartsUtc<=now&&(x.EndsUtc==null||x.EndsUtc>now)).OrderBy(x=>x.CreatedUtc).FirstOrDefaultAsync(ct);
-            if(item is null)return Results.NoContent();
+            var candidates=await db.PlatformAdCampaigns.AsNoTracking()
+                .Where(x=>x.Placement==placement&&x.Status=="Active"&&x.StartsUtc<=now&&(x.EndsUtc==null||x.EndsUtc>now))
+                .OrderBy(x=>x.CreatedUtc).Take(100).ToListAsync(ct);
+            if(candidates.Count==0)return Results.NoContent();
+            var candidateIds=candidates.Select(x=>x.Id).ToArray();
+            var recentCounts=await db.PlatformAdEvents.AsNoTracking()
+                .Where(x=>candidateIds.Contains(x.CampaignId)&&x.EventType=="IMPRESSION"&&x.CreatedUtc>=now.AddDays(-7))
+                .GroupBy(x=>x.CampaignId).Select(g=>new{CampaignId=g.Key,Count=g.LongCount()}).ToDictionaryAsync(x=>x.CampaignId,x=>x.Count,ct);
+            var item=candidates.OrderBy(x=>recentCounts.GetValueOrDefault(x.Id)).ThenBy(x=>x.CreatedUtc).First();
             var creative=await db.PlatformAdCreatives.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==item.CreativeId,ct);
             if(creative is null)return Results.NoContent();
             return Results.Ok(new{item.Id,item.AdvertiserName,item.Headline,item.Body,item.DestinationUrl,item.Placement,item.Format,imageUrl=$"/api/v1/advertising/creatives/{creative.Id}"});

@@ -2795,7 +2795,7 @@ class MainActivity : AppCompatActivity() {
             column.addView(actions, linearParams().apply { bottomMargin = dp(12) })
         }
 
-        if (!isPicker) addNativeAdPlacement(column, "FILES")
+        if (!isPicker && !librarySelectionMode) addNativeAdPlacement(column, "FILES")
 
         val selectedHere = selectedFilePaths.mapNotNull { runCatching { File(it).canonicalFile }.getOrNull() }.filter { it.isFile && it.exists() }
         val chooserSelection = if (isPicker && !fileChooserSelectFolders) selectedChooserFiles() else emptyList()

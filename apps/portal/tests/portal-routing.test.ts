@@ -93,7 +93,7 @@ test("shop workspace sections have stable deep links and restore correctly", () 
 
 
 test("admin workspace sections have stable deep links and restore nested views", () => {
-  const sections = ["Overview", "Tenants", "Plans", "Subscriptions", "Operations"] as const;
+  const sections = ["Overview", "Tenants", "Plans", "Subscriptions", "Operations", "Advertising"] as const;
   for (const section of sections) {
     const path = adminPathForSection(section);
     assert.ok(path === "/admin" || path.startsWith("/admin/"));
@@ -101,6 +101,7 @@ test("admin workspace sections have stable deep links and restore nested views",
   }
   assert.equal(adminSectionFromPath("/admin/tenants/42"), "Tenants");
   assert.equal(adminSectionFromPath("/admin/plans/version/3"), "Plans");
+  assert.equal(adminSectionFromPath("/admin/advertising"), "Advertising");
   assert.equal(adminSectionFromPath("/admin/unknown"), "Overview");
 });
 
