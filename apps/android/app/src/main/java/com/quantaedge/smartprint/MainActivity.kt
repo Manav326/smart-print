@@ -2800,7 +2800,7 @@ class MainActivity : AppCompatActivity() {
             try { store.reorder(file, 1); showFiles() }
             catch (e: Exception) { toast("Reorder failed: " + message(e)) }
         }
-        if (!file.isDirectory) actions += "Share" to { shareDocument(file) }
+        if (!file.isDirectory) actions += "Share" to { shareDocument(file, mediaType) }
         actions += "Delete" to {
             showConfirmSheet(
                 if (file.isDirectory) "Delete folder?" else "Delete file?",
