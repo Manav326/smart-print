@@ -889,6 +889,7 @@ public sealed class AgentLocalQueueStore
 
             var alreadyRetained = !string.IsNullOrWhiteSpace(entry.PhotoSourceSha256);
             var createdPhotoSource = false;
+            var sourceMoved = false;
             if (alreadyRetained)
             {
                 if (entry.PhotoSourceSizeBytes is not > 0 ||
@@ -913,12 +914,15 @@ public sealed class AgentLocalQueueStore
             }
             else
             {
-                // Preserve the original encrypted queue payload byte-for-byte.
-                // This sidecar is never exposed directly; ReadPhotoSource decrypts
-                // it only inside the Windows Agent after cloud authorization.
-                if (File.Exists(retainedSourcePath)) File.Delete(retainedSourcePath);
-                File.Copy(documentPath, retainedSourcePath, overwrite: false);
+                // Move the already protected upload into its retained-source slot.
+                // This preserves the exact encrypted bytes without making a second
+                // full-size copy on disk. The replacement PDF is written into the
+                // original queue path after the move.
+                if (File.Exists(retainedSourcePath))
+                    throw new InvalidDataException("An unexpected retained photo source already exists.");
+                File.Move(documentPath, retainedSourcePath);
                 createdPhotoSource = true;
+                sourceMoved = true;
             }
 
             var newHash = Convert.ToHexString(SHA256.HashData(replacementBytes.Span)).ToLowerInvariant();
@@ -948,12 +952,15 @@ public sealed class AgentLocalQueueStore
                         await stream.WriteAsync(protectedBytes, cancellationToken);
                         await stream.FlushAsync(cancellationToken);
                     }
-                    File.Replace(temporaryPath, entry.DocumentPath, backupPath, ignoreMetadataErrors: true);
+                    if (sourceMoved)
+                        File.Move(temporaryPath, entry.DocumentPath);
+                    else
+                        File.Replace(temporaryPath, entry.DocumentPath, backupPath, ignoreMetadataErrors: true);
                 }
                 catch
                 {
-                    if (createdPhotoSource && File.Exists(retainedSourcePath))
-                        File.Delete(retainedSourcePath);
+                    if (sourceMoved && File.Exists(retainedSourcePath) && !File.Exists(documentPath))
+                        File.Move(retainedSourcePath, documentPath);
                     throw;
                 }
                 finally
@@ -994,9 +1001,12 @@ public sealed class AgentLocalQueueStore
                         if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
                         File.Move(backupPath, entry.DocumentPath);
                     }
+                    else if (sourceMoved && File.Exists(retainedSourcePath))
+                    {
+                        if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
+                        File.Move(retainedSourcePath, entry.DocumentPath);
+                    }
                     await SaveManifestAsync(entry, CancellationToken.None);
-                    if (createdPhotoSource && File.Exists(retainedSourcePath))
-                        File.Delete(retainedSourcePath);
                     throw;
                 }
 
@@ -1017,9 +1027,8 @@ public sealed class AgentLocalQueueStore
             }
             catch
             {
-                if (createdPhotoSource && File.Exists(retainedSourcePath) &&
-                    entry.PhotoSourceSha256 is null)
-                    File.Delete(retainedSourcePath);
+                // A first-edit failure restores the source to its original queue
+                // path in the inner rollback. Do not delete a retained original.
                 throw;
             }
         }
