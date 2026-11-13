@@ -1027,8 +1027,24 @@ public sealed class AgentLocalQueueStoreTests
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None));
 
+            // Even if a partial legacy manifest lost both document paths, the
+            // Agent can derive and erase the deterministic source sidecar name.
+            await File.WriteAllBytesAsync(retainedPhotoPath, RandomNumberGenerator.GetBytes(64));
+            var pathlessStaleMetadata = store.Find(job.Id)! with
+            {
+                PhotoSourcePath = null,
+                PhotoSourceDocumentName = "private-original.jpg",
+                PhotoSourceMediaType = "image/jpeg",
+                PhotoSourceSha256 = entry.Sha256,
+                PhotoSourceSizeBytes = entry.SizeBytes
+            };
+            await File.WriteAllTextAsync(
+                Path.ChangeExtension(entry.DocumentPath, ".json"),
+                JsonSerializer.Serialize(pathlessStaleMetadata, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
             // The retry path scrubs stale metadata and can then be acknowledged.
             await store.PurgePrivateSourceAfterConfirmedOutputAsync(job.Id, CancellationToken.None);
+            Assert.False(File.Exists(retainedPhotoPath));
             await store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None);
             Assert.False(store.Find(job.Id)!.PrivatePurgePending);
             Assert.Empty(store.GetPrivatePurgePendingJobs());
