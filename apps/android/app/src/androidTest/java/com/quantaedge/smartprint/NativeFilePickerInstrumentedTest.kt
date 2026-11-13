@@ -15,13 +15,17 @@ import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import org.json.JSONObject
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.io.ByteArrayOutputStream
 import java.io.File
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class NativeFilePickerInstrumentedTest {
@@ -49,7 +53,8 @@ class NativeFilePickerInstrumentedTest {
                 .put("resolutionDpi", 300)
         )
         val id = idStore.savePreparedOutput(pdf, jpeg, jpeg)
-        val callbackCalled = AtomicBoolean(false)
+        val callbackLatch = CountDownLatch(1)
+        val callbackUris = AtomicReference<Array<Uri>?>(null)
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -64,8 +69,9 @@ class NativeFilePickerInstrumentedTest {
 
                     MainActivity::class.java.getDeclaredField("fileCallback").apply {
                         isAccessible = true
-                    }.set(activity, ValueCallback<Array<Uri>> {
-                        callbackCalled.set(true)
+                    }.set(activity, ValueCallback<Array<Uri>> { uris ->
+                        callbackUris.set(uris)
+                        callbackLatch.countDown()
                     })
 
                     MainActivity::class.java.getDeclaredMethod(
@@ -86,7 +92,26 @@ class NativeFilePickerInstrumentedTest {
                 onView(withText("Add selected files (2)")).check(matches(isDisplayed()))
                 onView(withText("ID Studio · Private documents")).check(matches(isDisplayed()))
 
-                assertFalse("Selecting a studio item must not submit the picker callback.", callbackCalled.get())
+                assertTrue(
+                    "Selecting Studio items must wait for the single final Add action.",
+                    callbackLatch.count == 1L
+                )
+                onView(withText("Add selected files (2)")).perform(click())
+                assertTrue("The final Add action should return the selected documents.", callbackLatch.await(15, TimeUnit.SECONDS))
+
+                val attached = callbackUris.get()
+                assertNotNull(attached)
+                assertEquals(2, attached!!.size)
+                attached.forEach { uri ->
+                    context.contentResolver.openInputStream(uri).use { input ->
+                        assertNotNull("The returned private content URI must be readable.", input)
+                        val header = ByteArray(5)
+                        assertEquals(5, input!!.read(header))
+                        assertEquals("%PDF-".toByteArray(Charsets.US_ASCII).toList(), header.toList())
+                    }
+                }
+                assertTrue("The original encrypted Photo Studio document must remain saved.", photo.isFile)
+                assertTrue("The original encrypted ID Studio document must remain saved.", id.isFile)
             }
         } finally {
             photoStore.deletePrepared(photo)
