@@ -1,5 +1,16 @@
 namespace SmartPrint.Agent;
 
+/// <summary>
+/// The output mode returned by the API at dispatch is authoritative. Local
+/// queue metadata records the upload-time state and may be stale after a
+/// printer reassignment.
+/// </summary>
+public static class AgentOutputModeRules
+{
+    public static bool IsPdfExport(string? dispatchOutputMode) =>
+        string.Equals(dispatchOutputMode, "PDF_EXPORT", StringComparison.OrdinalIgnoreCase);
+}
+
 public sealed record AgentClaimedJob(
     Guid Id,
     string JobNumber,

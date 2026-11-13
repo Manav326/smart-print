@@ -1068,9 +1068,7 @@ public sealed class Worker(
         {
             ct.ThrowIfCancellationRequested();
             var entry = localQueueStore.Find(job.Id);
-            var isPdfExport = job.OutputMode == PrinterOutputModeRules.PdfExport ||
-                entry?.OutputMode == PrinterOutputModeRules.PdfExport ||
-                PrinterOutputModeRules.IsPdfExport(job.QueueName, entry?.PrinterName);
+            var isPdfExport = AgentOutputModeRules.IsPdfExport(job.OutputMode);
             var localStateValid = entry is not null &&
                 (entry.State == "ACKNOWLEDGED" ||
                  (isPdfExport && entry.State == "OUTPUT_UNCONFIRMED"));
