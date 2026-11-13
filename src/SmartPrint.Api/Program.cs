@@ -2363,14 +2363,14 @@ shop.MapPost("/photo-jobs", async (
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
         !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
-        photoCount is < 1 or > 100 ||
+        photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
         photosPerPage < 1 ||
         photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["photoDetails"] = ["Choose a supported photo size, 1–100 photos and a valid photos-per-page layout."]
+            ["photoDetails"] = [$"Choose a supported photo size, 1–{UploadLimits.MaxPhotoCount} photos and a valid photos-per-page layout."]
         });
     }
 
@@ -3671,7 +3671,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
         !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
-        photoCount is < 1 or > 100 ||
+        photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
         photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
     {
@@ -6625,7 +6625,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     if (device is null) return Results.Unauthorized();
 
     if (request.PageCount is < 1 or > 100 ||
-        request.PhotoCount is < 1 or > 100 ||
+        request.PhotoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         request.PhotosPerPage is < 1 or > 100 ||
         request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6"))
         return Results.BadRequest(new { code = "photo_revision_output_invalid", message = "The prepared photo page metadata is invalid." });
@@ -8016,7 +8016,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         requestedPrintKind == "PHOTO" &&
         photoSizeCode is string supportedPhotoSizeCode &&
         supportedPhotoSizeCode is "35x45" or "25x35" or "2x2" or "4x6" &&
-        photoCount is >= 1 and <= 100 &&
+        photoCount is >= 1 and <= UploadLimits.MaxPhotoCount &&
         photosPerPage is int requestedPhotosPerPage &&
         requestedPhotosPerPage >= 1 &&
         requestedPhotosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(supportedPhotoSizeCode);
@@ -9744,7 +9744,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         (isPhotoPrint &&
             (request.Copies != 1 || request.ColourMode != "Colour" ||
              request.IsDuplex || request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
-             request.PhotoCount is null || request.PhotoCount is < 1 or > 100 ||
+             request.PhotoCount is null || request.PhotoCount is < 1 or > UploadLimits.MaxPhotoCount ||
              request.PhotosPerPage is < 1)) ||
         (isPhotoPrint && (request.PaperSize != "A4" || request.Orientation != "AUTO")) ||
         (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null)))
