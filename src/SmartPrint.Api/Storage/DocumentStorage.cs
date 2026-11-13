@@ -31,12 +31,6 @@ public sealed class DocumentStorage : IDisposable
             throw new DocumentValidationException("File size must be within the upload size limit.");
         }
 
-        var extension = Path.GetExtension(originalFileName).ToLowerInvariant();
-        if (extension is not (".pdf" or ".jpg" or ".jpeg" or ".png"))
-        {
-            throw new DocumentValidationException("Only PDF, JPG, JPEG and PNG files are supported in this release.");
-        }
-
         await using var memory = new MemoryStream((int)declaredLength);
         await input.CopyToAsync(memory, cancellationToken);
         if (memory.Length != declaredLength || memory.Length > UploadLimits.MaxFileBytes)
@@ -47,7 +41,7 @@ public sealed class DocumentStorage : IDisposable
         var bytes = memory.ToArray();
         var analysis = DocumentAnalyzer.Analyse(bytes, extension);
         var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-        var storageKey = $"{tenantId:N}/{documentId:N}{extension}";
+        var storageKey = $"{tenantId:N}/{documentId:N}{analysis.Extension}";
         var fullPath = ResolveStoragePath(storageKey);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         var encryptedBytes = Encrypt(bytes, encryptionKey);
