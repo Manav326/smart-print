@@ -1176,6 +1176,179 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
     return Results.Ok(new { Job = jobStatus, Timeline = timeline, Payment = payment, BatchPayment = batchPayment });
 });
 
+
+customerApi.MapGet("/orders/{orderKey:guid}/tracking", async (
+    Guid orderKey,
+    ClaimsPrincipal principal,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var customerId = CustomerIdentity.GetCustomerId(principal);
+    if (customerId is null)
+    {
+        return Results.Forbid();
+    }
+
+    // Resolve the requested batch (or a standalone job) through customer ownership
+    // first. The batch identifier is never sufficient authorization on its own.
+    var anchorJob = await db.PrintJobs.AsNoTracking()
+        .Where(item =>
+            (item.BatchId == orderKey || (item.Id == orderKey && item.BatchId == null)) &&
+            (item.CustomerUserId == customerId ||
+             (item.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                 session.TenantId == item.TenantId &&
+                 session.Id == item.CustomerSessionId &&
+                 session.CustomerUserId == customerId))))
+        .Select(item => new { item.Id, item.TenantId, item.BatchId })
+        .SingleOrDefaultAsync(ct);
+
+    if (anchorJob is null)
+    {
+        return Results.NotFound();
+    }
+
+    var jobs = await db.PrintJobs.AsNoTracking()
+        .Where(item =>
+            item.TenantId == anchorJob.TenantId &&
+            (anchorJob.BatchId != null ? item.BatchId == anchorJob.BatchId : item.Id == anchorJob.Id) &&
+            (item.CustomerUserId == customerId ||
+             (item.CustomerSessionId != null && db.CustomerPrintSessions.Any(session =>
+                 session.TenantId == item.TenantId &&
+                 session.Id == item.CustomerSessionId &&
+                 session.CustomerUserId == customerId))))
+        .OrderBy(item => item.CreatedUtc)
+        .Select(item => new
+        {
+            item.Id,
+            item.TenantId,
+            item.BatchId,
+            item.BatchGroupName,
+            item.BatchName,
+            item.JobNumber,
+            item.Status,
+            item.PageCount,
+            item.Copies,
+            item.ColourMode,
+            item.PaperSize,
+            item.IsDuplex,
+            item.Orientation,
+            item.PrintKind,
+            item.PhotoSizeCode,
+            item.PhotoCount,
+            item.PhotosPerPage,
+            item.Currency,
+            item.QuotedAmountMinor,
+            item.RejectedPageNumbersJson,
+            item.OutputType,
+            item.OutputCompletedUtc,
+            item.UpdatedUtc,
+            item.CreatedUtc,
+            item.PrivatePrinting,
+            item.PrivateDocumentPurgedUtc,
+            item.FailureCode,
+            ShopName = db.ShopProfiles.AsNoTracking()
+                .Where(profile => profile.TenantId == item.TenantId)
+                .Select(profile => profile.DisplayName)
+                .FirstOrDefault() ?? "Print shop",
+            OriginalFileName = item.PrivatePrinting
+                ? "Private document"
+                : db.PrintDocuments.AsNoTracking()
+                    .Where(document => document.TenantId == item.TenantId && document.PrintJobId == item.Id)
+                    .Select(document => document.OriginalFileName)
+                    .FirstOrDefault() ?? "Print document"
+        })
+        .ToListAsync(ct);
+
+    if (jobs.Count == 0)
+    {
+        return Results.NotFound();
+    }
+
+    var jobIds = jobs.Select(item => item.Id).ToArray();
+    var events = await db.PrintJobEvents.AsNoTracking()
+        .Where(item => item.TenantId == anchorJob.TenantId && jobIds.Contains(item.PrintJobId))
+        .OrderBy(item => item.CreatedUtc)
+        .Select(item => new
+        {
+            item.PrintJobId,
+            item.PreviousStatus,
+            item.NewStatus,
+            item.ActorType,
+            item.ReasonCode,
+            item.CreatedUtc
+        })
+        .ToListAsync(ct);
+
+    var payments = await db.PrintPayments.AsNoTracking()
+        .Where(item => item.TenantId == anchorJob.TenantId && jobIds.Contains(item.PrintJobId))
+        .OrderByDescending(item => item.UpdatedUtc)
+        .Select(item => new
+        {
+            item.Id,
+            item.PrintJobId,
+            item.BatchPaymentId,
+            item.Method,
+            item.Status,
+            item.AmountMinor,
+            item.RefundedAmountMinor,
+            item.Currency,
+            item.RejectionReason,
+            item.CreatedUtc,
+            item.UpdatedUtc,
+            item.VerifiedUtc
+        })
+        .ToListAsync(ct);
+
+    var batchPaymentIds = payments
+        .Where(item => item.BatchPaymentId != null)
+        .Select(item => item.BatchPaymentId!.Value)
+        .Distinct()
+        .ToArray();
+    var batchPayments = batchPaymentIds.Length == 0
+        ? []
+        : await db.PrintBatchPayments.AsNoTracking()
+            .Where(item => item.TenantId == anchorJob.TenantId && batchPaymentIds.Contains(item.Id))
+            .OrderByDescending(item => item.UpdatedUtc)
+            .Select(item => new
+            {
+                item.Id,
+                item.BatchId,
+                item.Method,
+                item.Status,
+                item.AmountMinor,
+                item.Currency,
+                item.PaymentReference,
+                item.RejectionReason,
+                item.CreatedUtc,
+                item.UpdatedUtc,
+                item.VerifiedUtc
+            })
+            .ToListAsync(ct);
+
+    var first = jobs[0];
+    return Results.Ok(new
+    {
+        Order = new
+        {
+            Key = anchorJob.BatchId ?? anchorJob.Id,
+            BatchId = anchorJob.BatchId,
+            first.BatchName,
+            first.BatchGroupName,
+            first.ShopName,
+            CreatedUtc = jobs.Min(item => item.CreatedUtc),
+            UpdatedUtc = jobs.Max(item => item.UpdatedUtc),
+            FileCount = jobs.Count
+        },
+        Files = jobs.Select(job => new
+        {
+            Job = job,
+            Timeline = events.Where(item => item.PrintJobId == job.Id).ToArray(),
+            Payment = payments.FirstOrDefault(item => item.PrintJobId == job.Id)
+        }).ToArray(),
+        BatchPayment = batchPayments.FirstOrDefault()
+    });
+});
+
 var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
 
