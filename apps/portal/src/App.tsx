@@ -3893,10 +3893,10 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       const previousSessionKey=result
         ?customerPendingSelectionStorageKey(publicCode,result.sessionToken)
         :null;
-      const value=await createCustomerSession(publicCode);
-      // Do not switch sessions if an explicit reset cannot clear the previous
-      // unsent selection; otherwise those files could reappear in the new batch.
+      // Clear the completed/abandoned draft before asking the server for a new
+      // session. A storage failure must not leave an orphan session behind.
       if(previousSessionKey)await clearCustomerPendingSelection(previousSessionKey);
+      const value=await createCustomerSession(publicCode);
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       await saveNativeCustomerShopProfile(publicCode,value.shop);
       const stationKey=`qrtoprint.customer-session:${publicCode}`;
