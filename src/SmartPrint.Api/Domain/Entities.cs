@@ -348,6 +348,7 @@ public sealed class PrintDocument
     public string? PhotoSourceMediaType { get; set; }
     public string? PhotoSourceSha256 { get; set; }
     public long? PhotoSourceSizeBytes { get; set; }
+    public string? PhotoEditorSettingsJson { get; set; }
     public string PageSizesJson { get; set; } = "[]";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? PurgedUtc { get; set; }
