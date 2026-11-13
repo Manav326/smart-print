@@ -1008,6 +1008,31 @@ public sealed class AgentLocalQueueStore
                     CryptographicOperations.ZeroMemory(verifiedSource);
                 }
             }
+            else
+            {
+                // On the first edit, the manifest still describes the original file,
+                // but verify the protected bytes before moving them into the retained
+                // source sidecar. A stale or corrupted queue file must never become the
+                // supposedly immutable source for future edits.
+                byte[] verifiedOriginal;
+                try
+                {
+                    verifiedOriginal = ReadDocument(jobId);
+                }
+                catch (Exception exception) when (exception is IOException or CryptographicException)
+                {
+                    throw new InvalidDataException(
+                        "The local original photo failed its integrity check. Reopen its preview before saving.",
+                        exception);
+                }
+                finally
+                {
+                    // ReadDocument returns plaintext only after verifying its digest.
+                    // The buffer is cleared immediately after this integrity check.
+                }
+
+                CryptographicOperations.ZeroMemory(verifiedOriginal);
+            }
 
             var newHash = Convert.ToHexString(SHA256.HashData(replacementBytes.Span)).ToLowerInvariant();
             var plaintext = replacementBytes.ToArray();
