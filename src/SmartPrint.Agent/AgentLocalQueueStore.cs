@@ -53,9 +53,73 @@ public sealed class AgentLocalQueueStore
         }
         foreach (var photoSourceFile in Directory.EnumerateFiles(queueRoot, "*.qdoc.photo.source", SearchOption.TopDirectoryOnly))
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var documentFile = photoSourceFile[..^".photo.source".Length];
-            if (!File.Exists(Path.ChangeExtension(documentFile, ".json")))
+            var jobIdText = Path.GetFileNameWithoutExtension(documentFile);
+            if (!Guid.TryParseExact(jobIdText, "N", out var jobId))
+                continue;
+
+            var manifestPath = GetManifestPath(jobId);
+            if (!File.Exists(manifestPath))
+            {
                 File.Delete(photoSourceFile);
+                continue;
+            }
+
+            var entry = Find(jobId);
+            if (entry is null || !string.IsNullOrWhiteSpace(entry.PhotoSourceSha256))
+                continue; // The source is now the committed retained original.
+
+            // Recover a first-edit interruption. The old manifest has no retained
+            // source metadata yet; if its normal .qdoc no longer matches the
+            // original, restore the encrypted source sidecar before the queue is
+            // made available again.
+            var documentStillOriginal = false;
+            try
+            {
+                var currentBytes = ReadDocument(jobId);
+                try
+                {
+                    documentStillOriginal =
+                        currentBytes.LongLength == entry.SizeBytes &&
+                        string.Equals(
+                            Convert.ToHexString(SHA256.HashData(currentBytes)).ToLowerInvariant(),
+                            entry.Sha256,
+                            StringComparison.OrdinalIgnoreCase);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(currentBytes);
+                }
+            }
+            catch (Exception exception) when (
+                exception is FileNotFoundException or DirectoryNotFoundException or
+                InvalidDataException or CryptographicException)
+            {
+                // The queue manifest still describes the original image, but the
+                // primary payload was moved or replaced before its manifest commit.
+            }
+
+            if (documentStillOriginal)
+            {
+                File.Delete(photoSourceFile); // Interrupted before the original move was needed.
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.DocumentPath))
+            {
+                File.Delete(photoSourceFile);
+                continue;
+            }
+            var documentPath = Path.GetFullPath(entry.DocumentPath);
+            var queuePrefix = Path.GetFullPath(queueRoot).TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!documentPath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The interrupted photo document path is outside the protected queue.");
+
+            if (File.Exists(documentPath)) File.Delete(documentPath);
+            File.Move(photoSourceFile, documentPath);
         }
 
         await Task.CompletedTask;
