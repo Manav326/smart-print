@@ -1228,14 +1228,14 @@ async function exercisePhotoStudioFailurePaths() {
     const opened = await openPhotoStudioFixture(page, "?mode=customer&oversizeRaster=1");
     const apply = opened.dialog.getByRole("button", { name: "Prepare A4 sheet" });
     await apply.click();
-    await opened.dialog.getByRole("alert").filter({ hasText: /20 MB file limit/ }).waitFor({ state: "visible" });
+    await opened.dialog.getByRole("alert").filter({ hasText: /50 MB file limit/ }).waitFor({ state: "visible" });
     assert.equal(await apply.isDisabled(), false, "An over-limit PDF must fail before submission and release the editor.");
     assert.equal(await page.locator("#photo-studio-result").innerText(), "",
       "An oversized render must never be reported as prepared or submitted.");
   } finally {
     await largeContext.close();
   }
-  console.log("[QA-CASE-END] PASS | Photo Studio malformed input, missing prices, save/render retry and 20 MB output limit.");
+  console.log("[QA-CASE-END] PASS | Photo Studio malformed input, missing prices, save/render retry and 50 MB output limit.");
 }
 
 
