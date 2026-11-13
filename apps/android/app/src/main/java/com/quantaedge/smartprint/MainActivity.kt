@@ -1975,16 +1975,16 @@ class MainActivity : AppCompatActivity() {
                     }
                     CustomerAccountClient.mergeLegacyHistorySnapshot(local, legacyItems)
                         .also { store.replace(email, it) }
-                } else if (serverCount <= local.size.toLong()) {
+                } else if (serverCount == 0L) {
                     local
                 } else {
                     val firstPage = authenticated { token ->
-                        CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = 10)
+                        CustomerAccountClient.historyPage(accountServiceUrl(), token, page = 0, size = 100)
                     }
                     require(firstPage.totalItems == serverCount) {
                         "The server history changed during refresh. Your saved history has not changed."
                     }
-                    require(firstPage.page == 0 && firstPage.size == 10) {
+                    require(firstPage.page == 0 && firstPage.size == 100) {
                         "The server returned an invalid first history page. Your saved history has not changed."
                     }
                     val downloaded = linkedMapOf<String, CustomerPrintHistoryItem>()
@@ -2030,7 +2030,8 @@ class MainActivity : AppCompatActivity() {
                     ) {
                         "New orders arrived during sync. Tap refresh again to get the complete history."
                     }
-                    downloaded.values.toList().also { store.replace(email, it) }
+                    CustomerAccountClient.mergeLegacyHistorySnapshot(local, downloaded.values.toList())
+                        .also { store.replace(email, it) }
                 }
             }
             runOnUiThread {
