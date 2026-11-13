@@ -818,6 +818,48 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AgentStartupRestoresOriginalIfFirstPhotoRevisionWasInterrupted(bool replacementPayloadWasWritten)
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Original image remains recoverable after interrupted first edit"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                Status = "AWAITING_SHOP_APPROVAL",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            var entry = store.Find(job.Id)!;
+            var sourcePath = entry.DocumentPath + ".photo.source";
+            File.Move(entry.DocumentPath, sourcePath);
+            if (replacementPayloadWasWritten)
+                await File.WriteAllBytesAsync(entry.DocumentPath, "interrupted replacement"u8.ToArray());
+
+            var restartedStore = new AgentLocalQueueStore(root);
+            await restartedStore.InitializeAsync(CancellationToken.None);
+
+            var restored = restartedStore.Find(job.Id)!;
+            Assert.Equal(staged.Sha256, restored.Sha256);
+            Assert.Equal(staged.SizeBytes, restored.SizeBytes);
+            Assert.Equal("original.jpg", restored.DocumentName);
+            Assert.Equal("image/jpeg", restored.MediaType);
+            Assert.True(originalBytes.AsSpan().SequenceEqual(restartedStore.ReadDocument(job.Id)));
+            Assert.False(File.Exists(sourcePath));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task FailedCloudCommitRollsBackTheLocalPhotoBytesAndManifest()
     {
