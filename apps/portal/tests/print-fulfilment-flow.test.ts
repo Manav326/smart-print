@@ -357,7 +357,9 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.match(route,/IsShopOwner\(principal\)/);
  assert.match(route,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
  assert.match(route,/document\.StorageMode, "CLOUD"/);
- assert.match(route,/document\.MediaType is not \("image\/jpeg" or "image\/png"\)/);
+ assert.match(route,/var photoSourceMediaType = document\.PhotoSourceMediaType \?\? document\.MediaType/);
+ assert.match(route,/photoSourceMediaType is not \("image\/jpeg" or "image\/png"\)/);
+ assert.match(route,/if \(job\.PrivatePrinting\)/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
  assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
  assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
@@ -382,8 +384,10 @@ test("customer photo previews show the source image and branded prepared pages w
 
 test("the exact same Photo Studio is opened from the shop image review",()=>{
  const app=read("../src/App.tsx");
- assert.match(app,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
- assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
+ assert.match(app,/openShopPhotoStudioForJob\(preview\.job,preview\)/);
+ assert.match(app,/setShopPhotoStudio\(\{source,job,initialSettings,returnPreview\}\)/);
+ assert.match(app,/if\(editor\.job\.privatePrinting \|\| !editor\.job\.photoSourceAvailable\)/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage,JSON\.stringify\(sheet\.editorSettings\?\?\{\}\)\)/);
  assert.match(app,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
  assert.match(app,/Enhance photo for printing/);
 });
@@ -442,7 +446,8 @@ test("local photo revision rejects paid, handed-off and changed originals",()=>{
  assert.match(route,/document\.StorageMode != "LOCAL_AGENT"/);
  assert.match(route,/document\.AgentDeviceId != device\.Id/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
- assert.match(route,/document\.Sha256, request\.ExpectedOriginalSha256/);
+ assert.match(route,/retainedSourceSha256, request\.ExpectedOriginalSha256/);
+ assert.match(route,/retainedSourceSizeBytes != request\.ExpectedOriginalSizeBytes/);
  assert.match(route,/request\.PhotosPerPage > PricingCalculator\.MaximumPhotosPerA4Sheet/);
  assert.match(route,/request\.PageCount != PricingCalculator\.PhotoPageCount\(request\.PhotoCount, request\.PhotoSizeCode, request\.PhotosPerPage\)/);
 });
