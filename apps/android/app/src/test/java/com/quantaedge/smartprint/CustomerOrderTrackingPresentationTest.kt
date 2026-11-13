@@ -68,6 +68,17 @@ class CustomerOrderTrackingPresentationTest {
     }
 
     @Test
+    fun refundedOnlyOrdersShowTheRefundAndDoNotClaimPrintingCompleted() {
+        val steps = CustomerOrderTrackingPresentation.steps(
+            listOf("REFUNDED"), "REFUNDED", listOf("REFUNDED")
+        )
+        assertEquals(CustomerTrackingStepState.DONE, steps[2].state)
+        assertTrue(steps[2].detail.contains("refunded", ignoreCase = true))
+        assertEquals(CustomerTrackingStepState.SKIPPED, steps[3].state)
+        assertEquals(CustomerTrackingStepState.SKIPPED, steps[4].state)
+    }
+
+    @Test
     fun partiallyCompletedOrdersDoNotClaimEveryFileIsReadyForCollection() {
         val steps = CustomerOrderTrackingPresentation.steps(
             listOf("COMPLETED", "REFUNDED", "CANCELLED"), "PARTIALLY_REFUNDED"
@@ -88,6 +99,18 @@ class CustomerOrderTrackingPresentationTest {
             "Your order has a partial result",
             CustomerOrderTrackingPresentation.currentHeadline(
                 listOf("COMPLETED", "REFUNDED"), "PARTIALLY_REFUNDED"
+            )
+        )
+        assertEquals(
+            "The print quote needs to be refreshed",
+            CustomerOrderTrackingPresentation.currentHeadline(
+                listOf("QUOTE_EXPIRED"), "QUOTE_EXPIRED"
+            )
+        )
+        assertEquals(
+            "Payment reported; waiting for shop verification",
+            CustomerOrderTrackingPresentation.currentHeadline(
+                listOf("AWAITING_PAYMENT"), "CUSTOMER_REPORTED"
             )
         )
     }
