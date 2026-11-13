@@ -22,6 +22,7 @@ const htmlFiles = await Promise.all(pages.map(([path]) => readFile(join(dist, pa
 const sitemap = await readFile(join(dist, "sitemap.xml"), "utf8");
 const robots = await readFile(join(dist, "robots.txt"), "utf8");
 const nginx = await readFile(join(portalRoot, "nginx.conf"), "utf8");
+const favicon = await readFile(join(portalRoot, "public/branding/apple-touch-icon.png"));
 const originMatch = htmlFiles[0].match(/<link rel="canonical" href="(https:\/\/[^/]+)\//);
 assert.ok(originMatch, "homepage needs an absolute HTTPS canonical URL");
 const origin = originMatch[1];
@@ -57,6 +58,26 @@ for (let index = 0; index < pages.length; index += 1) {
     assert.doesNotThrow(() => JSON.parse(match[1]), `${path} has invalid JSON-LD`);
   }
 }
+const homepageJsonLd = [...htmlFiles[0].matchAll(/<script type="application\\/ld\\+json">([\\s\\S]*?)<\\/script>/g)]
+  .map(match => JSON.parse(match[1]));
+const homepageGraph = homepageJsonLd.flatMap(schema => schema["@graph"] ?? [schema]);
+const websiteSchema = homepageGraph.find(node => node["@type"] === "WebSite");
+const organizationSchema = homepageGraph.find(node => node["@type"] === "Organization" && node.url === origin + "/");
+assert.equal(websiteSchema?.name, "SmartPrint by QuantaEdge", "homepage site name must use the product and parent brand");
+assert.deepEqual(websiteSchema?.alternateName, ["Smart Print by QuantaEdge", "SmartPrint", "smartprint.quantaedge.in"],
+  "homepage site name must provide useful branded and hostname alternatives");
+assert.equal(organizationSchema?.alternateName, "Smart Print by QuantaEdge", "organization identity must match the site name");
+assert.equal(organizationSchema?.logo?.url, origin + "/branding/apple-touch-icon.png", "organization logo must use the supported square PNG asset");
+assert.equal(organizationSchema?.logo?.width, 180, "organization logo width must be explicit");
+assert.equal(organizationSchema?.logo?.height, 180, "organization logo height must be explicit");
+assert.ok(htmlFiles[0].includes('<link rel="icon" type="image/png" sizes="180x180" href="/branding/apple-touch-icon.png">'),
+  "homepage must declare the square PNG favicon before any other icon type");
+assert.ok(htmlFiles[0].includes("Smart Print by QuantaEdge"), "homepage HTML must use the exact parent-branded search phrase");
+assert.equal(favicon.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", "favicon must be a valid PNG image");
+const faviconWidth = favicon.readUInt32BE(16);
+const faviconHeight = favicon.readUInt32BE(20);
+assert.equal(faviconWidth, faviconHeight, "favicon must be square");
+assert.ok(faviconWidth >= 112 && faviconHeight >= 112, "favicon/organization logo must be at least 112x112");
 assert.ok(htmlFiles[0].includes('"@type":"SoftwareApplication"'), "homepage must describe the app with structured data");
 assert.ok(htmlFiles[0].includes('"@type":"Organization"'), "homepage must describe its publisher");
 const faqHtml = htmlFiles[pages.findIndex(([, route]) => route === "/smartprint-faq/")];
