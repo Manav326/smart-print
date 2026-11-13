@@ -144,6 +144,17 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
             isValidId(idFromFile(file))
     }.getOrDefault(false)
 
+    /**
+     * Lightweight chooser metadata lookup. Do not pull a legacy duplicated Base64 payload
+     * into memory or trigger its migration merely to display a picker row.
+     */
+    fun readPickerMetadata(file: File): JSONObject? {
+        require(isPreparedDocument(file)) { "Only a private Photo Studio document can be opened here." }
+        val source = metadataFile(idFromFile(file))
+        if (!source.isFile || source.length() > MAX_METADATA_BYTES + VAULT_OVERHEAD_BYTES) return null
+        return readMetadata(file)
+    }
+
     fun readMetadata(file: File): JSONObject {
         require(isPreparedDocument(file)) { "Only a private Photo Studio document can be opened here." }
         val metadataFile = metadataFile(idFromFile(file))

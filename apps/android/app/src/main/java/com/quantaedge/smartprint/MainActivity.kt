@@ -78,6 +78,7 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.ConcurrentHashMap
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.ZipEntry
@@ -167,6 +168,11 @@ class MainActivity : AppCompatActivity() {
     private val chooserPreparationExecutor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "SmartPrint-document-picker").apply { isDaemon = true }
     }
+    private val pickerMetadataExecutor = Executors.newFixedThreadPool(2) { task ->
+        Thread(task, "SmartPrint-picker-metadata").apply { isDaemon = true }
+    }
+    private val pickerStudioTitles = ConcurrentHashMap<String, String>()
+    private val pickerStudioMetadataAttempted = ConcurrentHashMap.newKeySet<String>()
     private var chooserPreparationGeneration = 0
     private var chooserPreparationTask: Future<*>? = null
     private var pickerPreparingSelection = false
@@ -534,6 +540,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         cancelActiveChooserPreparation()
         chooserPreparationExecutor.shutdownNow()
+        pickerMetadataExecutor.shutdownNow()
         releaseIdStudioReviewBitmap()
         documentViewer?.dispose()
         documentViewer = null
@@ -4827,6 +4834,38 @@ class MainActivity : AppCompatActivity() {
     private fun pickerSavedDate(file: File): String =
         SimpleDateFormat("d MMM, h:mm a", Locale.getDefault()).format(Date(file.lastModified()))
 
+    /**
+     * Studio titles are encrypted with their metadata. Resolve them off the UI thread and
+     * refresh the visible chooser only after the small metadata record is ready. Large legacy
+     * Photo Studio metadata is intentionally skipped by readPickerMetadata rather than migrated
+     * while a customer is simply choosing a file.
+     */
+    private fun pickerStudioTitle(file: File, isPhotoStudio: Boolean, fallback: String): String {
+        val path = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
+        pickerStudioTitles[path]?.let { return it }
+        if (pickerStudioMetadataAttempted.add(path)) {
+            pickerMetadataExecutor.execute {
+                val title = runCatching {
+                    val metadata = if (isPhotoStudio) {
+                        photoStudioStore.readPickerMetadata(file)
+                    } else {
+                        idStudioStore.readMetadata(file)
+                    }
+                    metadata?.optString("title")?.trim()?.take(80).orEmpty()
+                }.getOrNull().orEmpty()
+                if (title.isNotBlank()) pickerStudioTitles[path] = title
+                runOnUiThread {
+                    if (title.isNotBlank() && pickerMode && fileCallback != null &&
+                        !isFinishing && !isDestroyed
+                    ) {
+                        refreshLibrary()
+                    }
+                }
+            }
+        }
+        return fallback
+    }
+
     private fun addPhotoStudioPickerSection(parent: LinearLayout) {
         if (portalUrl == null) return
         val prepared = photoStudioStore.listPrepared()
@@ -4859,7 +4898,10 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(9), 0, dp(6), 0)
             }
-            details.addView(text("Prepared photo sheet", 12, R.color.qp_text, true).apply { maxLines = 1 })
+            details.addView(text(
+                pickerStudioTitle(file, isPhotoStudio = true, fallback = "Prepared photo sheet"),
+                12, R.color.qp_text, true
+            ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
             details.addView(text(
                 "Private on this device · Saved ${pickerSavedDate(file)}",
                 9, R.color.qp_muted, false
@@ -4903,7 +4945,10 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(9), 0, dp(6), 0)
             }
-            details.addView(text("Prepared ID card", 12, R.color.qp_text, true).apply { maxLines = 1 })
+            details.addView(text(
+                pickerStudioTitle(file, isPhotoStudio = false, fallback = "Prepared ID card"),
+                12, R.color.qp_text, true
+            ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
             details.addView(text(
                 "Private on this device · A4 front + back · Saved ${pickerSavedDate(file)}",
                 9, R.color.qp_muted, false
