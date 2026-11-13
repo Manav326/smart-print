@@ -729,6 +729,37 @@ public sealed class AgentLocalQueueStoreTests
             Assert.False(updated.IsDuplex);
             Assert.Equal(750, updated.QuotedAmountMinor);
             Assert.True(replacement.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.Equal("original.jpg", updated.PhotoSourceDocumentName);
+            Assert.Equal("image/jpeg", updated.PhotoSourceMediaType);
+            Assert.Equal(staged.Sha256, updated.PhotoSourceSha256);
+            Assert.Equal(staged.SizeBytes, updated.PhotoSourceSizeBytes);
+            Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadPhotoSource(job.Id)));
+            Assert.Single(Directory.GetFiles(root, "*.photo.source"));
+            Assert.Single(Directory.GetFiles(root, "*.qdoc"));
+            Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
+
+            // A second save must replace only the current PDF and continue using
+            // the exact first uploaded source, not a copy of the previous PDF.
+            var secondReplacement = "%PDF-1.4\\nsecond-shop-prepared-a4-photo-sheet"u8.ToArray();
+            await store.ReplaceStagedPhotoDocumentAsync(
+                job.Id,
+                staged.Sha256,
+                staged.SizeBytes,
+                "photo-sheet.pdf",
+                secondReplacement,
+                1,
+                500,
+                () =>
+                {
+                    Assert.True(secondReplacement.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+                    Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadPhotoSource(job.Id)));
+                    return Task.CompletedTask;
+                },
+                CancellationToken.None);
+            Assert.True(secondReplacement.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadPhotoSource(job.Id)));
+            Assert.Single(Directory.GetFiles(root, "*.photo.source"));
+            Assert.Single(Directory.GetFiles(root, "*.qdoc"));
             Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
         }
         finally
@@ -775,6 +806,8 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal("original.jpg", restored.DocumentName);
             Assert.Equal("image/jpeg", restored.MediaType);
             Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.Null(restored.PhotoSourceSha256);
+            Assert.Empty(Directory.GetFiles(root, "*.photo.source"));
             Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
         }
         finally
