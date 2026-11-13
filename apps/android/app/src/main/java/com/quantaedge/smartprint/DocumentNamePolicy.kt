@@ -31,18 +31,32 @@ object DocumentNamePolicy {
     fun isPrintable(name: String, bytes: Long): Boolean =
         bytes in 1..MAX_PRINT_BYTES && extension(name) in setOf("pdf", "jpg", "jpeg", "png")
 
-    fun isPrintable(file: File): Boolean =
-        file.isFile && file.length() in 1..MAX_PRINT_BYTES && mimeType(file) in printableMimeTypes
+    fun isPrintable(file: File): Boolean {
+        if (!file.isFile || file.length() !in 1..MAX_PRINT_BYTES) return false
+        // Normal filenames need no file I/O; inspect content only for renamed or uncommon extensions.
+        return extension(file.name) in setOf("pdf", "jpg", "jpeg", "png") ||
+            mimeType(file) in printableMimeTypes
+    }
 
-    fun isBatchSource(file: File): Boolean =
-        file.isFile && mimeType(file) in printableMimeTypes
+    fun isBatchSource(file: File): Boolean {
+        if (!file.isFile) return false
+        return extension(file.name) in setOf("pdf", "jpg", "jpeg", "png") ||
+            mimeType(file) in printableMimeTypes
+    }
 
     fun isPdf(file: File): Boolean = mimeType(file) == "application/pdf"
 
-    fun isImage(file: File): Boolean = mimeType(file).startsWith("image/")
+    fun isImage(file: File): Boolean {
+        val nameType = mimeType(file.name)
+        return if (nameType.startsWith("image/")) true else mimeType(file).startsWith("image/")
+    }
 
-    fun supportsInAppViewer(file: File): Boolean =
-        file.isFile && mimeType(file) in inAppViewerMimeTypes
+    fun supportsInAppViewer(file: File): Boolean {
+        if (!file.isFile) return false
+        return mimeType(file.name) in inAppViewerMimeTypes || mimeType(file) in inAppViewerMimeTypes
+    }
+
+    fun supportsInAppViewer(mimeType: String): Boolean = mimeType in inAppViewerMimeTypes
 
     /** Returns the detected content type, using the filename only when bytes are unknown. */
     fun mimeType(file: File): String =
