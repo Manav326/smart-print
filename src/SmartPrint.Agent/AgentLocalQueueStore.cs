@@ -912,17 +912,6 @@ public sealed class AgentLocalQueueStore
                     CryptographicOperations.ZeroMemory(verifiedSource);
                 }
             }
-            else
-            {
-                // Move the already protected upload into its retained-source slot.
-                // This preserves the exact encrypted bytes without making a second
-                // full-size copy on disk. The replacement PDF is written into the
-                // original queue path after the move.
-                if (File.Exists(retainedSourcePath))
-                    throw new InvalidDataException("An unexpected retained photo source already exists.");
-                File.Move(documentPath, retainedSourcePath);
-                createdPhotoSource = true;
-                sourceMoved = true;
             }
 
             var newHash = Convert.ToHexString(SHA256.HashData(replacementBytes.Span)).ToLowerInvariant();
@@ -945,6 +934,17 @@ public sealed class AgentLocalQueueStore
             {
                 try
                 {
+                    if (!alreadyRetained)
+                    {
+                        // Move only after the replacement is safely encrypted in
+                        // memory. If encryption fails, the original remains at its
+                        // normal queue path and no orphan sidecar is left behind.
+                        if (File.Exists(retainedSourcePath))
+                            throw new InvalidDataException("An unexpected retained photo source already exists.");
+                        File.Move(documentPath, retainedSourcePath);
+                        createdPhotoSource = true;
+                        sourceMoved = true;
+                    }
                     await using (var stream = new FileStream(
                         temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                         64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
