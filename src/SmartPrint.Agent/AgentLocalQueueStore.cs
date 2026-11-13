@@ -910,8 +910,11 @@ public sealed class AgentLocalQueueStore
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
         if (!entry.PrivatePrinting || entry.State != "OUTPUT_CONFIRMED" || !entry.PrivatePurgePending ||
-            !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256))
-            throw new InvalidOperationException("The private source purge has not completed locally.");
+            !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256) ||
+            !string.IsNullOrWhiteSpace(entry.PhotoSourcePath) ||
+            entry.PhotoSourceDocumentName is not null || entry.PhotoSourceMediaType is not null ||
+            entry.PhotoSourceSha256 is not null || entry.PhotoSourceSizeBytes is not null)
+            throw new InvalidOperationException("The private document and any retained photo source must be removed before purge acknowledgement.");
         await SaveManifestAsync(entry with { PrivatePurgePending = false }, ct);
     }
 
