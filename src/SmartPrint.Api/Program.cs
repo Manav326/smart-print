@@ -3900,10 +3900,31 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
     {
         var document = await db.PrintDocuments.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-            .Select(item => new { item.StorageMode, item.AgentDeviceId })
+            .Select(item => new
+            {
+                item.StorageMode,
+                item.AgentDeviceId,
+                item.MediaType,
+                item.PhotoSourceMediaType,
+                item.PhotoSourceOriginalFileName,
+                item.PhotoSourceSha256,
+                item.PhotoSourceSizeBytes
+            })
             .SingleOrDefaultAsync(ct);
         if (document is null)
             return Results.NotFound();
+        if (photoSourcePreview)
+        {
+            var sourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+            var sourceName = document.PhotoSourceOriginalFileName;
+            var sourceSize = document.PhotoSourceSizeBytes;
+            var sourceHash = document.PhotoSourceSha256;
+            if (sourceMediaType is not ("image/jpeg" or "image/png") ||
+                (sourceName is not null && sourceName.Length > 255) ||
+                (sourceSize is not null && sourceSize <= 0) ||
+                (sourceHash is not null && (sourceHash.Length != 64 || !sourceHash.All(Uri.IsHexDigit))))
+                return Results.Conflict(new { code = "photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
+        }
         if (!string.Equals(document.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
             return Results.Ok(new { Mode = "CLOUD" });
         if (document.AgentDeviceId is not Guid documentAgentId)
@@ -3976,9 +3997,25 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
     if (privatePrinting.Value)
         return Results.Conflict(new { code = "private_printing_source_locked", message = "The customer selected Private Printing. The original source document is not available in the shop portal." });
 
+    var variant = context.Request.Query["variant"].FirstOrDefault();
+    var photoSourcePreview = string.Equals(variant, "photo-source", StringComparison.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(variant) && !photoSourcePreview)
+        return Results.BadRequest(new { code = "document_variant_invalid" });
+
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageKey, item.StorageMode, item.MediaType, item.PurgedUtc })
+        .Select(item => new
+        {
+            item.StorageKey,
+            item.StorageMode,
+            item.MediaType,
+            item.PurgedUtc,
+            item.PhotoSourceStorageKey,
+            item.PhotoSourceOriginalFileName,
+            item.PhotoSourceMediaType,
+            item.PhotoSourceSha256,
+            item.PhotoSourceSizeBytes
+        })
         .SingleOrDefaultAsync(ct);
     if (document is null)
     {
@@ -3994,10 +4031,24 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
         return Results.StatusCode(StatusCodes.Status410Gone);
     }
 
+    var storageKey = document.StorageKey;
+    var mediaType = document.MediaType;
+    if (photoSourcePreview)
+    {
+        mediaType = document.PhotoSourceMediaType ?? document.MediaType;
+        storageKey = document.PhotoSourceStorageKey ?? document.StorageKey;
+        var sourceHash = document.PhotoSourceSha256 ?? string.Empty;
+        var sourceSize = document.PhotoSourceSizeBytes ?? 0;
+        if (mediaType is not ("image/jpeg" or "image/png") ||
+            sourceSize <= 0 ||
+            sourceHash.Length != 64 || !sourceHash.All(Uri.IsHexDigit))
+            return Results.Conflict(new { code = "photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
+    }
+
     MemoryStream content;
     try
     {
-        content = storage.OpenRead(document.StorageKey);
+        content = storage.OpenRead(storageKey);
     }
     catch (IOException)
     {
@@ -6776,12 +6827,15 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         }
     }
 
+    var retainedSourceSha256 = document.PhotoSourceSha256 ?? document.Sha256;
+    var retainedSourceSizeBytes = document.PhotoSourceSizeBytes ?? document.SizeBytes;
+    var retainedSourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
     if (job.Status != "AWAITING_SHOP_APPROVAL" ||
         job.LocalQueueReceivedUtc is not null || job.ClaimedByAgentDeviceId is not null ||
         document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId != device.Id ||
-        document.MediaType is not ("image/jpeg" or "image/png") ||
-        !string.Equals(document.Sha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
-        document.SizeBytes != request.ExpectedOriginalSizeBytes)
+        retainedSourceMediaType is not ("image/jpeg" or "image/png") ||
+        !string.Equals(retainedSourceSha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
+        retainedSourceSizeBytes != request.ExpectedOriginalSizeBytes)
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new { code = "photo_revision_original_changed", message = "The local original or job state changed before the revision was committed. The original file has been restored on the shop computer." });
@@ -6950,7 +7004,8 @@ agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
 
     var variant = context.Request.Query["variant"].FirstOrDefault();
     var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
-    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+    var photoSourcePreview = string.Equals(variant, "photo-source", StringComparison.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview && !photoSourcePreview &&
         !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
         return Results.BadRequest(new { code = "local_preview_variant_invalid" });
 
