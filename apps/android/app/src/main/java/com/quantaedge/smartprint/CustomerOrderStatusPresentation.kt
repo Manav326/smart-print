@@ -47,6 +47,7 @@ internal object CustomerOrderStatusPresentation {
         "QUOTE_EXPIRED" -> "Quote expired"
         "PARTIALLY_COMPLETED" -> "Partially completed"
         "MIXED_OUTCOME" -> "Mixed outcome"
+        "MIXED_PROGRESS" -> "In progress across files"
         else -> "In progress"
     }
 
@@ -75,6 +76,8 @@ internal object CustomerOrderStatusPresentation {
                 "OUTPUT_UNCONFIRMED" to 4, "PDF_EXPORTING" to 4,
                 "QUEUED" to 4, "SUBMITTING_TO_SPOOLER" to 4
             )
+            val distinctActiveStages = active.map { stageRank[it] ?: 0 }.distinct()
+            if (distinctActiveStages.size > 1) return "MIXED_PROGRESS"
             return active.maxWithOrNull(
                 compareBy<String> { stageRank[it] ?: 0 }.thenBy { it }
             ).orEmpty()
