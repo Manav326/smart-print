@@ -9,6 +9,7 @@ import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } from "./PhotoStudio";
 import { isSupportedPhotoSource, resolvePhotoSourceMimeType } from "./photo-source-policy";
 import { copyCustomerUploadFileMetadata, normalizeCustomerUploadFile } from "./customer-upload-file-policy";
+import { clearCustomerPendingSelection, customerPendingSelectionStorageKey, loadCustomerPendingSelection, saveCustomerPendingFiles, saveCustomerPendingSelectionMetadata } from "./customer-upload-draft-store";
 import CustomerUpiQr from "./CustomerUpiQr";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
@@ -3812,9 +3813,11 @@ function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
 }
 
 function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:boolean;onToggleTheme:()=>void}) {
+  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [result,setResult]=useState<Awaited<ReturnType<typeof createCustomerSession>>|null>(null);
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
+  const [restoredSession,setRestoredSession]=useState(false);
   const [localReady,setLocalReady]=useState(false);
   const [localFallbackSuggested,setLocalFallbackSuggested]=useState(false);
   const handleLocalReady=useCallback((ready:boolean)=>{
@@ -3830,26 +3833,39 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     let mounted=true;
     const stationKey=`qrtoprint.customer-session:${publicCode}`;
     const restore=async()=>{
-      const storedToken=sessionStorage.getItem(stationKey) ||
-        await getNativeCustomerPrintSession(publicCode);
+      // Android Keystore is authoritative in the native app. A stale WebView
+      // sessionStorage token must never erase a still-valid native token.
+      const nativeToken=await getNativeCustomerPrintSession(publicCode);
+      const browserToken=sessionStorage.getItem(stationKey) ?? "";
+      const candidates=Array.from(new Set(
+        (nativeAppMode?[nativeToken,browserToken]:[browserToken,nativeToken]).filter(Boolean)
+      ));
       let existing:Awaited<ReturnType<typeof createCustomerSession>>|null=null;
-      if(storedToken){
-        try {
-          existing=await resumeCustomerSession(storedToken,publicCode);
-        } catch(exception) {
+      let invalidNativeToken=false;
+      let invalidBrowserToken=false;
+      for(const token of candidates){
+        try{
+          existing=await resumeCustomerSession(token,publicCode);
+          break;
+        }catch(exception){
           if(exception instanceof ApiError&&exception.status===401){
-            sessionStorage.removeItem(stationKey);
-            sessionStorage.removeItem("qrtoprint.customer-session");
-            await clearNativeCustomerPrintSession(publicCode);
-          } else throw exception;
+            if(token===nativeToken)invalidNativeToken=true;
+            if(token===browserToken)invalidBrowserToken=true;
+            continue;
+          }
+          // A network/server error is not proof that a session is invalid.
+          // Preserve both tokens and do not create a replacement session.
+          throw exception;
         }
       }
+      if(invalidBrowserToken)sessionStorage.removeItem(stationKey);
+      if(invalidNativeToken)await clearNativeCustomerPrintSession(publicCode);
       const value=existing??await createCustomerSession(publicCode);
-      // Wait for native encrypted persistence before presenting the connected session.
-      // In a regular browser the bridge is absent and this safely becomes a no-op.
+      // Persist the confirmed token before showing the connected session.
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       await saveNativeCustomerShopProfile(publicCode,value.shop);
       if(!mounted)return;
+      setRestoredSession(Boolean(existing));
       setResult(value);
       if(storedNatively)sessionStorage.removeItem(stationKey);
       else sessionStorage.setItem(stationKey,value.sessionToken);
@@ -3859,7 +3875,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       if(mounted)setError(exception instanceof Error?exception.message:"This QR station is unavailable.");
     }).finally(()=>{if(mounted)setLoading(false);});
     return ()=>{mounted=false;};
-  },[publicCode]);
+  },[publicCode,nativeAppMode]);
 
   const startNewSession=useCallback(async()=>{
     setLoading(true);
@@ -3867,20 +3883,25 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     setLocalReady(false);
     setLocalFallbackSuggested(false);
     try{
+      const previousSessionKey=result
+        ?customerPendingSelectionStorageKey(publicCode,result.sessionToken)
+        :null;
       const value=await createCustomerSession(publicCode);
+      if(previousSessionKey)await clearCustomerPendingSelection(previousSessionKey).catch(()=>undefined);
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       await saveNativeCustomerShopProfile(publicCode,value.shop);
       const stationKey=`qrtoprint.customer-session:${publicCode}`;
       if(storedNatively)sessionStorage.removeItem(stationKey);
       else sessionStorage.setItem(stationKey,value.sessionToken);
       sessionStorage.removeItem("qrtoprint.customer-session");
+      setRestoredSession(false);
       setResult(value);
     }catch(exception){
       setError(exception instanceof Error?exception.message:"Could not start a new print session.");
     }finally{
       setLoading(false);
     }
-  },[publicCode]);
+  },[publicCode,result]);
 
   useEffect(()=>{
     if(!result)return;
@@ -3916,13 +3937,12 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     };
   },[result?.sessionToken,result?.expiresUtc]);
 
-  const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
     <header className="customer-entry-brand"><BrandLockup className="customer-entry-brand-lockup" /><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
     <main className={result ? "customer-entry-card customer-entry-card--upload" : "customer-entry-card"}>
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?"Connecting…":"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
-      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
+      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">{restoredSession?"SESSION RESTORED":"SECURE SESSION CREATED"}</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{restoredSession?"Your existing print session and order progress are ready.":nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
