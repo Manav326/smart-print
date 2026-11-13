@@ -5,6 +5,7 @@ import java.io.RandomAccessFile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -62,23 +63,20 @@ class PrintBatchSelectionPolicyTest {
 
     @Test
     fun acceptsCombinedSizeExactlyAtTheSharedBatchLimit() {
-        val files = (1..10).map {
-            createFile("document-$it.pdf", DocumentNamePolicy.MAX_PRINT_BYTES)
-        }
+        val files = createBatchWithTotalBytes("exact-batch", PrintBatchSelectionPolicy.MAX_TOTAL_BYTES)
 
         assertEquals(PrintBatchSelectionPolicy.MAX_TOTAL_BYTES, files.sumOf { it.length() })
+        assertTrue(files.all { it.length() in 1..DocumentNamePolicy.MAX_PRINT_BYTES })
         assertNull(PrintBatchSelectionPolicy.validationError(files))
     }
 
     @Test
     fun rejectsCombinedSizeAboveTheSharedBatchLimit() {
-        val fileBytes = PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / 11 + 1L
-        val files = (1..11).map { createFile("document-$it.pdf", fileBytes) }
+        val files = createBatchWithTotalBytes("over-batch", PrintBatchSelectionPolicy.MAX_TOTAL_BYTES + 1L)
 
-        assertEquals(11, files.size)
-        assertEquals(true, files.all { it.length() <= DocumentNamePolicy.MAX_PRINT_BYTES })
-        assertEquals(true, files.sumOf { it.length() } > PrintBatchSelectionPolicy.MAX_TOTAL_BYTES)
-
+        assertTrue(files.all { it.length() in 1..DocumentNamePolicy.MAX_PRINT_BYTES })
+        assertTrue(files.size <= PrintBatchSelectionPolicy.MAX_FILES)
+        assertTrue(files.sumOf { it.length() } > PrintBatchSelectionPolicy.MAX_TOTAL_BYTES)
         assertNotNull(PrintBatchSelectionPolicy.validationError(files))
     }
 
@@ -87,6 +85,20 @@ class PrintBatchSelectionPolicyTest {
         val file = createFile("same.pdf", 100L)
 
         assertNotNull(PrintBatchSelectionPolicy.validationError(listOf(file, file)))
+    }
+
+    private fun createBatchWithTotalBytes(prefix: String, totalBytes: Long): List<File> {
+        require(totalBytes > 0L)
+        val fileCount = ((totalBytes - 1L) / DocumentNamePolicy.MAX_PRINT_BYTES + 1L).toInt()
+        require(fileCount <= PrintBatchSelectionPolicy.MAX_FILES) {
+            "The configured batch byte limit cannot be represented within the configured file-count limit."
+        }
+        val baseBytes = totalBytes / fileCount
+        val extraBytes = (totalBytes % fileCount).toInt()
+        return (0 until fileCount).map { index ->
+            val size = baseBytes + if (index < extraBytes) 1L else 0L
+            createFile("$prefix-$index.pdf", size)
+        }
     }
 
     private fun createFile(name: String, size: Long): File {
