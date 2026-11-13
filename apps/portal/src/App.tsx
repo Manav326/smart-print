@@ -3887,7 +3887,9 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         ?customerPendingSelectionStorageKey(publicCode)
         :null;
       const value=await createCustomerSession(publicCode);
-      if(previousSessionKey)await clearCustomerPendingSelection(previousSessionKey).catch(()=>undefined);
+      // Do not switch sessions if an explicit reset cannot clear the previous
+      // unsent selection; otherwise those files could reappear in the new batch.
+      if(previousSessionKey)await clearCustomerPendingSelection(previousSessionKey);
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       await saveNativeCustomerShopProfile(publicCode,value.shop);
       const stationKey=`qrtoprint.customer-session:${publicCode}`;
@@ -5243,14 +5245,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     } finally {setBusy(false);}
   }
 
-  function applyPhotoSheets(sheets:PreparedPhotoSheet[]) {
+  async function applyPhotoSheets(sheets:PreparedPhotoSheet[]) {
     if(!photoStudioSourceFingerprint||!sheets.length)return;
     const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===photoStudioSourceFingerprint);
-    if(index<0){setError("The source photo is no longer in this batch. Select it again.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
+    if(index<0)throw new Error("The source photo is no longer in this batch. Select it again.");
     const generated=sheets.map(sheet=>sheet.file),nextFiles=[...files.slice(0,index),...generated,...files.slice(index+1)];
     const pending=nextFiles.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate)));
     const bytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,file)=>sum+file.size,0);
-    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||bytes>UPLOAD_LIMITS.maxBatchBytes){setError("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
+    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||bytes>UPLOAD_LIMITS.maxBatchBytes)
+      throw new Error("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");
     const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint},previews={...photoPreviewPagesByFingerprint};
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];delete previews[photoStudioSourceFingerprint];
     for(const sheet of sheets){
@@ -5260,7 +5263,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
       if(urls.length)previews[fp]=urls;
     }
-    void persistPendingFiles(nextFiles);
+    // Commit the prepared PDF bytes before closing the editor.
+    await persistPendingFiles(nextFiles);
     setFiles(nextFiles);setSelectedFileIndex(index);setSelectedPreparedPhotoPage(0);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoPreviewPagesByFingerprint(previews);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setPhotoStudioEditorDraft(null);setError("");
   }
   function openPhotoStudio(candidate:File){
@@ -5442,16 +5446,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
   }
 
-  function removeSelectedFile(fingerprint: string) {
+  async function removeSelectedFile(fingerprint: string) {
     if (busy) return;
     const index = files.findIndex(candidate => customerFileFingerprint(candidate) === fingerprint);
     if (index < 0) return;
     const nextFiles = files.filter(candidate => customerFileFingerprint(candidate) !== fingerprint);
-    void persistPendingFiles(nextFiles);
+    await persistPendingFiles(nextFiles);
     setFiles(nextFiles);
     setSelectedFileIndex(current => current === index
       ? Math.min(index, Math.max(0, nextFiles.length - 1))
       : current > index ? current - 1 : current);
+    if(photoStudioEditorDraft?.fingerprint===fingerprint){
+      setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setPhotoStudioEditorDraft(null);
+    }
     setFileGroupNames(current => {
       const next = { ...current };
       delete next[fingerprint];
@@ -5684,7 +5691,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
               {!isSmartPrintIdDocument(selected)&&<button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
-              <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
+              <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>void removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&!isSmartPrintIdDocument(selected)&&<div className="customer-file-overrides">
                 <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
                    onChange={event=>{
