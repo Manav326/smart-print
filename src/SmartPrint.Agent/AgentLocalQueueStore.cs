@@ -47,7 +47,15 @@ public sealed class AgentLocalQueueStore
             if (!File.Exists(manifestPath))
             {
                 File.Delete(documentFile);
+                var orphanedPhotoSource = documentFile + ".photo.source";
+                if (File.Exists(orphanedPhotoSource)) File.Delete(orphanedPhotoSource);
             }
+        }
+        foreach (var photoSourceFile in Directory.EnumerateFiles(queueRoot, "*.qdoc.photo.source", SearchOption.TopDirectoryOnly))
+        {
+            var documentFile = photoSourceFile[..^".photo.source".Length];
+            if (!File.Exists(Path.ChangeExtension(documentFile, ".json")))
+                File.Delete(photoSourceFile);
         }
 
         await Task.CompletedTask;
@@ -133,6 +141,7 @@ public sealed class AgentLocalQueueStore
             documentPath,
             documentPath + ".tmp",
             documentPath + ".photo-revision.bak",
+            documentPath + ".photo.source",
             GetManifestPath(jobId) + ".tmp"
         };
 
@@ -401,7 +410,11 @@ public sealed class AgentLocalQueueStore
                 throw new InvalidDataException("The staged local upload document path is outside the protected queue.");
 
             var manifestPath = GetManifestPath(jobId);
+            var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
+            if (!photoSourcePath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The retained photo source path is outside the protected queue.");
             if (File.Exists(documentPath)) File.Delete(documentPath);
+            if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
             if (File.Exists(manifestPath)) File.Delete(manifestPath);
             return true;
         }
@@ -434,7 +447,11 @@ public sealed class AgentLocalQueueStore
             throw new InvalidDataException("The local upload document path is outside the protected queue.");
 
         var manifestPath = GetManifestPath(jobId);
+        var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
+        if (!photoSourcePath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("The retained photo source path is outside the protected queue.");
         if (File.Exists(documentPath)) File.Delete(documentPath);
+        if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
         if (File.Exists(manifestPath)) File.Delete(manifestPath);
         await Task.CompletedTask;
     }
@@ -491,8 +508,12 @@ public sealed class AgentLocalQueueStore
                 if (File.Exists(outputPath)) File.Delete(outputPath);
             }
 
+            var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
+            if (!photoSourcePath.StartsWith(queuePrefix, comparison))
+                continue;
             var manifestPath = GetManifestPath(entry.JobId);
             if (File.Exists(documentPath)) File.Delete(documentPath);
+            if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
             if (File.Exists(manifestPath)) File.Delete(manifestPath);
             removed++;
         }
