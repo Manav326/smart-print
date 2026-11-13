@@ -1052,6 +1052,14 @@ public sealed class LocalAgentApiHostedService(
                         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
                     }
 
+                    if (!string.Equals(analysis.Extension, claim.FileExtension, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(analysis.MediaType, claim.MediaType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        const string message = "The document content does not match the detected upload format. Select the original file again.";
+                        await ReportPrivateValidationFailureAsync("document_content_type_mismatch", message);
+                        return Results.UnprocessableEntity(new { code = "document_content_type_mismatch", message });
+                    }
+
                     if (existing is null)
                     {
                         var stagedJob = new AgentClaimedJob(
