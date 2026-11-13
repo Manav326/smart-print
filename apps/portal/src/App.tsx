@@ -618,7 +618,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     source:File;
     job:ShopPrintJob;
     initialSettings?:Partial<PhotoStudioEditorSettings>;
-    returnPreview:{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean};
+    returnPreview?:{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean};
   }|null>(null);
   const [shopPhotoOrderOpen,setShopPhotoOrderOpen]=useState(false);
   const [shopPhotoOrderDraft,setShopPhotoOrderDraft]=useState<ShopPhotoOrderDraft|null>(null);
@@ -1640,7 +1640,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       const source=new File([sourceBlob],sourceName,{type:mediaType,lastModified:Date.now()});
       const returnPreview=returningFromPreview
         ?{name:returningFromPreview.name,blob:returningFromPreview.blob,mediaType:returningFromPreview.mediaType,job:returningFromPreview.job,readOnly:returningFromPreview.readOnly}
-        :{name:sourceName,blob:sourceBlob,mediaType,job,readOnly:false};
+        :undefined;
       let initialSettings:Partial<PhotoStudioEditorSettings>|undefined;
       if(job.photoEditorSettingsJson){
         try{
@@ -1669,6 +1669,11 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   function cancelShopPhotoStudio(){
     if(!shopPhotoStudio){setShopPhotoStudio(null);return;}
     const restored=shopPhotoStudio.returnPreview;
+    if(!restored){
+      setShopPhotoStudio(null);
+      setFocusShopPhotoEdit(false);
+      return;
+    }
     setPreview({...restored,url:URL.createObjectURL(restored.blob)});
     setFocusShopPhotoEdit(true);
     setShopPhotoStudio(null);
