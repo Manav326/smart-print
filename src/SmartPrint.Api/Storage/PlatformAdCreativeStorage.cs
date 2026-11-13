@@ -37,7 +37,8 @@ public sealed class PlatformAdCreativeStorage
         }
         catch { if (File.Exists(path)) File.Delete(path); throw; }
         finally { Array.Clear(bytes); }
-        var safeName = Path.GetFileName(name.Trim());
+        var decodedName = Uri.UnescapeDataString(name.Trim());
+        var safeName = Path.GetFileName(decodedName);
         if (string.IsNullOrWhiteSpace(safeName)) safeName = "creative" + ext;
         if (safeName.Length > 255) safeName = safeName[^255..];
         return new StoredAdCreative(id, safeName, type, key, size);

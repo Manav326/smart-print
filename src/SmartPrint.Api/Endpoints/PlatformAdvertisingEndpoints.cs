@@ -42,6 +42,19 @@ public static class PlatformAdvertisingEndpoints
             try{db.PlatformAdCreatives.Add(creative);await db.SaveChangesAsync(ct);}catch{await storage.DeleteAsync(creative);throw;}
             return Results.Created($"/api/v1/advertising/creatives/{creative.Id}",new{creative.Id,creative.FileName,creative.ContentType,creative.SizeBytes,imageUrl=$"/api/v1/advertising/creatives/{creative.Id}"});
         });
+        platform.MapGet("/advertising/creatives/{creativeId:guid}/preview", async (
+            Guid creativeId, SmartPrintDbContext db, PlatformAdCreativeStorage storage, CancellationToken ct) =>
+        {
+            var creative = await db.PlatformAdCreatives.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.Id == creativeId, ct);
+            if (creative is null) return Results.NotFound();
+            await using var source = storage.OpenRead(creative);
+            await using var memory = new MemoryStream();
+            await source.CopyToAsync(memory, ct);
+            var dataUrl = "data:" + creative.ContentType + ";base64," + Convert.ToBase64String(memory.ToArray());
+            return Results.Ok(new { dataUrl, creative.FileName, creative.ContentType });
+        });
+
         platform.MapPost("/advertising/campaigns",async(PlatformAdCampaignRequest request,ClaimsPrincipal user,SmartPrintDbContext db,CancellationToken ct)=>{
             var actor=ActorId(user);if(actor is null)return Results.Forbid();
             var errors=await Validate(request,db,ct);if(errors.Count>0)return Results.ValidationProblem(errors);

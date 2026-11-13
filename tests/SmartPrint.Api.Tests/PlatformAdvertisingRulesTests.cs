@@ -4,6 +4,7 @@ public sealed class PlatformAdvertisingRulesTests
 {
     [Theory]
     [InlineData("HOME","BANNER",true)]
+    [InlineData("SHOP_OVERVIEW","BANNER",true)]
     [InlineData("FILES","CARD",true)]
     [InlineData("HOME","CARD",false)]
     [InlineData("FILES","BANNER",false)]

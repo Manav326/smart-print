@@ -2730,3 +2730,9 @@ export function recordPublicAdEvent(campaignId: string, eventType: "IMPRESSION" 
   return apiRequest<void>("/api/v1/advertising/" + campaignId + "/events",
     { method: "POST", body: JSON.stringify({ eventType }) }).catch(() => undefined);
 }
+
+export function getPlatformAdCreativePreview(token: string, creativeId: string) {
+  return apiRequest<{ dataUrl: string; fileName: string; contentType: string }>(
+    "/api/v1/platform/advertising/creatives/" + creativeId + "/preview", {}, token
+  );
+}
