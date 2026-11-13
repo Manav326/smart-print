@@ -178,11 +178,28 @@ public sealed class Worker(
                     continue;
                 }
 
+                if (!string.Equals(analysis.Extension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
+                    !string.Equals(analysis.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase))
+                {
+                    const string message = "The document content does not match the detected upload format. Select the original file again.";
+                    using var rejected = await SendAgentRequestAsync(
+                        client, credentials,
+                        $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                        new AgentPrivateRelayRejectRequest("document_content_type_mismatch", message),
+                        cancellationToken);
+                    if (!rejected.IsSuccessStatusCode)
+                    {
+                        logger.LogWarning("Private relay {JobNumber} format mismatch could not be recorded (HTTP {StatusCode}); it will be retried.", ticket.JobNumber, (int)rejected.StatusCode);
+                        retryableFailure = true;
+                    }
+                    continue;
+                }
+
                 var job = new AgentClaimedJob(
                     ticket.PrintJobId, ticket.JobNumber, "AWAITING_CONFIGURATION",
                     analysis.PageCount, ticket.Copies, ticket.ColourMode, ticket.PaperSize,
                     ticket.IsDuplex, "INR", 0, ticket.PrinterDeviceId, ticket.PrinterName,
-                    ticket.QueueName, "Private document", ticket.MediaType, ticket.SizeBytes,
+                    ticket.QueueName, "Private document", analysis.MediaType, ticket.SizeBytes,
                     ticket.Sha256, ticket.ExpiresUtc, "LOCAL_AGENT",
                     ticket.OutputMode, ticket.Orientation,
                     PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind);
@@ -194,8 +211,8 @@ public sealed class Worker(
                     client, credentials,
                     $"api/v1/agent/private-relays/{ticket.TicketId:D}/complete",
                     new LocalPrintUploadCompletionRequest(
-                        analysis.PageCount, analysis.PageSizesJson, ticket.FileExtension,
-                        ticket.MediaType, ticket.SizeBytes, ticket.Sha256),
+                        analysis.PageCount, analysis.PageSizesJson, analysis.Extension,
+                        analysis.MediaType, ticket.SizeBytes, ticket.Sha256),
                     cancellationToken);
                 if (!completion.IsSuccessStatusCode)
                 {
