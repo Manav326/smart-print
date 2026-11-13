@@ -96,7 +96,8 @@ internal object CustomerOrderTrackingPresentation {
             allReady -> CustomerTrackingStepState.DONE
             allOutputResolved && normalized.any { it in ready } -> CustomerTrackingStepState.DONE
             allOutputResolved && normalized.none { it in ready } -> CustomerTrackingStepState.SKIPPED
-            normalized.any { it in ready } -> CustomerTrackingStepState.CURRENT
+            paymentState == CustomerTrackingStepState.DONE && normalized.any { it in ready } ->
+                CustomerTrackingStepState.CURRENT
             else -> CustomerTrackingStepState.UPCOMING
         }
 
@@ -132,14 +133,22 @@ internal object CustomerOrderTrackingPresentation {
             else -> "Payment stage will appear after shop review"
         }
         val reviewDetail = when {
-            reviewState == CustomerTrackingStepState.DONE -> "Shop review resolved for all files"
+            reviewState == CustomerTrackingStepState.DONE -> "Review and approval resolved for all files"
+            normalized.any { it == "AWAITING_CUSTOMER_APPROVAL" } ->
+                "Your approval is needed before the shop can continue"
+            normalized.any { it == "AWAITING_CONFIGURATION" } ->
+                "Choose the print options needed to continue"
             normalized.any { it == "AWAITING_SHOP_APPROVAL" } -> "The shop is reviewing your files"
-            else -> "Your files are being checked"
+            else -> "The shop is checking your files"
         }
         val printDetail = when {
             printingState == CustomerTrackingStepState.SKIPPED -> "No printing was required for these closed files"
             printingState == CustomerTrackingStepState.DONE && readyCount > 0 -> "Output completed or remaining files were closed"
-            anyPrinting -> "Printer processing is underway"
+            normalized.any { it == "PRINTING" || it == "SPOOLER_ACCEPTED" } ->
+                "The printer is processing your files"
+            normalized.any { it in setOf("LOCAL_QUEUE_CLAIMED", "LOCAL_QUEUE_READY") } ->
+                "Sending the approved job to the shop computer"
+            anyPrinting -> "Payment is confirmed; the shop is preparing the print job"
             else -> "Starts after review and payment"
         }
 
@@ -173,7 +182,12 @@ internal object CustomerOrderTrackingPresentation {
         val current = steps.lastOrNull { it.state == CustomerTrackingStepState.CURRENT }
         if (current != null) {
             return when (current.title) {
-                "Shop review" -> "The shop is reviewing your order"
+                "Shop review" -> when {
+                    statuses.any { it.equals("AWAITING_CUSTOMER_APPROVAL", true) } -> "Your approval is needed"
+                    statuses.any { it.equals("AWAITING_CONFIGURATION", true) } -> "Choose print options to continue"
+                    statuses.any { it.equals("AWAITING_SHOP_APPROVAL", true) } -> "The shop is reviewing your order"
+                    else -> "The shop is checking your files"
+                }
                 "Payment" -> when {
                     payment in setOf("PAYMENT_REJECTED", "REJECTED") ||
                         statuses.any { it.equals("PAYMENT_REJECTED", true) } ||
