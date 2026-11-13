@@ -19,7 +19,7 @@ object PrintBatchSelectionPolicy {
         for (file in files) {
             if (!file.isFile) return "A selected document is no longer available."
             val size = file.length()
-            if (!DocumentNamePolicy.isPrintable(file.name, size)) {
+            if (!DocumentNamePolicy.isPrintable(file)) {
                 return file.name + " is not a supported PDF/JPG/PNG file or exceeds the ${DocumentNamePolicy.MAX_PRINT_BYTES / (1024L * 1024L)} MB per-file limit."
             }
             if (size > MAX_TOTAL_BYTES - totalBytes) {
