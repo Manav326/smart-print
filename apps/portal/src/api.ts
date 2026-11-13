@@ -1078,6 +1078,7 @@ export interface ShopPricingProfile {
 
 export interface ShopPrintJob {
   id: string;
+  photoEditorSettingsJson?: string | null;
   batchId?: string | null;
   batchGroupName?: string | null;
   batchName?: string | null;
@@ -2139,7 +2140,8 @@ export async function replaceShopPhotoDocumentLocally(
   file: File,
   photoSizeCode: string,
   photoCount: number,
-  photosPerPage: number
+  photosPerPage: number,
+  editorSettingsJson?: string
 ) {
   validateUploadFileSize(file);
   const grant = await apiRequest<{
@@ -2158,6 +2160,7 @@ export async function replaceShopPhotoDocumentLocally(
   form.append("photoSizeCode", photoSizeCode);
   form.append("photoCount", String(photoCount));
   form.append("photosPerPage", String(photosPerPage));
+  if (editorSettingsJson) form.append("editorSettingsJson", editorSettingsJson);
 
   let lastError: Error | null = null;
   for (const value of grant.endpoints.slice(0, 8)) {
@@ -2225,7 +2228,8 @@ export function replaceShopPhotoDocument(
   file: File,
   photoSizeCode: string,
   photoCount: number,
-  photosPerPage: number
+  photosPerPage: number,
+  editorSettingsJson?: string
 ) {
   validateUploadFileSize(file);
   const form = new FormData();
@@ -2233,6 +2237,7 @@ export function replaceShopPhotoDocument(
   form.append("photoSizeCode", photoSizeCode);
   form.append("photoCount", String(photoCount));
   form.append("photosPerPage", String(photosPerPage));
+  if (editorSettingsJson) form.append("editorSettingsJson", editorSettingsJson);
   return apiRequest<{
     id: string;
     status: string;
