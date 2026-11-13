@@ -132,13 +132,22 @@ function drawPhotoSheetPage(
   const source=cropSource(image,size,zoom,focusX,focusY);
   const filter=`brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%)`;
   const photoW=Math.max(1,Math.round(size.widthMm/25.4*300)),photoH=Math.max(1,Math.round(size.heightMm/25.4*300));
+
+  // Every copy on a sheet uses the same source crop and treatment. Rasterize it
+  // once at the final 300-DPI tile size, then reuse that immutable tile for all
+  // positions. This avoids allocating and filtering one large canvas per copy.
+  const photoTile=document.createElement("canvas");
+  photoTile.width=photoW;photoTile.height=photoH;
+  const tileContext=photoTile.getContext("2d");
+  if(!tileContext)throw new Error("A photo crop could not be prepared.");
+  tileContext.filter=filter;
+  tileContext.drawImage(image,source.x,source.y,source.width,source.height,0,0,photoW,photoH);
+  tileContext.filter="none";
+  if(background.sourceColor)replaceEdgeBackground(photoTile,background.sourceColor,background.targetColor,background.tolerance);
+
   for(const position of positions){
     const x=position.xMm,y=position.yMm;
-    const crop=document.createElement("canvas");crop.width=photoW;crop.height=photoH;
-    const cropContext=crop.getContext("2d");if(!cropContext)throw new Error("A photo crop could not be prepared.");
-    cropContext.filter=filter;cropContext.drawImage(image,source.x,source.y,source.width,source.height,0,0,photoW,photoH);cropContext.filter="none";
-    if(background.sourceColor)replaceEdgeBackground(crop,background.sourceColor,background.targetColor,background.tolerance);
-    context.drawImage(crop,x,y,size.widthMm,size.heightMm);
+    context.drawImage(photoTile,x,y,size.widthMm,size.heightMm);
     context.save();context.strokeStyle="#7b8491";context.lineWidth=.18;context.setLineDash([.8,.8]);context.strokeRect(x,y,size.widthMm,size.heightMm);context.restore();
     if(captionHeightMm>0){
       const lines=[caption.name.trim().slice(0,48),caption.dob.trim()?("DOB: "+formatDobForPrint(caption.dob)):""].filter(Boolean);
@@ -149,6 +158,8 @@ function drawPhotoSheetPage(
       context.restore();
     }
   }
+  photoTile.width=0;
+  photoTile.height=0;
 
   // Text layers are placed in page-relative coordinates so the preview and the
   // final 300-DPI A4 raster use the same position, font size and colour.
