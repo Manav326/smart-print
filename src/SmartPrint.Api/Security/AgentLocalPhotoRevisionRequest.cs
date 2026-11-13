@@ -11,4 +11,5 @@ public sealed record AgentLocalPhotoRevisionRequest(
     int PhotoCount,
     int PhotosPerPage,
     long? ExpectedQuotedAmountMinor = null,
-    int? ExpectedPricingVersion = null);
+    int? ExpectedPricingVersion = null,
+    string? EditorSettingsJson = null);

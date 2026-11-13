@@ -67,8 +67,7 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
   onDispatch:(job:ShopPrintJob)=>void;onConfirmOutput:(job:ShopPrintJob)=>void;
   onRetryPdfExport:(job:ShopPrintJob)=>void;onHistory:(job:ShopPrintJob)=>void;onOpenPhotoStudio:(job:ShopPrintJob)=>void;
 }){
-  const imageFile=/^image\/(jpeg|png)$/i.test(job.document.mediaType||"") || /\.(jpe?g|png)$/i.test(job.document.originalFileName);
-  const canEditPhoto=job.printKind==="PHOTO"&&imageFile&&job.status==="AWAITING_SHOP_APPROVAL";
+  const canEditPhoto=job.photoSourceAvailable===true&&!job.privatePrinting&&job.status==="AWAITING_SHOP_APPROVAL";
   const canRefund=(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&["VERIFIED","PARTIALLY_REFUNDED"].includes(job.payment?.status??"")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId;
   const assignable=["PAID_AUTHORISED","LOCAL_QUEUE_READY"].includes(job.status);
   const confirmable=job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT");

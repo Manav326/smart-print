@@ -492,7 +492,7 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
         private const val MIN_CARD_ASPECT_RATIO = 1.15f
         private const val MAX_CARD_ASPECT_RATIO = 2.1f
         private const val MAX_SCAN_BYTES = 30L * 1024L * 1024L
-        private const val MAX_PREPARED_BYTES = 20L * 1024L * 1024L
+        private const val MAX_PREPARED_BYTES = UploadLimits.MAX_FILE_BYTES
         private const val MAX_METADATA_BYTES = 64L * 1024L
         private const val THUMBNAIL_WIDTH = 320
         private const val CARD_THUMBNAIL_WIDTH = 600

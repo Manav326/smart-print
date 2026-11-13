@@ -5,6 +5,14 @@ namespace SmartPrint.Api.Tests;
 public sealed class PrintBatchCapacityRulesTests
 {
     [Fact]
+    public void UsesFiftyMegabytesPerFileAndFiveHundredMegabytesPerBatch()
+    {
+        Assert.Equal(50L * 1024 * 1024, UploadLimits.MaxFileBytes);
+        Assert.Equal(500L * 1024 * 1024, UploadLimits.MaxBatchBytes);
+        Assert.Equal(51L * 1024 * 1024, UploadLimits.MaxMultipartRequestBytes);
+    }
+
+    [Fact]
     public void AllowsTheTwentiethFileAndRejectsTheTwentyFirst()
     {
         Assert.True(PrintBatchCapacityRules.CanAdd(19, 19, 1));
@@ -12,7 +20,7 @@ public sealed class PrintBatchCapacityRulesTests
     }
 
     [Fact]
-    public void AllowsExactlyFiftyMegabytesAndRejectsAnyByteOver()
+    public void AllowsExactlyFiveHundredMegabytesAndRejectsAnyByteOver()
     {
         Assert.True(PrintBatchCapacityRules.CanAdd(0, 0, PrintBatchCapacityRules.MaximumTotalBytes));
         Assert.False(PrintBatchCapacityRules.CanAdd(1, PrintBatchCapacityRules.MaximumTotalBytes, 1));

@@ -48,7 +48,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         require(sizeCode in PHOTO_SIZE_LIMITS.keys) { "Choose a supported photo size before saving." }
         val photoCount = suppliedMetadata.optInt("photoCount", 0)
         val photosPerPage = suppliedMetadata.optInt("photosPerPage", 0)
-        require(photoCount in 1..100) { "The photo count must be between 1 and 100." }
+        require(photoCount in 1..UploadLimits.MAX_PHOTO_COUNT) { "The photo count must be between 1 and ${UploadLimits.MAX_PHOTO_COUNT}." }
         require(photosPerPage in 1..(PHOTO_SIZE_LIMITS[sizeCode] ?: 0)) {
             "The photos-per-A4-page setting is invalid."
         }
@@ -104,7 +104,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         require(sizeCode in PHOTO_SIZE_LIMITS.keys) { "Choose a supported photo size before saving." }
         val photoCount = suppliedMetadata.optInt("photoCount", 0)
         val photosPerPage = suppliedMetadata.optInt("photosPerPage", 0)
-        require(photoCount in 1..100) { "The photo count must be between 1 and 100." }
+        require(photoCount in 1..UploadLimits.MAX_PHOTO_COUNT) { "The photo count must be between 1 and ${UploadLimits.MAX_PHOTO_COUNT}." }
         require(photosPerPage in 1..(PHOTO_SIZE_LIMITS[sizeCode] ?: 0)) {
             "The photos-per-A4-page setting is invalid."
         }
@@ -370,8 +370,8 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         private const val GCM_TAG_BITS = 128
         private const val GCM_TAG_BYTES = 16
         private const val IV_BYTES = 12
-        private const val MAX_PREPARED_BYTES = 20L * 1024L * 1024L
-        private const val MAX_SOURCE_BYTES = 20L * 1024L * 1024L
+        private const val MAX_PREPARED_BYTES = UploadLimits.MAX_FILE_BYTES
+        private const val MAX_SOURCE_BYTES = UploadLimits.MAX_FILE_BYTES
         private const val MAX_METADATA_BYTES = 64L * 1024L
         private const val VAULT_OVERHEAD_BYTES = 64L
         private const val TRANSIENT_RETENTION_MILLIS = 30L * 60L * 1000L

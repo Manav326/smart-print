@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "maxFileBytes": 52428800,
+  "maxBatchFiles": 20,
+  "maxBatchBytes": 524288000,
+  "multipartOverheadBytes": 1048576,
+  "privateRelayEncryptionOverheadBytes": 16,
+  "maxPhotoCount": 100
+}

@@ -1,12 +1,12 @@
 using System.Security.Cryptography;
 
+using SmartPrint.Api.Domain;
 using SmartPrint.Documents;
 
 namespace SmartPrint.Api.Storage;
 
 public sealed class DocumentStorage : IDisposable
 {
-    private const long MaximumFileBytes = 20 * 1024 * 1024;
     private readonly IConfiguration configuration;
     private readonly IWebHostEnvironment environment;
     private readonly byte[] encryptionKey;
@@ -26,9 +26,9 @@ public sealed class DocumentStorage : IDisposable
         long declaredLength,
         CancellationToken cancellationToken)
     {
-        if (declaredLength is <= 0 or > MaximumFileBytes)
+        if (declaredLength is <= 0 or > UploadLimits.MaxFileBytes)
         {
-            throw new DocumentValidationException("File size must be between 1 byte and 20 MB.");
+            throw new DocumentValidationException("File size must be within the upload size limit.");
         }
 
         var extension = Path.GetExtension(originalFileName).ToLowerInvariant();
@@ -39,9 +39,9 @@ public sealed class DocumentStorage : IDisposable
 
         await using var memory = new MemoryStream((int)declaredLength);
         await input.CopyToAsync(memory, cancellationToken);
-        if (memory.Length != declaredLength || memory.Length > MaximumFileBytes)
+        if (memory.Length != declaredLength || memory.Length > UploadLimits.MaxFileBytes)
         {
-            throw new DocumentValidationException("The uploaded file is incomplete or exceeds the 20 MB limit.");
+            throw new DocumentValidationException("The uploaded file is incomplete or exceeds the upload size limit.");
         }
 
         var bytes = memory.ToArray();
@@ -77,7 +77,7 @@ public sealed class DocumentStorage : IDisposable
         CancellationToken cancellationToken)
     {
         if (tenantId == Guid.Empty || ticketId == Guid.Empty ||
-            declaredLength is <= 16 or > MaximumFileBytes + 16)
+            declaredLength is <= UploadLimits.PrivateRelayEncryptionOverheadBytes or > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
             throw new InvalidDataException("The encrypted private relay payload has an invalid size or identity.");
 
         await using var memory = new MemoryStream(checked((int)declaredLength));

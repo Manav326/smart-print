@@ -2266,6 +2266,12 @@ shop.MapGet("/print-jobs", async (
             job.OutputSizeBytes,
             job.OutputCompletedUtc,
             StorageMode = document.StorageMode,
+            PhotoSourceAvailable = !job.PrivatePrinting &&
+                (document.PhotoSourceMediaType == "image/jpeg" ||
+                 document.PhotoSourceMediaType == "image/png" ||
+                 (document.PhotoSourceMediaType == null &&
+                  (document.MediaType == "image/jpeg" || document.MediaType == "image/png"))),
+            PhotoEditorSettingsJson = job.PrivatePrinting ? null : document.PhotoEditorSettingsJson,
             DocumentAgentDeviceId = document.AgentDeviceId,
             DocumentAgentDeviceName = db.AgentDevices
                 .Where(agent => agent.TenantId == tenantId && agent.Id == document.AgentDeviceId)
@@ -2363,14 +2369,14 @@ shop.MapPost("/photo-jobs", async (
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
         !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
-        photoCount is < 1 or > 100 ||
+        photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
         photosPerPage < 1 ||
         photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["photoDetails"] = ["Choose a supported photo size, 1–100 photos and a valid photos-per-page layout."]
+            ["photoDetails"] = [$"Choose a supported photo size, 1–{UploadLimits.MaxPhotoCount} photos and a valid photos-per-page layout."]
         });
     }
 
@@ -2429,13 +2435,13 @@ shop.MapPost("/photo-jobs", async (
     }
 
     var upload = form.Files[0];
-    if (upload.Length is <= 0 or > 20 * 1024 * 1024 ||
+    if (upload.Length is <= 0 or > UploadLimits.MaxFileBytes ||
         !string.Equals(Path.GetExtension(upload.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
     {
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_invalid",
-            message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB."
+            message = $"The prepared photo sheet must be a PDF up to {UploadLimits.MaxFileBytes / (1024 * 1024)} MB."
         });
     }
 
@@ -2761,7 +2767,7 @@ shop.MapPost("/photo-jobs", async (
         throw;
     }
 })
-.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
 .RequireRateLimiting("document-upload");
 
 shop.MapGet("/reports/summary", async (
@@ -3516,13 +3522,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision-grant", async (
 
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageMode, item.AgentDeviceId, item.MediaType })
+        .Select(item => new { item.StorageMode, item.AgentDeviceId, item.MediaType, item.PhotoSourceMediaType })
         .SingleOrDefaultAsync(ct);
     if (document is null) return Results.NotFound();
     if (document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId is not Guid agentId)
         return Results.Conflict(new { code = "photo_revision_not_local", message = "This document is not stored on the paired local computer." });
-    if (document.MediaType is not ("image/jpeg" or "image/png"))
-        return Results.Conflict(new { code = "photo_revision_source_not_image", message = "The shop editor requires an original JPG or PNG image." });
+    var photoSourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+    if (photoSourceMediaType is not ("image/jpeg" or "image/png"))
+        return Results.Conflict(new { code = "photo_revision_source_not_image", message = "The shop editor requires a retained original JPG or PNG image." });
 
     var hasPayment = await db.PrintPayments.AnyAsync(item =>
         item.TenantId == tenantId && item.PrintJobId == jobId &&
@@ -3586,6 +3593,15 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
+    if (job.PrivatePrinting)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "private_printing_source_locked",
+            message = "Private Printing never transfers the original photo or editor settings to the shop. Ask the customer to submit a new document if a change is needed."
+        });
+    }
 
     if (job.Status != "AWAITING_SHOP_APPROVAL" ||
         job.LocalQueueReceivedUtc is not null ||
@@ -3617,13 +3633,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         });
     }
 
-    if (document.MediaType is not ("image/jpeg" or "image/png"))
+    var photoSourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+    if (photoSourceMediaType is not ("image/jpeg" or "image/png"))
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "photo_revision_source_not_image",
-            message = "The shop editor can enhance an original JPG or PNG photo. This job is not an original image."
+            message = "The shop editor can enhance an original JPG or PNG photo. This job has no retained editable photo source."
         });
     }
 
@@ -3657,32 +3674,42 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
 
     var file = form.Files[0];
-    if (file.Length is <= 0 or > 20 * 1024 * 1024 ||
+    if (file.Length is <= 0 or > UploadLimits.MaxFileBytes ||
         !string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
     {
         await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_invalid",
-            message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB."
+            message = $"The prepared photo sheet must be a PDF up to {UploadLimits.MaxFileBytes / (1024 * 1024)} MB."
         });
     }
 
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
         !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
-        photoCount is < 1 or > 100 ||
+        photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
         photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
     {
         await transaction.RollbackAsync(ct);
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["photoDetails"] = ["Choose a supported ID photo size and a quantity from 1 to 100."]
+            ["photoDetails"] = [$"Choose a supported ID photo size and a quantity from 1 to {UploadLimits.MaxPhotoCount}."]
         });
     }
 
     var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
+    if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(
+            form["editorSettingsJson"].FirstOrDefault(), out var editorSettingsJson))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.BadRequest(new
+        {
+            code = "photo_editor_settings_invalid",
+            message = "The saved Photo Studio editing settings are invalid. Reopen the editor and save again."
+        });
+    }
 
     var pricing = await db.ShopPricingProfiles.AsNoTracking()
         .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
@@ -3734,6 +3761,17 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
 
     var previousStorageKey = document.StorageKey;
     var now = DateTimeOffset.UtcNow;
+    if (document.PhotoSourceOriginalFileName is null)
+    {
+        // Preserve the first uploaded photo as the immutable editing source.
+        // Every replacement PDF gets a fresh key; later edits always start from
+        // this retained source instead of progressively recompressing a PDF.
+        document.PhotoSourceStorageKey = document.StorageKey;
+        document.PhotoSourceOriginalFileName = document.OriginalFileName;
+        document.PhotoSourceMediaType = document.MediaType;
+        document.PhotoSourceSha256 = document.Sha256;
+        document.PhotoSourceSizeBytes = document.SizeBytes;
+    }
     document.OriginalFileName = outputName;
     document.MediaType = stored.Analysis.MediaType;
     document.FileExtension = stored.Analysis.Extension;
@@ -3743,6 +3781,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     document.StorageMode = "CLOUD";
     document.AgentDeviceId = null;
     document.PageSizesJson = stored.Analysis.PageSizesJson;
+    document.PhotoEditorSettingsJson = editorSettingsJson;
     document.PurgedUtc = null;
 
     job.PageCount = expectedPageCount;
@@ -3788,14 +3827,17 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         throw;
     }
 
-    try
+    if (!string.Equals(previousStorageKey, document.PhotoSourceStorageKey, StringComparison.Ordinal))
     {
-        await storage.DeleteAsync(previousStorageKey);
-    }
-    catch (IOException)
-    {
-        // The database now points to the new revision. A failed old-file cleanup
-        // must not turn a successful customer-visible revision into an error.
+        try
+        {
+            await storage.DeleteAsync(previousStorageKey);
+        }
+        catch (IOException)
+        {
+            // The database now points to the new revision. A failed old-file cleanup
+            // must not turn a successful customer-visible revision into an error.
+        }
     }
 
     return Results.Ok(new
@@ -3813,7 +3855,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         job.QuoteExpiresUtc,
         document.OriginalFileName,
         document.MediaType,
-        document.SizeBytes
+        document.SizeBytes,
+        document.PhotoEditorSettingsJson
     });
 });
 
@@ -3837,7 +3880,8 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
 
     var variant = context.Request.Query["variant"].FirstOrDefault();
     var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
-    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+    var photoSourcePreview = string.Equals(variant, "photo-source", StringComparison.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview && !photoSourcePreview &&
         !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
         return Results.BadRequest(new { code = "local_preview_variant_invalid" });
 
@@ -3883,10 +3927,34 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
     {
         var document = await db.PrintDocuments.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-            .Select(item => new { item.StorageMode, item.AgentDeviceId })
+            .Select(item => new
+            {
+                item.StorageMode,
+                item.AgentDeviceId,
+                item.MediaType,
+                item.OriginalFileName,
+                item.SizeBytes,
+                item.Sha256,
+                item.PhotoSourceMediaType,
+                item.PhotoSourceOriginalFileName,
+                item.PhotoSourceSha256,
+                item.PhotoSourceSizeBytes
+            })
             .SingleOrDefaultAsync(ct);
         if (document is null)
             return Results.NotFound();
+        if (photoSourcePreview)
+        {
+            var sourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+            var sourceName = document.PhotoSourceOriginalFileName ?? document.OriginalFileName;
+            var sourceSize = document.PhotoSourceSizeBytes ?? document.SizeBytes;
+            var sourceHash = document.PhotoSourceSha256 ?? document.Sha256;
+            if (sourceMediaType is not ("image/jpeg" or "image/png") ||
+                string.IsNullOrWhiteSpace(sourceName) || sourceName.Length > 255 ||
+                sourceSize <= 0 ||
+                string.IsNullOrWhiteSpace(sourceHash) || sourceHash.Length != 64 || !sourceHash.All(Uri.IsHexDigit))
+                return Results.Conflict(new { code = "photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
+        }
         if (!string.Equals(document.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
             return Results.Ok(new { Mode = "CLOUD" });
         if (document.AgentDeviceId is not Guid documentAgentId)
@@ -3959,9 +4027,28 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
     if (privatePrinting.Value)
         return Results.Conflict(new { code = "private_printing_source_locked", message = "The customer selected Private Printing. The original source document is not available in the shop portal." });
 
+    var variant = context.Request.Query["variant"].FirstOrDefault();
+    var photoSourcePreview = string.Equals(variant, "photo-source", StringComparison.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(variant) && !photoSourcePreview)
+        return Results.BadRequest(new { code = "document_variant_invalid" });
+
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageKey, item.StorageMode, item.MediaType, item.PurgedUtc })
+        .Select(item => new
+        {
+            item.StorageKey,
+            item.StorageMode,
+            item.MediaType,
+            item.OriginalFileName,
+            item.SizeBytes,
+            item.Sha256,
+            item.PurgedUtc,
+            item.PhotoSourceStorageKey,
+            item.PhotoSourceOriginalFileName,
+            item.PhotoSourceMediaType,
+            item.PhotoSourceSha256,
+            item.PhotoSourceSizeBytes
+        })
         .SingleOrDefaultAsync(ct);
     if (document is null)
     {
@@ -3977,10 +4064,25 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
         return Results.StatusCode(StatusCodes.Status410Gone);
     }
 
+    var storageKey = document.StorageKey;
+    var mediaType = document.MediaType;
+    if (photoSourcePreview)
+    {
+        mediaType = document.PhotoSourceMediaType ?? document.MediaType;
+        storageKey = document.PhotoSourceStorageKey ?? document.StorageKey;
+        var sourceHash = document.PhotoSourceSha256 ?? document.Sha256;
+        var sourceSize = document.PhotoSourceSizeBytes ?? document.SizeBytes;
+        if (mediaType is not ("image/jpeg" or "image/png") ||
+            sourceSize <= 0 ||
+            string.IsNullOrWhiteSpace(sourceHash) ||
+            sourceHash.Length != 64 || !sourceHash.All(Uri.IsHexDigit))
+            return Results.Conflict(new { code = "photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
+    }
+
     MemoryStream content;
     try
     {
-        content = storage.OpenRead(document.StorageKey);
+        content = storage.OpenRead(storageKey);
     }
     catch (IOException)
     {
@@ -3990,7 +4092,7 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
     context.Response.Headers["Cache-Control"] = "private, no-store";
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["Content-Security-Policy"] = "sandbox";
-    return Results.File(content, document.MediaType, enableRangeProcessing: false);
+    return Results.File(content, mediaType, enableRangeProcessing: false);
 });
 
 shop.MapPost("/print-batches/{batchId:guid}/review", async (
@@ -4005,12 +4107,12 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
 
     var reviewedIds = request.ReviewedJobIds?.Distinct().ToArray() ?? [];
     var acceptedIds = request.AcceptedJobIds?.Distinct().ToArray() ?? [];
-    if (reviewedIds.Length is < 1 or > 20 ||
+    if (reviewedIds.Length is < 1 or > UploadLimits.MaxBatchFiles ||
         acceptedIds.Length > reviewedIds.Length ||
         acceptedIds.Except(reviewedIds).Any())
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["review"] = ["Review between 1 and 20 files. Accepted file IDs must be part of the reviewed batch."]
+            ["review"] = [$"Review between 1 and {UploadLimits.MaxBatchFiles} files. Accepted file IDs must be part of the reviewed batch."]
         });
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -5544,7 +5646,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/received", async (
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (string.IsNullOrWhiteSpace(sha) || sha.Length != 64 ||
         sha.Any(character => !Uri.IsHexDigit(character)) ||
-        request.SizeBytes <= 0 || request.SizeBytes > 20L * 1024 * 1024)
+        request.SizeBytes <= 0 || request.SizeBytes > UploadLimits.MaxFileBytes)
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
@@ -6203,7 +6305,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
     if (request.LocalJobs is null || request.LocalJobs.Count is < 1 or > 100)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["localJobs"] = ["Provide between 1 and 100 local queue proofs."] });
     var proofs = request.LocalJobs
-        .Where(x => x is not null && x.JobId != Guid.Empty && x.SizeBytes is > 0 and <= 20L * 1024 * 1024 &&
+        .Where(x => x is not null && x.JobId != Guid.Empty && x.SizeBytes is > 0 and <= UploadLimits.MaxFileBytes &&
                     x.Sha256 is { Length: 64 } && x.Sha256.All(Uri.IsHexDigit))
         .GroupBy(x => x.JobId).Select(g => g.First()).ToList();
     if (proofs.Count != request.LocalJobs.Count)
@@ -6524,6 +6626,9 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
 
+    if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(request.EditorSettingsJson, out _))
+        return Results.BadRequest(new { code = "photo_editor_settings_invalid", message = "The Photo Studio editing settings are invalid. Reopen the editor and save again." });
+
     var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
     if (!LocalDocumentPhotoRevisionGrant.TryValidate(
             grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
@@ -6533,10 +6638,26 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
     var job = await db.PrintJobs.AsNoTracking()
         .SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
+    if (job.PrivatePrinting)
+        return Results.Conflict(new
+        {
+            code = "private_printing_source_locked",
+            message = "Private Printing never transfers original-photo or Photo Studio editor metadata to the shop Agent."
+        });
 
     var document = await db.PrintDocuments.AsNoTracking()
         .Where(item => item.TenantId == device.TenantId && item.PrintJobId == jobId)
-        .Select(item => new { item.StorageMode, item.AgentDeviceId, item.Sha256, item.SizeBytes, item.MediaType })
+        .Select(item => new
+        {
+            item.StorageMode,
+            item.AgentDeviceId,
+            item.Sha256,
+            item.SizeBytes,
+            item.MediaType,
+            item.PhotoSourceSha256,
+            item.PhotoSourceSizeBytes,
+            item.PhotoSourceMediaType
+        })
         .SingleOrDefaultAsync(ct);
     if (document is null) return Results.NotFound();
 
@@ -6545,12 +6666,15 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
         document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId != device.Id)
         return Results.Conflict(new { code = "photo_revision_not_allowed", message = "This local document is no longer eligible for photo enhancement." });
 
-    if (document.MediaType is not ("image/jpeg" or "image/png") ||
-        !string.Equals(document.Sha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
-        document.SizeBytes != request.ExpectedOriginalSizeBytes)
+    var sourceSha256 = document.PhotoSourceSha256 ?? document.Sha256;
+    var sourceSizeBytes = document.PhotoSourceSizeBytes ?? document.SizeBytes;
+    var sourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+    if (sourceMediaType is not ("image/jpeg" or "image/png") ||
+        !string.Equals(sourceSha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
+        sourceSizeBytes != request.ExpectedOriginalSizeBytes)
         return Results.Conflict(new { code = "photo_revision_original_changed", message = "The local original no longer matches the document registered by the shop service. Reopen its preview." });
 
-    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
+    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
         string.IsNullOrWhiteSpace(request.Sha256) || request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
         string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000 || !IsValidPageSizesJson(request.PageSizesJson))
         return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -6600,8 +6724,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
     return Results.Ok(new
     {
         job.Id,
-        OriginalSha256 = document.Sha256,
-        OriginalSizeBytes = document.SizeBytes,
+        OriginalSha256 = sourceSha256,
+        OriginalSizeBytes = sourceSizeBytes,
         NewSha256 = request.Sha256,
         NewSizeBytes = request.SizeBytes,
         request.PhotoSizeCode,
@@ -6624,8 +6748,11 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
 
+    if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(request.EditorSettingsJson, out var editorSettingsJson))
+        return Results.BadRequest(new { code = "photo_editor_settings_invalid", message = "The Photo Studio editing settings are invalid. Reopen the editor and save again." });
+
     if (request.PageCount is < 1 or > 100 ||
-        request.PhotoCount is < 1 or > 100 ||
+        request.PhotoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         request.PhotosPerPage is < 1 or > 100 ||
         request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6"))
         return Results.BadRequest(new { code = "photo_revision_output_invalid", message = "The prepared photo page metadata is invalid." });
@@ -6713,7 +6840,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
             JsonSerializer.Serialize(PricingCalculator.CalculatePhotoPageRefundAllocations(
                 request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage, job.PhotoUnitPriceMinorSnapshot)),
             StringComparison.Ordinal) &&
-        string.Equals(document.PageSizesJson, request.PageSizesJson, StringComparison.Ordinal))
+        string.Equals(document.PageSizesJson, request.PageSizesJson, StringComparison.Ordinal) &&
+        string.Equals(document.PhotoEditorSettingsJson, editorSettingsJson, StringComparison.Ordinal))
     {
         var duplicateHasPayment = await db.PrintPayments.AnyAsync(item =>
             item.TenantId == device.TenantId && item.PrintJobId == jobId &&
@@ -6746,12 +6874,15 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         }
     }
 
+    var retainedSourceSha256 = document.PhotoSourceSha256 ?? document.Sha256;
+    var retainedSourceSizeBytes = document.PhotoSourceSizeBytes ?? document.SizeBytes;
+    var retainedSourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
     if (job.Status != "AWAITING_SHOP_APPROVAL" ||
         job.LocalQueueReceivedUtc is not null || job.ClaimedByAgentDeviceId is not null ||
         document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId != device.Id ||
-        document.MediaType is not ("image/jpeg" or "image/png") ||
-        !string.Equals(document.Sha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
-        document.SizeBytes != request.ExpectedOriginalSizeBytes)
+        retainedSourceMediaType is not ("image/jpeg" or "image/png") ||
+        !string.Equals(retainedSourceSha256, request.ExpectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
+        retainedSourceSizeBytes != request.ExpectedOriginalSizeBytes)
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new { code = "photo_revision_original_changed", message = "The local original or job state changed before the revision was committed. The original file has been restored on the shop computer." });
@@ -6769,7 +6900,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         return Results.Conflict(new { code = "photo_revision_payment_started", message = "A payment attempt started before the revision could be saved. The local original has been restored." });
     }
 
-    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
+    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
         request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
         string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000)
     {
@@ -6814,12 +6945,20 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     var now = DateTimeOffset.UtcNow;
     var previousStorageMode = document.StorageMode;
     var outputName = $"photo-sheet-{job.JobNumber}.pdf";
+    if (document.PhotoSourceOriginalFileName is null)
+    {
+        document.PhotoSourceOriginalFileName = document.OriginalFileName;
+        document.PhotoSourceMediaType = document.MediaType;
+        document.PhotoSourceSha256 = document.Sha256;
+        document.PhotoSourceSizeBytes = document.SizeBytes;
+    }
     document.OriginalFileName = outputName;
     document.MediaType = "application/pdf";
     document.FileExtension = ".pdf";
     document.SizeBytes = request.SizeBytes;
     document.Sha256 = request.Sha256.ToLowerInvariant();
     document.PageSizesJson = request.PageSizesJson;
+    document.PhotoEditorSettingsJson = editorSettingsJson;
     document.PurgedUtc = null;
     document.StorageMode = previousStorageMode;
     document.AgentDeviceId = device.Id;
@@ -6873,7 +7012,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.QuoteExpiresUtc,
         document.OriginalFileName,
         document.MediaType,
-        document.SizeBytes
+        document.SizeBytes,
+        document.PhotoEditorSettingsJson
     });
 });
 
@@ -6913,7 +7053,8 @@ agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
 
     var variant = context.Request.Query["variant"].FirstOrDefault();
     var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
-    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+    var photoSourcePreview = string.Equals(variant, "photo-source", StringComparison.OrdinalIgnoreCase);
+    if (!string.IsNullOrWhiteSpace(variant) && !outputPreview && !photoSourcePreview &&
         !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
         return Results.BadRequest(new { code = "local_preview_variant_invalid" });
 
@@ -6960,10 +7101,33 @@ agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
             on new { job.TenantId, PrintJobId = job.Id } equals new { item.TenantId, item.PrintJobId }
         where job.Id == jobId && job.TenantId == device.TenantId &&
               item.StorageMode == "LOCAL_AGENT" && item.AgentDeviceId == device.Id
-        select new { item.MediaType, item.OriginalFileName, item.SizeBytes, item.Sha256 }
+        select new
+        {
+            item.MediaType,
+            item.OriginalFileName,
+            item.SizeBytes,
+            item.Sha256,
+            item.PhotoSourceOriginalFileName,
+            item.PhotoSourceMediaType,
+            item.PhotoSourceSha256,
+            item.PhotoSourceSizeBytes
+        }
     ).SingleOrDefaultAsync(ct);
 
     if (document is null) return Results.NotFound();
+    if (photoSourcePreview)
+    {
+        var mediaType = document.PhotoSourceMediaType ?? document.MediaType;
+        var originalFileName = document.PhotoSourceOriginalFileName ?? document.OriginalFileName;
+        var sizeBytes = document.PhotoSourceSizeBytes ?? document.SizeBytes;
+        var sha256 = document.PhotoSourceSha256 ?? document.Sha256;
+        if (mediaType is not ("image/jpeg" or "image/png") ||
+            sizeBytes <= 0 ||
+            string.IsNullOrWhiteSpace(sha256) || sha256.Length != 64 || !sha256.All(Uri.IsHexDigit) ||
+            string.IsNullOrWhiteSpace(originalFileName) || originalFileName.Length > 255)
+            return Results.Conflict(new { code = "local_photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
+        return Results.Ok(new { MediaType = mediaType, OriginalFileName = originalFileName, SizeBytes = sizeBytes, Sha256 = sha256 });
+    }
     return Results.Ok(new
     {
         document.MediaType,
@@ -7992,9 +8156,9 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         return Results.BadRequest(new { code = "invalid_batch_name", message = exception.Message });
     }
-    if (file.Length is <= 0 or > 20 * 1024 * 1024)
+    if (file.Length is <= 0 or > UploadLimits.MaxFileBytes)
     {
-        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "File size must be between 1 byte and 20 MB.");
+        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: $"File size must be between 1 byte and {UploadLimits.MaxFileBytes / (1024 * 1024)} MB.");
     }
 
     var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
@@ -8016,7 +8180,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         requestedPrintKind == "PHOTO" &&
         photoSizeCode is string supportedPhotoSizeCode &&
         supportedPhotoSizeCode is "35x45" or "25x35" or "2x2" or "4x6" &&
-        photoCount is >= 1 and <= 100 &&
+        photoCount is >= 1 and <= UploadLimits.MaxPhotoCount &&
         photosPerPage is int requestedPhotosPerPage &&
         requestedPhotosPerPage >= 1 &&
         requestedPhotosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(supportedPhotoSizeCode);
@@ -8380,7 +8544,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             await transaction.RollbackAsync(ct);
             await storage.DeleteAsync(stored.StorageKey);
             return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
-                title: "A print batch can contain up to 20 files and 50 MB in total.");
+                title: $"A print batch can contain up to {UploadLimits.MaxBatchFiles} files and {UploadLimits.MaxBatchBytes / (1024 * 1024)} MB in total.");
         }
         var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
         if (!quota.Allowed)
@@ -8443,7 +8607,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         DuplicateRequest = false
     });
 })
-.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
 .RequireRateLimiting("document-upload");
 
 publicApi.MapPost("/sessions/current/local-upload-tickets", async (
@@ -8508,7 +8672,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     var validPhotoMetadata = request.PrintKind == "PHOTO" &&
         request.PhotoSizeCode is string photoSizeCode &&
         (photoSizeCode is "35x45" or "25x35" or "2x2" or "4x6") &&
-        request.PhotoCount is >= 1 and <= 100 &&
+        request.PhotoCount is >= 1 and <= UploadLimits.MaxPhotoCount &&
         request.PhotosPerPage is int photosPerPage &&
         photosPerPage >= 1 &&
         photosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
@@ -8535,14 +8699,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 : "Private Photo Studio sheets require a supported photo size, quantity, A4 sheet layout and a single-sided colour A4 PDF. No document was uploaded."
         });
     var sha = request.Sha256?.Trim().ToLowerInvariant();
-    if (mediaType is null || request.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
+    if (mediaType is null || request.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
         string.IsNullOrWhiteSpace(sha) || sha.Length != 64 || sha.Any(character => !Uri.IsHexDigit(character)) ||
         request.ColourMode is not ("Mono" or "Colour") ||
         request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         request.Copies is < 1 or > 100 ||
         request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
     {
-        return Results.UnprocessableEntity(new { code = "document_not_supported", message = "Local upload supports PDF, JPG/JPEG and PNG files up to 20 MB with a valid SHA-256 digest." });
+        return Results.UnprocessableEntity(new { code = "document_not_supported", message = $"Local upload supports PDF, JPG/JPEG and PNG files up to {UploadLimits.MaxFileBytes / (1024 * 1024)} MB with a valid SHA-256 digest." });
     }
 
     var batchId = request.BatchId ?? Guid.NewGuid();
@@ -9026,7 +9190,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     {
         await transaction.RollbackAsync(ct);
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
-            title: "A print batch can contain up to 20 files and 50 MB in total.");
+            title: $"A print batch can contain up to {UploadLimits.MaxBatchFiles} files and {UploadLimits.MaxBatchBytes / (1024 * 1024)} MB in total.");
     }
 
     db.LocalPrintUploadTickets.Add(ticket);
@@ -9122,7 +9286,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     if (form.Files.Count != 1)
         return Results.BadRequest(new { code = "private_relay_file_required" });
     var file = form.Files[0];
-    if (file.Length != ticket.SizeBytes + 16 || file.Length > 20L * 1024 * 1024 + 16)
+    if (file.Length != ticket.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes || file.Length > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
         return Results.UnprocessableEntity(new { code = "private_relay_size_mismatch", message = "The encrypted file size does not match its original upload ticket." });
 
     string storageKey;
@@ -9198,7 +9362,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         ticket.JobNumber
     });
 })
-.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
 .RequireRateLimiting("document-upload");
 
 publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private-relay-status", async (
@@ -9375,7 +9539,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     if (form.Files.Count != 1)
         return Results.BadRequest(new { code = "one_file_required", message = "Continue with one original document per print request." });
     var file = form.Files[0];
-    if (file.Length != preflightTicket.SizeBytes || file.Length is <= 0 or > 20 * 1024 * 1024)
+    if (file.Length != preflightTicket.SizeBytes || file.Length is <= 0 or > UploadLimits.MaxFileBytes)
         return Results.UnprocessableEntity(new { code = "local_upload_recovery_size_mismatch", message = "The selected file does not match the original upload attempt." });
 
     var documentId = Guid.NewGuid();
@@ -9660,7 +9824,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         throw;
     }
 })
-.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
 .RequireRateLimiting("document-upload");
 
 publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
@@ -9744,7 +9908,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         (isPhotoPrint &&
             (request.Copies != 1 || request.ColourMode != "Colour" ||
              request.IsDuplex || request.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
-             request.PhotoCount is null || request.PhotoCount is < 1 or > 100 ||
+             request.PhotoCount is null || request.PhotoCount is < 1 or > UploadLimits.MaxPhotoCount ||
              request.PhotosPerPage is < 1)) ||
         (isPhotoPrint && (request.PaperSize != "A4" || request.Orientation != "AUTO")) ||
         (!isPhotoPrint && (request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null)))

@@ -92,8 +92,8 @@ class MainActivity : AppCompatActivity() {
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
         private const val FOLDER_PICKER_ACCEPT = "application/x-smartprint-folder-selection"
-        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES = 20L * 1024L * 1024L
-        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES = 50L * 1024L * 1024L
+        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES = UploadLimits.MAX_FILE_BYTES
+        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES = UploadLimits.MAX_BATCH_BYTES
     }
 
     private lateinit var store: LocalDocumentStore
@@ -1960,10 +1960,22 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val local = store.read(email).orEmpty()
-                val serverCount = authenticated { token ->
-                    CustomerAccountClient.historyCount(accountServiceUrl(), token)
+                val serverCount = try {
+                    authenticated { token -> CustomerAccountClient.historyCount(accountServiceUrl(), token) }
+                } catch (error: CustomerApiException) {
+                    if (error.statusCode == 404) null else throw error
                 }
-                if (serverCount <= local.size.toLong()) {
+                if (serverCount == null) {
+                    // Older deployed API builds expose only GET /jobs with a
+                    // { jobs: [...] } response. Keep refresh usable during rollout.
+                    // Merge with the encrypted local cache because that legacy route
+                    // is capped at 100 records and must never erase older saved history.
+                    val legacyItems = authenticated { token ->
+                        CustomerAccountClient.legacyHistorySnapshot(accountServiceUrl(), token)
+                    }
+                    CustomerAccountClient.mergeLegacyHistorySnapshot(local, legacyItems)
+                        .also { store.replace(email, it) }
+                } else if (serverCount <= local.size.toLong()) {
                     local
                 } else {
                     val firstPage = authenticated { token ->
@@ -2284,7 +2296,7 @@ class MainActivity : AppCompatActivity() {
         val visibleEntries = allEntries.filter {
             when {
                 isPicker && fileChooserSelectFolders -> it.isDirectory
-                isPicker -> it.isDirectory || DocumentNamePolicy.isPrintable(it.name, it.length())
+                isPicker -> it.isDirectory || DocumentNamePolicy.isPrintable(it)
                 librarySearchQuery.isBlank() -> true
                 else -> it.name.contains(librarySearchQuery, ignoreCase = true)
             }
@@ -2483,7 +2495,7 @@ class MainActivity : AppCompatActivity() {
             }
             selectionRow.addView(text("${chooserSelection.size} selected", 12, R.color.qp_text, true),
                 LinearLayout.LayoutParams(0, -2, 1f))
-            val selectablePickerFiles = visibleEntries.filter { !it.isDirectory && DocumentNamePolicy.isPrintable(it.name, it.length()) }
+            val selectablePickerFiles = visibleEntries.filter { !it.isDirectory && DocumentNamePolicy.isPrintable(it) }
             val allVisiblePickerFilesSelected = selectablePickerFiles.isNotEmpty() && selectablePickerFiles.all { chooserSelectedFilePaths.contains(it.canonicalPath) }
             selectionRow.addView(button(if (allVisiblePickerFilesSelected) "Deselect all" else "Select all", false).apply {
                 minHeight = dp(34)
@@ -2545,8 +2557,8 @@ class MainActivity : AppCompatActivity() {
             selectionActions.addView(button("ZIP", false).apply {
                 minHeight = dp(38); setOnClickListener { exportSelected(selectedHere); clearLibrarySelection(); showFiles() }
             }, LinearLayout.LayoutParams(0, dp(38), 1f))
-            val supportedBatch = selectedHere.size in 2..20 && selectedHere.all {
-                it.extension.lowercase(Locale.ROOT) in setOf("pdf", "jpg", "jpeg", "png") && it.length() in 1..(20L * 1024L * 1024L)
+            val supportedBatch = selectedHere.size in 2..UploadLimits.MAX_BATCH_FILES && selectedHere.all {
+                DocumentNamePolicy.isBatchSource(it) && it.length() in 1..UploadLimits.MAX_FILE_BYTES
             } && selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
             selectionActions.addView(button("Combine into PDF", true).apply {
                 minHeight = dp(38); isEnabled = supportedBatch; alpha = if (supportedBatch) 1f else 0.45f
@@ -2580,7 +2592,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addLibraryEntries(parentView: LinearLayout, entries: List<File>, isPicker: Boolean, depth: Int) {
         entries.forEach { entry ->
-            if (!isPicker || entry.isDirectory || (!fileChooserSelectFolders && DocumentNamePolicy.isPrintable(entry.name, entry.length()))) {
+            if (!isPicker || entry.isDirectory || (!fileChooserSelectFolders && DocumentNamePolicy.isPrintable(entry))) {
                 parentView.addView(entryView(entry, isPicker, depth), linearParams())
                 if (entry.isDirectory && expandedFolderPaths.contains(entry.canonicalPath) && depth < MAX_TREE_DEPTH) {
                     val children = runCatching { store.list(entry).toList() }.getOrDefault(emptyList())
@@ -2741,18 +2753,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun fileIconResource(file: File): Int {
         if (file.isDirectory) return R.drawable.ic_folder
-        return when (file.extension.lowercase(Locale.ROOT)) {
-            "pdf" -> R.drawable.ic_file_pdf
-            "jpg", "jpeg", "png", "webp", "bmp", "gif" -> R.drawable.ic_file_image
+        val mediaType = if (file.extension.isBlank()) {
+            DocumentNamePolicy.mimeType(file)
+        } else {
+            DocumentNamePolicy.mimeType(file.name)
+        }
+        return when (mediaType) {
+            "application/pdf" -> R.drawable.ic_file_pdf
+            "image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif" -> R.drawable.ic_file_image
             else -> R.drawable.ic_file
         }
     }
 
     private fun showEntryMenu(anchor: View, file: File) {
+        val mediaType = if (file.isFile) DocumentNamePolicy.mimeType(file) else null
         val actions = mutableListOf<Pair<String, () -> Unit>>()
-        if (!file.isDirectory) actions += "Open" to { openDocument(file) }
-        if (!file.isDirectory && supportsInAppViewer(file)) actions += "Open with another app" to { openDocumentExternally(file) }
-        if (!file.isDirectory && file.extension.equals("pdf", true)) {
+        if (!file.isDirectory) actions += "Open" to { openDocument(file, mediaType) }
+        if (mediaType != null && DocumentNamePolicy.supportsInAppViewer(mediaType)) {
+            actions += "Open with another app" to { openDocumentExternally(file, mediaType) }
+        }
+        if (mediaType == "application/pdf") {
             actions += "Edit PDF" to { showPdfEditor(file) }
         }
         actions += "Rename" to {
@@ -2780,7 +2800,7 @@ class MainActivity : AppCompatActivity() {
             try { store.reorder(file, 1); showFiles() }
             catch (e: Exception) { toast("Reorder failed: " + message(e)) }
         }
-        if (!file.isDirectory) actions += "Share" to { shareDocument(file) }
+        if (!file.isDirectory) actions += "Share" to { shareDocument(file, mediaType) }
         actions += "Delete" to {
             showConfirmSheet(
                 if (file.isDirectory) "Delete folder?" else "Delete file?",
@@ -2860,7 +2880,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showPdfEditor(file: File) {
         try {
-            require(file.isFile && file.extension.equals("pdf", true)) {
+            require(file.isFile && DocumentNamePolicy.isPdf(file)) {
                 "Only saved PDFs can be edited here."
             }
             val pages = DocumentBatchComposer.pageEdits(file).toMutableList()
@@ -4971,7 +4991,7 @@ class MainActivity : AppCompatActivity() {
         val documents = selectedFolders.flatMap { folder ->
             val groupName = store.pathOf(folder).replace("/", " - ").take(80).ifBlank { "Loose files" }
             store.list(folder).filter { file ->
-                file.isFile && DocumentNamePolicy.isPrintable(file.name, file.length())
+                DocumentNamePolicy.isPrintable(file)
             }.map { file -> file to groupName }
         }.distinctBy { it.first.canonicalPath }
         if (documents.isEmpty()) {
@@ -5106,8 +5126,8 @@ class MainActivity : AppCompatActivity() {
         val callback = fileCallback ?: return
         val selected = uris.distinct()
         if (selected.isEmpty()) return
-        if (selected.size > 20) {
-            toast("Choose up to 20 documents at once.")
+        if (selected.size > UploadLimits.MAX_BATCH_FILES) {
+            toast("Choose up to ${UploadLimits.MAX_BATCH_FILES} documents at once.")
             return
         }
         if (!fileChooserAllowsMultiple && selected.size != 1) {
@@ -5306,7 +5326,7 @@ class MainActivity : AppCompatActivity() {
             if (child.isDirectory) {
                 if (!copyFolder(child, target, depth + 1, count, budget)) return false
             } else {
-                val outputFile = target.createFile(DocumentNamePolicy.mimeType(child.name), uniqueName(target, child.name))
+                val outputFile = target.createFile(DocumentNamePolicy.mimeType(child), uniqueName(target, child.name))
                     ?: error("Could not create ${child.name}.")
                 val output = contentResolver.openOutputStream(outputFile.uri, "w") ?: error("Cannot write ${child.name}.")
                 output.use { out -> FileInputStream(child).use { it.copyTo(out) } }
@@ -5328,14 +5348,11 @@ class MainActivity : AppCompatActivity() {
         return "$base-${System.currentTimeMillis()}$ext"
     }
 
-    private fun supportsInAppViewer(file: File): Boolean {
-        if (!file.isFile) return false
-        return file.extension.lowercase(Locale.ROOT) in setOf(
-            "pdf", "jpg", "jpeg", "png", "webp", "bmp", "gif"
-        )
-    }
-
-    private fun showDocumentViewer(file: File, startPosition: Int? = null) {
+    private fun showDocumentViewer(
+        file: File,
+        startPosition: Int? = null,
+        detectedMimeType: String? = null
+    ) {
         val isPreparedId = idStudioStore.isPreparedDocument(file)
         val documentFile = if (isPreparedId) {
             try { idStudioStore.materializePreparedFile(file) }
@@ -5344,9 +5361,10 @@ class MainActivity : AppCompatActivity() {
                 return
             }
         } else file
-        if (!supportsInAppViewer(documentFile)) {
+        val documentMimeType = detectedMimeType ?: DocumentNamePolicy.mimeType(documentFile)
+        if (!DocumentNamePolicy.supportsInAppViewer(documentMimeType)) {
             if (isPreparedId) idStudioStore.releaseTransientFile(documentFile)
-            else openDocumentExternally(file)
+            else openDocumentExternally(file, documentMimeType)
             return
         }
         if (!documentFile.exists() || !documentFile.isFile) {
@@ -5382,20 +5400,19 @@ class MainActivity : AppCompatActivity() {
         setBottomNavigationVisible(false)
         content.removeAllViews()
 
-        val images = if (documentFile.extension.equals("pdf", true)) {
+        val images = if (documentMimeType == "application/pdf") {
             emptyList()
         } else {
             val siblings = documentFile.parentFile?.let { folder ->
                 runCatching {
                     store.list(folder).filter { candidate ->
-                        candidate.isFile && candidate.extension.lowercase(Locale.ROOT) in
-                            setOf("jpg", "jpeg", "png", "webp", "bmp", "gif")
+                        candidate.isFile && DocumentNamePolicy.isImage(candidate)
                     }
                 }.getOrDefault(emptyList())
             }.orEmpty()
             (if (siblings.any { sameDocument(it, documentFile) }) siblings else siblings + documentFile)
         }
-        val reader = SmartPrintDocumentViewer(this, documentFile, images, startPosition) { current ->
+        val reader = SmartPrintDocumentViewer(this, documentFile, images, startPosition, documentMimeType) { current ->
             viewingDocument = current
             setToolbarPage(if (isPreparedId) "ID card preview" else current.name)
         }
@@ -5463,12 +5480,23 @@ class MainActivity : AppCompatActivity() {
         } else showFiles()
     }
 
-    private fun openDocument(file: File) {
-        if (idStudioStore.isPreparedDocument(file) || supportsInAppViewer(file)) showDocumentViewer(file)
-        else openDocumentExternally(file)
+    private fun openDocument(file: File, detectedMimeType: String? = null) {
+        if (idStudioStore.isPreparedDocument(file)) {
+            // The encrypted library entry is not a PDF until the store materializes
+            // its temporary decrypted copy. Let showDocumentViewer detect that copy.
+            showDocumentViewer(file)
+            return
+        }
+
+        val mediaType = detectedMimeType ?: DocumentNamePolicy.mimeType(file)
+        if (DocumentNamePolicy.supportsInAppViewer(mediaType)) {
+            showDocumentViewer(file, detectedMimeType = mediaType)
+        } else {
+            openDocumentExternally(file, mediaType)
+        }
     }
 
-    private fun openDocumentExternally(file: File) {
+    private fun openDocumentExternally(file: File, mediaType: String = DocumentNamePolicy.mimeType(file)) {
         if (idStudioStore.isPreparedDocument(file)) {
             toast("Prepared ID documents can only be viewed and printed inside SmartPrint.")
             return
@@ -5476,22 +5504,23 @@ class MainActivity : AppCompatActivity() {
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.documents", file)
             val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, DocumentNamePolicy.mimeType(file.name))
+                setDataAndType(uri, mediaType)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             startActivity(Intent.createChooser(intent, "Open document"))
         } catch (_: Exception) { toast("No app could open this document.") }
     }
 
-    private fun shareDocument(file: File) {
+    private fun shareDocument(file: File, detectedMimeType: String? = null) {
         if (idStudioStore.isPreparedDocument(file)) {
             toast("Prepared ID documents cannot be shared outside SmartPrint.")
             return
         }
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.documents", file)
+            val mediaType = detectedMimeType ?: DocumentNamePolicy.mimeType(file)
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = DocumentNamePolicy.mimeType(file.name)
+                type = mediaType
                 putExtra(Intent.EXTRA_STREAM, uri)
                 clipData = ClipData.newUri(contentResolver, file.name, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)

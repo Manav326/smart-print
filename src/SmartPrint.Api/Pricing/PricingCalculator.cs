@@ -38,7 +38,7 @@ public static class PricingCalculator
     {
         ArgumentNullException.ThrowIfNull(pricing);
         if (!pricing.IsConfigured) throw new InvalidOperationException("Shop pricing is not configured.");
-        if (photoCount is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(photoCount), "Photo count must be between 1 and 100.");
+        if (photoCount is < 1 or > UploadLimits.MaxPhotoCount) throw new ArgumentOutOfRangeException(nameof(photoCount), $"Photo count must be between 1 and {UploadLimits.MaxPhotoCount}.");
         var unitRate = PhotoUnitRate(photoSizeCode, pricing);
         if (unitRate <= 0) throw new InvalidOperationException("This photo size is not currently priced by the shop.");
         return checked(photoCount * unitRate);
@@ -66,8 +66,8 @@ public static class PricingCalculator
 
     public static int PhotoPageCount(int photoCount, string photoSizeCode)
     {
-        if (photoCount is < 1 or > 100)
-            throw new ArgumentOutOfRangeException(nameof(photoCount), "Photo count must be between 1 and 100.");
+        if (photoCount is < 1 or > UploadLimits.MaxPhotoCount)
+            throw new ArgumentOutOfRangeException(nameof(photoCount), $"Photo count must be between 1 and {UploadLimits.MaxPhotoCount}.");
 
         var photosPerPage = MaximumPhotosPerA4Sheet(photoSizeCode);
         return checked((photoCount + photosPerPage - 1) / photosPerPage);
@@ -75,8 +75,8 @@ public static class PricingCalculator
 
     public static int PhotoPageCount(int photoCount, string photoSizeCode, int photosPerPage)
     {
-        if (photoCount is < 1 or > 100)
-            throw new ArgumentOutOfRangeException(nameof(photoCount), "Photo count must be between 1 and 100.");
+        if (photoCount is < 1 or > UploadLimits.MaxPhotoCount)
+            throw new ArgumentOutOfRangeException(nameof(photoCount), $"Photo count must be between 1 and {UploadLimits.MaxPhotoCount}.");
 
         var maximumPhotos = MaximumPhotosPerA4Sheet(photoSizeCode);
         if (photosPerPage is < 1 || photosPerPage > maximumPhotos)

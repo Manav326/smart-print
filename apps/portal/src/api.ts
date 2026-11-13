@@ -1,4 +1,5 @@
 import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
+import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "./local-preview-routing";
 import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 import { authStorageKey } from "./portal-routing";
@@ -191,6 +192,15 @@ export class LocalUploadOutcomeUnknownError extends Error {
   }
 }
 
+function validateUploadFileSize(file: File): void {
+  if (file.size <= 0 || file.size > UPLOAD_LIMITS.maxFileBytes) {
+    throw new ApiError(
+      `Choose a file up to ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB.`,
+      413,
+      "document_size_invalid"
+    );
+  }
+}
 const defaultApiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 let apiBase = defaultApiBase;
 let desktopApiBaseRefresh: Promise<void> | null = null;
@@ -838,6 +848,7 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   paymentMethod: "UPI" | "CASH";
   idempotencyKey: string;
 }) {
+  validateUploadFileSize(file);
   const form = new FormData();
   form.append("file", file, file.name);
   form.append("photoSizeCode", values.photoSizeCode);
@@ -1067,6 +1078,8 @@ export interface ShopPricingProfile {
 
 export interface ShopPrintJob {
   id: string;
+  photoSourceAvailable?: boolean;
+  photoEditorSettingsJson?: string | null;
   batchId?: string | null;
   batchGroupName?: string | null;
   batchName?: string | null;
@@ -1324,6 +1337,7 @@ export async function uploadCustomerDocument(
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
   photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
 ) {
+  validateUploadFileSize(file);
   const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
   const pendingLocalGrant = sessionStorage.getItem(localKeys.grant);
@@ -1538,6 +1552,7 @@ export async function uploadCustomerDocumentLocally(
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
   photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
 ): Promise<UploadedPrintJob> {
+  validateUploadFileSize(file);
   if (printKind === "ID_DOCUMENT" && !privatePrinting) {
     throw new LocalUploadPreflightError(
       "Prepared ID cards must use Private Printing. The normal upload route is disabled for ID documents.",
@@ -2013,9 +2028,9 @@ export function applyShopPrintBatchReview(
 export async function downloadShopDocument(
   token: string,
   jobId: string,
-  variant: "original" | "output" = "original"
+  variant: "original" | "output" | "photo-source" = "original"
 ): Promise<Blob> {
-  const query = variant === "output" ? "?variant=output" : "";
+  const query = variant === "original" ? "" : `?variant=${variant}`;
   const source = await apiRequest<
     | { mode: "CLOUD" }
     | { mode: "LOCAL_AGENT"; grantToken: string; endpoints: string[]; expiresUtc: string }
@@ -2024,7 +2039,7 @@ export async function downloadShopDocument(
   if (source.mode === "CLOUD") {
     if (variant === "output")
       throw new ApiError("The saved PDF is available only on the paired shop computer. Reconnect that computer and try again.", 409);
-    const documentPath = `/api/v1/shop/print-jobs/${jobId}/document`;
+    const documentPath = `/api/v1/shop/print-jobs/${jobId}/document${variant === "photo-source" ? "?variant=photo-source" : ""}`;
     const request = (accessToken: string) => fetchApiResponse(documentPath, {
       headers: {
         Accept: "application/pdf,image/jpeg,image/png",
@@ -2070,7 +2085,7 @@ export async function downloadShopDocument(
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
     try {
       const response = await fetch(
-        `${endpoint.origin}/api/v1/local/documents/${encodeURIComponent(jobId)}/preview${variant === "output" ? "?variant=output" : ""}`,
+        `${endpoint.origin}/api/v1/local/documents/${encodeURIComponent(jobId)}/preview${variant === "original" ? "" : `?variant=${variant}`}`,
         {
           method: "GET",
           mode: "cors",
@@ -2126,8 +2141,10 @@ export async function replaceShopPhotoDocumentLocally(
   file: File,
   photoSizeCode: string,
   photoCount: number,
-  photosPerPage: number
+  photosPerPage: number,
+  editorSettingsJson?: string
 ) {
+  validateUploadFileSize(file);
   const grant = await apiRequest<{
     grantToken: string;
     endpoints: string[];
@@ -2144,6 +2161,7 @@ export async function replaceShopPhotoDocumentLocally(
   form.append("photoSizeCode", photoSizeCode);
   form.append("photoCount", String(photoCount));
   form.append("photosPerPage", String(photosPerPage));
+  if (editorSettingsJson) form.append("editorSettingsJson", editorSettingsJson);
 
   let lastError: Error | null = null;
   for (const value of grant.endpoints.slice(0, 8)) {
@@ -2211,13 +2229,16 @@ export function replaceShopPhotoDocument(
   file: File,
   photoSizeCode: string,
   photoCount: number,
-  photosPerPage: number
+  photosPerPage: number,
+  editorSettingsJson?: string
 ) {
+  validateUploadFileSize(file);
   const form = new FormData();
   form.append("file", file, file.name);
   form.append("photoSizeCode", photoSizeCode);
   form.append("photoCount", String(photoCount));
   form.append("photosPerPage", String(photosPerPage));
+  if (editorSettingsJson) form.append("editorSettingsJson", editorSettingsJson);
   return apiRequest<{
     id: string;
     status: string;

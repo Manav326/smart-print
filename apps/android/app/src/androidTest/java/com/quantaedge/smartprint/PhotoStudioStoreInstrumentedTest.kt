@@ -105,6 +105,38 @@ class PhotoStudioStoreInstrumentedTest {
     }
 
     @Test
+    fun photoQuantityUsesTheGeneratedMaximumAtTheStorageBoundary() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val isolatedFiles = File(context.cacheDir, "photo-store-count-" + UUID.randomUUID()).apply { mkdirs() }
+        val isolatedCache = File(isolatedFiles, "cache").apply { mkdirs() }
+        val store = PhotoStudioStore(isolatedFiles, isolatedCache)
+        val maximum = UploadLimits.MAX_PHOTO_COUNT
+
+        fun metadata(photoCount: Int) = JSONObject()
+            .put("title", "Boundary test")
+            .put("sizeCode", "35x45")
+            .put("photoCount", photoCount)
+            .put("photosPerPage", 25)
+            .put("pageCount", (photoCount + 24) / 25)
+            .put("resolutionDpi", 300)
+
+        val accepted = store.savePreparedOutput(testPdf(), testJpeg(), metadata(maximum))
+        assertEquals(maximum, store.readMetadata(accepted).optInt("photoCount"))
+
+        var rejected = false
+        try {
+            store.savePreparedOutput(testPdf(), testJpeg(), metadata(maximum + 1))
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue("A quantity above the shared photo-count limit must be rejected.", rejected)
+        assertEquals("The rejected sheet must not be persisted.", 1, store.listPrepared().size)
+
+        store.deletePrepared(accepted)
+        isolatedFiles.deleteRecursively()
+    }
+
+    @Test
     fun privatePhotoMetadataRejectsInvalidQuantityAndLayout() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val isolatedFiles = File(context.cacheDir, "photo-store-invalid-" + UUID.randomUUID()).apply { mkdirs() }

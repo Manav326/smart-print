@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 
+const uploadLimits = JSON.parse(readFileSync(new URL("../../../config/upload-limits.json", import.meta.url), "utf8"));
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) {
   throw new Error("PLAYWRIGHT_MODULE_DIR must point to the temporary Playwright package installed by CI.");
@@ -829,7 +830,7 @@ async function exercisePhotoStudioBrowser() {
       assert.deepEqual(output.pixelProbes.filter(probe => probe.page === 6).map(probe => probe.slot), [0, 1, 2, 3, 4], "The final partial A4 page must occupy the first five stable grid slots.");
       assert.ok(Array.isArray(output.finalUnusedSlotRgb) && output.finalUnusedSlotRgb.every(channel => channel > 245), "Unused final-page slots must remain blank rather than recentering or duplicating tiles.");
     }
-    assert.ok(output.bytes > 0 && output.bytes <= 20 * 1024 * 1024);
+    assert.ok(output.bytes > 0 && output.bytes <= uploadLimits.maxFileBytes);
     await context.close();
     results.push({
       check: `Photo Studio ${item.mode} / ${item.theme} / ${item.width}x${item.height}`,
@@ -1173,7 +1174,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.ok(result.pixelProbes[0].captionRedPixels>0,"Generated PDF pages must contain the opted-in red caption.");
     assert.deepEqual(result.pixelProbes.filter(probe=>probe.page===6).map(probe=>probe.slot),[0,1,2,3,4]);
     assert.ok(result.finalUnusedSlotRgb.every(channel=>channel>245),"Unused slots on the final page must stay blank.");
-    assert.ok(result.bytes>0 && result.bytes<=20*1024*1024);
+    assert.ok(result.bytes>0 && result.bytes<=uploadLimits.maxFileBytes);
     await page.screenshot({path:join(artifactDirectory,"photo-studio-exhaustive-controls.png"),fullPage:false,animations:"disabled"});
     console.log("[QA-CASE-END] PASS | Photo Studio full control matrix.");
   } finally {
@@ -1228,14 +1229,14 @@ async function exercisePhotoStudioFailurePaths() {
     const opened = await openPhotoStudioFixture(page, "?mode=customer&oversizeRaster=1");
     const apply = opened.dialog.getByRole("button", { name: "Prepare A4 sheet" });
     await apply.click();
-    await opened.dialog.getByRole("alert").filter({ hasText: /20 MB file limit/ }).waitFor({ state: "visible" });
+    await opened.dialog.getByRole("alert").filter({ hasText: new RegExp(`${uploadLimits.maxFileBytes / (1024 * 1024)} MB file limit`) }).waitFor({ state: "visible" });
     assert.equal(await apply.isDisabled(), false, "An over-limit PDF must fail before submission and release the editor.");
     assert.equal(await page.locator("#photo-studio-result").innerText(), "",
       "An oversized render must never be reported as prepared or submitted.");
   } finally {
     await largeContext.close();
   }
-  console.log("[QA-CASE-END] PASS | Photo Studio malformed input, missing prices, save/render retry and 20 MB output limit.");
+  console.log(`[QA-CASE-END] PASS | Photo Studio malformed input, missing prices, save/render retry and ${uploadLimits.maxFileBytes / (1024 * 1024)} MB output limit.`);
 }
 
 

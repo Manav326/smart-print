@@ -384,7 +384,9 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
   assert.ok(flow.includes("checked={defaults.advancedEnabled}"));
   assert.ok(flow.includes("checked={own.advancedEnabled}"));
   assert.ok(flow.includes("{!isIdStudioGroup&&defaults.advancedEnabled&&"));
-  assert.ok(flow.includes("Prepared ID sheet · one colour copy · A4 portrait · single-sided"));
+  assert.ok(flow.includes("ID sheet · fixed settings."));
+  assert.ok(flow.includes('InfoTooltip label="ID sheet settings"'));
+  assert.ok(flow.includes("One colour copy, A4 portrait and single-sided printing"));
   assert.ok(flow.includes('{defaults.colourMode==="Mono"'));
   assert.ok(flow.includes('Copies · all files'));
 });

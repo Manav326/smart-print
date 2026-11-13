@@ -47,7 +47,79 @@ public sealed class AgentLocalQueueStore
             if (!File.Exists(manifestPath))
             {
                 File.Delete(documentFile);
+                var orphanedPhotoSource = documentFile + ".photo.source";
+                if (File.Exists(orphanedPhotoSource)) File.Delete(orphanedPhotoSource);
             }
+        }
+        foreach (var photoSourceFile in Directory.EnumerateFiles(queueRoot, "*.qdoc.photo.source", SearchOption.TopDirectoryOnly))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var documentFile = photoSourceFile[..^".photo.source".Length];
+            var jobIdText = Path.GetFileNameWithoutExtension(documentFile);
+            if (!Guid.TryParseExact(jobIdText, "N", out var jobId))
+                continue;
+
+            var manifestPath = GetManifestPath(jobId);
+            if (!File.Exists(manifestPath))
+            {
+                File.Delete(photoSourceFile);
+                continue;
+            }
+
+            var entry = Find(jobId);
+            if (entry is null || !string.IsNullOrWhiteSpace(entry.PhotoSourceSha256))
+                continue; // The source is now the committed retained original.
+
+            // Recover a first-edit interruption. The old manifest has no retained
+            // source metadata yet; if its normal .qdoc no longer matches the
+            // original, restore the encrypted source sidecar before the queue is
+            // made available again.
+            var documentStillOriginal = false;
+            try
+            {
+                var currentBytes = ReadDocument(jobId);
+                try
+                {
+                    documentStillOriginal =
+                        currentBytes.LongLength == entry.SizeBytes &&
+                        string.Equals(
+                            Convert.ToHexString(SHA256.HashData(currentBytes)).ToLowerInvariant(),
+                            entry.Sha256,
+                            StringComparison.OrdinalIgnoreCase);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(currentBytes);
+                }
+            }
+            catch (Exception exception) when (
+                exception is FileNotFoundException or DirectoryNotFoundException or
+                InvalidDataException or CryptographicException)
+            {
+                // The queue manifest still describes the original image, but the
+                // primary payload was moved or replaced before its manifest commit.
+            }
+
+            if (documentStillOriginal)
+            {
+                File.Delete(photoSourceFile); // Interrupted before the original move was needed.
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(entry.DocumentPath))
+            {
+                File.Delete(photoSourceFile);
+                continue;
+            }
+            var documentPath = Path.GetFullPath(entry.DocumentPath);
+            var queuePrefix = Path.GetFullPath(queueRoot).TrimEnd(
+                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            if (!documentPath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The interrupted photo document path is outside the protected queue.");
+
+            if (File.Exists(documentPath)) File.Delete(documentPath);
+            File.Move(photoSourceFile, documentPath);
         }
 
         await Task.CompletedTask;
@@ -118,6 +190,37 @@ public sealed class AgentLocalQueueStore
         ReadEntries().Where(entry => entry.PrivatePrinting &&
             (entry.State == "PRIVATE_PURGE_PENDING" || entry.PrivatePurgePending)).ToArray();
 
+    private static async Task EraseProtectedQueueFileAsync(
+        string path,
+        string queuePrefix,
+        StringComparison comparison,
+        CancellationToken cancellationToken)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!fullPath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("A private document path is outside the protected queue.");
+        if (!File.Exists(fullPath)) return;
+
+        await using (var stream = new FileStream(
+            fullPath, FileMode.Open, FileAccess.Write, FileShare.None,
+            64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
+        {
+            var zeroes = new byte[64 * 1024];
+            long remaining = stream.Length;
+            stream.Position = 0;
+            while (remaining > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var count = (int)Math.Min(zeroes.Length, remaining);
+                await stream.WriteAsync(zeroes.AsMemory(0, count), cancellationToken);
+                remaining -= count;
+            }
+            stream.Flush(flushToDisk: true);
+            CryptographicOperations.ZeroMemory(zeroes);
+        }
+        File.Delete(fullPath);
+    }
+
     public async Task PurgeUnindexedPrivateSourceAsync(Guid jobId, CancellationToken cancellationToken)
     {
         if (jobId == Guid.Empty) throw new ArgumentException("A private job ID is required.", nameof(jobId));
@@ -133,6 +236,7 @@ public sealed class AgentLocalQueueStore
             documentPath,
             documentPath + ".tmp",
             documentPath + ".photo-revision.bak",
+            documentPath + ".photo.source",
             GetManifestPath(jobId) + ".tmp"
         };
 
@@ -207,7 +311,7 @@ public sealed class AgentLocalQueueStore
         if (job.Id == Guid.Empty ||
             string.IsNullOrWhiteSpace(job.JobNumber) ||
             documentBytes.Length != job.SizeBytes ||
-            job.SizeBytes is <= 0 or > 20L * 1024 * 1024)
+            job.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes)
         {
             throw new InvalidDataException("The claimed job metadata or document size is invalid.");
         }
@@ -401,7 +505,11 @@ public sealed class AgentLocalQueueStore
                 throw new InvalidDataException("The staged local upload document path is outside the protected queue.");
 
             var manifestPath = GetManifestPath(jobId);
+            var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
+            if (!photoSourcePath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The retained photo source path is outside the protected queue.");
             if (File.Exists(documentPath)) File.Delete(documentPath);
+            if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
             if (File.Exists(manifestPath)) File.Delete(manifestPath);
             return true;
         }
@@ -434,7 +542,11 @@ public sealed class AgentLocalQueueStore
             throw new InvalidDataException("The local upload document path is outside the protected queue.");
 
         var manifestPath = GetManifestPath(jobId);
+        var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
+        if (!photoSourcePath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("The retained photo source path is outside the protected queue.");
         if (File.Exists(documentPath)) File.Delete(documentPath);
+        if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
         if (File.Exists(manifestPath)) File.Delete(manifestPath);
         await Task.CompletedTask;
     }
@@ -491,8 +603,12 @@ public sealed class AgentLocalQueueStore
                 if (File.Exists(outputPath)) File.Delete(outputPath);
             }
 
+            var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
+            if (!photoSourcePath.StartsWith(queuePrefix, comparison))
+                continue;
             var manifestPath = GetManifestPath(entry.JobId);
             if (File.Exists(documentPath)) File.Delete(documentPath);
+            if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
             if (File.Exists(manifestPath)) File.Delete(manifestPath);
             removed++;
         }
@@ -759,26 +875,18 @@ public sealed class AgentLocalQueueStore
                 var documentPath = Path.GetFullPath(entry.DocumentPath);
                 if (!documentPath.StartsWith(queuePrefix, comparison))
                     throw new InvalidDataException("The private document path is outside the protected queue.");
-                if (File.Exists(documentPath))
-                {
-                    await using (var stream = new FileStream(documentPath, FileMode.Open, FileAccess.Write, FileShare.None,
-                        64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
-                    {
-                        var zeroes = new byte[64 * 1024];
-                        long remaining = stream.Length;
-                        stream.Position = 0;
-                        while (remaining > 0)
-                        {
-                            var count = (int)Math.Min(zeroes.Length, remaining);
-                            await stream.WriteAsync(zeroes.AsMemory(0, count), ct);
-                            remaining -= count;
-                        }
-                        stream.Flush(flushToDisk: true);
-                        CryptographicOperations.ZeroMemory(zeroes);
-                    }
-                    File.Delete(documentPath);
-                }
+                await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, ct);
             }
+
+            // The deterministic sidecar name lets a purge retry remove a
+            // leftover source even when an older/partially sanitized manifest
+            // has already lost both DocumentPath and PhotoSourcePath.
+            var photoSourcePath = entry.PhotoSourcePath;
+            if (string.IsNullOrWhiteSpace(photoSourcePath))
+                photoSourcePath = !string.IsNullOrWhiteSpace(entry.DocumentPath)
+                    ? entry.DocumentPath + ".photo.source"
+                    : Path.Combine(queueRootFull, jobId.ToString("N") + ".qdoc.photo.source");
+            await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, ct);
 
             await SaveManifestAsync(entry with
             {
@@ -788,6 +896,11 @@ public sealed class AgentLocalQueueStore
                 MediaType = string.Empty,
                 Sha256 = string.Empty,
                 SizeBytes = 0,
+                PhotoSourcePath = null,
+                PhotoSourceDocumentName = null,
+                PhotoSourceMediaType = null,
+                PhotoSourceSha256 = null,
+                PhotoSourceSizeBytes = null,
                 PrivatePurgePending = true
             }, ct);
         }
@@ -801,8 +914,11 @@ public sealed class AgentLocalQueueStore
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
         if (!entry.PrivatePrinting || entry.State != "OUTPUT_CONFIRMED" || !entry.PrivatePurgePending ||
-            !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256))
-            throw new InvalidOperationException("The private source purge has not completed locally.");
+            !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256) ||
+            !string.IsNullOrWhiteSpace(entry.PhotoSourcePath) ||
+            entry.PhotoSourceDocumentName is not null || entry.PhotoSourceMediaType is not null ||
+            entry.PhotoSourceSha256 is not null || entry.PhotoSourceSizeBytes is not null)
+            throw new InvalidOperationException("The private document and any retained photo source must be removed before purge acknowledgement.");
         await SaveManifestAsync(entry with { PrivatePurgePending = false }, ct);
     }
 
@@ -830,7 +946,7 @@ public sealed class AgentLocalQueueStore
             string.IsNullOrWhiteSpace(replacementDocumentName) ||
             replacementDocumentName.Length > 255 ||
             !string.Equals(Path.GetExtension(replacementDocumentName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
-            replacementBytes.Length is <= 0 or > 20 * 1024 * 1024 ||
+            replacementBytes.Length <= 0 || replacementBytes.Length > UploadLimits.MaxFileBytes ||
             pageCount is < 1 or > 100 ||
             quotedAmountMinor <= 0)
             throw new InvalidDataException("The prepared local photo revision metadata is invalid.");
@@ -840,12 +956,78 @@ public sealed class AgentLocalQueueStore
         {
             var entry = Find(jobId)
                 ?? throw new FileNotFoundException("The original local photo is missing from the protected queue.");
+            if (entry.PrivatePrinting)
+                throw new InvalidOperationException("Private Printing photos and editor metadata must remain on the customer's device.");
             if (entry.State is not ("LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT"))
                 throw new InvalidOperationException("A local photo can only be enhanced before payment and printer handoff.");
-            if (!string.Equals(entry.Sha256, expectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
-                entry.SizeBytes != expectedOriginalSizeBytes ||
+
+            var sourceName = entry.PhotoSourceDocumentName ?? entry.DocumentName;
+            var sourceMediaType = entry.PhotoSourceMediaType ?? entry.MediaType;
+            var sourceSha256 = entry.PhotoSourceSha256 ?? entry.Sha256;
+            var sourceSizeBytes = entry.PhotoSourceSizeBytes ?? entry.SizeBytes;
+            if (sourceMediaType is not ("image/jpeg" or "image/png") ||
+                !string.Equals(sourceSha256, expectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
+                sourceSizeBytes != expectedOriginalSizeBytes ||
                 !File.Exists(entry.DocumentPath))
-                throw new InvalidDataException("The local original changed or is no longer available. Reopen its preview before saving.");
+                throw new InvalidDataException("The local original photo changed or is no longer available. Reopen its preview before saving.");
+
+            var queueRootFull = Path.GetFullPath(queueRoot);
+            var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var documentPath = Path.GetFullPath(entry.DocumentPath);
+            if (!documentPath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The local photo document path is outside the protected queue.");
+
+            var retainedSourcePath = entry.PhotoSourcePath ??
+                entry.DocumentPath + ".photo.source";
+            retainedSourcePath = Path.GetFullPath(retainedSourcePath);
+            if (!retainedSourcePath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The retained photo source path is outside the protected queue.");
+
+            var alreadyRetained = !string.IsNullOrWhiteSpace(entry.PhotoSourceSha256);
+            var sourceMoved = false;
+            if (alreadyRetained)
+            {
+                if (entry.PhotoSourceSizeBytes is not > 0 ||
+                    string.IsNullOrWhiteSpace(entry.PhotoSourceMediaType) ||
+                    string.IsNullOrWhiteSpace(entry.PhotoSourceDocumentName) ||
+                    !File.Exists(retainedSourcePath))
+                    throw new InvalidDataException("The retained original photo is incomplete. Do not overwrite it; contact support.");
+                var verifiedSource = ReadPhotoSource(jobId);
+                try
+                {
+                    if (verifiedSource.LongLength != expectedOriginalSizeBytes ||
+                        !string.Equals(
+                            Convert.ToHexString(SHA256.HashData(verifiedSource)).ToLowerInvariant(),
+                            expectedOriginalSha256,
+                            StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("The retained original photo failed its integrity check.");
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(verifiedSource);
+                }
+            }
+            else
+            {
+                // On the first edit, the manifest still describes the original file,
+                // but verify the protected bytes before moving them into the retained
+                // source sidecar. A stale or corrupted queue file must never become the
+                // supposedly immutable source for future edits.
+                byte[] verifiedOriginal;
+                try
+                {
+                    verifiedOriginal = ReadDocument(jobId);
+                }
+                catch (Exception exception) when (exception is IOException or CryptographicException or InvalidDataException)
+                {
+                    throw new InvalidDataException(
+                        "The local original photo failed its integrity check. Reopen its preview before saving.",
+                        exception);
+                }
+
+                CryptographicOperations.ZeroMemory(verifiedOriginal);
+            }
 
             var newHash = Convert.ToHexString(SHA256.HashData(replacementBytes.Span)).ToLowerInvariant();
             var plaintext = replacementBytes.ToArray();
@@ -865,70 +1047,150 @@ public sealed class AgentLocalQueueStore
             if (File.Exists(backupPath)) File.Delete(backupPath);
             try
             {
-                await using (var stream = new FileStream(
-                    temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                    64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                try
                 {
-                    await stream.WriteAsync(protectedBytes, cancellationToken);
-                    await stream.FlushAsync(cancellationToken);
+                    if (!alreadyRetained)
+                    {
+                        // Move only after the replacement is safely encrypted in
+                        // memory. If encryption fails, the original remains at its
+                        // normal queue path and no orphan sidecar is left behind.
+                        if (File.Exists(retainedSourcePath))
+                            throw new InvalidDataException("An unexpected retained photo source already exists.");
+                        File.Move(documentPath, retainedSourcePath);
+                        sourceMoved = true;
+                    }
+                    await using (var stream = new FileStream(
+                        temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                        64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                    {
+                        await stream.WriteAsync(protectedBytes, cancellationToken);
+                        await stream.FlushAsync(cancellationToken);
+                    }
+                    if (sourceMoved)
+                        File.Move(temporaryPath, entry.DocumentPath);
+                    else
+                        File.Replace(temporaryPath, entry.DocumentPath, backupPath, ignoreMetadataErrors: true);
                 }
-                File.Replace(temporaryPath, entry.DocumentPath, backupPath, ignoreMetadataErrors: true);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(protectedBytes);
-                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-            }
+                catch
+                {
+                    if (sourceMoved && File.Exists(retainedSourcePath) && !File.Exists(documentPath))
+                        File.Move(retainedSourcePath, documentPath);
+                    throw;
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(protectedBytes);
+                    if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+                }
 
-            var replacementEntry = entry with
-            {
-                DocumentName = replacementDocumentName,
-                MediaType = "application/pdf",
-                Sha256 = newHash,
-                SizeBytes = replacementBytes.Length,
-                PageCount = pageCount,
-                Copies = 1,
-                ColourMode = "Colour",
-                PaperSize = "A4",
-                IsDuplex = false,
-                Orientation = "AUTO",
-                QuotedAmountMinor = quotedAmountMinor
-            };
+                var replacementEntry = entry with
+                {
+                    DocumentName = replacementDocumentName,
+                    MediaType = "application/pdf",
+                    Sha256 = newHash,
+                    SizeBytes = replacementBytes.Length,
+                    PageCount = pageCount,
+                    Copies = 1,
+                    ColourMode = "Colour",
+                    PaperSize = "A4",
+                    IsDuplex = false,
+                    Orientation = "AUTO",
+                    QuotedAmountMinor = quotedAmountMinor,
+                    PhotoSourcePath = retainedSourcePath,
+                    PhotoSourceDocumentName = sourceName,
+                    PhotoSourceMediaType = sourceMediaType,
+                    PhotoSourceSha256 = sourceSha256,
+                    PhotoSourceSizeBytes = sourceSizeBytes
+                };
 
-            try
-            {
-                await SaveManifestAsync(replacementEntry, cancellationToken);
-                await commitServerRevisionAsync();
+                try
+                {
+                    await SaveManifestAsync(replacementEntry, cancellationToken);
+                    await commitServerRevisionAsync();
+                }
+                catch
+                {
+                    if (File.Exists(backupPath))
+                    {
+                        if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
+                        File.Move(backupPath, entry.DocumentPath);
+                    }
+                    else if (sourceMoved && File.Exists(retainedSourcePath))
+                    {
+                        if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
+                        File.Move(retainedSourcePath, entry.DocumentPath);
+                    }
+                    await SaveManifestAsync(entry, CancellationToken.None);
+                    throw;
+                }
+
+                // The server and manifest now point to the replacement. Cleanup
+                // failure must not roll back the file after the server has committed.
+                try
+                {
+                    if (File.Exists(backupPath)) File.Delete(backupPath);
+                }
+                catch (IOException)
+                {
+                    // Keep the encrypted backup for a later maintenance cleanup.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Keep the encrypted backup for a later maintenance cleanup.
+                }
             }
             catch
             {
-                if (File.Exists(backupPath))
-                {
-                    if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
-                    File.Move(backupPath, entry.DocumentPath);
-                }
-                await SaveManifestAsync(entry, CancellationToken.None);
+                // A first-edit failure restores the source to its original queue
+                // path in the inner rollback. Do not delete a retained original.
                 throw;
-            }
-
-            // The server and manifest now point to the replacement. Cleanup
-            // failure must not roll back the file after the server has committed.
-            try
-            {
-                if (File.Exists(backupPath)) File.Delete(backupPath);
-            }
-            catch (IOException)
-            {
-                // Keep the encrypted backup for a later maintenance cleanup.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Keep the encrypted backup for a later maintenance cleanup.
             }
         }
         finally
         {
             stagedUploadLeaseGate.Release();
+        }
+    }
+
+    public byte[] ReadPhotoSource(Guid jobId)
+    {
+        var entry = Find(jobId)
+            ?? throw new FileNotFoundException("The print job is not present in the local queue.");
+        if (string.IsNullOrWhiteSpace(entry.PhotoSourceSha256))
+        {
+            if (entry.MediaType is not ("image/jpeg" or "image/png"))
+                throw new FileNotFoundException("This job has no retained original photo source.");
+            return ReadDocument(jobId);
+        }
+
+        if (entry.PhotoSourceSizeBytes is not > 0 ||
+            entry.PhotoSourceMediaType is not ("image/jpeg" or "image/png"))
+            throw new InvalidDataException("The retained original photo metadata is invalid.");
+
+        var sourcePath = entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source";
+        var fullSourcePath = Path.GetFullPath(sourcePath);
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!fullSourcePath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("The retained original photo path is outside the protected queue.");
+
+        var protectedBytes = File.ReadAllBytes(fullSourcePath);
+        try
+        {
+            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
+            var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
+            if (plaintext.LongLength != entry.PhotoSourceSizeBytes.Value ||
+                !string.Equals(actualHash, entry.PhotoSourceSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+                throw new InvalidDataException("The retained original photo failed its integrity check.");
+            }
+            return plaintext;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(protectedBytes);
         }
     }
 

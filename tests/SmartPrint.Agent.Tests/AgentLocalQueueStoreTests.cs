@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using SmartPrint.Agent;
 
 namespace SmartPrint.Agent.Tests;
@@ -680,6 +681,112 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task PrivatePrintingPhotoRevisionCannotRetainAnEditableOriginalOrSettings()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Private customer photo bytes"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                PrivatePrinting = true,
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "private-original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.ReplaceStagedPhotoDocumentAsync(
+                    job.Id,
+                    staged.Sha256,
+                    staged.SizeBytes,
+                    "private-photo-sheet.pdf",
+                    "%PDF-1.4\\nprivate-photo-sheet"u8.ToArray(),
+                    1,
+                    500,
+                    () => Task.CompletedTask,
+                    CancellationToken.None));
+
+            var unchanged = store.Find(job.Id)!;
+            Assert.Equal("private-original.jpg", unchanged.DocumentName);
+            Assert.Equal(staged.Sha256, unchanged.Sha256);
+            Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.Null(unchanged.PhotoSourcePath);
+            Assert.Null(unchanged.PhotoSourceDocumentName);
+            Assert.Null(unchanged.PhotoSourceMediaType);
+            Assert.Null(unchanged.PhotoSourceSha256);
+            Assert.Null(unchanged.PhotoSourceSizeBytes);
+            Assert.Empty(Directory.GetFiles(root, "*.photo.source"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FirstLocalPhotoRevisionRejectsCorruptedOriginalBeforeRetainingIt()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Original local image bytes"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                Status = "AWAITING_SHOP_APPROVAL",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+            var entry = store.Find(job.Id)!;
+            var corruptedProtectedBytes = "not a valid protected document"u8.ToArray();
+            await File.WriteAllBytesAsync(entry.DocumentPath, corruptedProtectedBytes);
+            var serverCommitAttempted = false;
+
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.ReplaceStagedPhotoDocumentAsync(
+                    job.Id,
+                    staged.Sha256,
+                    staged.SizeBytes,
+                    "photo-sheet.pdf",
+                    "%PDF-1.4\\nprepared-photo-sheet"u8.ToArray(),
+                    1,
+                    500,
+                    () =>
+                    {
+                        serverCommitAttempted = true;
+                        return Task.CompletedTask;
+                    },
+                    CancellationToken.None));
+
+            var unchanged = store.Find(job.Id)!;
+            Assert.False(serverCommitAttempted);
+            Assert.Equal("original.jpg", unchanged.DocumentName);
+            Assert.Equal(staged.Sha256, unchanged.Sha256);
+            Assert.Equal(staged.SizeBytes, unchanged.SizeBytes);
+            Assert.Null(unchanged.PhotoSourcePath);
+            Assert.Null(unchanged.PhotoSourceSha256);
+            Assert.Equal(corruptedProtectedBytes, await File.ReadAllBytesAsync(unchanged.DocumentPath));
+            Assert.Empty(Directory.GetFiles(root, "*.photo.source"));
+            Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+            Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task LocalPhotoRevisionReplacesTheProtectedDocumentAndCommitsTheServerSnapshot()
     {
         var root = CreateTemporaryDirectory();
@@ -729,7 +836,129 @@ public sealed class AgentLocalQueueStoreTests
             Assert.False(updated.IsDuplex);
             Assert.Equal(750, updated.QuotedAmountMinor);
             Assert.True(replacement.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.Equal("original.jpg", updated.PhotoSourceDocumentName);
+            Assert.Equal("image/jpeg", updated.PhotoSourceMediaType);
+            Assert.Equal(staged.Sha256, updated.PhotoSourceSha256);
+            Assert.Equal(staged.SizeBytes, updated.PhotoSourceSizeBytes);
+            Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadPhotoSource(job.Id)));
+            Assert.Single(Directory.GetFiles(root, "*.photo.source"));
+            Assert.Single(Directory.GetFiles(root, "*.qdoc"));
             Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
+
+            // A second save must replace only the current PDF and continue using
+            // the exact first uploaded source, not a copy of the previous PDF.
+            var secondReplacement = "%PDF-1.4\\nsecond-shop-prepared-a4-photo-sheet"u8.ToArray();
+            await store.ReplaceStagedPhotoDocumentAsync(
+                job.Id,
+                staged.Sha256,
+                staged.SizeBytes,
+                "photo-sheet.pdf",
+                secondReplacement,
+                1,
+                500,
+                () =>
+                {
+                    Assert.True(secondReplacement.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+                    Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadPhotoSource(job.Id)));
+                    return Task.CompletedTask;
+                },
+                CancellationToken.None);
+            Assert.True(secondReplacement.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadPhotoSource(job.Id)));
+            Assert.Single(Directory.GetFiles(root, "*.photo.source"));
+            Assert.Single(Directory.GetFiles(root, "*.qdoc"));
+            Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CompletedPhotoJobRetentionRemovesItsCurrentPdfAndRetainedOriginal()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Original local image bytes"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                Status = "AWAITING_SHOP_APPROVAL",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            var replacement = "%PDF-1.4\\nshop-prepared-a4-photo-sheet"u8.ToArray();
+            await store.ReplaceStagedPhotoDocumentAsync(
+                job.Id, staged.Sha256, staged.SizeBytes, "photo-sheet.pdf",
+                replacement, 1, 500, () => Task.CompletedTask, CancellationToken.None);
+
+            var retained = store.Find(job.Id)!;
+            var sourcePath = retained.PhotoSourcePath!;
+            Assert.True(File.Exists(sourcePath));
+            Assert.True(File.Exists(retained.DocumentPath));
+
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Photo-Retention-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 791, "SmartPrint-Photo-Retention-Test", CancellationToken.None);
+            await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
+
+            var removed = await store.PruneRetainedEntriesAsync(
+                DateTimeOffset.UtcNow.AddDays(8),
+                TimeSpan.FromDays(7),
+                root,
+                CancellationToken.None);
+
+            Assert.Equal(1, removed);
+            Assert.False(File.Exists(sourcePath));
+            Assert.False(File.Exists(retained.DocumentPath));
+            Assert.Null(store.Find(job.Id));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AgentStartupRestoresOriginalIfFirstPhotoRevisionWasInterrupted(bool replacementPayloadWasWritten)
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Original image remains recoverable after interrupted first edit"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                Status = "AWAITING_SHOP_APPROVAL",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            var entry = store.Find(job.Id)!;
+            var sourcePath = entry.DocumentPath + ".photo.source";
+            File.Move(entry.DocumentPath, sourcePath);
+            if (replacementPayloadWasWritten)
+                await File.WriteAllBytesAsync(entry.DocumentPath, "interrupted replacement"u8.ToArray());
+
+            var restartedStore = new AgentLocalQueueStore(root);
+            await restartedStore.InitializeAsync(CancellationToken.None);
+
+            var restored = restartedStore.Find(job.Id)!;
+            Assert.Equal(staged.Sha256, restored.Sha256);
+            Assert.Equal(staged.SizeBytes, restored.SizeBytes);
+            Assert.Equal("original.jpg", restored.DocumentName);
+            Assert.Equal("image/jpeg", restored.MediaType);
+            Assert.True(originalBytes.AsSpan().SequenceEqual(restartedStore.ReadDocument(job.Id)));
+            Assert.False(File.Exists(sourcePath));
         }
         finally
         {
@@ -775,6 +1004,8 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal("original.jpg", restored.DocumentName);
             Assert.Equal("image/jpeg", restored.MediaType);
             Assert.True(originalBytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+            Assert.Null(restored.PhotoSourceSha256);
+            Assert.Empty(Directory.GetFiles(root, "*.photo.source"));
             Assert.Empty(Directory.GetFiles(root, "*.photo-revision.bak"));
         }
         finally
@@ -801,6 +1032,27 @@ public sealed class AgentLocalQueueStoreTests
             Assert.True(File.Exists(entry.DocumentPath));
             Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
 
+            // Simulate unexpected/stale source metadata and an encrypted sidecar.
+            // Private Printing purge must erase both and clear the manifest.
+            var retainedPhotoPath = entry.DocumentPath + ".photo.source";
+            File.Copy(entry.DocumentPath, retainedPhotoPath);
+            var manifestWithUnexpectedPhotoSource = store.Find(job.Id)! with
+            {
+                // Reproduce an older partially purged manifest: the main
+                // document path is already blank, but the retained photo sidecar
+                // and its sensitive metadata were left behind.
+                DocumentPath = string.Empty,
+                PhotoSourcePath = retainedPhotoPath,
+                PhotoSourceDocumentName = "private-original.jpg",
+                PhotoSourceMediaType = "image/jpeg",
+                PhotoSourceSha256 = entry.Sha256,
+                PhotoSourceSizeBytes = entry.SizeBytes
+            };
+            await File.WriteAllTextAsync(
+                Path.ChangeExtension(entry.DocumentPath, ".json"),
+                JsonSerializer.Serialize(manifestWithUnexpectedPhotoSource, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            File.Delete(entry.DocumentPath);
+
             await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
 
             var sanitized = store.Find(job.Id)!;
@@ -812,8 +1064,44 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal(string.Empty, sanitized.Sha256);
             Assert.Equal(0, sanitized.SizeBytes);
             Assert.False(File.Exists(entry.DocumentPath));
+            Assert.False(File.Exists(retainedPhotoPath));
+            Assert.Null(sanitized.PhotoSourcePath);
+            Assert.Null(sanitized.PhotoSourceDocumentName);
+            Assert.Null(sanitized.PhotoSourceMediaType);
+            Assert.Null(sanitized.PhotoSourceSha256);
+            Assert.Null(sanitized.PhotoSourceSizeBytes);
             Assert.Contains(store.GetPrivatePurgePendingJobs(), item => item.JobId == job.Id);
 
+            // Acknowledgement must not mask any source metadata left behind
+            // by a stale manifest, even after the files themselves are gone.
+            var staleMetadata = store.Find(job.Id)! with
+            {
+                PhotoSourceDocumentName = "private-original.jpg"
+            };
+            await File.WriteAllTextAsync(
+                Path.ChangeExtension(entry.DocumentPath, ".json"),
+                JsonSerializer.Serialize(staleMetadata, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None));
+
+            // Even if a partial legacy manifest lost both document paths, the
+            // Agent can derive and erase the deterministic source sidecar name.
+            await File.WriteAllBytesAsync(retainedPhotoPath, RandomNumberGenerator.GetBytes(64));
+            var pathlessStaleMetadata = store.Find(job.Id)! with
+            {
+                PhotoSourcePath = null,
+                PhotoSourceDocumentName = "private-original.jpg",
+                PhotoSourceMediaType = "image/jpeg",
+                PhotoSourceSha256 = entry.Sha256,
+                PhotoSourceSizeBytes = entry.SizeBytes
+            };
+            await File.WriteAllTextAsync(
+                Path.ChangeExtension(entry.DocumentPath, ".json"),
+                JsonSerializer.Serialize(pathlessStaleMetadata, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+            // The retry path scrubs stale metadata and can then be acknowledged.
+            await store.PurgePrivateSourceAfterConfirmedOutputAsync(job.Id, CancellationToken.None);
+            Assert.False(File.Exists(retainedPhotoPath));
             await store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None);
             Assert.False(store.Find(job.Id)!.PrivatePurgePending);
             Assert.Empty(store.GetPrivatePurgePendingJobs());
