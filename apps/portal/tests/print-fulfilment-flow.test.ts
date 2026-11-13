@@ -14,6 +14,31 @@ test("customer upload sends the selected file settings to both storage paths", (
   assert.match(api, /orientation: settings\.orientation/);
 });
 
+test("Private Printing relays only the encrypted print document and required quote metadata", () => {
+  const api = read("../src/api.ts");
+  const ticketStart = api.indexOf("async function requestCustomerLocalUploadTicket(");
+  const ticketEnd = api.indexOf("async function uploadCustomerLocalTicketViaCloud(", ticketStart);
+  assert.ok(ticketStart >= 0 && ticketEnd > ticketStart);
+  const ticket = api.slice(ticketStart, ticketEnd);
+  assert.match(ticket, /originalFileName: privatePrinting \? "private-document" \+ privateExtension/);
+  assert.match(ticket, /privatePrinting,/);
+  assert.match(ticket, /photoSizeCode: photoSettings\?\.sizeCode/);
+  assert.match(ticket, /photoCount: photoSettings\?\.photoCount/);
+  assert.match(ticket, /photosPerPage: photoSettings\?\.photosPerPage/);
+  assert.doesNotMatch(ticket, /editorSettingsJson|PhotoEditorSettings|cropX|cropY|zoom/);
+
+  const uploadStart = api.indexOf("export async function uploadCustomerDocumentLocally(");
+  const upload = api.slice(uploadStart);
+  assert.match(upload, /crypto\.subtle\.encrypt\(\{ name: "AES-GCM"/);
+  assert.match(upload, /form\.append\("file", new Blob\(\[ciphertext\].*private-document\.bin/);
+  const relayStart = upload.indexOf("if (privatePrinting) {", upload.indexOf("if (ticket.agentDeviceId === localAgent.agentDeviceId"));
+  const relayEnd = upload.indexOf("// A LAN response can be lost", relayStart);
+  assert.ok(relayStart >= 0 && relayEnd > relayStart);
+  const privateRelay = upload.slice(relayStart, relayEnd);
+  assert.match(privateRelay, /return uploadCustomerPrivateRelay\(/);
+  assert.doesNotMatch(privateRelay, /uploadCustomerLocalTicketViaCloud/);
+});
+
 test("standard Cloud-assisted Photo Studio uploads keep photo identity through the existing multipart form", () => {
   const api = read("../src/api.ts");
   const app = read("../src/App.tsx");
