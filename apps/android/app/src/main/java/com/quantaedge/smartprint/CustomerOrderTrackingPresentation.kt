@@ -50,7 +50,8 @@ internal object CustomerOrderTrackingPresentation {
         val billableIndexes = normalized.indices.filter { index ->
             normalized[index] !in excluded || perFilePayments[index].isNotBlank()
         }
-        val hasBillableFiles = billableIndexes.isNotEmpty()
+        val hasBillableFiles = billableIndexes.isNotEmpty() ||
+            payment in paymentVerified || payment in paymentPending
         val batchPaymentKnown = payment.isNotBlank()
         val paymentVerifiedForBatch = if (batchPaymentKnown) {
             payment in paymentVerified
@@ -121,6 +122,7 @@ internal object CustomerOrderTrackingPresentation {
             payment in paymentPending -> when (payment) {
                 "CUSTOMER_REPORTED", "PAYMENT_REPORTED" -> "Payment reported · shop verification pending"
                 "PAYMENT_REJECTED", "REJECTED" -> "Payment was declined · review the payment details"
+                "CANCELLED" -> "Payment was cancelled"
                 "QUOTE_EXPIRED" -> "The quote needs to be refreshed"
                 else -> "Waiting for payment"
             }
