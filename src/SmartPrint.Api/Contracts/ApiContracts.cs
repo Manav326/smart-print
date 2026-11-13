@@ -122,7 +122,8 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     string PrintKind = "DOCUMENT",
     string? PhotoSizeCode = null,
     int? PhotoCount = null,
-    int? PhotosPerPage = null);
+    int? PhotosPerPage = null,
+    string? DetectedFileExtension = null);
 
 public sealed record RecordPrintRefundRequest(
     string RefundMethod,
