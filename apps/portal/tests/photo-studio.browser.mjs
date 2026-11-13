@@ -713,7 +713,17 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
   // same bytes; no replacement PDF becomes the source of the next edit.
   await page.getByRole("button", { name: "Enhance photo for printing" }).click();
   await page.getByRole("dialog", { name: "Photo Studio" }).waitFor({ state: "visible" });
+  // The previous success toast remains visible while the editor is reopened.
+  // Wait for the second real revision response, not that stale toast, before
+  // asserting the server accepted the next save.
+  const secondRevisionResponse = page.waitForResponse(response => {
+    const request = response.request();
+    return request.method() === "POST" &&
+      new URL(response.url()).pathname === "/api/v1/shop/print-jobs/" + PHOTO_JOB_ID + "/photo-revision";
+  }, { timeout: 90000 });
   await page.getByRole("button", { name: "Save sheet to this job" }).click();
+  const secondRevision = await secondRevisionResponse;
+  assert.equal(secondRevision.status(), 200, "The second revision must be accepted by the same job.");
   await page.getByText(/The enhanced multi-page A4 photo PDF is saved to the same print job/).waitFor({ state: "visible", timeout: 90000 });
   assert.equal(revisionRequests.length, 2, "The same photo job should accept successive revisions.");
   assert.deepEqual(revisionRequests.map(item => item.jobId), [PHOTO_JOB_ID, PHOTO_JOB_ID],
