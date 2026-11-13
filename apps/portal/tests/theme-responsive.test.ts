@@ -229,9 +229,13 @@ test("customer upload form clearly supports backend-approved image formats", () 
   const customerFlow = app.slice(customerFlowStart, customerFlowEnd);
   assert.ok(customerFlow.includes("Add documents or images"));
   assert.ok(customerFlow.includes("Select documents or images"));
-  assert.ok(customerFlow.includes('accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"'));
-  assert.ok(app.includes('const supported=rootFiles.filter(candidate=>/\\.(pdf|jpe?g|png)$/i.test(candidate.name));'),
-    "The shared selection handler must retain PDF, JPG, JPEG and PNG support.");
+  assert.ok(customerFlow.includes("PDF, JPG or PNG"));
+  assert.ok(app.includes('const contentType=await identifySupportedDocument(candidate);'),
+    "Customer file selection must inspect document bytes, not trust filename extensions or browser MIME labels.");
+  assert.ok(app.includes("contentType!==null"), "Only supported content signatures may enter the customer print flow.");
+  assert.doesNotMatch(customerFlow,/accept="[^"]*(?:\.pdf|application\/pdf|image\/jpeg|image\/png)/,
+    "The browser picker must not hide valid documents based on potentially incorrect extension or MIME labels.");
+  assert.ok(app.includes("identifySupportedDocument(candidate)"), "The shared selection handler must classify every candidate by content.");
 });
 
 test("Android customer printing uses the same single Copies control and event handlers as the browser", () => {

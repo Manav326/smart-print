@@ -310,7 +310,7 @@ test("owner preview selects the persisted supported MIME type before the blob re
 test("customer web upload accepts drag and drop and contains no JavaScript browser alert dialogs",()=>{
  const app=read("../src/App.tsx");
  assert.match(app,/onDragOver=\{event=>\{if\(!batchLockedForPayment\)event\.preventDefault\(\);\}\}/);
- assert.match(app,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
+ assert.match(app,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;(?:void\s+)?chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
  assert.doesNotMatch(app,/window\.(alert|confirm|prompt)\s*\(/);
 });
 

@@ -16,7 +16,8 @@ object DocumentNamePolicy {
     const val MAX_PRINT_BYTES = UploadLimits.MAX_FILE_BYTES
     const val MAX_IMPORT_BYTES = 100L * 1024L * 1024L
 
-    private const val MAX_HEADER_BYTES = 1028
+    const val PDF_HEADER_SCAN_BYTES = 1028
+    private const val MAX_HEADER_BYTES = PDF_HEADER_SCAN_BYTES
     private const val MAX_TYPE_CACHE_ENTRIES = 256
 
     private data class FileIdentity(
@@ -55,18 +56,26 @@ object DocumentNamePolicy {
 
     fun isPrintable(file: File): Boolean {
         if (!file.isFile || file.length() !in 1..MAX_PRINT_BYTES) return false
-        // Normal filenames need no file I/O; inspect content only for renamed or uncommon extensions.
-        return extension(file.name) in setOf("pdf", "jpg", "jpeg", "png") ||
-            mimeType(file) in printableMimeTypes
+        return mimeType(file) in printableMimeTypes
     }
 
     fun isBatchSource(file: File): Boolean {
         if (!file.isFile) return false
-        return extension(file.name) in setOf("pdf", "jpg", "jpeg", "png") ||
-            mimeType(file) in printableMimeTypes
+        return mimeType(file) in printableMimeTypes
     }
 
     fun isPdf(file: File): Boolean = mimeType(file) == "application/pdf"
+
+    /** Checks only the bounded PDF signature window, without trusting a display name or MIME label. */
+    fun isPdfHeader(header: ByteArray, bytesRead: Int = header.size): Boolean {
+        val available = bytesRead.coerceIn(0, minOf(header.size, MAX_HEADER_BYTES))
+        val lastOffset = minOf(1023, available - PDF_HEADER.size)
+        if (lastOffset < 0) return false
+        for (offset in 0..lastOffset) {
+            if (PDF_HEADER.indices.all { header[offset + it] == PDF_HEADER[it] }) return true
+        }
+        return false
+    }
 
     fun isImage(file: File): Boolean = mimeType(file).startsWith("image/")
 
@@ -81,20 +90,26 @@ object DocumentNamePolicy {
      * The bounded LRU avoids retaining an unbounded list of customer file paths.
      */
     fun mimeType(file: File): String {
-        if (!file.isFile) return mimeType(file.name)
+        if (!file.isFile) return safeFilenameMimeFallback(file.name)
         val identity = runCatching {
             FileIdentity(file.canonicalPath, file.length(), file.lastModified())
-        }.getOrNull() ?: return mimeType(file.name)
+        }.getOrNull() ?: return safeFilenameMimeFallback(file.name)
 
         synchronized(detectedTypeCache) {
             detectedTypeCache[identity]?.let { return it }
         }
 
-        val detected = detectMimeType(file) ?: mimeType(file.name)
+        val detected = detectMimeType(file) ?: safeFilenameMimeFallback(file.name)
         synchronized(detectedTypeCache) {
             detectedTypeCache[identity] = detected
         }
         return detected
+    }
+
+    private fun safeFilenameMimeFallback(name: String): String {
+        val fallback = mimeType(name)
+        // A supported printable extension is never sufficient evidence of its content.
+        return if (fallback in printableMimeTypes) "application/octet-stream" else fallback
     }
 
     fun mimeType(name: String): String = when (extension(name)) {
@@ -136,12 +151,11 @@ object DocumentNamePolicy {
             offset >= 0 && offset + signature.size <= bytesRead &&
                 signature.indices.all { header[offset + it] == signature[it] }
 
-        // PDF permits its header to appear within the first 1024 bytes.
-        for (offset in 0..(bytesRead - PDF_HEADER.size).coerceAtLeast(-1)) {
-            if (matches(offset, PDF_HEADER)) return "application/pdf"
-        }
         if (matches(0, JPEG_HEADER)) return "image/jpeg"
         if (matches(0, PNG_HEADER)) return "image/png"
+
+        // PDF permits its header to appear within the first 1024 bytes.
+        if (isPdfHeader(header, bytesRead)) return "application/pdf"
         if (matches(0, BMP_HEADER)) return "image/bmp"
         if (matches(0, GIF87_HEADER) || matches(0, GIF89_HEADER)) return "image/gif"
         if (bytesRead >= 12 && matches(0, RIFF_HEADER) && matches(8, WEBP_HEADER)) return "image/webp"

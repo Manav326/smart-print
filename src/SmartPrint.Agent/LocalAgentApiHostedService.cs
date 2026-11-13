@@ -419,8 +419,7 @@ public sealed class LocalAgentApiHostedService(
                     return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Send exactly one prepared photo-sheet PDF." });
 
                 var file = form.Files[0];
-                if (file.Length is <= 0 or > UploadLimits.MaxFileBytes ||
-                    !string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+                if (file.Length is <= 0 or > UploadLimits.MaxFileBytes)
                     return Results.UnprocessableEntity(new { code = "photo_sheet_invalid", message = "The prepared photo sheet must be a supported PDF within the upload size limit." });
 
                 var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
@@ -452,6 +451,16 @@ public sealed class LocalAgentApiHostedService(
                     CryptographicOperations.ZeroMemory(bytes);
                     return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
                 }
+                if (!string.Equals(analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.UnprocessableEntity(new
+                    {
+                        code = "photo_sheet_not_supported",
+                        message = "The prepared Photo Studio sheet must contain actual PDF content."
+                    });
+                }
+
                 var expectedPageCount = checked((photoCount + photosPerPage - 1) / photosPerPage);
                 if (analysis.PageCount != expectedPageCount)
                 {
@@ -1050,6 +1059,14 @@ public sealed class LocalAgentApiHostedService(
                             "document_not_supported",
                             exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
                         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
+                    }
+
+                    if (!string.Equals(analysis.Extension, claim.FileExtension, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(analysis.MediaType, claim.MediaType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        const string message = "The document content does not match the detected upload format. Select the original file again.";
+                        await ReportPrivateValidationFailureAsync("document_content_type_mismatch", message);
+                        return Results.UnprocessableEntity(new { code = "document_content_type_mismatch", message });
                     }
 
                     if (existing is null)

@@ -32,6 +32,16 @@ class DocumentNamePolicyTest {
         assertTrue(DocumentNamePolicy.supportsInAppViewer(file))
     }
 
+    @Test fun pdfHeaderDetectionUsesTheSameBoundedWindowAsUploadAnalysis() {
+        val accepted = ByteArray(DocumentNamePolicy.PDF_HEADER_SCAN_BYTES)
+        "%PDF-".toByteArray().copyInto(accepted, 1023)
+        assertTrue(DocumentNamePolicy.isPdfHeader(accepted, accepted.size))
+
+        val rejected = ByteArray(DocumentNamePolicy.PDF_HEADER_SCAN_BYTES + 1)
+        "%PDF-".toByteArray().copyInto(rejected, 1024)
+        assertFalse(DocumentNamePolicy.isPdfHeader(rejected, rejected.size))
+    }
+
     @Test fun contentTypeWinsWhenTheFilenameExtensionIsWrong() {
         val file = File(temporaryFolder.root, "really-a-pdf.jpg")
         file.writeBytes("%PDF-1.4\n".toByteArray())
@@ -75,6 +85,20 @@ class DocumentNamePolicyTest {
         assertEquals("application/octet-stream", DocumentNamePolicy.mimeType(file))
         assertFalse(DocumentNamePolicy.isPrintable(file))
         assertFalse(DocumentNamePolicy.supportsInAppViewer(file))
+    }
+
+    @Test fun printableEligibilityRequiresSupportedFileContent() {
+        val invalidPdf=File(temporaryFolder.root,"fake.pdf")
+        invalidPdf.writeText("This is not a PDF")
+        assertEquals("application/octet-stream",DocumentNamePolicy.mimeType(invalidPdf))
+        assertFalse(DocumentNamePolicy.isPrintable(invalidPdf))
+        assertFalse(DocumentNamePolicy.isBatchSource(invalidPdf))
+
+        val pngNamedJpeg=File(temporaryFolder.root,"actually-png.jpg")
+        pngNamedJpeg.writeBytes(byteArrayOf(0x89.toByte(),0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a))
+        assertEquals("image/png",DocumentNamePolicy.mimeType(pngNamedJpeg))
+        assertTrue(DocumentNamePolicy.isPrintable(pngNamedJpeg))
+        assertTrue(DocumentNamePolicy.isBatchSource(pngNamedJpeg))
     }
 
     @Test fun sanitisesNames() {

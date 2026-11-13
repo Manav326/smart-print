@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Writer;
 using System.Text;
 using System.Text.Json;
 using System.IO.Compression;
@@ -42,6 +44,57 @@ public sealed class DocumentAnalyzerTests
         Encoding.ASCII.GetBytes("IHDR").CopyTo(bytes, 12);
 
         Assert.Throws<DocumentValidationException>(() => DocumentAnalyzer.Analyse(bytes, ".png"));
+    }
+
+    [Fact]
+    public void IdentifiesPngFromContentWhenTheFilenameSaysPdf()
+    {
+        var result = DocumentAnalyzer.Analyse(CreatePng(8, 6), ".pdf");
+
+        Assert.Equal("image/png", result.MediaType);
+        Assert.Equal(".png", result.Extension);
+    }
+
+    [Fact]
+    public void FullyAnalyzesPdfWithHeaderAtLastAllowedOffset()
+    {
+        var builder = new PdfDocumentBuilder();
+        builder.AddPage(PageSize.A4);
+        var pdf = builder.Build();
+        var bytes = new byte[1023 + pdf.Length];
+        Array.Fill(bytes, (byte)' ');
+        pdf.CopyTo(bytes, 1023);
+
+        var result = DocumentAnalyzer.Analyse(bytes, ".jpg");
+
+        Assert.Equal(1, result.PageCount);
+        Assert.Equal("application/pdf", result.MediaType);
+        Assert.Equal(".pdf", result.Extension);
+    }
+
+    [Fact]
+    public void RejectsPdfWithMoreThanFiveHundredPages()
+    {
+        var builder = new PdfDocumentBuilder();
+        for (var page = 0; page < 501; page++)
+            builder.AddPage(PageSize.A4);
+
+        var pdf = builder.Build();
+
+        Assert.Throws<DocumentValidationException>(() =>
+            DocumentAnalyzer.Analyse(pdf, ".pdf"));
+    }
+
+    [Fact]
+    public void UsesTheSameFirst1024BytePdfHeaderWindowAsAndroid()
+    {
+        var accepted = new byte[1028];
+        "%PDF-"u8.CopyTo(accepted.AsSpan(1023));
+        Assert.Equal(".pdf", DocumentAnalyzer.IdentifyExtension(accepted));
+
+        var rejected = new byte[1029];
+        "%PDF-"u8.CopyTo(rejected.AsSpan(1024));
+        Assert.Null(DocumentAnalyzer.IdentifyExtension(rejected));
     }
 
     private static byte[] CreatePng(int width, int height)

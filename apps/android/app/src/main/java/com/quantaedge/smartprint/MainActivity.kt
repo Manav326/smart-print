@@ -2678,7 +2678,14 @@ class MainActivity : AppCompatActivity() {
                 minHeight = dp(40)
                 setOnClickListener {
                     try {
-                        browsePhoneDocuments.launch(arrayOf("application/pdf", "image/jpeg", "image/png"))
+                        // Customer uploads are classified by file bytes in the Portal. Do not
+                        // let a provider's missing or incorrect MIME label hide a valid file.
+                        val acceptedMimeTypes = if (fileChooserReturnToPhotoStudio) {
+                            arrayOf("image/jpeg", "image/png")
+                        } else {
+                            arrayOf("*/*")
+                        }
+                        browsePhoneDocuments.launch(acceptedMimeTypes)
                     } catch (e: Exception) {
                         toast("Phone files could not be opened: " + message(e))
                     }
@@ -3130,11 +3137,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun fileIconResource(file: File): Int {
         if (file.isDirectory) return R.drawable.ic_folder
-        val mediaType = if (file.extension.isBlank()) {
-            DocumentNamePolicy.mimeType(file)
-        } else {
-            DocumentNamePolicy.mimeType(file.name)
-        }
+        val mediaType = DocumentNamePolicy.mimeType(file)
         return when (mediaType) {
             "application/pdf" -> R.drawable.ic_file_pdf
             "image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif" -> R.drawable.ic_file_image
@@ -5679,7 +5682,7 @@ class MainActivity : AppCompatActivity() {
             return token
         }
         val source = runCatching { file.canonicalFile }.getOrNull() ?: return null
-        if (!source.isFile || !source.name.endsWith(".pdf", true) ||
+        if (!source.isFile || !DocumentNamePolicy.isPdf(source) ||
             source.length() !in 1..MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES) return null
         val token = UUID.randomUUID().toString()
         customerUploadPdfPreviews[token] = source
@@ -5687,8 +5690,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createCustomerUploadPdfPreview(uri: Uri): String? {
-        val name = queryName(uri)
-        if (!name.endsWith(".pdf", true)) return null
+        // Probe only the bounded signature window before copying a selected phone file
+        // into the preview cache. Images and unsupported files are not duplicated.
+        val hasPdfContent = try {
+            contentResolver.openInputStream(uri)?.use { source ->
+                val header = ByteArray(DocumentNamePolicy.PDF_HEADER_SCAN_BYTES)
+                var bytesRead = 0
+                while (bytesRead < header.size) {
+                    val count = source.read(header, bytesRead, header.size - bytesRead)
+                    if (count <= 0) break
+                    bytesRead += count
+                }
+                DocumentNamePolicy.isPdfHeader(header, bytesRead)
+            } == true
+        } catch (_: Exception) {
+            false
+        }
+        if (!hasPdfContent) return null
+
         val directory = File(cacheDir, "customer-upload-pdf-preview")
         if (!directory.exists() && !directory.mkdirs()) return null
         val canonicalDirectory = directory.canonicalFile
@@ -5699,7 +5718,7 @@ class MainActivity : AppCompatActivity() {
         val target = runCatching { File.createTempFile("upload-preview-", ".pdf", directory) }.getOrNull()
             ?: return null
         return try {
-            val input = contentResolver.openInputStream(uri) ?: error("Selected PDF is unavailable.")
+            val input = contentResolver.openInputStream(uri) ?: error("Selected document is unavailable.")
             val copiedBytes = input.use { source ->
                 target.outputStream().use { destination ->
                     val buffer = ByteArray(8192)
@@ -5719,7 +5738,8 @@ class MainActivity : AppCompatActivity() {
                     total
                 }
             }
-            require(copiedBytes > 0L) { "Selected PDF is empty." }
+            require(copiedBytes > 0L) { "Selected document is empty." }
+            require(DocumentNamePolicy.isPdf(target)) { "Selected document does not contain PDF content." }
             val token = UUID.randomUUID().toString()
             customerUploadPdfPreviews[token] = target
             token

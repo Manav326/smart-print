@@ -17,18 +17,47 @@ public static class DocumentAnalyzer
     private const int MaximumPages = 500;
     private const ulong MaximumImagePixels = 50_000_000UL;
 
-    public static DocumentAnalysis Analyse(byte[] bytes, string extension)
+    public static string? IdentifyExtension(ReadOnlySpan<byte> bytes)
     {
+        ReadOnlySpan<byte> pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+        if (bytes.Length >= pngSignature.Length && bytes[..pngSignature.Length].SequenceEqual(pngSignature))
+            return ".png";
+        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+            return ".jpg";
+
+        var searchLength = Math.Min(bytes.Length, 1028);
+        var lastHeaderOffset = Math.Min(1023, searchLength - 5);
+        for (var offset = 0; offset <= lastHeaderOffset; offset++)
+        {
+            if (bytes.Slice(offset, 5).SequenceEqual("%PDF-"u8))
+                return ".pdf";
+        }
+        return null;
+    }
+
+    public static DocumentAnalysis Analyse(byte[] bytes, string filenameExtension = "")
+    {
+        // File names are display labels. Format selection always comes from bytes.
+        var extension = IdentifyExtension(bytes) ??
+            throw new DocumentValidationException("The file content is not a supported PDF, JPEG or PNG document.");
+        // Preserve the established .jpeg storage/ticket alias when it agrees with
+        // the detected JPEG signature; other mismatched extensions are ignored.
+        if (extension == ".jpg" && string.Equals(filenameExtension, ".jpeg", StringComparison.OrdinalIgnoreCase))
+            extension = ".jpeg";
+
         if (extension == ".pdf")
         {
-            if (bytes.Length < 8 || !bytes.AsSpan(0, 5).SequenceEqual("%PDF-"u8))
-            {
-                throw new DocumentValidationException("The file extension says PDF, but the file signature is invalid.");
-            }
+            if (bytes.Length < 8)
+                throw new DocumentValidationException("The PDF file is incomplete.");
 
             try
             {
                 using var document = PdfDocument.Open(new MemoryStream(bytes, writable: false));
+                if (document.NumberOfPages is <= 0 or > MaximumPages)
+                {
+                    throw new DocumentValidationException($"PDFs must contain between 1 and {MaximumPages} pages.");
+                }
+
                 var pages = document.GetPages().Select(page =>
                 {
                     var images = page.GetImages().Select(image =>
@@ -56,10 +85,6 @@ public static class DocumentAnalyzer
                     };
                 }).ToArray();
 
-                if (document.NumberOfPages is <= 0 or > MaximumPages)
-                {
-                    throw new DocumentValidationException($"PDFs must contain between 1 and {MaximumPages} pages.");
-                }
                 return new DocumentAnalysis(document.NumberOfPages, System.Text.Json.JsonSerializer.Serialize(pages), "application/pdf", ".pdf");
             }
             catch (DocumentValidationException)
