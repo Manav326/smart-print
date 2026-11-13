@@ -4,5 +4,6 @@
   "maxBatchFiles": 20,
   "maxBatchBytes": 52428800,
   "multipartOverheadBytes": 1048576,
-  "privateRelayEncryptionOverheadBytes": 16
+  "privateRelayEncryptionOverheadBytes": 16,
+  "maxPhotoCount": 100
 }
