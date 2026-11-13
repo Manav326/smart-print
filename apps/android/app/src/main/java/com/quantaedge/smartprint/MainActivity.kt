@@ -2819,11 +2819,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun fileIconResource(file: File): Int {
         if (file.isDirectory) return R.drawable.ic_folder
-        val mediaType = if (file.extension.isBlank()) {
-            DocumentNamePolicy.mimeType(file)
-        } else {
-            DocumentNamePolicy.mimeType(file.name)
-        }
+        val mediaType = DocumentNamePolicy.mimeType(file)
         return when (mediaType) {
             "application/pdf" -> R.drawable.ic_file_pdf
             "image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif" -> R.drawable.ic_file_image
