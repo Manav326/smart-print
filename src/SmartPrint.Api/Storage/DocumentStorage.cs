@@ -39,7 +39,7 @@ public sealed class DocumentStorage : IDisposable
         }
 
         var bytes = memory.ToArray();
-        var analysis = DocumentAnalyzer.Analyse(bytes, extension);
+        var analysis = DocumentAnalyzer.Analyse(bytes);
         var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
         var storageKey = $"{tenantId:N}/{documentId:N}{analysis.Extension}";
         var fullPath = ResolveStoragePath(storageKey);
