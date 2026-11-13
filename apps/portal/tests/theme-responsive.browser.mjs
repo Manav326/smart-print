@@ -1236,7 +1236,7 @@ async function exercisePhotoStudioFailurePaths() {
   } finally {
     await largeContext.close();
   }
-  console.log("[QA-CASE-END] PASS | Photo Studio malformed input, missing prices, save/render retry and ${uploadLimits.maxFileBytes / (1024 * 1024)} MB output limit.");
+  console.log(`[QA-CASE-END] PASS | Photo Studio malformed input, missing prices, save/render retry and ${uploadLimits.maxFileBytes / (1024 * 1024)} MB output limit.`);
 }
 
 
