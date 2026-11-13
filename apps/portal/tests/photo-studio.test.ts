@@ -186,13 +186,19 @@ test("customer, shop order and private library share one strict JPG/PNG source p
 
 test("shop cancellation returns to the original document preview",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/returnPreview:\{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean\}/);
+ assert.match(app,/returnPreview\?:\{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean\}/);
  assert.match(app,/function cancelShopPhotoStudio\(\)[\s\S]*?URL\.createObjectURL\(restored\.blob\)[\s\S]*?setPreview/);
  assert.match(app,/onCancel=\{cancelShopPhotoStudio\}/);
  assert.match(app,/focusEditOnMount=\{focusShopPhotoEdit\}/);
  assert.match(app,/setFocusShopPhotoEdit\(true\)/);
  assert.match(app,/editPhotoButtonRef\.current\?\.focus\(\)/);
  assert.match(app,/setPreview\(null\); setFocusShopPhotoEdit\(false\)/);
+});
+
+test("cancelling Photo Studio opened from Order Journey returns to the journey without opening an original-image modal",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/const returnPreview=returningFromPreview[\s\S]*?:undefined/);
+ assert.match(app,/if\(!restored\)\{\s*setShopPhotoStudio\(null\);\s*setFocusShopPhotoEdit\(false\);\s*return;/);
 });
 
 test("Photo Studio follows the saved light or dark appearance in both customer and shop routes",()=>{
