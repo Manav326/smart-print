@@ -3891,7 +3891,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     setLocalFallbackSuggested(false);
     try{
       const previousSessionKey=result
-        ?customerPendingSelectionStorageKey(publicCode,result?.sessionToken??"")
+        ?customerPendingSelectionStorageKey(publicCode,result.sessionToken)
         :null;
       const value=await createCustomerSession(publicCode);
       // Do not switch sessions if an explicit reset cannot clear the previous
