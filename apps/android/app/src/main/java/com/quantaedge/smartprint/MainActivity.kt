@@ -2561,7 +2561,7 @@ class MainActivity : AppCompatActivity() {
             selectionActions.addView(button("ZIP", false).apply {
                 minHeight = dp(38); setOnClickListener { exportSelected(selectedHere); clearLibrarySelection(); showFiles() }
             }, LinearLayout.LayoutParams(0, dp(38), 1f))
-            val supportedBatch = selectedHere.size in 2..20 && selectedHere.all {
+            val supportedBatch = selectedHere.size in 2..UploadLimits.MAX_BATCH_FILES && selectedHere.all {
                 it.extension.lowercase(Locale.ROOT) in setOf("pdf", "jpg", "jpeg", "png") && it.length() in 1..UploadLimits.MAX_FILE_BYTES
             } && selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
             selectionActions.addView(button("Combine into PDF", true).apply {
@@ -5122,8 +5122,8 @@ class MainActivity : AppCompatActivity() {
         val callback = fileCallback ?: return
         val selected = uris.distinct()
         if (selected.isEmpty()) return
-        if (selected.size > 20) {
-            toast("Choose up to 20 documents at once.")
+        if (selected.size > UploadLimits.MAX_BATCH_FILES) {
+            toast("Choose up to ${UploadLimits.MAX_BATCH_FILES} documents at once.")
             return
         }
         if (!fileChooserAllowsMultiple && selected.size != 1) {
