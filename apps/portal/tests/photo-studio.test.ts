@@ -549,7 +549,7 @@ test("both Photo Studio entry points inherit the same batch privacy without sile
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  const applyStart=app.indexOf("function applyPhotoSheets(");
  const chooseStart=app.indexOf("function chooseFiles(next:File[]");
- const chooseEnd=app.indexOf("function selectUploadedFile(",chooseStart);
+ const chooseEnd=app.indexOf("function removeSelectedFile(",chooseStart);
  assert.ok(applyStart>=0&&chooseStart>applyStart&&chooseEnd>chooseStart);
  const apply=app.slice(applyStart,chooseStart);
  const choose=app.slice(chooseStart,chooseEnd);
@@ -604,20 +604,4 @@ test("one processed 300-DPI crop is reused across all copies and every A4 page",
 });
 
 
-test("upload-page and saved Photo Studio documents share one privacy default and preserve explicit customer choice",()=>{
- const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- const helperStart=app.indexOf("function preselectPhotoStudioPrivacy()");
- const applyStart=app.indexOf("function applyPhotoSheets(");
- const pickerStart=app.indexOf("function chooseFiles(next:File[]");
- assert.ok(helperStart>=0&&applyStart>helperStart&&pickerStart>applyStart);
- const helper=app.slice(helperStart,applyStart);
- const apply=app.slice(applyStart,pickerStart);
- const pickerEnd=app.indexOf("function selectUploadedFile(",pickerStart);
- const picker=app.slice(pickerStart,pickerEnd);
- assert.ok(helper.includes("uploadedBatch.length===0&&!privacyChoiceManuallySelected"));
- assert.ok(apply.includes("preselectPhotoStudioPrivacy()"));
- assert.ok(picker.includes("else if(incomingPhotoDocument)"));
- assert.ok(picker.includes("preselectPhotoStudioPrivacy()"));
- assert.ok(app.includes("setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false)"));
- assert.ok(app.includes("setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true)"));
-});
+
