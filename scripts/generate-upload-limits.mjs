@@ -50,6 +50,7 @@ public static class UploadLimits
 {
     public const long MaxFileBytes = ${maxFileBytes}L;
     public const int MaxBatchFiles = ${maxBatchFiles};
+    public const int MaxPhotoCount = ${maxPhotoCount};
     public const long MaxBatchBytes = ${maxBatchBytes}L;
     public const long MaxMultipartRequestBytes = ${maxMultipartRequestBytes}L;
     public const long PrivateRelayEncryptionOverheadBytes = ${privateRelayEncryptionOverheadBytes}L;
