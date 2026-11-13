@@ -400,6 +400,17 @@ public sealed class LocalAgentApiHostedService(
                 var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
                 if (credentials is null || string.IsNullOrWhiteSpace(grantToken) || grantToken.Length > 4096)
                     return Results.Unauthorized();
+
+                // Reject private jobs before parsing or accepting a replacement PDF
+                // or editor-settings form field from the shop browser.
+                var entry = localQueueStore.Find(jobId);
+                if (entry?.PrivatePrinting == true)
+                    return Results.Conflict(new
+                    {
+                        code = "private_printing_source_locked",
+                        message = "Private Printing stays on the device and cannot send original photos or editor settings to the shop service."
+                    });
+
                 if (!context.Request.HasFormContentType)
                     return Results.BadRequest(new { code = "photo_revision_form_required", message = "Send one prepared photo-sheet PDF." });
 
@@ -453,16 +464,6 @@ public sealed class LocalAgentApiHostedService(
                 }
 
                 var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-                var entry = localQueueStore.Find(jobId);
-                if (entry?.PrivatePrinting == true)
-                {
-                    CryptographicOperations.ZeroMemory(bytes);
-                    return Results.Conflict(new
-                    {
-                        code = "private_printing_source_locked",
-                        message = "Private Printing stays on the device and cannot send original photos or editor settings to the shop service."
-                    });
-                }
                 if (entry is null ||
                     entry.State is not ("LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT") ||
                     !File.Exists(entry.DocumentPath))
