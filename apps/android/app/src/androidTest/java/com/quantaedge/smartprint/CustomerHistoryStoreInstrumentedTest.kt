@@ -39,7 +39,9 @@ class CustomerHistoryStoreInstrumentedTest {
             printKind = "DOCUMENT",
             photoSizeCode = null,
             photoCount = 0,
-            photosPerPage = null
+            photosPerPage = null,
+            privatePrinting = true,
+            updatedUtc = "2026-11-12T10:06:00Z"
         )
         try {
             assertNull("A new account starts without a local snapshot.", store.read(email))

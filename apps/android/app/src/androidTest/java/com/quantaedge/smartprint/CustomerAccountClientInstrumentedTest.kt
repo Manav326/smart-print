@@ -57,6 +57,32 @@ class CustomerAccountClientInstrumentedTest {
     }
 
     @Test
+    fun parsesPrivatePrintingAndLatestUpdateMetadataWithoutExposingPrivateFilename() {
+        val record = historyRecord("private-job")
+            .put("privatePrinting", true)
+            .put("originalFileName", "Private document")
+            .put("updatedUtc", "2026-11-13T12:30:00Z")
+        val item = CustomerAccountClient.parseLegacyHistorySnapshot(
+            JSONObject().put("jobs", JSONArray().put(record))
+        ).single()
+
+        assertTrue(item.privatePrinting)
+        assertEquals("Private document", item.originalFileName)
+        assertEquals("2026-11-13T12:30:00Z", item.updatedUtc)
+    }
+
+    @Test
+    fun rejectsInvalidOrderTrackingKeysBeforeMakingARequest() {
+        var rejected = false
+        try {
+            CustomerAccountClient.orderTracking("https://smartprint.example.test", "token", "not-a-guid")
+        } catch (_: IllegalArgumentException) {
+            rejected = true
+        }
+        assertTrue("An invalid order key must be rejected before network access.", rejected)
+    }
+
+    @Test
     fun parsesMpayZeroBasedHistoryPaginationEnvelope() {
         val records = JSONArray()
         repeat(10) { index -> records.put(historyRecord("job-$index")) }

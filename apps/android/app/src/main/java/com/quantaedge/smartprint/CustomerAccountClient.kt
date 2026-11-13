@@ -51,7 +51,9 @@ data class CustomerPrintHistoryItem(
     val printKind: String?,
     val photoSizeCode: String?,
     val photoCount: Int,
-    val photosPerPage: Int?
+    val photosPerPage: Int?,
+    val privatePrinting: Boolean = false,
+    val updatedUtc: String = createdUtc
 )
 
 data class CustomerHistoryPage(
@@ -227,7 +229,9 @@ object CustomerAccountClient {
                 printKind = job.optString("printKind").takeUnless { it.isBlank() || it == "null" },
                 photoSizeCode = job.optString("photoSizeCode").takeUnless { it.isBlank() || it == "null" },
                 photoCount = job.optInt("photoCount"),
-                photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage")
+                photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage"),
+                privatePrinting = job.optBoolean("privatePrinting", false),
+                updatedUtc = job.optString("updatedUtc").takeUnless { it.isBlank() || it == "null" } ?: job.optString("createdUtc")
             )
         }
 
@@ -312,6 +316,13 @@ object CustomerAccountClient {
             totalPages = totalPages,
             hasNext = hasNext
         )
+    }
+
+    /** Reads one customer-owned batch (or standalone order) with all files and events in one snapshot. */
+    fun orderTracking(baseUrl: String, accessToken: String, orderKey: String): JSONObject {
+        val safeId = orderKey.trim()
+        require(safeId.matches(Regex("^[0-9a-fA-F-]{36}$"))) { "The print order identifier is invalid." }
+        return request(baseUrl, "/api/v1/customer/orders/$safeId/tracking", null, accessToken)
     }
 
     /** Reads the current state and audit timeline of a job owned by this signed-in customer. */
