@@ -87,6 +87,11 @@ import java.net.URL
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
+internal object IdCaptureOverlayPermissionPolicy {
+    fun shouldExplain(isGranted: Boolean, alreadyExplained: Boolean): Boolean =
+        !isGranted && !alreadyExplained
+}
+
 class MainActivity : AppCompatActivity() {
     companion object {
         private const val HOME = 1
@@ -4820,7 +4825,7 @@ class MainActivity : AppCompatActivity() {
         pendingIdStudioSide = side
         val preferences = getSharedPreferences("smartprint.id-capture-overlay", MODE_PRIVATE)
         val alreadyExplained = preferences.getBoolean("permissionExplained", false)
-        if (!Settings.canDrawOverlays(this) && !alreadyExplained) {
+        if (IdCaptureOverlayPermissionPolicy.shouldExplain(Settings.canDrawOverlays(this), alreadyExplained)) {
             // Explain the special Android permission once. A later attempt never
             // interrupts the customer with another prompt; ML Kit still works.
             preferences.edit().putBoolean("permissionExplained", true).apply()
@@ -4923,7 +4928,8 @@ class MainActivity : AppCompatActivity() {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_SECURE,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL

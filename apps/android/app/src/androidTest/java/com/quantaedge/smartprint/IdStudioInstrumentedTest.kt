@@ -367,16 +367,18 @@ class IdStudioInstrumentedTest {
 
     @Test
     fun idCaptureOverlayPermissionExplanationIsRememberedOnce() {
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val preferences = context.getSharedPreferences("smartprint.id-capture-overlay", Context.MODE_PRIVATE)
-        preferences.edit().remove("permissionExplained").commit()
-        assertFalse(preferences.getBoolean("permissionExplained", false))
-        preferences.edit().putBoolean("permissionExplained", true).commit()
-        assertTrue(
-            "After the first explanation, SmartPrint must not show another automatic permission prompt.",
-            preferences.getBoolean("permissionExplained", false)
+        assertFalse(
+            "Already-granted overlay access must never trigger another explanation.",
+            IdCaptureOverlayPermissionPolicy.shouldExplain(isGranted = true, alreadyExplained = false)
         )
-        preferences.edit().clear().commit()
+        assertTrue(
+            "The explanation is shown on the first attempt when access is missing.",
+            IdCaptureOverlayPermissionPolicy.shouldExplain(isGranted = false, alreadyExplained = false)
+        )
+        assertFalse(
+            "After the one-time explanation, SmartPrint must not prompt automatically again.",
+            IdCaptureOverlayPermissionPolicy.shouldExplain(isGranted = false, alreadyExplained = true)
+        )
     }
 
     private fun testJpeg(): ByteArray {
