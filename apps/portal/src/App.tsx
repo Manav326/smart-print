@@ -9,7 +9,7 @@ import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } from "./PhotoStudio";
 import { isSupportedPhotoSource, resolvePhotoSourceMimeType } from "./photo-source-policy";
 import { copyCustomerUploadFileMetadata, normalizeCustomerUploadFile } from "./customer-upload-file-policy";
-import { clearCustomerPendingSelection, customerPendingSelectionStorageKey, loadCustomerPendingSelection, saveCustomerPendingFiles, saveCustomerPendingSelectionMetadata } from "./customer-upload-draft-store";
+import { clearCustomerPendingSelection, clearCustomerPendingSelectionsForStation, customerPendingSelectionStorageKey, loadCustomerPendingSelection, saveCustomerPendingFiles, saveCustomerPendingSelectionMetadata } from "./customer-upload-draft-store";
 import CustomerUpiQr from "./CustomerUpiQr";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
@@ -3841,25 +3841,32 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         (nativeAppMode?[nativeToken,browserToken]:[browserToken,nativeToken]).filter(Boolean)
       ));
       let existing:Awaited<ReturnType<typeof createCustomerSession>>|null=null;
-      let invalidNativeToken=false;
-      let invalidBrowserToken=false;
+      const invalidTokens:string[]=[];
       for(const token of candidates){
         try{
           existing=await resumeCustomerSession(token,publicCode);
           break;
         }catch(exception){
           if(exception instanceof ApiError&&exception.status===401){
-            if(token===nativeToken)invalidNativeToken=true;
-            if(token===browserToken)invalidBrowserToken=true;
+            invalidTokens.push(token);
             continue;
           }
           // A network/server error is not proof that a session is invalid.
-          // Preserve both tokens and do not create a replacement session.
+          // Preserve both tokens and all unsent files for a later retry.
           throw exception;
         }
       }
-      if(invalidBrowserToken)sessionStorage.removeItem(stationKey);
-      if(invalidNativeToken)await clearNativeCustomerPrintSession(publicCode);
+      for(const token of invalidTokens){
+        await clearCustomerPendingSelection(customerPendingSelectionStorageKey(publicCode,token)).catch(()=>undefined);
+      }
+      if(invalidTokens.includes(browserToken))sessionStorage.removeItem(stationKey);
+      if(invalidTokens.includes(nativeToken))await clearNativeCustomerPrintSession(publicCode);
+      if(!existing){
+        // No usable guest capability means this is a genuinely new customer
+        // session. Never carry unsent files or old order metadata into it.
+        await clearCustomerPendingSelectionsForStation(publicCode).catch(()=>undefined);
+        localStorage.removeItem(`qrtoprint.customer-active-job:${publicCode}`);
+      }
       const value=existing??await createCustomerSession(publicCode);
       // Persist the confirmed token before showing the connected session.
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
@@ -3884,7 +3891,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     setLocalFallbackSuggested(false);
     try{
       const previousSessionKey=result
-        ?customerPendingSelectionStorageKey(publicCode)
+        ?customerPendingSelectionStorageKey(publicCode,result?.sessionToken??"")
         :null;
       const value=await createCustomerSession(publicCode);
       // Do not switch sessions if an explicit reset cannot clear the previous
@@ -4493,7 +4500,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   void printerCapabilitiesJson;
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
-  const pendingSelectionStorageKey=customerPendingSelectionStorageKey(publicCode);
+  const pendingSelectionStorageKey=customerPendingSelectionStorageKey(publicCode,sessionToken);
   const [pendingSelectionRestored,setPendingSelectionRestored]=useState(false);
   const [draftPersistenceWarning,setDraftPersistenceWarning]=useState("");
   const [files,setFiles]=useState<File[]>([]);
