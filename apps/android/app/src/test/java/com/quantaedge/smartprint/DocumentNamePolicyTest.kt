@@ -77,6 +77,20 @@ class DocumentNamePolicyTest {
         assertFalse(DocumentNamePolicy.supportsInAppViewer(file))
     }
 
+    @Test fun printableEligibilityRequiresSupportedFileContent() {
+        val invalidPdf=File(temporaryFolder.root,"fake.pdf")
+        invalidPdf.writeText("This is not a PDF")
+        assertEquals("application/octet-stream",DocumentNamePolicy.mimeType(invalidPdf))
+        assertFalse(DocumentNamePolicy.isPrintable(invalidPdf))
+        assertFalse(DocumentNamePolicy.isBatchSource(invalidPdf))
+
+        val pngNamedJpeg=File(temporaryFolder.root,"actually-png.jpg")
+        pngNamedJpeg.writeBytes(byteArrayOf(0x89.toByte(),0x50,0x4e,0x47,0x0d,0x0a,0x1a,0x0a))
+        assertEquals("image/png",DocumentNamePolicy.mimeType(pngNamedJpeg))
+        assertTrue(DocumentNamePolicy.isPrintable(pngNamedJpeg))
+        assertTrue(DocumentNamePolicy.isBatchSource(pngNamedJpeg))
+    }
+
     @Test fun sanitisesNames() {
         assertEquals("_safe_.pdf", DocumentNamePolicy.safeName("../safe?.pdf"))
         assertEquals("Untitled document", DocumentNamePolicy.safeName("   "))
