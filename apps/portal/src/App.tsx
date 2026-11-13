@@ -4317,6 +4317,8 @@ type StoredCustomerDraft = {
 };
 
 function isCustomerImage(file:File):boolean {
+  const identified=identifiedCustomerDocumentTypes.get(file);
+  if(identified)return identified.mediaType==="image/jpeg"||identified.mediaType==="image/png";
   return isSupportedPhotoSource(file);
 }
 
@@ -4819,10 +4821,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   useEffect(()=>{
     if(!file){setPreviewUrl(null);return;}
-    // Some Android document providers expose PDFs with an empty or generic
-    // MIME type. Preserve the existing blob preview with the correct PDF type.
-    const previewSource=isCustomerPdf(file)&&file.type.toLowerCase()!=="application/pdf"
-      ?new Blob([file],{type:"application/pdf"})
+    // Android providers and renamed files can expose a MIME type that disagrees
+    // with the bytes. The content analysis performed during selection is the
+    // authority for both PDF and image previews.
+    const identified=identifiedCustomerDocumentTypes.get(file);
+    const browserMediaType=file.type.split(";")[0].trim().toLowerCase();
+    const previewSource=identified&&browserMediaType!==identified.mediaType
+      ?new Blob([file],{type:identified.mediaType})
       :file;
     const url=URL.createObjectURL(previewSource);
     setPreviewUrl(url);
@@ -5206,7 +5211,16 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return;
     }
     if(!photoRatesAvailable){setError("Photo printing is not configured at this shop yet. Please ask the shop owner to enable photo pricing.");return;}
-    setPhotoStudioSource(candidate);
+    const identified=identifiedCustomerDocumentTypes.get(candidate);
+    const mediaType=identified?.mediaType??resolvePhotoSourceMimeType(candidate);
+    if(mediaType!=="image/jpeg"&&mediaType!=="image/png"){
+      setError("The file contents are not a supported JPEG or PNG photo.");
+      return;
+    }
+    const source=candidate.type.split(";")[0].trim().toLowerCase()===mediaType
+      ?candidate
+      :new File([candidate],candidate.name,{type:mediaType,lastModified:candidate.lastModified});
+    setPhotoStudioSource(source);
     setPhotoStudioSourceFingerprint(fingerprint);
     setError("");
   }
