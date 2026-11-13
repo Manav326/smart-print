@@ -462,9 +462,20 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Conflict(new { code = "local_photo_source_missing", message = "The original local photo is no longer eligible for enhancement." });
                 }
 
+                var sourceSha256 = entry.PhotoSourceSha256 ?? entry.Sha256;
+                var sourceSizeBytes = entry.PhotoSourceSizeBytes ?? entry.SizeBytes;
+                var sourceMediaType = entry.PhotoSourceMediaType ?? entry.MediaType;
+                if (sourceMediaType is not ("image/jpeg" or "image/png") ||
+                    string.IsNullOrWhiteSpace(sourceSha256) || sourceSha256.Length != 64 ||
+                    sourceSizeBytes <= 0)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.Conflict(new { code = "local_photo_source_unavailable", message = "The original JPG or PNG source is no longer available for editing." });
+                }
+
                 var revisionRequest = new LocalAgentPhotoRevisionRequest(
-                    entry.Sha256,
-                    entry.SizeBytes,
+                    sourceSha256,
+                    sourceSizeBytes,
                     hash,
                     bytes.LongLength,
                     analysis.PageCount,
