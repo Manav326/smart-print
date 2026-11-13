@@ -89,6 +89,7 @@ internal object CustomerOrderTrackingPresentation {
             allReady -> CustomerTrackingStepState.DONE
             allOutputResolved && normalized.any { it in ready } -> CustomerTrackingStepState.DONE
             allOutputResolved && normalized.none { it in ready } -> CustomerTrackingStepState.SKIPPED
+            normalized.any { it in ready } -> CustomerTrackingStepState.CURRENT
             else -> CustomerTrackingStepState.UPCOMING
         }
 
@@ -101,16 +102,21 @@ internal object CustomerOrderTrackingPresentation {
             anyPrinting -> "The shop is processing your files"
             else -> "Waiting for printing to begin"
         }
+        val anyFileVerified = billableIndexes.any { index ->
+            normalized[index] in printing || normalized[index] in ready ||
+                perFilePayments[index] in paymentVerified
+        }
         val paymentDetail = when {
             !hasBillableFiles -> "No payment required for excluded files"
             payment in paymentVerified -> "Payment verified"
             payment in paymentPending -> when (payment) {
                 "CUSTOMER_REPORTED", "PAYMENT_REPORTED" -> "Payment reported · shop verification pending"
-                "PAYMENT_REJECTED" -> "Payment was declined · review the payment details"
+                "PAYMENT_REJECTED", "REJECTED" -> "Payment was declined · review the payment details"
                 "QUOTE_EXPIRED" -> "The quote needs to be refreshed"
                 else -> "Waiting for payment"
             }
-            verified -> "Payment was confirmed before printing"
+            paymentRequired -> "Payment is pending for one or more files"
+            anyFileVerified -> "Payment verified for processed files"
             else -> "Payment stage will appear after shop review"
         }
         val reviewDetail = when {
@@ -133,6 +139,7 @@ internal object CustomerOrderTrackingPresentation {
                 when {
                     allOutputResolved && !allReady && readyCount > 0 -> "Order outcome"
                     allOutputResolved && readyCount == 0 -> "Order closed"
+                    readyCount > 0 && !allReady -> "Partial output ready"
                     normalized.any { it == "PDF_EXPORTED" } && normalized.none { it == "COMPLETED" } -> "PDF ready"
                     else -> "Ready for collection"
                 },
@@ -147,16 +154,19 @@ internal object CustomerOrderTrackingPresentation {
         paymentStatus: String?,
         filePaymentStatuses: List<String> = emptyList()
     ): String {
+        val payment = paymentStatus.orEmpty().trim().uppercase(Locale.ROOT)
         val steps = steps(statuses, paymentStatus, filePaymentStatuses)
         val current = steps.lastOrNull { it.state == CustomerTrackingStepState.CURRENT }
         if (current != null) {
             return when (current.title) {
                 "Shop review" -> "The shop is reviewing your order"
                 "Payment" -> if (
-                    payment == "PAYMENT_REJECTED" || payment == "REJECTED" ||
-                    statuses.any { it.equals("PAYMENT_REJECTED", true) }
+                    payment in setOf("PAYMENT_REJECTED", "REJECTED") ||
+                    statuses.any { it.equals("PAYMENT_REJECTED", true) } ||
+                    filePaymentStatuses.any { it.equals("PAYMENT_REJECTED", true) }
                 ) "Payment needs attention" else "Waiting for payment"
                 "Printing" -> "Your order is being printed"
+                "Partial output ready" -> "Some files are ready; the rest are still in progress"
                 else -> current.title
             }
         }
