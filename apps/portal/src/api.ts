@@ -1078,6 +1078,7 @@ export interface ShopPricingProfile {
 
 export interface ShopPrintJob {
   id: string;
+  photoSourceAvailable?: boolean;
   photoEditorSettingsJson?: string | null;
   batchId?: string | null;
   batchGroupName?: string | null;
