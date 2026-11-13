@@ -1715,13 +1715,26 @@ shop.MapPost("/qr-stations", async (
         });
     }
 
-    if (request.PrinterDeviceId is Guid printerId &&
-        !await db.PrinterDevices.AnyAsync(printer => printer.Id == printerId && printer.TenantId == tenantId, ct))
+    if (request.PrinterDeviceId is Guid printerId)
     {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
+        var selectedPrinterOutputMode = await db.PrinterDevices.AsNoTracking()
+            .Where(printer => printer.Id == printerId && printer.TenantId == tenantId && printer.IsActive)
+            .Select(printer => printer.OutputMode)
+            .SingleOrDefaultAsync(ct);
+        if (selectedPrinterOutputMode is null)
         {
-            ["printerDeviceId"] = ["The selected printer does not belong to this shop."]
-        });
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["printerDeviceId"] = ["Select an active printer that belongs to this shop."]
+            });
+        }
+        if (selectedPrinterOutputMode is not ("PHYSICAL" or "PDF_EXPORT"))
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]>
+            {
+                ["printerDeviceId"] = ["This virtual/document driver is not supported for SmartPrint output. Select a physical printer or Microsoft Print to PDF for non-production testing."]
+            });
+        }
     }
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);

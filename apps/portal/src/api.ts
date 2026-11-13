@@ -133,7 +133,7 @@ export interface PrinterDevice {
   manufacturer: string;
   model: string;
   connectionType: string;
-  outputMode: "PHYSICAL" | "PDF_EXPORT" | string;
+  outputMode: "PHYSICAL" | "PDF_EXPORT" | "UNSUPPORTED_VIRTUAL" | string;
   connectionAddress?: string | null;
   queueName?: string | null;
   capabilitiesJson: string;
