@@ -414,13 +414,13 @@ public sealed class LocalAgentApiHostedService(
 
                 var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
                 if (!int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
-                    photoCount is < 1 or > 100 ||
+                    photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
                     !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
                     photosPerPage is < 1 or > 100 ||
                     photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6"))
                     return Results.ValidationProblem(new Dictionary<string, string[]>
                     {
-                        ["photoDetails"] = ["Choose a supported ID photo size and a quantity from 1 to 100."]
+                        ["photoDetails"] = [$"Choose a supported ID photo size and a quantity from 1 to {UploadLimits.MaxPhotoCount}."]
                     });
 
                 byte[] bytes;
