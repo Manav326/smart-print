@@ -16,7 +16,8 @@ public sealed class AddShopPhotoSourceRetention : Migration
                 ADD COLUMN "PhotoSourceOriginalFileName" character varying(255) NULL,
                 ADD COLUMN "PhotoSourceMediaType" character varying(100) NULL,
                 ADD COLUMN "PhotoSourceSha256" character varying(64) NULL,
-                ADD COLUMN "PhotoSourceSizeBytes" bigint NULL;
+                ADD COLUMN "PhotoSourceSizeBytes" bigint NULL,
+                ADD COLUMN "PhotoEditorSettingsJson" jsonb NULL;
 
             ALTER TABLE "PrintDocuments"
                 ADD CONSTRAINT "CK_PrintDocuments_PhotoSourceRetention"
@@ -63,7 +64,8 @@ public sealed class AddShopPhotoSourceRetention : Migration
                 DROP COLUMN IF EXISTS "PhotoSourceOriginalFileName",
                 DROP COLUMN IF EXISTS "PhotoSourceMediaType",
                 DROP COLUMN IF EXISTS "PhotoSourceSha256",
-                DROP COLUMN IF EXISTS "PhotoSourceSizeBytes";
+                DROP COLUMN IF EXISTS "PhotoSourceSizeBytes",
+                DROP COLUMN IF EXISTS "PhotoEditorSettingsJson";
             """);
     }
 }
