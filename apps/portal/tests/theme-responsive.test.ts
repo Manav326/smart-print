@@ -236,7 +236,6 @@ test("customer upload form clearly supports backend-approved image formats", () 
   assert.doesNotMatch(customerFlow,/accept="[^"]*(?:\.pdf|application\/pdf|image\/jpeg|image\/png)/,
     "The browser picker must not hide valid documents based on potentially incorrect extension or MIME labels.");
   assert.ok(app.includes("identifySupportedDocument(candidate)"), "The shared selection handler must classify every candidate by content.");
-    "The shared selection handler must retain PDF, JPG, JPEG and PNG support.");
 });
 
 test("Android customer printing uses the same single Copies control and event handlers as the browser", () => {
