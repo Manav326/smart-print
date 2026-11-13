@@ -174,11 +174,17 @@ internal object CustomerOrderTrackingPresentation {
         if (current != null) {
             return when (current.title) {
                 "Shop review" -> "The shop is reviewing your order"
-                "Payment" -> if (
+                "Payment" -> when {
                     payment in setOf("PAYMENT_REJECTED", "REJECTED") ||
-                    statuses.any { it.equals("PAYMENT_REJECTED", true) } ||
-                    filePaymentStatuses.any { it.equals("PAYMENT_REJECTED", true) }
-                ) "Payment needs attention" else "Waiting for payment"
+                        statuses.any { it.equals("PAYMENT_REJECTED", true) } ||
+                        filePaymentStatuses.any { it.equals("PAYMENT_REJECTED", true) } -> "Payment needs attention"
+                    payment == "QUOTE_EXPIRED" || statuses.any { it.equals("QUOTE_EXPIRED", true) } ->
+                        "The print quote needs to be refreshed"
+                    payment in setOf("CUSTOMER_REPORTED", "PAYMENT_REPORTED") ||
+                        filePaymentStatuses.any { it in setOf("CUSTOMER_REPORTED", "PAYMENT_REPORTED") } ->
+                        "Payment reported; waiting for shop verification"
+                    else -> "Waiting for payment"
+                }
                 "Printing" -> "Your order is being printed"
                 "Partial output ready" -> "Some files are ready; the rest are still in progress"
                 else -> current.title
