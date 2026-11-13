@@ -1222,7 +1222,6 @@ customerApi.MapGet("/orders/{orderKey:guid}/tracking", async (
         .Select(item => new
         {
             item.Id,
-            item.TenantId,
             item.BatchId,
             item.BatchGroupName,
             item.BatchName,
@@ -1246,8 +1245,6 @@ customerApi.MapGet("/orders/{orderKey:guid}/tracking", async (
             item.UpdatedUtc,
             item.CreatedUtc,
             item.PrivatePrinting,
-            item.PrivateDocumentPurgedUtc,
-            item.FailureCode,
             ShopName = db.ShopProfiles.AsNoTracking()
                 .Where(profile => profile.TenantId == item.TenantId)
                 .Select(profile => profile.DisplayName)
@@ -1276,7 +1273,6 @@ customerApi.MapGet("/orders/{orderKey:guid}/tracking", async (
             item.PreviousStatus,
             item.NewStatus,
             item.ActorType,
-            item.ReasonCode,
             item.CreatedUtc
         })
         .ToListAsync(ct);
@@ -1317,7 +1313,6 @@ customerApi.MapGet("/orders/{orderKey:guid}/tracking", async (
             item.Status,
             item.AmountMinor,
             item.Currency,
-            item.PaymentReference,
             item.RejectionReason,
             item.CreatedUtc,
             item.UpdatedUtc,
