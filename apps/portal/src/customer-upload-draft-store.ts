@@ -3,6 +3,7 @@ export type CustomerPendingFileMetadata = {
   batchGroup?: string;
   printKind?: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT";
   photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number };
+  nativePreviewToken?: string;
 };
 
 export type CustomerPendingSelectionMetadata = {
@@ -20,6 +21,7 @@ export type CustomerPendingSelectionMetadata = {
 
 export type CustomerPendingSelection = {
   files: File[];
+  nativePreviewTokens: Array<string | null>;
   metadata: CustomerPendingSelectionMetadata;
 };
 
@@ -82,7 +84,7 @@ function fileRecordKey(storageKey: string, index: number): string {
   return `${storageKey}\u0000${String(index).padStart(2, "0")}`;
 }
 
-function metadataForFile(file: File): CustomerPendingFileMetadata {
+function metadataForFile(file: File, previewTokens?: WeakMap<File, string>): CustomerPendingFileMetadata {
   const tagged = file as File & {
     __smartPrintBatchGroup?: string;
     __smartPrintPrintKind?: string;
@@ -94,7 +96,8 @@ function metadataForFile(file: File): CustomerPendingFileMetadata {
     ...(tagged.webkitRelativePath ? { webkitRelativePath: tagged.webkitRelativePath } : {}),
     ...(tagged.__smartPrintBatchGroup ? { batchGroup: tagged.__smartPrintBatchGroup } : {}),
     ...(printKind === "PHOTO" || printKind === "ID_DOCUMENT" ? { printKind } : {}),
-    ...(tagged.__smartPrintPhotoSettings ? { photoSettings: tagged.__smartPrintPhotoSettings } : {})
+    ...(tagged.__smartPrintPhotoSettings ? { photoSettings: tagged.__smartPrintPhotoSettings } : {}),
+    ...(previewTokens?.get(file) ? { nativePreviewToken: previewTokens.get(file) } : {})
   };
 }
 
@@ -104,7 +107,7 @@ function metadataForFile(file: File): CustomerPendingFileMetadata {
  * Files are committed together so an interrupted save leaves the previous
  * selection intact instead of a partially replaced one.
  */
-export async function saveCustomerPendingFiles(storageKey: string, files: File[]): Promise<void> {
+export async function saveCustomerPendingFiles(storageKey: string, files: File[], previewTokens?: WeakMap<File, string>): Promise<void> {
   const database = await openDatabase();
   try {
     const transaction = database.transaction(FILE_STORE, "readwrite");
@@ -125,7 +128,7 @@ export async function saveCustomerPendingFiles(storageKey: string, files: File[]
         size: file.size,
         lastModified: file.lastModified,
         blob: file,
-        fileMetadata: metadataForFile(file)
+        fileMetadata: metadataForFile(file, previewTokens)
       };
       store.put(record, fileRecordKey(storageKey, index));
     });
@@ -174,6 +177,7 @@ export async function loadCustomerPendingSelection(storageKey: string): Promise<
     if (!storedMetadata || storedMetadata.version !== 1 || records.length === 0) return null;
 
     records.sort((left, right) => left.index - right.index);
+    const nativePreviewTokens: Array<string | null> = [];
     const files = records.map(record => {
       const file = new File([record.blob], record.name, {
         type: record.type,
@@ -187,6 +191,7 @@ export async function loadCustomerPendingSelection(storageKey: string): Promise<
       if (record.fileMetadata.batchGroup) file.__smartPrintBatchGroup = record.fileMetadata.batchGroup;
       if (record.fileMetadata.printKind) file.__smartPrintPrintKind = record.fileMetadata.printKind;
       if (record.fileMetadata.photoSettings) file.__smartPrintPhotoSettings = record.fileMetadata.photoSettings;
+      nativePreviewTokens.push(record.fileMetadata.nativePreviewToken ?? null);
       if (record.fileMetadata.webkitRelativePath) {
         Object.defineProperty(file, "webkitRelativePath", {
           configurable: true,
@@ -198,6 +203,7 @@ export async function loadCustomerPendingSelection(storageKey: string): Promise<
     });
     return {
       files,
+      nativePreviewTokens,
       metadata: {
         selectedFileIndex: Math.min(Math.max(0, storedMetadata.selectedFileIndex || 0), Math.max(0, files.length - 1)),
         batchName: typeof storedMetadata.batchName === "string" ? storedMetadata.batchName : "",
