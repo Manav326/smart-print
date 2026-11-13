@@ -1200,8 +1200,9 @@ customerApi.MapGet("/orders/{orderKey:guid}/tracking", async (
                  session.TenantId == item.TenantId &&
                  session.Id == item.CustomerSessionId &&
                  session.CustomerUserId == customerId))))
+        .OrderBy(item => item.CreatedUtc)
         .Select(item => new { item.Id, item.TenantId, item.BatchId })
-        .SingleOrDefaultAsync(ct);
+        .FirstOrDefaultAsync(ct);
 
     if (anchorJob is null)
     {
