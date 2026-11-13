@@ -44,6 +44,27 @@ public sealed class DocumentAnalyzerTests
         Assert.Throws<DocumentValidationException>(() => DocumentAnalyzer.Analyse(bytes, ".png"));
     }
 
+    [Fact]
+    public void IdentifiesPngFromContentWhenTheFilenameSaysPdf()
+    {
+        var result = DocumentAnalyzer.Analyse(CreatePng(8, 6), ".pdf");
+
+        Assert.Equal("image/png", result.MediaType);
+        Assert.Equal(".png", result.Extension);
+    }
+
+    [Fact]
+    public void UsesTheSameFirst1024BytePdfHeaderWindowAsAndroid()
+    {
+        var accepted = new byte[1028];
+        "%PDF-"u8.CopyTo(accepted.AsSpan(1023));
+        Assert.Equal(".pdf", DocumentAnalyzer.IdentifyExtension(accepted));
+
+        var rejected = new byte[1029];
+        "%PDF-"u8.CopyTo(rejected.AsSpan(1024));
+        Assert.Null(DocumentAnalyzer.IdentifyExtension(rejected));
+    }
+
     private static byte[] CreatePng(int width, int height)
     {
         using var output = new MemoryStream();
