@@ -235,7 +235,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
     if(!selected)return;
     const supportedMime=resolvePhotoSourceMimeType(selected);
     if(!supportedMime){setError("Choose one JPG or PNG photo.");event.currentTarget.value="";return;}
-    if(selected.size<=0||selected.size>UPLOAD_LIMITS.maxFileBytes){setError(`Choose a photo up to ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB.`);event.currentTarget.value="";return;}
+    if(selected.size<=0){setError("Choose a non-empty photo.");event.currentTarget.value="";return;}
     const normalized=selected.type===supportedMime?selected:new File([selected],selected.name,{type:supportedMime,lastModified:selected.lastModified});
     setSource(normalized);setEditingDocumentId(null);setInitialSettings(undefined);setStatus("");setError("");
   }
@@ -245,8 +245,8 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
     if(!source||!sheet||saving)return;
     const bridge=nativeBridge();
     if(!bridge){setError("Open Photo Studio from the SmartPrint Android app to save a private sheet.");return;}
-    if(source.size<=0||source.size>UPLOAD_LIMITS.maxFileBytes||sheet.file.size<=0||sheet.file.size>UPLOAD_LIMITS.maxFileBytes){
-      setError(`Each photo file must be within ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB. Choose a smaller original or reduce the photo count.`);
+    if(source.size<=0||sheet.file.size<=0){
+      setError("The original photo or prepared sheet is empty. Choose the photo again and retry.");
       return;
     }
     setSaving(true);setError("");setStatus("Saving securely on this device…");

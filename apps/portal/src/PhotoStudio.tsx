@@ -557,9 +557,9 @@ export default function PhotoStudio({
             {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
             {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm,textLayers,sharedPhotoTile);
           let blob=await canvasToBlob(canvas,"image/jpeg",.9);
-          if(blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(canvas,"image/jpeg",.82);
+          if(mode!=="private-library"&&blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(canvas,"image/jpeg",.82);
           jpegByteLength+=blob.size;
-          if(jpegByteLength+pdfStructureAllowance>MAX_FILE_BYTES)
+          if(mode!=="private-library"&&jpegByteLength+pdfStructureAllowance>MAX_FILE_BYTES)
             throw new Error(`The prepared photo PDF would exceed SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo, choose fewer photos per job, or split the order into smaller batches.`);
           jpegPages.push(new Uint8Array(await blob.arrayBuffer()));
         }
@@ -570,7 +570,7 @@ export default function PhotoStudio({
       const bytes=buildPhotoPdf(jpegPages);
       const buffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength) as ArrayBuffer;
       const pdf=new Blob([buffer],{type:"application/pdf"});
-      if(pdf.size>MAX_FILE_BYTES)throw new Error(`The prepared photo PDF exceeds SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo or reduce the number of copies.`);
+      if(mode!=="private-library"&&pdf.size>MAX_FILE_BYTES)throw new Error(`The prepared photo PDF exceeds SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo or reduce the number of copies.`);
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
       const editorSettings: PhotoStudioEditorSettings = {
         sizeId: size.id,

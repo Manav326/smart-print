@@ -105,6 +105,56 @@ class PhotoStudioStoreInstrumentedTest {
     }
 
     @Test
+    fun privatePhotoMetadataDropsTransferPayloadsAndRepairsPreviouslySavedDocuments() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val isolatedFiles = File(context.cacheDir, "photo-store-metadata-" + UUID.randomUUID()).apply { mkdirs() }
+        val isolatedCache = File(isolatedFiles, "cache").apply { mkdirs() }
+        val store = PhotoStudioStore(isolatedFiles, isolatedCache)
+        val supplied = JSONObject()
+            .put("title", "Large private photo")
+            .put("sourceName", "large-photo.jpg")
+            .put("sourceMime", "image/jpeg")
+            .put("sizeCode", "35x45")
+            .put("photoCount", 8)
+            .put("photosPerPage", 8)
+            .put("pageCount", 1)
+            .put("resolutionDpi", 300)
+            .put("sourceBase64", "S".repeat(96 * 1024))
+            .put("pdfBase64", "P".repeat(96 * 1024))
+
+        val prepared = store.savePreparedOutput(testPdf(), testJpeg(), supplied)
+        val id = prepared.name.removePrefix(PhotoStudioStore.FILE_PREFIX).removeSuffix(".spph")
+        val metadataFile = File(store.root, "$id.meta")
+        val savedMetadata = store.readMetadata(prepared)
+        assertFalse(savedMetadata.has("sourceBase64"))
+        assertFalse(savedMetadata.has("pdfBase64"))
+        assertTrue("Persisted metadata must stay small even when transfer payloads are large.",
+            metadataFile.length() < 64L * 1024L)
+
+        // Recreate the metadata format written by the old implementation, then
+        // verify that opening the document repairs it transparently.
+        val legacyMetadata = JSONObject(savedMetadata.toString())
+            .put("sourceBase64", "S".repeat(96 * 1024))
+            .put("pdfBase64", "P".repeat(96 * 1024))
+        val writer = PhotoStudioStore::class.java.getDeclaredMethod(
+            "writeEncryptedAtomically", File::class.java, ByteArray::class.java
+        ).apply { isAccessible = true }
+        writer.invoke(store, metadataFile, legacyMetadata.toString().toByteArray(Charsets.UTF_8))
+
+        val repaired = store.readMetadata(prepared)
+        assertEquals("Large private photo", repaired.optString("title"))
+        assertFalse(repaired.has("sourceBase64"))
+        assertFalse(repaired.has("pdfBase64"))
+        assertTrue("Legacy transfer data must be removed after migration.",
+            metadataFile.length() < 64L * 1024L)
+        assertTrue("The saved PDF remains previewable after metadata repair.",
+            !store.createThumbnailBase64(prepared).isNullOrBlank())
+
+        store.deletePrepared(prepared)
+        isolatedFiles.deleteRecursively()
+    }
+
+    @Test
     fun photoQuantityUsesTheGeneratedMaximumAtTheStorageBoundary() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val isolatedFiles = File(context.cacheDir, "photo-store-count-" + UUID.randomUUID()).apply { mkdirs() }

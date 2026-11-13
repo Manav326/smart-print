@@ -36,12 +36,8 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
     }
 
     fun savePreparedOutput(pdfBytes: ByteArray, sourceBytes: ByteArray, suppliedMetadata: JSONObject): File {
-        require(pdfBytes.size.toLong() in 1L..MAX_PREPARED_BYTES) {
-            "The prepared photo sheet exceeds SmartPrint's private document limit."
-        }
-        require(sourceBytes.size.toLong() in 1L..MAX_SOURCE_BYTES) {
-            "The original photo exceeds SmartPrint's private source limit."
-        }
+        require(pdfBytes.isNotEmpty()) { "The prepared photo sheet is empty." }
+        require(sourceBytes.isNotEmpty()) { "The original photo is empty." }
         require(hasPdfSignature(pdfBytes)) { "The prepared photo sheet could not be verified." }
 
         val sizeCode = suppliedMetadata.optString("sizeCode")
@@ -64,7 +60,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         val output = documentFile(id)
         val source = sourceFile(id)
         val metadataFile = metadataFile(id)
-        val metadata = JSONObject(suppliedMetadata.toString()).apply {
+        val metadata = compactMetadata(suppliedMetadata).apply {
             put("id", id)
             put("title", safeTitle(optString("title"), sizeCode))
             put("sizeCode", sizeCode)
@@ -81,7 +77,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         try {
             writeEncryptedAtomically(output, pdfBytes)
             writeEncryptedAtomically(source, sourceBytes)
-            writeEncryptedAtomically(metadataFile, metadata.toString().toByteArray(Charsets.UTF_8))
+            writeMetadataAtomically(metadataFile, metadata)
         } catch (error: Exception) {
             output.delete()
             source.delete()
@@ -93,12 +89,8 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
 
     fun updatePreparedOutput(id: String, pdfBytes: ByteArray, sourceBytes: ByteArray, suppliedMetadata: JSONObject): File {
         val output = findById(id) ?: error("This private photo sheet is no longer available.")
-        require(pdfBytes.size.toLong() in 1L..MAX_PREPARED_BYTES) {
-            "The prepared photo sheet exceeds SmartPrint's private document limit."
-        }
-        require(sourceBytes.size.toLong() in 1L..MAX_SOURCE_BYTES) {
-            "The original photo exceeds SmartPrint's private source limit."
-        }
+        require(pdfBytes.isNotEmpty()) { "The prepared photo sheet is empty." }
+        require(sourceBytes.isNotEmpty()) { "The original photo is empty." }
         require(hasPdfSignature(pdfBytes)) { "The prepared photo sheet could not be verified." }
         val sizeCode = suppliedMetadata.optString("sizeCode")
         require(sizeCode in PHOTO_SIZE_LIMITS.keys) { "Choose a supported photo size before saving." }
@@ -116,7 +108,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
             "The prepared photo resolution could not be verified."
         }
         val existing = readMetadata(output)
-        val metadata = JSONObject(suppliedMetadata.toString()).apply {
+        val metadata = compactMetadata(suppliedMetadata).apply {
             put("id", id)
             put("title", safeTitle(existing.optString("title", optString("title")), sizeCode))
             put("sizeCode", sizeCode)
@@ -129,7 +121,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         }
         writeEncryptedAtomically(output, pdfBytes)
         writeEncryptedAtomically(sourceFile(id), sourceBytes)
-        writeEncryptedAtomically(metadataFile(id), metadata.toString().toByteArray(Charsets.UTF_8))
+        writeMetadataAtomically(metadataFile(id), metadata)
         return output
     }
 
@@ -154,9 +146,20 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
 
     fun readMetadata(file: File): JSONObject {
         require(isPreparedDocument(file)) { "Only a private Photo Studio document can be opened here." }
-        val bytes = readEncrypted(metadataFile(idFromFile(file)), MAX_METADATA_BYTES)
+        val metadataFile = metadataFile(idFromFile(file))
+        val bytes = readEncrypted(metadataFile, MAX_LEGACY_METADATA_BYTES)
         return try {
-            JSONObject(String(bytes, Charsets.UTF_8))
+            val stored = JSONObject(String(bytes, Charsets.UTF_8))
+            val compacted = compactMetadata(stored)
+            // Older builds persisted the full Base64 PDF and source in this JSON
+            // record as well as in their separately encrypted vault files. Strip
+            // those duplicate payloads once, so existing private sheets become
+            // readable again without having to recreate or delete them.
+            val needsMigration = stored.has("pdfBase64") ||
+                stored.has("sourceBase64") ||
+                bytes.size.toLong() > MAX_METADATA_BYTES
+            if (needsMigration) writeMetadataAtomically(metadataFile, compacted)
+            compacted
         } finally {
             bytes.fill(0)
         }
@@ -167,13 +170,13 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         val safe = safeTitle(title, metadata.optString("sizeCode"))
         metadata.put("title", safe)
         metadata.put("updatedUtc", System.currentTimeMillis())
-        writeEncryptedAtomically(metadataFile(idFromFile(file)), metadata.toString().toByteArray(Charsets.UTF_8))
+        writeMetadataAtomically(metadataFile(idFromFile(file)), metadata)
         return metadata
     }
 
     fun materializePdf(file: File): File {
         require(isPreparedDocument(file)) { "Only a private Photo Studio PDF can be opened or printed." }
-        val bytes = readEncrypted(file, MAX_PREPARED_BYTES)
+        val bytes = readEncrypted(file)
         return try {
             require(hasPdfSignature(bytes)) { "The private photo sheet is damaged. Prepare it again from the original photo." }
             writeTransient(bytes, ".pdf")
@@ -184,7 +187,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
 
     fun readOriginalPhoto(file: File): ByteArray {
         require(isPreparedDocument(file)) { "Only a private Photo Studio document can be edited here." }
-        return readEncrypted(sourceFile(idFromFile(file)), MAX_SOURCE_BYTES)
+        return readEncrypted(sourceFile(idFromFile(file)))
     }
 
     fun materializeOriginalPhoto(file: File): File {
@@ -267,16 +270,43 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
     private fun metadataFile(id: String) = File(root, id + ".meta")
     private fun idFromFile(file: File): String = file.name.removePrefix(FILE_PREFIX).removeSuffix(".spph")
 
-    private fun readEncrypted(file: File, maximumBytes: Long): ByteArray {
+    private fun readEncrypted(file: File, maximumBytes: Long? = null): ByteArray {
         val canonical = file.canonicalFile
         require(canonical.parentFile?.canonicalPath == root.canonicalPath && canonical.isFile) {
             "The private Photo Studio data is no longer available."
         }
         val encrypted = canonical.readBytes()
-        require(encrypted.size.toLong() <= maximumBytes + VAULT_OVERHEAD_BYTES) {
-            "The private Photo Studio data exceeds its allowed size."
+        if (maximumBytes != null) {
+            require(encrypted.size.toLong() <= maximumBytes + VAULT_OVERHEAD_BYTES) {
+                "The private Photo Studio metadata exceeds its allowed size."
+            }
         }
         return decrypt(encrypted, maximumBytes)
+    }
+
+    private fun compactMetadata(supplied: JSONObject): JSONObject {
+        val allowedKeys = listOf(
+            "title", "sourceName", "sourceMime", "sizeCode", "photoCount",
+            "photosPerPage", "pageCount", "resolutionDpi", "captionHeightMm",
+            "editorSettings", "id", "createdUtc", "updatedUtc"
+        )
+        return JSONObject().apply {
+            allowedKeys.forEach { key ->
+                if (supplied.has(key)) put(key, supplied.get(key))
+            }
+        }
+    }
+
+    private fun writeMetadataAtomically(target: File, metadata: JSONObject) {
+        val bytes = metadata.toString().toByteArray(Charsets.UTF_8)
+        try {
+            require(bytes.size.toLong() <= MAX_METADATA_BYTES) {
+                "Photo Studio editor details are too large to save."
+            }
+            writeEncryptedAtomically(target, bytes)
+        } finally {
+            bytes.fill(0)
+        }
     }
 
     private fun writeEncryptedAtomically(target: File, plaintext: ByteArray) {
@@ -317,7 +347,7 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         }
     }
 
-    private fun decrypt(envelope: ByteArray, maximumBytes: Long): ByteArray {
+    private fun decrypt(envelope: ByteArray, maximumBytes: Long?): ByteArray {
         require(envelope.size >= VAULT_HEADER.size + IV_BYTES + GCM_TAG_BYTES &&
             VAULT_HEADER.indices.all { envelope[it] == VAULT_HEADER[it] }) {
             "This private Photo Studio file is incomplete or unsupported."
@@ -327,7 +357,9 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.DECRYPT_MODE, vaultKey, GCMParameterSpec(GCM_TAG_BITS, iv))
         val plaintext = cipher.doFinal(ciphertext)
-        require(plaintext.size.toLong() <= maximumBytes) { "The private Photo Studio data is too large." }
+        if (maximumBytes != null) {
+            require(plaintext.size.toLong() <= maximumBytes) { "The private Photo Studio metadata is too large." }
+        }
         return plaintext
     }
 
@@ -370,9 +402,11 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         private const val GCM_TAG_BITS = 128
         private const val GCM_TAG_BYTES = 16
         private const val IV_BYTES = 12
-        private const val MAX_PREPARED_BYTES = UploadLimits.MAX_FILE_BYTES
-        private const val MAX_SOURCE_BYTES = UploadLimits.MAX_FILE_BYTES
         private const val MAX_METADATA_BYTES = 64L * 1024L
+        // The old bridge duplicated two Base64 payloads (each up to 50 MiB)
+        // inside metadata. This bounded allowance is migration-only; PDF and
+        // original-photo files themselves have no upload-sized vault limit.
+        private const val MAX_LEGACY_METADATA_BYTES = 160L * 1024L * 1024L
         private const val VAULT_OVERHEAD_BYTES = 64L
         private const val TRANSIENT_RETENTION_MILLIS = 30L * 60L * 1000L
         private const val THUMBNAIL_WIDTH = 320
