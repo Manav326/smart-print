@@ -876,10 +876,13 @@ public sealed class AgentLocalQueueStore
                 if (!documentPath.StartsWith(queuePrefix, comparison))
                     throw new InvalidDataException("The private document path is outside the protected queue.");
                 await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, ct);
-                var photoSourcePath = Path.GetFullPath(
-                    entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
-                await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, ct);
             }
+
+            var photoSourcePath = entry.PhotoSourcePath;
+            if (string.IsNullOrWhiteSpace(photoSourcePath) && !string.IsNullOrWhiteSpace(entry.DocumentPath))
+                photoSourcePath = entry.DocumentPath + ".photo.source";
+            if (!string.IsNullOrWhiteSpace(photoSourcePath))
+                await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, ct);
 
             await SaveManifestAsync(entry with
             {
