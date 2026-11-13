@@ -523,6 +523,8 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
   const sourceHash = createHash("sha256").update(sourcePng).digest("hex");
   const apiRequests = [];
   const unhandledApi = [];
+  const sourcePhotoPreviewRequests = [];
+  const revisionRequests = [];
   let revisedPdf = null;
   let revisionRequest = null;
   let revisionSaved = false;
@@ -559,6 +561,11 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
       return json({ mode: "CLOUD" });
     }
     if (path === "/api/v1/shop/print-jobs/" + PHOTO_JOB_ID + "/document" && method === "GET") {
+      const variant = url.searchParams.get("variant");
+      if (variant === "photo-source") {
+        sourcePhotoPreviewRequests.push({ variant, jobId: PHOTO_JOB_ID });
+        return route.fulfill({ status: 200, contentType: "image/png", body: sourcePng });
+      }
       return route.fulfill({
         status: 200,
         contentType: revisionSaved && revisedPdf ? "application/pdf" : "image/png",
@@ -593,6 +600,7 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
       assert.equal(sizeCode, "35x45");
       assert.ok(fileName.toLowerCase().endsWith(".pdf"));
       revisionRequest = { jobId: PHOTO_JOB_ID, method, fileName, requestedCount, perPage, sizeCode, pdfBytes: revisedPdf.length, pageCount };
+      revisionRequests.push(revisionRequest);
       revisionSaved = true;
       return json({
         id: PHOTO_JOB_ID, status: "AWAITING_SHOP_APPROVAL", pageCount, printKind: "PHOTO",
@@ -675,12 +683,57 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
   assert.match(await preview.innerText(), /17 35 × 45 mm photos · 9 per A4 page · 2 A4 PDF page\(s\)/);
   assert.ok(revisionRequest.pdfBytes > 1000);
   await page.screenshot({ path: join(artifactDirectory, "real-shop-owner-saved-pdf.png"), fullPage: true });
+
+  // Reopen the saved job from its PDF preview. Photo Studio must fetch the
+  // retained source image, restore the exact crop/layout/form choices, and
+  // return to the saved PDF on Cancel rather than previewing the source.
+  await page.getByRole("button", { name: "Enhance photo for printing" }).click();
+  const reopenedStudio = page.getByRole("dialog", { name: "Photo Studio" });
+  await reopenedStudio.waitFor({ state: "visible" });
+  assert.equal(sourcePhotoPreviewRequests.length, 2,
+    "The shop editor must retrieve the retained original source for the repeat edit.");
+  assert.equal(await page.getByLabel("Photo size").inputValue(), "35x45");
+  assert.equal(await page.getByLabel("Number of photos").inputValue(), "17");
+  assert.equal(await page.getByLabel("Photos per A4 page").inputValue(), "9");
+  assert.equal(await page.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).isChecked(), true);
+  assert.equal(await page.getByLabel("Name for form (optional)").inputValue(), "Shop Owner QA");
+  assert.equal(await page.getByLabel("Date of birth (optional)").inputValue(), "1998-05-17");
+  await activatePhotoTool(page, "Crop", "Zoom");
+  assert.equal(await getEditorControl(page, "Zoom").inputValue(), "1.25");
+  assert.equal(await getEditorControl(page, "Horizontal position").inputValue(), "48");
+  assert.equal(await getEditorControl(page, "Vertical position").inputValue(), "52");
+  await activatePhotoTool(page, "Looks", "Brightness");
+  assert.equal(await page.locator("#photo-studio-look-crisp").getAttribute("aria-pressed"), "true");
+  await page.getByRole("button", { name: "Close Photo Studio" }).click();
+  await page.getByRole("dialog").waitFor({ state: "visible" });
+  assert.match(await page.getByRole("dialog").innerText(), /17 35 × 45 mm photos · 9 per A4 page · 2 A4 PDF page\(s\)/,
+    "Canceling a repeat edit must return to the current saved PDF preview.");
+
+  // Save a second revision into the same job. The original source remains the
+  // same bytes; no replacement PDF becomes the source of the next edit.
+  await page.getByRole("button", { name: "Enhance photo for printing" }).click();
+  await page.getByRole("dialog", { name: "Photo Studio" }).waitFor({ state: "visible" });
+  await page.getByRole("button", { name: "Save sheet to this job" }).click();
+  await page.getByText(/The enhanced multi-page A4 photo PDF is saved to the same print job/).waitFor({ state: "visible", timeout: 90000 });
+  assert.equal(revisionRequests.length, 2, "The same photo job should accept successive revisions.");
+  assert.deepEqual(revisionRequests.map(item => item.jobId), [PHOTO_JOB_ID, PHOTO_JOB_ID],
+    "Repeated edits must update one job, not create new print jobs.");
+  assert.equal(sourcePhotoPreviewRequests.length, 3,
+    "Each edit must reopen the same retained source, not the previous PDF.");
+  assert.equal(createHash("sha256").update(sourcePng).digest("hex"), sourceHash,
+    "The retained original source bytes must remain unchanged across repeated edits.");
+  const secondSavedPreview = page.getByRole("dialog");
+  await secondSavedPreview.waitFor({ state: "visible" });
+  assert.match(await secondSavedPreview.innerText(), /17 35 × 45 mm photos · 9 per A4 page · 2 A4 PDF page\(s\)/);
   assert.equal(pageErrors.length, 0, "Uncaught shop workspace errors: " + pageErrors.join("; "));
+  assert.deepEqual(unhandledApi, [], "Unexpected API calls: " + JSON.stringify(unhandledApi));
   await context.close();
   return {
     label: "real-shop-owner-existing-job",
     originalJobId: PHOTO_JOB_ID,
     savedJobId: revisionRequest.jobId,
+    revisionCount: revisionRequests.length,
+    sourcePhotoPreviewRequests: sourcePhotoPreviewRequests.length,
     photoCount: revisionRequest.requestedCount,
     photosPerPage: revisionRequest.perPage,
     pageCount: revisionRequest.pageCount,
