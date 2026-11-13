@@ -152,7 +152,10 @@ internal object CustomerOrderTrackingPresentation {
         if (current != null) {
             return when (current.title) {
                 "Shop review" -> "The shop is reviewing your order"
-                "Payment" -> "Payment needs attention"
+                "Payment" -> if (
+                    payment == "PAYMENT_REJECTED" || payment == "REJECTED" ||
+                    statuses.any { it.equals("PAYMENT_REJECTED", true) }
+                ) "Payment needs attention" else "Waiting for payment"
                 "Printing" -> "Your order is being printed"
                 else -> current.title
             }
