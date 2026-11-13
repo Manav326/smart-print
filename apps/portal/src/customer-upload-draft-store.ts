@@ -284,7 +284,7 @@ export async function clearCustomerPendingSelectionsForStation(publicCode: strin
     const transaction = database.transaction([FILE_STORE, METADATA_STORE], "readwrite");
     const done = transactionDone(transaction);
     const prefix = `${publicCode}:`;
-    const range = IDBKeyRange.bound(prefix, `${prefix}\\uffff`);
+    const range = IDBKeyRange.bound(prefix, prefix + String.fromCharCode(0xffff));
     const fileStore = transaction.objectStore(FILE_STORE);
     const fileKeysRequest = fileStore.getAllKeys(range);
     fileKeysRequest.onsuccess = () => fileKeysRequest.result.forEach(key => fileStore.delete(key));
