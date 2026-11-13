@@ -2383,7 +2383,7 @@ class MainActivity : AppCompatActivity() {
             }, LinearLayout.LayoutParams(-2, dp(40)).apply { marginStart = dp(8) })
             column.addView(sourceRow, linearParams().apply { bottomMargin = dp(4) })
         }
-        if (isPicker && !fileChooserSelectFolders) {
+        if (isPicker && !fileChooserSelectFolders && portalUrl != null) {
             requestPickerStudioMetadata()
             addIdStudioPickerSection(column)
             addPhotoStudioPickerSection(column)
