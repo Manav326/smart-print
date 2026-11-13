@@ -112,6 +112,7 @@ export async function saveCustomerPendingFiles(storageKey: string, files: File[]
   try {
     const transaction = database.transaction(FILE_STORE, "readwrite");
     const store = transaction.objectStore(FILE_STORE);
+    const done = transactionDone(transaction);
     const range = IDBKeyRange.bound(`${storageKey}\u0000`, `${storageKey}\u0000\uffff`);
     const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
       const request = store.getAllKeys(range);
@@ -132,7 +133,7 @@ export async function saveCustomerPendingFiles(storageKey: string, files: File[]
       };
       store.put(record, fileRecordKey(storageKey, index));
     });
-    await transactionDone(transaction);
+    await done;
   } finally {
     database.close();
   }
@@ -145,12 +146,13 @@ export async function saveCustomerPendingSelectionMetadata(
   const database = await openDatabase();
   try {
     const transaction = database.transaction(METADATA_STORE, "readwrite");
+    const done = transactionDone(transaction);
     transaction.objectStore(METADATA_STORE).put({
       ...metadata,
       version: 1,
       updatedAt: Date.now()
     } satisfies StoredMetadata, storageKey);
-    await transactionDone(transaction);
+    await done;
   } finally {
     database.close();
   }
@@ -160,6 +162,7 @@ export async function loadCustomerPendingSelection(storageKey: string): Promise<
   const database = await openDatabase();
   try {
     const transaction = database.transaction([FILE_STORE, METADATA_STORE], "readonly");
+    const done = transactionDone(transaction);
     const metadataRequest = transaction.objectStore(METADATA_STORE).get(storageKey);
     const range = IDBKeyRange.bound(`${storageKey}\u0000`, `${storageKey}\u0000\uffff`);
     const filesRequest = transaction.objectStore(FILE_STORE).getAll(range);
@@ -173,7 +176,7 @@ export async function loadCustomerPendingSelection(storageKey: string): Promise<
         filesRequest.onerror = () => reject(filesRequest.error);
       })
     ]);
-    await transactionDone(transaction);
+    await done;
     if (!storedMetadata || storedMetadata.version !== 1 || records.length === 0) return null;
 
     records.sort((left, right) => left.index - right.index);
@@ -226,6 +229,7 @@ export async function clearCustomerPendingSelection(storageKey: string): Promise
   const database = await openDatabase();
   try {
     const transaction = database.transaction([FILE_STORE, METADATA_STORE], "readwrite");
+    const done = transactionDone(transaction);
     const fileStore = transaction.objectStore(FILE_STORE);
     const range = IDBKeyRange.bound(`${storageKey}\u0000`, `${storageKey}\u0000\uffff`);
     const keys = await new Promise<IDBValidKey[]>((resolve, reject) => {
@@ -235,7 +239,7 @@ export async function clearCustomerPendingSelection(storageKey: string): Promise
     });
     keys.forEach(key => fileStore.delete(key));
     transaction.objectStore(METADATA_STORE).delete(storageKey);
-    await transactionDone(transaction);
+    await done;
   } finally {
     database.close();
   }
