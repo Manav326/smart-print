@@ -77,6 +77,8 @@ assert.equal(favicon.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", "favico
 const faviconWidth = favicon.readUInt32BE(16);
 const faviconHeight = favicon.readUInt32BE(20);
 assert.equal(faviconWidth, faviconHeight, "favicon must be square");
+assert.equal(faviconWidth, 180, "favicon metadata must match the 180px Apple touch PNG width");
+assert.equal(faviconHeight, 180, "favicon metadata must match the 180px Apple touch PNG height");
 assert.ok(faviconWidth >= 112 && faviconHeight >= 112, "favicon/organization logo must be at least 112x112");
 assert.ok(htmlFiles[0].includes('"@type":"SoftwareApplication"'), "homepage must describe the app with structured data");
 assert.ok(htmlFiles[0].includes('"@type":"Organization"'), "homepage must describe its publisher");
