@@ -551,11 +551,22 @@ public sealed class AgentLocalQueueStore
         await Task.CompletedTask;
     }
 
+    public string EnsurePrivateTestOutputDirectory()
+    {
+        Directory.CreateDirectory(queueRoot);
+        if (applyWindowsAcl) SecureDirectory(queueRoot);
+        var directory = Path.Combine(queueRoot, "PrivateTestExports");
+        Directory.CreateDirectory(directory);
+        if (applyWindowsAcl) SecureDirectory(directory);
+        return Path.GetFullPath(directory);
+    }
+
     public async Task<int> PruneRetainedEntriesAsync(
         DateTimeOffset now,
         TimeSpan completedRetention,
         string pdfExportDirectory,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? privateTestOutputDirectory = null)
     {
         if (completedRetention <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(completedRetention));
@@ -568,11 +579,38 @@ public sealed class AgentLocalQueueStore
         var outputPrefix = outputRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         var cutoff = now - completedRetention;
+        var privateTestCutoff = now - TimeSpan.FromHours(24);
+        var privateTestPrefix = string.IsNullOrWhiteSpace(privateTestOutputDirectory)
+            ? null
+            : Path.GetFullPath(privateTestOutputDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
         var removed = 0;
 
         foreach (var entry in ReadEntries())
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (entry.PrivatePrinting &&
+                entry.OutputMode == PrinterOutputModeRules.PdfExport &&
+                entry.CompletedUtc is DateTimeOffset privateTestCompletedUtc &&
+                privateTestCompletedUtc <= privateTestCutoff &&
+                !entry.PrivatePurgePending &&
+                string.IsNullOrWhiteSpace(entry.DocumentPath))
+            {
+                // Test output is a local sensitive artifact, not a customer PDF.
+                // Keep it for 24 hours after the private source purge is confirmed,
+                // then securely erase it and its sanitized reconciliation manifest.
+                if (privateTestPrefix is null) continue;
+                if (!string.IsNullOrWhiteSpace(entry.OutputFilePath))
+                {
+                    var outputPath = Path.GetFullPath(entry.OutputFilePath);
+                    if (!outputPath.StartsWith(privateTestPrefix, comparison)) continue;
+                    await EraseProtectedQueueFileAsync(outputPath, queuePrefix, comparison, cancellationToken);
+                }
+                var privateManifestPath = GetManifestPath(entry.JobId);
+                if (File.Exists(privateManifestPath)) File.Delete(privateManifestPath);
+                removed++;
+                continue;
+            }
 
             if (entry.State == "LOCAL_UPLOAD_STAGED" && entry.LeaseExpiresUtc <= now)
             {
@@ -864,8 +902,10 @@ public sealed class AgentLocalQueueStore
         try
         {
             var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
-            if (!entry.PrivatePrinting || entry.State is not ("PRIVATE_PURGE_PENDING" or "OUTPUT_CONFIRMED") || entry.CompletedUtc is null)
-                throw new InvalidOperationException("A private source can be purged only after confirmed physical output.");
+            if (!entry.PrivatePrinting ||
+                entry.State is not ("PRIVATE_PURGE_PENDING" or "OUTPUT_CONFIRMED" or "PDF_EXPORT_REPORTED") ||
+                entry.CompletedUtc is null)
+                throw new InvalidOperationException("A private source can be purged only after verified physical output or a separately recorded test output.");
 
             var queueRootFull = Path.GetFullPath(queueRoot);
             var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
