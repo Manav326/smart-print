@@ -41,11 +41,16 @@ internal object CustomerOrderTrackingPresentation {
         val allReviewed = normalized.all { it !in early }
         val allResolved = active.isEmpty()
         val payment = paymentStatus.orEmpty().trim().uppercase(Locale.ROOT)
-        val hasBillableFiles = normalized.any { it !in excluded }
-        val billableIndexes = normalized.indices.filter { normalized[it] !in excluded }
         val perFilePayments = normalized.indices.map { index ->
             filePaymentStatuses.getOrNull(index).orEmpty().trim().uppercase(Locale.ROOT)
         }
+        // A rejected file with no charge does not block the batch payment stage.
+        // Cancelled/failed/refunded files with recorded payments remain visible in
+        // payment progress so a refund is never mistaken for "no payment required".
+        val billableIndexes = normalized.indices.filter { index ->
+            normalized[index] !in excluded || perFilePayments[index].isNotBlank()
+        }
+        val hasBillableFiles = billableIndexes.isNotEmpty()
         val batchPaymentKnown = payment.isNotBlank()
         val paymentVerifiedForBatch = if (batchPaymentKnown) {
             payment in paymentVerified
@@ -108,7 +113,11 @@ internal object CustomerOrderTrackingPresentation {
         }
         val paymentDetail = when {
             !hasBillableFiles -> "No payment required for excluded files"
+            payment == "REFUNDED" -> "Payment refunded"
+            payment == "PARTIALLY_REFUNDED" -> "Partial refund recorded"
             payment in paymentVerified -> "Payment verified"
+            perFilePayments.filter(String::isNotBlank).isNotEmpty() &&
+                perFilePayments.filter(String::isNotBlank).all { it == "REFUNDED" } -> "Payments refunded"
             payment in paymentPending -> when (payment) {
                 "CUSTOMER_REPORTED", "PAYMENT_REPORTED" -> "Payment reported · shop verification pending"
                 "PAYMENT_REJECTED", "REJECTED" -> "Payment was declined · review the payment details"
@@ -140,7 +149,8 @@ internal object CustomerOrderTrackingPresentation {
                     allOutputResolved && !allReady && readyCount > 0 -> "Order outcome"
                     allOutputResolved && readyCount == 0 -> "Order closed"
                     readyCount > 0 && !allReady -> "Partial output ready"
-                    normalized.any { it == "PDF_EXPORTED" } && normalized.none { it == "COMPLETED" } -> "PDF ready"
+                    normalized.all { it == "PDF_EXPORTED" } -> "PDF ready"
+                    normalized.any { it == "PDF_EXPORTED" } && normalized.any { it == "COMPLETED" } -> "Output ready"
                     else -> "Ready for collection"
                 },
                 readyDetail,
