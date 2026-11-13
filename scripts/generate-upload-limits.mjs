@@ -15,6 +15,7 @@ function positiveSafeInteger(name) {
 }
 
 const maxFileBytes = positiveSafeInteger("maxFileBytes");
+const maxPhotoCount = positiveSafeInteger("maxPhotoCount");
 const maxBatchFiles = positiveSafeInteger("maxBatchFiles");
 const maxBatchBytes = positiveSafeInteger("maxBatchBytes");
 const multipartOverheadBytes = positiveSafeInteger("multipartOverheadBytes");
@@ -36,6 +37,7 @@ public static class UploadLimits
 {
     public const long MaxFileBytes = ${maxFileBytes}L;
     public const int MaxBatchFiles = ${maxBatchFiles};
+    public const int MaxPhotoCount = ${maxPhotoCount};
     public const long MaxBatchBytes = ${maxBatchBytes}L;
     public const long MaxMultipartRequestBytes = ${maxMultipartRequestBytes}L;
     public const long PrivateRelayEncryptionOverheadBytes = ${privateRelayEncryptionOverheadBytes}L;
@@ -59,6 +61,7 @@ package com.quantaedge.smartprint
 internal object UploadLimits {
     const val MAX_FILE_BYTES: Long = ${maxFileBytes}L
     const val MAX_BATCH_FILES: Int = ${maxBatchFiles}
+    const val MAX_PHOTO_COUNT: Int = ${maxPhotoCount}
     const val MAX_BATCH_BYTES: Long = ${maxBatchBytes}L
     const val MAX_MULTIPART_REQUEST_BYTES: Long = ${maxMultipartRequestBytes}L
     const val PRIVATE_RELAY_ENCRYPTION_OVERHEAD_BYTES: Long = ${privateRelayEncryptionOverheadBytes}L
@@ -68,6 +71,7 @@ internal object UploadLimits {
 export const UPLOAD_LIMITS = Object.freeze({
   maxFileBytes: ${maxFileBytes},
   maxBatchFiles: ${maxBatchFiles},
+  maxPhotoCount: ${maxPhotoCount},
   maxBatchBytes: ${maxBatchBytes},
   maxMultipartRequestBytes: ${maxMultipartRequestBytes},
   privateRelayEncryptionOverheadBytes: ${privateRelayEncryptionOverheadBytes}
