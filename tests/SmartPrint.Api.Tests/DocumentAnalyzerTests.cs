@@ -73,6 +73,19 @@ public sealed class DocumentAnalyzerTests
     }
 
     [Fact]
+    public void RejectsPdfWithMoreThanFiveHundredPages()
+    {
+        var builder = new PdfDocumentBuilder();
+        for (var page = 0; page < 501; page++)
+            builder.AddPage(PageSize.A4);
+
+        var pdf = builder.Build();
+
+        Assert.Throws<DocumentValidationException>(() =>
+            DocumentAnalyzer.Analyse(pdf, ".pdf"));
+    }
+
+    [Fact]
     public void UsesTheSameFirst1024BytePdfHeaderWindowAsAndroid()
     {
         var accepted = new byte[1028];
