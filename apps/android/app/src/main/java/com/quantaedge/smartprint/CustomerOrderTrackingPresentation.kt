@@ -86,7 +86,8 @@ internal object CustomerOrderTrackingPresentation {
         }
         val printingState = when {
             !hasBillableFiles -> CustomerTrackingStepState.SKIPPED
-            allReady || allOutputResolved -> CustomerTrackingStepState.DONE
+            allReady || (allOutputResolved && normalized.any { it in ready }) -> CustomerTrackingStepState.DONE
+            allOutputResolved -> CustomerTrackingStepState.SKIPPED
             paymentState != CustomerTrackingStepState.DONE -> CustomerTrackingStepState.UPCOMING
             anyPrinting -> CustomerTrackingStepState.CURRENT
             else -> CustomerTrackingStepState.UPCOMING
@@ -136,6 +137,7 @@ internal object CustomerOrderTrackingPresentation {
             else -> "Your files are being checked"
         }
         val printDetail = when {
+            printingState == CustomerTrackingStepState.SKIPPED -> "No printing was required for these closed files"
             printingState == CustomerTrackingStepState.DONE && readyCount > 0 -> "Output completed or remaining files were closed"
             anyPrinting -> "Printer processing is underway"
             else -> "Starts after review and payment"
