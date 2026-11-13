@@ -382,6 +382,19 @@ test("customer photo previews show the source image and branded prepared pages w
  assert.doesNotMatch(preview,/photoSettingsByFileFingerprint\\[[^\\]]+\\]\\?<iframe/);
 });
 
+test("customer Photo Studio uploads the prepared PDF, not a second raw-photo copy or editor-settings payload",()=>{
+ const app=read("../src/App.tsx");
+ const start=app.indexOf("function applyPhotoSheets(");
+ const end=app.indexOf("function openPhotoStudio(",start);
+ assert.ok(start>=0&&end>start);
+ const flow=app.slice(start,end);
+ assert.match(flow,/const generated=sheets\.map\(sheet=>sheet\.file\),nextFiles=\[\.\.\.files\.slice\(0,index\),\.\.\.generated,\.\.\.files\.slice\(index\+1\)\]/);
+ assert.match(flow,/delete photos\[photoStudioSourceFingerprint\]/);
+ assert.match(flow,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
+ assert.match(flow,/setPhotoStudioSource\(null\)/);
+ assert.doesNotMatch(flow,/editorSettings|textLayers/);
+});
+
 test("the exact same Photo Studio is opened from the shop image review",()=>{
  const app=read("../src/App.tsx");
  assert.match(app,/openShopPhotoStudioForJob\(preview\.job,preview\)/);
@@ -427,6 +440,11 @@ test("local photo revisions use a purpose-bound grant and preserve local storage
  assert.match(program,/document\.StorageMode = previousStorageMode/);
  assert.match(program,/ActorId = grant\.ActorUserId/);
  assert.match(agent,/X-Print-Photo-Revision-Grant/);
+ const localRevisionStart=agent.indexOf('app.MapPost("/api/v1/local/documents/{jobId:guid}/photo-revision"');
+ const privateGuard=agent.indexOf("if (entry?.PrivatePrinting == true)",localRevisionStart);
+ const formRead=agent.indexOf("context.Request.ReadFormAsync(ct)",localRevisionStart);
+ assert.ok(localRevisionStart>=0&&privateGuard>localRevisionStart&&formRead>privateGuard,
+   "Private Printing must be rejected before the local Agent reads the prepared PDF or editor-settings form payload.");
  assert.match(agent,/ReplaceStagedPhotoDocumentAsync/);
  assert.match(agent,/local-document-photo-revisions\/\{jobId\}\/complete/);
  assert.match(queue,/await commitServerRevisionAsync\(\)/);
