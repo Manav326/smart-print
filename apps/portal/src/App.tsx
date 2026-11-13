@@ -5401,7 +5401,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         <ShieldCheck size={16}/>
         <span>{privatePrinting
           ? <><strong>Private Printing preselected.</strong> <InfoTooltip label="Change printing method"><span>You can still choose Standard Printing above before uploading.</span></InfoTooltip></>
-          : <><strong>Standard Printing selected.</strong>}</span>
+          : <strong>Standard Printing selected.</strong>}</span>
       </div>}
     </section>
     {privatePrinting
