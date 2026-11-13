@@ -58,7 +58,7 @@ for (let index = 0; index < pages.length; index += 1) {
     assert.doesNotThrow(() => JSON.parse(match[1]), `${path} has invalid JSON-LD`);
   }
 }
-const homepageJsonLd = [...htmlFiles[0].matchAll(/<script type="application\\/ld\\+json">([\\s\\S]*?)<\\/script>/g)]
+const homepageJsonLd = [...htmlFiles[0].matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)]
   .map(match => JSON.parse(match[1]));
 const homepageGraph = homepageJsonLd.flatMap(schema => schema["@graph"] ?? [schema]);
 const websiteSchema = homepageGraph.find(node => node["@type"] === "WebSite");
