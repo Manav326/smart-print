@@ -25,8 +25,9 @@ public static class DocumentAnalyzer
         if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
             return ".jpg";
 
-        var searchLength = Math.Min(bytes.Length, 1024);
-        for (var offset = 0; offset <= searchLength - 5; offset++)
+        var searchLength = Math.Min(bytes.Length, 1028);
+        var lastHeaderOffset = Math.Min(1023, searchLength - 5);
+        for (var offset = 0; offset <= lastHeaderOffset; offset++)
         {
             if (bytes.Slice(offset, 5).SequenceEqual("%PDF-"u8))
                 return ".pdf";
