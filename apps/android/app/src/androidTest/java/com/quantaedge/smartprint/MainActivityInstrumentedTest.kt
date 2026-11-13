@@ -376,6 +376,46 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
+    fun extensionlessPdfStillOpensInTheNativePdfViewerAndEditor() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val pdf = File(context.cacheDir, "smartprint-renamed-pdf-without-extension")
+        val document = android.graphics.pdf.PdfDocument()
+        try {
+            val page = document.startPage(
+                android.graphics.pdf.PdfDocument.PageInfo.Builder(300, 420, 1).create()
+            )
+            page.canvas.drawText("PDF content", 24f, 48f, android.graphics.Paint())
+            document.finishPage(page)
+            pdf.outputStream().use(document::writeTo)
+        } finally {
+            document.close()
+        }
+
+        try {
+            assertEquals("application/pdf", DocumentNamePolicy.mimeType(pdf))
+            assertTrue(DocumentNamePolicy.isPrintable(pdf))
+            assertTrue(DocumentNamePolicy.supportsInAppViewer(pdf))
+            assertEquals(1, DocumentBatchComposer.pageEdits(pdf).size)
+
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val viewer = SmartPrintDocumentViewer(activity, pdf, emptyList(), 0) {}
+                    try {
+                        val isPdfField = SmartPrintDocumentViewer::class.java
+                            .getDeclaredField("isPdf")
+                            .apply { isAccessible = true }
+                        assertEquals(true, isPdfField.getBoolean(viewer))
+                    } finally {
+                        viewer.dispose()
+                    }
+                }
+            }
+        } finally {
+            pdf.delete()
+        }
+    }
+
+    @Test
     fun acceptedShopQrIsSavedAsTheSelectedShopAndOpenedInTheWebView() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val shopPreferences = context.getSharedPreferences(
