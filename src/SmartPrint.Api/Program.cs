@@ -102,6 +102,7 @@ builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddHttpClient<SubscriptionRazorpayService>();
 builder.Services.AddSingleton<DocumentStorage>();
+builder.Services.AddSingleton<PlatformAdCreativeStorage>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddHostedService<PrivateRelayRetentionWorker>();
 builder.Services.AddSingleton<PrivateRelayWakeupService>(services =>
@@ -152,6 +153,7 @@ builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
 var app = builder.Build();
 
 app.MapRazorpaySubscriptionWebhookEndpoint();
+app.MapPublicAdvertisingEndpoints();
 
 if (builder.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup"))
 {
@@ -281,6 +283,7 @@ var platform = app.MapGroup("/api/v1/platform")
 platform.MapSubscriptionPlanEndpoints();
 platform.MapPlatformSubscriptionEndpoints();
 platform.MapPlatformOperationalSettingsEndpoints();
+platform.MapPlatformAdvertisingEndpoints();
 
 platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct) =>
 {
