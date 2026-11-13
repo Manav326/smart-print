@@ -3884,7 +3884,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     setLocalFallbackSuggested(false);
     try{
       const previousSessionKey=result
-        ?customerPendingSelectionStorageKey(publicCode,result.sessionToken)
+        ?customerPendingSelectionStorageKey(publicCode)
         :null;
       const value=await createCustomerSession(publicCode);
       if(previousSessionKey)await clearCustomerPendingSelection(previousSessionKey).catch(()=>undefined);
@@ -4491,7 +4491,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   void printerCapabilitiesJson;
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
-  const pendingSelectionStorageKey=customerPendingSelectionStorageKey(publicCode,sessionToken);
+  const pendingSelectionStorageKey=customerPendingSelectionStorageKey(publicCode);
   const [pendingSelectionRestored,setPendingSelectionRestored]=useState(false);
   const [draftPersistenceWarning,setDraftPersistenceWarning]=useState("");
   const [files,setFiles]=useState<File[]>([]);
