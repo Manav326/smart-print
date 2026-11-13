@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using SmartPrint.Agent;
 
 namespace SmartPrint.Agent.Tests;
@@ -926,6 +927,22 @@ public sealed class AgentLocalQueueStoreTests
             Assert.True(File.Exists(entry.DocumentPath));
             Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
 
+            // Simulate unexpected/stale source metadata and an encrypted sidecar.
+            // Private Printing purge must erase both and clear the manifest.
+            var retainedPhotoPath = entry.DocumentPath + ".photo.source";
+            File.Copy(entry.DocumentPath, retainedPhotoPath);
+            var manifestWithUnexpectedPhotoSource = store.Find(job.Id)! with
+            {
+                PhotoSourcePath = retainedPhotoPath,
+                PhotoSourceDocumentName = "private-original.jpg",
+                PhotoSourceMediaType = "image/jpeg",
+                PhotoSourceSha256 = entry.Sha256,
+                PhotoSourceSizeBytes = entry.SizeBytes
+            };
+            await File.WriteAllTextAsync(
+                Path.ChangeExtension(entry.DocumentPath, ".json"),
+                JsonSerializer.Serialize(manifestWithUnexpectedPhotoSource, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
             await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
 
             var sanitized = store.Find(job.Id)!;
@@ -937,6 +954,12 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal(string.Empty, sanitized.Sha256);
             Assert.Equal(0, sanitized.SizeBytes);
             Assert.False(File.Exists(entry.DocumentPath));
+            Assert.False(File.Exists(retainedPhotoPath));
+            Assert.Null(sanitized.PhotoSourcePath);
+            Assert.Null(sanitized.PhotoSourceDocumentName);
+            Assert.Null(sanitized.PhotoSourceMediaType);
+            Assert.Null(sanitized.PhotoSourceSha256);
+            Assert.Null(sanitized.PhotoSourceSizeBytes);
             Assert.Contains(store.GetPrivatePurgePendingJobs(), item => item.JobId == job.Id);
 
             await store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None);
