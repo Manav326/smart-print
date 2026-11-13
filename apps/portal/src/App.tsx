@@ -1682,6 +1682,13 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   async function applyShopPhotoStudio(sheets:PreparedPhotoSheet[]){
     const editor=shopPhotoStudio;
     if(!editor||sheets.length!==1)throw new Error("Prepare one multi-page A4 photo PDF before saving this job.");
+    if(editor.job.privatePrinting || !editor.job.photoSourceAvailable){
+      const message=editor.job.privatePrinting
+        ? "Private Printing keeps the original photo and editor settings on the customer's device. Shop-side revisions are disabled."
+        : "The original photo is no longer available for editing. Refresh the queue before trying again.";
+      setError(message);
+      throw new Error(message);
+    }
     const sheet=sheets[0];
     setBusyJobId(editor.job.id);
     try{
