@@ -502,7 +502,11 @@ function makePhotoJob(sourcePng, revisedPdf = null) {
     pageCount: revisedPdf ? 2 : 1, copies: 1, colourMode: "Colour", paperSize: "A4",
     isDuplex: false, currency: "INR", quotedAmountMinor: revisedPdf ? 42500 : 2500,
     createdUtc: "2026-11-08T00:00:00Z", storageMode: "CLOUD",
-    printKind: revisedPdf ? "PHOTO" : "PHOTO", photoSizeCode: revisedPdf ? "35x45" : null,
+    // The fixture models a standard photo job with a retained editable original.
+    // The shop UI now requires this server-owned capability flag before offering
+    // the edit action; private jobs deliberately never set it.
+    photoSourceAvailable: true,
+    printKind: "PHOTO", photoSizeCode: revisedPdf ? "35x45" : null,
     photoCount: revisedPdf ? 17 : 1, photoUnitPriceMinorSnapshot: 2500,
     document: {
       originalFileName: revisedPdf ? "SP-PS-QA-007_photo-sheet.pdf" : "owner-uploaded-source.png",
