@@ -538,8 +538,8 @@ public sealed class LocalAgentApiHostedService(
                 {
                     await localQueueStore.ReplaceStagedPhotoDocumentAsync(
                         jobId,
-                        entry.Sha256,
-                        entry.SizeBytes,
+                        sourceSha256,
+                        sourceSizeBytes,
                         outputName,
                         bytes,
                         analysis.PageCount,
