@@ -4491,6 +4491,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   void printerCapabilitiesJson;
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
+  const pendingSelectionStorageKey=customerPendingSelectionStorageKey(publicCode,sessionToken);
+  const [pendingSelectionRestored,setPendingSelectionRestored]=useState(false);
+  const [draftPersistenceWarning,setDraftPersistenceWarning]=useState("");
   const [files,setFiles]=useState<File[]>([]);
   const [selectedFileIndex,setSelectedFileIndex]=useState(0);
   const file=files[selectedFileIndex]??null;
@@ -4622,6 +4625,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   );
   const canOfferPrivatePrinting=Boolean(localAgent?.agentDeviceId && localAgent.documentEncryptionPublicKey);
 
+  async function persistPendingFiles(nextFiles:File[]) {
+    try {
+      await saveCustomerPendingFiles(pendingSelectionStorageKey,nextFiles,smartPrintNativePdfPreviewTokens);
+      setDraftPersistenceWarning("");
+    } catch {
+      setDraftPersistenceWarning("This selection is still available on this screen, but this device could not save a recovery copy. Keep SmartPrint open until upload finishes.");
+    }
+  }
+
   useEffect(()=>{
     if(privatePrinting)sessionStorage.setItem(privatePrintingStorageKey,"true");
     else sessionStorage.removeItem(privatePrintingStorageKey);
@@ -4662,6 +4674,55 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(!paymentOptions.upiEnabled&&paymentOptions.cashEnabled)setPaymentMethod("CASH");
     else if(paymentOptions.upiEnabled)setPaymentMethod("UPI");
   },[paymentOptions.upiEnabled,paymentOptions.cashEnabled]);
+
+  useEffect(()=>{
+    let active=true;
+    void loadCustomerPendingSelection(pendingSelectionStorageKey).then(selection=>{
+      if(!active||!selection)return;
+      selection.files.forEach((candidate,index)=>{
+        const token=selection.nativePreviewTokens[index];
+        if(token)smartPrintNativePdfPreviewTokens.set(candidate,token);
+      });
+      setFiles(selection.files);
+      setSelectedFileIndex(selection.metadata.selectedFileIndex);
+      setBatchName(selection.metadata.batchName);
+      setFileGroupNames(selection.metadata.fileGroupNames);
+      setGroupSettings(selection.metadata.groupSettings as Record<string,CustomerGroupSettings>);
+      setFileSettings(selection.metadata.fileSettings as Record<string,CustomerFileSettings>);
+      setPhotoSettingsByFileFingerprint(selection.metadata.photoSettingsByFileFingerprint);
+      setPrivatePrinting(selection.metadata.privatePrinting);
+      setPrivacyChoiceManuallySelected(selection.metadata.privacyChoiceManuallySelected);
+      setUploadMode(selection.metadata.privatePrinting?"LOCAL":selection.metadata.uploadMode);
+      setUploadModeManuallySelected(selection.metadata.uploadModeManuallySelected);
+    }).catch(()=>{
+      if(active)setDraftPersistenceWarning("SmartPrint could not restore the previous file selection from this device. Your saved shop orders are not affected.");
+    }).finally(()=>{
+      if(active)setPendingSelectionRestored(true);
+    });
+    return ()=>{active=false;};
+  },[pendingSelectionStorageKey]);
+
+  useEffect(()=>{
+    if(!pendingSelectionRestored)return;
+    if(files.length===0){
+      void clearCustomerPendingSelection(pendingSelectionStorageKey).catch(()=>undefined);
+      return;
+    }
+    void saveCustomerPendingSelectionMetadata(pendingSelectionStorageKey,{
+      selectedFileIndex,
+      batchName,
+      fileGroupNames,
+      groupSettings,
+      fileSettings,
+      photoSettingsByFileFingerprint,
+      privatePrinting,
+      privacyChoiceManuallySelected,
+      uploadMode,
+      uploadModeManuallySelected
+    }).catch(()=>{
+      setDraftPersistenceWarning("Your files remain selected, but some print settings could not be saved for recovery.");
+    });
+  },[pendingSelectionRestored,pendingSelectionStorageKey,files.length,selectedFileIndex,batchName,fileGroupNames,groupSettings,fileSettings,photoSettingsByFileFingerprint,privatePrinting,privacyChoiceManuallySelected,uploadMode,uploadModeManuallySelected]);
 
   useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
@@ -4890,6 +4951,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setUploaded(results[0]??null);
       setQuote(null);setJobStatus(null);setPayment(null);setPaymentReference("");
       setSelectedFileIndex(0);
+      await clearCustomerPendingSelection(pendingSelectionStorageKey).catch(()=>undefined);
       setFiles([]);
       // Upload succeeded; release only the temporary decrypted picker copies.
       // The saved encrypted Photo Studio document remains available in the app library.
@@ -5176,6 +5238,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
       if(urls.length)previews[fp]=urls;
     }
+    void persistPendingFiles(nextFiles);
     setFiles(nextFiles);setSelectedFileIndex(index);setSelectedPreparedPhotoPage(0);setFileGroupNames(groups);setFileSettings(settings);setPhotoSettingsByFileFingerprint(photos);setPhotoPreviewPagesByFingerprint(previews);setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);setError("");
   }
   function openPhotoStudio(candidate:File){
@@ -5340,6 +5403,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         }
         return updated;
       });
+      await persistPendingFiles(selected);
       setFiles(selected);
       setSelectedFileIndex(0);
       setError(nestedSkipped
@@ -5360,6 +5424,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const index = files.findIndex(candidate => customerFileFingerprint(candidate) === fingerprint);
     if (index < 0) return;
     const nextFiles = files.filter(candidate => customerFileFingerprint(candidate) !== fingerprint);
+    void persistPendingFiles(nextFiles);
     setFiles(nextFiles);
     setSelectedFileIndex(current => current === index
       ? Math.min(index, Math.max(0, nextFiles.length - 1))
@@ -5489,6 +5554,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const photoAlreadyUploaded=Boolean(file&&uploadedFileFingerprints.includes(customerFileFingerprint(file)));
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · {UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per file · {UPLOAD_LIMITS.maxBatchFiles} files / {UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB total</span></div>
+    {!pendingSelectionRestored&&<small className="customer-upload-local-note" role="status">Restoring your saved selection…</small>}
+    {draftPersistenceWarning&&<small className="customer-upload-local-note" role="status">{draftPersistenceWarning}</small>}
     <section className="customer-privacy-choice" aria-label="Document privacy choice">
       <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>Choose how files are handled</strong></div><small>Applies to all files</small></div>
       <div className="customer-privacy-choice-grid">
@@ -5524,13 +5591,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
       onDrop={event=>{event.preventDefault();if(batchLockedForPayment||busy||validatingSelection)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment||busy||validatingSelection} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={!pendingSelectionRestored||batchLockedForPayment||busy||validatingSelection} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>{nativeAppMode?"Select files":"Select documents or images"}</strong>
         <small>PDF, JPG or PNG</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment||busy||validatingSelection} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={!pendingSelectionRestored||batchLockedForPayment||busy||validatingSelection} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
         <small>{nativeAppMode?"Select multiple folders":"One folder at a time"}</small>
@@ -5648,7 +5715,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply. <InfoTooltip label="Folder settings"><span>Settings apply to every file in this folder. Use Custom on a file to change its settings.</span></InfoTooltip></small>}
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<button type="button" className="customer-flow-button" onClick={()=>openCustomerPdfPreview(file)}><FileText size={16}/> Preview PDF</button>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
-    {files.length>0&&<button className="customer-flow-button" disabled={busy||validatingSelection||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{validatingSelection?<><span className="button-spinner"/>Checking files…</>:busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
+    {files.length>0&&<button className="customer-flow-button" disabled={!pendingSelectionRestored||busy||validatingSelection||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{validatingSelection?<><span className="button-spinner"/>Checking files…</>:busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div>{!nativeAppMode&&<small>Updates after each file.</small>}</div>}
     {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?<>Local transfer is not encrypted. <InfoTooltip label="Local transfer security"><span>Shop Wi-Fi uses local HTTP. Choose Cloud-assisted for encrypted HTTPS transfer.</span></InfoTooltip></>:<>Check shop Wi-Fi first. <InfoTooltip label="Shop Wi-Fi access"><span>In a browser, tap Check shop Wi-Fi above to grant local network access.</span></InfoTooltip></>}</small>}
     {files.length>0&&uploadMode==="CLOUD"&&<small className="customer-upload-local-note">Encrypted HTTPS upload. <InfoTooltip label="Secure upload details"><span>Files are encrypted in transit and stored in the existing print queue until the shop computer is ready.</span></InfoTooltip></small>}
