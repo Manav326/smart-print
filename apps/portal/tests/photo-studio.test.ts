@@ -205,7 +205,8 @@ test("customers are told when the shop has not enabled photo printing",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/Photo printing unavailable/);
  assert.match(app,/InfoTooltip label="Photo printing details"/);
- assert.match(app,/Ask the shop owner to configure photo sizes and rates/);
+ assert.match(app,/Photo printing unavailable\. Ask the shop owner\./);
+ assert.match(app,/This shop must enable photo printing and configure its photo sizes and rates/);
 });
 
 test("50 photos can be laid out as nine per A4 page with a partially filled final page",()=>{
