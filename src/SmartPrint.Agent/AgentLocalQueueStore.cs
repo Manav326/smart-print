@@ -830,7 +830,7 @@ public sealed class AgentLocalQueueStore
             string.IsNullOrWhiteSpace(replacementDocumentName) ||
             replacementDocumentName.Length > 255 ||
             !string.Equals(Path.GetExtension(replacementDocumentName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
-            replacementBytes.Length is <= 0 or > UploadLimits.MaxFileBytes ||
+            replacementBytes.Length <= 0 || replacementBytes.Length > UploadLimits.MaxFileBytes ||
             pageCount is < 1 or > 100 ||
             quotedAmountMinor <= 0)
             throw new InvalidDataException("The prepared local photo revision metadata is invalid.");
