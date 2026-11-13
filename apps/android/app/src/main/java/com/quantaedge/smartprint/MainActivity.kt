@@ -5379,6 +5379,24 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createCustomerUploadPdfPreview(uri: Uri): String? {
+        // Probe only the bounded signature window before copying a selected phone file
+        // into the preview cache. Images and unsupported files are not duplicated.
+        val hasPdfContent = try {
+            contentResolver.openInputStream(uri)?.use { source ->
+                val header = ByteArray(DocumentNamePolicy.PDF_HEADER_SCAN_BYTES)
+                var bytesRead = 0
+                while (bytesRead < header.size) {
+                    val count = source.read(header, bytesRead, header.size - bytesRead)
+                    if (count <= 0) break
+                    bytesRead += count
+                }
+                DocumentNamePolicy.isPdfHeader(header, bytesRead)
+            } == true
+        } catch (_: Exception) {
+            false
+        }
+        if (!hasPdfContent) return null
+
         val directory = File(cacheDir, "customer-upload-pdf-preview")
         if (!directory.exists() && !directory.mkdirs()) return null
         val canonicalDirectory = directory.canonicalFile
@@ -5389,7 +5407,7 @@ class MainActivity : AppCompatActivity() {
         val target = runCatching { File.createTempFile("upload-preview-", ".pdf", directory) }.getOrNull()
             ?: return null
         return try {
-            val input = contentResolver.openInputStream(uri) ?: error("Selected PDF is unavailable.")
+            val input = contentResolver.openInputStream(uri) ?: error("Selected document is unavailable.")
             val copiedBytes = input.use { source ->
                 target.outputStream().use { destination ->
                     val buffer = ByteArray(8192)
