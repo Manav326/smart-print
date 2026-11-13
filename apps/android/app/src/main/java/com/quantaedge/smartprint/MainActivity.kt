@@ -1635,7 +1635,7 @@ class MainActivity : AppCompatActivity() {
         val groups = jobs.groupBy { it.batchId?.takeIf(String::isNotBlank) ?: it.id }
             .values
             .sortedByDescending { batch ->
-                batch.maxOfOrNull {
+                batch.minOfOrNull {
                     runCatching { Instant.parse(it.createdUtc).toEpochMilli() }.getOrDefault(0L)
                 } ?: 0L
             }
@@ -1773,7 +1773,9 @@ class MainActivity : AppCompatActivity() {
                         })
                 }
                 pageGroups.groupBy { batch ->
-                    CustomerHistoryDatePresentation.monthHeading(batch.first().createdUtc)
+                    CustomerHistoryDatePresentation.monthHeading(
+                        batch.minByOrNull { it.createdUtc }?.createdUtc ?: batch.first().createdUtc
+                    )
                 }.forEach { (monthLabel, monthBatches) ->
                     val monthHeader = LinearLayout(this).apply {
                         orientation = LinearLayout.HORIZONTAL
@@ -1825,8 +1827,11 @@ class MainActivity : AppCompatActivity() {
                             background = roundedDrawable(palette.first, 10)
                         })
                         body.addView(top)
+                        val placedUtc = batch.minByOrNull { it.createdUtc }?.createdUtc ?: identity.createdUtc
+                        val orderReference = identity.batchId?.take(8)?.uppercase(Locale.ROOT)
+                            ?.let { "Batch #$it" } ?: "Order ${identity.jobNumber}"
                         body.addView(text(
-                            "${identity.shopName} · Placed ${CustomerHistoryDatePresentation.dateTime(identity.createdUtc)}",
+                            "$orderReference · ${identity.shopName} · Placed ${CustomerHistoryDatePresentation.dateTime(placedUtc)}",
                             10, R.color.qp_muted, false
                         ).apply { setPadding(0, dp(5), 0, dp(3)) })
                         val latestUpdate = batch.maxOfOrNull { it.updatedUtc }.orEmpty()
