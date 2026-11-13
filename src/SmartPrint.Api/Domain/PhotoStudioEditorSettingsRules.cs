@@ -20,10 +20,31 @@ public static class PhotoStudioEditorSettingsRules
             {
                 MaxDepth = 12
             });
-            if (document.RootElement.ValueKind != JsonValueKind.Object)
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
                 return false;
 
-            normalized = document.RootElement.GetRawText();
+            // These values are hydrated directly by the Photo Studio UI. Validate
+            // their structural types at the API boundary so a malformed saved object
+            // cannot crash the editor when a shop reopens a photo revision.
+            if (root.TryGetProperty("photoName", out var photoName) &&
+                photoName.ValueKind != JsonValueKind.String)
+                return false;
+            if (root.TryGetProperty("dateOfBirth", out var dateOfBirth) &&
+                dateOfBirth.ValueKind != JsonValueKind.String)
+                return false;
+            if (root.TryGetProperty("adjustments", out var adjustments) &&
+                adjustments.ValueKind is not (JsonValueKind.Object or JsonValueKind.Null))
+                return false;
+            if (root.TryGetProperty("textLayers", out var textLayers))
+            {
+                if (textLayers.ValueKind != JsonValueKind.Array || textLayers.GetArrayLength() > 20)
+                    return false;
+                if (textLayers.EnumerateArray().Any(layer => layer.ValueKind != JsonValueKind.Object))
+                    return false;
+            }
+
+            normalized = root.GetRawText();
             return true;
         }
         catch (JsonException)
