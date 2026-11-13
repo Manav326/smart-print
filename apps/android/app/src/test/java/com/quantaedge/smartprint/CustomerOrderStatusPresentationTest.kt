@@ -41,12 +41,24 @@ class CustomerOrderStatusPresentationTest {
     @Test
     fun activeBatchStageDoesNotDependOnFileOrdering() {
         assertEquals("PRINTING", CustomerOrderStatusPresentation.batchSummaryStatus(
-            listOf("REFUNDED", "AWAITING_PAYMENT", "PRINTING", "COMPLETED")
+            listOf("REFUNDED", "PRINTING", "COMPLETED")
         ))
         assertEquals("PRINTING", CustomerOrderStatusPresentation.batchSummaryStatus(
-            listOf("COMPLETED", "PRINTING", "AWAITING_PAYMENT", "REFUNDED")
+            listOf("COMPLETED", "PRINTING", "REFUNDED")
         ))
         assertFalse(CustomerOrderStatusPresentation.isTerminalStatus("PRINTING"))
+    }
+
+    @Test
+    fun filesAtDifferentActiveStagesAreNotPresentedAsOneUniformStage() {
+        assertEquals("MIXED_PROGRESS", CustomerOrderStatusPresentation.batchSummaryStatus(
+            listOf("AWAITING_PAYMENT", "PRINTING")
+        ))
+        assertEquals("MIXED_PROGRESS", CustomerOrderStatusPresentation.batchSummaryStatus(
+            listOf("PRINTING", "AWAITING_PAYMENT")
+        ))
+        assertEquals("In progress across files",
+            CustomerOrderStatusPresentation.activityStatusLabel("MIXED_PROGRESS"))
     }
 
     @Test
