@@ -925,6 +925,8 @@ public sealed class AgentLocalQueueStore
         {
             var entry = Find(jobId)
                 ?? throw new FileNotFoundException("The original local photo is missing from the protected queue.");
+            if (entry.PrivatePrinting)
+                throw new InvalidOperationException("Private Printing photos and editor metadata must remain on the customer's device.");
             if (entry.State is not ("LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT"))
                 throw new InvalidOperationException("A local photo can only be enhanced before payment and printer handoff.");
 
