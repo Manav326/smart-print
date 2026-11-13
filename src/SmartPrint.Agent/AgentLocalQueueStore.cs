@@ -190,6 +190,37 @@ public sealed class AgentLocalQueueStore
         ReadEntries().Where(entry => entry.PrivatePrinting &&
             (entry.State == "PRIVATE_PURGE_PENDING" || entry.PrivatePurgePending)).ToArray();
 
+    private static async Task EraseProtectedQueueFileAsync(
+        string path,
+        string queuePrefix,
+        StringComparison comparison,
+        CancellationToken cancellationToken)
+    {
+        var fullPath = Path.GetFullPath(path);
+        if (!fullPath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("A private document path is outside the protected queue.");
+        if (!File.Exists(fullPath)) return;
+
+        await using (var stream = new FileStream(
+            fullPath, FileMode.Open, FileAccess.Write, FileShare.None,
+            64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
+        {
+            var zeroes = new byte[64 * 1024];
+            long remaining = stream.Length;
+            stream.Position = 0;
+            while (remaining > 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var count = (int)Math.Min(zeroes.Length, remaining);
+                await stream.WriteAsync(zeroes.AsMemory(0, count), cancellationToken);
+                remaining -= count;
+            }
+            stream.Flush(flushToDisk: true);
+            CryptographicOperations.ZeroMemory(zeroes);
+        }
+        File.Delete(fullPath);
+    }
+
     public async Task PurgeUnindexedPrivateSourceAsync(Guid jobId, CancellationToken cancellationToken)
     {
         if (jobId == Guid.Empty) throw new ArgumentException("A private job ID is required.", nameof(jobId));
@@ -844,25 +875,10 @@ public sealed class AgentLocalQueueStore
                 var documentPath = Path.GetFullPath(entry.DocumentPath);
                 if (!documentPath.StartsWith(queuePrefix, comparison))
                     throw new InvalidDataException("The private document path is outside the protected queue.");
-                if (File.Exists(documentPath))
-                {
-                    await using (var stream = new FileStream(documentPath, FileMode.Open, FileAccess.Write, FileShare.None,
-                        64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
-                    {
-                        var zeroes = new byte[64 * 1024];
-                        long remaining = stream.Length;
-                        stream.Position = 0;
-                        while (remaining > 0)
-                        {
-                            var count = (int)Math.Min(zeroes.Length, remaining);
-                            await stream.WriteAsync(zeroes.AsMemory(0, count), ct);
-                            remaining -= count;
-                        }
-                        stream.Flush(flushToDisk: true);
-                        CryptographicOperations.ZeroMemory(zeroes);
-                    }
-                    File.Delete(documentPath);
-                }
+                await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, ct);
+                var photoSourcePath = Path.GetFullPath(
+                    entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
+                await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, ct);
             }
 
             await SaveManifestAsync(entry with
@@ -873,6 +889,11 @@ public sealed class AgentLocalQueueStore
                 MediaType = string.Empty,
                 Sha256 = string.Empty,
                 SizeBytes = 0,
+                PhotoSourcePath = null,
+                PhotoSourceDocumentName = null,
+                PhotoSourceMediaType = null,
+                PhotoSourceSha256 = null,
+                PhotoSourceSizeBytes = null,
                 PrivatePurgePending = true
             }, ct);
         }
