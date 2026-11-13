@@ -40,6 +40,10 @@ public static class DocumentAnalyzer
         // File names are display labels. Format selection always comes from bytes.
         var extension = IdentifyExtension(bytes) ??
             throw new DocumentValidationException("The file content is not a supported PDF, JPEG or PNG document.");
+        // Preserve the established .jpeg storage/ticket alias when it agrees with
+        // the detected JPEG signature; other mismatched extensions are ignored.
+        if (extension == ".jpg" && string.Equals(filenameExtension, ".jpeg", StringComparison.OrdinalIgnoreCase))
+            extension = ".jpeg";
 
         if (extension == ".pdf")
         {
