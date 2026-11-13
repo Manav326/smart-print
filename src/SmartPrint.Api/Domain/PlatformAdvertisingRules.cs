@@ -3,9 +3,9 @@ namespace SmartPrint.Api.Domain;
 public static class PlatformAdvertisingRules
 {
     public const long MaximumCreativeBytes = 3 * 1024 * 1024;
-    public static bool IsSupportedPlacement(string? value) => value is "HOME" or "FILES";
+    public static bool IsSupportedPlacement(string? value) => value is "HOME" or "FILES" or "SHOP_OVERVIEW";
     public static bool IsValidPlacementFormat(string? placement, string? format) =>
-        (placement, format) is ("HOME", "BANNER") or ("FILES", "CARD");
+        (placement, format) is ("HOME", "BANNER") or ("FILES", "CARD") or ("SHOP_OVERVIEW", "BANNER");
     public static bool IsSafeDestinationUrl(string? value)
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||

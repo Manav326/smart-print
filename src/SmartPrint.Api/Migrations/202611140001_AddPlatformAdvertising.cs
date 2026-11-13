@@ -38,7 +38,7 @@ public sealed class AddPlatformAdvertising : Migration
             table.ForeignKey("FK_PlatformAdCampaigns_AspNetUsers_CreatedByUserId",x=>x.CreatedByUserId,"AspNetUsers","Id",onDelete:ReferentialAction.SetNull);
             table.ForeignKey("FK_PlatformAdCampaigns_AspNetUsers_UpdatedByUserId",x=>x.UpdatedByUserId,"AspNetUsers","Id",onDelete:ReferentialAction.SetNull);
             table.CheckConstraint("CK_PlatformAdCampaigns_Status","\"Status\" IN ('Draft','Active','Paused','Archived')");
-            table.CheckConstraint("CK_PlatformAdCampaigns_Placement","\"Placement\" IN ('HOME','FILES')");
+            table.CheckConstraint("CK_PlatformAdCampaigns_Placement","\"Placement\" IN ('HOME','FILES','SHOP_OVERVIEW')");
             table.CheckConstraint("CK_PlatformAdCampaigns_Format","\"Format\" IN ('BANNER','CARD')");
             table.CheckConstraint("CK_PlatformAdCampaigns_Dates","\"EndsUtc\" IS NULL OR \"EndsUtc\" >= \"StartsUtc\"");
         });
@@ -50,7 +50,7 @@ public sealed class AddPlatformAdvertising : Migration
             table.PrimaryKey("PK_PlatformAdEvents",x=>x.Id);
             table.ForeignKey("FK_PlatformAdEvents_PlatformAdCampaigns_CampaignId",x=>x.CampaignId,"PlatformAdCampaigns","Id",onDelete:ReferentialAction.Cascade);
             table.CheckConstraint("CK_PlatformAdEvents_EventType","\"EventType\" IN ('IMPRESSION','CLICK')");
-            table.CheckConstraint("CK_PlatformAdEvents_Placement","\"Placement\" IN ('HOME','FILES')");
+            table.CheckConstraint("CK_PlatformAdEvents_Placement","\"Placement\" IN ('HOME','FILES','SHOP_OVERVIEW')");
         });
         m.CreateTable("PlatformAdCampaignAudits",table=>new{
             Id=table.Column<Guid>(type:"uuid",nullable:false),CampaignId=table.Column<Guid>(type:"uuid",nullable:false),

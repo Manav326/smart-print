@@ -82,7 +82,7 @@ public static class PlatformAdvertisingEndpoints
     {
         var group=app.MapGroup("/api/v1/advertising").AllowAnonymous().RequireRateLimiting("public-api");
         group.MapGet("/active",async(string placement,SmartPrintDbContext db,CancellationToken ct)=>{
-            if(!PlatformAdvertisingRules.IsSupportedPlacement(placement))return Results.ValidationProblem(new Dictionary<string,string[]>{{"placement",new[]{"Choose HOME or FILES."}}});
+            if(!PlatformAdvertisingRules.IsSupportedPlacement(placement))return Results.ValidationProblem(new Dictionary<string,string[]>{{"placement",new[]{"Choose HOME, FILES or SHOP_OVERVIEW."}}});
             var now=DateTimeOffset.UtcNow;
             var item=await db.PlatformAdCampaigns.AsNoTracking().Where(x=>x.Placement==placement&&x.Status=="Active"&&x.StartsUtc<=now&&(x.EndsUtc==null||x.EndsUtc>now)).OrderBy(x=>x.CreatedUtc).FirstOrDefaultAsync(ct);
             if(item is null)return Results.NoContent();
@@ -113,7 +113,7 @@ public static class PlatformAdvertisingEndpoints
         Required(e,"name",request.Name,120);Required(e,"advertiserName",request.AdvertiserName,140);Required(e,"headline",request.Headline,120);Required(e,"body",request.Body,400);
         if(request.Terms is {Length:>2000})e["terms"]=new[]{"Terms must be 2,000 characters or fewer."};
         if(request.CreativeId==Guid.Empty||!await db.PlatformAdCreatives.AnyAsync(x=>x.Id==request.CreativeId,ct))e["creativeId"]=new[]{"Upload a banner image before saving."};
-        if(!PlatformAdvertisingRules.IsValidPlacementFormat(request.Placement,request.Format))e["placement"]=new[]{"Choose Home banner or Files card."};
+        if(!PlatformAdvertisingRules.IsValidPlacementFormat(request.Placement,request.Format))e["placement"]=new[]{"Choose Home banner, Files card or Shop overview banner."};
         if(!PlatformAdvertisingRules.IsSafeDestinationUrl(request.DestinationUrl))e["destinationUrl"]=new[]{"Use a public HTTPS destination URL on port 443."};
         if(request.EndsUtc is not null&&request.EndsUtc<request.StartsUtc)e["endsUtc"]=new[]{"The end time cannot be before the start time."};
         return e;

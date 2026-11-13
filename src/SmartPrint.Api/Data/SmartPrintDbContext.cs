@@ -120,7 +120,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.ToTable("PlatformAdCampaigns", table =>
             {
                 table.HasCheckConstraint("CK_PlatformAdCampaigns_Status", "\"Status\" IN ('Draft', 'Active', 'Paused', 'Archived')");
-                table.HasCheckConstraint("CK_PlatformAdCampaigns_Placement", "\"Placement\" IN ('HOME', 'FILES')");
+                table.HasCheckConstraint("CK_PlatformAdCampaigns_Placement", "\"Placement\" IN ('HOME', 'FILES', 'SHOP_OVERVIEW')");
                 table.HasCheckConstraint("CK_PlatformAdCampaigns_Format", "\"Format\" IN ('BANNER', 'CARD')");
                 table.HasCheckConstraint("CK_PlatformAdCampaigns_Dates", "\"EndsUtc\" IS NULL OR \"EndsUtc\" >= \"StartsUtc\"");
             });
@@ -146,7 +146,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.ToTable("PlatformAdEvents", table =>
             {
                 table.HasCheckConstraint("CK_PlatformAdEvents_EventType", "\"EventType\" IN ('IMPRESSION', 'CLICK')");
-                table.HasCheckConstraint("CK_PlatformAdEvents_Placement", "\"Placement\" IN ('HOME', 'FILES')");
+                table.HasCheckConstraint("CK_PlatformAdEvents_Placement", "\"Placement\" IN ('HOME', 'FILES', 'SHOP_OVERVIEW')");
             });
             entity.HasKey(x => x.Id);
             entity.Property(x => x.EventType).HasMaxLength(16).IsRequired();
