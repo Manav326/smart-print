@@ -2449,8 +2449,7 @@ shop.MapPost("/photo-jobs", async (
     }
 
     var upload = form.Files[0];
-    if (upload.Length is <= 0 or > UploadLimits.MaxFileBytes ||
-        !string.Equals(Path.GetExtension(upload.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+    if (upload.Length is <= 0 or > UploadLimits.MaxFileBytes)
     {
         return Results.UnprocessableEntity(new
         {
@@ -3833,8 +3832,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
 
     var file = form.Files[0];
-    if (file.Length is <= 0 or > UploadLimits.MaxFileBytes ||
-        !string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+    if (file.Length is <= 0 or > UploadLimits.MaxFileBytes)
     {
         await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new
