@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 
+const uploadLimits = JSON.parse(readFileSync(new URL("../../../config/upload-limits.json", import.meta.url), "utf8"));
 const appMode = (process.env.SMARTPRINT_MIXED_BATCH_REFUND_APP || "web").toLowerCase();
 if (!["web", "desktop", "desktop-native"].includes(appMode)) {
   throw new Error("App mode must be web, desktop, or desktop-native.");
@@ -288,7 +289,7 @@ const subscription = {
   plan: null,
   entitlements: {
     maxPrinters: 2, maxAgentDevices: 1, maxQrStations: 2, maxMonthlyPrintJobs: 1000,
-    maxDocumentBytes: 52428800, cloudAssistedPrintingEnabled: true, whiteLabelEnabled: false,
+    maxDocumentBytes: uploadLimits.maxFileBytes, cloudAssistedPrintingEnabled: true, whiteLabelEnabled: false,
     advancedReportsEnabled: false, isLegacyUnconfigured: false, isAccessActive: true
   },
   usage: {
