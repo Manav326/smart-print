@@ -536,9 +536,11 @@ async function runScenario(browser) {
     "Unexpected portal requests: " + JSON.stringify(harness.unhandledApi));
 
   const selectedKinds = await page.locator(".customer-uploaded-batch-item .print-kind-tag").allTextContents();
+  assert.equal(selectedKinds.filter(value => value.trim() === "ID card").length, 2,
+    "Both ID Studio files must retain the customer-facing ID card label after upload.");
   assert.equal(selectedKinds.filter(value => value.trim() === "Photo").length, 5);
-  assert.equal(selectedKinds.filter(value => value.trim() === "Document").length, 3,
-    "The customer batch list retains all three non-photo documents; the API ticket assertions verify which two are ID cards.");
+  assert.equal(selectedKinds.filter(value => value.trim() === "Document").length, 1,
+    "Only the ordinary multi-page PDF must use the generic document label.");
   const uploadedLabels = await page.locator(".customer-uploaded-batch-item").allTextContents();
   assert.ok(uploadedLabels.every(value => value.includes("Private document")),
     "The upload receipt must use privacy-safe document names.");
