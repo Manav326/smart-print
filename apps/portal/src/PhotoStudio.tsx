@@ -69,7 +69,7 @@ function formatPhotoRate(minor: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(minor / 100);
 }
 const MAX_FILE_BYTES = UPLOAD_LIMITS.maxFileBytes;
-const MAX_PHOTO_COUNT = 100;
+const MAX_PHOTO_COUNT = UPLOAD_LIMITS.maxPhotoCount;
 
 const PHOTO_SIZES: PhotoSize[] = [
   { id: "35x45", label: "35 × 45 mm", detail: "Portrait ID photo", widthMm: 35, heightMm: 45 },
