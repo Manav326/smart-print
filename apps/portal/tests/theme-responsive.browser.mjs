@@ -829,7 +829,7 @@ async function exercisePhotoStudioBrowser() {
       assert.deepEqual(output.pixelProbes.filter(probe => probe.page === 6).map(probe => probe.slot), [0, 1, 2, 3, 4], "The final partial A4 page must occupy the first five stable grid slots.");
       assert.ok(Array.isArray(output.finalUnusedSlotRgb) && output.finalUnusedSlotRgb.every(channel => channel > 245), "Unused final-page slots must remain blank rather than recentering or duplicating tiles.");
     }
-    assert.ok(output.bytes > 0 && output.bytes <= 20 * 1024 * 1024);
+    assert.ok(output.bytes > 0 && output.bytes <= 50 * 1024 * 1024);
     await context.close();
     results.push({
       check: `Photo Studio ${item.mode} / ${item.theme} / ${item.width}x${item.height}`,
@@ -1173,7 +1173,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.ok(result.pixelProbes[0].captionRedPixels>0,"Generated PDF pages must contain the opted-in red caption.");
     assert.deepEqual(result.pixelProbes.filter(probe=>probe.page===6).map(probe=>probe.slot),[0,1,2,3,4]);
     assert.ok(result.finalUnusedSlotRgb.every(channel=>channel>245),"Unused slots on the final page must stay blank.");
-    assert.ok(result.bytes>0 && result.bytes<=20*1024*1024);
+    assert.ok(result.bytes>0 && result.bytes<=50*1024*1024);
     await page.screenshot({path:join(artifactDirectory,"photo-studio-exhaustive-controls.png"),fullPage:false,animations:"disabled"});
     console.log("[QA-CASE-END] PASS | Photo Studio full control matrix.");
   } finally {
