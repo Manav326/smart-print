@@ -4694,6 +4694,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setPrivacyChoiceManuallySelected(selection.metadata.privacyChoiceManuallySelected);
       setUploadMode(selection.metadata.privatePrinting?"LOCAL":selection.metadata.uploadMode);
       setUploadModeManuallySelected(selection.metadata.uploadModeManuallySelected);
+      setPaymentMethod(selection.metadata.paymentMethod);
+      setPaymentReference(selection.metadata.paymentReference);
     }).catch(()=>{
       if(active)setDraftPersistenceWarning("SmartPrint could not restore the previous file selection from this device. Your saved shop orders are not affected.");
     }).finally(()=>{
@@ -4718,11 +4720,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       privatePrinting,
       privacyChoiceManuallySelected,
       uploadMode,
-      uploadModeManuallySelected
+      uploadModeManuallySelected,
+      paymentMethod,
+      paymentReference
     }).catch(()=>{
       setDraftPersistenceWarning("Your files remain selected, but some print settings could not be saved for recovery.");
     });
-  },[pendingSelectionRestored,pendingSelectionStorageKey,files.length,selectedFileIndex,batchName,fileGroupNames,groupSettings,fileSettings,photoSettingsByFileFingerprint,privatePrinting,privacyChoiceManuallySelected,uploadMode,uploadModeManuallySelected]);
+  },[pendingSelectionRestored,pendingSelectionStorageKey,files.length,selectedFileIndex,batchName,fileGroupNames,groupSettings,fileSettings,photoSettingsByFileFingerprint,privatePrinting,privacyChoiceManuallySelected,uploadMode,uploadModeManuallySelected,paymentMethod,paymentReference]);
 
   useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
@@ -5559,10 +5563,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     <section className="customer-privacy-choice" aria-label="Document privacy choice">
       <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>Choose how files are handled</strong></div><small>Applies to all files</small></div>
       <div className="customer-privacy-choice-grid">
-        <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
+        <button type="button" aria-pressed={privatePrinting} disabled={!pendingSelectionRestored||busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
           <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>Encrypted. Erased after printing.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
         </button>
-        <button type="button" aria-pressed={!privatePrinting} disabled={busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false);}}>
+        <button type="button" aria-pressed={!privatePrinting} disabled={!pendingSelectionRestored||busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false);}}>
           <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Normal print queue. 7-day auto-delete.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
@@ -5580,9 +5584,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       ? <div className="customer-private-transfer-note"><Lock size={16}/><span>End-to-end encrypted · Physical printing only</span></div>
       : <div className="customer-upload-modes">
       {localAgent?.endpoints.length
-        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Local transfer · not encrypted</small></button>
+        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} disabled={!pendingSelectionRestored} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Local transfer · not encrypted</small></button>
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Unavailable</small></button>}
-      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Secure upload · print when ready</small></button>}
+      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} disabled={!pendingSelectionRestored} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Secure upload · print when ready</small></button>}
     </div>}
     {!localAgent?.endpoints.length&&<small className="customer-upload-local-note">Shop connection details <InfoTooltip label="Shop connection unavailable"><span>The paired shop computer has not reported a reachable local connection.</span></InfoTooltip></small>}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload unavailable. <InfoTooltip label="Upload unavailable"><span>No document was uploaded. Ask the shop to reconnect its print service, then try again.</span></InfoTooltip></div>}
