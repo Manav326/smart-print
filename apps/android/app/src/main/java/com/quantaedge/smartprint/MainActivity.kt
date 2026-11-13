@@ -2380,11 +2380,21 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     detailScroll.addView(detailColumn)
-                    AlertDialog.Builder(this)
-                        .setTitle(orderName)
-                        .setView(detailScroll)
-                        .setPositiveButton("Close", null)
-                        .show()
+                    val trackingDialog = BottomSheetDialog(this)
+                    trackingDialog.setContentView(detailScroll)
+                    trackingDialog.setOnShowListener { shown ->
+                        val sheet = (shown as BottomSheetDialog).findViewById<FrameLayout>(
+                            com.google.android.material.R.id.design_bottom_sheet
+                        )
+                        sheet?.layoutParams = sheet?.layoutParams?.apply {
+                            height = (resources.displayMetrics.heightPixels * 0.88f).toInt()
+                        }
+                        sheet?.let {
+                            com.google.android.material.bottomsheet.BottomSheetBehavior.from(it).state =
+                                com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
+                        }
+                    }
+                    trackingDialog.show()
                 }.onFailure { error ->
                     AlertDialog.Builder(this)
                         .setTitle("Order details unavailable")
