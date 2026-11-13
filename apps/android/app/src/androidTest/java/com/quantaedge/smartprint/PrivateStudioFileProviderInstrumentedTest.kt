@@ -116,6 +116,17 @@ class PrivateStudioFileProviderInstrumentedTest {
                 preparedPhotos.all { it.isFile && !DocumentNamePolicy.isPdf(it) })
             assertTrue(transientIds.all { it.parentFile?.name == "id-studio-transient" })
             assertTrue(transientPhotos.all { it.parentFile?.name == "photo-studio-transient" })
+
+            transientIds.forEach(idStore::releaseTransientFile)
+            transientPhotos.forEach(photoStore::releaseTransientFile)
+            assertTrue("ID PDFs are removed from the transient cache after upload.",
+                transientIds.none { it.exists() })
+            assertTrue("Photo Studio PDFs are removed from the transient cache after upload.",
+                transientPhotos.none { it.exists() })
+            assertTrue("Encrypted ID vault originals remain available.",
+                preparedIds.all { it.exists() && !DocumentNamePolicy.isPdf(it) })
+            assertTrue("Encrypted Photo Studio vault originals remain available.",
+                preparedPhotos.all { it.exists() && !DocumentNamePolicy.isPdf(it) })
         } finally {
             transientIds.forEach(idStore::releaseTransientFile)
             transientPhotos.forEach(photoStore::releaseTransientFile)
