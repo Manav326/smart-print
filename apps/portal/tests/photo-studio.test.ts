@@ -6,6 +6,7 @@ import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, 
 
 test("customer upload limits come from the shared generated policy",()=>{
  assert.equal(UPLOAD_LIMITS.maxFileBytes,20*1024*1024);
+ assert.equal(UPLOAD_LIMITS.maxPhotoCount,100);
  assert.equal(UPLOAD_LIMITS.maxBatchFiles,20);
  assert.equal(UPLOAD_LIMITS.maxBatchBytes,50*1024*1024);
  assert.equal(UPLOAD_LIMITS.maxMultipartRequestBytes,21*1024*1024);
