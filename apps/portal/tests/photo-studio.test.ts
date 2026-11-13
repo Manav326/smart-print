@@ -548,3 +548,22 @@ test("ID Studio remains private-only while saved Photo Studio sheets can use the
  assert.match(app,/if\(incomingPhotoDocument&&uploadedBatch\.length===0&&!privacyChoiceManuallySelected\)/);
 });
 
+
+
+test("each photo sheet rasterizes and backgrounds the source crop once before reusing it for every copy",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const start=studio.indexOf("function drawPhotoSheetPage(");
+ const end=studio.indexOf("function cropSource(",start);
+ assert.ok(start>=0&&end>start,"The shared photo-sheet renderer must exist.");
+ const renderer=studio.slice(start,end);
+ const loop=renderer.indexOf("for(const position of positions)");
+ assert.ok(loop>0,"Photo copies must be drawn in one position loop.");
+ assert.ok(renderer.indexOf("drawImage(image,source.x,source.y,source.width,source.height")<loop,
+  "The original photo crop must be rasterized before iterating over copies.");
+ assert.ok(renderer.indexOf("replaceEdgeBackground(photoTile")<loop,
+  "Background replacement must run once on the shared tile, not once per copy.");
+ const copyLoop=renderer.slice(loop);
+ assert.match(copyLoop,/context\.drawImage\(photoTile,x,y,size\.widthMm,size\.heightMm\)/);
+ assert.doesNotMatch(copyLoop,/replaceEdgeBackground\(|createElement\("canvas"\)/,
+  "The copy loop must not allocate or process a new photo raster.");
+});
