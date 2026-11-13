@@ -2384,6 +2384,7 @@ class MainActivity : AppCompatActivity() {
             column.addView(sourceRow, linearParams().apply { bottomMargin = dp(4) })
         }
         if (isPicker && !fileChooserSelectFolders) {
+            requestPickerStudioMetadata()
             addIdStudioPickerSection(column)
             addPhotoStudioPickerSection(column)
         }
@@ -4840,11 +4841,22 @@ class MainActivity : AppCompatActivity() {
      * Photo Studio metadata is intentionally skipped by readPickerMetadata rather than migrated
      * while a customer is simply choosing a file.
      */
-    private fun pickerStudioTitle(file: File, isPhotoStudio: Boolean, fallback: String): String {
-        val path = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
-        pickerStudioTitles[path]?.let { return it }
-        if (pickerStudioMetadataAttempted.add(path)) {
-            pickerMetadataExecutor.execute {
+    private fun requestPickerStudioMetadata() {
+        val documents = buildList {
+            idStudioStore.listPrepared().forEach { add(it to false) }
+            photoStudioStore.listPrepared().forEach { add(it to true) }
+        }
+        val pending = documents.filter { (file, _) ->
+            val path = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
+            pickerStudioMetadataAttempted.add(path)
+        }
+        if (pending.isEmpty()) return
+
+        pickerMetadataExecutor.execute {
+            var titlesChanged = false
+            pending.forEach { (file, isPhotoStudio) ->
+                if (Thread.currentThread().isInterrupted) return@execute
+                val path = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
                 val title = runCatching {
                     val metadata = if (isPhotoStudio) {
                         photoStudioStore.readPickerMetadata(file)
@@ -4853,17 +4865,24 @@ class MainActivity : AppCompatActivity() {
                     }
                     metadata?.optString("title")?.trim()?.take(80).orEmpty()
                 }.getOrNull().orEmpty()
-                if (title.isNotBlank()) pickerStudioTitles[path] = title
-                runOnUiThread {
-                    if (title.isNotBlank() && pickerMode && fileCallback != null &&
-                        !isFinishing && !isDestroyed
-                    ) {
-                        refreshLibrary()
-                    }
+                if (title.isNotBlank()) {
+                    pickerStudioTitles[path] = title
+                    titlesChanged = true
+                }
+            }
+            runOnUiThread {
+                if (titlesChanged && pickerMode && fileCallback != null &&
+                    !isFinishing && !isDestroyed
+                ) {
+                    refreshLibrary()
                 }
             }
         }
-        return fallback
+    }
+
+    private fun pickerStudioTitle(file: File, fallback: String): String {
+        val path = runCatching { file.canonicalPath }.getOrDefault(file.absolutePath)
+        return pickerStudioTitles[path] ?: fallback
     }
 
     private fun addPhotoStudioPickerSection(parent: LinearLayout) {
@@ -4899,7 +4918,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(dp(9), 0, dp(6), 0)
             }
             details.addView(text(
-                pickerStudioTitle(file, isPhotoStudio = true, fallback = "Prepared photo sheet"),
+                pickerStudioTitle(file, fallback = "Prepared photo sheet"),
                 12, R.color.qp_text, true
             ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
             details.addView(text(
@@ -4946,7 +4965,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(dp(9), 0, dp(6), 0)
             }
             details.addView(text(
-                pickerStudioTitle(file, isPhotoStudio = false, fallback = "Prepared ID card"),
+                pickerStudioTitle(file, fallback = "Prepared ID card"),
                 12, R.color.qp_text, true
             ).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
             details.addView(text(
