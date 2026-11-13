@@ -174,15 +174,19 @@ public sealed class DocumentStorageTests
     }
 
     [Fact]
-    public async Task RejectsUnsupportedExtension()
+    public async Task StoresSupportedContentUsingDetectedExtensionEvenWhenFilenameIsUnsupported()
     {
         var root = CreateTemporaryDirectory();
         try
         {
             using var storage = CreateStorage(root);
             await using var input = new MemoryStream(ValidPng);
-            await Assert.ThrowsAsync<DocumentValidationException>(() =>
-                storage.ValidateAndStoreAsync(Guid.NewGuid(), Guid.NewGuid(), "invoice.exe", input, ValidPng.Length, CancellationToken.None));
+            var stored = await storage.ValidateAndStoreAsync(
+                Guid.NewGuid(), Guid.NewGuid(), "invoice.exe", input, ValidPng.Length, CancellationToken.None);
+
+            Assert.Equal("image/png", stored.Analysis.MediaType);
+            Assert.Equal(".png", stored.Analysis.Extension);
+            Assert.EndsWith(".png", stored.StorageKey, StringComparison.Ordinal);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
