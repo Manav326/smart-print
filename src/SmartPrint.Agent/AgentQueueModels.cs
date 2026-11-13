@@ -89,7 +89,12 @@ public sealed record AgentLocalQueueEntry(
     bool PdfBrandingEnabled = false,
     bool PrivatePrinting = false,
     bool PrivatePurgePending = false,
-    string PrintKind = "DOCUMENT");
+    string PrintKind = "DOCUMENT",
+    string? PhotoSourcePath = null,
+    string? PhotoSourceDocumentName = null,
+    string? PhotoSourceMediaType = null,
+    string? PhotoSourceSha256 = null,
+    long? PhotoSourceSizeBytes = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
