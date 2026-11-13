@@ -1626,7 +1626,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setError("This job has no shop-editable original photo. Private Printing files stay with the customer.");
       return;
     }
-    setBusyJobId(job.id);setError("");
+    setBusyJobId(job.id);setError("");setToast("");
     try{
       const blob=await downloadShopDocument(tokens.accessToken,job.id,"photo-source");
       const response=(blob.type||"").split(";")[0].trim().toLowerCase();
@@ -1691,6 +1691,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
     const sheet=sheets[0];
     setBusyJobId(editor.job.id);
+    setToast("");
     try{
       if(editor.job.storageMode==="LOCAL_AGENT") {
         await replaceShopPhotoDocumentLocally(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}));
