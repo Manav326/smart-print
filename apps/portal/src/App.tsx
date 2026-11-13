@@ -1,4 +1,5 @@
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
+import { identifySupportedDocument, type SupportedDocumentType } from "./document-content-policy";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode, type CSSProperties } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
@@ -4341,7 +4342,10 @@ function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSetting
     Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum;
 }
 
+const identifiedCustomerDocumentTypes=new WeakMap<File,SupportedDocumentType>();
 function isCustomerPdf(file:File):boolean {
+  const identified=identifiedCustomerDocumentTypes.get(file);
+  if(identified)return identified.mediaType==="application/pdf";
   return file.type.toLowerCase()==="application/pdf"||/\.pdf$/i.test(file.name);
 }
 
@@ -5212,16 +5216,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     setError("");
   }
-  function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
+  async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
       return;
-    }
-    if(nativePreviewTokens?.length===next.length) {
-      next.forEach((candidate,index)=>{
-        const token=nativePreviewTokens[index];
-        if(token&&isCustomerPdf(candidate))smartPrintNativePdfPreviewTokens.set(candidate,token);
-      });
     }
     if(nativePrintKinds?.length===next.length) {
       next.forEach((candidate,index)=>{
@@ -5245,7 +5243,18 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       if(relativePath&&parts.length>2){nestedSkipped++;return false;}
       return true;
     });
-    const supported=rootFiles.filter(candidate=>/\.(pdf|jpe?g|png)$/i.test(candidate.name));
+    const identified=await Promise.all(rootFiles.map(async candidate=>{
+      const contentType=await identifySupportedDocument(candidate);
+      if(contentType)identifiedCustomerDocumentTypes.set(candidate,contentType);
+      return {candidate,contentType};
+    }));
+    const supported=identified.filter(item=>item.contentType!==null).map(item=>item.candidate);
+    if(nativePreviewTokens?.length===next.length) {
+      supported.forEach(candidate=>{
+        const token=nativePreviewTokens[next.indexOf(candidate)];
+        if(token&&isCustomerPdf(candidate))smartPrintNativePdfPreviewTokens.set(candidate,token);
+      });
+    }
     const malformedPhotoDocument=supported.some(candidate=>
       (candidate as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="PHOTO"&&!isValidNativePhotoSettings(
         (candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings
@@ -5281,6 +5290,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       });
     }
     const unsupportedSkipped=rootFiles.length-supported.length;
+    const mismatchedNames=supported.filter(candidate=>{
+      const detected=identifiedCustomerDocumentTypes.get(candidate);
+      if(!detected)return false;
+      const ext=candidate.name.toLowerCase().match(/\.[^.]+$/)?.[0]??"";
+      return ext!==detected.extension&&!(detected.extension===".jpg"&&ext===".jpeg");
+    });
     if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
     const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
     if(oversized){setError(`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file limit.`);return;}
@@ -5320,7 +5335,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return updated;
     });
     setFiles(selected);setSelectedFileIndex(0);
-    setError(nestedSkipped? "Nested folders are skipped; only files directly inside each selected folder are included.":unsupportedSkipped? "Unsupported file types were skipped.": "");
+    const notices:string[]=[];
+    if(nestedSkipped)notices.push("Nested folders are skipped; only files directly inside each selected folder are included.");
+    if(unsupportedSkipped)notices.push("Files without a supported PDF, JPEG or PNG signature were skipped.");
+    if(mismatchedNames.length)notices.push(`${mismatchedNames.length} file(s) were identified by their contents; their original filenames are preserved.`);
+    setError(notices.join(" "));
   }
 
   function removeSelectedFile(fingerprint: string) {
@@ -5491,15 +5510,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<div className="customer-upload-local-note" role="status">Encrypted online relay in use. <InfoTooltip label="Secure relay details"><span>Shop Wi-Fi is not verified. SmartPrint uses the encrypted online relay automatically; no Wi-Fi setup is needed.</span></InfoTooltip></div>}
     <div className="customer-upload-picker-grid"
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
-      onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
+      onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>{nativeAppMode?"Select files":"Select documents or images"}</strong>
         <small>PDF, JPG or PNG</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":undefined} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>{nativeAppMode?"Choose folders":"Add a folder"}</strong>
         <small>{nativeAppMode?"Select multiple folders":"One folder at a time"}</small>
