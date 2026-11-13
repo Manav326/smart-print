@@ -70,10 +70,8 @@ object DocumentNamePolicy {
 
     fun isImage(file: File): Boolean = mimeType(file).startsWith("image/")
 
-    fun supportsInAppViewer(file: File): Boolean {
-        if (!file.isFile) return false
-        return mimeType(file.name) in inAppViewerMimeTypes || mimeType(file) in inAppViewerMimeTypes
-    }
+    fun supportsInAppViewer(file: File): Boolean =
+        file.isFile && supportsInAppViewer(mimeType(file))
 
     fun supportsInAppViewer(mimeType: String): Boolean = mimeType in inAppViewerMimeTypes
 
