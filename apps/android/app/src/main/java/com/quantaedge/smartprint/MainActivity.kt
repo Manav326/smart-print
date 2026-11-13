@@ -7,10 +7,13 @@ import android.content.pm.PackageManager
 import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.PixelFormat
+import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.view.Gravity
 import android.view.Menu
 import android.content.res.ColorStateList
@@ -125,6 +128,11 @@ class MainActivity : AppCompatActivity() {
     private var idStudioDraftId: String? = null
     private var idStudioEditingFile: File? = null
     private var pendingIdStudioSide: String? = null
+    private var idCaptureOverlayView: View? = null
+    private var idCaptureOverlayWindowManager: WindowManager? = null
+    private val idCaptureOverlayThumbnails = linkedMapOf<String, ImageView>()
+    private val idCaptureOverlayTiles = linkedMapOf<String, MaterialCardView>()
+    private var queuedIdStudioSide: String? = null
     private var idStudioFrontRotation = 0
     private var idStudioBackRotation = 0
     private var idStudioCardWidthMm = IdCardLayoutPolicy.DEFAULT_CARD_WIDTH_MM
@@ -197,6 +205,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportArchive: ActivityResultLauncher<String>
     private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
     private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
+    private lateinit var idCaptureOverlayPermissionLauncher: ActivityResultLauncher<Intent>
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Restore the explicit app preference before AppCompat inflates theme-aware UI.
@@ -400,6 +409,14 @@ class MainActivity : AppCompatActivity() {
         ) { granted ->
             completeLocalNetworkPermissionRequest(granted)
         }
+        idCaptureOverlayPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult()
+        ) {
+            // Continue with the scanner either way. When access was granted, the
+            // compact SmartPrint preview overlay is attached above the ML Kit UI.
+            // When declined, scanning remains fully usable without the overlay.
+            pendingIdStudioSide?.let(::launchIdStudioScanner)
+        }
         browsePhoneDocuments = registerForActivityResult(
             ActivityResultContracts.OpenMultipleDocuments()
         ) { uris ->
@@ -420,6 +437,7 @@ class MainActivity : AppCompatActivity() {
         documentScanLauncher = registerForActivityResult(
             ActivityResultContracts.StartIntentSenderForResult()
         ) { result ->
+            hideIdCaptureOverlay()
             if (result.resultCode == RESULT_OK) {
                 try {
                     val scan = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
@@ -427,25 +445,33 @@ class MainActivity : AppCompatActivity() {
                     val idSide = pendingIdStudioSide
                     if (idSide != null) {
                         pendingIdStudioSide = null
-                        saveIdStudioScan(scan, idSide)
+                        val nextSide = queuedIdStudioSide
+                        queuedIdStudioSide = null
+                        saveIdStudioScan(scan, idSide, nextSide)
                     } else if (pendingScanNeedsDestination) showScanDestinationPicker(scan)
                     else saveDocumentScan(scan, pendingScanDestinationPath)
                 } catch (e: Exception) {
-                    if (pendingIdStudioSide != null || idStudioDraftId != null) {
-                        pendingIdStudioSide = null
-                        toast("ID scan could not be saved: " + message(e))
-                        if (idStudioDraftId?.let(idStudioStore::hasFront) == true) showIdStudioBackStep()
-                        else showIdStudioHome()
+                    val idSide = pendingIdStudioSide
+                    pendingIdStudioSide = null
+                    val nextSide = queuedIdStudioSide
+                    queuedIdStudioSide = null
+                    toast("ID scan could not be saved: " + message(e))
+                    if (nextSide != null && idStudioDraftId?.let(idStudioStore::draftExists) == true) {
+                        startIdStudioSideScan(nextSide)
+                    } else if (idStudioDraftId?.let(idStudioStore::hasFront) == true) {
+                        showIdStudioBackStep()
                     } else {
-                        pendingScanNeedsDestination = false
-                        pendingScanDestinationPath = ""
-                        toast("Could not save the scan: " + message(e))
+                        showIdStudioHome()
                     }
                 }
             } else {
                 val idSide = pendingIdStudioSide
                 pendingIdStudioSide = null
-                if (idSide != null) {
+                val nextSide = queuedIdStudioSide
+                queuedIdStudioSide = null
+                if (nextSide != null && idStudioDraftId?.let(idStudioStore::draftExists) == true) {
+                    startIdStudioSideScan(nextSide)
+                } else if (idSide != null) {
                     toast("Scan cancelled. Your existing private ID scans are unchanged.")
                     if (idStudioDraftId?.let(idStudioStore::hasFront) == true) showIdStudioBackStep()
                     else showIdStudioHome()
@@ -538,6 +564,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        hideIdCaptureOverlay()
         cancelActiveChooserPreparation()
         chooserPreparationExecutor.shutdownNow()
         pickerMetadataExecutor.shutdownNow()
@@ -4785,6 +4812,44 @@ class MainActivity : AppCompatActivity() {
         }
         releaseIdStudioReviewBitmap()
         pendingIdStudioSide = side
+        val preferences = getSharedPreferences("smartprint.id-capture-overlay", MODE_PRIVATE)
+        val alreadyExplained = preferences.getBoolean("permissionExplained", false)
+        if (!Settings.canDrawOverlays(this) && !alreadyExplained) {
+            // Explain the special Android permission once. A later attempt never
+            // interrupts the customer with another prompt; ML Kit still works.
+            preferences.edit().putBoolean("permissionExplained", true).apply()
+            AlertDialog.Builder(this)
+                .setTitle("Keep both ID sides in view")
+                .setMessage("SmartPrint can show two small Front and Back previews beside ML Kit’s capture button while you scan. This is used only for ID capture. Allow it once in Android settings?")
+                .setPositiveButton("Continue") { _, _ ->
+                    try {
+                        idCaptureOverlayPermissionLauncher.launch(
+                            Intent(
+                                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")
+                            )
+                        )
+                    } catch (_: Exception) {
+                        launchIdStudioScanner(side)
+                    }
+                }
+                .setNegativeButton("Not now") { _, _ -> launchIdStudioScanner(side) }
+                .setOnCancelListener { launchIdStudioScanner(side) }
+                .show()
+            return
+        }
+        launchIdStudioScanner(side)
+    }
+
+    private fun launchIdStudioScanner(side: String) {
+        val draftId = idStudioDraftId
+        if (draftId == null || !idStudioStore.draftExists(draftId)) {
+            pendingIdStudioSide = null
+            hideIdCaptureOverlay()
+            showIdStudioHome()
+            return
+        }
+        pendingIdStudioSide = side
         val options = GmsDocumentScannerOptions.Builder()
             .setGalleryImportAllowed(true)
             .setPageLimit(1)
@@ -4794,16 +4859,25 @@ class MainActivity : AppCompatActivity() {
         GmsDocumentScanning.getClient(options)
             .getStartScanIntent(this)
             .addOnSuccessListener { sender ->
-                documentScanLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                try {
+                    if (Settings.canDrawOverlays(this)) showIdCaptureOverlay()
+                    documentScanLauncher.launch(IntentSenderRequest.Builder(sender).build())
+                } catch (error: Exception) {
+                    hideIdCaptureOverlay()
+                    pendingIdStudioSide = null
+                    toast("The ID scanner could not be opened. Your saved scan is unchanged. " + message(error))
+                    if (idStudioStore.hasFront(draftId)) showIdStudioBackStep() else showIdStudioHome()
+                }
             }
             .addOnFailureListener { error ->
+                hideIdCaptureOverlay()
                 pendingIdStudioSide = null
                 toast("The ID scanner is unavailable. Your saved scan is unchanged. " + message(error))
                 if (idStudioStore.hasFront(draftId)) showIdStudioBackStep() else showIdStudioHome()
             }
     }
 
-    private fun saveIdStudioScan(scan: GmsDocumentScanningResult, side: String) {
+    private fun saveIdStudioScan(scan: GmsDocumentScanningResult, side: String, nextSide: String? = null) {
         val draftId = idStudioDraftId
         try {
             require(draftId != null && idStudioStore.draftExists(draftId)) {
@@ -4817,15 +4891,162 @@ class MainActivity : AppCompatActivity() {
                 ?: error("The corrected card image could not be opened.")
             input.use { idStudioStore.saveScan(draftId, side, it) }
             toast(if (side == "front") "Front side saved privately." else "Back side saved privately.")
-            showIdStudioBackStep()
+            if (nextSide != null) startIdStudioSideScan(nextSide) else showIdStudioBackStep()
         } catch (error: Exception) {
             toast("Could not save the " + side + " scan: " + message(error))
-            if (draftId != null && idStudioStore.draftExists(draftId) && idStudioStore.hasFront(draftId)) {
+            if (nextSide != null && draftId != null && idStudioStore.draftExists(draftId)) {
+                startIdStudioSideScan(nextSide)
+            } else if (draftId != null && idStudioStore.draftExists(draftId) && idStudioStore.hasFront(draftId)) {
                 showIdStudioBackStep()
             } else {
                 showIdStudioHome()
             }
         }
+    }
+
+    private fun showIdCaptureOverlay() {
+        if (!Settings.canDrawOverlays(this) || idCaptureOverlayView != null) return
+        val manager = getSystemService(WINDOW_SERVICE) as WindowManager
+        val overlay = createIdCaptureOverlayView()
+        val params = WindowManager.LayoutParams(
+            dp(104),
+            dp(72),
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            // ML Kit places its shutter near the lower centre in portrait.
+            // Keep the two small previews immediately to its left with a clear gap.
+            x = -dp(88)
+            y = dp(24)
+            title = "SmartPrint ID side previews"
+        }
+        try {
+            manager.addView(overlay, params)
+            idCaptureOverlayWindowManager = manager
+            idCaptureOverlayView = overlay
+            idCaptureOverlayThumbnails.forEach { (side, image) ->
+                if (idStudioDraftId?.let(idStudioStore::hasSide) == true) {
+                    loadIdStudioDraftThumbnail(image, side)
+                }
+            }
+        } catch (_: Exception) {
+            idCaptureOverlayThumbnails.clear()
+            idCaptureOverlayTiles.clear()
+            idCaptureOverlayView = null
+            idCaptureOverlayWindowManager = null
+        }
+    }
+
+    private fun createIdCaptureOverlayView(): View {
+        idCaptureOverlayThumbnails.clear()
+        idCaptureOverlayTiles.clear()
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(4), dp(4), dp(4), dp(4))
+            background = roundedDrawable(
+                android.graphics.Color.argb(194, 22, 25, 32),
+                dp(12)
+            )
+            elevation = dp(5).toFloat()
+            contentDescription = "SmartPrint front and back ID previews"
+        }
+        listOf("front", "back").forEach { side ->
+            val captured = idStudioDraftId?.let { draft ->
+                idStudioStore.draftExists(draft) && idStudioStore.hasSide(draft, side)
+            } == true
+            val title = if (side == "front") "Front" else "Back"
+            val tile = MaterialCardView(this).apply {
+                radius = dp(8).toFloat()
+                cardElevation = 0f
+                strokeWidth = dp(1)
+                strokeColor = getColor(R.color.qp_glass_border)
+                setCardBackgroundColor(android.graphics.Color.rgb(37, 41, 50))
+                isClickable = true
+                isFocusable = true
+                contentDescription = if (captured) {
+                    "Retake ID $side side after the current scan"
+                } else {
+                    "ID $side side not captured"
+                }
+                setOnClickListener { queueIdStudioRetake(side) }
+            }
+            val tileContent = FrameLayout(this)
+            val image = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                contentDescription = "ID $side thumbnail"
+                background = roundedDrawable(android.graphics.Color.rgb(48, 53, 64), dp(6))
+                if (!captured) setImageResource(R.drawable.ic_file)
+            }
+            idCaptureOverlayThumbnails[side] = image
+            tileContent.addView(image, FrameLayout.LayoutParams(-1, dp(46)))
+            val caption = text(title, 9, R.color.qp_text, true).apply {
+                gravity = Gravity.CENTER
+                setBackgroundColor(android.graphics.Color.argb(220, 22, 25, 32))
+            }
+            tileContent.addView(
+                caption,
+                FrameLayout.LayoutParams(-1, dp(16), Gravity.BOTTOM)
+            )
+            tile.addView(tileContent, ViewGroup.LayoutParams(-1, -1))
+            idCaptureOverlayTiles[side] = tile
+            row.addView(
+                tile,
+                LinearLayout.LayoutParams(dp(46), dp(64)).apply {
+                    if (side == "back") marginStart = dp(4)
+                }
+            )
+        }
+        updateIdCaptureOverlaySelection()
+        return row
+    }
+
+    private fun queueIdStudioRetake(side: String) {
+        if (pendingIdStudioSide == null || (side != "front" && side != "back")) return
+        queuedIdStudioSide = if (queuedIdStudioSide == side) null else side
+        updateIdCaptureOverlaySelection()
+    }
+
+    private fun updateIdCaptureOverlaySelection() {
+        idCaptureOverlayTiles.forEach { (side, tile) ->
+            val selected = queuedIdStudioSide == side
+            tile.strokeWidth = dp(if (selected) 2 else 1)
+            tile.strokeColor = getColor(
+                if (selected) R.color.qp_primary else R.color.qp_glass_border
+            )
+            tile.contentDescription = when {
+                selected -> "ID $side side selected to retake next"
+                idStudioDraftId?.let { draft ->
+                    idStudioStore.draftExists(draft) && idStudioStore.hasSide(draft, side)
+                } == true -> "Retake ID $side side after the current scan"
+                else -> "ID $side side not captured"
+            }
+        }
+    }
+
+    private fun hideIdCaptureOverlay() {
+        val overlay = idCaptureOverlayView
+        if (overlay != null) {
+            runCatching {
+                (idCaptureOverlayWindowManager
+                    ?: getSystemService(WINDOW_SERVICE) as WindowManager)
+                    .removeViewImmediate(overlay)
+            }
+        }
+        idCaptureOverlayThumbnails.values.forEach { image ->
+            image.tag = null
+            val bitmap = (image.drawable as? BitmapDrawable)?.bitmap
+            image.setImageDrawable(null)
+            if (bitmap != null && !bitmap.isRecycled) bitmap.recycle()
+        }
+        idCaptureOverlayThumbnails.clear()
+        idCaptureOverlayTiles.clear()
+        idCaptureOverlayView = null
+        idCaptureOverlayWindowManager = null
     }
 
     private fun showIdStudioBackStep() {

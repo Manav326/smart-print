@@ -299,6 +299,85 @@ class IdStudioInstrumentedTest {
         }
     }
 
+
+    @Test
+    fun idCapturePreviewOverlayKeepsBothSidesCompactAndQueuesRetakesSerially() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("smartprint.customer.last-shop", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        val store = IdStudioStore(context.filesDir, context.cacheDir)
+        val draftId = store.createDraft()
+        store.saveScan(draftId, "front", ByteArrayInputStream(testJpeg()))
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredField("idStudioDraftId").apply {
+                        isAccessible = true
+                    }.set(activity, draftId)
+                    MainActivity::class.java.getDeclaredField("pendingIdStudioSide").apply {
+                        isAccessible = true
+                    }.set(activity, "back")
+
+                    val overlay = MainActivity::class.java.getDeclaredMethod(
+                        "createIdCaptureOverlayView"
+                    ).apply { isAccessible = true }.invoke(activity) as android.widget.LinearLayout
+
+                    assertEquals("The capture overlay contains only the two side previews.", 2, overlay.childCount)
+                    assertTrue(
+                        "The Front tile remains a compact thumbnail control.",
+                        overlay.getChildAt(0).contentDescription.toString().contains("Front", true) ||
+                            overlay.getChildAt(0).contentDescription.toString().contains("front", true)
+                    )
+                    assertTrue(
+                        "The Back tile remains a compact thumbnail control.",
+                        overlay.getChildAt(1).contentDescription.toString().contains("Back", true) ||
+                            overlay.getChildAt(1).contentDescription.toString().contains("back", true)
+                    )
+
+                    // Tapping a thumbnail queues the retake instead of stacking a
+                    // second ML Kit activity above the currently active scanner.
+                    overlay.getChildAt(0).performClick()
+                    assertEquals(
+                        "A Front retake is queued for after the active scanner closes.",
+                        "front",
+                        MainActivity::class.java.getDeclaredField("queuedIdStudioSide")
+                            .apply { isAccessible = true }.get(activity)
+                    )
+                    assertEquals(
+                        "The current Back scan remains the only active scanner session.",
+                        "back",
+                        MainActivity::class.java.getDeclaredField("pendingIdStudioSide")
+                            .apply { isAccessible = true }.get(activity)
+                    )
+                    overlay.getChildAt(0).performClick()
+                    assertNull(
+                        "Tapping the selected thumbnail again clears the queued retake.",
+                        MainActivity::class.java.getDeclaredField("queuedIdStudioSide")
+                            .apply { isAccessible = true }.get(activity)
+                    )
+                }
+            }
+        } finally {
+            store.deleteDraft(draftId)
+        }
+    }
+
+
+    @Test
+    fun idCaptureOverlayPermissionExplanationIsRememberedOnce() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val preferences = context.getSharedPreferences("smartprint.id-capture-overlay", Context.MODE_PRIVATE)
+        preferences.edit().remove("permissionExplained").commit()
+        assertFalse(preferences.getBoolean("permissionExplained", false))
+        preferences.edit().putBoolean("permissionExplained", true).commit()
+        assertTrue(
+            "After the first explanation, SmartPrint must not show another automatic permission prompt.",
+            preferences.getBoolean("permissionExplained", false)
+        )
+        preferences.edit().clear().commit()
+    }
+
     private fun testJpeg(): ByteArray {
         val bitmap = Bitmap.createBitmap(1000, 630, Bitmap.Config.ARGB_8888)
         try {
