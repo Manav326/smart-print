@@ -2393,11 +2393,11 @@ class MainActivity : AppCompatActivity() {
                         val sheet = (shown as BottomSheetDialog).findViewById<FrameLayout>(
                             com.google.android.material.R.id.design_bottom_sheet
                         )
-                        sheet?.layoutParams = sheet?.layoutParams?.apply {
-                            height = (resources.displayMetrics.heightPixels * 0.88f).toInt()
-                        }
-                        sheet?.let {
-                            com.google.android.material.bottomsheet.BottomSheetBehavior.from(it).state =
+                        sheet?.let { bottomSheet ->
+                            bottomSheet.layoutParams = bottomSheet.layoutParams.apply {
+                                height = (resources.displayMetrics.heightPixels * 0.88f).toInt()
+                            }
+                            com.google.android.material.bottomsheet.BottomSheetBehavior.from(bottomSheet).state =
                                 com.google.android.material.bottomsheet.BottomSheetBehavior.STATE_EXPANDED
                         }
                     }
