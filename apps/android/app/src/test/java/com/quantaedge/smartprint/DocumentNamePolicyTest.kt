@@ -56,6 +56,19 @@ class DocumentNamePolicyTest {
         assertTrue(DocumentNamePolicy.isPrintable(png))
     }
 
+    @Test fun detectedTypeIsRecomputedWhenTheSamePathIsReplaced() {
+        val file = File(temporaryFolder.root, "renamed-document")
+        file.writeBytes("%PDF-1.7\\n".toByteArray())
+        assertEquals("application/pdf", DocumentNamePolicy.mimeType(file))
+
+        // Size is part of the cache identity, so replacing the file cannot reuse its
+        // previous PDF classification even when the path is unchanged.
+        file.writeBytes(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xe0.toByte(), 0x00))
+        assertEquals("image/jpeg", DocumentNamePolicy.mimeType(file))
+        assertTrue(DocumentNamePolicy.isImage(file))
+        assertFalse(DocumentNamePolicy.isPdf(file))
+    }
+
     @Test fun unknownExtensionlessFilesAreNotMisclassifiedAsPrintable() {
         val file = File(temporaryFolder.root, "renamed-file")
         file.writeText("This is not a PDF or image.")
