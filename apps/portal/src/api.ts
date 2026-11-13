@@ -2592,6 +2592,7 @@ export interface PlatformOperationalSettings {
   apiRetentionSweepHours: number;
   agentRetentionSweepHours: number;
   allowPaidJobClaimsWhenSuspended: boolean;
+  allowPrivatePrintingVirtualOutput: boolean;
   updatedByUserId: string | null;
   updatedUtc: string;
 }
@@ -2608,6 +2609,7 @@ export interface PlatformOperationalSettingsInput {
   apiRetentionSweepHours: number;
   agentRetentionSweepHours: number;
   allowPaidJobClaimsWhenSuspended: boolean;
+  allowPrivatePrintingVirtualOutput: boolean;
   reason: string;
 }
 

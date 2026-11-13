@@ -46,6 +46,7 @@ public sealed class PlatformOperationalSettings
     public int ApiRetentionSweepHours { get; set; } = 1;
     public int AgentRetentionSweepHours { get; set; } = 1;
     public bool AllowPaidJobClaimsWhenSuspended { get; set; } = true;
+    public bool AllowPrivatePrintingVirtualOutput { get; set; }
     public Guid? UpdatedByUserId { get; set; }
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

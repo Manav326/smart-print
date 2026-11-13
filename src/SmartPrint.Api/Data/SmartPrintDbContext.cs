@@ -79,6 +79,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 table.HasCheckConstraint("CK_PlatformOperationalSettings_SweepHours",
                     "\"ApiRetentionSweepHours\" BETWEEN 1 AND 168 AND \"AgentRetentionSweepHours\" BETWEEN 1 AND 24");
             });
+            entity.Property(x => x.AllowPrivatePrintingVirtualOutput).HasDefaultValue(false);
             entity.HasKey(x => x.Id);
             entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.SetNull);
         });
