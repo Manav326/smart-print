@@ -17,6 +17,8 @@ export type CustomerPendingSelectionMetadata = {
   privacyChoiceManuallySelected: boolean;
   uploadMode: "LOCAL" | "CLOUD";
   uploadModeManuallySelected: boolean;
+  paymentMethod: "UPI" | "CASH";
+  paymentReference: string;
 };
 
 export type CustomerPendingSelection = {
@@ -178,7 +180,23 @@ export async function loadCustomerPendingSelection(storageKey: string): Promise<
       })
     ]);
     await done;
-    if (!storedMetadata || storedMetadata.version !== 1 || records.length === 0) return null;
+    if (records.length === 0) return null;
+    const metadata = storedMetadata?.version === 1 ? storedMetadata : {
+      version: 1 as const,
+      updatedAt: Date.now(),
+      selectedFileIndex: 0,
+      batchName: "",
+      fileGroupNames: {},
+      groupSettings: {},
+      fileSettings: {},
+      photoSettingsByFileFingerprint: {},
+      privatePrinting: false,
+      privacyChoiceManuallySelected: false,
+      uploadMode: "LOCAL" as const,
+      uploadModeManuallySelected: false,
+      paymentMethod: "UPI" as const,
+      paymentReference: ""
+    };
 
     records.sort((left, right) => left.index - right.index);
     const nativePreviewTokens: Array<string | null> = [];
@@ -209,16 +227,18 @@ export async function loadCustomerPendingSelection(storageKey: string): Promise<
       files,
       nativePreviewTokens,
       metadata: {
-        selectedFileIndex: Math.min(Math.max(0, storedMetadata.selectedFileIndex || 0), Math.max(0, files.length - 1)),
-        batchName: typeof storedMetadata.batchName === "string" ? storedMetadata.batchName : "",
-        fileGroupNames: storedMetadata.fileGroupNames ?? {},
-        groupSettings: storedMetadata.groupSettings ?? {},
-        fileSettings: storedMetadata.fileSettings ?? {},
-        photoSettingsByFileFingerprint: storedMetadata.photoSettingsByFileFingerprint ?? {},
-        privatePrinting: Boolean(storedMetadata.privatePrinting),
-        privacyChoiceManuallySelected: Boolean(storedMetadata.privacyChoiceManuallySelected),
-        uploadMode: storedMetadata.uploadMode === "CLOUD" ? "CLOUD" : "LOCAL",
-        uploadModeManuallySelected: Boolean(storedMetadata.uploadModeManuallySelected)
+        selectedFileIndex: Math.min(Math.max(0, metadata.selectedFileIndex || 0), Math.max(0, files.length - 1)),
+        batchName: typeof metadata.batchName === "string" ? metadata.batchName : "",
+        fileGroupNames: metadata.fileGroupNames ?? {},
+        groupSettings: metadata.groupSettings ?? {},
+        fileSettings: metadata.fileSettings ?? {},
+        photoSettingsByFileFingerprint: metadata.photoSettingsByFileFingerprint ?? {},
+        privatePrinting: Boolean(metadata.privatePrinting),
+        privacyChoiceManuallySelected: Boolean(metadata.privacyChoiceManuallySelected),
+        uploadMode: metadata.uploadMode === "CLOUD" ? "CLOUD" : "LOCAL",
+        uploadModeManuallySelected: Boolean(metadata.uploadModeManuallySelected),
+        paymentMethod: metadata.paymentMethod === "CASH" ? "CASH" : "UPI",
+        paymentReference: typeof metadata.paymentReference === "string" ? metadata.paymentReference.slice(0, 100) : ""
       }
     };
   } finally {
