@@ -8492,7 +8492,6 @@ publicApi.MapPost("/sessions/current/jobs", async (
     var invalidPhotoUpload =
         isPhotoUpload &&
         (!validPhotoMetadata ||
-         !Path.GetExtension(originalName).Equals(".pdf", StringComparison.OrdinalIgnoreCase) ||
          requestedColourMode != "Colour" ||
          requestedPaperSize != "A4" ||
          requestedDuplex ||
