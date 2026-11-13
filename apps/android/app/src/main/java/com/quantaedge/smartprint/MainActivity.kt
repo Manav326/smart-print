@@ -2302,7 +2302,7 @@ class MainActivity : AppCompatActivity() {
                         detailColumn.addView(fileCard, linearParams().apply { bottomMargin = dp(7) })
                     }
 
-                    val totalPaid = fileEntries.sumOf { entry ->
+                    val totalPaidFromFiles = fileEntries.sumOf { entry ->
                         val payment = entry.third ?: return@sumOf 0L
                         val status = payment.optString("status").uppercase(Locale.ROOT)
                         if (status in setOf("VERIFIED", "PARTIALLY_REFUNDED", "REFUNDED"))
@@ -2313,7 +2313,14 @@ class MainActivity : AppCompatActivity() {
                     }
                     val paymentCurrency = batchPayment?.optString("currency")
                         ?.takeIf(String::isNotBlank) ?: batch.first().currency
-                    val batchAmount = batchPayment?.optLong("amountMinor")?.takeIf { it > 0L } ?: totalPaid
+                    val paymentStatusLabel = batchPayment?.optString("status").orEmpty().uppercase(Locale.ROOT)
+                    val paymentIsVerified = paymentStatusLabel in setOf("VERIFIED", "PARTIALLY_REFUNDED", "REFUNDED")
+                    val quotedTotal = batchPayment?.optLong("amountMinor")?.takeIf { it > 0L }
+                        ?: fileEntries.sumOf { it.first.optLong("quotedAmountMinor").coerceAtLeast(0L) }
+                    val paidTotal = if (totalPaidFromFiles > 0L) totalPaidFromFiles
+                        else if (paymentIsVerified) batchPayment?.optLong("amountMinor")?.coerceAtLeast(0L) ?: 0L
+                        else 0L
+                    val amountDue = (quotedTotal - paidTotal).coerceAtLeast(0L)
                     detailColumn.addView(text("Payment summary", 14, R.color.qp_text, true)
                         .apply { setPadding(0, dp(8), 0, dp(7)) })
                     val paymentCard = card()
@@ -2335,9 +2342,11 @@ class MainActivity : AppCompatActivity() {
                         ))
                         paymentBody.addView(line)
                     }
-                    addPaymentLine("Paid", batchAmount)
+                    addPaymentLine("Order total", quotedTotal)
+                    addPaymentLine("Paid", paidTotal)
                     addPaymentLine("Returned", totalRefunded)
-                    addPaymentLine("Net paid", (batchAmount - totalRefunded).coerceAtLeast(0L), true)
+                    addPaymentLine("Net paid", (paidTotal - totalRefunded).coerceAtLeast(0L), true)
+                    if (amountDue > 0L) addPaymentLine("Amount due", amountDue)
                     batchPayment?.let {
                         paymentBody.addView(text(
                             "Payment · ${CustomerOrderStatusPresentation.activityStatusLabel(it.optString("status"))}",
