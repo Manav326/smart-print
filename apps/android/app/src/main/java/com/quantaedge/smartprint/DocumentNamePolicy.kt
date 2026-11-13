@@ -46,10 +46,7 @@ object DocumentNamePolicy {
 
     fun isPdf(file: File): Boolean = mimeType(file) == "application/pdf"
 
-    fun isImage(file: File): Boolean {
-        val nameType = mimeType(file.name)
-        return if (nameType.startsWith("image/")) true else mimeType(file).startsWith("image/")
-    }
+    fun isImage(file: File): Boolean = mimeType(file).startsWith("image/")
 
     fun supportsInAppViewer(file: File): Boolean {
         if (!file.isFile) return false
