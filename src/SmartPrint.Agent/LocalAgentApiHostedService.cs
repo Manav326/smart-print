@@ -454,6 +454,15 @@ public sealed class LocalAgentApiHostedService(
 
                 var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
                 var entry = localQueueStore.Find(jobId);
+                if (entry?.PrivatePrinting == true)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.Conflict(new
+                    {
+                        code = "private_printing_source_locked",
+                        message = "Private Printing stays on the device and cannot send original photos or editor settings to the shop service."
+                    });
+                }
                 if (entry is null ||
                     entry.State is not ("LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT") ||
                     !File.Exists(entry.DocumentPath))
