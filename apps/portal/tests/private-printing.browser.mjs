@@ -402,7 +402,7 @@ async function runScenario(browser) {
   const harness = await installPrivatePrintingApiHarness(context, page);
 
   await page.goto(baseUrl + "/s/" + STATION_CODE, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: "Private Printing QA Shop" }).waitFor({ state: "visible", timeout: 30000 });
+  await page.getByRole("heading", { name: /Private Printing QA Shop/ }).waitFor({ state: "visible", timeout: 30000 });
   const privateChoice = page.locator(".customer-privacy-option.private");
   await privateChoice.waitFor({ state: "visible" });
   assert.equal(await privateChoice.getAttribute("aria-pressed"), "false");
@@ -496,9 +496,9 @@ async function runScenario(browser) {
     "Unexpected portal requests: " + JSON.stringify(harness.unhandledApi));
 
   const selectedKinds = await page.locator(".customer-uploaded-batch-item .print-kind-tag").allTextContents();
-  assert.equal(selectedKinds.filter(value => value.includes("ID card")).length, 2);
   assert.equal(selectedKinds.filter(value => value.trim() === "Photo").length, 5);
-  assert.equal(selectedKinds.filter(value => value.trim() === "Document").length, 1);
+  assert.equal(selectedKinds.filter(value => value.trim() === "Document").length, 3,
+    "The customer batch list retains all three non-photo documents; the API ticket assertions verify which two are ID cards.");
   const uploadedLabels = await page.locator(".customer-uploaded-batch-item").allTextContents();
   assert.ok(uploadedLabels.every(value => value.includes("Private document")),
     "The upload receipt must use privacy-safe document names.");
