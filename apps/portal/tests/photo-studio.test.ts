@@ -1,7 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { UPLOAD_LIMITS } from "../src/upload-limits.generated.ts";
 import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
+
+test("customer upload limits come from the shared generated policy",()=>{
+ assert.equal(UPLOAD_LIMITS.maxFileBytes,20*1024*1024);
+ assert.equal(UPLOAD_LIMITS.maxBatchFiles,20);
+ assert.equal(UPLOAD_LIMITS.maxBatchBytes,50*1024*1024);
+ assert.equal(UPLOAD_LIMITS.maxMultipartRequestBytes,21*1024*1024);
+ assert.equal(UPLOAD_LIMITS.privateRelayEncryptionOverheadBytes,16);
+});
 
 test("exact physical photo layout starts at the top safe margin on A4",()=>{
  const layout=getPhotoSheetLayout({widthMm:35,heightMm:45});

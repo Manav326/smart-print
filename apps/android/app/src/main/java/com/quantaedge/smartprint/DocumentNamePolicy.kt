@@ -3,7 +3,7 @@ package com.quantaedge.smartprint
 import java.util.Locale
 
 object DocumentNamePolicy {
-    const val MAX_PRINT_BYTES = 20L * 1024L * 1024L
+    const val MAX_PRINT_BYTES = UploadLimits.MAX_FILE_BYTES
     const val MAX_IMPORT_BYTES = 100L * 1024L * 1024L
 
     fun isPrintable(name: String, bytes: Long): Boolean =

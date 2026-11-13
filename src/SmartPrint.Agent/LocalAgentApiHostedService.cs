@@ -275,8 +275,8 @@ public sealed class LocalAgentApiHostedService(
 
             builder.Services.Configure<FormOptions>(options =>
             {
-                options.MultipartBodyLengthLimit = 21 * 1024 * 1024;
-                options.MemoryBufferThreshold = 21 * 1024 * 1024;
+                options.MultipartBodyLengthLimit = UploadLimits.MaxMultipartRequestBytes;
+                options.MemoryBufferThreshold = checked((int)UploadLimits.MaxMultipartRequestBytes);
             });
 
             // Retain loopback-only static origins for local development. The production
@@ -408,9 +408,9 @@ public sealed class LocalAgentApiHostedService(
                     return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Send exactly one prepared photo-sheet PDF." });
 
                 var file = form.Files[0];
-                if (file.Length is <= 0 or > 20 * 1024 * 1024 ||
+                if (file.Length is <= 0 or > UploadLimits.MaxFileBytes ||
                     !string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
-                    return Results.UnprocessableEntity(new { code = "photo_sheet_invalid", message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB." });
+                    return Results.UnprocessableEntity(new { code = "photo_sheet_invalid", message = "The prepared photo sheet must be a supported PDF within the upload size limit." });
 
                 var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
                 if (!int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
@@ -842,7 +842,7 @@ public sealed class LocalAgentApiHostedService(
 
                 if (claim.PrintJobId == Guid.Empty ||
                     claim.ExpiresUtc <= DateTimeOffset.UtcNow ||
-                    claim.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
+                    claim.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
                     string.IsNullOrWhiteSpace(claim.Sha256) ||
                     string.IsNullOrWhiteSpace(claim.FileExtension))
                 {
@@ -878,8 +878,8 @@ public sealed class LocalAgentApiHostedService(
                     }
 
                     var form = await context.Request.ReadFormAsync(ct);
-                    var expectedWireSize = claim.PrivatePrinting ? checked(claim.SizeBytes + 16) : claim.SizeBytes;
-                    if (form.Files.Count != 1 || form.Files[0].Length != expectedWireSize || expectedWireSize > 20L * 1024 * 1024 + 16)
+                    var expectedWireSize = claim.PrivatePrinting ? checked(claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes) : claim.SizeBytes;
+                    if (form.Files.Count != 1 || form.Files[0].Length != expectedWireSize || expectedWireSize > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
                     {
                         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "The received document size does not match the authorised upload.");
                     }
@@ -924,13 +924,13 @@ public sealed class LocalAgentApiHostedService(
                         }
                         try
                         {
-                            if (aesKey!.Length != 32 || iv!.Length != 12 || receivedBytes.LongLength != claim.SizeBytes + 16)
+                            if (aesKey!.Length != 32 || iv!.Length != 12 || receivedBytes.LongLength != claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
                                 throw new CryptographicException("The private document encryption envelope is invalid.");
                             bytes = new byte[checked((int)claim.SizeBytes)];
                             aad = Encoding.UTF8.GetBytes($"SmartPrint.PrivatePrinting.v1|{claim.Id}|{claim.PrintJobId}|{claim.SizeBytes}|{claim.Sha256}");
-                            using var aes = new AesGcm(aesKey, 16);
+                            using var aes = new AesGcm(aesKey, checked((int)UploadLimits.PrivateRelayEncryptionOverheadBytes));
                             aes.Decrypt(iv, receivedBytes.AsSpan(0, checked((int)claim.SizeBytes)),
-                                receivedBytes.AsSpan(checked((int)claim.SizeBytes), 16), bytes, aad);
+                                receivedBytes.AsSpan(checked((int)claim.SizeBytes), checked((int)UploadLimits.PrivateRelayEncryptionOverheadBytes)), bytes, aad);
                         }
                         catch (CryptographicException)
                         {
@@ -1045,7 +1045,7 @@ public sealed class LocalAgentApiHostedService(
                     CryptographicOperations.ZeroMemory(bytes);
                 }
             })
-            .WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+            .WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
             .RequireCors("CustomerPortal");
 
             await application.StartAsync(cancellationToken);

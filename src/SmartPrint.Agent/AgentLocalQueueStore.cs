@@ -207,7 +207,7 @@ public sealed class AgentLocalQueueStore
         if (job.Id == Guid.Empty ||
             string.IsNullOrWhiteSpace(job.JobNumber) ||
             documentBytes.Length != job.SizeBytes ||
-            job.SizeBytes is <= 0 or > 20L * 1024 * 1024)
+            job.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes)
         {
             throw new InvalidDataException("The claimed job metadata or document size is invalid.");
         }
@@ -830,7 +830,7 @@ public sealed class AgentLocalQueueStore
             string.IsNullOrWhiteSpace(replacementDocumentName) ||
             replacementDocumentName.Length > 255 ||
             !string.Equals(Path.GetExtension(replacementDocumentName), ".pdf", StringComparison.OrdinalIgnoreCase) ||
-            replacementBytes.Length is <= 0 or > 20 * 1024 * 1024 ||
+            replacementBytes.Length is <= 0 or > UploadLimits.MaxFileBytes ||
             pageCount is < 1 or > 100 ||
             quotedAmountMinor <= 0)
             throw new InvalidDataException("The prepared local photo revision metadata is invalid.");

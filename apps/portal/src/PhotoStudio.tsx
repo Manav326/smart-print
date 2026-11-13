@@ -4,6 +4,7 @@ import {
   Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
+import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
 import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "./photo-studio-layout";
 
@@ -67,7 +68,7 @@ type Adjustments = {
 function formatPhotoRate(minor: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(minor / 100);
 }
-const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_FILE_BYTES = UPLOAD_LIMITS.maxFileBytes;
 const MAX_PHOTO_COUNT = 100;
 
 const PHOTO_SIZES: PhotoSize[] = [
@@ -537,13 +538,13 @@ export default function PhotoStudio({
         if(blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(canvas,"image/jpeg",.82);
         jpegByteLength+=blob.size;
         if(jpegByteLength+pdfStructureAllowance>MAX_FILE_BYTES)
-          throw new Error("The prepared photo PDF would exceed SmartPrint's 20 MB file limit. Use a smaller original photo, choose fewer photos per job, or split the order into smaller batches.");
+          throw new Error(`The prepared photo PDF would exceed SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo, choose fewer photos per job, or split the order into smaller batches.`);
         jpegPages.push(new Uint8Array(await blob.arrayBuffer()));
       }
       const bytes=buildPhotoPdf(jpegPages);
       const buffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength) as ArrayBuffer;
       const pdf=new Blob([buffer],{type:"application/pdf"});
-      if(pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's 20 MB file limit. Use a smaller original photo or reduce the number of copies.");
+      if(pdf.size>MAX_FILE_BYTES)throw new Error(`The prepared photo PDF exceeds SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo or reduce the number of copies.`);
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
       const editorSettings: PhotoStudioEditorSettings = {
         sizeId: size.id,

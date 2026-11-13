@@ -92,8 +92,8 @@ class MainActivity : AppCompatActivity() {
         private const val MAX_TREE_FILES = 500
         private const val MAX_TREE_DEPTH = 12
         private const val FOLDER_PICKER_ACCEPT = "application/x-smartprint-folder-selection"
-        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES = 20L * 1024L * 1024L
-        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES = 50L * 1024L * 1024L
+        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES = UploadLimits.MAX_FILE_BYTES
+        private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES = UploadLimits.MAX_BATCH_BYTES
     }
 
     private lateinit var store: LocalDocumentStore
@@ -2562,7 +2562,7 @@ class MainActivity : AppCompatActivity() {
                 minHeight = dp(38); setOnClickListener { exportSelected(selectedHere); clearLibrarySelection(); showFiles() }
             }, LinearLayout.LayoutParams(0, dp(38), 1f))
             val supportedBatch = selectedHere.size in 2..20 && selectedHere.all {
-                it.extension.lowercase(Locale.ROOT) in setOf("pdf", "jpg", "jpeg", "png") && it.length() in 1..(20L * 1024L * 1024L)
+                it.extension.lowercase(Locale.ROOT) in setOf("pdf", "jpg", "jpeg", "png") && it.length() in 1..UploadLimits.MAX_FILE_BYTES
             } && selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
             selectionActions.addView(button("Combine into PDF", true).apply {
                 minHeight = dp(38); isEnabled = supportedBatch; alpha = if (supportedBatch) 1f else 0.45f

@@ -1,4 +1,5 @@
 import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
+import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "./local-preview-routing";
 import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 import { authStorageKey } from "./portal-routing";
@@ -191,6 +192,15 @@ export class LocalUploadOutcomeUnknownError extends Error {
   }
 }
 
+function validateUploadFileSize(file: File): void {
+  if (file.size <= 0 || file.size > UPLOAD_LIMITS.maxFileBytes) {
+    throw new ApiError(
+      `Choose a file up to ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB.`,
+      413,
+      "document_size_invalid"
+    );
+  }
+}
 const defaultApiBase = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 let apiBase = defaultApiBase;
 let desktopApiBaseRefresh: Promise<void> | null = null;
@@ -838,6 +848,7 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   paymentMethod: "UPI" | "CASH";
   idempotencyKey: string;
 }) {
+  validateUploadFileSize(file);
   const form = new FormData();
   form.append("file", file, file.name);
   form.append("photoSizeCode", values.photoSizeCode);
@@ -1324,6 +1335,7 @@ export async function uploadCustomerDocument(
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
   photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
 ) {
+  validateUploadFileSize(file);
   const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
   const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
   const pendingLocalGrant = sessionStorage.getItem(localKeys.grant);
@@ -1538,6 +1550,7 @@ export async function uploadCustomerDocumentLocally(
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
   photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
 ): Promise<UploadedPrintJob> {
+  validateUploadFileSize(file);
   if (printKind === "ID_DOCUMENT" && !privatePrinting) {
     throw new LocalUploadPreflightError(
       "Prepared ID cards must use Private Printing. The normal upload route is disabled for ID documents.",
@@ -2128,6 +2141,7 @@ export async function replaceShopPhotoDocumentLocally(
   photoCount: number,
   photosPerPage: number
 ) {
+  validateUploadFileSize(file);
   const grant = await apiRequest<{
     grantToken: string;
     endpoints: string[];
@@ -2213,6 +2227,7 @@ export function replaceShopPhotoDocument(
   photoCount: number,
   photosPerPage: number
 ) {
+  validateUploadFileSize(file);
   const form = new FormData();
   form.append("file", file, file.name);
   form.append("photoSizeCode", photoSizeCode);

@@ -370,8 +370,8 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         private const val GCM_TAG_BITS = 128
         private const val GCM_TAG_BYTES = 16
         private const val IV_BYTES = 12
-        private const val MAX_PREPARED_BYTES = 20L * 1024L * 1024L
-        private const val MAX_SOURCE_BYTES = 20L * 1024L * 1024L
+        private const val MAX_PREPARED_BYTES = UploadLimits.MAX_FILE_BYTES
+        private const val MAX_SOURCE_BYTES = UploadLimits.MAX_FILE_BYTES
         private const val MAX_METADATA_BYTES = 64L * 1024L
         private const val VAULT_OVERHEAD_BYTES = 64L
         private const val TRANSIENT_RETENTION_MILLIS = 30L * 60L * 1000L

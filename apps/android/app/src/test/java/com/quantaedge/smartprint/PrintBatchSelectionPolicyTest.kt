@@ -32,10 +32,10 @@ class PrintBatchSelectionPolicyTest {
 
     @Test
     fun rejectsMoreThanTwentyFiles() {
-        val files = (1..21).map { createFile("document-$it.pdf", 100L) }
+        val files = (1..(PrintBatchSelectionPolicy.MAX_FILES + 1)).map { createFile("document-$it.pdf", 100L) }
 
         assertEquals(
-            "A print batch can contain up to 20 files.",
+            "A print batch can contain up to ${PrintBatchSelectionPolicy.MAX_FILES} files.",
             PrintBatchSelectionPolicy.validationError(files)
         )
     }
@@ -50,9 +50,9 @@ class PrintBatchSelectionPolicyTest {
     @Test
     fun rejectsCombinedSizeAboveFiftyMegabytes() {
         val files = listOf(
-            createFile("one.pdf", 18L * 1024L * 1024L),
-            createFile("two.pdf", 18L * 1024L * 1024L),
-            createFile("three.pdf", 15L * 1024L * 1024L)
+            createFile("one.pdf", PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / 3 + 1L),
+            createFile("two.pdf", PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / 3 + 1L),
+            createFile("three.pdf", PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / 3 + 1L)
         )
 
         assertNotNull(PrintBatchSelectionPolicy.validationError(files))

@@ -17,7 +17,7 @@ data class PdfPageEdit(val sourceIndex: Int, val rotationDegrees: Int = 0)
 
 object DocumentBatchComposer {
     const val MAX_SOURCE_BYTES = 100L * 1024L * 1024L
-    const val MAX_PRINT_PDF_BYTES = 20L * 1024L * 1024L
+    const val MAX_PRINT_PDF_BYTES = UploadLimits.MAX_FILE_BYTES
     const val MAX_PAGES = 500
     private const val MAX_RENDER_EDGE = 2000
     private const val PAGE_WIDTH = 595
@@ -256,7 +256,7 @@ object DocumentBatchComposer {
             stream.fd.sync()
         }
         require(output.length() in 1..MAX_PRINT_PDF_BYTES) {
-            "The prepared PDF exceeds the current 20 MB per-document print limit. Remove pages or prepare a smaller batch."
+            "The prepared PDF exceeds the current ${MAX_PRINT_PDF_BYTES / (1024L * 1024L)} MB per-document print limit. Remove pages or prepare a smaller batch."
         }
     }
 }

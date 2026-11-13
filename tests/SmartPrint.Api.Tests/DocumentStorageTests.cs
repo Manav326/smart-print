@@ -3,6 +3,7 @@ using System.Buffers.Binary;
 using System.IO.Compression;
 using System.Text;
 using Microsoft.Extensions.Configuration;
+using SmartPrint.Api.Domain;
 using SmartPrint.Api.Storage;
 using SmartPrint.Documents;
 
@@ -209,7 +210,7 @@ public sealed class DocumentStorageTests
             using var storage = CreateStorage(root);
             await using var input = new MemoryStream();
             await Assert.ThrowsAsync<DocumentValidationException>(() =>
-                storage.ValidateAndStoreAsync(Guid.NewGuid(), Guid.NewGuid(), "large.png", input, 20L * 1024 * 1024 + 1, CancellationToken.None));
+                storage.ValidateAndStoreAsync(Guid.NewGuid(), Guid.NewGuid(), "large.png", input, UploadLimits.MaxFileBytes + 1, CancellationToken.None));
         }
         finally { Directory.Delete(root, recursive: true); }
     }

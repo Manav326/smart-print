@@ -1,3 +1,4 @@
+import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode, type CSSProperties } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
@@ -228,7 +229,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
     if(!selected)return;
     const supported=selected.type.toLowerCase().startsWith("image/")||/\.(jpe?g|png)$/i.test(selected.name);
     if(!supported){setError("Choose one JPG or PNG photo.");event.currentTarget.value="";return;}
-    if(selected.size<=0||selected.size>20*1024*1024){setError("Choose a photo up to 20 MB.");event.currentTarget.value="";return;}
+    if(selected.size<=0||selected.size>UPLOAD_LIMITS.maxFileBytes){setError(`Choose a photo up to ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB.`);event.currentTarget.value="";return;}
     setSource(selected);setEditingDocumentId(null);setInitialSettings(undefined);setStatus("");setError("");
   }
 
@@ -2095,8 +2096,8 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
     if(!["image/jpeg","image/png"].includes(inferredType)){
       setFile(null);setError("Choose a JPG, JPEG or PNG image. Other formats are not supported by Photo Studio.");event.currentTarget.value="";return;
     }
-    if(candidate.size<=0||candidate.size>20*1024*1024){
-      setFile(null);setError("The original photo must be between 1 byte and 20 MB.");event.currentTarget.value="";return;
+    if(candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes){
+      setFile(null);setError(`The original photo must be between 1 byte and ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB.`);event.currentTarget.value="";return;
     }
     setFile(candidate.type===inferredType?candidate:new File([candidate],candidate.name,{type:inferredType,lastModified:candidate.lastModified}));
   }
@@ -5105,7 +5106,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const generated=sheets.map(sheet=>sheet.file),nextFiles=[...files.slice(0,index),...generated,...files.slice(index+1)];
     const pending=nextFiles.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate)));
     const bytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,file)=>sum+file.size,0);
-    if(uploadedBatch.length+pending.length>20||bytes>50*1024*1024){setError("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
+    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||bytes>UPLOAD_LIMITS.maxBatchBytes){setError("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint},previews={...photoPreviewPagesByFingerprint};
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];delete previews[photoStudioSourceFingerprint];
     for(const sheet of sheets){
@@ -5208,16 +5209,16 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     const unsupportedSkipped=rootFiles.length-supported.length;
     if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
-    const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>20*1024*1024);
-    if(oversized){setError(`“${oversized.name}” exceeds the 20 MB per-file limit.`);return;}
+    const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
+    if(oversized){setError(`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file limit.`);return;}
     const merged=new Map(files.map(candidate=>[customerFileFingerprint(candidate),candidate]));
     for(const candidate of supported)merged.set(customerFileFingerprint(candidate),candidate);
     const selected=Array.from(merged.values());
     const alreadyUploaded=new Set(uploadedFileFingerprints);
     const pending=selected.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
     const totalBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,candidate)=>sum+candidate.size,0);
-    if(uploadedBatch.length+pending.length>20||totalBytes>50*1024*1024){
-      setError(nativeAppMode ? "20 files · 50 MB max." : "This batch can contain up to 20 files and 50 MB in total.");
+    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||totalBytes>UPLOAD_LIMITS.maxBatchBytes){
+      setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchFiles} files · ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB max.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchFiles} files and ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB in total.`);
       return;
     }
     setFileGroupNames(current=>{
@@ -5382,18 +5383,18 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   const photoAlreadyUploaded=Boolean(file&&uploadedFileFingerprints.includes(customerFileFingerprint(file)));
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
-    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · Up to 20 files / 50 MB</span></div>
+    <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · Up to {UPLOAD_LIMITS.maxBatchFiles} files / {UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB</span></div>
     <section className="customer-privacy-choice" aria-label="Document privacy choice">
       <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>{nativeAppMode?"Choose how files are handled":"How should SmartPrint handle your documents?"}</strong></div><small>{nativeAppMode?"Applies to all selected files":"This choice applies to every file in this batch."}</small></div>
       <div className="customer-privacy-choice-grid">
         <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
-          <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>{nativeAppMode?"Encrypted before upload. The shop copy is erased after printing.":"Encrypted before leaving your device. Sent over shop Wi-Fi or a temporary encrypted relay. The paired computer erases its copy after confirmed printing; your original file stays on your device."}</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
+          <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>Encrypted upload. Shop copy erased after printing.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
         </button>
         <button type="button" aria-pressed={!privatePrinting} disabled={busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false);}}>
-          <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>{nativeAppMode?"Shop normal workflow. Source copies are deleted 7 days after confirmed printing.":"Use the shop's normal document workflow. Completed source copies are automatically deleted 7 days after confirmed output under the standard retention policy."}</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
+          <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Normal print queue. Source copies auto-delete after 7 days.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
-      {nativeAppMode&&<small className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>Encrypted on your phone before upload. Sent over shop Wi-Fi or a temporary encrypted relay. The paired computer erases its working copy after confirmed physical printing. Your original file stays on your phone.</span></InfoTooltip> Private Printing details</small>}
+      <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>Files are encrypted before leaving your device. They travel over shop Wi-Fi or a temporary encrypted relay. The paired computer erases its working copy after physical printing is confirmed. Your original stays on your device.</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Standard Printing uses the shop's normal print queue. Completed source copies are deleted automatically 7 days after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
       {!canOfferPrivatePrinting&&<small className="customer-privacy-unavailable">{nativeAppMode?"Private Printing is unavailable until the shop computer reconnects.":"Private Printing becomes available when the shop's paired Windows computer is connected and has enabled its secure document key."} {nativeAppMode&&<InfoTooltip label="Why Private Printing is unavailable"><span>The paired shop computer must be connected and have its secure document key enabled.</span></InfoTooltip>}</small>}
       {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on.</strong> {nativeAppMode?"Your original stays on this phone; the shop copy is erased after printing is confirmed.":"The paired computer erases its working copy after physical output is confirmed. Your original file stays on your device."}</span></div>}
       {files.some(isSmartPrintPhotoDocument)&&<div className="customer-private-confirmation" role="status">

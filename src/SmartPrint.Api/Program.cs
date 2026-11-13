@@ -2429,13 +2429,13 @@ shop.MapPost("/photo-jobs", async (
     }
 
     var upload = form.Files[0];
-    if (upload.Length is <= 0 or > 20 * 1024 * 1024 ||
+    if (upload.Length is <= 0 or > UploadLimits.MaxFileBytes ||
         !string.Equals(Path.GetExtension(upload.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
     {
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_invalid",
-            message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB."
+            message = $"The prepared photo sheet must be a PDF up to {UploadLimits.MaxFileBytes / (1024 * 1024)} MB."
         });
     }
 
@@ -2761,7 +2761,7 @@ shop.MapPost("/photo-jobs", async (
         throw;
     }
 })
-.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
 .RequireRateLimiting("document-upload");
 
 shop.MapGet("/reports/summary", async (
@@ -3657,14 +3657,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
 
     var file = form.Files[0];
-    if (file.Length is <= 0 or > 20 * 1024 * 1024 ||
+    if (file.Length is <= 0 or > UploadLimits.MaxFileBytes ||
         !string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
     {
         await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_invalid",
-            message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB."
+            message = $"The prepared photo sheet must be a PDF up to {UploadLimits.MaxFileBytes / (1024 * 1024)} MB."
         });
     }
 
@@ -4005,12 +4005,12 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
 
     var reviewedIds = request.ReviewedJobIds?.Distinct().ToArray() ?? [];
     var acceptedIds = request.AcceptedJobIds?.Distinct().ToArray() ?? [];
-    if (reviewedIds.Length is < 1 or > 20 ||
+    if (reviewedIds.Length is < 1 or > UploadLimits.MaxBatchFiles ||
         acceptedIds.Length > reviewedIds.Length ||
         acceptedIds.Except(reviewedIds).Any())
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["review"] = ["Review between 1 and 20 files. Accepted file IDs must be part of the reviewed batch."]
+            ["review"] = [$"Review between 1 and {UploadLimits.MaxBatchFiles} files. Accepted file IDs must be part of the reviewed batch."]
         });
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
@@ -5544,7 +5544,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/received", async (
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (string.IsNullOrWhiteSpace(sha) || sha.Length != 64 ||
         sha.Any(character => !Uri.IsHexDigit(character)) ||
-        request.SizeBytes <= 0 || request.SizeBytes > 20L * 1024 * 1024)
+        request.SizeBytes <= 0 || request.SizeBytes > UploadLimits.MaxFileBytes)
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
@@ -6203,7 +6203,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
     if (request.LocalJobs is null || request.LocalJobs.Count is < 1 or > 100)
         return Results.ValidationProblem(new Dictionary<string, string[]> { ["localJobs"] = ["Provide between 1 and 100 local queue proofs."] });
     var proofs = request.LocalJobs
-        .Where(x => x is not null && x.JobId != Guid.Empty && x.SizeBytes is > 0 and <= 20L * 1024 * 1024 &&
+        .Where(x => x is not null && x.JobId != Guid.Empty && x.SizeBytes is > 0 and <= UploadLimits.MaxFileBytes &&
                     x.Sha256 is { Length: 64 } && x.Sha256.All(Uri.IsHexDigit))
         .GroupBy(x => x.JobId).Select(g => g.First()).ToList();
     if (proofs.Count != request.LocalJobs.Count)
@@ -6550,7 +6550,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
         document.SizeBytes != request.ExpectedOriginalSizeBytes)
         return Results.Conflict(new { code = "photo_revision_original_changed", message = "The local original no longer matches the document registered by the shop service. Reopen its preview." });
 
-    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
+    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
         string.IsNullOrWhiteSpace(request.Sha256) || request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
         string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000 || !IsValidPageSizesJson(request.PageSizesJson))
         return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -6769,7 +6769,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         return Results.Conflict(new { code = "photo_revision_payment_started", message = "A payment attempt started before the revision could be saved. The local original has been restored." });
     }
 
-    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > 20 * 1024 * 1024 ||
+    if (request.PageCount is < 1 or > 100 || request.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
         request.Sha256.Length != 64 || !request.Sha256.All(Uri.IsHexDigit) ||
         string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000)
     {
@@ -7992,9 +7992,9 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         return Results.BadRequest(new { code = "invalid_batch_name", message = exception.Message });
     }
-    if (file.Length is <= 0 or > 20 * 1024 * 1024)
+    if (file.Length is <= 0 or > UploadLimits.MaxFileBytes)
     {
-        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "File size must be between 1 byte and 20 MB.");
+        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: $"File size must be between 1 byte and {UploadLimits.MaxFileBytes / (1024 * 1024)} MB.");
     }
 
     var originalName = file.FileName.Split('/', '\\').LastOrDefault() ?? string.Empty;
@@ -8380,7 +8380,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             await transaction.RollbackAsync(ct);
             await storage.DeleteAsync(stored.StorageKey);
             return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
-                title: "A print batch can contain up to 20 files and 50 MB in total.");
+                title: $"A print batch can contain up to {UploadLimits.MaxBatchFiles} files and {UploadLimits.MaxBatchBytes / (1024 * 1024)} MB in total.");
         }
         var quota = await entitlements.CheckCapacityAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
         if (!quota.Allowed)
@@ -8443,7 +8443,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         DuplicateRequest = false
     });
 })
-.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
 .RequireRateLimiting("document-upload");
 
 publicApi.MapPost("/sessions/current/local-upload-tickets", async (
@@ -8535,14 +8535,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 : "Private Photo Studio sheets require a supported photo size, quantity, A4 sheet layout and a single-sided colour A4 PDF. No document was uploaded."
         });
     var sha = request.Sha256?.Trim().ToLowerInvariant();
-    if (mediaType is null || request.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
+    if (mediaType is null || request.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
         string.IsNullOrWhiteSpace(sha) || sha.Length != 64 || sha.Any(character => !Uri.IsHexDigit(character)) ||
         request.ColourMode is not ("Mono" or "Colour") ||
         request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         request.Copies is < 1 or > 100 ||
         request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
     {
-        return Results.UnprocessableEntity(new { code = "document_not_supported", message = "Local upload supports PDF, JPG/JPEG and PNG files up to 20 MB with a valid SHA-256 digest." });
+        return Results.UnprocessableEntity(new { code = "document_not_supported", message = $"Local upload supports PDF, JPG/JPEG and PNG files up to {UploadLimits.MaxFileBytes / (1024 * 1024)} MB with a valid SHA-256 digest." });
     }
 
     var batchId = request.BatchId ?? Guid.NewGuid();
@@ -9026,7 +9026,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     {
         await transaction.RollbackAsync(ct);
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
-            title: "A print batch can contain up to 20 files and 50 MB in total.");
+            title: $"A print batch can contain up to {UploadLimits.MaxBatchFiles} files and {UploadLimits.MaxBatchBytes / (1024 * 1024)} MB in total.");
     }
 
     db.LocalPrintUploadTickets.Add(ticket);
@@ -9122,7 +9122,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     if (form.Files.Count != 1)
         return Results.BadRequest(new { code = "private_relay_file_required" });
     var file = form.Files[0];
-    if (file.Length != ticket.SizeBytes + 16 || file.Length > 20L * 1024 * 1024 + 16)
+    if (file.Length != ticket.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes || file.Length > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
         return Results.UnprocessableEntity(new { code = "private_relay_size_mismatch", message = "The encrypted file size does not match its original upload ticket." });
 
     string storageKey;
@@ -9198,7 +9198,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         ticket.JobNumber
     });
 })
-.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
 .RequireRateLimiting("document-upload");
 
 publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private-relay-status", async (
@@ -9375,7 +9375,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     if (form.Files.Count != 1)
         return Results.BadRequest(new { code = "one_file_required", message = "Continue with one original document per print request." });
     var file = form.Files[0];
-    if (file.Length != preflightTicket.SizeBytes || file.Length is <= 0 or > 20 * 1024 * 1024)
+    if (file.Length != preflightTicket.SizeBytes || file.Length is <= 0 or > UploadLimits.MaxFileBytes)
         return Results.UnprocessableEntity(new { code = "local_upload_recovery_size_mismatch", message = "The selected file does not match the original upload attempt." });
 
     var documentId = Guid.NewGuid();
@@ -9660,7 +9660,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         throw;
     }
 })
-.WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+.WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
 .RequireRateLimiting("document-upload");
 
 publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
