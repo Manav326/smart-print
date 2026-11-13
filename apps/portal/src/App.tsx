@@ -45,6 +45,7 @@ import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPrefe
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
 import OrderJourneyPage from "./OrderJourneyPage";
+import ShopAdPlacement from "./ShopAdPlacement";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
@@ -2001,6 +2002,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X size={15}/></button></div>}
           {toast && <div className="inline-success" role="status"><Check size={15}/><span>{toast}</span><button onClick={() => setToast("")} aria-label="Dismiss message"><X size={15}/></button></div>}
 
+          {active === "Overview" && <ShopAdPlacement placement="SHOP_OVERVIEW"/>}
           {active === "Order Journey" && <OrderJourneyPage
             jobs={journeyJobs}
             payments={journeyPayments}

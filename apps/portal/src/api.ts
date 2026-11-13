@@ -2684,3 +2684,49 @@ export function updatePlatformOperationalSettings(token: string, values: Platfor
     body: JSON.stringify(values)
   }, token);
 }
+
+ 
+export interface PlatformAdCampaign {
+  id: string; name: string; advertiserName: string; headline: string; body: string;
+  terms: string | null; creativeId: string; creativeUrl: string | null; creativeFileName: string | null;
+  destinationUrl: string; placement: "HOME" | "FILES" | "SHOP_OVERVIEW" | string; format: string;
+  status: string; storedStatus: "Draft" | "Active" | "Paused" | "Archived" | string;
+  startsUtc: string; endsUtc: string | null; createdUtc: string; updatedUtc: string;
+  impressions: number; clicks: number; clickThroughRate: number;
+}
+export interface PublicAdCampaign {
+  id: string; advertiserName: string; headline: string; body: string;
+  destinationUrl: string; placement: string; format: string; imageUrl: string;
+}
+export interface PlatformAdCampaignInput {
+  name: string; advertiserName: string; headline: string; body: string; terms?: string;
+  creativeId: string; destinationUrl: string; placement: string; format: string;
+  startsUtc: string; endsUtc: string | null;
+}
+export function getPlatformAdCampaigns(token: string) {
+  return apiRequest<PlatformAdCampaign[]>("/api/v1/platform/advertising/campaigns", {}, token);
+}
+export function uploadPlatformAdCreative(token: string, file: File) {
+  return apiRequest<{ id: string; fileName: string; contentType: string; sizeBytes: number; imageUrl: string }>(
+    "/api/v1/platform/advertising/creatives",
+    { method: "POST", headers: { "Content-Type": file.type, "X-Ad-Creative-File-Name": encodeURIComponent(file.name), "X-Ad-Creative-File-Size": String(file.size) }, body: file },
+    token
+  );
+}
+export function savePlatformAdCampaign(token: string, values: PlatformAdCampaignInput, campaignId?: string) {
+  return apiRequest<PlatformAdCampaign>(
+    campaignId ? "/api/v1/platform/advertising/campaigns/" + campaignId : "/api/v1/platform/advertising/campaigns",
+    { method: campaignId ? "PUT" : "POST", body: JSON.stringify(values) }, token
+  );
+}
+export function updatePlatformAdCampaignStatus(token: string, campaignId: string, status: "Active" | "Paused" | "Archived") {
+  return apiRequest<PlatformAdCampaign>("/api/v1/platform/advertising/campaigns/" + campaignId + "/status",
+    { method: "POST", body: JSON.stringify({ status }) }, token);
+}
+export function getPublicAdCampaign(placement: string) {
+  return apiRequest<PublicAdCampaign | null>("/api/v1/advertising/active?placement=" + encodeURIComponent(placement));
+}
+export function recordPublicAdEvent(campaignId: string, eventType: "IMPRESSION" | "CLICK") {
+  return apiRequest<void>("/api/v1/advertising/" + campaignId + "/events",
+    { method: "POST", body: JSON.stringify({ eventType }) }).catch(() => undefined);
+}
