@@ -3905,6 +3905,9 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
                 item.StorageMode,
                 item.AgentDeviceId,
                 item.MediaType,
+                item.OriginalFileName,
+                item.SizeBytes,
+                item.Sha256,
                 item.PhotoSourceMediaType,
                 item.PhotoSourceOriginalFileName,
                 item.PhotoSourceSha256,
@@ -3916,13 +3919,13 @@ shop.MapGet("/print-jobs/{jobId:guid}/preview-source", async (
         if (photoSourcePreview)
         {
             var sourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
-            var sourceName = document.PhotoSourceOriginalFileName;
-            var sourceSize = document.PhotoSourceSizeBytes;
-            var sourceHash = document.PhotoSourceSha256;
+            var sourceName = document.PhotoSourceOriginalFileName ?? document.OriginalFileName;
+            var sourceSize = document.PhotoSourceSizeBytes ?? document.SizeBytes;
+            var sourceHash = document.PhotoSourceSha256 ?? document.Sha256;
             if (sourceMediaType is not ("image/jpeg" or "image/png") ||
-                (sourceName is not null && sourceName.Length > 255) ||
-                (sourceSize is not null && sourceSize <= 0) ||
-                (sourceHash is not null && (sourceHash.Length != 64 || !sourceHash.All(Uri.IsHexDigit))))
+                string.IsNullOrWhiteSpace(sourceName) || sourceName.Length > 255 ||
+                sourceSize <= 0 ||
+                string.IsNullOrWhiteSpace(sourceHash) || sourceHash.Length != 64 || !sourceHash.All(Uri.IsHexDigit))
                 return Results.Conflict(new { code = "photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
         }
         if (!string.Equals(document.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
@@ -4009,6 +4012,9 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
             item.StorageKey,
             item.StorageMode,
             item.MediaType,
+            item.OriginalFileName,
+            item.SizeBytes,
+            item.Sha256,
             item.PurgedUtc,
             item.PhotoSourceStorageKey,
             item.PhotoSourceOriginalFileName,
@@ -4037,10 +4043,11 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
     {
         mediaType = document.PhotoSourceMediaType ?? document.MediaType;
         storageKey = document.PhotoSourceStorageKey ?? document.StorageKey;
-        var sourceHash = document.PhotoSourceSha256 ?? string.Empty;
-        var sourceSize = document.PhotoSourceSizeBytes ?? 0;
+        var sourceHash = document.PhotoSourceSha256 ?? document.Sha256;
+        var sourceSize = document.PhotoSourceSizeBytes ?? document.SizeBytes;
         if (mediaType is not ("image/jpeg" or "image/png") ||
             sourceSize <= 0 ||
+            string.IsNullOrWhiteSpace(sourceHash) ||
             sourceHash.Length != 64 || !sourceHash.All(Uri.IsHexDigit))
             return Results.Conflict(new { code = "photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
     }
