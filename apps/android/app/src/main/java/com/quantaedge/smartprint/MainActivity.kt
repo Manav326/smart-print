@@ -5476,8 +5476,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openDocument(file: File) {
+        if (idStudioStore.isPreparedDocument(file)) {
+            // The encrypted library entry is not a PDF until the store materializes
+            // its temporary decrypted copy. Let showDocumentViewer detect that copy.
+            showDocumentViewer(file)
+            return
+        }
+
         val mediaType = DocumentNamePolicy.mimeType(file)
-        if (idStudioStore.isPreparedDocument(file) || DocumentNamePolicy.supportsInAppViewer(mediaType)) {
+        if (DocumentNamePolicy.supportsInAppViewer(mediaType)) {
             showDocumentViewer(file, detectedMimeType = mediaType)
         } else {
             openDocumentExternally(file, mediaType)
