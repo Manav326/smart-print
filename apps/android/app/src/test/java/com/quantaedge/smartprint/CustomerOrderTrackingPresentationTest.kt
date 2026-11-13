@@ -27,6 +27,29 @@ class CustomerOrderTrackingPresentationTest {
     }
 
     @Test
+    fun oneUnpaidFileKeepsBatchPaymentAsTheCurrentMilestone() {
+        val steps = CustomerOrderTrackingPresentation.steps(
+            listOf("PRINTING", "AWAITING_PAYMENT"),
+            null,
+            listOf("VERIFIED", "AWAITING_CUSTOMER_PAYMENT")
+        )
+        assertEquals(CustomerTrackingStepState.DONE, steps[1].state)
+        assertEquals(CustomerTrackingStepState.CURRENT, steps[2].state)
+        assertEquals(CustomerTrackingStepState.UPCOMING, steps[3].state)
+    }
+
+    @Test
+    fun allPerFilePaymentsVerifiedCanCompletePaymentWithoutBatchPaymentRecord() {
+        val steps = CustomerOrderTrackingPresentation.steps(
+            listOf("PAID_AUTHORISED", "LOCAL_QUEUE_READY"),
+            null,
+            listOf("VERIFIED", "VERIFIED")
+        )
+        assertEquals(CustomerTrackingStepState.DONE, steps[2].state)
+        assertEquals(CustomerTrackingStepState.CURRENT, steps[3].state)
+    }
+
+    @Test
     fun completePhysicalAndPdfOrdersReachTheirCorrectFinalMilestone() {
         val physical = CustomerOrderTrackingPresentation.steps(listOf("COMPLETED"), "VERIFIED")
         val pdf = CustomerOrderTrackingPresentation.steps(listOf("PDF_EXPORTED"), "VERIFIED")
