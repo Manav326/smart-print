@@ -17,14 +17,33 @@ public static class DocumentAnalyzer
     private const int MaximumPages = 500;
     private const ulong MaximumImagePixels = 50_000_000UL;
 
-    public static DocumentAnalysis Analyse(byte[] bytes, string extension)
+    public static string? IdentifyExtension(ReadOnlySpan<byte> bytes)
     {
+        ReadOnlySpan<byte> pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+        if (bytes.Length >= pngSignature.Length && bytes[..pngSignature.Length].SequenceEqual(pngSignature))
+            return ".png";
+        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+            return ".jpg";
+
+        var searchLength = Math.Min(bytes.Length, 1024);
+        for (var offset = 0; offset <= searchLength - 5; offset++)
+        {
+            if (bytes.Slice(offset, 5).SequenceEqual("%PDF-"u8))
+                return ".pdf";
+        }
+        return null;
+    }
+
+    public static DocumentAnalysis Analyse(byte[] bytes, string filenameExtension = "")
+    {
+        // File names are display labels. Format selection always comes from bytes.
+        var extension = IdentifyExtension(bytes) ??
+            throw new DocumentValidationException("The file content is not a supported PDF, JPEG or PNG document.");
+
         if (extension == ".pdf")
         {
-            if (bytes.Length < 8 || !bytes.AsSpan(0, 5).SequenceEqual("%PDF-"u8))
-            {
-                throw new DocumentValidationException("The file extension says PDF, but the file signature is invalid.");
-            }
+            if (bytes.Length < 8)
+                throw new DocumentValidationException("The PDF file is incomplete.");
 
             try
             {
