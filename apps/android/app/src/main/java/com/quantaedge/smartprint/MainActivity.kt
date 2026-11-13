@@ -1791,7 +1791,8 @@ class MainActivity : AppCompatActivity() {
                             orientation = LinearLayout.VERTICAL
                             setPadding(dp(13), dp(11), dp(13), dp(11))
                         }
-                        val status = CustomerOrderStatusPresentation.batchSummaryStatus(batch.map { it.status })
+                        val outcome = CustomerOrderStatusPresentation.batchOutcome(batch.map { it.status })
+                        val status = outcome.status
                         val darkMode = (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
                             android.content.res.Configuration.UI_MODE_NIGHT_YES
                         val palette = when (status.uppercase(Locale.ROOT)) {
@@ -1832,6 +1833,27 @@ class MainActivity : AppCompatActivity() {
                             "${batch.size} file(s) · ${batch.sumOf { it.pageCount }} pages",
                             10, R.color.qp_primary, true
                         ))
+                        body.addView(text(
+                            "${outcome.readyCount} of ${outcome.fileCount} files ready · " +
+                                "${outcome.activeCount} in progress · ${outcome.excludedCount} closed without output",
+                            10, R.color.qp_muted, false
+                        ).apply { setPadding(0, dp(7), 0, dp(3)) })
+                        val progress = android.widget.ProgressBar(
+                            this, null, android.R.attr.progressBarStyleHorizontal
+                        ).apply {
+                            max = 100
+                            this.progress = outcome.progressPercent
+                            progressTintList = ColorStateList.valueOf(
+                                if (outcome.progressPercent == 100) android.graphics.Color.rgb(36, 139, 94)
+                                else getColor(R.color.qp_primary)
+                            )
+                            progressBackgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_outline))
+                            contentDescription = "Batch completion ${outcome.progressPercent} percent"
+                        }
+                        body.addView(progress, LinearLayout.LayoutParams(-1, dp(6)).apply {
+                            topMargin = dp(2)
+                            bottomMargin = dp(4)
+                        })
                         val photos = batch.filter { it.printKind == "PHOTO" }
                         if (photos.isNotEmpty()) {
                             val photoSummary = photos.joinToString(" · ") { photo ->
