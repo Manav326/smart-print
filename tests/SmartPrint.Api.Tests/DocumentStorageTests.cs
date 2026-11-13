@@ -186,7 +186,7 @@ public sealed class DocumentStorageTests
 
             Assert.Equal("image/png", stored.Analysis.MediaType);
             Assert.Equal(".png", stored.Analysis.Extension);
-            Assert.True(stored.StorageKey.EndsWith(".png", StringComparison.Ordinal));
+            Assert.EndsWith(".png", stored.StorageKey, StringComparison.Ordinal);
         }
         finally { Directory.Delete(root, recursive: true); }
     }
