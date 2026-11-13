@@ -2753,18 +2753,26 @@ class MainActivity : AppCompatActivity() {
 
     private fun fileIconResource(file: File): Int {
         if (file.isDirectory) return R.drawable.ic_folder
-        return when (file.extension.lowercase(Locale.ROOT)) {
-            "pdf" -> R.drawable.ic_file_pdf
-            "jpg", "jpeg", "png", "webp", "bmp", "gif" -> R.drawable.ic_file_image
+        val mediaType = if (file.extension.isBlank()) {
+            DocumentNamePolicy.mimeType(file)
+        } else {
+            DocumentNamePolicy.mimeType(file.name)
+        }
+        return when (mediaType) {
+            "application/pdf" -> R.drawable.ic_file_pdf
+            "image/jpeg", "image/png", "image/webp", "image/bmp", "image/gif" -> R.drawable.ic_file_image
             else -> R.drawable.ic_file
         }
     }
 
     private fun showEntryMenu(anchor: View, file: File) {
+        val mediaType = if (file.isFile) DocumentNamePolicy.mimeType(file) else null
         val actions = mutableListOf<Pair<String, () -> Unit>>()
-        if (!file.isDirectory) actions += "Open" to { openDocument(file) }
-        if (!file.isDirectory && supportsInAppViewer(file)) actions += "Open with another app" to { openDocumentExternally(file) }
-        if (!file.isDirectory && DocumentNamePolicy.isPdf(file)) {
+        if (!file.isDirectory) actions += "Open" to { openDocument(file, mediaType) }
+        if (mediaType != null && DocumentNamePolicy.supportsInAppViewer(mediaType)) {
+            actions += "Open with another app" to { openDocumentExternally(file, mediaType) }
+        }
+        if (mediaType == "application/pdf") {
             actions += "Edit PDF" to { showPdfEditor(file) }
         }
         actions += "Rename" to {
@@ -5475,7 +5483,7 @@ class MainActivity : AppCompatActivity() {
         } else showFiles()
     }
 
-    private fun openDocument(file: File) {
+    private fun openDocument(file: File, detectedMimeType: String? = null) {
         if (idStudioStore.isPreparedDocument(file)) {
             // The encrypted library entry is not a PDF until the store materializes
             // its temporary decrypted copy. Let showDocumentViewer detect that copy.
@@ -5483,7 +5491,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val mediaType = DocumentNamePolicy.mimeType(file)
+        val mediaType = detectedMimeType ?: DocumentNamePolicy.mimeType(file)
         if (DocumentNamePolicy.supportsInAppViewer(mediaType)) {
             showDocumentViewer(file, detectedMimeType = mediaType)
         } else {
@@ -5506,14 +5514,14 @@ class MainActivity : AppCompatActivity() {
         } catch (_: Exception) { toast("No app could open this document.") }
     }
 
-    private fun shareDocument(file: File) {
+    private fun shareDocument(file: File, detectedMimeType: String? = null) {
         if (idStudioStore.isPreparedDocument(file)) {
             toast("Prepared ID documents cannot be shared outside SmartPrint.")
             return
         }
         try {
             val uri = FileProvider.getUriForFile(this, "$packageName.documents", file)
-            val mediaType = DocumentNamePolicy.mimeType(file)
+            val mediaType = detectedMimeType ?: DocumentNamePolicy.mimeType(file)
             val intent = Intent(Intent.ACTION_SEND).apply {
                 type = mediaType
                 putExtra(Intent.EXTRA_STREAM, uri)
