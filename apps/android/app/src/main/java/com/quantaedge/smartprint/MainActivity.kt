@@ -2073,110 +2073,316 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+
     private fun showCustomerJobDetails(batch: List<CustomerPrintHistoryItem>) {
         if (batch.isEmpty()) return
         Thread {
-            try {
+            val result = runCatching {
                 var auth = customerAccountStore.read() ?: error("Sign in to view order details.")
                 if (CustomerAccountClient.accessTokenIsExpired(auth)) {
                     auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
                     customerAccountStore.save(auth)
                 }
-                val detailResponses = batch.map { job ->
-                    try {
-                        CustomerAccountClient.jobStatus(accountServiceUrl(), auth.accessToken, job.id)
+                fun <T> authenticated(action: (String) -> T): T {
+                    return try {
+                        action(auth.accessToken)
                     } catch (error: CustomerApiException) {
                         if (error.statusCode != 401) throw error
                         auth = CustomerAccountClient.refresh(accountServiceUrl(), auth)
                         customerAccountStore.save(auth)
-                        CustomerAccountClient.jobStatus(accountServiceUrl(), auth.accessToken, job.id)
+                        action(auth.accessToken)
                     }
                 }
-                runOnUiThread {
-                    if (isFinishing) return@runOnUiThread
+
+                val orderKey = batch.first().batchId ?: batch.first().id
+                try {
+                    authenticated { token ->
+                        CustomerAccountClient.orderTracking(accountServiceUrl(), token, orderKey)
+                    }
+                } catch (error: CustomerApiException) {
+                    if (error.statusCode != 404) throw error
+                    // Rollout compatibility: older API instances still expose one status
+                    // endpoint per file. Keep tracking usable until the batch endpoint deploys.
+                    val legacyFiles = JSONArray()
+                    var legacyBatchPayment: JSONObject? = null
+                    batch.forEach { historyItem ->
+                        val detail = authenticated { token ->
+                            CustomerAccountClient.jobStatus(accountServiceUrl(), token, historyItem.id)
+                        }
+                        legacyFiles.put(JSONObject()
+                            .put("job", detail.optJSONObject("job") ?: JSONObject())
+                            .put("timeline", detail.optJSONArray("timeline") ?: JSONArray())
+                            .put("payment", detail.optJSONObject("payment") ?: JSONObject.NULL))
+                        detail.optJSONObject("batchPayment")?.let { legacyBatchPayment = it }
+                    }
+                    JSONObject()
+                        .put("order", JSONObject()
+                            .put("key", orderKey)
+                            .put("batchId", batch.first().batchId ?: JSONObject.NULL)
+                            .put("batchName", batch.first().batchName ?: JSONObject.NULL)
+                            .put("batchGroupName", batch.first().batchGroupName ?: JSONObject.NULL)
+                            .put("shopName", batch.first().shopName)
+                            .put("createdUtc", batch.minOf { it.createdUtc }))
+                        .put("files", legacyFiles)
+                        .put("batchPayment", legacyBatchPayment ?: JSONObject.NULL)
+                }
+            }
+
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                result.onSuccess { payload ->
+                    val order = payload.optJSONObject("order") ?: JSONObject()
+                    val files = payload.optJSONArray("files") ?: JSONArray()
+                    if (files.length() == 0) {
+                        AlertDialog.Builder(this)
+                            .setTitle("Order details unavailable")
+                            .setMessage("No files were found for this print order.")
+                            .setPositiveButton("Close", null)
+                            .show()
+                        return@onSuccess
+                    }
+
+                    val fileEntries = (0 until files.length()).mapNotNull { index ->
+                        files.optJSONObject(index)?.let { entry ->
+                            val job = entry.optJSONObject("job") ?: JSONObject()
+                            Triple(job, entry.optJSONArray("timeline") ?: JSONArray(), entry.optJSONObject("payment"))
+                        }
+                    }
+                    val statuses = fileEntries.map { it.first.optString("status") }
+                    val batchPayment = payload.optJSONObject("batchPayment")
+                    val paymentStatus = batchPayment?.optString("status")?.takeIf { it.isNotBlank() }
+                        ?: fileEntries.mapNotNull { it.third?.optString("status")?.takeIf(String::isNotBlank) }
+                            .firstOrNull()
+                    val outcome = CustomerOrderStatusPresentation.batchOutcome(statuses)
+                    val headline = CustomerOrderTrackingPresentation.currentHeadline(statuses, paymentStatus)
                     val detailScroll = ScrollView(this).apply { isFillViewport = true }
                     val detailColumn = LinearLayout(this).apply {
                         orientation = LinearLayout.VERTICAL
                         setPadding(dp(16), dp(12), dp(16), dp(18))
                     }
-                    val batchPayment = detailResponses.asSequence()
-                        .mapNotNull { it.optJSONObject("batchPayment") }
-                        .maxByOrNull { it.optString("updatedUtc") }
-                    if (batchPayment != null) {
-                        val batchPaymentId = batchPayment.optString("id")
-                        val allocatedFileCount = detailResponses.count { response ->
-                            response.optJSONObject("payment")?.optString("batchPaymentId") == batchPaymentId
-                        }.coerceAtLeast(1)
-                        detailColumn.addView(text(
-                            CustomerOrderStatusPresentation.batchPaymentSummary(
-                                batchPayment.optString("status"),
-                                batchPayment.optLong("amountMinor"),
-                                batchPayment.optString("currency", batch.first().currency),
-                                allocatedFileCount
-                            ),
-                            10, R.color.qp_muted, false
-                        ).apply { setPadding(0, 0, 0, dp(8)) })
+
+                    detailColumn.addView(text(headline, 18, R.color.qp_text, true)
+                        .apply { setPadding(0, 0, 0, dp(5)) })
+                    val orderName = order.optString("batchName").takeIf(String::isNotBlank)
+                        ?: order.optString("batchGroupName").takeIf(String::isNotBlank)
+                        ?: batch.first().batchName?.takeIf(String::isNotBlank)
+                        ?: if (batch.size > 1) "Print batch" else "Order ${batch.first().jobNumber}"
+                    val shopName = order.optString("shopName").takeIf(String::isNotBlank)
+                        ?: batch.first().shopName
+                    val createdUtc = order.optString("createdUtc").takeIf(String::isNotBlank)
+                        ?: batch.minOf { it.createdUtc }
+                    detailColumn.addView(text(
+                        "$orderName · $shopName",
+                        11, R.color.qp_muted, false
+                    ).apply { setPadding(0, 0, 0, dp(3)) })
+                    detailColumn.addView(text(
+                        "Order ${batch.first().jobNumber} · ${CustomerHistoryDatePresentation.dateTime(createdUtc)}",
+                        10, R.color.qp_muted, false
+                    ).apply { setPadding(0, 0, 0, dp(12)) })
+
+                    val summaryCard = card()
+                    val summaryBody = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(12), dp(10), dp(12), dp(10))
                     }
-                    detailResponses.forEachIndexed { index, response ->
-                        val summary = response.optJSONObject("job") ?: JSONObject()
-                        val timeline = response.optJSONArray("timeline") ?: org.json.JSONArray()
-                        val historyItem = batch[index]
-                        detailColumn.addView(text(historyItem.originalFileName, 14, R.color.qp_text, true)
-                            .apply { setPadding(0, 0, 0, dp(5)) })
-                        detailColumn.addView(text("Order " + historyItem.jobNumber + " · " +
-                            activityStatusLabel(summary.optString("status", historyItem.status)), 11, R.color.qp_primary, true))
-                        detailColumn.addView(text(summary.optString("pageCount", historyItem.pageCount.toString()) +
-                            " pages · " + summary.optInt("copies", historyItem.copies) + " copies · " +
-                            summary.optString("paperSize", "A4"), 10, R.color.qp_muted, false)
-                            .apply { setPadding(0, dp(4), 0, dp(5)) })
-                        if (historyItem.printKind == "PHOTO" || summary.optString("printKind") == "PHOTO") {
-                            val density = summary.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }
-                                ?.optInt("photosPerPage")
-                                ?.takeIf { it > 0 } ?: historyItem.photosPerPage
-                            val densityLabel = density?.let { "$it per A4 page" } ?: "Layout density not recorded for this older order"
-                            detailColumn.addView(text(
-                                "${summary.optInt("photoCount", historyItem.photoCount)} ${summary.optString("photoSizeCode", historyItem.photoSizeCode ?: "photo")} · ${densityLabel} · ${historyItem.pageCount} A4 PDF page(s)",
-                                10, R.color.qp_muted, false
-                            ).apply { setPadding(0, 0, 0, dp(5)) })
-                        }
-                        val payment = response.optJSONObject("payment")
-                        val paymentStatus = payment?.optString("status")?.takeIf { it.isNotBlank() }
-                            ?: historyItem.paymentStatus
-                        val allocatedAmountMinor = payment?.optLong("amountMinor") ?: historyItem.paidAmountMinor
-                        val refundedAmountMinor = payment?.optLong("refundedAmountMinor") ?: historyItem.refundedAmountMinor
-                        val paymentSummary = CustomerOrderStatusPresentation.filePaymentSummary(
-                            paymentStatus, allocatedAmountMinor, refundedAmountMinor, historyItem.currency
+                    summaryBody.addView(text(
+                        "${outcome.readyCount} of ${outcome.fileCount} files ready · " +
+                            "${outcome.activeCount} in progress · ${outcome.excludedCount} closed without output",
+                        11, R.color.qp_text, true
+                    ))
+                    val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                        max = 100
+                        this.progress = outcome.progressPercent
+                        progressTintList = ColorStateList.valueOf(
+                            if (outcome.progressPercent == 100) android.graphics.Color.rgb(36, 139, 94)
+                            else getColor(R.color.qp_primary)
                         )
-                        if (paymentSummary != null) detailColumn.addView(text(
-                            paymentSummary, 10, R.color.qp_muted, false
-                        ))
-                        detailColumn.addView(text("Progress", 11, R.color.qp_text, true)
-                            .apply { setPadding(0, dp(8), 0, dp(4)) })
-                        for (eventIndex in 0 until timeline.length()) {
-                            val event = timeline.optJSONObject(eventIndex) ?: continue
-                            val timestamp = runCatching {
-                                Instant.parse(event.optString("createdUtc")).atZone(ZoneId.systemDefault())
-                                    .format(DateTimeFormatter.ofPattern("dd MMMM · hh:mm a", Locale.ENGLISH))
-                            }.getOrDefault("")
-                            detailColumn.addView(text(
-                                activityStatusLabel(event.optString("newStatus")) + " · " + timestamp,
-                                10, R.color.qp_muted, false
-                            ).apply { setPadding(dp(8), dp(3), 0, dp(3)) })
+                        progressBackgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_outline))
+                        contentDescription = "Order completion ${outcome.progressPercent} percent"
+                    }
+                    summaryBody.addView(progress, LinearLayout.LayoutParams(-1, dp(6)).apply {
+                        topMargin = dp(9)
+                        bottomMargin = dp(8)
+                    })
+                    summaryBody.addView(text(activityStatusLabel(outcome.status), 10, R.color.qp_primary, true))
+                    summaryCard.addView(summaryBody)
+                    detailColumn.addView(summaryCard, linearParams().apply { bottomMargin = dp(12) })
+
+                    detailColumn.addView(text("Order progress", 14, R.color.qp_text, true)
+                        .apply { setPadding(0, dp(2), 0, dp(8)) })
+                    val milestones = CustomerOrderTrackingPresentation.steps(statuses, paymentStatus)
+                    milestones.forEachIndexed { index, milestone ->
+                        addCustomerTrackingStep(detailColumn, milestone, index == milestones.lastIndex)
+                    }
+
+                    detailColumn.addView(text("Files in this order", 14, R.color.qp_text, true)
+                        .apply { setPadding(0, dp(12), 0, dp(7)) })
+                    fileEntries.forEachIndexed { index, entry ->
+                        val job = entry.first
+                        val historyItem = batch.firstOrNull { it.id == job.optString("id") }
+                        val payment = entry.third
+                        val privatePrinting = job.optBoolean(
+                            "privatePrinting", historyItem?.privatePrinting ?: false
+                        )
+                        val fileName = if (privatePrinting) "Private document" else
+                            job.optString("originalFileName").takeIf(String::isNotBlank)
+                                ?: historyItem?.originalFileName ?: "Print document"
+                        val fileCard = card()
+                        val fileBody = LinearLayout(this).apply {
+                            orientation = LinearLayout.VERTICAL
+                            setPadding(dp(12), dp(10), dp(12), dp(10))
                         }
-                        if (index < detailResponses.lastIndex) {
-                            detailColumn.addView(text(" ", 4, R.color.qp_muted, false).apply { setPadding(0, dp(8), 0, dp(8)) })
+                        val fileHeader = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                        }
+                        fileHeader.addView(text(fileName, 12, R.color.qp_text, true),
+                            LinearLayout.LayoutParams(0, -2, 1f))
+                        fileHeader.addView(text(
+                            activityStatusLabel(job.optString("status")),
+                            9, R.color.qp_primary, true
+                        ))
+                        fileBody.addView(fileHeader)
+                        val pageCount = job.optInt("pageCount", historyItem?.pageCount ?: 0)
+                        val copies = job.optInt("copies", historyItem?.copies ?: 1)
+                        val paperSize = job.optString("paperSize").takeIf(String::isNotBlank) ?: "A4"
+                        fileBody.addView(text(
+                            "$pageCount page(s) · $copies copie(s) · $paperSize",
+                            10, R.color.qp_muted, false
+                        ).apply { setPadding(0, dp(5), 0, dp(2)) })
+                        if (privatePrinting) {
+                            fileBody.addView(text(
+                                "Private Printing · document content is not shown in order history",
+                                9, R.color.qp_muted, false
+                            ).apply { setPadding(0, dp(2), 0, dp(3)) })
+                        }
+                        if (job.optString("printKind") == "PHOTO" || historyItem?.printKind == "PHOTO") {
+                            val photoCount = job.optInt("photoCount", historyItem?.photoCount ?: 0)
+                            val photoSize = job.optString("photoSizeCode")
+                                .takeIf(String::isNotBlank) ?: historyItem?.photoSizeCode ?: "photo"
+                            val density = job.optInt("photosPerPage").takeIf { it > 0 }
+                                ?: historyItem?.photosPerPage
+                            fileBody.addView(text(
+                                "$photoCount $photoSize · ${density?.let { "$it per A4 page" } ?: "layout not recorded"}",
+                                10, R.color.qp_muted, false
+                            ))
+                        }
+                        val allocated = payment?.optLong("amountMinor")
+                            ?: historyItem?.paidAmountMinor ?: 0L
+                        val refunded = payment?.optLong("refundedAmountMinor")
+                            ?: historyItem?.refundedAmountMinor ?: 0L
+                        val paymentSummary = CustomerOrderStatusPresentation.filePaymentSummary(
+                            payment?.optString("status")?.takeIf(String::isNotBlank)
+                                ?: historyItem?.paymentStatus,
+                            allocated,
+                            refunded,
+                            payment?.optString("currency")?.takeIf(String::isNotBlank)
+                                ?: historyItem?.currency ?: "INR"
+                        )
+                        if (paymentSummary != null) {
+                            fileBody.addView(text(paymentSummary, 9, R.color.qp_muted, false)
+                                .apply { setPadding(0, dp(5), 0, 0) })
+                        }
+                        fileCard.addView(fileBody)
+                        detailColumn.addView(fileCard, linearParams().apply { bottomMargin = dp(7) })
+                    }
+
+                    val totalPaid = fileEntries.sumOf { entry ->
+                        val payment = entry.third ?: return@sumOf 0L
+                        val status = payment.optString("status").uppercase(Locale.ROOT)
+                        if (status in setOf("VERIFIED", "PARTIALLY_REFUNDED", "REFUNDED"))
+                            payment.optLong("amountMinor").coerceAtLeast(0L) else 0L
+                    }
+                    val totalRefunded = fileEntries.sumOf { entry ->
+                        (entry.third?.optLong("refundedAmountMinor") ?: 0L).coerceAtLeast(0L)
+                    }
+                    val paymentCurrency = batchPayment?.optString("currency")
+                        ?.takeIf(String::isNotBlank) ?: batch.first().currency
+                    val batchAmount = batchPayment?.optLong("amountMinor")?.takeIf { it > 0L } ?: totalPaid
+                    detailColumn.addView(text("Payment summary", 14, R.color.qp_text, true)
+                        .apply { setPadding(0, dp(8), 0, dp(7)) })
+                    val paymentCard = card()
+                    val paymentBody = LinearLayout(this).apply {
+                        orientation = LinearLayout.VERTICAL
+                        setPadding(dp(12), dp(10), dp(12), dp(10))
+                    }
+                    fun addPaymentLine(label: String, amount: Long, emphasize: Boolean = false) {
+                        val line = LinearLayout(this).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            gravity = Gravity.CENTER_VERTICAL
+                            setPadding(0, dp(3), 0, dp(3))
+                        }
+                        line.addView(text(label, 10, R.color.qp_muted, false),
+                            LinearLayout.LayoutParams(0, -2, 1f))
+                        line.addView(text(
+                            "%.2f %s".format(Locale.ROOT, amount.coerceAtLeast(0L) / 100.0, paymentCurrency),
+                            10, if (emphasize) R.color.qp_primary else R.color.qp_text, true
+                        ))
+                        paymentBody.addView(line)
+                    }
+                    addPaymentLine("Paid", batchAmount)
+                    addPaymentLine("Returned", totalRefunded)
+                    addPaymentLine("Net paid", (batchAmount - totalRefunded).coerceAtLeast(0L), true)
+                    batchPayment?.let {
+                        paymentBody.addView(text(
+                            "Payment · ${CustomerOrderStatusPresentation.activityStatusLabel(it.optString("status"))}",
+                            9, R.color.qp_muted, false
+                        ).apply { setPadding(0, dp(5), 0, 0) })
+                    }
+                    paymentCard.addView(paymentBody)
+                    detailColumn.addView(paymentCard, linearParams().apply { bottomMargin = dp(12) })
+
+                    data class TrackingEvent(
+                        val createdUtc: String,
+                        val status: String,
+                        val fileName: String,
+                        val actorType: String
+                    )
+                    val events = fileEntries.flatMap { entry ->
+                        val job = entry.first
+                        val privatePrinting = job.optBoolean("privatePrinting", false)
+                        val fileName = if (privatePrinting) "Private document"
+                            else job.optString("originalFileName").takeIf(String::isNotBlank) ?: "Print document"
+                        val timeline = entry.second
+                        (0 until timeline.length()).mapNotNull { eventIndex ->
+                            timeline.optJSONObject(eventIndex)?.let { event ->
+                                TrackingEvent(
+                                    event.optString("createdUtc"),
+                                    event.optString("newStatus"),
+                                    fileName,
+                                    event.optString("actorType")
+                                )
+                            }
+                        }
+                    }.sortedBy { it.createdUtc }
+                    if (events.isNotEmpty()) {
+                        detailColumn.addView(text("Recent activity", 14, R.color.qp_text, true)
+                            .apply { setPadding(0, dp(8), 0, dp(7)) })
+                        events.takeLast(12).reversed().forEach { event ->
+                            val actor = when {
+                                event.actorType.contains("CUSTOMER", true) -> "You"
+                                event.actorType.contains("SHOP", true) -> "Shop"
+                                event.actorType.contains("AGENT", true) -> "Print agent"
+                                else -> "SmartPrint"
+                            }
+                            detailColumn.addView(text(
+                                "${CustomerOrderStatusPresentation.activityStatusLabel(event.status)} · ${event.fileName}",
+                                10, R.color.qp_text, true
+                            ).apply { setPadding(0, dp(4), 0, 0) })
+                            detailColumn.addView(text(
+                                "$actor · ${CustomerHistoryDatePresentation.timelineDateTime(event.createdUtc)}",
+                                9, R.color.qp_muted, false
+                            ).apply { setPadding(0, dp(2), 0, dp(5)) })
                         }
                     }
+
                     detailScroll.addView(detailColumn)
                     AlertDialog.Builder(this)
-                        .setTitle(batch.first().batchName?.takeIf(String::isNotBlank) ?: "Print details")
+                        .setTitle(orderName)
                         .setView(detailScroll)
                         .setPositiveButton("Close", null)
                         .show()
-                }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    if (isFinishing) return@runOnUiThread
+                }.onFailure { error ->
                     AlertDialog.Builder(this)
                         .setTitle("Order details unavailable")
                         .setMessage(error.message ?: "Please reconnect and try again.")
@@ -2185,6 +2391,54 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }.start()
+    }
+
+    private fun addCustomerTrackingStep(
+        container: LinearLayout,
+        step: CustomerTrackingStep,
+        last: Boolean
+    ) {
+        val (marker, markerColor, titleColor) = when (step.state) {
+            CustomerTrackingStepState.DONE ->
+                Triple("✓", android.graphics.Color.rgb(36, 139, 94), R.color.qp_text)
+            CustomerTrackingStepState.CURRENT ->
+                Triple("•", getColor(R.color.qp_primary), R.color.qp_text)
+            CustomerTrackingStepState.SKIPPED ->
+                Triple("–", getColor(R.color.qp_outline), R.color.qp_muted)
+            CustomerTrackingStepState.UPCOMING ->
+                Triple("○", getColor(R.color.qp_outline), R.color.qp_muted)
+        }
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.TOP
+        }
+        val rail = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+        }
+        val dot = TextView(this).apply {
+            text = marker
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setTextColor(android.graphics.Color.WHITE)
+            background = roundedDrawable(markerColor, dp(14))
+        }
+        rail.addView(dot, LinearLayout.LayoutParams(dp(28), dp(28)))
+        if (!last) {
+            rail.addView(View(this).apply {
+                setBackgroundColor(getColor(R.color.qp_outline))
+            }, LinearLayout.LayoutParams(dp(2), dp(24)))
+        }
+        row.addView(rail, LinearLayout.LayoutParams(dp(34), -2))
+        val copy = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(3), dp(1), 0, dp(9))
+        }
+        copy.addView(text(step.title, 12, titleColor, true))
+        copy.addView(text(step.detail, 10, R.color.qp_muted, false)
+            .apply { setPadding(0, dp(2), 0, 0) })
+        row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+        container.addView(row, linearParams())
     }
 
     private fun showFiles() {
