@@ -6012,6 +6012,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         PrinterDeviceId = stationPrinter.Id,
         PrinterName = stationPrinter.DisplayName,
         QueueName = stationPrinter.QueueName,
+        OutputMode = stationPrinter.OutputMode,
         ticket.OriginalFileName,
         ticket.FileExtension,
         ticket.PrivatePrinting,

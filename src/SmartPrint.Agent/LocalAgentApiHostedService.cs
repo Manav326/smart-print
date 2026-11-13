@@ -1074,6 +1074,7 @@ public sealed class LocalAgentApiHostedService(
                             claim.Sha256,
                             claim.ExpiresUtc,
                             "LOCAL_AGENT",
+                            OutputMode: claim.OutputMode,
                             Orientation: claim.Orientation,
                             PrivatePrinting: claim.PrivatePrinting,
                             PrintKind: claim.PrintKind);
@@ -1181,7 +1182,8 @@ public sealed class LocalAgentApiHostedService(
         bool PrivatePrinting,
         DateTimeOffset ExpiresUtc,
         LocalUploadedPrintResult? UploadResult,
-        string PrintKind = "DOCUMENT");
+        string PrintKind = "DOCUMENT",
+        string OutputMode = "PHYSICAL");
 
     private sealed record LocalUploadCompletionResponse(
         bool AlreadyCompleted,
