@@ -769,6 +769,56 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task CompletedPhotoJobRetentionRemovesItsCurrentPdfAndRetainedOriginal()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var originalBytes = "Original local image bytes"u8.ToArray();
+            var job = CreateJob(originalBytes) with
+            {
+                Status = "AWAITING_SHOP_APPROVAL",
+                StorageMode = "LOCAL_AGENT",
+                MediaType = "image/jpeg",
+                DocumentName = "original.jpg"
+            };
+            var staged = await store.EnqueueLocalUploadAsync(job, originalBytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+            var replacement = "%PDF-1.4\\nshop-prepared-a4-photo-sheet"u8.ToArray();
+            await store.ReplaceStagedPhotoDocumentAsync(
+                job.Id, staged.Sha256, staged.SizeBytes, "photo-sheet.pdf",
+                replacement, 1, 500, () => Task.CompletedTask, CancellationToken.None);
+
+            var retained = store.Find(job.Id)!;
+            var sourcePath = retained.PhotoSourcePath!;
+            Assert.True(File.Exists(sourcePath));
+            Assert.True(File.Exists(retained.DocumentPath));
+
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Photo-Retention-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 791, "SmartPrint-Photo-Retention-Test", CancellationToken.None);
+            await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
+
+            var removed = await store.PruneRetainedEntriesAsync(
+                DateTimeOffset.UtcNow.AddDays(8),
+                TimeSpan.FromDays(7),
+                root,
+                CancellationToken.None);
+
+            Assert.Equal(1, removed);
+            Assert.False(File.Exists(sourcePath));
+            Assert.False(File.Exists(retained.DocumentPath));
+            Assert.Null(store.Find(job.Id));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task FailedCloudCommitRollsBackTheLocalPhotoBytesAndManifest()
     {
         var root = CreateTemporaryDirectory();
