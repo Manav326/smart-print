@@ -23,21 +23,62 @@ class CustomerOrderStatusPresentationTest {
     }
 
     @Test
-    fun mixedTerminalBatchSummarisesAsOutputReadyWhenAnyFileHasOutput() {
-        assertEquals("COMPLETED", CustomerOrderStatusPresentation.batchSummaryStatus(
+    fun mixedTerminalBatchIsNotMisrepresentedAsFullyCompleted() {
+        assertEquals("PARTIALLY_COMPLETED", CustomerOrderStatusPresentation.batchSummaryStatus(
             listOf("REFUNDED", "COMPLETED", "CANCELLED")
         ))
-        assertEquals("PDF_EXPORTED", CustomerOrderStatusPresentation.batchSummaryStatus(
+        assertEquals("PARTIALLY_COMPLETED", CustomerOrderStatusPresentation.batchSummaryStatus(
             listOf("PDF_EXPORTED", "REJECTED")
+        ))
+        assertEquals("COMPLETED", CustomerOrderStatusPresentation.batchSummaryStatus(
+            listOf("COMPLETED", "COMPLETED")
+        ))
+        assertEquals("PDF_EXPORTED", CustomerOrderStatusPresentation.batchSummaryStatus(
+            listOf("PDF_EXPORTED", "PDF_EXPORTED")
         ))
     }
 
     @Test
-    fun anActiveFileKeepsTheMixedBatchInItsActiveStage() {
+    fun activeBatchStageDoesNotDependOnFileOrdering() {
         assertEquals("PRINTING", CustomerOrderStatusPresentation.batchSummaryStatus(
             listOf("REFUNDED", "PRINTING", "COMPLETED")
         ))
+        assertEquals("PRINTING", CustomerOrderStatusPresentation.batchSummaryStatus(
+            listOf("COMPLETED", "PRINTING", "REFUNDED")
+        ))
         assertFalse(CustomerOrderStatusPresentation.isTerminalStatus("PRINTING"))
+    }
+
+    @Test
+    fun filesAtDifferentActiveStagesAreNotPresentedAsOneUniformStage() {
+        assertEquals("MIXED_PROGRESS", CustomerOrderStatusPresentation.batchSummaryStatus(
+            listOf("AWAITING_PAYMENT", "PRINTING")
+        ))
+        assertEquals("MIXED_PROGRESS", CustomerOrderStatusPresentation.batchSummaryStatus(
+            listOf("PRINTING", "AWAITING_PAYMENT")
+        ))
+        assertEquals("In progress across files",
+            CustomerOrderStatusPresentation.activityStatusLabel("MIXED_PROGRESS"))
+    }
+
+    @Test
+    fun noOutputMixedTerminalBatchHasAnExplicitMixedOutcome() {
+        assertEquals("MIXED_OUTCOME", CustomerOrderStatusPresentation.batchSummaryStatus(
+            listOf("REFUNDED", "CANCELLED", "FAILED")
+        ))
+    }
+
+    @Test
+    fun batchOutcomeExposesFileCountsAndCompletionProgress() {
+        val outcome = CustomerOrderStatusPresentation.batchOutcome(
+            listOf("COMPLETED", "PRINTING", "REFUNDED", "REJECTED")
+        )
+        assertEquals(4, outcome.fileCount)
+        assertEquals(1, outcome.readyCount)
+        assertEquals(1, outcome.activeCount)
+        assertEquals(2, outcome.excludedCount)
+        assertEquals(25, outcome.progressPercent)
+        assertEquals("PRINTING", outcome.status)
     }
 
     @Test

@@ -100,6 +100,8 @@ internal class CustomerHistoryStore(context: Context) {
         .put("photoSizeCode", photoSizeCode ?: JSONObject.NULL)
         .put("photoCount", photoCount)
         .put("photosPerPage", photosPerPage ?: JSONObject.NULL)
+        .put("privatePrinting", privatePrinting)
+        .put("updatedUtc", updatedUtc)
 
     private fun JSONObject.toHistoryItem(): CustomerPrintHistoryItem {
         fun optional(name: String): String? =
@@ -127,7 +129,9 @@ internal class CustomerHistoryStore(context: Context) {
             printKind = optional("printKind"),
             photoSizeCode = optional("photoSizeCode"),
             photoCount = optInt("photoCount"),
-            photosPerPage = if (!has("photosPerPage") || isNull("photosPerPage")) null else optInt("photosPerPage")
+            photosPerPage = if (!has("photosPerPage") || isNull("photosPerPage")) null else optInt("photosPerPage"),
+            privatePrinting = optBoolean("privatePrinting", false),
+            updatedUtc = optional("updatedUtc") ?: optString("createdUtc")
         )
     }
 
