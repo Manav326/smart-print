@@ -5196,6 +5196,7 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     HttpContext context,
     SmartPrintDbContext db,
     DocumentStorage storage,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -5213,13 +5214,21 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
         {
             item.PrivateRelayStorageKey,
             item.PrivateRelayWrappedKey,
-            item.PrivateRelayIv
+            item.PrivateRelayIv,
+            item.PrinterDeviceId
         })
         .SingleOrDefaultAsync(ct);
     if (relay is null || string.IsNullOrWhiteSpace(relay.PrivateRelayStorageKey) ||
         string.IsNullOrWhiteSpace(relay.PrivateRelayWrappedKey) ||
         string.IsNullOrWhiteSpace(relay.PrivateRelayIv))
         return Results.NotFound();
+    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, device.TenantId, device.Id, relay.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document could be delivered. No payload was downloaded."
+        });
 
     MemoryStream ciphertext;
     try { ciphertext = storage.OpenRead(relay.PrivateRelayStorageKey); }
