@@ -2989,7 +2989,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
                        item.TenantId == tenantId &&
                        item.IsActive &&
                        item.AgentDeviceId != null &&
-                       (item.OutputMode == "PDF_EXPORT" ||
+                       ((item.OutputMode == "PDF_EXPORT" && !selectedJob.PrivatePrinting) ||
                         (item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
                          (item.Status == "Ready" || item.Status == "Busy"))) &&
                        db.AgentDevices.Any(agent =>
@@ -5239,6 +5239,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     SmartPrintDbContext db,
     DocumentStorage storage,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -5285,6 +5286,14 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
 
     if (ticket.CompletedUtc is not null)
         return await ExistingResultAsync(true);
+
+    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, ticket.TenantId, device.Id, ticket.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted handoff completed. The protected local copy is retained for safe retry."
+        });
 
     if (ticket.PrivateRelayFailedUtc is not null ||
         string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey) ||
@@ -5874,6 +5883,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
     Guid ticketId,
     HttpContext context,
     SmartPrintDbContext db,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -5978,6 +5988,14 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
             message = "The original printer assignment changed. SmartPrint will keep this request in the secure queue for the shop owner to reassign."
         });
     }
+    if (ticket.PrivatePrinting &&
+        !await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, ticket.TenantId, device.Id, ticket.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document was transferred. Reconnect and retry the same upload."
+        });
 
     ticket.ClaimedUtc ??= now;
     ticket.ClaimLeaseExpiresUtc = ticket.ExpiresUtc;
@@ -6017,6 +6035,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     SmartPrintDbContext db,
     DocumentStorage storage,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -6114,6 +6133,15 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             }
         });
     }
+
+    if (ticket.PrivatePrinting &&
+        !await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, ticket.TenantId, device.Id, ticket.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's Private Printing output policy or printer readiness changed before the upload could be finalised. Keep the protected local copy and retry the same request after the shop is ready."
+        });
 
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (request.PageCount is < 1 or > 500 ||
@@ -6654,25 +6682,18 @@ agentApi.MapPost("/jobs/{jobId:guid}/private-test-output", async (
         string.Equals(job.OutputFileName, request.FileName, StringComparison.Ordinal))
         return Results.Ok(new { job.Id, job.Status, job.OutputType, DuplicateRequest = true, PhysicalOutputConfirmed = false });
 
-    var allowPrivateVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+    // The central policy and current printer readiness were validated when the
+    // server authorised this job for TEST_VIRTUAL at dispatch. Do not recheck
+    // the toggle here: an administrator may turn testing off while an already
+    // authorised Agent is reporting its completed file. The receipt is required
+    // to finish source deletion safely, not to grant another output attempt.
     var now = DateTimeOffset.UtcNow;
-    var authorisedPrinter = job.PrinterDeviceId is Guid assignedPrinterId &&
-        await db.PrinterDevices.AnyAsync(printer =>
-            printer.Id == assignedPrinterId && printer.TenantId == device.TenantId &&
-            printer.AgentDeviceId == device.Id && printer.IsActive &&
-            printer.OutputMode == "PDF_EXPORT" &&
-            printer.QueueName != null && printer.QueueName != "" &&
-            printer.LastSeenUtc != null && printer.LastSeenUtc >= now.AddMinutes(-2) &&
-            (printer.Status == "Ready" || printer.Status == "Busy")) &&
-        await db.AgentDevices.AnyAsync(agent =>
-            agent.Id == device.Id && agent.TenantId == device.TenantId &&
-            agent.RevokedUtc == null && agent.Status != "Revoked" &&
-            agent.LastSeenUtc != null && agent.LastSeenUtc >= now.AddMinutes(-2));
     var paymentVerified = await db.PrintPayments.AnyAsync(payment =>
         payment.TenantId == device.TenantId && payment.PrintJobId == job.Id &&
         (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED"), ct);
-    if (!allowPrivateVirtualOutput || !authorisedPrinter || !paymentVerified ||
-        !job.PrivatePrinting || job.OutputType != PrivatePrintingOutputPolicy.TestVirtual ||
+    if (environment.IsProduction() || !paymentVerified ||
+        !job.PrivatePrinting || job.PrinterDeviceId is null ||
+        job.OutputType != PrivatePrintingOutputPolicy.TestVirtual ||
         job.Status != "PRINT_SUBMITTING" || job.ClaimedByAgentDeviceId != device.Id ||
         job.LocalQueueReceivedUtc is null)
         return Results.Conflict(new
@@ -9490,6 +9511,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     DocumentStorage storage,
     PrivateRelayWakeupService relayWakeups,
     ILoggerFactory loggerFactory,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -9543,6 +9565,13 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         return Results.Conflict(new { code = "private_relay_already_completed", message = "This private print request has already reached the shop queue." });
     if (ticket.PrivateRelayFailedUtc is not null)
         return Results.Conflict(new { code = "private_relay_validation_failed", message = ticket.PrivateRelayFailureMessage });
+    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, ticket.TenantId, ticket.AgentDeviceId, ticket.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's private-printing output eligibility changed before the encrypted transfer started. No relay file was accepted. Refresh the shop connection and retry."
+        });
 
     // An accepted relay already has an immutable ticket and grant. A retry must
     // continue polling that same transfer rather than replace a possibly claimed payload.
@@ -11571,6 +11600,39 @@ static async Task<bool> GetPrivatePrintingVirtualOutputEnabledAsync(
         .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
         .Select(item => (bool?)item.AllowPrivatePrintingVirtualOutput)
         .SingleOrDefaultAsync(ct) ?? false;
+}
+
+static async Task<bool> IsPrivatePrintingOutputQueueReadyAsync(
+    SmartPrintDbContext db,
+    IHostEnvironment environment,
+    Guid tenantId,
+    Guid agentDeviceId,
+    Guid printerDeviceId,
+    CancellationToken ct)
+{
+    var allowVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+    var printer = await db.PrinterDevices.AsNoTracking()
+        .Where(item => item.Id == printerDeviceId &&
+                       item.TenantId == tenantId &&
+                       item.AgentDeviceId == agentDeviceId &&
+                       item.IsActive &&
+                       item.QueueName != null && item.QueueName != "")
+        .Select(item => new { item.OutputMode, item.Status, item.LastSeenUtc })
+        .SingleOrDefaultAsync(ct);
+    var now = DateTimeOffset.UtcNow;
+    if (printer is null ||
+        !PrivatePrintingOutputPolicy.IsEligible(allowVirtualOutput, environment.IsProduction(), printer.OutputMode) ||
+        printer.LastSeenUtc is null || printer.LastSeenUtc < now.AddMinutes(-2) ||
+        printer.Status is not ("Ready" or "Busy"))
+        return false;
+
+    return await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
+        agent.Id == agentDeviceId &&
+        agent.TenantId == tenantId &&
+        agent.RevokedUtc == null &&
+        agent.Status != "Revoked" &&
+        agent.LastSeenUtc != null &&
+        agent.LastSeenUtc >= now.AddMinutes(-2), ct);
 }
 
 static string GetRateLimitPartitionKey(HttpContext context) =>
