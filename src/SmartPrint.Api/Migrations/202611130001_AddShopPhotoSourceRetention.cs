@@ -36,40 +36,7 @@ public sealed class AddShopPhotoSourceRetention : Migration
                         "PhotoSourceMediaType" IS NOT NULL AND
                         "PhotoSourceMediaType" IN ('image/jpeg', 'image/png') AND
                         "PhotoSourceSha256" IS NOT NULL AND
-                        "PhotoSourceSha256" ~ '^[0-9a-fA-F]{64}
-                        (
-                            (
-                                "StorageMode" = 'CLOUD' AND
-                                "PhotoSourceStorageKey" IS NOT NULL AND
-                                length("PhotoSourceStorageKey") BETWEEN 1 AND 200
-                            )
-                            OR
-                            (
-                                "StorageMode" = 'LOCAL_AGENT' AND
-                                "PhotoSourceStorageKey" IS NULL AND
-                                "AgentDeviceId" IS NOT NULL
-                            )
-                        )
-                    )
-                );
-            """);
-    }
-
-    protected override void Down(MigrationBuilder migrationBuilder)
-    {
-        migrationBuilder.Sql("""
-            ALTER TABLE "PrintDocuments"
-                DROP CONSTRAINT IF EXISTS "CK_PrintDocuments_PhotoSourceRetention",
-                DROP COLUMN IF EXISTS "PhotoSourceStorageKey",
-                DROP COLUMN IF EXISTS "PhotoSourceOriginalFileName",
-                DROP COLUMN IF EXISTS "PhotoSourceMediaType",
-                DROP COLUMN IF EXISTS "PhotoSourceSha256",
-                DROP COLUMN IF EXISTS "PhotoSourceSizeBytes",
-                DROP COLUMN IF EXISTS "PhotoEditorSettingsJson";
-            """);
-    }
-}
- AND
+                        "PhotoSourceSha256" ~ '^[0-9a-fA-F]{64}$' AND
                         "PhotoSourceSizeBytes" IS NOT NULL AND
                         "PhotoSourceSizeBytes" > 0 AND
                         (
@@ -99,7 +66,8 @@ public sealed class AddShopPhotoSourceRetention : Migration
                 DROP COLUMN IF EXISTS "PhotoSourceOriginalFileName",
                 DROP COLUMN IF EXISTS "PhotoSourceMediaType",
                 DROP COLUMN IF EXISTS "PhotoSourceSha256",
-                DROP COLUMN IF EXISTS "PhotoSourceSizeBytes";
+                DROP COLUMN IF EXISTS "PhotoSourceSizeBytes",
+                DROP COLUMN IF EXISTS "PhotoEditorSettingsJson";
             """);
     }
 }
