@@ -198,33 +198,8 @@ object CustomerAccountClient {
         return totalCount
     }
 
-    fun historyPage(
-        baseUrl: String,
-        accessToken: String,
-        page: Int,
-        size: Int = 10
-    ): CustomerHistoryPage {
-        require(page >= 0) { "History page must be zero or greater." }
-        require(size in 1..100) { "History page size must be between 1 and 100." }
-        val response = request(
-            baseUrl,
-            "/api/v1/customer/jobs?page=$page&size=$size",
-            null,
-            accessToken
-        )
-        return parseHistoryPage(response, page, size)
-    }
-
-    internal fun parseHistoryPage(
-        response: JSONObject,
-        requestedPage: Int,
-        requestedSize: Int
-    ): CustomerHistoryPage {
-        require(requestedPage >= 0) { "History page must be zero or greater." }
-        require(requestedSize in 1..100) { "History page size must be between 1 and 100." }
-        val itemsJson = response.optJSONArray("items")
-            ?: throw IllegalStateException("The server returned a history page without its items.")
-        val items = (0 until itemsJson.length()).mapNotNull { index ->
+    private fun parseHistoryItems(itemsJson: JSONArray): List<CustomerPrintHistoryItem> =
+        (0 until itemsJson.length()).map { index ->
             val job = itemsJson.optJSONObject(index)
                 ?: throw IllegalStateException("The server returned an invalid history record.")
             CustomerPrintHistoryItem(
@@ -253,6 +228,44 @@ object CustomerAccountClient {
                 photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage")
             )
         }
+
+    internal fun parseLegacyHistorySnapshot(response: JSONObject): List<CustomerPrintHistoryItem> {
+        val jobs = response.optJSONArray("jobs")
+            ?: response.optJSONArray("Jobs")
+            ?: throw IllegalStateException("The older SmartPrint service returned an unsupported history response.")
+        return parseHistoryItems(jobs)
+    }
+
+    fun legacyHistorySnapshot(baseUrl: String, accessToken: String): List<CustomerPrintHistoryItem> =
+        parseLegacyHistorySnapshot(request(baseUrl, "/api/v1/customer/jobs", null, accessToken))
+
+    fun historyPage(
+        baseUrl: String,
+        accessToken: String,
+        page: Int,
+        size: Int = 10
+    ): CustomerHistoryPage {
+        require(page >= 0) { "History page must be zero or greater." }
+        require(size in 1..100) { "History page size must be between 1 and 100." }
+        val response = request(
+            baseUrl,
+            "/api/v1/customer/jobs?page=$page&size=$size",
+            null,
+            accessToken
+        )
+        return parseHistoryPage(response, page, size)
+    }
+
+    internal fun parseHistoryPage(
+        response: JSONObject,
+        requestedPage: Int,
+        requestedSize: Int
+    ): CustomerHistoryPage {
+        require(requestedPage >= 0) { "History page must be zero or greater." }
+        require(requestedSize in 1..100) { "History page size must be between 1 and 100." }
+        val itemsJson = response.optJSONArray("items")
+            ?: throw IllegalStateException("The server returned a history page without its items.")
+        val items = parseHistoryItems(itemsJson)
         val responsePage = response.getInt("page")
         val responseSize = response.getInt("size")
         val totalItems = response.getLong("totalItems")
@@ -336,7 +349,14 @@ object CustomerAccountClient {
             val payload = stream?.use { input ->
                 BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).readText()
             }.orEmpty()
-            val json = if (payload.isBlank()) JSONObject() else JSONObject(payload)
+            // Reverse proxies and older API hosts may return an empty or HTML 404.
+            // Preserve the HTTP status so callers can select the documented legacy route.
+            val json = if (status in 200..299) {
+                if (payload.isBlank()) JSONObject() else JSONObject(payload)
+            } else {
+                runCatching { if (payload.isBlank()) JSONObject() else JSONObject(payload) }
+                    .getOrElse { JSONObject() }
+            }
             if (status !in 200..299) {
                 val fieldErrors = json.optJSONObject("errors")
                 val firstFieldError = fieldErrors?.keys()?.asSequence()

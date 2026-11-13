@@ -11,6 +11,24 @@ import org.json.JSONObject
 @RunWith(AndroidJUnit4::class)
 class CustomerAccountClientInstrumentedTest {
     @Test
+    fun parsesLegacyUnpaginatedHistoryEnvelopeForOlderApiBuilds() {
+        val records = JSONArray().put(historyRecord("legacy-job-1")).put(historyRecord("legacy-job-2"))
+        val response = JSONObject().put("jobs", records)
+
+        val history = CustomerAccountClient.parseLegacyHistorySnapshot(response)
+
+        assertEquals(2, history.size)
+        assertEquals("legacy-job-1", history[0].id)
+        assertEquals("admission-form.pdf", history[0].originalFileName)
+    }
+
+    @Test
+    fun acceptsPascalCaseLegacyHistoryEnvelope() {
+        val response = JSONObject().put("Jobs", JSONArray().put(historyRecord("legacy-job-1")))
+        assertEquals("legacy-job-1", CustomerAccountClient.parseLegacyHistorySnapshot(response).single().id)
+    }
+
+    @Test
     fun parsesMpayZeroBasedHistoryPaginationEnvelope() {
         val records = JSONArray()
         repeat(10) { index -> records.put(historyRecord("job-$index")) }

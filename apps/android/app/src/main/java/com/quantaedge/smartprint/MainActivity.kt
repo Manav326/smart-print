@@ -1960,10 +1960,26 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val local = store.read(email).orEmpty()
-                val serverCount = authenticated { token ->
-                    CustomerAccountClient.historyCount(accountServiceUrl(), token)
+                val serverCount = try {
+                    authenticated { token -> CustomerAccountClient.historyCount(accountServiceUrl(), token) }
+                } catch (error: CustomerApiException) {
+                    if (error.statusCode == 404) null else throw error
                 }
-                if (serverCount <= local.size.toLong()) {
+                if (serverCount == null) {
+                    // Older deployed API builds expose only GET /jobs with a
+                    // { jobs: [...] } response. Keep refresh usable during rollout.
+                    // Merge with the encrypted local cache because that legacy route
+                    // is capped at 100 records and must never erase older saved history.
+                    val legacyItems = authenticated { token ->
+                        CustomerAccountClient.legacyHistorySnapshot(accountServiceUrl(), token)
+                    }
+                    val merged = linkedMapOf<String, CustomerPrintHistoryItem>()
+                    local.forEach { merged[it.id] = it }
+                    legacyItems.forEach { merged[it.id] = it }
+                    merged.values.sortedWith(
+                        compareByDescending<CustomerPrintHistoryItem> { it.createdUtc }.thenByDescending { it.id }
+                    ).also { store.replace(email, it) }
+                } else if (serverCount <= local.size.toLong()) {
                     local
                 } else {
                     val firstPage = authenticated { token ->
