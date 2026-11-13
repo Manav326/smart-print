@@ -200,7 +200,8 @@ export async function loadCustomerPendingSelection(storageKey: string): Promise<
       uploadMode: "LOCAL" as const,
       uploadModeManuallySelected: false,
       paymentMethod: "UPI" as const,
-      paymentReference: ""
+      paymentReference: "",
+      photoStudioDraft: null
     };
 
     records.sort((left, right) => left.index - right.index);
