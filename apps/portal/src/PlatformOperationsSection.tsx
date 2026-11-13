@@ -140,7 +140,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
                   const checked = event.target.checked;
                   setDraft(current => current ? { ...current, allowPrivatePrintingVirtualOutput: checked } : current);
                 }}/>
-              <span><strong>Allow Private Printing with approved virtual test printers</strong><small>Non-production only. Lets Private Printing use PDF_EXPORT queues such as Microsoft Print to PDF for end-to-end testing. Production APIs always reject virtual output, even if this setting is accidentally enabled.</small></span>
+              <span><strong>Allow Microsoft Print to PDF for Private Printing tests</strong><small>Non-production only. The Agent currently recognizes Microsoft Print to PDF as its supported virtual test queue. Other virtual drivers remain ineligible until their unattended output behaviour is explicitly validated. Production APIs always reject virtual output, even if this setting is accidentally enabled.</small></span>
             </label>
             <label className="platform-ops-toggle">
               <input type="checkbox" checked={draft.allowPaidJobClaimsWhenSuspended}

@@ -68,6 +68,17 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
+    public void UnknownThirdPartyPdfDriversAreNotAutomaticallyEligibleVirtualOutputs()
+    {
+        Assert.Equal(
+            PrinterOutputModeRules.Physical,
+            PrinterOutputModeRules.Detect("Adobe PDF", "Adobe PDF"));
+        Assert.Equal(
+            PrinterOutputModeRules.Physical,
+            PrinterOutputModeRules.Detect("Foxit PDF Printer", "Foxit PDF Printer"));
+    }
+
+    [Fact]
     public void WindowsDriverCapabilityDiscoveryReturnsStructuredReportForInstalledPdfPrinter()
     {
         if (!OperatingSystem.IsWindows())
