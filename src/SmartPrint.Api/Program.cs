@@ -2266,6 +2266,11 @@ shop.MapGet("/print-jobs", async (
             job.OutputSizeBytes,
             job.OutputCompletedUtc,
             StorageMode = document.StorageMode,
+            PhotoSourceAvailable = !job.PrivatePrinting &&
+                (document.PhotoSourceMediaType == "image/jpeg" ||
+                 document.PhotoSourceMediaType == "image/png" ||
+                 (document.PhotoSourceMediaType == null &&
+                  (document.MediaType == "image/jpeg" || document.MediaType == "image/png"))),
             PhotoEditorSettingsJson = job.PrivatePrinting ? null : document.PhotoEditorSettingsJson,
             DocumentAgentDeviceId = document.AgentDeviceId,
             DocumentAgentDeviceName = db.AgentDevices
