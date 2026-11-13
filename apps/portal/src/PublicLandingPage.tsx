@@ -36,7 +36,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
       <main>
         <section className="sp-hero">
           <div className="sp-hero-copy">
-            <div className="sp-eyebrow"><span className="sp-eyebrow-dot"/> PRINTING, CONNECTED</div>
+            <div className="sp-eyebrow"><span className="sp-eyebrow-dot"/> SMART PRINT BY QUANTAEDGE</div>
             <h1>From their phone<br/>to <span>your printer.</span><br/>Without the back-and-forth.</h1>
             <p className="sp-hero-lede">SmartPrint brings local print shops and customers together. Scan the shop QR, choose copies and colour for each file, and send an organised request for the shop to review.</p>
             <div className="sp-hero-actions">
