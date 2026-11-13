@@ -7554,7 +7554,7 @@ agentApi.MapPost("/printers/sync", async (
                           printer.QueueName.Length <= 160 &&
                           !string.IsNullOrWhiteSpace(printer.DriverName) &&
                           printer.DriverName.Length <= 160 &&
-                          (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT") &&
+                          (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT" or "UNSUPPORTED_VIRTUAL") &&
                           (printer.PortName?.Length ?? 0) <= 255 &&
                           (printer.CapabilitiesJson?.Length ?? 0) <= 16000 && validStatuses.Contains(printer.Status, StringComparer.Ordinal))
         .GroupBy(printer => printer.QueueName.Trim(), StringComparer.OrdinalIgnoreCase)
