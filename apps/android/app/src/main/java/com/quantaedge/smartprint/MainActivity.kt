@@ -2151,10 +2151,11 @@ class MainActivity : AppCompatActivity() {
                     val statuses = fileEntries.map { it.first.optString("status") }
                     val batchPayment = payload.optJSONObject("batchPayment")
                     val paymentStatus = batchPayment?.optString("status")?.takeIf { it.isNotBlank() }
-                        ?: fileEntries.mapNotNull { it.third?.optString("status")?.takeIf(String::isNotBlank) }
-                            .firstOrNull()
+                    val filePaymentStatuses = fileEntries.map { it.third?.optString("status").orEmpty() }
                     val outcome = CustomerOrderStatusPresentation.batchOutcome(statuses)
-                    val headline = CustomerOrderTrackingPresentation.currentHeadline(statuses, paymentStatus)
+                    val headline = CustomerOrderTrackingPresentation.currentHeadline(
+                        statuses, paymentStatus, filePaymentStatuses
+                    )
                     val detailScroll = ScrollView(this).apply { isFillViewport = true }
                     val detailColumn = LinearLayout(this).apply {
                         orientation = LinearLayout.VERTICAL
@@ -2210,7 +2211,9 @@ class MainActivity : AppCompatActivity() {
 
                     detailColumn.addView(text("Order progress", 14, R.color.qp_text, true)
                         .apply { setPadding(0, dp(2), 0, dp(8)) })
-                    val milestones = CustomerOrderTrackingPresentation.steps(statuses, paymentStatus)
+                    val milestones = CustomerOrderTrackingPresentation.steps(
+                        statuses, paymentStatus, filePaymentStatuses
+                    )
                     milestones.forEachIndexed { index, milestone ->
                         addCustomerTrackingStep(detailColumn, milestone, index == milestones.lastIndex)
                     }
