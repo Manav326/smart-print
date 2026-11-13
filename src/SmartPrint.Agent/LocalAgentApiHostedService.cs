@@ -419,8 +419,7 @@ public sealed class LocalAgentApiHostedService(
                     return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Send exactly one prepared photo-sheet PDF." });
 
                 var file = form.Files[0];
-                if (file.Length is <= 0 or > UploadLimits.MaxFileBytes ||
-                    !string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
+                if (file.Length is <= 0 or > UploadLimits.MaxFileBytes)
                     return Results.UnprocessableEntity(new { code = "photo_sheet_invalid", message = "The prepared photo sheet must be a supported PDF within the upload size limit." });
 
                 var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
