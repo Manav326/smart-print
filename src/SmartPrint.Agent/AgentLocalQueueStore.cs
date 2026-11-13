@@ -842,10 +842,63 @@ public sealed class AgentLocalQueueStore
                 ?? throw new FileNotFoundException("The original local photo is missing from the protected queue.");
             if (entry.State is not ("LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT"))
                 throw new InvalidOperationException("A local photo can only be enhanced before payment and printer handoff.");
-            if (!string.Equals(entry.Sha256, expectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
-                entry.SizeBytes != expectedOriginalSizeBytes ||
+
+            var sourceName = entry.PhotoSourceDocumentName ?? entry.DocumentName;
+            var sourceMediaType = entry.PhotoSourceMediaType ?? entry.MediaType;
+            var sourceSha256 = entry.PhotoSourceSha256 ?? entry.Sha256;
+            var sourceSizeBytes = entry.PhotoSourceSizeBytes ?? entry.SizeBytes;
+            if (sourceMediaType is not ("image/jpeg" or "image/png") ||
+                !string.Equals(sourceSha256, expectedOriginalSha256, StringComparison.OrdinalIgnoreCase) ||
+                sourceSizeBytes != expectedOriginalSizeBytes ||
                 !File.Exists(entry.DocumentPath))
-                throw new InvalidDataException("The local original changed or is no longer available. Reopen its preview before saving.");
+                throw new InvalidDataException("The local original photo changed or is no longer available. Reopen its preview before saving.");
+
+            var queueRootFull = Path.GetFullPath(queueRoot);
+            var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var documentPath = Path.GetFullPath(entry.DocumentPath);
+            if (!documentPath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The local photo document path is outside the protected queue.");
+
+            var retainedSourcePath = entry.PhotoSourcePath ??
+                entry.DocumentPath + ".photo.source";
+            retainedSourcePath = Path.GetFullPath(retainedSourcePath);
+            if (!retainedSourcePath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The retained photo source path is outside the protected queue.");
+
+            var alreadyRetained = !string.IsNullOrWhiteSpace(entry.PhotoSourceSha256);
+            var createdPhotoSource = false;
+            if (alreadyRetained)
+            {
+                if (entry.PhotoSourceSizeBytes is not > 0 ||
+                    string.IsNullOrWhiteSpace(entry.PhotoSourceMediaType) ||
+                    string.IsNullOrWhiteSpace(entry.PhotoSourceDocumentName) ||
+                    !File.Exists(retainedSourcePath))
+                    throw new InvalidDataException("The retained original photo is incomplete. Do not overwrite it; contact support.");
+                var verifiedSource = ReadPhotoSource(jobId);
+                try
+                {
+                    if (verifiedSource.LongLength != expectedOriginalSizeBytes ||
+                        !string.Equals(
+                            Convert.ToHexString(SHA256.HashData(verifiedSource)).ToLowerInvariant(),
+                            expectedOriginalSha256,
+                            StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("The retained original photo failed its integrity check.");
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(verifiedSource);
+                }
+            }
+            else
+            {
+                // Preserve the original encrypted queue payload byte-for-byte.
+                // This sidecar is never exposed directly; ReadPhotoSource decrypts
+                // it only inside the Windows Agent after cloud authorization.
+                if (File.Exists(retainedSourcePath)) File.Delete(retainedSourcePath);
+                File.Copy(documentPath, retainedSourcePath, overwrite: false);
+                createdPhotoSource = true;
+            }
 
             var newHash = Convert.ToHexString(SHA256.HashData(replacementBytes.Span)).ToLowerInvariant();
             var plaintext = replacementBytes.ToArray();
@@ -865,70 +918,135 @@ public sealed class AgentLocalQueueStore
             if (File.Exists(backupPath)) File.Delete(backupPath);
             try
             {
-                await using (var stream = new FileStream(
-                    temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                    64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                try
                 {
-                    await stream.WriteAsync(protectedBytes, cancellationToken);
-                    await stream.FlushAsync(cancellationToken);
+                    await using (var stream = new FileStream(
+                        temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                        64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                    {
+                        await stream.WriteAsync(protectedBytes, cancellationToken);
+                        await stream.FlushAsync(cancellationToken);
+                    }
+                    File.Replace(temporaryPath, entry.DocumentPath, backupPath, ignoreMetadataErrors: true);
                 }
-                File.Replace(temporaryPath, entry.DocumentPath, backupPath, ignoreMetadataErrors: true);
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(protectedBytes);
-                if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-            }
+                catch
+                {
+                    if (createdPhotoSource && File.Exists(retainedSourcePath))
+                        File.Delete(retainedSourcePath);
+                    throw;
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(protectedBytes);
+                    if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+                }
 
-            var replacementEntry = entry with
-            {
-                DocumentName = replacementDocumentName,
-                MediaType = "application/pdf",
-                Sha256 = newHash,
-                SizeBytes = replacementBytes.Length,
-                PageCount = pageCount,
-                Copies = 1,
-                ColourMode = "Colour",
-                PaperSize = "A4",
-                IsDuplex = false,
-                Orientation = "AUTO",
-                QuotedAmountMinor = quotedAmountMinor
-            };
+                var replacementEntry = entry with
+                {
+                    DocumentName = replacementDocumentName,
+                    MediaType = "application/pdf",
+                    Sha256 = newHash,
+                    SizeBytes = replacementBytes.Length,
+                    PageCount = pageCount,
+                    Copies = 1,
+                    ColourMode = "Colour",
+                    PaperSize = "A4",
+                    IsDuplex = false,
+                    Orientation = "AUTO",
+                    QuotedAmountMinor = quotedAmountMinor,
+                    PhotoSourcePath = retainedSourcePath,
+                    PhotoSourceDocumentName = sourceName,
+                    PhotoSourceMediaType = sourceMediaType,
+                    PhotoSourceSha256 = sourceSha256,
+                    PhotoSourceSizeBytes = sourceSizeBytes
+                };
 
-            try
-            {
-                await SaveManifestAsync(replacementEntry, cancellationToken);
-                await commitServerRevisionAsync();
+                try
+                {
+                    await SaveManifestAsync(replacementEntry, cancellationToken);
+                    await commitServerRevisionAsync();
+                }
+                catch
+                {
+                    if (File.Exists(backupPath))
+                    {
+                        if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
+                        File.Move(backupPath, entry.DocumentPath);
+                    }
+                    await SaveManifestAsync(entry, CancellationToken.None);
+                    if (createdPhotoSource && File.Exists(retainedSourcePath))
+                        File.Delete(retainedSourcePath);
+                    throw;
+                }
+
+                // The server and manifest now point to the replacement. Cleanup
+                // failure must not roll back the file after the server has committed.
+                try
+                {
+                    if (File.Exists(backupPath)) File.Delete(backupPath);
+                }
+                catch (IOException)
+                {
+                    // Keep the encrypted backup for a later maintenance cleanup.
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    // Keep the encrypted backup for a later maintenance cleanup.
+                }
             }
             catch
             {
-                if (File.Exists(backupPath))
-                {
-                    if (File.Exists(entry.DocumentPath)) File.Delete(entry.DocumentPath);
-                    File.Move(backupPath, entry.DocumentPath);
-                }
-                await SaveManifestAsync(entry, CancellationToken.None);
+                if (createdPhotoSource && File.Exists(retainedSourcePath) &&
+                    entry.PhotoSourceSha256 is null)
+                    File.Delete(retainedSourcePath);
                 throw;
-            }
-
-            // The server and manifest now point to the replacement. Cleanup
-            // failure must not roll back the file after the server has committed.
-            try
-            {
-                if (File.Exists(backupPath)) File.Delete(backupPath);
-            }
-            catch (IOException)
-            {
-                // Keep the encrypted backup for a later maintenance cleanup.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Keep the encrypted backup for a later maintenance cleanup.
             }
         }
         finally
         {
             stagedUploadLeaseGate.Release();
+        }
+    }
+
+    public byte[] ReadPhotoSource(Guid jobId)
+    {
+        var entry = Find(jobId)
+            ?? throw new FileNotFoundException("The print job is not present in the local queue.");
+        if (string.IsNullOrWhiteSpace(entry.PhotoSourceSha256))
+        {
+            if (entry.MediaType is not ("image/jpeg" or "image/png"))
+                throw new FileNotFoundException("This job has no retained original photo source.");
+            return ReadDocument(jobId);
+        }
+
+        if (entry.PhotoSourceSizeBytes is not > 0 ||
+            entry.PhotoSourceMediaType is not ("image/jpeg" or "image/png"))
+            throw new InvalidDataException("The retained original photo metadata is invalid.");
+
+        var sourcePath = entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source";
+        var fullSourcePath = Path.GetFullPath(sourcePath);
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!fullSourcePath.StartsWith(queuePrefix, comparison))
+            throw new InvalidDataException("The retained original photo path is outside the protected queue.");
+
+        var protectedBytes = File.ReadAllBytes(fullSourcePath);
+        try
+        {
+            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
+            var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
+            if (plaintext.LongLength != entry.PhotoSourceSizeBytes.Value ||
+                !string.Equals(actualHash, entry.PhotoSourceSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+                throw new InvalidDataException("The retained original photo failed its integrity check.");
+            }
+            return plaintext;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(protectedBytes);
         }
     }
 
