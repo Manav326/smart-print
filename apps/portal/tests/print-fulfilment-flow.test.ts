@@ -340,7 +340,7 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
 
 test("photo quantities support up to 100 copies and automatically paginate over A4 sheets",()=>{
  const studio=read("../src/PhotoStudio.tsx");
- assert.match(studio,/const MAX_PHOTO_COUNT = 100/);
+ assert.match(studio,/const MAX_PHOTO_COUNT = UPLOAD_LIMITS\.maxPhotoCount/);
  assert.match(studio,/const maxCopies=MAX_PHOTO_COUNT/);
  assert.match(studio,/const sheetCount = Math\.ceil\(copies \/ photosPerPage\)/);
  assert.match(studio,/Photos per A4 page/);
