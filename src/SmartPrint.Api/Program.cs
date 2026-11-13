@@ -2116,7 +2116,6 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
             job.OutputType,
             job.OutputConfirmedUtc,
             job.OutputCompletedUtc,
-            PhotoEditorSettingsJson = job.PrivatePrinting ? null : document.PhotoEditorSettingsJson,
             Document = new
             {
                 OriginalFileName = PrivatePrintingRules.SafeDocumentLabel(job.PrivatePrinting, document.OriginalFileName),
@@ -2267,6 +2266,7 @@ shop.MapGet("/print-jobs", async (
             job.OutputSizeBytes,
             job.OutputCompletedUtc,
             StorageMode = document.StorageMode,
+            PhotoEditorSettingsJson = job.PrivatePrinting ? null : document.PhotoEditorSettingsJson,
             DocumentAgentDeviceId = document.AgentDeviceId,
             DocumentAgentDeviceName = db.AgentDevices
                 .Where(agent => agent.TenantId == tenantId && agent.Id == document.AgentDeviceId)
