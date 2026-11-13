@@ -399,15 +399,21 @@ class MainActivityInstrumentedTest {
 
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
-                    val viewer = SmartPrintDocumentViewer(activity, pdf, emptyList(), 0) {}
-                    try {
-                        val isPdfField = SmartPrintDocumentViewer::class.java
-                            .getDeclaredField("isPdf")
-                            .apply { isAccessible = true }
-                        assertEquals(true, isPdfField.getBoolean(viewer))
-                    } finally {
-                        viewer.dispose()
-                    }
+                    MainActivity::class.java.getDeclaredMethod(
+                        "openDocument",
+                        File::class.java,
+                        String::class.java
+                    ).apply { isAccessible = true }.invoke(activity, pdf, null)
+
+                    val viewer = MainActivity::class.java.getDeclaredField("documentViewer")
+                        .apply { isAccessible = true }
+                        .get(activity) as? SmartPrintDocumentViewer
+                    assertNotNull("Tapping an extensionless PDF must open SmartPrint's in-app viewer.", viewer)
+                    val isPdfField = SmartPrintDocumentViewer::class.java
+                        .getDeclaredField("isPdf")
+                        .apply { isAccessible = true }
+                    assertEquals(true, isPdfField.getBoolean(viewer))
+                    viewer?.dispose()
                 }
             }
         } finally {
