@@ -65,6 +65,17 @@ object DocumentNamePolicy {
 
     fun isPdf(file: File): Boolean = mimeType(file) == "application/pdf"
 
+    /** Checks only the bounded PDF signature window, without trusting a display name or MIME label. */
+    fun isPdfHeader(header: ByteArray, bytesRead: Int = header.size): Boolean {
+        val available = bytesRead.coerceIn(0, minOf(header.size, MAX_HEADER_BYTES))
+        val lastOffset = minOf(1023, available - PDF_HEADER.size)
+        if (lastOffset < 0) return false
+        for (offset in 0..lastOffset) {
+            if (PDF_HEADER.indices.all { header[offset + it] == PDF_HEADER[it] }) return true
+        }
+        return false
+    }
+
     fun isImage(file: File): Boolean = mimeType(file).startsWith("image/")
 
     fun supportsInAppViewer(file: File): Boolean =
@@ -143,9 +154,7 @@ object DocumentNamePolicy {
         if (matches(0, PNG_HEADER)) return "image/png"
 
         // PDF permits its header to appear within the first 1024 bytes.
-        for (offset in 0..(bytesRead - PDF_HEADER.size).coerceAtLeast(-1)) {
-            if (matches(offset, PDF_HEADER)) return "application/pdf"
-        }
+        if (isPdfHeader(header, bytesRead)) return "application/pdf"
         if (matches(0, BMP_HEADER)) return "image/bmp"
         if (matches(0, GIF87_HEADER) || matches(0, GIF89_HEADER)) return "image/gif"
         if (bytesRead >= 12 && matches(0, RIFF_HEADER) && matches(8, WEBP_HEADER)) return "image/webp"
