@@ -202,8 +202,10 @@ object CustomerAccountClient {
         (0 until itemsJson.length()).map { index ->
             val job = itemsJson.optJSONObject(index)
                 ?: throw IllegalStateException("The server returned an invalid history record.")
+            val id = job.optString("id").trim()
+            require(id.isNotEmpty() && id != "null") { "The server returned a history record without an ID." }
             CustomerPrintHistoryItem(
-                id = job.optString("id"),
+                id = id,
                 batchId = job.optString("batchId").takeUnless { it.isBlank() || it == "null" },
                 batchName = job.optString("batchName").takeUnless { it.isBlank() || it == "null" },
                 batchGroupName = job.optString("batchGroupName").takeUnless { it.isBlank() || it == "null" },
@@ -234,6 +236,20 @@ object CustomerAccountClient {
             ?: response.optJSONArray("Jobs")
             ?: throw IllegalStateException("The older SmartPrint service returned an unsupported history response.")
         return parseHistoryItems(jobs)
+    }
+
+    internal fun mergeLegacyHistorySnapshot(
+        localHistory: List<CustomerPrintHistoryItem>,
+        legacyHistory: List<CustomerPrintHistoryItem>
+    ): List<CustomerPrintHistoryItem> {
+        val merged = linkedMapOf<String, CustomerPrintHistoryItem>()
+        localHistory.forEach { merged[it.id] = it }
+        // Server copies win for matching IDs, while old locally cached rows
+        // survive because the legacy endpoint returns at most 100 records.
+        legacyHistory.forEach { merged[it.id] = it }
+        return merged.values.sortedWith(
+            compareByDescending<CustomerPrintHistoryItem> { it.createdUtc }.thenByDescending { it.id }
+        )
     }
 
     fun legacyHistorySnapshot(baseUrl: String, accessToken: String): List<CustomerPrintHistoryItem> =
