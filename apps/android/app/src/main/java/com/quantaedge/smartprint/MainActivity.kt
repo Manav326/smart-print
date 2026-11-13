@@ -1341,6 +1341,7 @@ class MainActivity : AppCompatActivity() {
         heroContent.addView(studioActions, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
         hero.addView(heroContent)
         column.addView(hero, linearParams().apply { bottomMargin = dp(11) })
+        addNativeAdPlacement(column, "HOME")
 
         val spaceSummary = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -2794,6 +2795,8 @@ class MainActivity : AppCompatActivity() {
             column.addView(actions, linearParams().apply { bottomMargin = dp(12) })
         }
 
+        if (!isPicker) addNativeAdPlacement(column, "FILES")
+
         val selectedHere = selectedFilePaths.mapNotNull { runCatching { File(it).canonicalFile }.getOrNull() }.filter { it.isFile && it.exists() }
         val chooserSelection = if (isPicker && !fileChooserSelectFolders) selectedChooserFiles() else emptyList()
         val chooserFolderSelection = if (isPicker && fileChooserSelectFolders) selectedChooserFolders() else emptyList()
@@ -4117,6 +4120,209 @@ class MainActivity : AppCompatActivity() {
                     imageView.contentDescription = "Connected shop logo"
                     imageView.setImageBitmap(bitmap)
                 } else bitmap.recycle()
+            }
+        }.start()
+    }
+
+    private fun addNativeAdPlacement(parent: LinearLayout, placement: String) {
+        val serviceBase = BuildConfig.SERVICE_BASE_URL.trimEnd('/')
+        if (serviceBase.isBlank()) return
+        val insertionIndex = parent.childCount
+        Thread {
+            val campaign = try {
+                val endpoint = URL(serviceBase + "/api/v1/advertising/active?placement=" + placement)
+                val connection = endpoint.openConnection() as? HttpURLConnection
+                    ?: return@Thread
+                try {
+                    connection.instanceFollowRedirects = false
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.useCaches = false
+                    connection.setRequestProperty("Accept", "application/json")
+                    connection.connect()
+                    if (connection.responseCode != 200 ||
+                        !connection.contentType.orEmpty().substringBefore(';').trim()
+                            .equals("application/json", true) ||
+                        connection.contentLengthLong > 64 * 1024) {
+                        null
+                    } else {
+                        val bytes = connection.inputStream.use { input ->
+                            val output = ByteArrayOutputStream()
+                            val buffer = ByteArray(4096)
+                            var total = 0
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                total += count
+                                if (total > 64 * 1024) return@use ByteArray(0)
+                                output.write(buffer, 0, count)
+                            }
+                            output.toByteArray()
+                        }
+                        if (bytes.isEmpty()) null else JSONObject(String(bytes, Charsets.UTF_8))
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (_: Exception) { null } ?: return@Thread
+
+            val campaignId = campaign.optString("id").takeIf { it.isNotBlank() } ?: return@Thread
+            val advertiser = campaign.optString("advertiserName").takeIf { it.isNotBlank() } ?: "Advertiser"
+            val headline = campaign.optString("headline").takeIf { it.isNotBlank() } ?: return@Thread
+            val body = campaign.optString("body").takeIf { it.isNotBlank() }.orEmpty()
+            val destination = campaign.optString("destinationUrl")
+            val imagePath = campaign.optString("imageUrl")
+            val imageTarget = try { URL(URL(serviceBase + "/"), imagePath) } catch (_: Exception) { return@Thread }
+            val serviceUri = Uri.parse(serviceBase)
+            val imageUri = Uri.parse(imageTarget.toString())
+            val servicePort = if (serviceUri.port == -1) 443 else serviceUri.port
+            val imagePort = if (imageUri.port == -1) 443 else imageUri.port
+            if (!imageUri.scheme.equals(serviceUri.scheme, true) ||
+                !imageUri.host.equals(serviceUri.host, true) ||
+                imagePort != servicePort ||
+                imageUri.userInfo != null ||
+                imageUri.fragment != null ||
+                !imageUri.path.orEmpty().startsWith("/api/v1/advertising/creatives/")) return@Thread
+
+            val bitmap = try {
+                val connection = imageTarget.openConnection() as? HttpURLConnection
+                    ?: return@Thread
+                try {
+                    connection.instanceFollowRedirects = false
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.useCaches = false
+                    connection.setRequestProperty("Accept", "image/jpeg,image/png,image/webp")
+                    connection.connect()
+                    val contentType = connection.contentType?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)
+                    if (connection.responseCode != 200 ||
+                        contentType !in setOf("image/jpeg", "image/png", "image/webp") ||
+                        connection.contentLengthLong > 3L * 1024L * 1024L) {
+                        null
+                    } else {
+                        val bytes = connection.inputStream.use { input ->
+                            val output = ByteArrayOutputStream()
+                            val buffer = ByteArray(8192)
+                            var total = 0
+                            while (true) {
+                                val count = input.read(buffer)
+                                if (count < 0) break
+                                total += count
+                                if (total > 3 * 1024 * 1024) return@use ByteArray(0)
+                                output.write(buffer, 0, count)
+                            }
+                            output.toByteArray()
+                        }
+                        if (bytes.isEmpty()) null else {
+                            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) null else {
+                                val sample = maxOf(1, maxOf(bounds.outWidth, bounds.outHeight) / 640)
+                                BitmapFactory.decodeByteArray(
+                                    bytes, 0, bytes.size,
+                                    BitmapFactory.Options().apply { inSampleSize = sample }
+                                )
+                            }
+                        }
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (_: Exception) { null } ?: return@Thread
+
+            runOnUiThread {
+                if (isFinishing || isDestroyed || !parent.isAttachedToWindow) {
+                    bitmap.recycle()
+                    return@runOnUiThread
+                }
+                val cardAd = card().apply {
+                    radius = dp(14).toFloat()
+                    cardElevation = dp(1).toFloat()
+                    strokeWidth = dp(1)
+                    strokeColor = getColor(R.color.qp_outline)
+                    setCardBackgroundColor(getColor(R.color.qp_card))
+                    isClickable = true
+                    isFocusable = true
+                    contentDescription = "Sponsored: " + headline
+                }
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    setPadding(dp(10), dp(10), dp(10), dp(10))
+                }
+                val isCard = campaign.optString("format") == "CARD"
+                val adImage = ImageView(this).apply {
+                    setImageBitmap(bitmap)
+                    scaleType = ImageView.ScaleType.CENTER_CROP
+                    contentDescription = null
+                    background = roundedDrawable(getColor(R.color.qp_soft), dp(8))
+                }
+                row.addView(adImage, LinearLayout.LayoutParams(
+                    if (isCard) dp(76) else dp(112),
+                    if (isCard) dp(76) else dp(58)
+                ))
+                val copy = LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(11), 0, dp(5), 0)
+                }
+                copy.addView(text("SPONSORED · " + advertiser, 8, R.color.qp_muted, true))
+                copy.addView(text(headline, 12, R.color.qp_text, true).apply {
+                    maxLines = 2
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(0, dp(3), 0, 0)
+                })
+                if (body.isNotBlank()) {
+                    copy.addView(text(body, 10, R.color.qp_muted, false).apply {
+                        maxLines = 2
+                        ellipsize = android.text.TextUtils.TruncateAt.END
+                        setPadding(0, dp(3), 0, 0)
+                    })
+                }
+                row.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+                row.addView(text("↗", 20, R.color.qp_muted, true))
+                cardAd.addView(row)
+                cardAd.setOnClickListener {
+                    trackNativeAdEvent(serviceBase, campaignId, "CLICK")
+                    try {
+                        val target = Uri.parse(destination)
+                        if (target.scheme.equals("https", true) && target.userInfo == null) {
+                            startActivity(Intent(Intent.ACTION_VIEW, target))
+                        }
+                    } catch (_: Exception) {
+                        toast("This advertisement link could not be opened.")
+                    }
+                }
+                parent.addView(
+                    cardAd,
+                    insertionIndex.coerceIn(0, parent.childCount),
+                    linearParams().apply { bottomMargin = dp(11) }
+                )
+                trackNativeAdEvent(serviceBase, campaignId, "IMPRESSION")
+            }
+        }.start()
+    }
+
+    private fun trackNativeAdEvent(serviceBase: String, campaignId: String, eventType: String) {
+        Thread {
+            val connection = try {
+                URL(serviceBase.trimEnd('/') + "/api/v1/advertising/" + campaignId + "/events")
+                    .openConnection() as? HttpURLConnection
+            } catch (_: Exception) { null } ?: return@Thread
+            try {
+                connection.instanceFollowRedirects = false
+                connection.requestMethod = "POST"
+                connection.connectTimeout = 4000
+                connection.readTimeout = 4000
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Accept", "application/json")
+                val payload = JSONObject().put("eventType", eventType).toString().toByteArray(Charsets.UTF_8)
+                connection.outputStream.use { it.write(payload) }
+                connection.responseCode
+            } catch (_: Exception) {
+                // Ad metrics are best-effort and never affect the customer's files or print flow.
+            } finally {
+                connection.disconnect()
             }
         }.start()
     }
