@@ -20,7 +20,7 @@ internal object CustomerOrderTrackingPresentation {
     private val paymentPending = setOf(
         "AWAITING_PAYMENT", "AWAITING_CUSTOMER_PAYMENT", "AWAITING_COUNTER_PAYMENT",
         "CASH_AWAITING_PAYMENT", "CUSTOMER_REPORTED", "PAYMENT_REPORTED",
-        "PAYMENT_REJECTED", "QUOTE_EXPIRED"
+        "PAYMENT_REJECTED", "QUOTE_EXPIRED", "REJECTED", "CANCELLED"
     )
     private val printing = setOf(
         "PAID_AUTHORISED", "LOCAL_QUEUE_CLAIMED", "LOCAL_QUEUE_READY",
@@ -29,7 +29,11 @@ internal object CustomerOrderTrackingPresentation {
     )
     private val paymentVerified = setOf("VERIFIED", "PARTIALLY_REFUNDED", "REFUNDED")
 
-    fun steps(statuses: List<String>, paymentStatus: String?): List<CustomerTrackingStep> {
+    fun steps(
+        statuses: List<String>,
+        paymentStatus: String?,
+        filePaymentStatuses: List<String> = emptyList()
+    ): List<CustomerTrackingStep> {
         val normalized = statuses.map { it.trim().uppercase(Locale.ROOT) }.filter(String::isNotBlank)
         if (normalized.isEmpty()) return emptyList()
 
@@ -38,8 +42,26 @@ internal object CustomerOrderTrackingPresentation {
         val allResolved = active.isEmpty()
         val payment = paymentStatus.orEmpty().trim().uppercase(Locale.ROOT)
         val hasBillableFiles = normalized.any { it !in excluded }
-        val verified = payment in paymentVerified || normalized.any { it in printing || it in ready }
-        val paymentRequired = normalized.any { it in paymentPending }
+        val billableIndexes = normalized.indices.filter { normalized[it] !in excluded }
+        val perFilePayments = normalized.indices.map { index ->
+            filePaymentStatuses.getOrNull(index).orEmpty().trim().uppercase(Locale.ROOT)
+        }
+        val batchPaymentKnown = payment.isNotBlank()
+        val paymentVerifiedForBatch = if (batchPaymentKnown) {
+            payment in paymentVerified
+        } else {
+            billableIndexes.all { index ->
+                normalized[index] in printing || normalized[index] in ready ||
+                    perFilePayments[index] in paymentVerified
+            }
+        }
+        val paymentRequired = if (batchPaymentKnown) {
+            payment in paymentPending
+        } else {
+            billableIndexes.any { index ->
+                normalized[index] in paymentPending || perFilePayments[index] in paymentPending
+            }
+        }
         val anyPrinting = normalized.any { it in printing }
         val allOutputResolved = allResolved
         val allReady = normalized.all { it in ready }
@@ -51,14 +73,15 @@ internal object CustomerOrderTrackingPresentation {
         }
         val paymentState = when {
             !hasBillableFiles -> CustomerTrackingStepState.SKIPPED
-            verified -> CustomerTrackingStepState.DONE
+            !allReviewed -> CustomerTrackingStepState.UPCOMING
             paymentRequired -> CustomerTrackingStepState.CURRENT
-            allReviewed -> CustomerTrackingStepState.CURRENT
-            else -> CustomerTrackingStepState.UPCOMING
+            paymentVerifiedForBatch -> CustomerTrackingStepState.DONE
+            else -> CustomerTrackingStepState.CURRENT
         }
         val printingState = when {
             !hasBillableFiles -> CustomerTrackingStepState.SKIPPED
             allReady || allOutputResolved -> CustomerTrackingStepState.DONE
+            paymentState != CustomerTrackingStepState.DONE -> CustomerTrackingStepState.UPCOMING
             anyPrinting -> CustomerTrackingStepState.CURRENT
             else -> CustomerTrackingStepState.UPCOMING
         }
@@ -119,8 +142,12 @@ internal object CustomerOrderTrackingPresentation {
         )
     }
 
-    fun currentHeadline(statuses: List<String>, paymentStatus: String?): String {
-        val steps = steps(statuses, paymentStatus)
+    fun currentHeadline(
+        statuses: List<String>,
+        paymentStatus: String?,
+        filePaymentStatuses: List<String> = emptyList()
+    ): String {
+        val steps = steps(statuses, paymentStatus, filePaymentStatuses)
         val current = steps.lastOrNull { it.state == CustomerTrackingStepState.CURRENT }
         if (current != null) {
             return when (current.title) {
