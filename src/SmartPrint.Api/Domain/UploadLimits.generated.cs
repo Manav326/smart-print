@@ -3,10 +3,10 @@ namespace SmartPrint.Api.Domain;
 
 public static class UploadLimits
 {
-    public const long MaxFileBytes = 20971520L;
+    public const long MaxFileBytes = 52428800L;
     public const int MaxBatchFiles = 20;
     public const int MaxPhotoCount = 100;
-    public const long MaxBatchBytes = 52428800L;
-    public const long MaxMultipartRequestBytes = 22020096L;
+    public const long MaxBatchBytes = 524288000L;
+    public const long MaxMultipartRequestBytes = 53477376L;
     public const long PrivateRelayEncryptionOverheadBytes = 16L;
 }

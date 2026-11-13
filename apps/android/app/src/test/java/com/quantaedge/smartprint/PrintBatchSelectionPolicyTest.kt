@@ -41,19 +41,42 @@ class PrintBatchSelectionPolicyTest {
     }
 
     @Test
-    fun rejectsAnIndividualFileAboveTwentyMegabytes() {
+    fun uploadPolicyUsesFiftyMegabytesPerFileAndFiveHundredMegabytesPerBatch() {
+        assertEquals(50L * 1024L * 1024L, DocumentNamePolicy.MAX_PRINT_BYTES)
+        assertEquals(500L * 1024L * 1024L, PrintBatchSelectionPolicy.MAX_TOTAL_BYTES)
+    }
+
+    @Test
+    fun acceptsAnIndividualFileExactlyAtFiftyMegabytes() {
+        val file = createFile("exact-limit.pdf", DocumentNamePolicy.MAX_PRINT_BYTES)
+        assertNull(PrintBatchSelectionPolicy.validationError(listOf(file)))
+    }
+
+    @Test
+    fun rejectsAnIndividualFileAboveFiftyMegabytes() {
         val file = createFile("large.pdf", DocumentNamePolicy.MAX_PRINT_BYTES + 1L)
 
         assertNotNull(PrintBatchSelectionPolicy.validationError(listOf(file)))
     }
 
     @Test
-    fun rejectsCombinedSizeAboveFiftyMegabytes() {
-        val files = listOf(
-            createFile("one.pdf", PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / 3 + 1L),
-            createFile("two.pdf", PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / 3 + 1L),
-            createFile("three.pdf", PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / 3 + 1L)
-        )
+    fun acceptsCombinedSizeExactlyAtFiveHundredMegabytes() {
+        val files = (1..10).map {
+            createFile("document-$it.pdf", DocumentNamePolicy.MAX_PRINT_BYTES)
+        }
+
+        assertEquals(500L * 1024L * 1024L, files.sumOf { it.length() })
+        assertNull(PrintBatchSelectionPolicy.validationError(files))
+    }
+
+    @Test
+    fun rejectsCombinedSizeAboveFiveHundredMegabytes() {
+        val fileBytes = PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / 11 + 1L
+        val files = (1..11).map { createFile("document-$it.pdf", fileBytes) }
+
+        assertEquals(11, files.size)
+        assertEquals(true, files.all { it.length() <= DocumentNamePolicy.MAX_PRINT_BYTES })
+        assertEquals(true, files.sumOf { it.length() } > PrintBatchSelectionPolicy.MAX_TOTAL_BYTES)
 
         assertNotNull(PrintBatchSelectionPolicy.validationError(files))
     }

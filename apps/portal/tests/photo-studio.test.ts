@@ -5,11 +5,11 @@ import { UPLOAD_LIMITS } from "../src/upload-limits.generated.ts";
 import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
 
 test("customer upload limits come from the shared generated policy",()=>{
- assert.equal(UPLOAD_LIMITS.maxFileBytes,20*1024*1024);
+ assert.equal(UPLOAD_LIMITS.maxFileBytes,50*1024*1024);
  assert.equal(UPLOAD_LIMITS.maxPhotoCount,100);
  assert.equal(UPLOAD_LIMITS.maxBatchFiles,20);
- assert.equal(UPLOAD_LIMITS.maxBatchBytes,50*1024*1024);
- assert.equal(UPLOAD_LIMITS.maxMultipartRequestBytes,21*1024*1024);
+ assert.equal(UPLOAD_LIMITS.maxBatchBytes,500*1024*1024);
+ assert.equal(UPLOAD_LIMITS.maxMultipartRequestBytes,51*1024*1024);
  assert.equal(UPLOAD_LIMITS.privateRelayEncryptionOverheadBytes,16);
 });
 
@@ -27,6 +27,12 @@ test("caption labels reserve their own area and never shrink photo dimensions",(
  assert.equal(labelled.contentWidthMm,plain.contentWidthMm);
  assert.equal(labelled.contentHeightMm,labelled.rows*52+(labelled.rows-1)*3);
 });
+test("private Photo Studio applies the shared per-file limit to both source and prepared output",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/source.size<=0\|\|source.size>UPLOAD_LIMITS.maxFileBytes\|\|sheet.file.size<=0\|\|sheet.file.size>UPLOAD_LIMITS.maxFileBytes/);
+ assert.doesNotMatch(app,/source\.size\+sheet\.file\.size>25\*1024\*1024/);
+});
+
 test("all configured photo sizes have positive safe layouts",()=>{
  for(const size of [{widthMm:35,heightMm:45},{widthMm:25,heightMm:35},{widthMm:50.8,heightMm:50.8},{widthMm:101.6,heightMm:152.4}]){
   const layout=getPhotoSheetLayout(size,7);

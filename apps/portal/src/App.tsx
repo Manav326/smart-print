@@ -238,8 +238,8 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
     if(!source||!sheet||saving)return;
     const bridge=nativeBridge();
     if(!bridge){setError("Open Photo Studio from the SmartPrint Android app to save a private sheet.");return;}
-    if(source.size+sheet.file.size>25*1024*1024){
-      setError("This photo and its prepared sheet exceed the private transfer limit. Choose a smaller original or reduce the photo count.");
+    if(source.size<=0||source.size>UPLOAD_LIMITS.maxFileBytes||sheet.file.size<=0||sheet.file.size>UPLOAD_LIMITS.maxFileBytes){
+      setError(`Each photo file must be within ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB. Choose a smaller original or reduce the photo count.`);
       return;
     }
     setSaving(true);setError("");setStatus("Saving securely on this device…");
