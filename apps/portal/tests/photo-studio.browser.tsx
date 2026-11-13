@@ -159,7 +159,7 @@ function PhotoStudioBrowserFixture() {
         HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
           if (this.width === 2480 && this.height === 3508) {
             if (oversizedRaster) {
-              callback(new Blob([new Uint8Array(20 * 1024 * 1024 + 8192)], { type: type || "image/jpeg" }));
+              callback(new Blob([new Uint8Array(50 * 1024 * 1024 + 8192)], { type: type || "image/jpeg" }));
               return;
             }
             if (failRasterOnce && !failureUsed) {
