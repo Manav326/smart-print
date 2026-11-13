@@ -107,8 +107,11 @@ internal object CustomerOrderTrackingPresentation {
             CustomerTrackingStep("Payment", paymentDetail, paymentState),
             CustomerTrackingStep("Printing", printDetail, printingState),
             CustomerTrackingStep(
-                if (normalized.any { it == "PDF_EXPORTED" } && normalized.none { it == "COMPLETED" }) "PDF ready"
-                else "Ready for collection",
+                when {
+                    allOutputResolved && !allReady && readyCount > 0 -> "Order outcome"
+                    normalized.any { it == "PDF_EXPORTED" } && normalized.none { it == "COMPLETED" } -> "PDF ready"
+                    else -> "Ready for collection"
+                },
                 readyDetail,
                 readyState
             )
