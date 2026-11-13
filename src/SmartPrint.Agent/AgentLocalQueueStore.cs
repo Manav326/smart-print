@@ -1019,16 +1019,11 @@ public sealed class AgentLocalQueueStore
                 {
                     verifiedOriginal = ReadDocument(jobId);
                 }
-                catch (Exception exception) when (exception is IOException or CryptographicException)
+                catch (Exception exception) when (exception is IOException or CryptographicException or InvalidDataException)
                 {
                     throw new InvalidDataException(
                         "The local original photo failed its integrity check. Reopen its preview before saving.",
                         exception);
-                }
-                finally
-                {
-                    // ReadDocument returns plaintext only after verifying its digest.
-                    // The buffer is cleared immediately after this integrity check.
                 }
 
                 CryptographicOperations.ZeroMemory(verifiedOriginal);
