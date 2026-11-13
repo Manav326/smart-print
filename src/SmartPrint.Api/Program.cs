@@ -998,6 +998,7 @@ customerApi.MapGet("/jobs", async (
         {
             job.Id,
             job.PrivatePrinting,
+            job.UpdatedUtc,
             job.BatchId,
             job.BatchGroupName,
             job.BatchName,
