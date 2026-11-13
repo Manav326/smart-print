@@ -561,20 +561,32 @@ test("ID Studio remains private-only while saved Photo Studio sheets can use the
 
 
 
-test("each photo sheet rasterizes and backgrounds the source crop once before reusing it for every copy",()=>{
+test("one processed 300-DPI crop is reused across all copies and every A4 page",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- const start=studio.indexOf("function drawPhotoSheetPage(");
- const end=studio.indexOf("function cropSource(",start);
- assert.ok(start>=0&&end>start,"The shared photo-sheet renderer must exist.");
- const renderer=studio.slice(start,end);
- const loop=renderer.indexOf("for(const position of positions)");
- assert.ok(loop>0,"Photo copies must be drawn in one position loop.");
- assert.ok(renderer.indexOf("drawImage(image,source.x,source.y,source.width,source.height")<loop,
-  "The original photo crop must be rasterized before iterating over copies.");
- assert.ok(renderer.indexOf("replaceEdgeBackground(photoTile")<loop,
-  "Background replacement must run once on the shared tile, not once per copy.");
- const copyLoop=renderer.slice(loop);
+ const helperStart=studio.indexOf("function createPhotoTile(");
+ const rendererStart=studio.indexOf("function drawPhotoSheetPage(");
+ const sourceStart=studio.indexOf("function cropSource(",rendererStart);
+ const saveStart=studio.indexOf("async function createPrintSheets()");
+ assert.ok(helperStart>=0&&rendererStart>helperStart&&sourceStart>rendererStart&&saveStart>sourceStart,
+  "Shared photo tile, page renderer and export path must exist.");
+
+ const helper=studio.slice(helperStart,rendererStart);
+ assert.match(helper,/drawImage\(image,source\.x,source\.y,source\.width,source\.height,0,0,photoW,photoH\)/);
+ assert.match(helper,/if\(background\.sourceColor\)replaceEdgeBackground\(photoTile/);
+
+ const renderer=studio.slice(rendererStart,sourceStart);
+ const copyLoop=renderer.slice(renderer.indexOf("for(const position of positions)"));
  assert.match(copyLoop,/context\.drawImage\(photoTile,x,y,size\.widthMm,size\.heightMm\)/);
- assert.doesNotMatch(copyLoop,/replaceEdgeBackground\(|createElement\("canvas"\)/,
-  "The copy loop must not allocate or process a new photo raster.");
+ assert.doesNotMatch(copyLoop,/createPhotoTile\(|replaceEdgeBackground\(|createElement\("canvas"\)/,
+  "The copy loop must reuse the already-processed tile.");
+ assert.match(renderer,/sharedPhotoTile\?\?createPhotoTile\(/);
+
+ const exporter=studio.slice(saveStart);
+ const tileCreate=exporter.indexOf("const sharedPhotoTile=createPhotoTile(");
+ const pageLoop=exporter.indexOf("for(let page=0;page<pages;page++)");
+ const pageDraw=exporter.indexOf("textLayers,sharedPhotoTile)",pageLoop);
+ const tileDispose=exporter.indexOf("sharedPhotoTile.width=0",pageLoop);
+ assert.ok(tileCreate>=0&&pageLoop>tileCreate&&pageDraw>pageLoop&&tileDispose>pageDraw,
+  "The export must create one tile before page rendering, pass it into every page, and release it afterwards.");
+ assert.match(exporter,/finally\{\s*sharedPhotoTile\.width=0;\s*sharedPhotoTile\.height=0;/);
 });
