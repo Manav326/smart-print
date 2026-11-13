@@ -2,6 +2,7 @@ package com.quantaedge.smartprint
 
 import java.io.File
 import java.io.FileInputStream
+import java.util.LinkedHashMap
 import java.util.Locale
 
 /**
@@ -16,6 +17,18 @@ object DocumentNamePolicy {
     const val MAX_IMPORT_BYTES = 100L * 1024L * 1024L
 
     private const val MAX_HEADER_BYTES = 1028
+    private const val MAX_TYPE_CACHE_ENTRIES = 256
+
+    private data class FileIdentity(
+        val canonicalPath: String,
+        val sizeBytes: Long,
+        val modifiedAtMillis: Long
+    )
+
+    private val detectedTypeCache = object : LinkedHashMap<FileIdentity, String>(32, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<FileIdentity, String>?): Boolean =
+            size > MAX_TYPE_CACHE_ENTRIES
+    }
 
     private val PDF_HEADER = byteArrayOf(0x25, 0x50, 0x44, 0x46, 0x2d)
     private val JPEG_HEADER = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte())
@@ -64,9 +77,27 @@ object DocumentNamePolicy {
 
     fun supportsInAppViewer(mimeType: String): Boolean = mimeType in inAppViewerMimeTypes
 
-    /** Returns the detected content type, using the filename only when bytes are unknown. */
-    fun mimeType(file: File): String =
-        detectMimeType(file) ?: mimeType(file.name)
+    /**
+     * Returns the detected content type. The small signature result is cached per file
+     * identity, so opening, editing and sharing the same unchanged file does not reread it.
+     * The bounded LRU avoids retaining an unbounded list of customer file paths.
+     */
+    fun mimeType(file: File): String {
+        if (!file.isFile) return mimeType(file.name)
+        val identity = runCatching {
+            FileIdentity(file.canonicalPath, file.length(), file.lastModified())
+        }.getOrNull() ?: return mimeType(file.name)
+
+        synchronized(detectedTypeCache) {
+            detectedTypeCache[identity]?.let { return it }
+        }
+
+        val detected = detectMimeType(file) ?: mimeType(file.name)
+        synchronized(detectedTypeCache) {
+            detectedTypeCache[identity] = detected
+        }
+        return detected
+    }
 
     fun mimeType(name: String): String = when (extension(name)) {
         "pdf" -> "application/pdf"
