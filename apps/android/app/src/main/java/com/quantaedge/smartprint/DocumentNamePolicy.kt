@@ -17,6 +17,15 @@ object DocumentNamePolicy {
 
     private const val MAX_HEADER_BYTES = 1024
 
+    private val PDF_HEADER = byteArrayOf(0x25, 0x50, 0x44, 0x46, 0x2d)
+    private val JPEG_HEADER = byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte())
+    private val PNG_HEADER = byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+    private val BMP_HEADER = byteArrayOf(0x42, 0x4d)
+    private val GIF87_HEADER = "GIF87a".toByteArray(Charsets.US_ASCII)
+    private val GIF89_HEADER = "GIF89a".toByteArray(Charsets.US_ASCII)
+    private val RIFF_HEADER = "RIFF".toByteArray(Charsets.US_ASCII)
+    private val WEBP_HEADER = "WEBP".toByteArray(Charsets.US_ASCII)
+
     private val printableMimeTypes = setOf(
         "application/pdf",
         "image/jpeg",
@@ -94,23 +103,19 @@ object DocumentNamePolicy {
         }
 
         if (bytesRead == 0) return null
-        fun byte(index: Int) = header[index].toInt() and 0xff
-        fun matches(offset: Int, signature: IntArray): Boolean =
+        fun matches(offset: Int, signature: ByteArray): Boolean =
             offset >= 0 && offset + signature.size <= bytesRead &&
-                signature.indices.all { byte(offset + it) == signature[it] }
+                signature.indices.all { header[offset + it] == signature[it] }
 
         // PDF permits its header to appear within the first 1024 bytes.
-        for (offset in 0..(bytesRead - 5).coerceAtLeast(-1)) {
-            if (matches(offset, intArrayOf(0x25, 0x50, 0x44, 0x46, 0x2d))) return "application/pdf"
+        for (offset in 0..(bytesRead - PDF_HEADER.size).coerceAtLeast(-1)) {
+            if (matches(offset, PDF_HEADER)) return "application/pdf"
         }
-        if (matches(0, intArrayOf(0xff, 0xd8, 0xff))) return "image/jpeg"
-        if (matches(0, intArrayOf(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a))) return "image/png"
-        if (matches(0, intArrayOf(0x42, 0x4d))) return "image/bmp"
-        if (matches(0, intArrayOf(0x47, 0x49, 0x46, 0x38, 0x37, 0x61)) ||
-            matches(0, intArrayOf(0x47, 0x49, 0x46, 0x38, 0x39, 0x61))) return "image/gif"
-        if (bytesRead >= 12 &&
-            matches(0, intArrayOf(0x52, 0x49, 0x46, 0x46)) &&
-            matches(8, intArrayOf(0x57, 0x45, 0x42, 0x50))) return "image/webp"
+        if (matches(0, JPEG_HEADER)) return "image/jpeg"
+        if (matches(0, PNG_HEADER)) return "image/png"
+        if (matches(0, BMP_HEADER)) return "image/bmp"
+        if (matches(0, GIF87_HEADER) || matches(0, GIF89_HEADER)) return "image/gif"
+        if (bytesRead >= 12 && matches(0, RIFF_HEADER) && matches(8, WEBP_HEADER)) return "image/webp"
 
         return null
     }
