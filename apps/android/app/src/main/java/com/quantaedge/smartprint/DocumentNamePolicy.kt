@@ -78,26 +78,26 @@ object DocumentNamePolicy {
      * The bounded LRU avoids retaining an unbounded list of customer file paths.
      */
     fun mimeType(file: File): String {
-        if (!file.isFile) return mimeType(file.name)
+        if (!file.isFile) return safeFilenameMimeFallback(file.name)
         val identity = runCatching {
             FileIdentity(file.canonicalPath, file.length(), file.lastModified())
-        }.getOrNull() ?: return mimeType(file.name)
+        }.getOrNull() ?: return safeFilenameMimeFallback(file.name)
 
         synchronized(detectedTypeCache) {
             detectedTypeCache[identity]?.let { return it }
         }
 
-        val detected = detectMimeType(file) ?: run {
-            // A printable extension must not turn corrupt or unreadable content
-            // into a PDF/JPEG/PNG viewer document. Other viewer formats retain
-            // their filename fallback.
-            val fallback = mimeType(file.name)
-            if (fallback in printableMimeTypes) "application/octet-stream" else fallback
-        }
+        val detected = detectMimeType(file) ?: safeFilenameMimeFallback(file.name)
         synchronized(detectedTypeCache) {
             detectedTypeCache[identity] = detected
         }
         return detected
+    }
+
+    private fun safeFilenameMimeFallback(name: String): String {
+        val fallback = mimeType(name)
+        // A supported printable extension is never sufficient evidence of its content.
+        return if (fallback in printableMimeTypes) "application/octet-stream" else fallback
     }
 
     fun mimeType(name: String): String = when (extension(name)) {
