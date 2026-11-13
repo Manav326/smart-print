@@ -84,7 +84,7 @@ function normalizedFileName(name: string, mimeType: CustomerUploadMimeType): str
     ? currentExtension === "jpg" || currentExtension === "jpeg"
     : currentExtension === expected;
   if (extensionMatches) return name;
-  const base = dot > 0 ? name.slice(0, dot) : name;
+  const base = dot > 0 ? name.slice(0, dot) : name.startsWith(".") ? name.slice(1) : name;
   return `${base || "document"}.${expected}`;
 }
 
@@ -105,7 +105,11 @@ export async function normalizeCustomerUploadFile(file: File): Promise<File | nu
   if (!mimeType || mimeType === "UNSUPPORTED") return null;
 
   const name = normalizedFileName(file.name, mimeType);
-  if (name === file.name && file.type === mimeType) return file;
+  // Keep the original immutable File object when its filename already has the
+  // correct extension. A generic provider MIME type is harmless here: the
+  // server verifies the signature, and avoiding a clone prevents needless
+  // duplicate memory for large photo/PDF uploads.
+  if (name === file.name) return file;
   return new File([file], name, { type: mimeType, lastModified: file.lastModified });
 }
 
