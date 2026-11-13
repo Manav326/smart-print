@@ -3617,13 +3617,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         });
     }
 
-    if (document.MediaType is not ("image/jpeg" or "image/png"))
+    var photoSourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+    if (photoSourceMediaType is not ("image/jpeg" or "image/png"))
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "photo_revision_source_not_image",
-            message = "The shop editor can enhance an original JPG or PNG photo. This job is not an original image."
+            message = "The shop editor can enhance an original JPG or PNG photo. This job has no retained editable photo source."
         });
     }
 
@@ -3734,6 +3735,17 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
 
     var previousStorageKey = document.StorageKey;
     var now = DateTimeOffset.UtcNow;
+    if (document.PhotoSourceOriginalFileName is null)
+    {
+        // Preserve the first uploaded photo as the immutable editing source.
+        // Every replacement PDF gets a fresh key; later edits always start from
+        // this retained source instead of progressively recompressing a PDF.
+        document.PhotoSourceStorageKey = document.StorageKey;
+        document.PhotoSourceOriginalFileName = document.OriginalFileName;
+        document.PhotoSourceMediaType = document.MediaType;
+        document.PhotoSourceSha256 = document.Sha256;
+        document.PhotoSourceSizeBytes = document.SizeBytes;
+    }
     document.OriginalFileName = outputName;
     document.MediaType = stored.Analysis.MediaType;
     document.FileExtension = stored.Analysis.Extension;
@@ -3788,14 +3800,17 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         throw;
     }
 
-    try
+    if (!string.Equals(previousStorageKey, document.PhotoSourceStorageKey, StringComparison.Ordinal))
     {
-        await storage.DeleteAsync(previousStorageKey);
-    }
-    catch (IOException)
-    {
-        // The database now points to the new revision. A failed old-file cleanup
-        // must not turn a successful customer-visible revision into an error.
+        try
+        {
+            await storage.DeleteAsync(previousStorageKey);
+        }
+        catch (IOException)
+        {
+            // The database now points to the new revision. A failed old-file cleanup
+            // must not turn a successful customer-visible revision into an error.
+        }
     }
 
     return Results.Ok(new
