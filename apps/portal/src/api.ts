@@ -2026,9 +2026,9 @@ export function applyShopPrintBatchReview(
 export async function downloadShopDocument(
   token: string,
   jobId: string,
-  variant: "original" | "output" = "original"
+  variant: "original" | "output" | "photo-source" = "original"
 ): Promise<Blob> {
-  const query = variant === "output" ? "?variant=output" : "";
+  const query = variant === "original" ? "" : `?variant=${variant}`;
   const source = await apiRequest<
     | { mode: "CLOUD" }
     | { mode: "LOCAL_AGENT"; grantToken: string; endpoints: string[]; expiresUtc: string }
@@ -2037,7 +2037,7 @@ export async function downloadShopDocument(
   if (source.mode === "CLOUD") {
     if (variant === "output")
       throw new ApiError("The saved PDF is available only on the paired shop computer. Reconnect that computer and try again.", 409);
-    const documentPath = `/api/v1/shop/print-jobs/${jobId}/document`;
+    const documentPath = `/api/v1/shop/print-jobs/${jobId}/document${variant === "photo-source" ? "?variant=photo-source" : ""}`;
     const request = (accessToken: string) => fetchApiResponse(documentPath, {
       headers: {
         Accept: "application/pdf,image/jpeg,image/png",
@@ -2083,7 +2083,7 @@ export async function downloadShopDocument(
     const timeout = window.setTimeout(() => controller.abort(), 15_000);
     try {
       const response = await fetch(
-        `${endpoint.origin}/api/v1/local/documents/${encodeURIComponent(jobId)}/preview${variant === "output" ? "?variant=output" : ""}`,
+        `${endpoint.origin}/api/v1/local/documents/${encodeURIComponent(jobId)}/preview${variant === "original" ? "" : `?variant=${variant}`}`,
         {
           method: "GET",
           mode: "cors",
