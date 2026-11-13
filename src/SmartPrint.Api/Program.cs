@@ -8508,7 +8508,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     var validPhotoMetadata = request.PrintKind == "PHOTO" &&
         request.PhotoSizeCode is string photoSizeCode &&
         (photoSizeCode is "35x45" or "25x35" or "2x2" or "4x6") &&
-        request.PhotoCount is >= 1 and <= 100 &&
+        request.PhotoCount is >= 1 and <= UploadLimits.MaxPhotoCount &&
         request.PhotosPerPage is int photosPerPage &&
         photosPerPage >= 1 &&
         photosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
