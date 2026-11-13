@@ -53,6 +53,11 @@ public static class DocumentAnalyzer
             try
             {
                 using var document = PdfDocument.Open(new MemoryStream(bytes, writable: false));
+                if (document.NumberOfPages is <= 0 or > MaximumPages)
+                {
+                    throw new DocumentValidationException($"PDFs must contain between 1 and {MaximumPages} pages.");
+                }
+
                 var pages = document.GetPages().Select(page =>
                 {
                     var images = page.GetImages().Select(image =>
@@ -80,10 +85,6 @@ public static class DocumentAnalyzer
                     };
                 }).ToArray();
 
-                if (document.NumberOfPages is <= 0 or > MaximumPages)
-                {
-                    throw new DocumentValidationException($"PDFs must contain between 1 and {MaximumPages} pages.");
-                }
                 return new DocumentAnalysis(document.NumberOfPages, System.Text.Json.JsonSerializer.Serialize(pages), "application/pdf", ".pdf");
             }
             catch (DocumentValidationException)
