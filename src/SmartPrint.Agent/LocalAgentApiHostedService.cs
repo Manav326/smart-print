@@ -451,6 +451,16 @@ public sealed class LocalAgentApiHostedService(
                     CryptographicOperations.ZeroMemory(bytes);
                     return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
                 }
+                if (!string.Equals(analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.UnprocessableEntity(new
+                    {
+                        code = "photo_sheet_not_supported",
+                        message = "The prepared Photo Studio sheet must contain actual PDF content."
+                    });
+                }
+
                 var expectedPageCount = checked((photoCount + photosPerPage - 1) / photosPerPage);
                 if (analysis.PageCount != expectedPageCount)
                 {
