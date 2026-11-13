@@ -116,26 +116,13 @@ function formatDobForPrint(value:string){
   return match?match[3]+"/"+match[2]+"/"+match[1]:value.trim().slice(0,24);
 }
 
-function drawPhotoSheetPage(
-  context:CanvasRenderingContext2D,image:HTMLImageElement,canvasWidth:number,size:PhotoSize,copies:number,photosPerPage:number,pageIndex:number,
-  zoom:number,focusX:number,focusY:number,adjustments:Adjustments,
-  caption:{name:string;dob:string;fontSizePt:number;color:string},
-  background:{sourceColor:string|null;targetColor:string;tolerance:number},captionHeightMm:number,
-  textLayers: readonly PhotoTextLayer[] = []
+function createPhotoTile(
+  image:HTMLImageElement,size:PhotoSize,zoom:number,focusX:number,focusY:number,adjustments:Adjustments,
+  background:{sourceColor:string|null;targetColor:string;tolerance:number}
 ){
-  const scaleX=canvasWidth/A4_WIDTH_MM,scaleY=context.canvas.height/A4_HEIGHT_MM;
-  const pageStart=pageIndex*photosPerPage;
-  const pageCopies=Math.max(0,Math.min(photosPerPage,copies-pageStart));
-  const positions=getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,pageCopies);
-  context.save();context.setTransform(1,0,0,1,0,0);context.fillStyle="#fff";
-  context.fillRect(0,0,canvasWidth,context.canvas.height);context.scale(scaleX,scaleY);
   const source=cropSource(image,size,zoom,focusX,focusY);
   const filter=`brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%)`;
   const photoW=Math.max(1,Math.round(size.widthMm/25.4*300)),photoH=Math.max(1,Math.round(size.heightMm/25.4*300));
-
-  // Every copy on a sheet uses the same source crop and treatment. Rasterize it
-  // once at the final 300-DPI tile size, then reuse that immutable tile for all
-  // positions. This avoids allocating and filtering one large canvas per copy.
   const photoTile=document.createElement("canvas");
   photoTile.width=photoW;photoTile.height=photoH;
   const tileContext=photoTile.getContext("2d");
@@ -144,6 +131,25 @@ function drawPhotoSheetPage(
   tileContext.drawImage(image,source.x,source.y,source.width,source.height,0,0,photoW,photoH);
   tileContext.filter="none";
   if(background.sourceColor)replaceEdgeBackground(photoTile,background.sourceColor,background.targetColor,background.tolerance);
+  return photoTile;
+}
+
+function drawPhotoSheetPage(
+  context:CanvasRenderingContext2D,image:HTMLImageElement,canvasWidth:number,size:PhotoSize,copies:number,photosPerPage:number,pageIndex:number,
+  zoom:number,focusX:number,focusY:number,adjustments:Adjustments,
+  caption:{name:string;dob:string;fontSizePt:number;color:string},
+  background:{sourceColor:string|null;targetColor:string;tolerance:number},captionHeightMm:number,
+  textLayers: readonly PhotoTextLayer[] = [],sharedPhotoTile?:HTMLCanvasElement
+){
+  const scaleX=canvasWidth/A4_WIDTH_MM,scaleY=context.canvas.height/A4_HEIGHT_MM;
+  const pageStart=pageIndex*photosPerPage;
+  const pageCopies=Math.max(0,Math.min(photosPerPage,copies-pageStart));
+  const positions=getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,pageCopies);
+  context.save();context.setTransform(1,0,0,1,0,0);context.fillStyle="#fff";
+  context.fillRect(0,0,canvasWidth,context.canvas.height);context.scale(scaleX,scaleY);
+  // A multi-page export passes one processed tile to every page. Live preview
+  // creates and releases its own tile because it renders only the visible page.
+  const photoTile=sharedPhotoTile??createPhotoTile(image,size,zoom,focusX,focusY,adjustments,background);
 
   for(const position of positions){
     const x=position.xMm,y=position.yMm;
@@ -158,8 +164,10 @@ function drawPhotoSheetPage(
       context.restore();
     }
   }
-  photoTile.width=0;
-  photoTile.height=0;
+  if(!sharedPhotoTile){
+    photoTile.width=0;
+    photoTile.height=0;
+  }
 
   // Text layers are placed in page-relative coordinates so the preview and the
   // final 300-DPI A4 raster use the same position, font size and colour.
@@ -539,18 +547,25 @@ export default function PhotoStudio({
       const pages=Math.ceil(parsedCopies/photosPerPage),jpegPages:Uint8Array[]=[];
       let jpegByteLength=0;
       const pdfStructureAllowance=4096+pages*1024;
-      for(let page=0;page<pages;page++){
-        const canvas=document.createElement("canvas");canvas.width=A4_WIDTH_PX;canvas.height=A4_HEIGHT_PX;
-        const context=canvas.getContext("2d");if(!context)throw new Error("A print canvas could not be created.");
-        drawPhotoSheetPage(context,image,canvas.width,size,parsedCopies,photosPerPage,page,zoom,focusX,focusY,adjustments,
-          {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
-          {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm,textLayers);
-        let blob=await canvasToBlob(canvas,"image/jpeg",.9);
-        if(blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(canvas,"image/jpeg",.82);
-        jpegByteLength+=blob.size;
-        if(jpegByteLength+pdfStructureAllowance>MAX_FILE_BYTES)
-          throw new Error(`The prepared photo PDF would exceed SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo, choose fewer photos per job, or split the order into smaller batches.`);
-        jpegPages.push(new Uint8Array(await blob.arrayBuffer()));
+      const sharedPhotoTile=createPhotoTile(image,size,zoom,focusX,focusY,adjustments,
+        {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance});
+      try{
+        for(let page=0;page<pages;page++){
+          const canvas=document.createElement("canvas");canvas.width=A4_WIDTH_PX;canvas.height=A4_HEIGHT_PX;
+          const context=canvas.getContext("2d");if(!context)throw new Error("A print canvas could not be created.");
+          drawPhotoSheetPage(context,image,canvas.width,size,parsedCopies,photosPerPage,page,zoom,focusX,focusY,adjustments,
+            {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
+            {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},captionHeightMm,textLayers,sharedPhotoTile);
+          let blob=await canvasToBlob(canvas,"image/jpeg",.9);
+          if(blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(canvas,"image/jpeg",.82);
+          jpegByteLength+=blob.size;
+          if(jpegByteLength+pdfStructureAllowance>MAX_FILE_BYTES)
+            throw new Error(`The prepared photo PDF would exceed SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo, choose fewer photos per job, or split the order into smaller batches.`);
+          jpegPages.push(new Uint8Array(await blob.arrayBuffer()));
+        }
+      }finally{
+        sharedPhotoTile.width=0;
+        sharedPhotoTile.height=0;
       }
       const bytes=buildPhotoPdf(jpegPages);
       const buffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength) as ArrayBuffer;
