@@ -106,7 +106,9 @@ test("customer Photo Studio cannot turn an already uploaded original into a seco
  assert.match(app,/if\(uploadedFileFingerprints\.includes\(fingerprint\)\)/);
  assert.match(app,/const photoAlreadyUploaded=Boolean\(file&&uploadedFileFingerprints\.includes\(customerFileFingerprint\(file\)\)\)/);
  assert.match(app,/disabled=\{busy\|\|batchLockedForPayment\|\|photoAlreadyUploaded\}/);
- assert.match(app,/This photo is already with the shop[\s\S]*?without creating another print job/);
+ assert.match(app,/Photo already sent\./);
+ assert.match(app,/InfoTooltip label="Photo already sent"/);
+ assert.match(app,/without creating another print job/);
 });
 
 test("customer photo preparation depends on configured shop pricing, not the current printer capability",()=>{
@@ -201,7 +203,8 @@ test("Photo Studio restores focus to the customer or shop control after it close
 
 test("customers are told when the shop has not enabled photo printing",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/Photo printing is not enabled at this shop yet/);
+ assert.match(app,/Photo printing unavailable/);
+ assert.match(app,/InfoTooltip label="Photo printing details"/);
  assert.match(app,/Ask the shop owner to configure photo sizes and rates/);
 });
 
@@ -525,7 +528,7 @@ test("saved Photo Studio documents default to Private Printing but allow Standar
  assert.match(app,/if\(idDocument&&!effectivePrivatePrinting\)/);
  assert.doesNotMatch(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument\|\|containsPhotoStudioDocument/);
  assert.match(app,/setPrivacyChoiceManuallySelected\(true\);setPrivatePrinting\(false\)/);
- assert.match(app,/Standard Printing is selected for this saved Photo Studio sheet/);
+ assert.match(app,/Standard Printing selected\./);
  assert.match(app,/uploadCustomerDocument\(sessionToken,candidate,currentBatchId/);
 });
 
