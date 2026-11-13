@@ -4496,6 +4496,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
+  const selectedFilesRef=useRef<File[]>([]);
+  useEffect(()=>{selectedFilesRef.current=files;},[files]);
   const [selectedFileIndex,setSelectedFileIndex]=useState(0);
   const file=files[selectedFileIndex]??null;
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
@@ -5299,7 +5301,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
     const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
     if(oversized){setError(`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file limit.`);return;}
-    const merged=new Map(files.map(candidate=>[customerFileFingerprint(candidate),candidate]));
+    const merged=new Map(selectedFilesRef.current.map(candidate=>[customerFileFingerprint(candidate),candidate]));
     for(const candidate of supported)merged.set(customerFileFingerprint(candidate),candidate);
     const selected=Array.from(merged.values());
     const alreadyUploaded=new Set(uploadedFileFingerprints);
@@ -5334,7 +5336,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       return updated;
     });
-    setFiles(selected);setSelectedFileIndex(0);
+    selectedFilesRef.current=selected;setFiles(selected);setSelectedFileIndex(0);
     const notices:string[]=[];
     if(nestedSkipped)notices.push("Nested folders are skipped; only files directly inside each selected folder are included.");
     if(unsupportedSkipped)notices.push("Files without a supported PDF, JPEG or PNG signature were skipped.");
