@@ -2116,6 +2116,7 @@ shop.MapGet("/customers/{customerId:guid}/jobs", async (
             job.OutputType,
             job.OutputConfirmedUtc,
             job.OutputCompletedUtc,
+            PhotoEditorSettingsJson = job.PrivatePrinting ? null : document.PhotoEditorSettingsJson,
             Document = new
             {
                 OriginalFileName = PrivatePrintingRules.SafeDocumentLabel(job.PrivatePrinting, document.OriginalFileName),
@@ -6611,6 +6612,9 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
 
+    if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(request.EditorSettingsJson, out _))
+        return Results.BadRequest(new { code = "photo_editor_settings_invalid", message = "The Photo Studio editing settings are invalid. Reopen the editor and save again." });
+
     var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
     if (!LocalDocumentPhotoRevisionGrant.TryValidate(
             grantToken, signingKeyText, issuer, audience, DateTimeOffset.UtcNow, out var grant) ||
@@ -6724,6 +6728,9 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
 
+    if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(request.EditorSettingsJson, out var editorSettingsJson))
+        return Results.BadRequest(new { code = "photo_editor_settings_invalid", message = "The Photo Studio editing settings are invalid. Reopen the editor and save again." });
+
     if (request.PageCount is < 1 or > 100 ||
         request.PhotoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         request.PhotosPerPage is < 1 or > 100 ||
@@ -6813,7 +6820,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
             JsonSerializer.Serialize(PricingCalculator.CalculatePhotoPageRefundAllocations(
                 request.PhotoCount, request.PhotoSizeCode, request.PhotosPerPage, job.PhotoUnitPriceMinorSnapshot)),
             StringComparison.Ordinal) &&
-        string.Equals(document.PageSizesJson, request.PageSizesJson, StringComparison.Ordinal))
+        string.Equals(document.PageSizesJson, request.PageSizesJson, StringComparison.Ordinal) &&
+        string.Equals(document.PhotoEditorSettingsJson, editorSettingsJson, StringComparison.Ordinal))
     {
         var duplicateHasPayment = await db.PrintPayments.AnyAsync(item =>
             item.TenantId == device.TenantId && item.PrintJobId == jobId &&
@@ -6930,6 +6938,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     document.SizeBytes = request.SizeBytes;
     document.Sha256 = request.Sha256.ToLowerInvariant();
     document.PageSizesJson = request.PageSizesJson;
+    document.PhotoEditorSettingsJson = editorSettingsJson;
     document.PurgedUtc = null;
     document.StorageMode = previousStorageMode;
     document.AgentDeviceId = device.Id;
@@ -6983,7 +6992,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.QuoteExpiresUtc,
         document.OriginalFileName,
         document.MediaType,
-        document.SizeBytes
+        document.SizeBytes,
+        document.PhotoEditorSettingsJson
     });
 });
 
