@@ -51,8 +51,10 @@ const DATABASE_VERSION = 1;
 const FILE_STORE = "pending-files";
 const METADATA_STORE = "pending-metadata";
 
-export function customerPendingSelectionStorageKey(publicCode: string, sessionToken: string): string {
-  return `${publicCode}:${sessionToken.slice(-16)}`;
+export function customerPendingSelectionStorageKey(publicCode: string): string {
+  // Pending, not-yet-uploaded files belong to this station on this device,
+  // not to a server session that may expire while the customer is away.
+  return publicCode;
 }
 
 function openDatabase(): Promise<IDBDatabase> {
