@@ -888,7 +888,6 @@ public sealed class AgentLocalQueueStore
                 throw new InvalidDataException("The retained photo source path is outside the protected queue.");
 
             var alreadyRetained = !string.IsNullOrWhiteSpace(entry.PhotoSourceSha256);
-            var createdPhotoSource = false;
             var sourceMoved = false;
             if (alreadyRetained)
             {
@@ -941,7 +940,6 @@ public sealed class AgentLocalQueueStore
                         if (File.Exists(retainedSourcePath))
                             throw new InvalidDataException("An unexpected retained photo source already exists.");
                         File.Move(documentPath, retainedSourcePath);
-                        createdPhotoSource = true;
                         sourceMoved = true;
                     }
                     await using (var stream = new FileStream(
