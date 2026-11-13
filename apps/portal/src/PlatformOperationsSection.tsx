@@ -26,7 +26,7 @@ type NumericKey =
 const fields: Array<{ key: NumericKey; label: string; hint: string; min: number; max: number }> = [
   { key: "trialMaxMonthlyPrintJobs", label: "Trial monthly print quota", hint: "Print jobs per calendar month. Default is 3,000. Paid plan quotas remain versioned under Plans & entitlements.", min: 1, max: 10_000_000 },
   { key: "cloudCompletedDocumentRetentionDays", label: "Cloud completed documents", hint: "Standard completed source files are kept for 7 days after confirmed output by default, then purged on the hourly API sweep.", min: 1, max: 3650 },
-  { key: "agentCompletedDocumentRetentionDays", label: "Windows Agent completed documents", hint: "Standard local source files remain for 7 days after output confirmation by default, then are removed on the hourly Agent sweep. Private Printing is erased after confirmed physical output.", min: 1, max: 3650 },
+  { key: "agentCompletedDocumentRetentionDays", label: "Windows Agent completed documents", hint: "Standard local source files remain for 7 days after output confirmation by default. Private Printing source files are erased after verified output; non-production test PDFs have a separate 24-hour local retention.", min: 1, max: 3650 },
   { key: "abandonedDocumentRetentionDays", label: "Rejected / fully refunded documents", hint: "Days terminal rejected, quote-expired or fully refunded files are retained when no financial hold exists.", min: 1, max: 3650 },
   { key: "pendingLocalUploadRetentionDays", label: "Pending local uploads", hint: "Days after a local upload becomes terminal unpaid before the API authorises the Agent to delete it.", min: 1, max: 3650 },
   { key: "expiredUploadTicketRetentionDays", label: "Expired upload tickets", hint: "Extra days after an unfinished local upload expires before its ticket record is removed.", min: 1, max: 3650 },
@@ -160,7 +160,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
 
           <section className="panel platform-ops-policy-note">
             <AlertTriangle size={17}/>
-            <div><strong>Safety behaviour</strong><p>Output-unconfirmed and unfinished jobs are never automatically deleted. Completed Standard Printing documents follow the configured retention window (7 days by default). Eligible abandoned files are purged only after the abandonment window and once financial holds clear. Private Printing files are removed only after the shop confirms physical output and the paired Agent acknowledges deletion. Permanent tenant deactivation is blocked until unsettled print and financial work is resolved.</p></div>
+            <div><strong>Safety behaviour</strong><p>Output-unconfirmed and unfinished jobs are never automatically deleted. Completed Standard Printing documents follow the configured retention window (7 days by default). Eligible abandoned files are purged only after the abandonment window and once financial holds clear. Private Printing source files are removed only after verified physical output or a verified non-production test output and the paired Agent acknowledges deletion. Test PDFs are not physical fulfilment and are separately retained in protected local storage for 24 hours. Permanent tenant deactivation is blocked until unsettled print and financial work is resolved.</p></div>
           </section>
 
           <section className="panel platform-ops-history">

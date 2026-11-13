@@ -30,7 +30,7 @@ import {
   reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings,
   updateShopOwnerAccount, updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
-  verifyShopPayment, retryShopPdfExport, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type CustomerPhotoPricing, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
+  verifyShopPayment, retryShopPdfExport, retryShopPrivateTestOutput, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type CustomerPhotoPricing, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
   type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob, type CustomerPrintRequestSettings
@@ -1385,16 +1385,23 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
   async function dispatchPrintJob(job: ShopPrintJob) {
     const pdfExport = job.outputMode === "PDF_EXPORT";
-    const ok = await confirmInApp(pdfExport
-      ? `Save a PDF for ${job.jobNumber} in the shop's QRtoPrint Exports folder? No Windows printer dialog will be opened.`
-      : `Start printing ${job.jobNumber} on ${job.printerName || "the assigned printer"}? The document will be submitted once to Windows. Spooler acceptance is not proof of paper output.`, pdfExport ? "Save PDF export?" : "Start printing?", pdfExport ? "Save PDF" : "Start printing");
+    const privateTestOutput = Boolean(job.privatePrinting && pdfExport);
+    const ok = await confirmInApp(privateTestOutput
+      ? `Create a non-production Private Printing test PDF for ${job.jobNumber}? The Agent stores it in its protected test folder for up to 24 hours. This is not a physical print and cannot be collected as a printed order.`
+      : pdfExport
+        ? `Save a PDF for ${job.jobNumber} in the shop's QRtoPrint Exports folder? No Windows printer dialog will be opened.`
+        : `Start printing ${job.jobNumber} on ${job.printerName || "the assigned printer"}? The document will be submitted once to Windows. Spooler acceptance is not proof of paper output.`,
+      privateTestOutput ? "Create private test PDF?" : pdfExport ? "Save PDF export?" : "Start printing?",
+      privateTestOutput ? "Create test PDF" : pdfExport ? "Save PDF" : "Start printing");
     if (!ok) return;
     setBusyJobId(job.id); setError("");
     try {
       await dispatchShopPrintJob(tokens.accessToken, job.id);
-      setToast(pdfExport
-        ? "PDF export authorised. The Windows Agent will create the PDF in the shop's export folder."
-        : "Print authorised. The Windows agent will submit this job once.");
+      setToast(privateTestOutput
+        ? "Private test PDF authorised. The Agent will save a protected local test artifact; no physical print is recorded."
+        : pdfExport
+          ? "PDF export authorised. The Windows Agent will create the PDF in the shop's export folder."
+          : "Print authorised. The Windows agent will submit this job once.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not start printing.");
@@ -1402,17 +1409,24 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   }
 
   async function retryPdfExport(job: ShopPrintJob) {
+    const privateTestOutput = Boolean(job.privatePrinting && job.outputType === "TEST_VIRTUAL");
     const ok = await confirmInApp(
-      `Confirm that no PDF file was saved for ${job.jobNumber}? The Agent will create the PDF in the shop's QRtoPrint Exports folder. Do not continue if a file from this job already exists.`,
-      "Retry PDF export?", "Retry export"
+      privateTestOutput
+        ? `Confirm that no valid test PDF was generated for ${job.jobNumber}? The Agent will retry from its protected local copy and save only to its protected test folder. Do not continue if the test PDF already exists; this is not a physical print.`
+        : `Confirm that no PDF file was saved for ${job.jobNumber}? The Agent will create the PDF in the shop's QRtoPrint Exports folder. Do not continue if a file from this job already exists.`,
+      privateTestOutput ? "Retry private test PDF?" : "Retry PDF export?",
+      privateTestOutput ? "Retry test PDF" : "Retry export"
     );
     if (!ok) return;
     setBusyJobId(job.id);
     setError("");
     try {
-      await retryShopPdfExport(tokens.accessToken, job.id);
+      if (privateTestOutput) await retryShopPrivateTestOutput(tokens.accessToken, job.id);
+      else await retryShopPdfExport(tokens.accessToken, job.id);
       await dispatchShopPrintJob(tokens.accessToken, job.id);
-      setToast("PDF export retry authorised. The Windows Agent will save the PDF locally.");
+      setToast(privateTestOutput
+        ? "Private test PDF retry authorised. The Agent will save a protected local test artifact; no physical print is made."
+        : "PDF export retry authorised. The Windows Agent will save the PDF locally.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not retry this PDF export.");
@@ -3127,15 +3141,15 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title="The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted.">Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
               {job.printerName&&<div className="queue-batch-file-printer">
                 <Printer size={13}/>
-                <strong>{job.outputMode==="PDF_EXPORT"?"Save as PDF":job.outputConfirmedUtc||job.status==="COMPLETED"?"Printed on":job.spoolerJobId?"Sent to":"Assigned printer"}</strong>
+                <strong>{job.outputType==="TEST_VIRTUAL"?"Private test PDF":job.outputMode==="PDF_EXPORT"?"Save as PDF":job.outputConfirmedUtc||job.status==="COMPLETED"?"Printed on":job.spoolerJobId?"Sent to":"Assigned printer"}</strong>
                 <span>{job.outputMode==="PDF_EXPORT"?job.printerAgentName||"Shop computer":job.printerName}</span>
-                {job.outputMode==="PDF_EXPORT"&&<small>Virtual printer: {job.printerName}</small>}
+                {job.outputMode==="PDF_EXPORT"&&<small>{job.outputType==="TEST_VIRTUAL"?"Test virtual printer: ":"Virtual printer: "}{job.printerName}{job.outputType==="TEST_VIRTUAL"?" · Not physical fulfilment":""}</small>}
                 {job.queueName&&job.queueName!==job.printerName&&<small>Windows queue: {job.queueName}</small>}
                 {job.printerAgentName&&job.outputMode!=="PDF_EXPORT"&&<small>Shop computer: {job.printerAgentName}</small>}
                 {job.printerSnapshotUtc&&<small>Output destination recorded: {formatIstDateTime(job.printerSnapshotUtc)}</small>}
@@ -3167,8 +3181,8 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}
                 {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button>}
                 {(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>{job.status==="REJECTED"?"Refund rejected file":"Review pages / refund"}</button>}
-                {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
-                {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>Save PDF again</button>}
+                {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.privatePrinting&&job.outputMode==="PDF_EXPORT"?"Create test PDF":job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
+                {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>{job.privatePrinting&&job.outputType==="TEST_VIRTUAL"?"Retry test PDF":"Save PDF again"}</button>}
                 {(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus,job.printerStatus))} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}
               </div>
               {editingSettingsJobId===job.id&&editingPrintSettings&&<div className="queue-settings-editor">
@@ -3436,6 +3450,7 @@ function prettyStatus(status:string) {
     SPOOLER_ACCEPTED:"Accepted by spooler",
     PRINTING:"Printing",
     OUTPUT_UNCONFIRMED:"Output unconfirmed",
+    TEST_OUTPUT_READY:"Test PDF created · not physically printed",
     PDF_EXPORTING:"Creating PDF",
     PDF_EXPORTED:"PDF saved",
     QUEUED:"Queued",
@@ -3892,7 +3907,8 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         .then(session=>{
           if(active){
             setResult(current=>current?.sessionToken===result.sessionToken
-              ? {...current,expiresUtc:session.expiresUtc,localAgent:session.localAgent,paymentOptions:session.paymentOptions}
+              ? {...current,expiresUtc:session.expiresUtc,localAgent:session.localAgent,paymentOptions:session.paymentOptions,
+                  privatePrintingVirtualOutputEnabled:session.privatePrintingVirtualOutputEnabled}
               : current);
           }
         })
@@ -3925,7 +3941,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
-        <CustomerPrintFlow dark={dark} publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled} photoPricing={result.photoPricing} hasAssignedPrinter={Boolean(result.printer)} printerCapabilitiesJson={result.printer?.capabilitiesJson} key={result.sessionToken} onStartNewSession={()=>void startNewSession()}/>
+        <CustomerPrintFlow dark={dark} publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled} privatePrintingVirtualOutputEnabled={result.privatePrintingVirtualOutputEnabled} photoPricing={result.photoPricing} hasAssignedPrinter={Boolean(result.printer)} printerCapabilitiesJson={result.printer?.capabilitiesJson} key={result.sessionToken} onStartNewSession={()=>void startNewSession()}/>
       </>:null}
     </main>
     <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>
@@ -4398,6 +4414,7 @@ function smartPrintNativeHeadline(status:string):string {
     case "SPOOLER_ACCEPTED": return "Printer queue accepted";
     case "PRINTING": return "Printing";
     case "OUTPUT_UNCONFIRMED": return "Output check pending";
+    case "TEST_OUTPUT_READY": return "Test PDF generated";
     case "COMPLETED": return "Ready to collect";
     case "PDF_EXPORTED": return "PDF ready";
     case "REFUNDED": return "Fully refunded";
@@ -4425,6 +4442,7 @@ function smartPrintNativeStatus(status:string):string {
     case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
     case "PRINTING": return "Printing in progress.";
     case "OUTPUT_UNCONFIRMED": return "Shop confirming print output.";
+    case "TEST_OUTPUT_READY": return "A non-production test PDF was generated. No physical print was made.";
     case "COMPLETED": return "Ready for collection.";
     case "PDF_EXPORTED": return "Your PDF was saved and verified.";
     case "REFUNDED": return "The file was excluded and its full payment was returned.";
@@ -4451,6 +4469,7 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
     case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
     case "PRINTING": return "Printing · Output unconfirmed.";
     case "OUTPUT_UNCONFIRMED": return "Output unconfirmed · Shop checks pages.";
+    case "TEST_OUTPUT_READY": return "Test output only · Not a physical print.";
     case "COMPLETED": return "Output confirmed · Collect print.";
     case "PDF_EXPORTED": return "PDF saved · Ready to use.";
     case "REFUNDED": return "Fully refunded · No printing will take place.";
@@ -4462,11 +4481,10 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
   }
 }
 
-function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,onStartNewSession}:{dark:boolean;publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;onStartNewSession:()=>void}) {
+function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,privatePrintingVirtualOutputEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,onStartNewSession}:{dark:boolean;publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;privatePrintingVirtualOutputEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;onStartNewSession:()=>void}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
-  // Customer requests are captured independently of current hardware reports.
-  // The shop may wait, reassign, or request an approved change before dispatch.
-  void hasAssignedPrinter;
+  // Private Printing is available only with a live paired Agent/key and a ready
+  // physical queue, or an explicitly approved non-production virtual test queue.
   void printerCapabilitiesJson;
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
@@ -4597,7 +4615,17 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [privacyChoiceManuallySelected,setPrivacyChoiceManuallySelected]=useState(
     ()=>sessionStorage.getItem("smartprint.privacy-choice-manual:"+sessionToken)==="true"
   );
-  const canOfferPrivatePrinting=Boolean(localAgent?.agentDeviceId && localAgent.documentEncryptionPublicKey);
+  const privateVirtualTestMode = localAgent?.printerOutputMode === "PDF_EXPORT";
+  const privateOutputModeAllowed = localAgent?.printerOutputMode === "PHYSICAL" ||
+    (privateVirtualTestMode && privatePrintingVirtualOutputEnabled);
+  const privateQueueReady = localAgent?.printerStatus === "Ready" || localAgent?.printerStatus === "Busy";
+  const canOfferPrivatePrinting=Boolean(
+    hasAssignedPrinter &&
+    localAgent?.agentDeviceId &&
+    localAgent.documentEncryptionPublicKey &&
+    privateQueueReady &&
+    privateOutputModeAllowed
+  );
 
   useEffect(()=>{
     if(privatePrinting)sessionStorage.setItem(privatePrintingStorageKey,"true");
@@ -4734,7 +4762,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     };
     void refreshAll();
     const awaitingPrivatePurge=jobStatus?.privatePrinting===true&&
-      jobStatus.status==="COMPLETED"&&!jobStatus.privateDocumentPurgedUtc;
+      (jobStatus.status==="COMPLETED"||jobStatus.status==="TEST_OUTPUT_READY")&&!jobStatus.privateDocumentPurgedUtc;
     const timer=window.setInterval(()=>void refreshAll(),awaitingPrivatePurge?3000:30000);
     return ()=>{active=false;window.clearInterval(timer);};
   },[sessionToken,batchStatusKey,uploaded?.job.id,jobStatus?.privatePrinting,jobStatus?.status,jobStatus?.privateDocumentPurgedUtc]);
@@ -5059,7 +5087,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       "OUTPUT_UNCONFIRMED"
     ]);
     const waitingForPrivatePurge =
-      jobStatus.status==="COMPLETED" &&
+      (jobStatus.status==="COMPLETED" || jobStatus.status==="TEST_OUTPUT_READY") &&
       Boolean(jobStatus.privatePrinting) &&
       !jobStatus.privateDocumentPurgedUtc;
     if(!liveStates.has(jobStatus.status)&&!waitingForPrivatePurge)return;
@@ -5431,24 +5459,24 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>Choose how files are handled</strong></div><small>Applies to all files</small></div>
       <div className="customer-privacy-choice-grid">
         <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
-          <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>Encrypted. Erased after printing.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
+          <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted · development test PDF only":"Encrypted · shop-side source erased after verified output"}</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
         </button>
         <button type="button" aria-pressed={!privatePrinting} disabled={busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false);}}>
           <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Normal print queue. 7-day auto-delete.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
-      <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>Files are encrypted before leaving your device. They travel over shop Wi-Fi or a temporary encrypted relay. The paired computer erases its working copy after physical printing is confirmed. Your original stays on your device.</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Standard Printing uses the shop's normal print queue. Completed source copies are deleted automatically 7 days after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
-      {!canOfferPrivatePrinting&&<small className="customer-privacy-unavailable">Private Printing unavailable. <InfoTooltip label="Why Private Printing is unavailable"><span>The paired shop computer must be connected and have its secure document key enabled.</span></InfoTooltip></small>}
+      <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>Files are encrypted before leaving your device and decrypted only by the paired Windows Agent. {privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"In development, the Agent can create a protected test PDF. It is not physical fulfilment; the test artifact is retained locally for up to 24 hours.":"The Agent erases its working source after physical output is confirmed."} Your original stays on your device.</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Standard Printing uses the shop's normal print queue. Completed source copies are deleted automatically 7 days after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
+      {!canOfferPrivatePrinting&&<small className="customer-privacy-unavailable">Private Printing unavailable. <InfoTooltip label="Why Private Printing is unavailable"><span>{!hasAssignedPrinter?"This QR station needs an active printer assignment.":!localAgent?.agentDeviceId||!localAgent.documentEncryptionPublicKey?"The paired Windows Agent must be online and publish its encryption key.":!privateQueueReady?"The assigned printer queue must report Ready or Busy.":privateVirtualTestMode?"Virtual test output is blocked until the Company Main Admin enables it in non-production.":"Private Printing requires an eligible physical printer or an approved non-production test printer."}</span></InfoTooltip></small>}
       {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on.</strong></span></div>}
       {files.some(isSmartPrintPhotoDocument)&&<div className="customer-private-confirmation" role="status">
         <ShieldCheck size={16}/>
         <span>{privatePrinting
-          ? <><strong>Private Printing preselected.</strong> <InfoTooltip label="Change printing method"><span>You can still choose Standard Printing above before uploading.</span></InfoTooltip></>
+          ? <><strong>Private Printing selected.</strong> <InfoTooltip label="Change printing method"><span>You can still choose Standard Printing above before uploading.</span></InfoTooltip></>
           : <strong>Standard Printing selected.</strong>}</span>
       </div>}
     </section>
     {privatePrinting
-      ? <div className="customer-private-transfer-note"><Lock size={16}/><span>End-to-end encrypted · Physical printing only</span></div>
+      ? <div className="customer-private-transfer-note"><Lock size={16}/><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"End-to-end encrypted · development test PDF only · not physical fulfilment":"End-to-end encrypted · physical printer required"}</span></div>
       : <div className="customer-upload-modes">
       {localAgent?.endpoints.length
         ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Local transfer · not encrypted</small></button>
@@ -5629,10 +5657,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
     {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={prettyStatus(jobStatus.status)} tone={["REJECTED","REFUNDED","CANCELLED","FAILED"].includes(jobStatus.status)?"red":jobStatus.status==="AWAITING_PAYMENT"?"green":"amber"}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
-      <strong>{jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
-      <p>{jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"The paired shop computer confirmed that its private working copy was removed. Your original file on this device is unchanged.":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"The shop confirmed the physical pages. SmartPrint is removing the private working copy from the paired shop computer and will confirm here when it is done.":nativeAppMode ? smartPrintNativeStatus(jobStatus.status) : jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready. Choose one of the payment methods enabled by the shop; the shop must verify payment before authorising the job.":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your paid document is being transferred securely to the shop's Windows computer. It has not been sent to the printer.":jobStatus.status==="LOCAL_QUEUE_READY"?"The document is safely stored in the shop's local queue and is waiting for the print operator. Physical printing has not started.":jobStatus.status==="PRINT_AUTHORISED"?"The shop has authorised printing. The Windows agent will submit the document once.":jobStatus.status==="PRINT_SUBMITTING"?"The Windows agent is submitting your document to the printer.":jobStatus.status==="SPOOLER_ACCEPTED"?"Windows accepted the job into the printer queue. This does not yet confirm paper output.":jobStatus.status==="PRINTING"?"The printer driver reports that the job is printing. The shop will confirm the pages before marking it complete.":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The printer queue could not confirm the final output. The shop operator is checking the pages before any retry.":jobStatus.status==="COMPLETED"?"The shop has checked the physical pages and marked your print ready for collection.":jobStatus.status==="PDF_EXPORTED"?"The shop saved and verified your PDF export.":jobStatus.status==="REFUNDED"?"The file was excluded and the full payment was returned.":jobStatus.status==="CANCELLED"?"This request was cancelled and will not be produced.":jobStatus.status==="FAILED"?"This request could not be completed. Contact the shop before trying again.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
+      <strong>{jobStatus.status==="TEST_OUTPUT_READY"?"Development test PDF generated · no physical print was made":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
+      <p>{jobStatus.status==="TEST_OUTPUT_READY"?(jobStatus.privateDocumentPurgedUtc
+        ?"The Agent confirmed that the encrypted source copy was removed. The protected test PDF remains on the shop computer for up to 24 hours for QA. Your original on this device is unchanged; no physical print or collection is recorded."
+        :"The Agent saved and verified a test PDF. SmartPrint is removing the encrypted source copy; the test PDF remains in protected local storage for up to 24 hours. Your original is unchanged and no physical print is recorded.")
+        :jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"The paired shop computer confirmed that its private working copy was removed. Your original file on this device is unchanged.":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"The shop confirmed the physical pages. SmartPrint is removing the private working copy from the paired shop computer and will confirm here when it is done.":nativeAppMode ? smartPrintNativeStatus(jobStatus.status) : jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready. Choose one of the payment methods enabled by the shop; the shop must verify payment before authorising the job.":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your paid document is being transferred securely to the shop's Windows computer. It has not been sent to the printer.":jobStatus.status==="LOCAL_QUEUE_READY"?"The document is safely stored in the shop's local queue and is waiting for the print operator. Physical printing has not started.":jobStatus.status==="PRINT_AUTHORISED"?"The shop has authorised printing. The Windows agent will submit the document once.":jobStatus.status==="PRINT_SUBMITTING"?"The Windows agent is submitting your document to the printer.":jobStatus.status==="SPOOLER_ACCEPTED"?"Windows accepted the job into the printer queue. This does not yet confirm paper output.":jobStatus.status==="PRINTING"?"The printer driver reports that the job is printing. The shop will confirm the pages before marking it complete.":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The printer queue could not confirm the final output. The shop operator is checking the pages before any retry.":jobStatus.status==="COMPLETED"?"The shop has checked the physical pages and marked your print ready for collection.":jobStatus.status==="PDF_EXPORTED"?"The shop saved and verified your PDF export.":jobStatus.status==="REFUNDED"?"The file was excluded and the full payment was returned.":jobStatus.status==="CANCELLED"?"This request was cancelled and will not be produced.":jobStatus.status==="FAILED"?"This request could not be completed. Contact the shop before trying again.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
+      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the encrypted source copy</strong>The test PDF was verified locally. The Agent is removing the protected source; the test PDF remains in its separate protected folder for up to 24 hours.</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Private source copy removed</strong>The test PDF remains in the Agent's protected test folder for up to 24 hours. It is not a physical print or a collection-ready order.</span></div>}
       {jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing your document from the shop computer</strong>The shop confirmed the physical print. SmartPrint is removing the shop-side working copy and will confirm when deletion is complete.</span></div>}
-      {jobStatus.privatePrinting&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Document removed from the shop computer</strong>The paired computer confirmed deletion of its private working copy. Your original file on this device has not been deleted.</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status!=="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Document removed from the shop computer</strong>The paired computer confirmed deletion of its private working copy. Your original file on this device has not been deleted.</span></div>}
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">
         <ShieldCheck size={16}/>
@@ -5732,7 +5765,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}
     </section>}
-    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{nativeAppMode ? smartPrintNativeBoundary(jobStatus?.status,Boolean(quote)) : jobStatus?.status==="PAID_AUTHORISED"?"The shop has verified your payment. It still needs to assign and start the local printer.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop has authorised physical printing.":jobStatus?.status==="PRINT_SUBMITTING"?"Your document is being sent to the Windows printer queue.":jobStatus?.status==="SPOOLER_ACCEPTED"?"Windows accepted the job. This is not proof that paper has come out.":jobStatus?.status==="PRINTING"?"The Windows driver reports that printing is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and actual pages before any retry.":jobStatus?.status==="COMPLETED"?"The shop confirmed the requested pages are printed and ready for collection.":jobStatus?.status==="PDF_EXPORTED"?"The PDF export was saved and verified.":jobStatus?.status==="REFUNDED"?"The file was fully refunded and will not be printed.":jobStatus?.status==="CANCELLED"?"The request was cancelled.":jobStatus?.status==="FAILED"?"The request failed; contact the shop before submitting again.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"?"The shop's paired Windows computer is receiving the encrypted document. It is not being printed yet.":jobStatus?.status==="LOCAL_QUEUE_READY"?"The encrypted local copy is verified on the shop computer. Physical printing still requires the print operator.":jobStatus?.status==="AWAITING_PAYMENT"?"Your quote is ready for payment. The shop collects payment directly and must verify it before the job is authorised.":jobStatus?.status==="PAYMENT_REPORTED"?"Your UPI reference is awaiting the shop's independent bank verification; submitting a reference does not confirm payment.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{nativeAppMode ? smartPrintNativeBoundary(jobStatus?.status,Boolean(quote)) : jobStatus?.status==="PAID_AUTHORISED"?"The shop has verified your payment. It still needs to assign and start the local printer.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop has authorised physical printing.":jobStatus?.status==="PRINT_SUBMITTING"?"Your document is being sent to the Windows printer queue.":jobStatus?.status==="SPOOLER_ACCEPTED"?"Windows accepted the job. This is not proof that paper has come out.":jobStatus?.status==="PRINTING"?"The Windows driver reports that printing is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and actual pages before any retry.":jobStatus?.status==="TEST_OUTPUT_READY"?"A non-production test PDF was generated. It is not a physical print and is not ready for collection.":jobStatus?.status==="COMPLETED"?"The shop confirmed the requested pages are printed and ready for collection.":jobStatus?.status==="PDF_EXPORTED"?"The PDF export was saved and verified.":jobStatus?.status==="REFUNDED"?"The file was fully refunded and will not be printed.":jobStatus?.status==="CANCELLED"?"The request was cancelled.":jobStatus?.status==="FAILED"?"The request failed; contact the shop before submitting again.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"?"The shop's paired Windows computer is receiving the encrypted document. It is not being printed yet.":jobStatus?.status==="LOCAL_QUEUE_READY"?"The encrypted local copy is verified on the shop computer. Physical printing still requires the print operator.":jobStatus?.status==="AWAITING_PAYMENT"?"Your quote is ready for payment. The shop collects payment directly and must verify it before the job is authorised.":jobStatus?.status==="PAYMENT_REPORTED"?"Your UPI reference is awaiting the shop's independent bank verification; submitting a reference does not confirm payment.":quote?"This quote is calculated by the shop's saved rate card. Accepting it sends a request to the shop; it does not collect payment or start printing.":"Your document is validated before pricing. You will see the shop's calculated price before any payment or print approval."}</span></div>
   </section></>;
 }
 
