@@ -340,6 +340,14 @@ public sealed class PrintDocument
     public string StorageKey { get; set; } = string.Empty;
     public string StorageMode { get; set; } = "CLOUD";
     public Guid? AgentDeviceId { get; set; }
+    // A shop may replace an uploaded image with a prepared A4 PDF more than
+    // once before payment. Keep the first source image as a separate protected
+    // original so every later edit starts from the same unmodified pixels.
+    public string? PhotoSourceStorageKey { get; set; }
+    public string? PhotoSourceOriginalFileName { get; set; }
+    public string? PhotoSourceMediaType { get; set; }
+    public string? PhotoSourceSha256 { get; set; }
+    public long? PhotoSourceSizeBytes { get; set; }
     public string PageSizesJson { get; set; } = "[]";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? PurgedUtc { get; set; }
