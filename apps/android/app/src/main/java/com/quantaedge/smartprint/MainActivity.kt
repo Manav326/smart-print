@@ -5348,9 +5348,6 @@ class MainActivity : AppCompatActivity() {
         return "$base-${System.currentTimeMillis()}$ext"
     }
 
-    private fun supportsInAppViewer(file: File): Boolean =
-        DocumentNamePolicy.supportsInAppViewer(file)
-
     private fun showDocumentViewer(
         file: File,
         startPosition: Int? = null,
