@@ -561,12 +561,19 @@ public sealed class AgentLocalQueueStore
         return Path.GetFullPath(directory);
     }
 
+    public Task<int> PruneRetainedEntriesAsync(
+        DateTimeOffset now,
+        TimeSpan completedRetention,
+        string pdfExportDirectory,
+        CancellationToken cancellationToken) =>
+        PruneRetainedEntriesAsync(now, completedRetention, pdfExportDirectory, null, cancellationToken);
+
     public async Task<int> PruneRetainedEntriesAsync(
         DateTimeOffset now,
         TimeSpan completedRetention,
         string pdfExportDirectory,
-        CancellationToken cancellationToken,
-        string? privateTestOutputDirectory = null)
+        string? privateTestOutputDirectory,
+        CancellationToken cancellationToken)
     {
         if (completedRetention <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(completedRetention));
@@ -930,7 +937,9 @@ public sealed class AgentLocalQueueStore
 
             await SaveManifestAsync(entry with
             {
-                State = "OUTPUT_CONFIRMED",
+                State = entry.State == "PDF_EXPORT_REPORTED" && entry.OutputMode == PrinterOutputModeRules.PdfExport
+                    ? "TEST_OUTPUT_SOURCE_PURGED"
+                    : "OUTPUT_CONFIRMED",
                 DocumentPath = string.Empty,
                 DocumentName = "Private document",
                 MediaType = string.Empty,
@@ -953,7 +962,9 @@ public sealed class AgentLocalQueueStore
     public async Task MarkPrivatePurgeAcknowledgedAsync(Guid jobId, CancellationToken ct)
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
-        if (!entry.PrivatePrinting || entry.State != "OUTPUT_CONFIRMED" || !entry.PrivatePurgePending ||
+        if (!entry.PrivatePrinting ||
+            entry.State is not ("OUTPUT_CONFIRMED" or "TEST_OUTPUT_SOURCE_PURGED") ||
+            !entry.PrivatePurgePending ||
             !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256) ||
             !string.IsNullOrWhiteSpace(entry.PhotoSourcePath) ||
             entry.PhotoSourceDocumentName is not null || entry.PhotoSourceMediaType is not null ||

@@ -834,10 +834,10 @@ public sealed class Worker(
                 {
                     if (!entry.PrivatePrinting)
                         throw new InvalidDataException("The server requested a private purge for a non-private local queue item.");
-                    if (entry.State is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING" or "PDF_EXPORT_REPORTED"))
+                    if (entry.State is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "OUTPUT_CONFIRMED" or "PRIVATE_PURGE_PENDING" or "PDF_EXPORT_REPORTED" or "TEST_OUTPUT_SOURCE_PURGED"))
                         throw new InvalidOperationException("The local job has not reached a state that permits a server-confirmed source purge.");
 
-                    if (entry.State == "PDF_EXPORT_REPORTED")
+                    if (entry.State is "PDF_EXPORT_REPORTED" or "TEST_OUTPUT_SOURCE_PURGED")
                     {
                         // A verified test PDF is not physical output. Purge only
                         // the protected source while retaining the test artifact
