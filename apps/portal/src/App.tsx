@@ -1623,7 +1623,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   async function openShopPhotoStudioForJob(job:ShopPrintJob){
     setBusyJobId(job.id);setError("");
     try{
-      const blob=await downloadShopDocument(tokens.accessToken,job.id,"original");
+      const blob=await downloadShopDocument(tokens.accessToken,job.id,"photo-source");
       const stored=(job.document.mediaType||"").split(";")[0].trim().toLowerCase();
       const response=(blob.type||"").split(";")[0].trim().toLowerCase();
       const extension=job.document.originalFileName.toLowerCase().split(".").pop();
