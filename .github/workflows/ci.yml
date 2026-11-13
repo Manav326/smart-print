@@ -69,6 +69,24 @@ jobs:
           path: artifacts/photo-studio-browser/
           if-no-files-found: warn
           retention-days: 14
+      - name: Validate Private Printing browser runner syntax
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        run: node --check apps/portal/tests/private-printing.browser.mjs
+      - name: Run eight-file Private Printing customer acceptance
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        env:
+          VITE_API_BASE_URL: ""
+        run: |
+          mkdir -p artifacts/private-printing-browser
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" SMARTPRINT_PRIVATE_PRINTING_ARTIFACT_DIR=artifacts/private-printing-browser node apps/portal/tests/private-printing.browser.mjs'
+      - name: Upload Private Printing browser acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-private-printing-browser-qa
+          path: artifacts/private-printing-browser/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Validate mixed-batch refund browser runner syntax
         if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
         run: node --check apps/portal/tests/mixed-batch-refund.browser.mjs
