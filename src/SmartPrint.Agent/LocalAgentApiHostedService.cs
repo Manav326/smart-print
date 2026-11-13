@@ -514,8 +514,8 @@ public sealed class LocalAgentApiHostedService(
 
                 var authorization = await authorizeResponse.Content.ReadFromJsonAsync<LocalAgentPhotoRevisionAuthorizationResponse>(cancellationToken: ct);
                 if (authorization is null ||
-                    !string.Equals(authorization.OriginalSha256, entry.Sha256, StringComparison.OrdinalIgnoreCase) ||
-                    authorization.OriginalSizeBytes != entry.SizeBytes ||
+                    !string.Equals(authorization.OriginalSha256, sourceSha256, StringComparison.OrdinalIgnoreCase) ||
+                    authorization.OriginalSizeBytes != sourceSizeBytes ||
                     !string.Equals(authorization.NewSha256, hash, StringComparison.OrdinalIgnoreCase) ||
                     authorization.NewSizeBytes != bytes.LongLength ||
                     authorization.PhotoSizeCode != photoSizeCode ||
