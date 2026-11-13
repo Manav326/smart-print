@@ -32,6 +32,16 @@ class DocumentNamePolicyTest {
         assertTrue(DocumentNamePolicy.supportsInAppViewer(file))
     }
 
+    @Test fun pdfHeaderDetectionUsesTheSameBoundedWindowAsUploadAnalysis() {
+        val accepted = ByteArray(DocumentNamePolicy.PDF_HEADER_SCAN_BYTES)
+        "%PDF-".toByteArray().copyInto(accepted, 1023)
+        assertTrue(DocumentNamePolicy.isPdfHeader(accepted, accepted.size))
+
+        val rejected = ByteArray(DocumentNamePolicy.PDF_HEADER_SCAN_BYTES + 1)
+        "%PDF-".toByteArray().copyInto(rejected, 1024)
+        assertFalse(DocumentNamePolicy.isPdfHeader(rejected, rejected.size))
+    }
+
     @Test fun contentTypeWinsWhenTheFilenameExtensionIsWrong() {
         val file = File(temporaryFolder.root, "really-a-pdf.jpg")
         file.writeBytes("%PDF-1.4\n".toByteArray())
