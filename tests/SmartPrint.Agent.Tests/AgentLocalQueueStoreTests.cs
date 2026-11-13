@@ -579,6 +579,38 @@ public sealed class AgentLocalQueueStoreTests
 
 
     [Fact]
+    public async Task DispatchOutputModeReplacesStaleUploadTimeModeBeforePhysicalSubmission()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Reassigned private test document"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                PrivatePrinting = true,
+                OutputMode = PrinterOutputModeRules.PdfExport
+            };
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+
+            await store.MarkSubmissionStartedAsync(
+                job.Id, "SmartPrint-Physical-Reassignment", CancellationToken.None, "PHYSICAL");
+
+            var dispatched = store.Find(job.Id)!;
+            Assert.Equal("SUBMITTING", dispatched.State);
+            Assert.Equal("PHYSICAL", dispatched.OutputMode);
+            Assert.Equal("SmartPrint-Physical-Reassignment", dispatched.SpoolerJobName);
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ShopOutputConfirmationStopsLocalSpoolerMonitoring()
     {
         var root = CreateTemporaryDirectory();

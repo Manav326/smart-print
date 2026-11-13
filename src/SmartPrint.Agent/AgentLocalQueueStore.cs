@@ -735,7 +735,11 @@ public sealed class AgentLocalQueueStore
         await SaveManifestAsync(entry with { RejectedPageNumbers = pages }, ct);
     }
 
-    public async Task MarkSubmissionStartedAsync(Guid jobId, string spoolerJobName, CancellationToken ct)
+    public async Task MarkSubmissionStartedAsync(
+        Guid jobId,
+        string spoolerJobName,
+        CancellationToken ct,
+        string? outputMode = null)
     {
         if (string.IsNullOrWhiteSpace(spoolerJobName) || spoolerJobName.Length > 180)
             throw new ArgumentException("A stable Windows spooler document name is required.", nameof(spoolerJobName));
@@ -746,7 +750,8 @@ public sealed class AgentLocalQueueStore
         await SaveManifestAsync(entry with
         {
             State = "SUBMITTING", SpoolerJobName = spoolerJobName, SpoolerJobId = null,
-            SpoolerSubmittedUtc = null, SpoolerStatus = "SUBMISSION_STARTED", FailureCode = null
+            SpoolerSubmittedUtc = null, SpoolerStatus = "SUBMISSION_STARTED", FailureCode = null,
+            OutputMode = outputMode ?? entry.OutputMode
         }, ct);
     }
 

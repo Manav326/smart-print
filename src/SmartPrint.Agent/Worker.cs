@@ -1115,10 +1115,19 @@ public sealed class Worker(
                     continue;
                 }
 
-                await localQueueStore.MarkSubmissionStartedAsync(job.Id, job.SpoolerJobName, ct);
+                await localQueueStore.MarkSubmissionStartedAsync(
+                    job.Id, job.SpoolerJobName, ct, job.OutputMode);
                 var bytes = localQueueStore.ReadDocument(job.Id);
                 SpoolerPrintReceipt spoolerReceipt;
-                try { spoolerReceipt = printExecutor.Print(entry with { SpoolerJobName = job.SpoolerJobName, RejectedPageNumbers = rejectedPages }, bytes, ct); }
+                try
+                {
+                    spoolerReceipt = printExecutor.Print(entry with
+                    {
+                        OutputMode = job.OutputMode,
+                        SpoolerJobName = job.SpoolerJobName,
+                        RejectedPageNumbers = rejectedPages
+                    }, bytes, ct);
+                }
                 finally { CryptographicOperations.ZeroMemory(bytes); }
 
                 await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
