@@ -10696,15 +10696,8 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         return Results.Ok(BuildBatchPaymentResponse(activeBatchPayment, activePaymentFileCount));
     }
 
-    var settledOrApprovedStates = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "REJECTED", "REFUNDED", "AWAITING_PAYMENT", "PAYMENT_REJECTED",
-        "AWAITING_CUSTOMER_PAYMENT", "PAYMENT_REPORTED", "AWAITING_COUNTER_PAYMENT",
-        "PAID_AUTHORISED", "LOCAL_QUEUE_CLAIMED", "LOCAL_QUEUE_READY",
-        "PRINT_AUTHORISED", "PRINT_SUBMITTING", "SPOOLER_ACCEPTED", "PRINTING",
-        "OUTPUT_UNCONFIRMED", "COMPLETED"
-    };
-    var pendingReview = jobs.FirstOrDefault(job => !settledOrApprovedStates.Contains(job.Status));
+    var pendingReview = jobs.FirstOrDefault(job =>
+        !BatchPaymentSelectionRules.IsReviewComplete(job.Status));
     if (pendingReview is not null)
         return Results.Conflict(new
         {
@@ -10713,7 +10706,7 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         });
 
     var payableJobs = jobs
-        .Where(job => job.Status is "AWAITING_PAYMENT" or "PAYMENT_REJECTED")
+        .Where(job => BatchPaymentSelectionRules.IsPayable(job.Status))
         .ToList();
     if (payableJobs.Count == 0)
         return Results.Conflict(new
