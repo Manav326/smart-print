@@ -3436,9 +3436,9 @@ function spoolerStatusWarning(status?: string | null, printerStatus?: string | n
 function prettyStatus(status:string) {
   const names:Record<string,string>={
     AWAITING_CONFIGURATION:"Being prepared",
-    AWAITING_CUSTOMER_APPROVAL:"Waiting for your approval",
+    AWAITING_CUSTOMER_APPROVAL:"Customer approval needed",
     QUOTE_EXPIRED:"Price needs refreshing",
-    AWAITING_SHOP_APPROVAL:"Shop reviewing",
+    AWAITING_SHOP_APPROVAL:"Needs your review",
     REJECTED:"Not accepted",
     REFUNDED:"Refunded",
     PARTIALLY_REFUNDED:"Partly refunded",
@@ -3446,26 +3446,35 @@ function prettyStatus(status:string) {
     VALIDATING:"Checking files",
     ANALYSING:"Checking files",
     AWAITING_PAYMENT:"Ready for payment",
+    AWAITING_CUSTOMER_PAYMENT:"Ready for payment",
     AWAITING_COUNTER_PAYMENT:"Pay at shop",
+    CASH_AWAITING_PAYMENT:"Cash payment due",
+    CUSTOMER_REPORTED:"Payment being checked",
+    PAYMENT_REPORTED:"Payment being checked",
+    PAYMENT_REJECTED:"Payment not confirmed",
     AUTHORISED:"Approved",
     PAID_AUTHORISED:"Payment received",
+    VERIFIED:"Payment received",
     LOCAL_QUEUE_CLAIMED:"Preparing to print",
-    LOCAL_QUEUE_READY:"Ready to print",
+    LOCAL_QUEUE_READY:"Preparing to print",
     PRINT_AUTHORISED:"Ready to print",
-    PRINT_SUBMITTING:"Starting print",
-    SPOOLER_ACCEPTED:"Printing in progress",
-    PRINTING:"Printing in progress",
+    PRINT_SUBMITTING:"Sending to printer",
+    SPOOLER_ACCEPTED:"Sent to printer",
+    SUBMITTING_TO_SPOOLER:"Sent to printer",
+    QUEUED:"Waiting to print",
+    PRINTING:"Printing",
     OUTPUT_UNCONFIRMED:"Shop checking print",
     TEST_OUTPUT_READY:"Test complete",
     PDF_EXPORTING:"Preparing PDF",
     PDF_EXPORTED:"PDF ready",
-    QUEUED:"Waiting to print",
-    SUBMITTING_TO_SPOOLER:"Printing started",
     COMPLETED:"Ready for collection",
+    PARTIALLY_COMPLETED:"Some files complete",
+    MIXED_OUTCOME:"Some files need attention",
+    MIXED_PROGRESS:"In progress",
     FAILED:"Could not print",
     CANCELLED:"Cancelled"
   };
-  return names[status] || status.split("_").map(part=>part.charAt(0).toUpperCase()+part.slice(1).toLowerCase()).join(" ");
+  return names[status] || "In progress";
 }
 function printBlockMessage(code:string):string {
   switch(code) {
