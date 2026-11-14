@@ -75,6 +75,9 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611100001_AddRazorpayShopSubscriptions",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611140004_AllowUnquotedPhotoDraftJobs",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
@@ -231,6 +234,7 @@ public sealed class PostgresMigrationUpgradeTests
         // The saved layout density is part of the quote snapshot and must survive a fresh DbContext.
         var photoJobId = Guid.NewGuid();
         var legacyPhotoJobId = Guid.NewGuid();
+        var draftPhotoJobId = Guid.NewGuid();
         db.PrintJobs.AddRange(
             new PrintJob
             {
@@ -251,6 +255,17 @@ public sealed class PostgresMigrationUpgradeTests
                 QuotedAmountMinor = 8750, PrintKind = "PHOTO", PhotoSizeCode = "35x45",
                 PhotoCount = 50, PhotosPerPage = null, PhotoUnitPriceMinorSnapshot = 175,
                 CreatedUtc = now, UpdatedUtc = now
+            },
+            new PrintJob
+            {
+                Id = draftPhotoJobId, TenantId = tenant.Id, QrStationId = station.Id,
+                CustomerSessionId = session.Id, JobNumber = $"SP-PHOTO-DRAFT-{Guid.NewGuid():N}"[..24],
+                IdempotencyKey = $"PHOTO-DRAFT-{Guid.NewGuid():N}", Status = "AWAITING_CONFIGURATION",
+                PageCount = 6, Copies = 1, Currency = "INR", QuotedAmountMinor = 0,
+                PrintKind = "PHOTO", PhotoSizeCode = "35x45", PhotoCount = 50,
+                PhotosPerPage = 9, PhotoUnitPriceMinorSnapshot = 0,
+                PricingVersion = null, QuoteExpiresUtc = null,
+                CreatedUtc = now, UpdatedUtc = now
             });
         await db.SaveChangesAsync();
 
@@ -264,6 +279,50 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Equal(6, savedPhotoJob.PageCount);
         Assert.Equal(50, legacyPhotoJob.PhotoCount);
         Assert.Null(legacyPhotoJob.PhotosPerPage); // Existing records are not assigned a guessed density.
+
+        var savedDraftPhotoJob = await photoSnapshotVerification.PrintJobs.AsNoTracking()
+            .SingleAsync(item => item.Id == draftPhotoJobId);
+        Assert.Equal("AWAITING_CONFIGURATION", savedDraftPhotoJob.Status);
+        Assert.Equal("PHOTO", savedDraftPhotoJob.PrintKind);
+        Assert.Equal("35x45", savedDraftPhotoJob.PhotoSizeCode);
+        Assert.Equal(50, savedDraftPhotoJob.PhotoCount);
+        Assert.Equal(9, savedDraftPhotoJob.PhotosPerPage);
+        Assert.Equal(0L, savedDraftPhotoJob.PhotoUnitPriceMinorSnapshot);
+        Assert.Equal(0L, savedDraftPhotoJob.QuotedAmountMinor);
+        Assert.Null(savedDraftPhotoJob.PricingVersion);
+        Assert.Null(savedDraftPhotoJob.QuoteExpiresUtc);
+
+        // A draft may be saved without a price, but it must become a fully-priced quote
+        // before leaving the configuration state.
+        await using (var quoteTransitionContext = new SmartPrintDbContext(options))
+        {
+            var quoteTransitionJob = await quoteTransitionContext.PrintJobs
+                .SingleAsync(item => item.Id == draftPhotoJobId);
+            quoteTransitionJob.PhotoUnitPriceMinorSnapshot = 175;
+            quoteTransitionJob.QuotedAmountMinor = 8750;
+            quoteTransitionJob.PricingVersion = 1;
+            quoteTransitionJob.QuoteExpiresUtc = now.AddMinutes(10);
+            quoteTransitionJob.Status = "AWAITING_PAYMENT";
+            quoteTransitionJob.UpdatedUtc = now;
+            await quoteTransitionContext.SaveChangesAsync();
+        }
+
+        await using (var invalidUnquotedPaymentContext = new SmartPrintDbContext(options))
+        {
+            invalidUnquotedPaymentContext.PrintJobs.Add(new PrintJob
+            {
+                Id = Guid.NewGuid(), TenantId = tenant.Id, QrStationId = station.Id,
+                CustomerSessionId = session.Id, JobNumber = $"SP-PHOTO-UNQUOTED-{Guid.NewGuid():N}"[..24],
+                IdempotencyKey = $"PHOTO-UNQUOTED-{Guid.NewGuid():N}", Status = "AWAITING_PAYMENT",
+                PageCount = 6, Copies = 1, Currency = "INR", QuotedAmountMinor = 0,
+                PrintKind = "PHOTO", PhotoSizeCode = "35x45", PhotoCount = 50,
+                PhotosPerPage = 9, PhotoUnitPriceMinorSnapshot = 0,
+                PricingVersion = null, QuoteExpiresUtc = null,
+                CreatedUtc = now, UpdatedUtc = now
+            });
+            await Assert.ThrowsAsync<DbUpdateException>(
+                () => invalidUnquotedPaymentContext.SaveChangesAsync());
+        }
 
         // The database must reject a layout density that the selected physical size cannot fit.
         var invalidDensityScenarios = new[]

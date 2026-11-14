@@ -423,7 +423,32 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 table.HasCheckConstraint("CK_PrintJobs_Origin", "\"Origin\" IN ('CUSTOMER_QR', 'SHOP_OWNER')");
                 table.HasCheckConstraint(
                     "CK_PrintJobs_PhotoQuoteSnapshot",
-                    "(\"PrintKind\" = 'DOCUMENT' AND \"PhotoSizeCode\" IS NULL AND \"PhotoCount\" = 0 AND \"PhotoUnitPriceMinorSnapshot\" = 0) OR (\"PrintKind\" = 'PHOTO' AND \"PhotoSizeCode\" IN ('35x45', '25x35', '2x2', '4x6') AND \"PhotoCount\" BETWEEN 1 AND 100 AND \"PhotoUnitPriceMinorSnapshot\" > 0)");
+                    """
+                    (
+                        "PrintKind" = 'DOCUMENT' AND
+                        "PhotoSizeCode" IS NULL AND
+                        "PhotoCount" = 0 AND
+                        "PhotoUnitPriceMinorSnapshot" = 0
+                    )
+                    OR
+                    (
+                        "PrintKind" = 'PHOTO' AND
+                        "PhotoSizeCode" IN ('35x45', '25x35', '2x2', '4x6') AND
+                        "PhotoCount" BETWEEN 1 AND 100 AND
+                        "PhotoUnitPriceMinorSnapshot" > 0
+                    )
+                    OR
+                    (
+                        "PrintKind" = 'PHOTO' AND
+                        "PhotoSizeCode" IN ('35x45', '25x35', '2x2', '4x6') AND
+                        "PhotoCount" BETWEEN 1 AND 100 AND
+                        "PhotoUnitPriceMinorSnapshot" = 0 AND
+                        "Status" = 'AWAITING_CONFIGURATION' AND
+                        "QuotedAmountMinor" = 0 AND
+                        "PricingVersion" IS NULL AND
+                        "QuoteExpiresUtc" IS NULL
+                    )
+                    """);
             });
             entity.HasKey(x => x.Id);
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
