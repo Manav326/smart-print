@@ -55,6 +55,26 @@ public sealed class PlanEntitlementRulesTests
     }
 
     [Fact]
+    public void ScheduledSubscriptionIsNotActiveUntilItsPaidStartAndThenExpiresNormally()
+    {
+        var now = new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
+        var start = now.AddDays(10);
+        var end = start.AddMonths(1);
+
+        Assert.Equal("Scheduled", PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+            "Scheduled", start, end, now));
+        Assert.False(PlanEntitlementRules.IsSubscriptionAccessActive("Scheduled", start, end, now));
+
+        Assert.Equal("Active", PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+            "Scheduled", start, end, start));
+        Assert.True(PlanEntitlementRules.IsSubscriptionAccessActive("Scheduled", start, end, start));
+
+        Assert.Equal("Expired", PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+            "Scheduled", start, end, end));
+        Assert.False(PlanEntitlementRules.IsSubscriptionAccessActive("Scheduled", start, end, end));
+    }
+
+    [Fact]
     public void ExpiryOnlyGrandfathersWorkAcceptedBeforeThePaidPeriodEnded()
     {
         var now = new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
