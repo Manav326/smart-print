@@ -12,6 +12,10 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<TenantStatusAudit> TenantStatusAudits => Set<TenantStatusAudit>();
     public DbSet<PlatformOperationalSettings> PlatformOperationalSettings => Set<PlatformOperationalSettings>();
     public DbSet<PlatformOperationalSettingsAudit> PlatformOperationalSettingsAudits => Set<PlatformOperationalSettingsAudit>();
+    public DbSet<PlatformAdCreative> PlatformAdCreatives => Set<PlatformAdCreative>();
+    public DbSet<PlatformAdCampaign> PlatformAdCampaigns => Set<PlatformAdCampaign>();
+    public DbSet<PlatformAdEvent> PlatformAdEvents => Set<PlatformAdEvent>();
+    public DbSet<PlatformAdCampaignAudit> PlatformAdCampaignAudits => Set<PlatformAdCampaignAudit>();
     public DbSet<AgentDevice> AgentDevices => Set<AgentDevice>();
     public DbSet<AgentEnrollmentCode> AgentEnrollmentCodes => Set<AgentEnrollmentCode>();
     public DbSet<ShopProfile> ShopProfiles => Set<ShopProfile>();
@@ -91,6 +95,75 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.ChangesJson).HasColumnType("jsonb").IsRequired();
             entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
             entity.HasIndex(x => x.CreatedUtc);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+
+        modelBuilder.Entity<PlatformAdCreative>(entity =>
+        {
+            entity.ToTable("PlatformAdCreatives", table =>
+            {
+                table.HasCheckConstraint("CK_PlatformAdCreatives_Size", "\"SizeBytes\" BETWEEN 1 AND 3145728");
+                table.HasCheckConstraint("CK_PlatformAdCreatives_ContentType", "\"ContentType\" IN ('image/jpeg', 'image/png', 'image/webp')");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.FileName).HasMaxLength(255).IsRequired();
+            entity.Property(x => x.ContentType).HasMaxLength(40).IsRequired();
+            entity.Property(x => x.StorageKey).HasMaxLength(300).IsRequired();
+            entity.HasIndex(x => x.StorageKey).IsUnique();
+            entity.HasIndex(x => x.CreatedUtc);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PlatformAdCampaign>(entity =>
+        {
+            entity.ToTable("PlatformAdCampaigns", table =>
+            {
+                table.HasCheckConstraint("CK_PlatformAdCampaigns_Status", "\"Status\" IN ('Draft', 'Active', 'Paused', 'Archived')");
+                table.HasCheckConstraint("CK_PlatformAdCampaigns_Placement", "\"Placement\" IN ('HOME', 'FILES', 'SHOP_OVERVIEW')");
+                table.HasCheckConstraint("CK_PlatformAdCampaigns_Format", "\"Format\" IN ('BANNER', 'CARD')");
+                table.HasCheckConstraint("CK_PlatformAdCampaigns_Dates", "\"EndsUtc\" IS NULL OR \"EndsUtc\" >= \"StartsUtc\"");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Name).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.AdvertiserName).HasMaxLength(140).IsRequired();
+            entity.Property(x => x.Headline).HasMaxLength(120).IsRequired();
+            entity.Property(x => x.Body).HasMaxLength(400).IsRequired();
+            entity.Property(x => x.Terms).HasMaxLength(2000);
+            entity.Property(x => x.DestinationUrl).HasMaxLength(1000).IsRequired();
+            entity.Property(x => x.Placement).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.Format).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(20).IsRequired();
+            entity.HasIndex(x => new { x.Placement, x.Status, x.StartsUtc, x.EndsUtc });
+            entity.HasIndex(x => x.CreativeId);
+            entity.HasOne<PlatformAdCreative>().WithMany().HasForeignKey(x => x.CreativeId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.CreatedByUserId).OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<PlatformAdEvent>(entity =>
+        {
+            entity.ToTable("PlatformAdEvents", table =>
+            {
+                table.HasCheckConstraint("CK_PlatformAdEvents_EventType", "\"EventType\" IN ('IMPRESSION', 'CLICK')");
+                table.HasCheckConstraint("CK_PlatformAdEvents_Placement", "\"Placement\" IN ('HOME', 'FILES', 'SHOP_OVERVIEW')");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.EventType).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Placement).HasMaxLength(20).IsRequired();
+            entity.HasIndex(x => new { x.CampaignId, x.EventType, x.CreatedUtc });
+            entity.HasIndex(x => x.CreatedUtc);
+            entity.HasOne<PlatformAdCampaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PlatformAdCampaignAudit>(entity =>
+        {
+            entity.ToTable("PlatformAdCampaignAudits");
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Action).HasMaxLength(32).IsRequired();
+            entity.Property(x => x.DetailsJson).HasColumnType("jsonb").IsRequired();
+            entity.HasIndex(x => new { x.CampaignId, x.CreatedUtc });
+            entity.HasOne<PlatformAdCampaign>().WithMany().HasForeignKey(x => x.CampaignId).OnDelete(DeleteBehavior.Cascade);
             entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ActorUserId).OnDelete(DeleteBehavior.SetNull);
         });
 
