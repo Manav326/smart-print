@@ -149,22 +149,26 @@ public sealed class SubscriptionRazorpayService(
             }
 
             var now = DateTimeOffset.UtcNow;
-            var currentSubscription = await db.TenantSubscriptions.AsNoTracking()
-                .Where(item => item.TenantId == tenantId)
-                .OrderByDescending(item => item.CreatedUtc)
-                .ThenByDescending(item => item.Id)
-                .Select(item => new { item.PlanCode, item.Status, item.PeriodEndUtc })
-                .FirstOrDefaultAsync(cancellationToken);
-            if (currentSubscription is not null &&
-                string.Equals(currentSubscription.Status, "Active", StringComparison.OrdinalIgnoreCase) &&
-                currentSubscription.PeriodEndUtc > now &&
-                !string.Equals(currentSubscription.PlanCode, candidate.Plan.Code, StringComparison.OrdinalIgnoreCase))
+            var differentPaidProductRemainsInTerm = await db.TenantSubscriptions.AsNoTracking()
+                .AnyAsync(item =>
+                    item.TenantId == tenantId &&
+                    item.PlanCode != candidate.Plan.Code &&
+                    (item.Status == "Active" || item.Status == "Scheduled") &&
+                    item.PeriodEndUtc > now,
+                    cancellationToken);
+            if (differentPaidProductRemainsInTerm)
             {
+                var paidThrough = await db.TenantSubscriptions.AsNoTracking()
+                    .Where(item => item.TenantId == tenantId &&
+                                   item.PlanCode != candidate.Plan.Code &&
+                                   (item.Status == "Active" || item.Status == "Scheduled") &&
+                                   item.PeriodEndUtc > now)
+                    .MaxAsync(item => item.PeriodEndUtc, cancellationToken);
                 throw new SubscriptionPaymentException(
                     "subscription_plan_change_requires_proration",
-                    "Your current paid plan remains active until " +
-                    currentSubscription.PeriodEndUtc.ToString("dd MMM yyyy", System.Globalization.CultureInfo.InvariantCulture) +
-                    ". Switching to a different product before then is paused until a credit or proration quote can be shown. You will not be charged for a change that discards unused paid time.",
+                    "Your current or already-paid future subscription term remains active through " +
+                    paidThrough.ToString("dd MMM yyyy", System.Globalization.CultureInfo.InvariantCulture) +
+                    ". Switching to a different product is paused until a credit or proration quote can be shown. You will not be charged for a change that discards unused paid time.",
                     StatusCodes.Status409Conflict);
             }
 
@@ -786,37 +790,48 @@ public sealed class SubscriptionRazorpayService(
 
         var now = DateTimeOffset.UtcNow;
         var previousSubscription = await db.TenantSubscriptions
-            .Where(item => item.TenantId == payment.TenantId)
-            .OrderByDescending(item => item.CreatedUtc)
+            .Where(item => item.TenantId == payment.TenantId &&
+                           (item.Status == "Active" || item.Status == "Scheduled" || item.Status == "Trial") &&
+                           item.PeriodEndUtc > now)
+            .OrderByDescending(item => item.PeriodEndUtc)
+            .ThenByDescending(item => item.CreatedUtc)
             .ThenByDescending(item => item.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? await db.TenantSubscriptions
+                .Where(item => item.TenantId == payment.TenantId)
+                .OrderByDescending(item => item.CreatedUtc)
+                .ThenByDescending(item => item.Id)
+                .FirstOrDefaultAsync(cancellationToken);
         var previousStatus = previousSubscription?.Status;
-        if (previousSubscription is not null)
+        var sameProductContinuation = previousSubscription is not null &&
+            (string.Equals(previousStatus, "Active", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(previousStatus, "Scheduled", StringComparison.OrdinalIgnoreCase)) &&
+            string.Equals(previousSubscription.PlanCode, candidate.Plan.Code, StringComparison.OrdinalIgnoreCase) &&
+            previousSubscription.PeriodEndUtc > now;
+        if (previousSubscription is not null && !sameProductContinuation)
         {
             previousSubscription.Status = "Superseded";
         }
 
         var periodStartUtc = terms.PeriodStartUtc;
         var periodEndUtc = terms.PeriodEndUtc;
-        // A same-plan renewal extends the paid term instead of discarding unused days.
-        // A different plan remains an immediate change so upgrades are not silently delayed.
-        if (previousSubscription is not null &&
-            string.Equals(previousStatus, "Active", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(previousSubscription.PlanCode, candidate.Plan.Code, StringComparison.OrdinalIgnoreCase) &&
-            previousSubscription.PeriodEndUtc > now)
+        if (sameProductContinuation)
         {
-            periodStartUtc = previousSubscription.PeriodEndUtc;
+            // Paid renewals are scheduled after the last already-paid term. The current
+            // subscription remains authoritative until this future period begins.
+            periodStartUtc = previousSubscription!.PeriodEndUtc;
             periodEndUtc = string.Equals(terms.BillingInterval, "Annual", StringComparison.OrdinalIgnoreCase)
                 ? periodStartUtc.AddYears(1)
                 : periodStartUtc.AddMonths(1);
         }
 
+        var assignedStatus = sameProductContinuation ? "Scheduled" : terms.Status;
         var subscription = new TenantSubscription
         {
             TenantId = payment.TenantId,
             PlanVersionId = candidate.Version.Id,
             PlanCode = candidate.Plan.Code,
-            Status = terms.Status,
+            Status = assignedStatus,
             BillingInterval = terms.BillingInterval,
             PeriodStartUtc = periodStartUtc,
             PeriodEndUtc = periodEndUtc,
@@ -834,7 +849,7 @@ public sealed class SubscriptionRazorpayService(
             EventType = "PAID_PLAN_ASSIGNED",
             PlanCode = candidate.Plan.Code,
             BillingInterval = terms.BillingInterval,
-            Status = terms.Status,
+            Status = assignedStatus,
             AmountMinor = terms.AmountMinor,
             Currency = terms.Currency,
             PeriodStartUtc = periodStartUtc,
