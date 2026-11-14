@@ -103,6 +103,7 @@ builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddHttpClient<SubscriptionRazorpayService>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddSingleton<PlatformAdCreativeStorage>();
+builder.Services.AddSingleton<AgentRateLimitService>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddHostedService<PrivateRelayRetentionWorker>();
 builder.Services.AddSingleton<PrivateRelayWakeupService>(services =>
@@ -135,16 +136,6 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("public-api", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    options.AddPolicy("agent-api", context =>
-        RateLimitPartition.GetTokenBucketLimiter(GetAgentRateLimitPartitionKey(context),
-            _ => new TokenBucketRateLimiterOptions
-            {
-                TokenLimit = 60,
-                TokensPerPeriod = 30,
-                ReplenishmentPeriod = TimeSpan.FromSeconds(15),
-                AutoReplenishment = true,
-                QueueLimit = 0
-            }));
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
         AgentRateLimitPartition.IsAgentApiRequest(context)
             ? RateLimitPartition.GetTokenBucketLimiter("all-agents",
@@ -5150,8 +5141,36 @@ shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
 });
 
 var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
-    .RequireRateLimiting("agent-api")
-    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
+    .AddEndpointFilter(async (context, next) =>
+    {
+        var http = context.HttpContext;
+        var isEnrollment = string.Equals(
+            http.Request.Path.Value, "/api/v1/agent/enroll", StringComparison.OrdinalIgnoreCase);
+
+        if (!isEnrollment)
+        {
+            var db = http.RequestServices.GetRequiredService<SmartPrintDbContext>();
+            var device = await AuthenticateAgentAsync(http, db, http.RequestAborted);
+            if (device is null) return Results.Unauthorized();
+
+            http.Items[AgentRateLimitService.AuthenticatedAgentItemKey] = device;
+            var decision = http.RequestServices.GetRequiredService<AgentRateLimitService>()
+                .TryAcquire(device.Id, DateTimeOffset.UtcNow);
+            if (!decision.IsAllowed)
+            {
+                var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(decision.RetryAfter.TotalSeconds));
+                http.Response.Headers.RetryAfter =
+                    retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return Results.Json(new
+                {
+                    code = "agent_rate_limit_exceeded",
+                    message = "The shop computer is busy. It will retry automatically."
+                }, statusCode: StatusCodes.Status429TooManyRequests);
+            }
+        }
+
+        return await EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false);
+    });
 
 agentApi.MapPost("/enroll", async (
     AgentEnrollmentRequest request,
@@ -11875,9 +11894,6 @@ static string GetRateLimitPartitionKey(HttpContext context) =>
 static string GetSessionRateLimitPartitionKey(HttpContext context) =>
     GetRateLimitPartitionKey(context);
 
-static string GetAgentRateLimitPartitionKey(HttpContext context) =>
-    AgentRateLimitPartition.GetPartitionKey(context);
-
 static async Task<(bool Allowed, DateTimeOffset? SuspendedAtUtc)> GetAgentClaimAccessAsync(
     Guid tenantId,
     SmartPrintDbContext db,
@@ -12070,6 +12086,12 @@ static async Task<AgentDevice?> AuthenticateAgentAsync(
     SmartPrintDbContext db,
     CancellationToken cancellationToken)
 {
+    if (context.Items.TryGetValue(AgentRateLimitService.AuthenticatedAgentItemKey, out var cached) &&
+        cached is AgentDevice authenticatedDevice)
+    {
+        return authenticatedDevice;
+    }
+
     if (!Guid.TryParse(context.Request.Headers["X-Print-Agent-Id"].FirstOrDefault(), out var agentId))
     {
         return null;
