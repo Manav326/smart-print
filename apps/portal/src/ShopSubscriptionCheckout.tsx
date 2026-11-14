@@ -448,7 +448,7 @@ export default function ShopSubscriptionCheckout({
   }
 
   const pendingPayment = payments.find(payment => isUnsettledSubscriptionPayment(payment.status));
-  const currentPaidTerm = currentSubscription.status === "Active" &&
+  const currentPaidTerm = currentSubscription.status.toLowerCase() === "active" &&
     Date.parse(currentSubscription.periodEndUtc) > Date.now();
 
   async function copyPendingPaymentReference() {
