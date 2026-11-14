@@ -574,7 +574,7 @@ export default function ShopSubscriptionCheckout({
                           <strong>{currentPaidTerm ? "Pay for next term " : "Pay "}{formatSubscriptionAmount(amount, plan.currency)}</strong>
                           <small>
                             {interval === "Monthly" ? "per month" : "per year"}
-                            {annualSavings > 0 ? ` · save ${formatSubscriptionAmount(annualSavings, plan.currency)} (${annualSavingsPercent}%)` : ""}
+                            {annualSavings > 0 ? ` · save ${formatSubscriptionAmount(annualSavings, plan.currency)} (${annualSavingsPercent}%) vs 12 monthly payments` : ""}
                             {currentPaidTerm ? ` · starts after ${formatIstDate(currentSubscription.periodEndUtc)}` : ""}
                           </small>
                         </span>
