@@ -4,6 +4,7 @@ import {
   formatSubscriptionAmount,
   getAnnualSavingsMinor,
   getAnnualSavingsPercent,
+  getSubscriptionReminderState,
   getPaidBillingIntervals,
   isUnsettledSubscriptionPayment,
   subscriptionPaymentActionLabel,
@@ -54,6 +55,18 @@ test("annual billing savings compare against twelve monthly payments", () => {
 test("annual savings are not shown when either billing interval is unavailable", () => {
   assert.equal(getAnnualSavingsMinor({ monthlyPriceMinor: null, annualPriceMinor: 149900 }), 0);
   assert.equal(getAnnualSavingsPercent({ monthlyPriceMinor: 14900, annualPriceMinor: null }), 0);
+});
+
+test("subscription reminder changes to expired at the paid-through boundary", () => {
+  const now = Date.parse("2026-11-14T12:00:00.000Z");
+  assert.equal(getSubscriptionReminderState("Active", true, "2026-11-21T12:00:00.000Z", now), "due-soon");
+  assert.equal(getSubscriptionReminderState("Active", true, "2026-11-22T12:00:00.000Z", now), null);
+  assert.equal(getSubscriptionReminderState("Active", true, "2026-11-14T12:00:00.000Z", now), "expired");
+  assert.equal(getSubscriptionReminderState("Active", true, "2026-11-14T11:59:59.999Z", now), "expired");
+  assert.equal(getSubscriptionReminderState("Trial", true, "2026-11-15T12:00:00.000Z", now), "due-soon");
+  assert.equal(getSubscriptionReminderState("Suspended", false, "2026-11-20T12:00:00.000Z", now), null);
+  assert.equal(getSubscriptionReminderState("Expired", false, "2026-11-30T12:00:00.000Z", now), "expired");
+  assert.equal(getSubscriptionReminderState("Active", true, "invalid", now), null);
 });
 
 test("only unresolved payment states block a new subscription order", () => {
