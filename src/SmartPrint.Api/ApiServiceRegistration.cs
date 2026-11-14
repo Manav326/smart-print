@@ -19,7 +19,7 @@ namespace SmartPrint.Api;
 
 public static class ApiServiceRegistration
 {
-    public static IServiceCollection AddApiServices(
+    public static string[] AddApiServices(
         this IServiceCollection services,
         IConfiguration configuration,
         string connectionString,
@@ -164,6 +164,6 @@ public static class ApiServiceRegistration
             .AllowAnyHeader()
             .AllowAnyMethod()));
 
-        return services;
+        return corsOrigins;
     }
 }

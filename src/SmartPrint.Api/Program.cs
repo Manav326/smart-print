@@ -47,7 +47,7 @@ if (Encoding.UTF8.GetByteCount(signingKeyText) < 32)
 var issuer = builder.Configuration["Authentication:Issuer"] ?? "QRtoPrint";
 var audience = builder.Configuration["Authentication:Audience"] ?? "QRtoPrint.Clients";
 
-builder.Services.AddApiServices(builder.Configuration, connectionString, signingKeyText, issuer, audience);
+var corsOrigins = builder.Services.AddApiServices(builder.Configuration, connectionString, signingKeyText, issuer, audience);
 
 var app = builder.Build();
 
