@@ -10340,9 +10340,6 @@ static bool IsValidPageSizesJson(string value)
     }
 }
 
-static bool IsHexColor(string value) =>
-    value is { Length: 7 } && value[0] == '#' && value[1..].All(Uri.IsHexDigit);
-
 
 await app.RunAsync();
 
