@@ -655,6 +655,13 @@ export interface ShopSubscriptionPaymentRecord {
   assignedSubscriptionId: string | null;
 }
 
+export interface ShopSubscriptionPaymentsPage {
+  items: ShopSubscriptionPaymentRecord[];
+  skip: number;
+  take: number;
+  totalCount: number;
+}
+
 export interface ShopSubscriptionPaymentVerification {
   status: string;
   subscriptionId: string | null;
@@ -666,8 +673,13 @@ export function getShopSubscriptionPlans(token: string) {
   return apiRequest<ShopSubscriptionPlanOption[]>("/api/v1/shop/subscription/plans", {}, token);
 }
 
-export function getShopSubscriptionPayments(token: string) {
-  return apiRequest<ShopSubscriptionPaymentRecord[]>("/api/v1/shop/subscription/payments", {}, token);
+export function getShopSubscriptionPayments(token: string, skip = 0, take = 20) {
+  const params = new URLSearchParams({ skip: String(skip), take: String(take) });
+  return apiRequest<ShopSubscriptionPaymentsPage>(
+    `/api/v1/shop/subscription/payments?${params.toString()}`,
+    {},
+    token
+  );
 }
 
 export function resumeShopSubscriptionPaymentOrder(token: string, paymentId: string) {
