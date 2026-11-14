@@ -441,6 +441,8 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
   const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const batchReviewService = read("../../../src/SmartPrint.Api/Services/ShopPrintBatchReviewService.cs");
+  const batchReviewEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintBatchReviewEndpoints.cs");
   const contracts = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
   const agent = read("../../../src/SmartPrint.Agent/WindowsPrintExecutor.cs");
   const pdfOverlay = read("../../../src/SmartPrint.Agent/PdfBrandingOverlay.cs");
@@ -451,10 +453,12 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(app.includes('checked={pdfBrandingEnabled&&!hasIdDocument} disabled={busy||hasIdDocument}'));
   assert.ok(api.includes('body: JSON.stringify({ reviewedJobIds, acceptedJobIds, pdfBrandingEnabled })'));
   assert.ok(contracts.includes('bool PdfBrandingEnabled = false'));
-  assert.ok(server.includes('request.PdfBrandingEnabled'));
-  assert.ok(server.includes('job.PdfBrandingEnabled = request.PdfBrandingEnabled'));
-  assert.match(server, /foreach \(var job in lockedJobs\)\s*\{\s*if \(job\.PdfBrandingEnabled/);
-  assert.doesNotMatch(server, /foreach \(var job in allBatchJobs\)\s*\{\s*if \(job\.PdfBrandingEnabled/);
+  assert.ok(batchReviewEndpoint.includes('request.PdfBrandingEnabled'));
+  assert.ok(batchReviewService.includes('job.PdfBrandingEnabled = pdfBrandingEnabled'));
+  assert.match(batchReviewService, /foreach \\(var job in lockedJobs\\)\\s*\\{\\s*if \\(job\\.PdfBrandingEnabled/);
+  assert.doesNotMatch(batchReviewService, /foreach \\(var job in allBatchJobs\\)\\s*\\{\\s*if \\(job\\.PdfBrandingEnabled/);
+  assert.ok(batchReviewService.includes("CanEnablePdfBranding"));
+  assert.ok(batchReviewService.includes("IdDocumentBrandingNotAllowed"));
   assert.ok(server.includes('candidate.PdfBrandingEnabled'));
   assert.ok(queueModels.includes('bool PdfBrandingEnabled = false'));
   assert.ok(agent.includes('"SMARTPRINT_BRANDED_PDF_RENDERER"'));

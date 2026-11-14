@@ -78,4 +78,21 @@ public sealed class PrintBatchReviewRulesTests
     public void AllowsDisablingBrandingForIdDocumentBatches() =>
         Assert.True(PrintBatchReviewRules.CanEnablePdfBranding(
             false, new[] { "ID_DOCUMENT" }));
+
+    [Fact]
+    public void TreatsMissingQuoteExpiryAsExpired() =>
+        Assert.True(PrintBatchReviewRules.IsQuoteExpired(null, DateTimeOffset.UtcNow));
+
+    [Fact]
+    public void TreatsQuoteAtOrBeforeNowAsExpired()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(PrintBatchReviewRules.IsQuoteExpired(now, now));
+        Assert.True(PrintBatchReviewRules.IsQuoteExpired(now.AddTicks(-1), now));
+    }
+
+    [Fact]
+    public void KeepsFutureQuoteValid() =>
+        Assert.False(PrintBatchReviewRules.IsQuoteExpired(
+            DateTimeOffset.UtcNow.AddMinutes(1), DateTimeOffset.UtcNow));
 }

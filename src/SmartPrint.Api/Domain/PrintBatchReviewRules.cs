@@ -31,4 +31,8 @@ public static class PrintBatchReviewRules
         IEnumerable<string?> printKinds) =>
         !enabled || !printKinds.Contains("ID_DOCUMENT", StringComparer.Ordinal);
 
+
+    public static bool IsQuoteExpired(DateTimeOffset? quoteExpiresUtc, DateTimeOffset now) =>
+        quoteExpiresUtc is null || quoteExpiresUtc <= now;
+
 }

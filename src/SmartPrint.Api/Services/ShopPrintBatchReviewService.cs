@@ -146,7 +146,7 @@ public sealed class ShopPrintBatchReviewService(SmartPrintDbContext db)
                     }
 
                     var previousStatus = job.Status;
-                    var quoteExpired = PrintBatchCheckoutRules.IsQuoteExpired(job.QuoteExpiresUtc, now);
+                    var quoteExpired = PrintBatchReviewRules.IsQuoteExpired(job.QuoteExpiresUtc, now);
                     job.Status = quoteExpired ? "QUOTE_EXPIRED" : "AWAITING_PAYMENT";
                     if (quoteExpired) quoteRefreshRequiredCount++;
                     job.FailureCode = null;
@@ -168,7 +168,7 @@ public sealed class ShopPrintBatchReviewService(SmartPrintDbContext db)
                 else if (job.Status == "AWAITING_SHOP_APPROVAL")
                 {
                     var previousStatus = job.Status;
-                    var quoteExpired = PrintBatchCheckoutRules.IsQuoteExpired(job.QuoteExpiresUtc, now);
+                    var quoteExpired = PrintBatchReviewRules.IsQuoteExpired(job.QuoteExpiresUtc, now);
                     job.Status = quoteExpired ? "QUOTE_EXPIRED" : "AWAITING_PAYMENT";
                     if (quoteExpired) quoteRefreshRequiredCount++;
                     job.FailureCode = null;
@@ -189,7 +189,7 @@ public sealed class ShopPrintBatchReviewService(SmartPrintDbContext db)
                 }
                 else if (job.Status is "AWAITING_PAYMENT" or "PAYMENT_REJECTED")
                 {
-                    if (PrintBatchCheckoutRules.IsQuoteExpired(job.QuoteExpiresUtc, now))
+                    if (PrintBatchReviewRules.IsQuoteExpired(job.QuoteExpiresUtc, now))
                     {
                         var previousStatus = job.Status;
                         job.Status = "QUOTE_EXPIRED";
