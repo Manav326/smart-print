@@ -473,12 +473,16 @@ test("contextual information stays concise and is accessible by hover, focus and
   const css = read("../src/styles.css");
   assert.match(app, /function InfoTooltip/);
   assert.match(app, /aria-describedby=\{tooltipId\}/);
-  assert.match(app, /onMouseEnter=\{\(\)=>setOpen\(true\)\}/);
-  assert.match(app, /onClick=\{\(\)=>setOpen\(true\)\}/);
+  assert.match(app, /const tooltipRef=useRef<HTMLSpanElement>\(null\)/);
+  assert.match(app, /getBoundingClientRect\(\)/);
+  assert.match(app, /const left=Math\.max\(gutter,Math\.min\(anchor\.left,maxLeft\)\)/);
+  assert.match(app, /onMouseEnter=\{openTooltip\}/);
+  assert.match(app, /onClick=\{openTooltip\}/);
   assert.match(app, /Files stay on this computer\. Reconnect it to use its printers\./);
   assert.match(app, /To switch computers, upload a new Cloud-assisted batch\./);
   assert.match(app, /jobStatus\.pdfBrandingEnabled&&<div className="customer-branding-note">/);
   assert.doesNotMatch(app, /If this request is saved as a PDF, a small SmartPrint by QuantaEdge footer/);
+  assert.match(css, /\.context-info-tooltip\s*\{[^}]*position:\s*fixed/s);
   assert.match(css, /\.context-info:focus-within \.context-info-tooltip/);
   assert.match(css, /\.context-info\.context-info-open \.context-info-tooltip/);
 });
@@ -675,4 +679,16 @@ test("native Android toolbar follows the transparent SmartPrint by QuantaEdge lo
     assert.match(colors, /qp_parent_orange_outline.*#913B0B/);
     assert.doesNotMatch(colors, /qp_parent_wordmark_bg/);
   }
+});
+
+
+test("customer upload controls and selected-document preview reflow cleanly on narrow screens", () => {
+  const css = read("../src/styles.css");
+  assert.match(css, /\.customer-folder-defaults\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/s);
+  assert.match(css, /\.customer-file-overrides:not\(\.customer-folder-advanced\)\s*\{[^}]*grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/s);
+  assert.match(css, /\.customer-folder-defaults \.customer-choice,\s*\.customer-file-overrides:not\(\.customer-folder-advanced\) \.customer-choice\s*\{[^}]*white-space:\s*nowrap/s);
+  assert.match(css, /\.customer-file-label\s*\{[^}]*height:\s*auto/s);
+  assert.match(css, /\.customer-file-label > span\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+  assert.match(css, /\.customer-file-studio-button\s*\{[^}]*grid-column:\s*2/s);
+  assert.match(css, /\.customer-file-preview iframe\s*\{[^}]*height:\s*clamp\(240px,60vh,480px\)/s);
 });

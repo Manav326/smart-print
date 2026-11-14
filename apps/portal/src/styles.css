@@ -3672,3 +3672,137 @@ html[data-theme="dark"] .brand-lockup-logo-dark { display: block; }
 .shop-ad-arrow{font-size:20px;color:var(--muted)}
 @media(max-width:980px){.platform-ad-layout{grid-template-columns:1fr}.platform-ad-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:620px){.platform-ad-fields{grid-template-columns:1fr}.platform-ad-field.full{grid-column:auto}.platform-ad-stats{gap:8px}.platform-ad-stat{padding:12px}.shop-ad-banner{align-items:flex-start;flex-wrap:wrap}.shop-ad-banner img{width:100%;max-height:100px;aspect-ratio:3.2}.shop-ad-arrow{display:none}}
+
+
+/* Responsive customer upload controls and selected-document preview. */
+.customer-folder-defaults .customer-choice,
+.customer-file-overrides:not(.customer-folder-advanced) .customer-choice {
+  white-space: nowrap;
+}
+.customer-file-overrides:not(.customer-folder-advanced) {
+  display: grid;
+  grid-template-columns: minmax(60px,72px) repeat(2,minmax(112px,1fr)) minmax(64px,auto) minmax(125px,auto);
+  align-items: end;
+  justify-content: stretch;
+}
+.customer-file-overrides:not(.customer-folder-advanced) .customer-choice-row {
+  min-width: 0;
+}
+.customer-file-overrides:not(.customer-folder-advanced) .customer-choice {
+  width: 100%;
+  min-width: 0;
+}
+.customer-file-label {
+  height: auto;
+  min-height: 44px;
+  padding: 10px 12px;
+}
+.customer-file-label > svg { flex: 0 0 auto; }
+.customer-file-label > span {
+  flex: 1 1 220px;
+  min-width: 0;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.customer-file-studio-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.customer-file-preview iframe {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: clamp(240px,55vh,420px);
+}
+.customer-file-preview img {
+  max-height: min(58vh,420px);
+}
+
+/* Tooltips are viewport-positioned so text stays readable near either screen edge. */
+.context-info-tooltip {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 1000;
+  max-width: min(320px,calc(100vw - 24px));
+  max-height: min(60vh,360px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+@media(max-width:520px) {
+  .customer-folder-group-head {
+    grid-template-columns: minmax(0,1fr);
+  }
+  .customer-folder-defaults {
+    display: grid;
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    width: 100%;
+    gap: 10px 12px;
+    justify-content: stretch;
+  }
+  .customer-folder-defaults > div { min-width: 0; }
+  .customer-folder-defaults .customer-choice-row,
+  .customer-file-overrides:not(.customer-folder-advanced) .customer-choice-row {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    min-width: 0;
+    gap: 6px;
+  }
+  .customer-folder-defaults .customer-choice,
+  .customer-file-overrides:not(.customer-folder-advanced) .customer-choice {
+    width: 100%;
+    min-width: 0;
+    min-height: 36px;
+    height: auto;
+    padding: 7px 5px;
+    font-size: 11px;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .customer-folder-copies {
+    width: 100%;
+    max-width: 100px;
+    margin-left: 0;
+  }
+  .customer-advanced-toggle {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .customer-file-overrides:not(.customer-folder-advanced) {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+    width: 100%;
+    justify-content: stretch;
+    gap: 8px;
+  }
+  .customer-file-overrides:not(.customer-folder-advanced) > div { min-width: 0; }
+  .customer-file-overrides:not(.customer-folder-advanced) > .customer-folder-copies {
+    width: 100%;
+    max-width: 100px;
+  }
+  .customer-file-label {
+    display: grid;
+    grid-template-columns: 20px minmax(0,1fr);
+    align-items: center;
+    gap: 8px;
+    min-height: 0;
+    padding: 10px;
+  }
+  .customer-file-label > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+  .customer-file-studio-button {
+    grid-column: 2;
+    width: 100%;
+    min-height: 36px;
+    margin: 0;
+    justify-content: center;
+    font-size: 11px;
+  }
+  .customer-file-preview iframe {
+    height: clamp(240px,60vh,480px);
+  }
+  .customer-file-preview img {
+    max-height: min(60vh,480px);
+  }
+}

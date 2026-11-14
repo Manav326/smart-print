@@ -3850,7 +3850,40 @@ async function copyText(value:string) {
 function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
   const tooltipId=useId();
   const rootRef=useRef<HTMLSpanElement>(null);
+  const tooltipRef=useRef<HTMLSpanElement>(null);
   const [open,setOpen]=useState(false);
+  const [tooltipPosition,setTooltipPosition]=useState({left:12,top:12});
+  const updateTooltipPosition=useCallback(()=>{
+    const anchor=rootRef.current?.getBoundingClientRect();
+    const tooltip=tooltipRef.current;
+    if(!anchor||!tooltip)return;
+    const gutter=12;
+    const tooltipBounds=tooltip.getBoundingClientRect();
+    const availableWidth=Math.max(0,window.innerWidth-gutter*2);
+    const tooltipWidth=Math.min(tooltipBounds.width||320,availableWidth);
+    const maxLeft=Math.max(gutter,window.innerWidth-tooltipWidth-gutter);
+    const left=Math.max(gutter,Math.min(anchor.left,maxLeft));
+    const below=anchor.bottom+8;
+    const top=below+tooltipBounds.height<=window.innerHeight-gutter
+      ?below
+      :Math.max(gutter,anchor.top-tooltipBounds.height-8);
+    const maxTop=Math.max(gutter,window.innerHeight-tooltipBounds.height-gutter);
+    setTooltipPosition({left,top:Math.min(top,maxTop)});
+  },[]);
+  const openTooltip=()=>{
+    updateTooltipPosition();
+    setOpen(true);
+  };
+  useEffect(()=>{
+    if(!open)return;
+    const reposition=()=>updateTooltipPosition();
+    window.addEventListener("resize",reposition);
+    window.addEventListener("scroll",reposition,true);
+    return ()=>{
+      window.removeEventListener("resize",reposition);
+      window.removeEventListener("scroll",reposition,true);
+    };
+  },[open,updateTooltipPosition]);
   useEffect(()=>{
     if(!open)return;
     const dismissOutside=(event:PointerEvent)=>{
@@ -3861,7 +3894,7 @@ function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
   },[open]);
   return <span ref={rootRef}
     className={open?"context-info context-info-open":"context-info"}
-    onMouseEnter={()=>setOpen(true)}
+    onMouseEnter={openTooltip}
     onMouseLeave={()=>setOpen(false)}
     onBlur={event=>{
       const nextTarget=event.relatedTarget;
@@ -3870,10 +3903,11 @@ function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
   >
     <button type="button" className="context-info-trigger" aria-label={label}
       aria-expanded={open} aria-describedby={tooltipId}
-      onFocus={()=>setOpen(true)} onClick={()=>setOpen(true)}
+      onFocus={openTooltip} onClick={openTooltip}
       onKeyDown={event=>{if(event.key==="Escape"){setOpen(false);event.currentTarget.blur();}}}
     ><Info size={14} strokeWidth={2}/></button>
-    <span id={tooltipId} className="context-info-tooltip" role="tooltip" aria-hidden={!open}>{children}</span>
+    <span ref={tooltipRef} id={tooltipId} className="context-info-tooltip" role="tooltip"
+      aria-hidden={!open} style={tooltipPosition}>{children}</span>
   </span>;
 }
 
