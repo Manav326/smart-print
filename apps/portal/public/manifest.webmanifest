@@ -1,0 +1,17 @@
+{
+  "name": "Smart Print",
+  "short_name": "Smart Print",
+  "description": "A simpler way for customers and local print shops to connect and print.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F6FA",
+  "theme_color": "#7258E8",
+  "icons": [
+    {
+      "src": "/branding/smartprint-app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -172,7 +172,8 @@ public sealed class LocalAgentApiHostedService(
     ILogger<LocalAgentApiHostedService> logger,
     IHostApplicationLifetime hostLifetime,
     LocalNetworkManager localNetworkManager,
-    AgentRuntimeReadiness runtimeReadiness) : IHostedService, IAsyncDisposable
+    AgentRuntimeReadiness runtimeReadiness,
+    AgentDocumentEncryptionKeyStore documentEncryptionKeyStore) : IHostedService, IAsyncDisposable
 {
     private WebApplication? application;
     private CancellationTokenSource? retryLifetime;
@@ -274,8 +275,8 @@ public sealed class LocalAgentApiHostedService(
 
             builder.Services.Configure<FormOptions>(options =>
             {
-                options.MultipartBodyLengthLimit = 21 * 1024 * 1024;
-                options.MemoryBufferThreshold = 21 * 1024 * 1024;
+                options.MultipartBodyLengthLimit = UploadLimits.MaxMultipartRequestBytes;
+                options.MemoryBufferThreshold = checked((int)UploadLimits.MaxMultipartRequestBytes);
             });
 
             // This is a separate WebApplication container from the outer Windows
@@ -292,7 +293,7 @@ public sealed class LocalAgentApiHostedService(
             {
                 policy.SetIsOriginAllowed(state.IsOriginAllowed)
                     .WithMethods("GET", "POST")
-                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant", "X-Print-Photo-Revision-Grant")
+                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant", "X-Print-Photo-Revision-Grant", "X-Print-Encrypted-Key", "X-Print-Encrypted-Iv")
                     .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
             }));
 
@@ -406,6 +407,17 @@ public sealed class LocalAgentApiHostedService(
                 var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
                 if (credentials is null || string.IsNullOrWhiteSpace(grantToken) || grantToken.Length > 4096)
                     return Results.Unauthorized();
+
+                // Reject private jobs before parsing or accepting a replacement PDF
+                // or editor-settings form field from the shop browser.
+                var entry = localQueueStore.Find(jobId);
+                if (entry?.PrivatePrinting == true)
+                    return Results.Conflict(new
+                    {
+                        code = "private_printing_source_locked",
+                        message = "Private Printing stays on the device and cannot send original photos or editor settings to the shop service."
+                    });
+
                 if (!context.Request.HasFormContentType)
                     return Results.BadRequest(new { code = "photo_revision_form_required", message = "Send one prepared photo-sheet PDF." });
 
@@ -414,19 +426,18 @@ public sealed class LocalAgentApiHostedService(
                     return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Send exactly one prepared photo-sheet PDF." });
 
                 var file = form.Files[0];
-                if (file.Length is <= 0 or > 20 * 1024 * 1024 ||
-                    !string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase))
-                    return Results.UnprocessableEntity(new { code = "photo_sheet_invalid", message = "The prepared photo sheet must be a PDF between 1 byte and 20 MB." });
+                if (file.Length is <= 0 or > UploadLimits.MaxFileBytes)
+                    return Results.UnprocessableEntity(new { code = "photo_sheet_invalid", message = "The prepared photo sheet must be a supported PDF within the upload size limit." });
 
                 var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
                 if (!int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
-                    photoCount is < 1 or > 100 ||
+                    photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
                     !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
                     photosPerPage is < 1 or > 100 ||
                     photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6"))
                     return Results.ValidationProblem(new Dictionary<string, string[]>
                     {
-                        ["photoDetails"] = ["Choose a supported ID photo size and a quantity from 1 to 100."]
+                        ["photoDetails"] = [$"Choose a supported ID photo size and a quantity from 1 to {UploadLimits.MaxPhotoCount}."]
                     });
 
                 byte[] bytes;
@@ -475,6 +486,16 @@ public sealed class LocalAgentApiHostedService(
                         statusCode: StatusCodes.Status503ServiceUnavailable,
                         title: "The isolated document processor is temporarily unavailable. Your existing print jobs are not affected.");
                 }
+                if (!string.Equals(analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.UnprocessableEntity(new
+                    {
+                        code = "photo_sheet_not_supported",
+                        message = "The prepared Photo Studio sheet must contain actual PDF content."
+                    });
+                }
+
                 var expectedPageCount = checked((photoCount + photosPerPage - 1) / photosPerPage);
                 if (analysis.PageCount != expectedPageCount)
                 {
@@ -487,7 +508,6 @@ public sealed class LocalAgentApiHostedService(
                 }
 
                 var hash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-                var entry = localQueueStore.Find(jobId);
                 if (entry is null ||
                     entry.State is not ("LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT") ||
                     !File.Exists(entry.DocumentPath))
@@ -496,16 +516,28 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Conflict(new { code = "local_photo_source_missing", message = "The original local photo is no longer eligible for enhancement." });
                 }
 
+                var sourceSha256 = entry.PhotoSourceSha256 ?? entry.Sha256;
+                var sourceSizeBytes = entry.PhotoSourceSizeBytes ?? entry.SizeBytes;
+                var sourceMediaType = entry.PhotoSourceMediaType ?? entry.MediaType;
+                if (sourceMediaType is not ("image/jpeg" or "image/png") ||
+                    string.IsNullOrWhiteSpace(sourceSha256) || sourceSha256.Length != 64 ||
+                    sourceSizeBytes <= 0)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return Results.Conflict(new { code = "local_photo_source_unavailable", message = "The original JPG or PNG source is no longer available for editing." });
+                }
+
                 var revisionRequest = new LocalAgentPhotoRevisionRequest(
-                    entry.Sha256,
-                    entry.SizeBytes,
+                    sourceSha256,
+                    sourceSizeBytes,
                     hash,
                     bytes.LongLength,
                     analysis.PageCount,
                     analysis.PageSizesJson,
                     photoSizeCode,
                     photoCount,
-                    photosPerPage);
+                    photosPerPage,
+                    EditorSettingsJson: form["editorSettingsJson"].FirstOrDefault());
 
                 var client = httpClientFactory.CreateClient("cloud");
                 client.Timeout = TimeSpan.FromSeconds(30);
@@ -537,8 +569,8 @@ public sealed class LocalAgentApiHostedService(
 
                 var authorization = await authorizeResponse.Content.ReadFromJsonAsync<LocalAgentPhotoRevisionAuthorizationResponse>(cancellationToken: ct);
                 if (authorization is null ||
-                    !string.Equals(authorization.OriginalSha256, entry.Sha256, StringComparison.OrdinalIgnoreCase) ||
-                    authorization.OriginalSizeBytes != entry.SizeBytes ||
+                    !string.Equals(authorization.OriginalSha256, sourceSha256, StringComparison.OrdinalIgnoreCase) ||
+                    authorization.OriginalSizeBytes != sourceSizeBytes ||
                     !string.Equals(authorization.NewSha256, hash, StringComparison.OrdinalIgnoreCase) ||
                     authorization.NewSizeBytes != bytes.LongLength ||
                     authorization.PhotoSizeCode != photoSizeCode ||
@@ -550,13 +582,18 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Conflict(new { code = "local_photo_revision_authorization_mismatch", message = "The cloud service authorization did not match this original and prepared photo sheet." });
                 }
 
+                var completionRequest = revisionRequest with
+                {
+                    ExpectedQuotedAmountMinor = authorization.QuotedAmountMinor,
+                    ExpectedPricingVersion = authorization.PricingVersion
+                };
                 var outputName = $"photo-sheet-{entry.JobNumber}.pdf";
                 try
                 {
                     await localQueueStore.ReplaceStagedPhotoDocumentAsync(
                         jobId,
-                        entry.Sha256,
-                        entry.SizeBytes,
+                        sourceSha256,
+                        sourceSizeBytes,
                         outputName,
                         bytes,
                         analysis.PageCount,
@@ -569,7 +606,7 @@ public sealed class LocalAgentApiHostedService(
                                     HttpMethod.Post,
                                     $"api/v1/agent/local-document-photo-revisions/{jobId}/complete")
                                 {
-                                    Content = JsonContent.Create(revisionRequest)
+                                    Content = JsonContent.Create(completionRequest)
                                 };
                                 completeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
                                 completeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
@@ -640,7 +677,8 @@ public sealed class LocalAgentApiHostedService(
             {
                 var variant = context.Request.Query["variant"].FirstOrDefault();
                 var outputPreview = string.Equals(variant, "output", StringComparison.OrdinalIgnoreCase);
-                if (!string.IsNullOrWhiteSpace(variant) && !outputPreview &&
+                var photoSourcePreview = string.Equals(variant, "photo-source", StringComparison.OrdinalIgnoreCase);
+                if (!string.IsNullOrWhiteSpace(variant) && !outputPreview && !photoSourcePreview &&
                     !string.Equals(variant, "original", StringComparison.OrdinalIgnoreCase))
                     return Results.BadRequest(new { code = "local_preview_variant_invalid" });
 
@@ -664,7 +702,7 @@ public sealed class LocalAgentApiHostedService(
                 client.Timeout = TimeSpan.FromSeconds(15);
                 client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
                 var authorizePath = $"api/v1/agent/local-document-previews/{jobId}/authorize" +
-                    (outputPreview ? "?variant=output" : string.Empty);
+                    (outputPreview ? "?variant=output" : photoSourcePreview ? "?variant=photo-source" : string.Empty);
                 using var authorizeRequest = new HttpRequestMessage(HttpMethod.Get, authorizePath);
                 authorizeRequest.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
                 authorizeRequest.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
@@ -745,10 +783,45 @@ public sealed class LocalAgentApiHostedService(
                     }
                     mediaType = "application/pdf";
                 }
+                else if (photoSourcePreview)
+                {
+                    if (authorizedDocument.MediaType is not ("image/jpeg" or "image/png"))
+                        return Results.Conflict(new { code = "local_photo_source_type_mismatch", message = "The retained source is not a supported JPG or PNG photo." });
+                    var sourceName = entry.PhotoSourceDocumentName ?? entry.DocumentName;
+                    var sourceMediaType = entry.PhotoSourceMediaType ?? entry.MediaType;
+                    var sourceSha256 = entry.PhotoSourceSha256 ?? entry.Sha256;
+                    var sourceSizeBytes = entry.PhotoSourceSizeBytes ?? entry.SizeBytes;
+                    if (sourceMediaType != authorizedDocument.MediaType ||
+                        sourceName != authorizedDocument.OriginalFileName ||
+                        sourceSizeBytes != authorizedDocument.SizeBytes ||
+                        !string.Equals(sourceSha256, authorizedDocument.Sha256, StringComparison.OrdinalIgnoreCase))
+                        return Results.Conflict(new { code = "local_photo_source_mismatch", message = "The retained original photo does not match the shop service's source record." });
+                    try
+                    {
+                        bytes = localQueueStore.ReadPhotoSource(jobId);
+                    }
+                    catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+                    {
+                        return Results.NotFound(new { code = "local_photo_source_missing", message = "The original photo is no longer present on this shop computer." });
+                    }
+                    catch (UnauthorizedAccessException exception)
+                    {
+                        logger.LogError(exception, "Windows denied access to the retained source photo for job {JobId}.", jobId);
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status500InternalServerError,
+                            title: "The SmartPrint background service cannot access the retained original photo. Repair the Agent's local storage permissions, then try again.");
+                    }
+                    catch (Exception exception) when (exception is IOException or CryptographicException or InvalidDataException)
+                    {
+                        logger.LogError(exception, "Retained source photo integrity check failed for job {JobId}.", jobId);
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status500InternalServerError,
+                            title: "The retained original photo could not be read or verified safely.");
+                    }
+                    mediaType = sourceMediaType;
+                }
                 else
                 {
-                    if (!File.Exists(entry.DocumentPath))
-                        return Results.NotFound(new { code = "local_preview_document_missing", message = "The original file is no longer present on this shop computer." });
                     if (entry.MediaType is not ("application/pdf" or "image/jpeg" or "image/png"))
                         return Results.StatusCode(StatusCodes.Status415UnsupportedMediaType);
                     if (entry.SizeBytes != authorizedDocument.SizeBytes ||
@@ -759,14 +832,28 @@ public sealed class LocalAgentApiHostedService(
 
                     try
                     {
+                        // Read the protected file directly instead of using File.Exists:
+                        // Windows can report false for inaccessible paths, which made
+                        // an ACL denial look like a deleted upload and hid the real issue.
                         bytes = localQueueStore.ReadDocument(jobId);
+                    }
+                    catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+                    {
+                        return Results.NotFound(new { code = "local_preview_document_missing", message = "The original file is no longer present on this shop computer." });
+                    }
+                    catch (UnauthorizedAccessException exception)
+                    {
+                        logger.LogError(exception, "Windows denied access to the protected local preview for job {JobId}.", jobId);
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status500InternalServerError,
+                            title: "The SmartPrint background service cannot access this protected local file. Repair the Agent's local storage permissions, then try preview again.");
                     }
                     catch (Exception exception) when (exception is IOException or CryptographicException or InvalidDataException)
                     {
                         logger.LogError(exception, "Local document preview integrity check failed for job {JobId}.", jobId);
                         return Results.Problem(
                             statusCode: StatusCodes.Status500InternalServerError,
-                            title: "The protected local document could not be read safely.");
+                            title: "The protected local document could not be read or verified safely.");
                     }
                     mediaType = entry.MediaType;
                 }
@@ -833,8 +920,25 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Problem(statusCode: StatusCodes.Status502BadGateway, title: "The cloud API returned an invalid local upload grant.");
                 }
 
+                async Task ReportPrivateValidationFailureAsync(string code, string message)
+                {
+                    if (!claim.PrivatePrinting) return;
+                    using var rejectionRequest = new HttpRequestMessage(
+                        HttpMethod.Post, $"api/v1/agent/private-relays/{claim.Id:D}/reject")
+                    {
+                        Content = JsonContent.Create(new AgentPrivateRelayRejectRequest(code, message))
+                    };
+                    AddAgentHeaders(rejectionRequest, credentials, uploadGrant);
+                    using var rejectionResponse = await client.SendAsync(rejectionRequest, ct);
+                    if (!rejectionResponse.IsSuccessStatusCode)
+                        logger.LogWarning("Could not persist private upload validation failure for ticket {TicketId} (HTTP {StatusCode}).",
+                            claim.Id, (int)rejectionResponse.StatusCode);
+                }
+
                 if (claim.AlreadyCompleted && claim.UploadResult is not null)
                 {
+                    if (claim.PrivatePrinting && claim.UploadResult.Job.Status == "COMPLETED")
+                        return Results.Ok(claim.UploadResult);
                     var completedJobId = claim.PrintJobId != Guid.Empty
                         ? claim.PrintJobId
                         : claim.UploadResult.Job.Id;
@@ -856,7 +960,7 @@ public sealed class LocalAgentApiHostedService(
 
                 if (claim.PrintJobId == Guid.Empty ||
                     claim.ExpiresUtc <= DateTimeOffset.UtcNow ||
-                    claim.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
+                    claim.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
                     string.IsNullOrWhiteSpace(claim.Sha256) ||
                     string.IsNullOrWhiteSpace(claim.FileExtension))
                 {
@@ -892,22 +996,82 @@ public sealed class LocalAgentApiHostedService(
                     }
 
                     var form = await context.Request.ReadFormAsync(ct);
-                    if (form.Files.Count != 1 || form.Files[0].Length != claim.SizeBytes)
+                    var expectedWireSize = claim.PrivatePrinting ? checked(claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes) : claim.SizeBytes;
+                    if (form.Files.Count != 1 || form.Files[0].Length != expectedWireSize || expectedWireSize > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
                     {
                         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "The received document size does not match the authorised upload.");
                     }
 
-                    await using var memory = new MemoryStream((int)claim.SizeBytes);
+                    await using var memory = new MemoryStream(checked((int)expectedWireSize));
                     await using (var input = form.Files[0].OpenReadStream())
                     {
                         await input.CopyToAsync(memory, ct);
                     }
-                    if (memory.Length != claim.SizeBytes)
+                    if (memory.Length != expectedWireSize)
                     {
                         return Results.BadRequest(new { code = "local_upload_incomplete", message = "The document transfer was incomplete. Retry the upload." });
                     }
-                    bytes = memory.ToArray();
+                    var receivedBytes = memory.ToArray();
                     CryptographicOperations.ZeroMemory(memory.GetBuffer().AsSpan(0, (int)memory.Length));
+                    if (claim.PrivatePrinting)
+                    {
+                        var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
+                        var ivText = context.Request.Headers["X-Print-Encrypted-Iv"].FirstOrDefault();
+                        if (string.IsNullOrWhiteSpace(wrappedKey) || string.IsNullOrWhiteSpace(ivText))
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            return Results.BadRequest(new { code = "private_document_encryption_required", message = "Private Printing requires the document encryption key and nonce." });
+                        }
+                        byte[]? aesKey = null;
+                        byte[]? iv = null;
+                        byte[] aad = Array.Empty<byte>();
+                        try
+                        {
+                            aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
+                            iv = Convert.FromBase64String(ivText);
+                        }
+                        catch (Exception exception) when (exception is CryptographicException or FormatException)
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
+                            if (iv is not null) CryptographicOperations.ZeroMemory(iv);
+                            await ReportPrivateValidationFailureAsync(
+                                "private_document_decryption_failed",
+                                "The shop computer could not securely open this file. Please select the document again.");
+                            return Results.UnprocessableEntity(new { code = "private_document_key_invalid", message = "The private document could not be decrypted by this paired shop computer." });
+                        }
+                        try
+                        {
+                            if (aesKey!.Length != 32 || iv!.Length != 12 || receivedBytes.LongLength != claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
+                                throw new CryptographicException("The private document encryption envelope is invalid.");
+                            bytes = new byte[checked((int)claim.SizeBytes)];
+                            aad = Encoding.UTF8.GetBytes($"SmartPrint.PrivatePrinting.v1|{claim.Id}|{claim.PrintJobId}|{claim.SizeBytes}|{claim.Sha256}");
+                            using var aes = new AesGcm(aesKey, checked((int)UploadLimits.PrivateRelayEncryptionOverheadBytes));
+                            aes.Decrypt(iv, receivedBytes.AsSpan(0, checked((int)claim.SizeBytes)),
+                                receivedBytes.AsSpan(checked((int)claim.SizeBytes), checked((int)UploadLimits.PrivateRelayEncryptionOverheadBytes)), bytes, aad);
+                        }
+                        catch (CryptographicException)
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            CryptographicOperations.ZeroMemory(aesKey);
+                            CryptographicOperations.ZeroMemory(iv);
+                            await ReportPrivateValidationFailureAsync(
+                                "private_document_decryption_failed",
+                                "The private document did not pass its authenticated encryption check. Please select it again.");
+                            return Results.UnprocessableEntity(new { code = "private_document_decryption_failed", message = "The private document did not pass its authenticated encryption check." });
+                        }
+                        finally
+                        {
+                            CryptographicOperations.ZeroMemory(receivedBytes);
+                            if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
+                            if (iv is not null) CryptographicOperations.ZeroMemory(iv);
+                            CryptographicOperations.ZeroMemory(aad);
+                        }
+                    }
+                    else
+                    {
+                        bytes = receivedBytes;
+                    }
                 }
 
                 try
@@ -915,7 +1079,10 @@ public sealed class LocalAgentApiHostedService(
                     var actualHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
                     if (!string.Equals(actualHash, claim.Sha256, StringComparison.OrdinalIgnoreCase))
                     {
-                        return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the cloud-authorised upload ticket." });
+                        await ReportPrivateValidationFailureAsync(
+                            "private_document_integrity_failed",
+                            "The file did not pass its integrity check. Please select it again.");
+                        return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the authorised upload." });
                     }
 
                     try
@@ -944,6 +1111,9 @@ public sealed class LocalAgentApiHostedService(
                     }
                     catch (DocumentValidationException exception)
                     {
+                        await ReportPrivateValidationFailureAsync(
+                            "document_not_supported",
+                            exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
                         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
                     }
                     catch (DocumentProcessingException exception)
@@ -952,6 +1122,14 @@ public sealed class LocalAgentApiHostedService(
                         return Results.Problem(
                             statusCode: StatusCodes.Status503ServiceUnavailable,
                             title: "The isolated document processor is temporarily unavailable. Your existing print jobs are not affected.");
+                    }
+
+                    if (!string.Equals(analysis.Extension, claim.FileExtension, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(analysis.MediaType, claim.MediaType, StringComparison.OrdinalIgnoreCase))
+                    {
+                        const string message = "The document content does not match the detected upload format. Select the original file again.";
+                        await ReportPrivateValidationFailureAsync("document_content_type_mismatch", message);
+                        return Results.UnprocessableEntity(new { code = "document_content_type_mismatch", message });
                     }
 
                     if (existing is null)
@@ -976,7 +1154,10 @@ public sealed class LocalAgentApiHostedService(
                             claim.Sha256,
                             claim.ExpiresUtc,
                             "LOCAL_AGENT",
-                            Orientation: claim.Orientation);
+                            OutputMode: claim.OutputMode,
+                            Orientation: claim.Orientation,
+                            PrivatePrinting: claim.PrivatePrinting,
+                            PrintKind: claim.PrintKind);
                         await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
                     }
 
@@ -1017,7 +1198,7 @@ public sealed class LocalAgentApiHostedService(
                     CryptographicOperations.ZeroMemory(bytes);
                 }
             })
-            .WithMetadata(new RequestSizeLimitAttribute(21 * 1024 * 1024))
+            .WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
             .RequireCors("CustomerPortal");
 
             await application.StartAsync(cancellationToken);
@@ -1078,8 +1259,11 @@ public sealed class LocalAgentApiHostedService(
         bool IsDuplex,
         int Copies,
         string Orientation,
+        bool PrivatePrinting,
         DateTimeOffset ExpiresUtc,
-        LocalUploadedPrintResult? UploadResult);
+        LocalUploadedPrintResult? UploadResult,
+        string PrintKind = "DOCUMENT",
+        string OutputMode = "PHYSICAL");
 
     private sealed record LocalUploadCompletionResponse(
         bool AlreadyCompleted,
@@ -1094,7 +1278,8 @@ public sealed class LocalAgentApiHostedService(
         Guid Id, string JobNumber, string Status, int PageCount, int Copies,
         string Currency, long QuotedAmountMinor, DateTimeOffset CreatedUtc,
         string ColourMode = "Mono", string PaperSize = "A4", bool IsDuplex = false,
-        string Orientation = "AUTO", int PricingVersion = 1);
+        string Orientation = "AUTO", int PricingVersion = 1, bool PrivatePrinting = false,
+        string PrintKind = "DOCUMENT");
 
     private sealed record LocalUploadedDocument(
         Guid Id, string OriginalFileName, string MediaType, long SizeBytes,

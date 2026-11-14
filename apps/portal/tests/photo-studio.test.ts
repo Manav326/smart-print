@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
+import { UPLOAD_LIMITS } from "../src/upload-limits.generated.ts";
 import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
+
+const UPLOAD_LIMITS_CONFIG = JSON.parse(readFileSync(new URL("../../../config/upload-limits.json", import.meta.url), "utf8"));
+
+test("customer upload limits are generated from the shared policy",()=>{
+ assert.equal(UPLOAD_LIMITS.maxFileBytes,UPLOAD_LIMITS_CONFIG.maxFileBytes);
+ assert.equal(UPLOAD_LIMITS.maxPhotoCount,UPLOAD_LIMITS_CONFIG.maxPhotoCount);
+ assert.equal(UPLOAD_LIMITS.maxBatchFiles,UPLOAD_LIMITS_CONFIG.maxBatchFiles);
+ assert.equal(UPLOAD_LIMITS.maxBatchBytes,UPLOAD_LIMITS_CONFIG.maxBatchBytes);
+ assert.equal(UPLOAD_LIMITS.maxMultipartRequestBytes,UPLOAD_LIMITS_CONFIG.maxFileBytes+UPLOAD_LIMITS_CONFIG.multipartOverheadBytes);
+ assert.equal(UPLOAD_LIMITS.privateRelayEncryptionOverheadBytes,UPLOAD_LIMITS_CONFIG.privateRelayEncryptionOverheadBytes);
+});
 
 test("exact physical photo layout starts at the top safe margin on A4",()=>{
  const layout=getPhotoSheetLayout({widthMm:35,heightMm:45});
@@ -17,6 +29,18 @@ test("caption labels reserve their own area and never shrink photo dimensions",(
  assert.equal(labelled.contentWidthMm,plain.contentWidthMm);
  assert.equal(labelled.contentHeightMm,labelled.rows*52+(labelled.rows-1)*3);
 });
+test("private Photo Studio is independent of the cloud upload file-size limit",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(app,/if\(selected\.size<=0\)/);
+ assert.doesNotMatch(app,/selected\.size>UPLOAD_LIMITS\.maxFileBytes/);
+ assert.match(app,/if\(source\.size<=0\|\|sheet\.file\.size<=0\)/);
+ assert.doesNotMatch(app,/source\.size>UPLOAD_LIMITS\.maxFileBytes/);
+ assert.doesNotMatch(app,/sheet\.file\.size>UPLOAD_LIMITS\.maxFileBytes/);
+ assert.match(studio,/mode!=="private-library"&&jpegByteLength\+pdfStructureAllowance>MAX_FILE_BYTES/);
+ assert.match(studio,/mode!=="private-library"&&pdf\.size>MAX_FILE_BYTES/);
+});
+
 test("all configured photo sizes have positive safe layouts",()=>{
  for(const size of [{widthMm:35,heightMm:45},{widthMm:25,heightMm:35},{widthMm:50.8,heightMm:50.8},{widthMm:101.6,heightMm:152.4}]){
   const layout=getPhotoSheetLayout(size,7);
@@ -52,7 +76,7 @@ test("photo PDF generation rejects empty or incomplete JPEG pages",()=>{
 
 test("name and DOB are opt-in and are absent from the default photo sheet",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- assert.match(studio,/const \[includeFormDetails,setIncludeFormDetails\]=useState\(false\)/);
+ assert.match(studio,/const \[includeFormDetails,setIncludeFormDetails\]=useState\(initialSettings\?\.includeFormDetails \?\? false\)/);
  assert.match(studio,/const hasCaption=includeFormDetails&&Boolean\(photoName\.trim\(\)\|\|dateOfBirth\.trim\(\)\)/);
  assert.match(studio,/checked=\{includeFormDetails\}/);
  assert.match(studio,/\{includeFormDetails&&<>[\s\S]*?Name for form[\s\S]*?Date of birth/);
@@ -60,12 +84,45 @@ test("name and DOB are opt-in and are absent from the default photo sheet",()=>{
 });
 
 
+test("private Photo Studio saves one photo locally with editable metadata and branded preview only",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
+ assert.match(app,/function PrivatePhotoStudioEntry/);
+ assert.match(app,/accept="image\/jpeg,image\/png,.jpg,.jpeg,.png"/);
+ assert.match(app,/savePhotoStudioDocument\|/);
+ assert.match(app,/updatePhotoStudioDocument\|/);
+ assert.match(app,/getPhotoStudioSource\|/);
+ assert.match(app,/renamePhotoStudioDocument\|/);
+ assert.match(app,/deletePhotoStudioDocument\|/);
+ assert.match(app,/mode="private-library"/);
+ assert.match(app,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
+ assert.match(app,/SmartPrint by QuantaEdge/);
+ assert.match(studio,/resolutionDpi:300,editorSettings/);
+ assert.match(studio,/mode === "private-library"/);
+ assert.match(css,/\.previewProtection::before/);
+ assert.match(css,/\.previewProtection::after/);
+ assert.match(css,/SmartPrint by QuantaEdge/);
+});
+
+test("ordinary customer Photo Studio remains inside the existing upload privacy choice",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument/);
+ assert.doesNotMatch(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument\|\|containsPhotoStudioDocument/);
+ assert.match(app,/const photoSettings=photoSettingsByFileFingerprint\[fingerprint\]/);
+ assert.match(app,/photoSettings\?\"PHOTO\":\"DOCUMENT\"/);
+ assert.match(app,/const incomingPhotoDocument=supported\.some\(isSmartPrintPhotoDocument\)/);
+ assert.match(app,/mode=\"customer\"/);
+});
+
 test("customer Photo Studio cannot turn an already uploaded original into a second print job",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/if\(uploadedFileFingerprints\.includes\(fingerprint\)\)/);
  assert.match(app,/const photoAlreadyUploaded=Boolean\(file&&uploadedFileFingerprints\.includes\(customerFileFingerprint\(file\)\)\)/);
  assert.match(app,/disabled=\{busy\|\|batchLockedForPayment\|\|photoAlreadyUploaded\}/);
- assert.match(app,/This photo is already with the shop[\s\S]*?without creating another print job/);
+ assert.match(app,/Photo already sent\./);
+ assert.match(app,/InfoTooltip label="Photo already sent"/);
+ assert.match(app,/without creating another print job/);
 });
 
 test("customer photo preparation depends on configured shop pricing, not the current printer capability",()=>{
@@ -121,22 +178,35 @@ test("short portrait phones keep Photo Studio preview, controls and save actions
 });
 
 
-test("Android image providers with blank MIME types still expose Photo Studio by supported filename",()=>{
+test("customer, shop order and private library share one strict JPG/PNG source policy",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/function isCustomerImage\(file:File\):boolean/);
- assert.ok(app.includes(String.raw`|| /\.(jpe?g|png)$/i.test(file.name);`));
+ const policy=readFileSync(new URL("../src/photo-source-policy.ts",import.meta.url),"utf8");
+ assert.match(app,/function isCustomerImage\(file:File\):boolean\s*\{\s*const identified=identifiedCustomerDocumentTypes\.get\(file\);/);
+ assert.match(app,/if\(identified\)return identified\.mediaType==="image\/jpeg"\|\|identified\.mediaType==="image\/png";/);
+ assert.match(app,/return isSupportedPhotoSource\(file\);/);
+ assert.match(app,/resolvePhotoSourceMimeType\(selected\)/);
+ assert.match(app,/resolvePhotoSourceMimeType\(candidate\)/);
+ assert.match(policy,/declaredMime === "image\/jpeg" \|\| declaredMime === "image\/png"/);
+ assert.match(policy,/if \(declaredMime\)\s*\{/);
+ assert.match(policy,/extension === "jpg" \|\| extension === "jpeg"/);
  assert.match(app,/isCustomerImage\(file\)&&photoRatesAvailable/);
 });
 
 test("shop cancellation returns to the original document preview",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/returnPreview:\{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean\}/);
+ assert.match(app,/returnPreview\?:\{name:string;blob:Blob;mediaType:string;job:ShopPrintJob;readOnly:boolean\}/);
  assert.match(app,/function cancelShopPhotoStudio\(\)[\s\S]*?URL\.createObjectURL\(restored\.blob\)[\s\S]*?setPreview/);
  assert.match(app,/onCancel=\{cancelShopPhotoStudio\}/);
  assert.match(app,/focusEditOnMount=\{focusShopPhotoEdit\}/);
  assert.match(app,/setFocusShopPhotoEdit\(true\)/);
  assert.match(app,/editPhotoButtonRef\.current\?\.focus\(\)/);
  assert.match(app,/setPreview\(null\); setFocusShopPhotoEdit\(false\)/);
+});
+
+test("cancelling Photo Studio opened from Order Journey returns to the journey without opening an original-image modal",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/const returnPreview=returningFromPreview[\s\S]*?:undefined/);
+ assert.match(app,/if\(!restored\)\{\s*setShopPhotoStudio\(null\);\s*setFocusShopPhotoEdit\(false\);\s*return;/);
 });
 
 test("Photo Studio follows the saved light or dark appearance in both customer and shop routes",()=>{
@@ -160,8 +230,10 @@ test("Photo Studio restores focus to the customer or shop control after it close
 
 test("customers are told when the shop has not enabled photo printing",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/Photo printing is not enabled at this shop yet/);
- assert.match(app,/Ask the shop owner to configure photo sizes and rates/);
+ assert.match(app,/Photo printing unavailable/);
+ assert.match(app,/InfoTooltip label="Photo printing details"/);
+ assert.match(app,/Photo printing unavailable\. Contact shop\./);
+ assert.match(app,/This shop must enable photo printing and configure its photo sizes and rates/);
 });
 
 test("50 photos can be laid out as nine per A4 page with a partially filled final page",()=>{
@@ -457,3 +529,81 @@ test("Photo Studio browser acceptance covers every editor tool and failure recov
  assert.match(browser,/failRender=1/);
  assert.match(browser,/oversizeRaster=1/);
 });
+
+test("Photo Studio text layers are independently selectable, editable, draggable and included in the A4 PDF",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/id="photo-studio-tool-text"/);
+ assert.match(studio,/title="Add, select and position text on the A4 sheet"/);
+ assert.doesNotMatch(studio,/id="photo-studio-tool-text"[^>]*disabled=/);
+ assert.match(studio,/id="photo-studio-add-text"/);
+ assert.match(studio,/id="photo-studio-text-content"/);
+ assert.match(studio,/id="photo-studio-text-font-size"/);
+ assert.match(studio,/id="photo-studio-text-colour"/);
+ assert.match(studio,/handleTextLayerPointerDown/);
+ assert.match(studio,/handleTextLayerPointerMove/);
+ assert.match(studio,/context\.fillText\(value, xMm, yMm, A4_WIDTH_MM - 16\)/);
+ assert.match(studio,/captionHeightMm,textLayers/);
+ assert.match(studio,/data-testid="photo-studio-text-layer"/);
+});
+
+
+test("both Photo Studio entry points inherit the same batch privacy without silently changing it",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const applyStart=app.indexOf("function applyPhotoSheets(");
+ const chooseStart=app.indexOf("function chooseFiles(next:File[]");
+ const chooseEnd=app.indexOf("function removeSelectedFile(",chooseStart);
+ assert.ok(applyStart>=0&&chooseStart>applyStart&&chooseEnd>chooseStart);
+ const apply=app.slice(applyStart,chooseStart);
+ const choose=app.slice(chooseStart,chooseEnd);
+ assert.doesNotMatch(app,/function preselectPhotoStudioPrivacy\(/);
+ assert.doesNotMatch(apply,/setPrivatePrinting\(/);
+ assert.match(apply,/Photo Studio output inherits the customer's current batch privacy choice/);
+ assert.match(choose,/incomingPhotoDocument/);
+ assert.match(choose,/Prepared Photo Studio documents use the same current batch privacy choice/);
+ assert.doesNotMatch(choose,/if\(incomingPhotoDocument\)[\s\S]{0,200}setPrivatePrinting\(true\)/);
+ assert.match(app,/setPrivacyChoiceManuallySelected\(true\);setPrivatePrinting\(false\)/);
+ assert.match(app,/setPrivacyChoiceManuallySelected\(true\);setPrivatePrinting\(true\)/);
+ assert.match(app,/const effectivePrivatePrinting=privatePrinting\|\|containsIdDocument/);
+ assert.match(app,/if\(idDocument&&!effectivePrivatePrinting\)/);
+});
+
+test("ID Studio remains Private Printing only",()=>{
+ const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ assert.match(app,/if\(incomingIdDocument\)\s*\{\s*\/\/ ID Studio remains Private Printing only/);
+ assert.match(app,/if\(idDocument&&!effectivePrivatePrinting\)/);
+});
+
+
+
+test("one processed 300-DPI crop is reused across all copies and every A4 page",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const helperStart=studio.indexOf("function createPhotoTile(");
+ const rendererStart=studio.indexOf("function drawPhotoSheetPage(");
+ const sourceStart=studio.indexOf("function cropSource(",rendererStart);
+ const saveStart=studio.indexOf("async function createPrintSheets()");
+ assert.ok(helperStart>=0&&rendererStart>helperStart&&sourceStart>rendererStart&&saveStart>sourceStart,
+  "Shared photo tile, page renderer and export path must exist.");
+
+ const helper=studio.slice(helperStart,rendererStart);
+ assert.match(helper,/drawImage\(image,source\.x,source\.y,source\.width,source\.height,0,0,photoW,photoH\)/);
+ assert.match(helper,/if\(background\.sourceColor\)replaceEdgeBackground\(photoTile/);
+
+ const renderer=studio.slice(rendererStart,sourceStart);
+ const copyLoop=renderer.slice(renderer.indexOf("for(const position of positions)"));
+ assert.match(copyLoop,/context\.drawImage\(photoTile,x,y,size\.widthMm,size\.heightMm\)/);
+ assert.doesNotMatch(copyLoop,/createPhotoTile\(|replaceEdgeBackground\(|createElement\("canvas"\)/,
+  "The copy loop must reuse the already-processed tile.");
+ assert.match(renderer,/sharedPhotoTile\?\?createPhotoTile\(/);
+
+ const exporter=studio.slice(saveStart);
+ const tileCreate=exporter.indexOf("const sharedPhotoTile=createPhotoTile(");
+ const pageLoop=exporter.indexOf("for(let page=0;page<pages;page++)");
+ const pageDraw=exporter.indexOf("textLayers,sharedPhotoTile)",pageLoop);
+ const tileDispose=exporter.indexOf("sharedPhotoTile.width=0",pageLoop);
+ assert.ok(tileCreate>=0&&pageLoop>tileCreate&&pageDraw>pageLoop&&tileDispose>pageDraw,
+  "The export must create one tile before page rendering, pass it into every page, and release it afterwards.");
+ assert.match(exporter,/finally\{\s*sharedPhotoTile\.width=0;\s*sharedPhotoTile\.height=0;/);
+});
+
+
+

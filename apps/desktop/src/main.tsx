@@ -9,7 +9,7 @@ import "./desktop.css";
 async function start() {
   document.body.dataset.appShell = "desktop";
   if (!isDesktopApp()) {
-    document.body.innerHTML = "<main style='font:16px sans-serif;padding:32px'>SmartPrint Desktop must run inside its Windows application.</main>";
+    document.body.innerHTML = "<main style='font:16px sans-serif;padding:32px'>Smart Print must run inside its Windows application.</main>";
     return;
   }
 
@@ -38,7 +38,7 @@ async function start() {
 
   const root = document.getElementById("smartprint-desktop-root");
   if (!root) {
-    throw new Error("SmartPrint Desktop could not find #smartprint-desktop-root.");
+    throw new Error("Smart Print could not find #smartprint-desktop-root.");
   }
 
   ReactDOM.createRoot(root).render(

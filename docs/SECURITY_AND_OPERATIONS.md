@@ -1,5 +1,14 @@
 # Security and Operations
 
+## 0. Production availability (24/7)
+
+- The production public website at `https://smartprint.quantaedge.in/` must remain publicly available 24 hours a day, 7 days a week. This is a standing production requirement, not a launch milestone or optional target.
+- Do not schedule a maintenance page, planned offline window or website shutdown for SEO work, content updates, routine releases or crawler verification.
+- Roll out portal/API changes with health checks and a rollback path. Keep the currently healthy version serving production traffic until the replacement is healthy; do not switch traffic to a failed or partially ready release.
+- Continuously monitor the public HTTPS homepage and important public routes from an external probe, alongside API/container health, DNS resolution and TLS certificate expiry. Alert and recover promptly when checks fail.
+- Treat a single crawler, search tool or research service fetch failure as an unverified fetch. Confirm suspected outages independently before classifying them as downtime; distinguish bot-specific blocks and rate limits from service unavailability.
+- If an unplanned incident occurs, use the incident recovery and rollback procedure. Do not convert a transient tool or crawler failure into an intentional maintenance state.
+
 ## 1. Tenant and identity security
 
 - Derive tenant scope from verified user membership or registered device identity.
@@ -35,7 +44,8 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 - Cloud document uploads require a clean ClamAV result and then use the private, resource-limited document-worker container for parsing. Direct shop-LAN uploads require a Windows Defender scan on the paired Agent and then use a separate restricted LocalService upload-analysis worker. Both paths fail closed on scanner failure; print-time PDFium/Skia rendering still runs inside the Agent and needs its own process isolation and Windows acceptance evidence.
 - Apply explicit retention and deletion policies. Never log document contents or public file URLs.
 - Platform administrators configure print quota and document/database retention under **Platform Control Centre → Operations & retention**. The seeded trial quota is 3,000 print jobs per calendar month. Paid-plan quotas remain versioned in **Plans & entitlements**. Operations controls cloud-completed, Agent-completed, abandoned-unpaid, pending-local-upload, expired-ticket, empty-session and stale-refresh-token retention, plus API/Agent sweep intervals and whether already-paid work may continue during a shop suspension. Every update requires an audit reason and records before/after settings.
-- Cloud source documents are purged only after confirmed physical output or a verified PDF export, or after a terminal rejection, quote expiry or full refund has passed the configured abandonment period without a financial hold. The database retains job, payment and refund metadata and marks purged documents with `PurgedUtc`; subsequent cloud preview/download returns HTTP 410.
+- Standard completed source documents (cloud and paired-Agent working copies) are retained for 7 days after confirmed physical output or verified PDF export by default, then purged on the next hourly cleanup sweep. The database retains job, payment and refund metadata and marks purged cloud documents with `PurgedUtc`; subsequent cloud preview/download returns HTTP 410.
+- Private Printing never places the source in the normal cloud document store or allows managed PDF export. Its paired Windows Agent securely overwrites and deletes the local working copy immediately after physical output is confirmed; the Agent then acknowledges the purge so the API can redact the source metadata. A temporary encrypted relay object, when used, is removed after the Agent verifies receipt. The original file in the customer's own phone/document library is not deleted.
 - The Windows Agent receives its completed-document retention window and sweep interval from the platform heartbeat. It removes pending-payment local source documents only after the API confirms the job is terminal unpaid, financial holds are clear and the platform retention deadline has passed. Output-unconfirmed jobs and paid work remain recoverable.
 - The API sweeps old expired local-upload tickets, empty customer sessions and expired/revoked refresh tokens at the platform-configured intervals. Historical print jobs, payment events, refund events and tenant audit history are retained.
 - Both cloud and local customer upload paths share the 20-file / 50-MB batch limit. Local upload reservations are serialized with the tenant's monthly print-job quota lock; expired, uncompleted reservations no longer consume capacity.

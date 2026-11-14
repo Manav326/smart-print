@@ -7,5 +7,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="PdfPig" Version="0.1.16" />
+    <PackageReference Include="StbImageSharp" Version="2.30.16" />
   </ItemGroup>
 </Project>

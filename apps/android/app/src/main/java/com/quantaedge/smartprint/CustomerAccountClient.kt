@@ -51,7 +51,18 @@ data class CustomerPrintHistoryItem(
     val printKind: String?,
     val photoSizeCode: String?,
     val photoCount: Int,
-    val photosPerPage: Int?
+    val photosPerPage: Int?,
+    val privatePrinting: Boolean = false,
+    val updatedUtc: String = createdUtc
+)
+
+data class CustomerHistoryPage(
+    val items: List<CustomerPrintHistoryItem>,
+    val page: Int,
+    val size: Int,
+    val totalItems: Long,
+    val totalPages: Int,
+    val hasNext: Boolean
 )
 
 /**
@@ -182,13 +193,21 @@ object CustomerAccountClient {
     fun profile(baseUrl: String, accessToken: String): JSONObject =
         request(baseUrl, "/api/v1/customer/me", null, accessToken)
 
-    fun history(baseUrl: String, accessToken: String): List<CustomerPrintHistoryItem> {
-        val response = request(baseUrl, "/api/v1/customer/jobs", null, accessToken)
-        val jobs = response.optJSONArray("jobs") ?: JSONArray()
-        return (0 until jobs.length()).mapNotNull { index ->
-            val job = jobs.optJSONObject(index) ?: return@mapNotNull null
+    fun historyCount(baseUrl: String, accessToken: String): Long {
+        val response = request(baseUrl, "/api/v1/customer/jobs/count", null, accessToken)
+        val totalCount = response.getLong("totalCount")
+        require(totalCount >= 0L) { "The server returned an invalid history count." }
+        return totalCount
+    }
+
+    private fun parseHistoryItems(itemsJson: JSONArray): List<CustomerPrintHistoryItem> =
+        (0 until itemsJson.length()).map { index ->
+            val job = itemsJson.optJSONObject(index)
+                ?: throw IllegalStateException("The server returned an invalid history record.")
+            val id = job.optString("id").trim()
+            require(id.isNotEmpty() && id != "null") { "The server returned a history record without an ID." }
             CustomerPrintHistoryItem(
-                id = job.optString("id"),
+                id = id,
                 batchId = job.optString("batchId").takeUnless { it.isBlank() || it == "null" },
                 batchName = job.optString("batchName").takeUnless { it.isBlank() || it == "null" },
                 batchGroupName = job.optString("batchGroupName").takeUnless { it.isBlank() || it == "null" },
@@ -210,9 +229,100 @@ object CustomerAccountClient {
                 printKind = job.optString("printKind").takeUnless { it.isBlank() || it == "null" },
                 photoSizeCode = job.optString("photoSizeCode").takeUnless { it.isBlank() || it == "null" },
                 photoCount = job.optInt("photoCount"),
-                photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage")
+                photosPerPage = job.takeIf { it.has("photosPerPage") && !it.isNull("photosPerPage") }?.optInt("photosPerPage"),
+                privatePrinting = job.optBoolean("privatePrinting", false),
+                updatedUtc = job.optString("updatedUtc").takeUnless { it.isBlank() || it == "null" } ?: job.optString("createdUtc")
             )
         }
+
+    internal fun parseLegacyHistorySnapshot(response: JSONObject): List<CustomerPrintHistoryItem> {
+        val jobs = response.optJSONArray("jobs")
+            ?: response.optJSONArray("Jobs")
+            ?: throw IllegalStateException("The older SmartPrint service returned an unsupported history response.")
+        return parseHistoryItems(jobs)
+    }
+
+    internal fun mergeLegacyHistorySnapshot(
+        localHistory: List<CustomerPrintHistoryItem>,
+        legacyHistory: List<CustomerPrintHistoryItem>
+    ): List<CustomerPrintHistoryItem> {
+        val merged = linkedMapOf<String, CustomerPrintHistoryItem>()
+        localHistory.forEach { merged[it.id] = it }
+        // Server copies win for matching IDs, while old locally cached rows
+        // survive because the legacy endpoint returns at most 100 records.
+        legacyHistory.forEach { merged[it.id] = it }
+        return merged.values.sortedWith(
+            compareByDescending<CustomerPrintHistoryItem> { it.createdUtc }.thenByDescending { it.id }
+        )
+    }
+
+    fun legacyHistorySnapshot(baseUrl: String, accessToken: String): List<CustomerPrintHistoryItem> =
+        parseLegacyHistorySnapshot(request(baseUrl, "/api/v1/customer/jobs", null, accessToken))
+
+    fun historyPage(
+        baseUrl: String,
+        accessToken: String,
+        page: Int,
+        size: Int = 10
+    ): CustomerHistoryPage {
+        require(page >= 0) { "History page must be zero or greater." }
+        require(size in 1..100) { "History page size must be between 1 and 100." }
+        val response = request(
+            baseUrl,
+            "/api/v1/customer/jobs?page=$page&size=$size",
+            null,
+            accessToken
+        )
+        return parseHistoryPage(response, page, size)
+    }
+
+    internal fun parseHistoryPage(
+        response: JSONObject,
+        requestedPage: Int,
+        requestedSize: Int
+    ): CustomerHistoryPage {
+        require(requestedPage >= 0) { "History page must be zero or greater." }
+        require(requestedSize in 1..100) { "History page size must be between 1 and 100." }
+        val itemsJson = response.optJSONArray("items")
+            ?: throw IllegalStateException("The server returned a history page without its items.")
+        val items = parseHistoryItems(itemsJson)
+        val responsePage = response.getInt("page")
+        val responseSize = response.getInt("size")
+        val totalItems = response.getLong("totalItems")
+        val totalPages = response.getInt("totalPages")
+        val hasNext = response.getBoolean("hasNext")
+        require(responsePage == requestedPage && responseSize == requestedSize) {
+            "The server returned a different history page than requested."
+        }
+        require(totalItems >= 0L && totalPages >= 0) {
+            "The server returned an invalid history total."
+        }
+        val expectedTotalPages = if (totalItems == 0L) 0 else
+            ((totalItems + responseSize - 1L) / responseSize).toInt()
+        require(totalPages == expectedTotalPages && hasNext == (responsePage + 1 < totalPages)) {
+            "The server returned inconsistent history pagination."
+        }
+        val offset = responsePage.toLong() * responseSize
+        val expectedItemCount = if (offset >= totalItems) 0 else
+            minOf(responseSize.toLong(), totalItems - offset).toInt()
+        require(items.size == expectedItemCount) {
+            "The server returned an incomplete history page."
+        }
+        return CustomerHistoryPage(
+            items = items,
+            page = responsePage,
+            size = responseSize,
+            totalItems = totalItems,
+            totalPages = totalPages,
+            hasNext = hasNext
+        )
+    }
+
+    /** Reads one customer-owned batch (or standalone order) with all files and events in one snapshot. */
+    fun orderTracking(baseUrl: String, accessToken: String, orderKey: String): JSONObject {
+        val safeId = orderKey.trim()
+        require(safeId.matches(Regex("^[0-9a-fA-F-]{36}$"))) { "The print order identifier is invalid." }
+        return request(baseUrl, "/api/v1/customer/orders/$safeId/tracking", null, accessToken)
     }
 
     /** Reads the current state and audit timeline of a job owned by this signed-in customer. */
@@ -266,7 +376,14 @@ object CustomerAccountClient {
             val payload = stream?.use { input ->
                 BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).readText()
             }.orEmpty()
-            val json = if (payload.isBlank()) JSONObject() else JSONObject(payload)
+            // Reverse proxies and older API hosts may return an empty or HTML 404.
+            // Preserve the HTTP status so callers can select the documented legacy route.
+            val json = if (status in 200..299) {
+                if (payload.isBlank()) JSONObject() else JSONObject(payload)
+            } else {
+                runCatching { if (payload.isBlank()) JSONObject() else JSONObject(payload) }
+                    .getOrElse { JSONObject() }
+            }
             if (status !in 200..299) {
                 val fieldErrors = json.optJSONObject("errors")
                 val firstFieldError = fieldErrors?.keys()?.asSequence()

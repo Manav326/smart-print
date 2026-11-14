@@ -3,6 +3,8 @@
   "private": true,
   "packageManager": "pnpm@10.18.0",
   "scripts": {
+    "generate:upload-limits": "node scripts/generate-upload-limits.mjs",
+    "check:upload-limits": "node scripts/generate-upload-limits.mjs --check",
     "dev": "pnpm --filter @smart-print/portal dev",
     "build": "pnpm --filter @smart-print/portal build",
     "typecheck": "pnpm --filter @smart-print/portal typecheck",

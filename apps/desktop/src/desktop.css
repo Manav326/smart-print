@@ -424,3 +424,23 @@ html[data-theme="light"] body[data-app-shell="desktop"] .app-shell.light {
   --red: #b23d4d;
   --blue: #2d5fa8;
 }
+
+/* Windows desktop uses the same theme-aware in-app lockup as the portal. */
+body[data-app-shell="desktop"] .brand-lockup {
+  align-items: center;
+}
+body[data-app-shell="desktop"] .brand-lockup-full {
+  width: 214px;
+  max-width: 100%;
+}
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .brand-lockup .brand-lockup-full {
+  display: none !important;
+}
+body[data-app-shell="desktop"] .app-shell.sidebar-collapsed .brand-lockup .brand-mark-image {
+  display: block !important;
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+  border-radius: 0;
+  box-shadow: none;
+}

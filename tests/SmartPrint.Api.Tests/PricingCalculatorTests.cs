@@ -81,6 +81,22 @@ public sealed class PricingCalculatorTests
     }
 
     [Fact]
+    public void PhotoQuoteAndPageCountUseTheGeneratedPhotoQuantityLimit()
+    {
+        var maximum = UploadLimits.MaxPhotoCount;
+        var pricing = ConfiguredPricingWithPhotoRate(175);
+
+        Assert.Equal((long)maximum * 175, PricingCalculator.CalculatePhoto(maximum, "35x45", pricing));
+        Assert.Equal(4, PricingCalculator.PhotoPageCount(maximum, "35x45", 25));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PricingCalculator.CalculatePhoto(maximum + 1, "35x45", pricing));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PricingCalculator.PhotoPageCount(maximum + 1, "35x45", 25));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PricingCalculator.PhotoPageCount(maximum + 1, "35x45"));
+    }
+
+    [Fact]
     public void PhotoSheetCapacitiesMatchTheSupportedA4Layouts()
     {
         Assert.Equal(25, PricingCalculator.MaximumPhotosPerA4Sheet("35x45"));

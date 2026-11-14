@@ -5,6 +5,7 @@ import {
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import { useFileDownload } from "./download-manager";
 import ThemeToggleButton from "./ThemeToggleButton";
+import BrandLockup from "./BrandLockup";
 import "./public-landing.css";
 
 export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
@@ -16,11 +17,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
     <div className="sp-public">
       <header className="sp-public-header">
         <a className="sp-public-brand" href="/" aria-label="SmartPrint home">
-          <span className="sp-public-brand-mark"><Printer size={21} strokeWidth={2.2}/></span>
-          <span className="sp-public-brand-copy">
-            <strong>smart<span>print</span></strong>
-            <small>BY QUANTAEDGE</small>
-          </span>
+          <BrandLockup className="sp-public-brand-lockup" />
         </a>
         <nav className="sp-public-nav" aria-label="Main navigation">
           <a href="#how-it-works">How it works</a>
@@ -39,14 +36,14 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
       <main>
         <section className="sp-hero">
           <div className="sp-hero-copy">
-            <div className="sp-eyebrow"><span className="sp-eyebrow-dot"/> PRINTING, CONNECTED</div>
+            <div className="sp-eyebrow"><span className="sp-eyebrow-dot"/> SMART PRINT BY QUANTAEDGE</div>
             <h1>From their phone<br/>to <span>your printer.</span><br/>Without the back-and-forth.</h1>
-            <p className="sp-hero-lede">SmartPrint brings local print shops and their customers together. A quick QR scan starts a clear, secure journey from document to print.</p>
+            <p className="sp-hero-lede">SmartPrint brings local print shops and customers together. Scan the shop QR, choose copies and colour for each file, and send an organised request for the shop to review.</p>
             <div className="sp-hero-actions">
               <a className="sp-button-primary" href="/shop?mode=register">Bring your shop online <ArrowRight size={17}/></a>
               <a className="sp-button-quiet" href="#how-it-works">See how it works <ChevronRight size={17}/></a>
             </div>
-            <div className="sp-hero-trust"><span><ShieldCheck size={15}/> Shop-controlled print approval</span><span><LockKeyhole size={14}/> Secure job handoff</span></div>
+            <div className="sp-hero-trust"><span><ShieldCheck size={15}/> Shop-controlled print approval</span><span><LockKeyhole size={14}/> Shop-authorised job handoff</span></div>
           </div>
 
           <div className="sp-hero-art" aria-label="Illustration of a customer phone connecting to a print shop">
@@ -62,7 +59,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
               </div>
               <div className="sp-art-phone-caption"><Smartphone size={12}/> CUSTOMER</div>
             </div>
-            <div className="sp-art-connection"><span/><span/><span/><small>SECURE CONNECTION</small></div>
+            <div className="sp-art-connection"><span/><span/><span/><small>SHOP CONNECTION</small></div>
             <div className="sp-art-shop">
               <div className="sp-art-shop-head"><span className="sp-art-shop-icon"><Store size={16}/></span><div><b>Your print shop</b><small>Workspace connected</small></div><i/></div>
               <div className="sp-art-printer"><span><Printer size={25}/></span><div><b>Shop printer</b><small>Ready for the next job</small></div><em><Check size={12}/></em></div>
@@ -85,7 +82,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
           <div className="sp-section-heading">
             <div className="sp-eyebrow">A SIMPLE, CONNECTED FLOW</div>
             <h2>Three steps. One smoother print experience.</h2>
-            <p>No messaging files back and forth. No guessing what the customer needs printed.</p>
+            <p>No scattered file messages. No repeating copy and colour instructions for every document.</p>
           </div>
           <div className="sp-steps">
             <article className="sp-step-card">
@@ -129,7 +126,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
           <div className="sp-connection-copy">
             <div className="sp-eyebrow">BUILT AROUND YOUR SHOP</div>
             <h2>Your printers stay at your shop. Your workflow gets connected.</h2>
-            <p>The SmartPrint Windows Agent connects the shop computer to the workspace. It discovers installed printer queues and securely receives only jobs authorised by the shop.</p>
+            <p>The SmartPrint Windows Agent connects the shop computer to the workspace. It discovers installed printer queues and receives only jobs authorised by the shop.</p>
             <div className="sp-connection-points"><span><Check/> Your existing Windows printer setup</span><span><Check/> Shop-controlled job authorisation</span><span><Check/> Local or cloud-assisted document transfer</span></div>
           </div>
           <div className="sp-connection-visual"><div className="sp-device-card"><Monitor size={29}/><b>Shop computer</b><small>SmartPrint Agent</small><span className="sp-online"><i/> Connected</span></div><div className="sp-connection-line"><span/><span/><span/></div><div className="sp-device-printer"><Printer size={35}/><b>Installed printer</b><small>Shop's printer queue</small></div><div className="sp-secure-pill"><LockKeyhole size={12}/> Authorised connection</div></div>
@@ -182,9 +179,22 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
         </section>
       </main>
       <footer className="sp-public-footer">
-        <a className="sp-public-brand" href="/"><span className="sp-public-brand-mark"><Printer size={19}/></span><span className="sp-public-brand-copy"><strong>smart<span>print</span></strong><small>BY QUANTAEDGE</small></span></a>
+        <a className="sp-public-brand" href="/"><BrandLockup className="sp-public-brand-lockup" /></a>
         <span>© {new Date().getFullYear()} SmartPrint by QuantaEdge</span>
         <div><a href="#how-it-works">How it works</a><a href="#downloads">Downloads</a><a href="/shop">For print shops</a></div>
+      <nav className="sp-public-footer-resources" aria-label="Print shop resources">
+          <span>PRINT SHOP RESOURCES</span>
+          <a href="/features/">All features</a>
+          <a href="/whatsapp-printing-alternative/">Chat-based print orders</a>
+          <a href="/document-privacy-private-printing/">Document privacy</a>
+          <a href="/photo-id-printing/">Photo and ID printing</a>
+          <a href="/print-shop-software/">Print shop software</a>
+          <a href="/qr-code-print-ordering/">QR code ordering</a>
+          <a href="/print-job-management/">Print job management</a>
+          <a href="/windows-print-agent/">Windows Print Agent</a>
+          <a href="/smartprint-faq/">SmartPrint FAQ</a>
+          <a href="/qr-printing-for-xerox-shops/">QR printing for Xerox shops</a>
+        </nav>
       </footer>
     </div>
   );

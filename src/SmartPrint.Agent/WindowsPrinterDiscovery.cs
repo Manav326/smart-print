@@ -35,7 +35,7 @@ public sealed class WindowsPrinterDiscovery(ILogger<WindowsPrinterDiscovery> log
                     var offline = ReadBoolean(printer, "WorkOffline");
                     var printerStatus = ReadInteger(printer, "PrinterStatus");
                     var isDefault = ReadBoolean(printer, "Default");
-                    var outputMode = PrinterOutputModeRules.Detect(name, driver);
+                    var outputMode = PrinterOutputModeRules.Detect(name, driver, port);
 
                     var status = ResolvePublishedStatus(outputMode, printerStatus, offline);
 

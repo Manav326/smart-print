@@ -14,6 +14,108 @@ test("customer upload sends the selected file settings to both storage paths", (
   assert.match(api, /orientation: settings\.orientation/);
 });
 
+test("Private Printing relays only the encrypted print document and required quote metadata", () => {
+  const api = read("../src/api.ts");
+  const ticketStart = api.indexOf("async function requestCustomerLocalUploadTicket(");
+  const ticketEnd = api.indexOf("async function uploadCustomerLocalTicketViaCloud(", ticketStart);
+  assert.ok(ticketStart >= 0 && ticketEnd > ticketStart);
+  const ticket = api.slice(ticketStart, ticketEnd);
+  assert.match(ticket, /originalFileName: privatePrinting \? "private-document" \+ privateExtension/);
+  assert.match(ticket, /privatePrinting,/);
+  assert.match(ticket, /photoSizeCode: photoSettings\?\.sizeCode/);
+  assert.match(ticket, /photoCount: photoSettings\?\.photoCount/);
+  assert.match(ticket, /photosPerPage: photoSettings\?\.photosPerPage/);
+  assert.doesNotMatch(ticket, /editorSettingsJson|PhotoEditorSettings|cropX|cropY|zoom/);
+
+  const uploadStart = api.indexOf("export async function uploadCustomerDocumentLocally(");
+  const upload = api.slice(uploadStart);
+  assert.match(upload, /crypto\.subtle\.encrypt\(\{ name: "AES-GCM"/);
+  assert.match(upload, /form\.append\("file", new Blob\(\[ciphertext\].*private-document\.bin/);
+  const relayStart = upload.indexOf("if (privatePrinting) {", upload.indexOf("if (ticket.agentDeviceId === localAgent.agentDeviceId"));
+  const relayEnd = upload.indexOf("// A LAN response can be lost", relayStart);
+  assert.ok(relayStart >= 0 && relayEnd > relayStart);
+  const privateRelay = upload.slice(relayStart, relayEnd);
+  assert.match(privateRelay, /return uploadCustomerPrivateRelay\(/);
+  assert.doesNotMatch(privateRelay, /uploadCustomerLocalTicketViaCloud/);
+});
+
+test("standard Cloud-assisted Photo Studio uploads keep photo identity through the existing multipart form", () => {
+  const api = read("../src/api.ts");
+  const app = read("../src/App.tsx");
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const cloudStart = api.indexOf("export async function uploadCustomerDocument(");
+  const cloudEnd = api.indexOf("type CustomerLocalAgentApi", cloudStart);
+  const cloudUpload = api.slice(cloudStart, cloudEnd);
+  assert.ok(cloudStart >= 0 && cloudEnd > cloudStart);
+  assert.match(cloudUpload, /printKind: "DOCUMENT" \| "PHOTO" \| "ID_DOCUMENT" = "DOCUMENT"/);
+  assert.match(cloudUpload, /form\.append\("printKind", printKind\)/);
+  assert.match(cloudUpload, /form\.append\("photoSizeCode", photoSettings\.sizeCode\)/);
+  assert.match(cloudUpload, /form\.append\("photoCount", String\(photoSettings\.photoCount\)\)/);
+  assert.match(cloudUpload, /form\.append\("photosPerPage", String\(photoSettings\.photosPerPage \?\? 1\)\)/);
+  assert.match(app, /await uploadCustomerDocument\(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName\|\|undefined,settings,printKind,photoSettings\)/);
+  const routeStart = program.indexOf('publicApi.MapPost("/sessions/current/jobs"');
+  const routeEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"', routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  const route = program.slice(routeStart, routeEnd);
+  assert.match(route, /PhotoSheetPdfRules\.HasExactlyA4PortraitPages/);
+  assert.match(route, /PrintKind = requestedPrintKind/);
+  assert.match(route, /PhotoSizeCode = photoSizeCode/);
+  assert.match(route, /PhotoCount = photoCount \?\? 0/);
+  assert.match(route, /PhotosPerPage = photosPerPage/);
+  assert.match(route, /existing\.PhotoCount != \(photoCount \?\? 0\)/);
+});
+
+test("private Photo Studio vault operations are scoped to the dedicated native route", () => {
+  const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+  assert.match(main, /privatePhotoStudioPageOpen &&[\s\S]*isPhotoStudioPageUrl\(webView\?\.url\)/);
+  assert.match(main, /photoStudioLibraryCommand && !photoStudioRouteActive/);
+});
+
+test("saved Photo Studio sheets join the chooser selection and wait for the final Add action", () => {
+  const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+  const app = read("../src/App.tsx");
+  const start = main.indexOf("private fun addPhotoStudioPickerSection(parent: LinearLayout)");
+  const end = main.indexOf("\n    private fun ", start + 1);
+  assert.ok(start >= 0 && end > start);
+  const picker = main.slice(start, end);
+  assert.match(picker, /Nothing is attached until you confirm below/);
+  assert.match(picker, /pickerStudioSelectionButton\(file, "Photo Studio document", 88\)/);
+  assert.doesNotMatch(picker, /chooseFiles\(listOf\(file\)/);
+  assert.doesNotMatch(picker, /uploadCustomerDocument|dispatchShopPrintJob/);
+  assert.match(main, /Add selected files \(\$\{chooserSelection\.size\}\)/);
+  assert.match(main, /setChooserFileSelected\(file, !selected\)/);
+  assert.match(app, /privatePrinting\?"Upload "\+pendingFilesCount\+" file\(s\) securely"/);
+});
+
+test("successful upload releases decrypted ID and Photo Studio staging but preserves both encrypted libraries", () => {
+  const app = read("../src/App.tsx");
+  const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+  const photoStore = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/PhotoStudioStore.kt");
+  const idStore = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/IdStudioStore.kt");
+  assert.match(app, /setFiles\(\[\]\);[\s\S]*postSmartPrintNativeMessage\("releaseStudioUploadFiles"\)/);
+  assert.match(main, /data == "releaseStudioUploadFiles"/);
+  assert.match(main, /privateIdUploadTempFiles\.toList\(\)\.forEach\(idStudioStore::releaseTransientFile\)/);
+  assert.match(main, /privateIdUploadTempFiles\.clear\(\)/);
+  assert.match(main, /privatePhotoUploadTempFiles\.toList\(\)\.forEach\(photoStudioStore::releaseTransientFile\)/);
+  assert.match(main, /privatePhotoUploadTempFiles\.clear\(\)/);
+  const previewCleanupStart = main.indexOf("private fun clearCustomerUploadPdfPreviews()");
+  const previewCleanupEnd = main.indexOf("private fun cancelPicker()", previewCleanupStart);
+  assert.ok(previewCleanupStart >= 0 && previewCleanupEnd > previewCleanupStart);
+  const previewCleanup = main.slice(previewCleanupStart, previewCleanupEnd);
+  assert.match(previewCleanup, /photoStudioStore\.releaseTransientFile\(file\)/);
+  assert.match(previewCleanup, /if \(parent == previewDirectory\) file\.delete\(\)/);
+  assert.match(photoStore, /fun releaseTransientFile\(file: File\)/);
+  assert.match(idStore, /fun releaseTransientFile\(file: File\)/);
+  assert.match(photoStore, /fun deletePrepared\(file: File\)/);
+  assert.match(idStore, /fun deletePrepared\(file: File\)/);
+  const releaseStart = main.indexOf("private fun releaseStudioUploadFiles()");
+  const releaseEnd = main.indexOf("private fun clearCustomerUploadPdfPreviews()", releaseStart);
+  assert.ok(releaseStart >= 0 && releaseEnd > releaseStart);
+  const release = main.slice(releaseStart, releaseEnd);
+  assert.doesNotMatch(release, /deletePrepared|sourceFile|metadataFile/,
+    "Upload cleanup must not delete either encrypted Studio library entry.");
+});
+
 test("owner quote edits are sent through the existing print-job API", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
@@ -208,7 +310,7 @@ test("owner preview selects the persisted supported MIME type before the blob re
 test("customer web upload accepts drag and drop and contains no JavaScript browser alert dialogs",()=>{
  const app=read("../src/App.tsx");
  assert.match(app,/onDragOver=\{event=>\{if\(!batchLockedForPayment\)event\.preventDefault\(\);\}\}/);
- assert.match(app,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
+ assert.match(app,/onDrop=\{event=>\{event\.preventDefault\(\);if\(batchLockedForPayment\)return;(?:void\s+)?chooseFiles\(Array\.from\(event\.dataTransfer\.files\|\|\[\]\)\);\}\}/);
  assert.doesNotMatch(app,/window\.(alert|confirm|prompt)\s*\(/);
 });
 
@@ -216,9 +318,11 @@ test("photo studio's selected photo quantity creates one multi-page file with on
  const app=read("../src/App.tsx");
  const studio=read("../src/PhotoStudio.tsx");
  assert.match(studio,/const pages=Math\.ceil\(parsedCopies\/photosPerPage\)/);
- assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage,captionHeightMm,previewPages:jpegPages\.map/);
+ assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage,captionHeightMm,resolutionDpi:300,editorSettings,previewPages:jpegPages\.map/);
  assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
- assert.match(studio,/export type PreparedPhotoSheet = \{ file: File; sizeCode: string; photoCount: number; photosPerPage: number; captionHeightMm: number; previewPages\?: Blob\[\] \}/);
+ assert.match(studio,/export type PreparedPhotoSheet = \{/);
+ assert.match(studio,/resolutionDpi\?: number/);
+ assert.match(studio,/editorSettings\?: PhotoStudioEditorSettings/);
  assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
  assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
 });
@@ -252,19 +356,25 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  assert.match(studio,/source:\s*File/);
  assert.doesNotMatch(studio,/<input[^>]+type=["']file/i);
  assert.doesNotMatch(studio,/<a[^>]+download/i);
- assert.match(studio,/setDesktopContentProtection\(true\)/);
+ assert.match(studio,/const protect = mode !== "private-library"/);
+ assert.match(studio,/setDesktopContentProtection\(protect\)/);
  assert.match(studio,/previewProtection/);
+ assert.match(studio,/const actionLabel = mode === "private-library" \? "Save private sheet"/);
  const studioCss=read("../src/PhotoStudio.module.css");
  assert.match(studioCss,/\.previewProtection::before/);
- assert.match(studio,/mode === "shop" \? "Save sheet to this job" : "Prepare A4 sheet"/);
- assert.match(studio,/This prepared multi-page A4 photo PDF replaces it in your batch/);
+ assert.match(studio,/mode === "private-library" \? "Save private sheet"/);
+ assert.match(studio,/mode === "shop-create" \? "Create photo order"/);
+ assert.match(studio,/mode === "shop" \? "Save sheet to this job"/);
+ assert.match(studio,/: "Prepare A4 sheet"/);
+ assert.match(studio,/Prepared A4 replaces this upload; original stays untouched/);
+ assert.match(studio,/Replace the unpaid job photo PDF; approval and dispatch still apply/);
  assert.match(studio,/type="date"/);
  assert.match(studio,/formatDobForPrint/);
 });
 
 test("photo quantities support up to 100 copies and automatically paginate over A4 sheets",()=>{
  const studio=read("../src/PhotoStudio.tsx");
- assert.match(studio,/const MAX_PHOTO_COUNT = 100/);
+ assert.match(studio,/const MAX_PHOTO_COUNT = UPLOAD_LIMITS\.maxPhotoCount/);
  assert.match(studio,/const maxCopies=MAX_PHOTO_COUNT/);
  assert.match(studio,/const sheetCount = Math\.ceil\(copies \/ photosPerPage\)/);
  assert.match(studio,/Photos per A4 page/);
@@ -281,7 +391,9 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.match(route,/IsShopOwner\(principal\)/);
  assert.match(route,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
  assert.match(route,/document\.StorageMode, "CLOUD"/);
- assert.match(route,/document\.MediaType is not \("image\/jpeg" or "image\/png"\)/);
+ assert.match(route,/var photoSourceMediaType = document\.PhotoSourceMediaType \?\? document\.MediaType/);
+ assert.match(route,/photoSourceMediaType is not \("image\/jpeg" or "image\/png"\)/);
+ assert.match(route,/if \(job\.PrivatePrinting\)/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
  assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
  assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
@@ -304,10 +416,25 @@ test("customer photo previews show the source image and branded prepared pages w
  assert.doesNotMatch(preview,/photoSettingsByFileFingerprint\\[[^\\]]+\\]\\?<iframe/);
 });
 
+test("customer Photo Studio uploads the prepared PDF, not a second raw-photo copy or editor-settings payload",()=>{
+ const app=read("../src/App.tsx");
+ const start=app.indexOf("function applyPhotoSheets(");
+ const end=app.indexOf("function openPhotoStudio(",start);
+ assert.ok(start>=0&&end>start);
+ const flow=app.slice(start,end);
+ assert.match(flow,/const generated=sheets\.map\(sheet=>sheet\.file\),nextFiles=\[\.\.\.files\.slice\(0,index\),\.\.\.generated,\.\.\.files\.slice\(index\+1\)\]/);
+ assert.match(flow,/delete photos\[photoStudioSourceFingerprint\]/);
+ assert.match(flow,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
+ assert.match(flow,/setPhotoStudioSource\(null\)/);
+ assert.doesNotMatch(flow,/editorSettings|textLayers/);
+});
+
 test("the exact same Photo Studio is opened from the shop image review",()=>{
  const app=read("../src/App.tsx");
- assert.match(app,/setShopPhotoStudio\(\{source,job:preview\.job,returnPreview\}\)/);
- assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
+ assert.match(app,/openShopPhotoStudioForJob\(preview\.job,preview\)/);
+ assert.match(app,/setShopPhotoStudio\(\{source,job,initialSettings,returnPreview\}\)/);
+ assert.match(app,/if\(editor\.job\.privatePrinting \|\| !editor\.job\.photoSourceAvailable\)/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage,JSON\.stringify\(sheet\.editorSettings\?\?\{\}\)\)/);
  assert.match(app,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
  assert.match(app,/Enhance photo for printing/);
 });
@@ -317,7 +444,9 @@ test("native Windows content capture protection covers the photo editor and imag
  const app=read("../src/App.tsx");
  const bridge=read("../src/desktop-bridge.ts");
  const permissions=JSON.parse(read("../../desktop/src-tauri/capabilities/default.json"));
- assert.match(studio,/setDesktopContentProtection\(true\)/);
+ assert.match(studio,/const protect = mode !== "private-library"/);
+ assert.match(studio,/setDesktopContentProtection\(protect\)/);
+ assert.match(studio,/previewProtection/);
  assert.match(app,/setDesktopContentProtection\(true\)/);
  assert.match(bridge,/getCurrentWindow\(\)\.setContentProtected\(enabled\)/);
  assert.ok(permissions.permissions.includes("core:window:allow-set-content-protected"));
@@ -329,7 +458,7 @@ test("shop owner can open the same editor for cloud and local Agent images",()=>
  const api=read("../src/api.ts");
  assert.match(app,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
  assert.match(app,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
- assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage\)/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage,JSON\.stringify\(sheet\.editorSettings\?\?\{\}\)\)/);
  assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
  assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
 });
@@ -345,6 +474,11 @@ test("local photo revisions use a purpose-bound grant and preserve local storage
  assert.match(program,/document\.StorageMode = previousStorageMode/);
  assert.match(program,/ActorId = grant\.ActorUserId/);
  assert.match(agent,/X-Print-Photo-Revision-Grant/);
+ const localRevisionStart=agent.indexOf('app.MapPost("/api/v1/local/documents/{jobId:guid}/photo-revision"');
+ const privateGuard=agent.indexOf("if (entry?.PrivatePrinting == true)",localRevisionStart);
+ const formRead=agent.indexOf("context.Request.ReadFormAsync(ct)",localRevisionStart);
+ assert.ok(localRevisionStart>=0&&privateGuard>localRevisionStart&&formRead>privateGuard,
+   "Private Printing must be rejected before the local Agent reads the prepared PDF or editor-settings form payload.");
  assert.match(agent,/ReplaceStagedPhotoDocumentAsync/);
  assert.match(agent,/local-document-photo-revisions\/\{jobId\}\/complete/);
  assert.match(queue,/await commitServerRevisionAsync\(\)/);
@@ -364,7 +498,8 @@ test("local photo revision rejects paid, handed-off and changed originals",()=>{
  assert.match(route,/document\.StorageMode != "LOCAL_AGENT"/);
  assert.match(route,/document\.AgentDeviceId != device\.Id/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
- assert.match(route,/document\.Sha256, request\.ExpectedOriginalSha256/);
+ assert.match(route,/retainedSourceSha256, request\.ExpectedOriginalSha256/);
+ assert.match(route,/retainedSourceSizeBytes != request\.ExpectedOriginalSizeBytes/);
  assert.match(route,/request\.PhotosPerPage > PricingCalculator\.MaximumPhotosPerA4Sheet/);
  assert.match(route,/request\.PageCount != PricingCalculator\.PhotoPageCount\(request\.PhotoCount, request\.PhotoSizeCode, request\.PhotosPerPage\)/);
 });
@@ -389,12 +524,16 @@ test("shop-owner Photo Studio supports cloud and local storage without changing 
 test("native Android protects Photo Studio from screenshots through the origin-pinned WebView bridge",()=>{
  const studio=read("../src/PhotoStudio.tsx");
  const activity=read("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+ assert.match(studio,/mode === "private-library"/);
  assert.match(studio,/postMessage\("setSensitivePreview\|on"\)/);
  assert.match(studio,/postMessage\("setSensitivePreview\|off"\)/);
  assert.match(activity,/sourceOrigin\.scheme == trustedPage\.scheme/);
  assert.match(activity,/sourceOrigin\.host\.equals\(trustedPage\.host, true\)/);
  assert.match(activity,/isMainFrame/);
  assert.match(activity,/parts\[0\] == "setSensitivePreview"/);
+ assert.match(activity,/photoStudioCaptureAllowed/);
+ assert.match(activity,/privateStudioCaptureBlocked/);
+ assert.match(activity,/idCaptureBlocked = idStudioScreenOpen/);
  assert.match(activity,/window\.addFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
  assert.match(activity,/window\.clearFlags\(WindowManager\.LayoutParams\.FLAG_SECURE\)/);
 });
@@ -417,6 +556,58 @@ test("native customer account identity accompanies QR session renewal",()=>{
  assert.match(renewal,/headers: \{ "X-Print-Session": sessionToken, \.\.\.await nativeCustomerAuthorizationHeaders\(\) \}/);
 });
 
+
+test("local shop Photo Studio revision completion commits the exact authorized price snapshot",()=>{
+  const agent=read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
+  const agentModels=read("../../../src/SmartPrint.Agent/AgentQueueModels.cs");
+  const program=read("../../../src/SmartPrint.Api/Program.cs");
+  assert.match(agent,/ExpectedQuotedAmountMinor = authorization\.QuotedAmountMinor/);
+  assert.match(agent,/ExpectedPricingVersion = authorization\.PricingVersion/);
+  assert.match(agent,/JsonContent\.Create\(completionRequest\)/);
+  assert.match(agentModels,/long\? ExpectedQuotedAmountMinor = null/);
+  assert.match(agentModels,/int\? ExpectedPricingVersion = null/);
+  const start=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"');
+  const end=program.indexOf("\nagentApi.",start+30);
+  assert.ok(start>=0&&end>start);
+  const complete=program.slice(start,end);
+  assert.match(complete,/expectedQuotedAmountMinor <= 0/);
+  assert.match(complete,/pricing\.Version != expectedPricingVersion \|\| amount != expectedQuotedAmountMinor/);
+  assert.match(complete,/photo_revision_pricing_changed/);
+  assert.match(complete,/job\.QuotedAmountMinor == request\.ExpectedQuotedAmountMinor/);
+  assert.match(complete,/job\.PricingVersion == request\.ExpectedPricingVersion/);
+});
+
+test("local shop Photo Studio revision authorization and completion enforce the A4 raster contract",()=>{
+  const program=read("../../../src/SmartPrint.Api/Program.cs");
+  const authorizeStart=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize"');
+  const authorizeEnd=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"',authorizeStart);
+  const completeStart=authorizeEnd;
+  const completeEnd=program.indexOf("\nagentApi.MapPost(",completeStart+30);
+  assert.ok(authorizeStart>=0&&authorizeEnd>authorizeStart);
+  assert.ok(completeStart>=0&&completeEnd>completeStart);
+  const authorize=program.slice(authorizeStart,authorizeEnd);
+  const complete=program.slice(completeStart,completeEnd);
+  assert.match(authorize,/request\.PageSizesJson\.Length > 64_000/);
+  assert.match(authorize,/PhotoSheetPdfRules\.HasExactlyA4PortraitPages\(request\.PageSizesJson, request\.PageCount\)/);
+  assert.match(complete,/PhotoSheetPdfRules\.HasExactlyA4PortraitPages\(request\.PageSizesJson, request\.PageCount\)/);
+  assert.match(authorize,/photo_sheet_layout_invalid/);
+  assert.match(complete,/photo_sheet_layout_invalid/);
+});
+
+test("cloud shop Photo Studio revisions validate complete A4 raster geometry before replacing the saved job",()=>{
+  const program=read("../../../src/SmartPrint.Api/Program.cs");
+  const start=program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision"');
+  const end=program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/preview-source"',start);
+  assert.ok(start>=0&&end>start);
+  const endpoint=program.slice(start,end);
+  const validation=endpoint.indexOf("PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount)");
+  const replacement=endpoint.indexOf("document.StorageKey = stored.StorageKey");
+  assert.match(endpoint,/string\.Equals\(stored\.Analysis\.MediaType, "application\/pdf"/);
+  assert.ok(validation>=0&&replacement>validation,
+    "The new PDF's A4 pages and full-page photo raster must be verified before replacing the existing document.");
+  assert.match(endpoint,/await storage\.DeleteAsync\(stored\.StorageKey\);[\s\S]*?await transaction\.RollbackAsync\(ct\)/);
+  assert.match(endpoint,/The replacement Photo Studio PDF must contain exactly/);
+});
 
 test("shop-originated photo orders use their own tenant-owned job and the shared Photo Studio",()=>{
  const app=read("../src/App.tsx");

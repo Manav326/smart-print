@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">Smart Print app icon</title>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9B8CFF"/>
+      <stop offset=".52" stop-color="#7258E8"/>
+      <stop offset="1" stop-color="#4B2CBF"/>
+    </linearGradient>
+    <linearGradient id="paper" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#EEEAFE"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="60" fill="url(#bg)"/>
+  <path d="M55 171 C53 190 68 205 91 211 C133 222 183 205 204 177" fill="none" stroke="#D7D0FF" stroke-width="10" stroke-linecap="round"/>
+  <path d="M91 52 H148 L166 70 V119 H91 Z" fill="url(#paper)"/>
+  <path d="M148 52 V70 H166" fill="none" stroke="#CFC7FF" stroke-width="5" stroke-linejoin="round"/>
+  <rect x="48" y="91" width="160" height="85" rx="24" fill="#FFFFFF"/>
+  <path d="M78 113 H160" fill="none" stroke="#7258E8" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="182" cy="132" r="6" fill="#9B8CFF"/>
+  <path d="M77 151 H179 V204 H77 Z" fill="#F8F7FF"/>
+  <path d="M98 169 H158 M98 185 H148" fill="none" stroke="#7258E8" stroke-width="8" stroke-linecap="round"/>
+</svg>

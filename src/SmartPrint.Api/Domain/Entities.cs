@@ -36,16 +36,17 @@ public sealed class PlatformOperationalSettings
 
     public int Id { get; set; } = SingletonIdValue;
     public int TrialMaxMonthlyPrintJobs { get; set; } = DefaultTrialMaxMonthlyPrintJobs;
-    public int CloudCompletedDocumentRetentionDays { get; set; } = 30;
-    public int AgentCompletedDocumentRetentionDays { get; set; } = 30;
+    public int CloudCompletedDocumentRetentionDays { get; set; } = 7;
+    public int AgentCompletedDocumentRetentionDays { get; set; } = 7;
     public int AbandonedDocumentRetentionDays { get; set; } = 30;
     public int PendingLocalUploadRetentionDays { get; set; } = 30;
     public int ExpiredUploadTicketRetentionDays { get; set; } = 7;
     public int EmptyCustomerSessionRetentionDays { get; set; } = 90;
     public int StaleRefreshTokenRetentionDays { get; set; } = 30;
-    public int ApiRetentionSweepHours { get; set; } = 24;
-    public int AgentRetentionSweepHours { get; set; } = 6;
+    public int ApiRetentionSweepHours { get; set; } = 1;
+    public int AgentRetentionSweepHours { get; set; } = 1;
     public bool AllowPaidJobClaimsWhenSuspended { get; set; } = true;
+    public bool AllowPrivatePrintingVirtualOutput { get; set; }
     public Guid? UpdatedByUserId { get; set; }
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
@@ -267,6 +268,9 @@ public sealed class PrintJob
     public Guid? CustomerSessionId { get; set; }
     public Guid? CustomerUserId { get; set; }
     public string Origin { get; set; } = "CUSTOMER_QR";
+    public bool PrivatePrinting { get; set; }
+    public DateTimeOffset? PrivateDocumentPurgeRequestedUtc { get; set; }
+    public DateTimeOffset? PrivateDocumentPurgedUtc { get; set; }
     public string? RecipientName { get; set; }
     public string? RecipientPhone { get; set; }
     public Guid? PrinterDeviceId { get; set; }
@@ -337,6 +341,15 @@ public sealed class PrintDocument
     public string StorageKey { get; set; } = string.Empty;
     public string StorageMode { get; set; } = "CLOUD";
     public Guid? AgentDeviceId { get; set; }
+    // A shop may replace an uploaded image with a prepared A4 PDF more than
+    // once before payment. Keep the first source image as a separate protected
+    // original so every later edit starts from the same unmodified pixels.
+    public string? PhotoSourceStorageKey { get; set; }
+    public string? PhotoSourceOriginalFileName { get; set; }
+    public string? PhotoSourceMediaType { get; set; }
+    public string? PhotoSourceSha256 { get; set; }
+    public long? PhotoSourceSizeBytes { get; set; }
+    public string? PhotoEditorSettingsJson { get; set; }
     public string PageSizesJson { get; set; } = "[]";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? PurgedUtc { get; set; }
@@ -345,6 +358,11 @@ public sealed class PrintDocument
 public sealed class LocalPrintUploadTicket
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public bool PrivatePrinting { get; set; }
+    public string PrintKind { get; set; } = "DOCUMENT";
+    public string? PhotoSizeCode { get; set; }
+    public int? PhotoCount { get; set; }
+    public int? PhotosPerPage { get; set; }
     public Guid TenantId { get; set; }
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }
@@ -372,6 +390,13 @@ public sealed class LocalPrintUploadTicket
     public DateTimeOffset? ClaimedUtc { get; set; }
     public DateTimeOffset? ClaimLeaseExpiresUtc { get; set; }
     public DateTimeOffset? CompletedUtc { get; set; }
+    public string? PrivateRelayStorageKey { get; set; }
+    public string? PrivateRelayWrappedKey { get; set; }
+    public string? PrivateRelayIv { get; set; }
+    public DateTimeOffset? PrivateRelayUploadedUtc { get; set; }
+    public DateTimeOffset? PrivateRelayFailedUtc { get; set; }
+    public string? PrivateRelayFailureCode { get; set; }
+    public string? PrivateRelayFailureMessage { get; set; }
 }
 
 
@@ -397,6 +422,7 @@ public sealed class AgentDevice
     public string FingerprintHash { get; set; } = string.Empty;
     public string SecretHash { get; set; } = string.Empty;
     public string LocalEndpointsJson { get; set; } = "[]";
+    public string? DocumentEncryptionPublicKey { get; set; }
     public string Status { get; set; } = "Online";
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSeenUtc { get; set; }

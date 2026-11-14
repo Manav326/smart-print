@@ -31,6 +31,7 @@ builder.Services.AddHttpClient("cloud", client =>
     AllowAutoRedirect = false
 });
 builder.Services.AddSingleton<AgentCredentialStore>();
+builder.Services.AddSingleton<AgentDocumentEncryptionKeyStore>();
 builder.Services.AddSingleton<WindowsDefenderDocumentThreatScanner>();
 builder.Services.AddSingleton<ILocalDocumentWorkerServiceStarter, WindowsLocalDocumentWorkerServiceStarter>();
 builder.Services.AddSingleton<WindowsLocalDocumentAnalyzer>();

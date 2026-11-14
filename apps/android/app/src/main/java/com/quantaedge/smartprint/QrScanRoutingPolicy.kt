@@ -14,17 +14,17 @@ internal enum class QrScanPurpose(
 ) {
     SHOP_CONNECTION(
         wireValue = "shop_connection",
-        eyebrow = "SHOP CONNECTION",
-        title = "Scan shop QR",
-        instruction = "Scan the SmartPrint QR displayed at the shop counter to connect.",
-        alignmentHint = "Align the shop QR inside the frame."
+        eyebrow = "SHOP QR",
+        title = "Scan Shop QR",
+        instruction = "Scan the Shop QR to send documents to this shop.",
+        alignmentHint = "Fit the Shop QR inside the frame."
     ),
     WIFI_READINESS(
         wireValue = "wifi_readiness",
-        eyebrow = "SHOP WI-FI CHECK",
-        title = "Scan Wi-Fi check QR",
-        instruction = "Scan the temporary phone-check QR shown on the shop computer.",
-        alignmentHint = "Align the phone-check QR inside the frame."
+        eyebrow = "WI-FI CHECK",
+        title = "Check Wi-Fi",
+        instruction = "Scan the Wi-Fi QR shown on the shop computer.",
+        alignmentHint = "Fit the Wi-Fi QR inside the frame."
     );
 
     companion object {
@@ -58,7 +58,7 @@ internal object QrScanRoutingPolicy {
                 QrScanRoute.ConnectToShop(link)
             } else {
                 QrScanRoute.Unsupported(
-                    "That isn't a shop connection QR. Scan the SmartPrint QR displayed at the shop counter."
+                    "This isn't a Shop QR. Choose the QR provided by the shop to send documents here."
                 )
             }
         }
@@ -68,7 +68,7 @@ internal object QrScanRoutingPolicy {
                 QrScanRoute.VerifyShopWifi(link)
             } else {
                 QrScanRoute.Unsupported(
-                    "That isn't a Wi-Fi check QR. Scan the temporary phone-check QR shown on the shop computer. Your current shop connection has not been changed."
+                    "This isn't a Wi-Fi QR. Choose the Wi-Fi QR shown on the shop computer. Your saved shop is unchanged."
                 )
             }
         }

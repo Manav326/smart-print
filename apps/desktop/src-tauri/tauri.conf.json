@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "SmartPrint by QuantaEdge",
+  "productName": "Smart Print",
   "version": "0.1.0",
   "identifier": "in.thinkwithsujeet.smartprint",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "SmartPrint by QuantaEdge",
+        "title": "Smart Print",
         "width": 1360,
         "height": 900,
         "minWidth": 1000,
@@ -26,15 +26,21 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' asset: http://asset.localhost http://tauri.localhost; img-src 'self' asset: http://asset.localhost http://tauri.localhost data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self'; connect-src ipc: http://ipc.localhost http://tauri.localhost https: http://127.0.0.1:17842"
+      "csp": "default-src 'self' asset: http://asset.localhost http://tauri.localhost; frame-src 'self' blob: asset: http://asset.localhost http://tauri.localhost; img-src 'self' asset: http://asset.localhost http://tauri.localhost data: blob: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; script-src 'self'; connect-src ipc: http://ipc.localhost http://tauri.localhost https: http://127.0.0.1:17842"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico"],
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ],
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper" }
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
     }
   }
 }

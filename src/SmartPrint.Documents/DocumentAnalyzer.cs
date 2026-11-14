@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using UglyToad.PdfPig;
+using StbImageSharp;
 
 namespace SmartPrint.Documents;
 
@@ -12,19 +13,49 @@ public sealed record DocumentAnalysis(
 public static class DocumentAnalyzer
 {
     private const int MaximumPages = 500;
+    private const ulong MaximumImagePixels = 50_000_000UL;
 
-    public static DocumentAnalysis Analyse(byte[] bytes, string extension)
+    public static string? IdentifyExtension(ReadOnlySpan<byte> bytes)
     {
+        ReadOnlySpan<byte> pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+        if (bytes.Length >= pngSignature.Length && bytes[..pngSignature.Length].SequenceEqual(pngSignature))
+            return ".png";
+        if (bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF)
+            return ".jpg";
+
+        var searchLength = Math.Min(bytes.Length, 1028);
+        var lastHeaderOffset = Math.Min(1023, searchLength - 5);
+        for (var offset = 0; offset <= lastHeaderOffset; offset++)
+        {
+            if (bytes.Slice(offset, 5).SequenceEqual("%PDF-"u8))
+                return ".pdf";
+        }
+        return null;
+    }
+
+    public static DocumentAnalysis Analyse(byte[] bytes, string filenameExtension = "")
+    {
+        // File names are display labels. Format selection always comes from bytes.
+        var extension = IdentifyExtension(bytes) ??
+            throw new DocumentValidationException("The file content is not a supported PDF, JPEG or PNG document.");
+        // Preserve the established .jpeg storage/ticket alias when it agrees with
+        // the detected JPEG signature; other mismatched extensions are ignored.
+        if (extension == ".jpg" && string.Equals(filenameExtension, ".jpeg", StringComparison.OrdinalIgnoreCase))
+            extension = ".jpeg";
+
         if (extension == ".pdf")
         {
-            if (bytes.Length < 8 || !bytes.AsSpan(0, 5).SequenceEqual("%PDF-"u8))
-            {
-                throw new DocumentValidationException("The file extension says PDF, but the file signature is invalid.");
-            }
+            if (bytes.Length < 8)
+                throw new DocumentValidationException("The PDF file is incomplete.");
 
             try
             {
                 using var document = PdfDocument.Open(new MemoryStream(bytes, writable: false));
+                if (document.NumberOfPages is <= 0 or > MaximumPages)
+                {
+                    throw new DocumentValidationException($"PDFs must contain between 1 and {MaximumPages} pages.");
+                }
+
                 var pages = document.GetPages().Select(page =>
                 {
                     var images = page.GetImages().Select(image =>
@@ -52,10 +83,6 @@ public static class DocumentAnalyzer
                     };
                 }).ToArray();
 
-                if (document.NumberOfPages is <= 0 or > MaximumPages)
-                {
-                    throw new DocumentValidationException($"PDFs must contain between 1 and {MaximumPages} pages.");
-                }
                 return new DocumentAnalysis(document.NumberOfPages, System.Text.Json.JsonSerializer.Serialize(pages), "application/pdf", ".pdf");
             }
             catch (DocumentValidationException)
@@ -80,7 +107,7 @@ public static class DocumentAnalyzer
             var width = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(16, 4));
             var height = BinaryPrimitives.ReadUInt32BigEndian(bytes.AsSpan(20, 4));
             ValidateImageDimensions(width, height);
-            return new DocumentAnalysis(1, ImagePageSize(width, height), "image/png", ".png");
+            return DecodeAndAnalyseImage(bytes, width, height, "image/png", ".png");
         }
 
         if (bytes.Length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8 || bytes[2] != 0xFF)
@@ -90,7 +117,7 @@ public static class DocumentAnalyzer
 
         var dimensions = ReadJpegDimensions(bytes);
         ValidateImageDimensions(dimensions.Width, dimensions.Height);
-        return new DocumentAnalysis(1, ImagePageSize(dimensions.Width, dimensions.Height), "image/jpeg", extension);
+        return DecodeAndAnalyseImage(bytes, dimensions.Width, dimensions.Height, "image/jpeg", extension);
     }
 
     private static (uint Width, uint Height) ReadJpegDimensions(byte[] bytes)
@@ -124,9 +151,48 @@ public static class DocumentAnalyzer
         throw new DocumentValidationException("The JPEG image dimensions could not be read.");
     }
 
+    private static DocumentAnalysis DecodeAndAnalyseImage(
+        byte[] bytes, uint expectedWidth, uint expectedHeight, string mediaType, string extension)
+    {
+        try
+        {
+            // Header checks are cheap, but cannot prove that compressed pixel data
+            // is complete. Decode the entire single-frame image before it becomes
+            // a payable print job so truncated/corrupt files cannot pass preflight.
+            using var infoStream = new MemoryStream(bytes, writable: false);
+            var imageInfo = ImageInfo.FromStream(infoStream);
+            if (imageInfo is null)
+                throw new DocumentValidationException("The image format could not be identified.");
+            var identified = imageInfo.Value;
+
+            if (identified.Width != expectedWidth || identified.Height != expectedHeight)
+                throw new DocumentValidationException("The image dimensions do not match its file header.");
+
+            var decoded = ImageResult.FromMemory(bytes, ColorComponents.RedGreenBlueAlpha);
+            var expectedDecodedBytes = checked((long)identified.Width * identified.Height * 4);
+            if (decoded.Width != identified.Width || decoded.Height != identified.Height ||
+                decoded.Data.LongLength != expectedDecodedBytes)
+                throw new DocumentValidationException("The image pixel data is incomplete or invalid.");
+
+            return new DocumentAnalysis(
+                1,
+                ImagePageSize((uint)decoded.Width, (uint)decoded.Height),
+                mediaType,
+                extension);
+        }
+        catch (DocumentValidationException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            throw new DocumentValidationException("The image is damaged, incomplete or could not be fully decoded.");
+        }
+    }
+
     private static void ValidateImageDimensions(uint width, uint height)
     {
-        if (width == 0 || height == 0 || (ulong)width * height > 100_000_000UL)
+        if (width == 0 || height == 0 || (ulong)width * height > MaximumImagePixels)
         {
             throw new DocumentValidationException("The image dimensions are invalid or too large to process safely.");
         }

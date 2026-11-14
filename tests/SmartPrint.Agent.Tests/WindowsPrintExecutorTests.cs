@@ -160,6 +160,123 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
             CryptographicOperations.ZeroMemory(bytes);
             if (Directory.Exists(outputDirectory))
                 Directory.Delete(outputDirectory, recursive: true);
+
+        }
+    }
+
+    [Fact]
+    public async Task PrivateDevelopmentVirtualOutputUsesMicrosoftDriverThenPurgesOnlyTheSource()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Assert.True(OperatingSystem.IsWindows(), "The private virtual-output integration test requires a Windows runner.");
+        using var bitmap = new SkiaSharp.SKBitmap(180, 240);
+        bitmap.Erase(SkiaSharp.SKColors.White);
+        using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+        using (var paint = new SkiaSharp.SKPaint { Color = new SkiaSharp.SKColor(32, 96, 180), IsAntialias = true })
+            canvas.DrawRect(new SkiaSharp.SKRect(18, 18, 162, 222), paint);
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        var sourceBytes = encoded.ToArray();
+        var root = Path.Combine(Path.GetTempPath(), "smartprint-private-virtual-spooler-" + Guid.NewGuid().ToString("N"));
+        var jobId = Guid.NewGuid();
+        var sourceHash = Convert.ToHexString(SHA256.HashData(sourceBytes)).ToLowerInvariant();
+        var job = new AgentClaimedJob(
+            jobId, "SP-PRIVATE-TEST-OUTPUT", "LOCAL_QUEUE_CLAIMED", 1, 1,
+            "Colour", "A4", false, "INR", 100, Guid.NewGuid(),
+            "Microsoft Print to PDF", "Microsoft Print to PDF",
+            "private-document.png", "image/png", sourceBytes.LongLength, sourceHash,
+            DateTimeOffset.UtcNow.AddMinutes(3))
+        {
+            PrivatePrinting = true,
+            StorageMode = "LOCAL_AGENT",
+            OutputMode = PrinterOutputModeRules.PdfExport
+        };
+
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var staged = await store.EnqueueAsync(job, sourceBytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(jobId, CancellationToken.None);
+            var testDirectory = store.EnsurePrivateTestOutputDirectory();
+            var outputPath = Path.Combine(testDirectory, jobId.ToString("N") + ".pdf");
+            await store.MarkPdfExportStartedAsync(jobId, outputPath, CancellationToken.None);
+
+            var export = await new WindowsPrintExecutor().ExportPdfUsingWindowsPrinterOrFallbackAsync(
+                store.Find(jobId)!,
+                sourceBytes,
+                outputPath,
+                testDirectory,
+                CancellationToken.None);
+
+            Assert.False(export.UsedFallback, "Private test output must exercise Microsoft's actual virtual-printer driver.");
+            Assert.Equal("MICROSOFT_PRINT_TO_PDF", export.Method);
+            Assert.True(export.SpoolerJobId is > 0, "The virtual printer did not return a Windows spooler job ID.");
+            Assert.Equal(outputPath, export.Receipt.OutputPath);
+
+            var deadline = DateTime.UtcNow.AddSeconds(45);
+            byte[]? outputBytes = null;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (File.Exists(outputPath))
+                {
+                    try
+                    {
+                        var candidate = await File.ReadAllBytesAsync(outputPath);
+                        if (candidate.Length > 1000 &&
+                            candidate.AsSpan(0, 5).SequenceEqual("%PDF-"u8) &&
+                            System.Text.Encoding.ASCII.GetString(candidate).Contains("%%EOF", StringComparison.Ordinal))
+                        {
+                            outputBytes = candidate;
+                            break;
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        // The Microsoft print processor may still be finalising the PDF.
+                    }
+                }
+                await Task.Delay(500);
+            }
+
+            Assert.NotNull(outputBytes);
+            Assert.True(outputBytes!.Length > 1000);
+            await store.MarkPdfExportedAsync(jobId, export.Receipt, CancellationToken.None);
+            await store.MarkPdfExportReceiptReportedAsync(jobId, CancellationToken.None);
+
+            var reported = store.Find(jobId)!;
+            Assert.Equal("PDF_EXPORT_REPORTED", reported.State);
+            Assert.True(reported.PrivatePrinting);
+            Assert.True(File.Exists(staged.DocumentPath),
+                "The private source must remain until the server authorises the test-output purge.");
+            Assert.True(File.Exists(outputPath), "The verified test PDF must be retained separately from the source.");
+
+            // This is the Agent-side action after the API accepts the verified
+            // TEST_VIRTUAL receipt and requests private-source deletion.
+            await store.PurgePrivateSourceAfterConfirmedOutputAsync(jobId, CancellationToken.None);
+            var purged = store.Find(jobId)!;
+            Assert.Equal("TEST_OUTPUT_SOURCE_PURGED", purged.State);
+            Assert.True(purged.PrivatePurgePending);
+            Assert.Equal(string.Empty, purged.DocumentPath);
+            Assert.Equal(string.Empty, purged.Sha256);
+            Assert.Equal(0, purged.SizeBytes);
+            Assert.False(File.Exists(staged.DocumentPath));
+            Assert.True(File.Exists(outputPath));
+
+            await store.MarkPrivatePurgeAcknowledgedAsync(jobId, CancellationToken.None);
+            Assert.False(store.Find(jobId)!.PrivatePurgePending);
+            Assert.True(File.Exists(outputPath), "Purging the source must not delete the retained QA PDF.");
+            Assert.Equal("TEST_OUTPUT_SOURCE_PURGED", store.Find(jobId)!.State);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(sourceBytes);
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
         }
     }
 }

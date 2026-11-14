@@ -98,7 +98,19 @@ public sealed class DocumentRetentionWorker(
 
                 try
                 {
+                    var photoSourceStorageKey = candidate.Document.PhotoSourceStorageKey;
+                    if (!string.IsNullOrWhiteSpace(photoSourceStorageKey) &&
+                        !string.Equals(photoSourceStorageKey, candidate.Document.StorageKey, StringComparison.Ordinal))
+                    {
+                        await storage.DeleteAsync(photoSourceStorageKey);
+                    }
                     await storage.DeleteAsync(candidate.Document.StorageKey);
+                    candidate.Document.PhotoSourceStorageKey = null;
+                    candidate.Document.PhotoSourceOriginalFileName = null;
+                    candidate.Document.PhotoSourceMediaType = null;
+                    candidate.Document.PhotoSourceSha256 = null;
+                    candidate.Document.PhotoSourceSizeBytes = null;
+                    candidate.Document.PhotoEditorSettingsJson = null;
                     candidate.Document.PurgedUtc = now;
                     await db.SaveChangesAsync(cancellationToken);
                     purgedCount++;
@@ -117,6 +129,47 @@ public sealed class DocumentRetentionWorker(
 
             if (hadStorageFailure) break;
         }
+
+        // Local Agent files are deleted by the Agent's own seven-day queue
+        // retention. Clear the server-side photo source hashes and editor JSON on
+        // the same schedule so DOB/name overlays are not retained in job metadata.
+        var expiredLocalPhotoMetadata = await (
+            from document in db.PrintDocuments
+            join job in db.PrintJobs
+                on new { document.TenantId, PrintJobId = document.PrintJobId }
+                equals new { job.TenantId, PrintJobId = job.Id }
+            let completedUtc = job.OutputType == "PDF_EXPORT" ? job.OutputCompletedUtc : job.OutputConfirmedUtc
+            let hasFinancialHold = db.PrintPayments.Any(payment =>
+                payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
+                (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+                 payment.Status == "CUSTOMER_REPORTED" ||
+                 payment.Status == "CASH_AWAITING_PAYMENT" ||
+                 ((payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
+                  payment.RefundedAmountMinor < payment.AmountMinor)))
+            where document.StorageMode == "LOCAL_AGENT" &&
+                  document.PurgedUtc == null &&
+                  (document.PhotoSourceSha256 != null || document.PhotoEditorSettingsJson != null) &&
+                  ((job.Status == "COMPLETED" && completedUtc != null && completedUtc <= completedCutoff) ||
+                   ((job.Status == "REJECTED" || job.Status == "PAYMENT_REJECTED" || job.Status == "QUOTE_EXPIRED" || job.Status == "REFUNDED") &&
+                    job.OutputConfirmedUtc == null && job.OutputCompletedUtc == null &&
+                    job.UpdatedUtc <= abandonedCutoff && !hasFinancialHold))
+            orderby job.UpdatedUtc, document.Id
+            select document)
+            .Take(100)
+            .ToListAsync(cancellationToken);
+
+        foreach (var document in expiredLocalPhotoMetadata)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            document.PhotoSourceStorageKey = null;
+            document.PhotoSourceOriginalFileName = null;
+            document.PhotoSourceMediaType = null;
+            document.PhotoSourceSha256 = null;
+            document.PhotoSourceSizeBytes = null;
+            document.PhotoEditorSettingsJson = null;
+        }
+        if (expiredLocalPhotoMetadata.Count > 0)
+            await db.SaveChangesAsync(cancellationToken);
 
         var expiredTicketCutoff = now.AddDays(-settings.ExpiredUploadTicketRetentionDays);
         var removedTickets = await db.LocalPrintUploadTickets

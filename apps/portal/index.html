@@ -1,30 +1,36 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f4f6fa" />
-    <script>
-      (() => {
-        let theme = "light";
-        try {
-          theme = localStorage.getItem("qrtoprint.theme") === "dark" ? "dark" : "light";
-        } catch {}
-        document.documentElement.dataset.theme = theme;
-        document.documentElement.style.colorScheme = theme;
-        const color = document.querySelector('meta[name="theme-color"]');
-        if (color) color.content = theme === "dark" ? "#0c0f16" : "#f4f6fa";
-      })();
-    </script>
-    <meta name="description" content="SmartPrint connects local print shops and customers. Scan a shop QR code, send documents and manage print jobs in one seamless workflow." />
-    <meta property="og:title" content="SmartPrint — From their phone to your printer" />
-    <meta property="og:description" content="A simpler way for customers and local print shops to connect and print." />
-    <meta property="og:type" content="website" />
-    <link rel="icon" type="image/svg+xml" href="/smartprint-mark.svg" />
-    <title>SmartPrint — From their phone to your printer</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<html lang="en-IN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f4f6fa">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta name="description" content="Official Smart Print by QuantaEdge website for print shops. Manage QR document requests, per-file settings, shop review, quotes and approved printer jobs.">
+<meta name="author" content="SmartPrint by QuantaEdge">
+<link rel="canonical" href="__SMARTPRINT_ORIGIN__/">
+<meta property="og:site_name" content="SmartPrint by QuantaEdge"><meta property="og:type" content="website"><meta property="og:url" content="__SMARTPRINT_ORIGIN__/">
+<meta property="og:title" content="Smart Print by QuantaEdge | Official SmartPrint Website"><meta property="og:description" content="Official Smart Print by QuantaEdge website for print shops. Manage QR document requests, per-file settings, shop review, quotes and approved printer jobs.">
+<meta property="og:locale" content="en_IN"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="Smart Print by QuantaEdge | Official SmartPrint Website"><meta name="twitter:description" content="Official Smart Print by QuantaEdge website for print shops. Manage QR document requests, per-file settings, shop review, quotes and approved printer jobs.">
+<link rel="icon" type="image/png" sizes="180x180" href="/branding/apple-touch-icon.png"><link rel="apple-touch-icon" href="/branding/apple-touch-icon.png"><link rel="manifest" href="/manifest.webmanifest">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@graph":[
+{"@type":"Organization","@id":"__SMARTPRINT_ORIGIN__/#organization","name":"SmartPrint by QuantaEdge","url":"__SMARTPRINT_ORIGIN__/","logo":{"@type":"ImageObject","url":"__SMARTPRINT_ORIGIN__/branding/apple-touch-icon.png","width":180,"height":180},"alternateName":"Smart Print by QuantaEdge","parentOrganization":{"@id":"https://quantaedge.in/#organization"}},
+{"@type":"Organization","@id":"https://quantaedge.in/#organization","name":"QuantaEdge","url":"https://quantaedge.in/"},
+{"@type":"WebSite","@id":"__SMARTPRINT_ORIGIN__/#website","url":"__SMARTPRINT_ORIGIN__/","name":"SmartPrint by QuantaEdge","alternateName":["Smart Print by QuantaEdge","SmartPrint","smartprint.quantaedge.in"],"publisher":{"@id":"__SMARTPRINT_ORIGIN__/#organization"},"inLanguage":"en-IN"},
+{"@type":"SoftwareApplication","@id":"__SMARTPRINT_ORIGIN__/#software","name":"SmartPrint","alternateName":"Smart Print by QuantaEdge","url":"__SMARTPRINT_ORIGIN__/","description":"Print-shop workflow software for QR document intake, per-file print choices, batch review, shop-controlled approvals, privacy options and connected Windows printers.","applicationCategory":"BusinessApplication","applicationSubCategory":"Print shop management software","operatingSystem":["Web","Windows","Android"],"publisher":{"@id":"__SMARTPRINT_ORIGIN__/#organization"},"featureList":["QR-code document intake for participating print shops","Per-file copy and colour settings with folder defaults","Multi-file batches with individual print-job review","Shop-controlled quotes, payment verification and print dispatch","Standard Printing and end-to-end encrypted Private Printing","Photo Studio and Android ID Studio","Shop reports and customer history","Windows Print Agent and installed printer queue discovery"]}
+]}</script>
+<script>
+(() => {
+  let theme = "light";
+  try {
+    theme = localStorage.getItem("qrtoprint.theme") === "dark" ? "dark" : "light";
+  } catch {}
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  const color = document.querySelector('meta[name="theme-color"]');
+  if (color) color.content = theme === "dark" ? "#0c0f16" : "#f4f6fa";
+})();
+</script>
+<title>Smart Print by QuantaEdge | Official SmartPrint Website</title>
+</head>
+<body><div id="root"></div>
+<noscript><main><h1>Smart Print by QuantaEdge: connected QR printing for local print shops</h1><p>SmartPrint by QuantaEdge connects customers with participating local print shops. Customers scan the shop's QR code and submit supported documents. The shop reviews the request, controls the quote and approval, and sends authorised work to its connected printer.</p><p>SmartPrint brings QR-based document intake, print-job management, shop-controlled approval and the Windows Print Agent into one workflow.</p><nav aria-label="SmartPrint printing guides"><a href="/features/">All features</a> <a href="/whatsapp-printing-alternative/">Chat-based print order alternative</a> <a href="/document-privacy-private-printing/">Document privacy</a> <a href="/photo-id-printing/">Photo and ID printing</a> <a href="/print-shop-software/">Print shop management software</a> <a href="/qr-code-print-ordering/">QR code print ordering</a> <a href="/qr-printing-for-xerox-shops/">QR print ordering for Xerox shops</a> <a href="/print-job-management/">Print job management</a> <a href="/windows-print-agent/">Windows Print Agent</a></nav></main></noscript>
+<script type="module" src="/src/main.tsx"></script></body></html>

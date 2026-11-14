@@ -77,6 +77,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
+      - name: Verify generated upload limits are in sync
+        run: node scripts/generate-upload-limits.mjs --check
       - uses: pnpm/action-setup@v6
         with:
           version: 10.18.0
@@ -123,6 +125,24 @@ jobs:
           path: artifacts/photo-studio-browser/
           if-no-files-found: warn
           retention-days: 14
+      - name: Validate Private Printing browser runner syntax
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        run: node --check apps/portal/tests/private-printing.browser.mjs
+      - name: Run eight-file Private Printing customer acceptance
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        env:
+          VITE_API_BASE_URL: ""
+        run: |
+          mkdir -p artifacts/private-printing-browser
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" SMARTPRINT_PRIVATE_PRINTING_ARTIFACT_DIR=artifacts/private-printing-browser node apps/portal/tests/private-printing.browser.mjs'
+      - name: Upload Private Printing browser acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-private-printing-browser-qa
+          path: artifacts/private-printing-browser/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Validate mixed-batch refund browser runner syntax
         if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
         run: node --check apps/portal/tests/mixed-batch-refund.browser.mjs
@@ -159,7 +179,13 @@ jobs:
         run: pnpm typecheck
       - name: Build portal and shared packages
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        env:
+          VITE_PUBLIC_BASE_URL: ${{ env.SMARTPRINT_PUBLIC_BASE_URL }}
         run: pnpm build
+      - name: Validate generated public SEO assets
+        if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
+        run: pnpm --filter @smart-print/portal validate:seo
+
       - name: Ensure production portal build excludes QA-only Photo Studio fixture
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
         shell: bash
@@ -1045,6 +1071,7 @@ jobs:
           push: true
           build-args: |
             SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
+            PUBLIC_BASE_URL=${{ env.SMARTPRINT_PUBLIC_BASE_URL }}
           tags: |
             ${{ steps.image_namespace.outputs.value }}/smart-print-portal:latest
             ${{ steps.image_namespace.outputs.value }}/smart-print-portal:sha-${{ github.sha }}

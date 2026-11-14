@@ -24,7 +24,7 @@ QRtoPrint is a commercial QR-based printing platform. Independent print shops su
 
 ## Android companion
 
-The native Android app complements the customer PWA for walk-in customers who prepare documents before reaching a shop. It provides QR scanning, an on-device folder-based document library, Android File Manager import/export and a native saved-file chooser inside the existing customer portal. It reuses the same `/s/{publicCode}` route, station-bound QR sessions, API upload grants, quote, approval, payment and job tracking. The Android app does not replace the Windows Print Agent or provide offline printing.
+The native Android app complements the customer web experience and uses the same shop QR session, quote, payment and print-job lifecycle. Implemented tools include on-device QR scanning, an app-private My Files library with folder import/export, Google Play Services document scanning, PDF copy editing, Photo Studio and ID Studio. ID Studio stores prepared sheets in a separate Android Keystore-encrypted local vault; prepared ID sheets always require Private Printing when submitted to a shop. The app does not replace the Windows Print Agent or provide offline printing. Public production/Play Store availability remains subject to real-device release validation.
 
 ## 4. Customer access modes
 
@@ -104,15 +104,27 @@ The standard brand combines Smart Print identity and tenant identity. White-labe
 
 V1 includes multi-tenancy, SaaS billing foundation, customer flow, shop operations, Windows agent, multi-vendor printer abstraction, local and cloud-assisted access, shop payment integration boundary, platform admin, security, backups, installer/update flow and automated tests.
 
-Defer Play Store apps, advanced AI/OCR, universal manufacturer-specific features, advanced finishing without confirmed hardware, franchise workflows and loyalty features for print customers.
+Defer public Play Store distribution until the existing Android companion passes its real-device release matrix; advanced AI/OCR, universal manufacturer-specific features, advanced finishing without confirmed hardware, franchise workflows and loyalty features for print customers remain outside the current verified scope.
 
 
-## Implemented V1 boundary
+## Implemented capability boundary (source audit: 12 November 2026)
 
-The blueprint above records the intended product, not every feature currently shipped. The present implementation is narrower:
+The earlier blueprint describes some intended capabilities and has been superseded in places by the current implementation. The following is the code-verified implementation boundary as of this audit; it does not claim every deployment or physical device has passed production acceptance.
 
-- Customer uploads are single-file PDF/JPG/JPEG/PNG, with a 20 MB hard limit and a 500-page PDF limit. The customer chooses Shop Wi-Fi (direct phone-to-Agent) or Cloud-assisted (encrypted API storage).
-- Direct Shop Wi-Fi keeps document bytes on the shop network, but still uses the cloud API for QR-session validation, one-use grant, metadata finalisation, quote, payment and dispatch authorisation. It is not an offline quote/payment/printing mode.
-- Both modes share one PrintJob, quote, approval, payment and spooler lifecycle. Shop UPI/cash payment is manually verified; gateway webhooks, automated refunds and payment reconciliation are not implemented.
-- The Windows Agent runs as a Windows Service on the printer-connected shop PC. Its current durable queue uses DPAPI-encrypted files and JSON manifests, not SQLite. Microsoft Print to PDF is a separate PDF export destination, written directly to a shop-accessible folder without an interactive service dialog. A tray UI, signed installer and automatic updater remain outstanding.
-- Printer compatibility must be verified per model and installed driver. Windows spooler acceptance is not proof of paper completion; shop-side output confirmation remains required.
+- Customer access: participating-shop QR sessions, guest printing and global customer accounts are implemented. Guest sessions remain anonymous in the shop's customer directory.
+- Customer documents: PDF/JPG/JPEG/PNG, up to 20 MB per file and 500 PDF pages. Multi-file batches support up to 20 files and 50 MB total. Each file is its own PrintJob under a shared batch; this is not one merged multi-file print job.
+- Customer configuration: copies (1–100), black-and-white/colour, single/double-sided, supported paper sizes and orientation. Folder/group defaults and per-file settings are supported.
+- Quotes and print payments: server-side shop rate-card quotes; UPI or cash-at-counter configuration; manual shop verification of UPI references/cash before dispatch. The optional instant-payment-after-upload setting allows payment to start as soon as a quote is calculated, but does not bypass shop verification. SmartPrint does not collect or route customer print revenue.
+- Shop control: the owner workspace includes Order Journey, Overview, Print Queue, Printers, QR Stations, Print Agent, Pricing, Subscription, Payments, Customers, Reports and Settings. The shop can review/accept/reject files, revise quotes before payment, assign printers, dispatch jobs and confirm actual paper output.
+- Batch/rejection/refunds: per-file decisions in a batch and supported per-page/file refund calculations are implemented before printer handoff. The app records a shop-confirmed refund as sent; it does not itself transfer a bank/UPI refund.
+- Privacy: Standard Printing follows the configurable retention policy (7 days by default after confirmed output or verified PDF export). Private Printing is customer-selected, uses end-to-end encryption to the paired Agent, bypasses normal cloud document storage/managed PDF export and deletes the Agent working copy only after confirmed physical output and Agent acknowledgement. Job/payment/audit metadata remains; the customer's original phone file is unchanged.
+- Transfer: direct Shop Wi-Fi transfers use local HTTP and are not encrypted in transit; they are restricted to the paired local-network Agent and one-use grant. Cloud-assisted HTTPS is plan-entitlement dependent. The cloud service remains required for session, quote, payment and dispatch coordination; there is no full offline mode.
+- Photo/ID preparation: Photo Studio prepares A4 sheets in 35×45 mm, 25×35 mm, 2×2 inch and 4×6 inch layouts with framing, basic appearance controls, background colour-key replacement, optional captions and custom text layers. Android ID Studio scans both card sides and creates an A4 physical-size sheet in an encrypted local vault; it always requires Private Printing. This is not AI photo segmentation, identity verification or facial retouching.
+- Android companion: native QR scanner, local file/folder library, document scanner, PDF copy-editing tools, Photo Studio and ID Studio are implemented. The app uses the shared customer workflow; it does not provide offline printing. CI APK/unit tests do not replace real-device/public-release validation.
+- Windows Agent: a paired Windows Service discovers installed queues, reports driver capabilities, keeps a protected local queue, claims only authorised jobs, submits through the Windows spooler and reports execution status. The shop confirms physical output; uncertain jobs are not automatically resubmitted. Microsoft Print to PDF is a separate output mode.
+- SaaS subscription: INR Razorpay shop-subscription checkout, server-side checkout signature verification and signed/idempotent webhook processing are implemented. This is separate from customer print payments.
+- Platform administration: shops, audited status changes, versioned plans/entitlements, subscription assignment/history and platform operational quota/retention controls are implemented.
+- Plan-gated capabilities: Cloud-assisted Printing, Advanced Reports, White-label and capacity entitlements depend on a shop's published plan. The server enforces entitlements.
+- Operational/release limitations: printer capability comes from the installed Windows driver and must be physically tested per model; the Windows beta installer is currently unsigned; no Agent tray UI or automatic updater is included. Malware scanning/isolated document conversion remain security hardening requirements. The standard direct LAN transfer is not encrypted in transit. Do not claim universal printer compatibility, fully offline printing, Office-file intake, automated customer UPI payments or automated customer print refunds.
+
+See docs/SEO_PRODUCT_CAPABILITY_AUDIT.md for the detailed code-derived inventory and the source files reviewed.
