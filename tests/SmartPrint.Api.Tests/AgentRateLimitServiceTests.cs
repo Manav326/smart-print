@@ -35,8 +35,9 @@ public sealed class AgentRateLimitServiceTests
         Assert.False(service.TryAcquire(agentId, now).IsAllowed);
 
         var afterOneSecond = now.AddSeconds(1);
-        Assert.True(service.TryAcquire(agentId, afterOneSecond).IsAllowed);
-        Assert.True(service.TryAcquire(agentId, afterOneSecond).IsAllowed);
+        for (var i = 0; i < AgentRateLimitService.TokensPerReplenishment /
+             AgentRateLimitService.ReplenishmentPeriod.TotalSeconds; i++)
+            Assert.True(service.TryAcquire(agentId, afterOneSecond).IsAllowed);
         Assert.False(service.TryAcquire(agentId, afterOneSecond).IsAllowed);
     }
 
