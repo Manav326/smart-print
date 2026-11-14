@@ -146,6 +146,18 @@ test("paid jobs are staged while a physical printer is offline and checked at di
   assert.match(dispatchService, /PrivatePrintingOutputPolicy\.IsEligible/);
 });
 
+test("managed PDF retry and physical confirmation retain Private Printing and virtual-output safeguards", () => {
+  const service = read("../../../src/SmartPrint.Api/Services/ShopPrintJobDispatchService.cs");
+  const endpoints = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobDispatchEndpoints.cs");
+  assert.match(service, /if \(job\.PrivatePrinting\)[\s\S]*?ShopPrintDispatchFailure\.PrivatePrintingOutputRequired/);
+  assert.match(service, /job\.OutputType is "PDF_EXPORT" or "TEST_VIRTUAL"/);
+  assert.match(service, /job\.PrivatePrinting && \(job\.OutputType != "PHYSICAL" \|\| job\.ClaimedByAgentDeviceId is null\)/);
+  assert.match(service, /job\.PrivateDocumentPurgeRequestedUtc \?\?= now/);
+  assert.match(endpoints, /private_printing_physical_output_required/);
+  assert.match(endpoints, /test_virtual_output_not_physical/);
+  assert.match(endpoints, /private_output_confirmation_invalid/);
+});
+
 test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
