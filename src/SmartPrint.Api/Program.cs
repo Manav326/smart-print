@@ -113,6 +113,7 @@ builder.Services.AddHostedService(services =>
     services.GetRequiredService<PrivateRelayWakeupService>());
 builder.Services.AddRateLimiter(options =>
 {
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.OnRejected = async (rejected, cancellationToken) =>
     {
         var response = rejected.HttpContext.Response;
