@@ -119,7 +119,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             return new TenantQuotaDecision(
                 false,
                 "subscription_inactive",
-                "This shop's trial or subscription period has ended or is inactive. Contact the platform team to restore access.",
+                "Your shop's SmartPrint subscription is inactive. Open Subscription in your shop dashboard to review plans and restore access.",
                 0,
                 0);
         }
