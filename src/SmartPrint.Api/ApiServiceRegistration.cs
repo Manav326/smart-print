@@ -97,6 +97,7 @@ public static class ApiServiceRegistration
         services.AddScoped<ShopReportService>();
         services.AddScoped<ShopPrintJobQueryService>();
         services.AddScoped<ShopPrintBatchReviewService>();
+        services.AddScoped<ShopPrintJobDecisionService>();
         services.AddScoped<ShopPrintJobAssignmentService>();
         services.AddScoped<ShopPrintJobSettingsService>();
         services.AddScoped<ShopPrintJobEventsService>();
