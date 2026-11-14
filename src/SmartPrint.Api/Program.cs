@@ -113,6 +113,21 @@ builder.Services.AddHostedService(services =>
     services.GetRequiredService<PrivateRelayWakeupService>());
 builder.Services.AddRateLimiter(options =>
 {
+    options.OnRejected = async (rejected, cancellationToken) =>
+    {
+        var response = rejected.HttpContext.Response;
+        response.StatusCode = StatusCodes.Status429TooManyRequests;
+        var retryAfterSeconds = rejected.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
+            ? Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))
+            : 5;
+        response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await response.WriteAsJsonAsync(new
+        {
+            code = "agent_rate_limit_exceeded",
+            message = "The shop computer is sending requests too quickly. It will retry automatically."
+        }, cancellationToken);
+    };
+
     options.AddPolicy("authentication", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -120,8 +135,23 @@ builder.Services.AddRateLimiter(options =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("agent-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetAgentRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+        RateLimitPartition.GetTokenBucketLimiter(GetAgentRateLimitPartitionKey(context),
+            _ => new TokenBucketRateLimiterOptions
+            {
+                TokenLimit = 60,
+                TokensPerPeriod = 30,
+                ReplenishmentPeriod = TimeSpan.FromSeconds(15),
+                AutoReplenishment = true,
+                QueueLimit = 0
+            }));
+    options.AddPolicy("agent-api-global", _ =>
+        RateLimitPartition.GetFixedWindowLimiter("all-agents",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 6000,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
     options.AddPolicy("qr-session", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -5116,6 +5146,7 @@ shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
 
 var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
     .RequireRateLimiting("agent-api")
+    .RequireRateLimiting("agent-api-global")
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
 
 agentApi.MapPost("/enroll", async (
@@ -5373,7 +5404,7 @@ agentApi.MapGet("/private-relays/pending", async (
     }
 
     return Results.Ok(new AgentPrivateRelayPendingResponse(items));
-}).RequireRateLimiting("agent-api");
+});
 
 agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     Guid ticketId,
@@ -5423,7 +5454,7 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     context.Response.Headers["X-Print-Encrypted-Key"] = relay.PrivateRelayWrappedKey;
     context.Response.Headers["X-Print-Encrypted-Iv"] = relay.PrivateRelayIv;
     return Results.File(ciphertext, "application/octet-stream", enableRangeProcessing: false);
-}).RequireRateLimiting("agent-api");
+});
 
 agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     Guid ticketId,
@@ -5684,7 +5715,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             DuplicateRequest = false
         }
     });
-}).RequireRateLimiting("agent-api");
+});
 
 agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     Guid ticketId,
@@ -5721,7 +5752,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     ticket.ExpiresUtc = ticket.PrivateRelayFailedUtc.Value;
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = false });
-}).RequireRateLimiting("agent-api");
+});
 
 agentApi.MapPost("/jobs/claim", async (
     HttpContext context,
@@ -11841,7 +11872,7 @@ static string GetSessionRateLimitPartitionKey(HttpContext context) =>
     GetRateLimitPartitionKey(context);
 
 static string GetAgentRateLimitPartitionKey(HttpContext context) =>
-    GetRateLimitPartitionKey(context);
+    AgentRateLimitPartition.GetPartitionKey(context);
 
 static async Task<(bool Allowed, DateTimeOffset? SuspendedAtUtc)> GetAgentClaimAccessAsync(
     Guid tenantId,
