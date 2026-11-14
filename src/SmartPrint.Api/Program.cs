@@ -399,7 +399,12 @@ platform.MapGet("/tenants", async (
             SubscriptionStatus = db.TenantSubscriptions.AsNoTracking()
                 .Where(subscription => subscription.TenantId == tenant.Id)
                 .OrderByDescending(subscription => subscription.CreatedUtc)
-                .Select(subscription => subscription.Status)
+                .ThenByDescending(subscription => subscription.Id)
+                .Select(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial") &&
+                    subscription.PeriodEndUtc <= recentEnd
+                        ? "Expired"
+                        : subscription.Status)
                 .FirstOrDefault(),
             SubscriptionPeriodEndUtc = db.TenantSubscriptions.AsNoTracking()
                 .Where(subscription => subscription.TenantId == tenant.Id)
