@@ -124,8 +124,8 @@ builder.Services.AddRateLimiter(options =>
         response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
         await response.WriteAsJsonAsync(new
         {
-            code = "agent_rate_limit_exceeded",
-            message = "The shop computer is sending requests too quickly. It will retry automatically."
+            code = "rate_limit_exceeded",
+            message = "SmartPrint is busy. Please wait a moment and try again."
         }, cancellationToken);
     };
 
