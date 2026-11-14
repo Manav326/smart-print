@@ -35,6 +35,16 @@ public static class PlanEntitlementRules
         return status;
     }
 
+    public static bool CanFinishAcceptedWorkAfterExpiry(
+        string? effectiveSubscriptionStatus,
+        DateTimeOffset? periodEndUtc,
+        DateTimeOffset acceptedUtc,
+        DateTimeOffset now) =>
+        string.Equals(effectiveSubscriptionStatus, "Expired", StringComparison.OrdinalIgnoreCase) &&
+        periodEndUtc is DateTimeOffset periodEnd &&
+        periodEnd <= now &&
+        acceptedUtc < periodEnd;
+
     public static bool AllowsDocument(long? maximumBytes, long requestedBytes) =>
         requestedBytes > 0 &&
         (maximumBytes is null ||
