@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SmartPrint.Api.Domain;
 using SmartPrint.Api.Data;
 
 namespace SmartPrint.Api.Services;

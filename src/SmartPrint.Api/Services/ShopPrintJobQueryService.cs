@@ -14,6 +14,10 @@ public sealed class ShopPrintJobQueryService(SmartPrintDbContext db)
         Guid? batchId,
         CancellationToken ct)
     {
+    var searchTerm = search?.Trim();
+    if (searchTerm is { Length: > 120 })
+        searchTerm = searchTerm[..120];
+
     var query =
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
