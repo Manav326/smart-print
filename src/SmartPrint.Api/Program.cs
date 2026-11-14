@@ -99,6 +99,7 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAssertion(context => PlatformAdminAuthorization.IsPlatformAdmin(context.User)));
 });
 builder.Services.AddScoped<TokenIssuer>();
+builder.Services.AddSingleton<GoogleAuthNonceStore>();
 builder.Services.AddSingleton<GoogleIdentityService>();
 builder.Services.AddSingleton<GoogleLoginNonceStore>();
 builder.Services.AddScoped<TenantEntitlementService>();
