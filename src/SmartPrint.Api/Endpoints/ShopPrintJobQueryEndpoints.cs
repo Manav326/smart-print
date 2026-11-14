@@ -38,7 +38,6 @@ public static class ShopPrintJobQueryEndpoints
             return Results.Ok(jobs);
         });
 
-        shop.MapShopReportEndpoints();
         return shop;
     }
 }
