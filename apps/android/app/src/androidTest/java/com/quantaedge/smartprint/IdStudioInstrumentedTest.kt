@@ -364,7 +364,7 @@ class IdStudioInstrumentedTest {
                 onView(withContentDescription("Use ${sourcePhoto.name} for ID front")).perform(click())
                 assertTrue("The selected My Files image is copied into the private ID draft.",
                     idStore.hasFront(draftId))
-                onView(withText("Front photo saved privately")).check(matches(isDisplayed()))
+                onView(withText("Photo saved privately")).check(matches(isDisplayed()))
             }
         } finally {
             idStore.deleteDraft(draftId)
