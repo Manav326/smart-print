@@ -17,6 +17,7 @@ public sealed record TenantEntitlementSnapshot(
     string PlanCode,
     string SubscriptionStatus,
     Guid? PlanVersionId,
+    DateTimeOffset? PeriodEndUtc,
     int? MaxPrinters,
     int? MaxAgentDevices,
     int? MaxQrStations,
@@ -71,7 +72,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         {
             return new TenantEntitlementSnapshot(
                 tenantId, subscription?.PlanCode ?? "UNCONFIGURED",
-                effectiveSubscriptionStatus, null,
+                effectiveSubscriptionStatus, null, subscription?.PeriodEndUtc,
                 null, null, null, isTrialPlan ? trialMonthlyLimit : null, null,
                 accessActive, false, accessActive, true, accessActive);
         }
@@ -85,7 +86,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         }
 
         return new TenantEntitlementSnapshot(
-            tenantId, subscription.PlanCode, effectiveSubscriptionStatus, version.Id,
+            tenantId, subscription.PlanCode, effectiveSubscriptionStatus, version.Id, subscription.PeriodEndUtc,
             version.MaxPrinters, version.MaxAgentDevices, version.MaxQrStations,
             isTrialPlan ? trialMonthlyLimit : version.MaxMonthlyPrintJobs, version.MaxDocumentBytes,
             version.CloudAssistedPrintingEnabled && accessActive,
