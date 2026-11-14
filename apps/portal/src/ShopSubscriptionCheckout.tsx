@@ -508,15 +508,21 @@ export default function ShopSubscriptionCheckout({
                 </div>
                 {plan.description && <p className="subscription-payment-description">{plan.description}</p>}
                 <div className="subscription-payment-entitlements">
-                  <span><strong>{plan.maxPrinters == null ? "No plan cap" : `Up to ${plan.maxPrinters.toLocaleString("en-IN")}`}</strong> printers</span>
-                  <span><strong>{plan.maxAgentDevices == null ? "No plan cap" : `Up to ${plan.maxAgentDevices.toLocaleString("en-IN")}`}</strong> computers</span>
-                  <span><strong>{plan.maxQrStations == null ? "No plan cap" : `Up to ${plan.maxQrStations.toLocaleString("en-IN")}`}</strong> QR stations</span>
-                  <span><strong>{plan.maxMonthlyPrintJobs == null ? "No plan cap" : `Up to ${plan.maxMonthlyPrintJobs.toLocaleString("en-IN")}`}</strong> monthly jobs</span>
-                  <span><strong>{plan.maxDocumentBytes == null ? "No plan cap" : `Up to ${(plan.maxDocumentBytes / (1024 * 1024)).toLocaleString("en-IN", { maximumFractionDigits: 1 })} MB`}</strong> cloud document size</span>
+                  <span><strong>{plan.maxPrinters == null ? "No plan-specific cap" : `Up to ${plan.maxPrinters.toLocaleString("en-IN")}`}</strong> printers</span>
+                  <span><strong>{plan.maxAgentDevices == null ? "No plan-specific cap" : `Up to ${plan.maxAgentDevices.toLocaleString("en-IN")}`}</strong> computers</span>
+                  <span><strong>{plan.maxQrStations == null ? "No plan-specific cap" : `Up to ${plan.maxQrStations.toLocaleString("en-IN")}`}</strong> QR stations</span>
+                  <span><strong>{plan.maxMonthlyPrintJobs == null ? "No plan-specific cap" : `Up to ${plan.maxMonthlyPrintJobs.toLocaleString("en-IN")}`}</strong> monthly jobs</span>
+                  <span><strong>{plan.maxDocumentBytes == null ? "No plan-specific cap" : `Up to ${(plan.maxDocumentBytes / (1024 * 1024)).toLocaleString("en-IN", { maximumFractionDigits: 1 })} MB`}</strong> cloud document size</span>
                   <span className={plan.cloudAssistedPrintingEnabled ? "included" : ""}>Cloud-assisted printing {plan.cloudAssistedPrintingEnabled ? "included" : "not included"}</span>
                   <span className={plan.whiteLabelEnabled ? "included" : ""}>White-label {plan.whiteLabelEnabled ? "included" : "not included"}</span>
                   <span className={plan.advancedReportsEnabled ? "included" : ""}>Advanced reports {plan.advancedReportsEnabled ? "included" : "not included"}</span>
                 </div>
+                <small className="subscription-payment-limit-note">Platform-wide file-size, security and operational limits continue to apply.</small>
+                {currentPaidTerm && currentSubscription.planCode !== plan.planCode && (
+                  <div className="inline-error subscription-payment-message">
+                    Your current paid product remains active through {formatIstDate(currentSubscription.periodEndUtc)}. A different product can only be selected after a credit or proration quote is available.
+                  </div>
+                )}
                 <div className="subscription-payment-actions">
                   {intervals.map(interval => {
                     const amount = priceFor(plan, interval);
