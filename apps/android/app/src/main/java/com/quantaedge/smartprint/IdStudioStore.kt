@@ -66,11 +66,11 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
     fun saveScan(draftId: String, side: String, input: InputStream): File {
         require(side == "front" || side == "back") { "Choose the front or back side of the card." }
         val bytes = input.use { readBounded(it, MAX_SCAN_BYTES) }
-        require(bytes.size >= MIN_SCAN_BYTES) { "The scanner returned an empty or incomplete image." }
+        require(bytes.size >= MIN_SCAN_BYTES) { "The selected photo is empty or incomplete." }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         require(bounds.outWidth > 0 && bounds.outHeight > 0) {
-            "The scanned card image is not a readable JPEG. Please scan again."
+            "This photo format is not supported or the image is damaged. Choose a clear JPG, PNG or WebP photo."
         }
         val shortEdge = minOf(bounds.outWidth, bounds.outHeight)
         val longEdge = maxOf(bounds.outWidth, bounds.outHeight)
@@ -86,7 +86,7 @@ class IdStudioStore(filesDir: File, cacheDir: File) {
         }
         val decoded = BitmapFactory.decodeByteArray(
             bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = 4 }
-        ) ?: error("The scanned image is incomplete or unreadable. Please scan again.")
+        ) ?: error("This photo is incomplete or unreadable. Choose another photo.")
         decoded.recycle()
         val directory = draftDirectory(draftId)
         val target = File(directory, "$side.jpg")
