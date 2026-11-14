@@ -487,13 +487,14 @@ test("customer payment settings refresh without reopening the QR session and exp
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
   const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const registration = read("../../../src/SmartPrint.Api/Services/AccountRegistrationService.cs");
   assert.match(app, /paymentOptions:session\.paymentOptions/);
   assert.match(app, /Cash at counter unavailable/);
   assert.match(app, /Disabled · customers will not see cash at the counter\./);
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
   assert.match(server, /var paymentOptions = await db\.ShopPaymentProfiles\.AsNoTracking\(\)/);
   assert.match(server, /PaymentOptions = paymentOptions/);
-  assert.match(server, /CashEnabled = false/);
+  assert.match(registration, /CashEnabled = false/);
 });
 
 test("Windows local document previews prefer the paired Agent loopback endpoint", () => {
