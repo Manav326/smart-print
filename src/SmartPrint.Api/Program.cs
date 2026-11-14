@@ -8768,7 +8768,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         return Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
-            title: "This shop's trial or subscription period is no longer active.");
+            title: "shop_temporarily_unavailable",
+            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
     }
 
     var stationDefaultPrinterId = await db.QrStations.AsNoTracking()
@@ -9460,7 +9461,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
     if (!subscription.IsAccessActive)
     {
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "shop_temporarily_unavailable",
+            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
     }
     if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, request.SizeBytes))
     {
@@ -10164,7 +10166,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         var subscription = await entitlements.GetForTenantAsync(ticket.TenantId, ct);
         if (!subscription.IsAccessActive)
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-                title: "This shop's trial or subscription period is no longer active."));
+                title: "shop_temporarily_unavailable",
+            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance."));
         var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
             db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
         if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
@@ -10363,7 +10366,8 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
     if (!subscription.IsAccessActive)
         return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "This shop's trial or subscription period is no longer active.");
+            title: "shop_temporarily_unavailable",
+            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
