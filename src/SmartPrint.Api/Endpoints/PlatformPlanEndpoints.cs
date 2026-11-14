@@ -209,6 +209,11 @@ public static class PlatformPlanEndpoints
             SmartPrintDbContext db,
             CancellationToken ct) =>
         {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            var draftLockKey = $"platform-plan-draft:{planId:N}";
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(6, hashtext({draftLockKey}))", ct);
+
             var plan = await db.SubscriptionPlans.SingleOrDefaultAsync(item => item.Id == planId, ct);
             if (plan is null)
             {
@@ -246,6 +251,7 @@ public static class PlatformPlanEndpoints
             version.UpdatedUtc = now;
             plan.UpdatedUtc = now;
             await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
             return Results.Ok(ToResponse(version));
         });
 
