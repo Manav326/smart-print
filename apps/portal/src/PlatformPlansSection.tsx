@@ -39,18 +39,74 @@ const emptyForm: PlanForm = {
   advancedReportsEnabled: false
 };
 
-function priceInputFromMinor(value: number | null): string {
-  return value === null ? "" : (value / 100).toFixed(2).replace(/\.00$/, "");
+function currencyMinorUnitDigits(currency: string): number {
+  try {
+    return new Intl.NumberFormat("en-IN", { style: "currency", currency }).resolvedOptions().maximumFractionDigits;
+  } catch {
+    return 2;
+  }
 }
 
-function optionalMoneyMinor(value: string, label: string): number | null {
+function priceInputFromMinor(value: number | null, currency: string): string {
+  if (value === null) return "";
+  const digits = currencyMinorUnitDigits(currency);
+  const formatted = (value / (10 ** digits)).toFixed(digits);
+  return digits === 0 ? formatted : formatted.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+}
+
+function optionalMoneyMinor(value: string, label: string, currency: string): number | null {
   const raw = value.trim();
   if (!raw) return null;
-  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) {
-    throw new Error(`${label} must be a non-negative amount with at most two decimal places, or left blank.`);
+  const digits = currencyMinorUnitDigits(currency);
+  const fractionPattern = digits === 0 ? "" : `(?:\\.\\d{1,${digits}})?`;
+  if (!new RegExp(`^\\d+${fractionPattern}import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { formatIstDate } from "./date-time";
+import {
+  CheckCircle2, CirclePlus, Cloud, FileText, Layers3, LoaderCircle,
+  LockKeyhole, RefreshCw, Save, ShieldCheck, Sparkles, ToggleLeft, ToggleRight
+} from "lucide-react";
+import {
+  createPlatformPlan, getPlatformPlans, publishPlatformPlanVersion,
+  savePlatformPlanDraft, updatePlatformPlan,
+  type AuthTokens, type PlatformPlan, type PlatformPlanVersion,
+  type PlatformPlanVersionInput
+} from "./api";
+
+type PlanForm = {
+  currency: string;
+  monthlyPriceMinor: string;
+  annualPriceMinor: string;
+  maxPrinters: string;
+  maxAgentDevices: string;
+  maxQrStations: string;
+  maxMonthlyPrintJobs: string;
+  maxDocumentBytes: string;
+  cloudAssistedPrintingEnabled: boolean;
+  whiteLabelEnabled: boolean;
+  advancedReportsEnabled: boolean;
+};
+
+const emptyForm: PlanForm = {
+  currency: "INR",
+  monthlyPriceMinor: "",
+  annualPriceMinor: "",
+  maxPrinters: "",
+  maxAgentDevices: "",
+  maxQrStations: "",
+  maxMonthlyPrintJobs: "",
+  maxDocumentBytes: "",
+  cloudAssistedPrintingEnabled: false,
+  whiteLabelEnabled: false,
+  advancedReportsEnabled: false
+};
+
+).test(raw)) {
+    throw new Error(`${label} must be a non-negative amount with at most ${digits} decimal places, or left blank.`);
   }
   const [wholePart, fractionPart = ""] = raw.split(".");
-  const minor = Number(wholePart) * 100 + Number(fractionPart.padEnd(2, "0") || "0");
+  const multiplier = 10 ** digits;
+  const minor = Number(wholePart) * multiplier +
+    Number((fractionPart || "").padEnd(digits, "0") || "0");
   if (!Number.isSafeInteger(minor)) throw new Error(`${label} is outside the supported amount range.`);
   return minor;
 }
@@ -59,8 +115,8 @@ function formFromVersion(version?: PlatformPlanVersion): PlanForm {
   if (!version) return { ...emptyForm };
   return {
     currency: version.currency,
-    monthlyPriceMinor: priceInputFromMinor(version.monthlyPriceMinor),
-    annualPriceMinor: priceInputFromMinor(version.annualPriceMinor),
+    monthlyPriceMinor: priceInputFromMinor(version.monthlyPriceMinor, version.currency),
+    annualPriceMinor: priceInputFromMinor(version.annualPriceMinor, version.currency),
     maxPrinters: version.maxPrinters?.toString() ?? "",
     maxAgentDevices: version.maxAgentDevices?.toString() ?? "",
     maxQrStations: version.maxQrStations?.toString() ?? "",
@@ -86,8 +142,8 @@ function toVersionInput(form: PlanForm): PlatformPlanVersionInput {
   if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Enter a three-letter currency code.");
   return {
     currency,
-    monthlyPriceMinor: optionalMoneyMinor(form.monthlyPriceMinor, "Monthly price"),
-    annualPriceMinor: optionalMoneyMinor(form.annualPriceMinor, "Annual price"),
+    monthlyPriceMinor: optionalMoneyMinor(form.monthlyPriceMinor, "Monthly price", currency),
+    annualPriceMinor: optionalMoneyMinor(form.annualPriceMinor, "Annual price", currency),
     maxPrinters: optionalInteger(form.maxPrinters, "Printer limit", false),
     maxAgentDevices: optionalInteger(form.maxAgentDevices, "Agent computer limit", false),
     maxQrStations: optionalInteger(form.maxQrStations, "QR station limit", false),
@@ -110,10 +166,11 @@ function draftVersion(plan: PlatformPlan): PlatformPlanVersion | undefined {
 function formatPrice(value: number | null, currency: string): string {
   if (value === null) return "Not set";
   try {
+    const digits = currencyMinorUnitDigits(currency);
     return new Intl.NumberFormat("en-IN", {
       style: "currency",
       currency
-    }).format(value / 100);
+    }).format(value / (10 ** digits));
   } catch {
     return `${currency} ${(value / 100).toFixed(2)}`;
   }
@@ -269,8 +326,8 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
     }
   }
 
-  const monthlyMinor = optionalPreview(form.monthlyPriceMinor);
-  const annualMinor = optionalPreview(form.annualPriceMinor);
+  const monthlyMinor = optionalPreview(form.monthlyPriceMinor, form.currency);
+  const annualMinor = optionalPreview(form.annualPriceMinor, form.currency);
 
   return (
     <section className="platform-plans">
@@ -345,7 +402,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
               </div>
               <PlanVersionEditor form={form} onChange={changeForm}/>
               <div className="platform-plan-editor-actions">
-                <span className="platform-plan-note">Enter prices in rupees; SmartPrint stores them in paise. Blank means unavailable, while zero is explicitly free.</span>
+                <span className="platform-plan-note">Enter amounts in the selected currency. Blank means unavailable, while zero is explicitly free.</span>
                 <button className="primary-button" onClick={() => void savePlan()} disabled={Boolean(busy)}>
                   {busy === "save" ? <LoaderCircle size={14} className="platform-spin"/> : <Save size={14}/>} Create plan draft
                 </button>
@@ -439,9 +496,9 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
   );
 }
 
-function optionalPreview(value: string): number | null {
+function optionalPreview(value: string, currency: string): number | null {
   try {
-    return optionalMoneyMinor(value, "Price");
+    return optionalMoneyMinor(value, "Price", currency);
   } catch {
     return null;
   }
@@ -463,12 +520,13 @@ function PlanVersionEditor({ form, onChange }: {
   form: PlanForm;
   onChange: <K extends keyof PlanForm>(key: K, value: PlanForm[K]) => void;
 }) {
+  const currencyLabel = form.currency.trim().toUpperCase() === "INR" ? "₹" : form.currency.toUpperCase();
   return (
     <div className="platform-plan-version-editor">
-      <div className="platform-plan-subheading"><div><h4>Pricing</h4><p>Amounts are stored as integer minor units for the selected currency.</p></div><Field label="Currency"><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder="INR"/></Field></div>
+      <div className="platform-plan-subheading"><div><h4>Pricing</h4><p>Enter amounts in {currencyLabel}; SmartPrint stores the currency's minor units.</p></div><Field label="Currency"><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder="INR"/></Field></div>
       <div className="platform-plan-meta-grid">
-        <Field label="Monthly price (₹)"><input type="number" min="0" step="0.01" value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="e.g. 149"/></Field>
-        <Field label="Annual price (₹)"><input type="number" min="0" step="0.01" value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="e.g. 1499"/></Field>
+        <Field label={`Monthly price (${currencyLabel})`}><input type="number" min="0" step="0.01" value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="e.g. 149"/></Field>
+        <Field label={`Annual price (${currencyLabel})`}><input type="number" min="0" step="0.01" value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="e.g. 1499"/></Field>
       </div>
 
       <div className="platform-plan-subheading"><div><h4>Usage limits</h4><p>Blank means no configured cap; positive numbers enforce the configured limit when enforcement is connected.</p></div><span className="platform-plan-unlimited">Optional limits</span></div>
