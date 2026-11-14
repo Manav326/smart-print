@@ -2979,7 +2979,7 @@ shop.MapGet("/reports/summary", async (
     var plan = await entitlements.GetForTenantAsync(tenantId, ct);
     if (!plan.IsAccessActive)
         return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "This shop's trial or subscription period is no longer active.");
+            title: "Your shop's SmartPrint subscription is inactive. Renew it from the Subscription page to restore access.");
     if (!plan.AdvancedReportsEnabled)
         return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
             title: "Advanced reporting is not included in this shop's current plan.");
@@ -5558,8 +5558,12 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     }
 
     var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
-    if (!subscription.IsAccessActive)
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
+    if (!subscription.IsAccessActive &&
+        !PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            subscription.SubscriptionStatus, subscription.PeriodEndUtc, ticket.CreatedUtc, DateTimeOffset.UtcNow))
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "shop_subscription_expired",
+            detail: "New uploads are blocked because this shop's subscription expired. Only uploads accepted before expiry can be finalised.");
     if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "This document exceeds the maximum size configured for this shop's plan.");
 
@@ -6416,9 +6420,13 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     }
 
     var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
-    if (!subscription.IsAccessActive)
+    if (!subscription.IsAccessActive &&
+        !PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            subscription.SubscriptionStatus, subscription.PeriodEndUtc, ticket.CreatedUtc, now))
     {
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "shop_subscription_expired",
+            detail: "New uploads are blocked because this shop's subscription expired. Only uploads accepted before expiry can be finalised.");
     }
     if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
     {
@@ -10164,10 +10172,12 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             }));
 
         var subscription = await entitlements.GetForTenantAsync(ticket.TenantId, ct);
-        if (!subscription.IsAccessActive)
+        var grandfatheredUpload = PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            subscription.SubscriptionStatus, subscription.PeriodEndUtc, ticket.CreatedUtc, commitNow);
+        if (!subscription.IsAccessActive && !grandfatheredUpload)
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
                 title: "shop_temporarily_unavailable",
-            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance."));
+                detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance."));
         var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
             db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
         if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
@@ -10181,7 +10191,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         var hasExistingMonthlyReservation = LocalUploadRecoveryRules.HasExistingMonthlyQuotaReservation(
             ticket.CreatedUtc, ticket.CompletedUtc, DateTimeOffset.UtcNow,
             TimeSpan.FromHours(maximumRecoveryAgeHours));
-        if (!hasExistingMonthlyReservation)
+        if (!hasExistingMonthlyReservation && !grandfatheredUpload)
         {
             var quota = await entitlements.CheckCapacityAsync(
                 ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
@@ -10364,10 +10374,6 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     }
 
     var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
-    if (!subscription.IsAccessActive)
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "shop_temporarily_unavailable",
-            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
@@ -10378,6 +10384,16 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     {
         await transaction.RollbackAsync(ct);
         return Results.NotFound();
+    }
+
+    if (!subscription.IsAccessActive &&
+        !PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            subscription.SubscriptionStatus, subscription.PeriodEndUtc, job.CreatedUtc, now))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "shop_temporarily_unavailable",
+            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
     }
 
     var savedQuoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
