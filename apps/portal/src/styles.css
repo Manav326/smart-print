@@ -3806,3 +3806,16 @@ html[data-theme="dark"] .brand-lockup-logo-dark { display: block; }
     max-height: min(60vh,480px);
   }
 }
+
+
+/* Google identity sign-in uses the provider-rendered button and existing auth-card surfaces. */
+.auth-google-signin{display:grid;gap:9px;margin-top:16px;min-width:0}
+.auth-google-divider{display:flex;align-items:center;gap:11px;color:#7e8ba0;font-size:8px;font-weight:800;letter-spacing:1.2px}
+.auth-google-divider:before,.auth-google-divider:after{content:"";height:1px;flex:1;background:rgba(255,255,255,.09)}
+.auth-google-signin__target{display:flex;justify-content:center;align-items:center;width:100%;min-height:42px;overflow:hidden}
+.auth-google-signin__status,.auth-google-signin__error{margin:0;text-align:center;font-size:8px;line-height:1.55;color:#98a3b7}
+.auth-google-signin__error{color:#ff9da8}
+
+.auth-google-signin__retry{display:grid;justify-items:center;gap:8px}
+.auth-google-signin__retry-button{border:1px solid rgba(154,138,255,.35);background:rgba(142,123,241,.1);color:#c9c0ff;border-radius:7px;padding:8px 12px;font:600 9px "DM Sans",sans-serif;cursor:pointer}
+.auth-google-signin__retry-button:hover{background:rgba(142,123,241,.18)}

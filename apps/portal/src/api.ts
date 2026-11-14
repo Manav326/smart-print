@@ -430,6 +430,29 @@ export const signIn = (email: string, password: string) =>
     body: JSON.stringify({ email, password })
   });
 
+export interface GoogleAuthConfiguration {
+  configured: boolean;
+  clientId: string;
+}
+
+export function getGoogleAuthConfiguration() {
+  return apiRequest<GoogleAuthConfiguration>("/api/v1/auth/google/config");
+}
+
+export async function getGoogleAuthChallenge(surface: "shop" | "customer") {
+  return apiRequest<{ nonce: string; expiresInSeconds: number }>("/api/v1/auth/google/challenge", {
+    method: "POST",
+    body: JSON.stringify({ surface })
+  });
+}
+
+export function signInShopWithGoogle(credential: string, nonce: string) {
+  return apiRequest<AuthTokens>("/api/v1/auth/google/shop", {
+    method: "POST",
+    body: JSON.stringify({ credential, nonce })
+  });
+}
+
 export async function registerShop(values: {
   businessName: string;
   ownerName: string;

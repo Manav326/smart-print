@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from "react";
+import { useCallback, useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, Printer, ShieldCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { isPlatformAdminSession, registerShop, signIn, storeTokens, type AuthTokens } from "./api";
 import { isDesktopApp } from "./desktop-bridge";
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
+import ShopGoogleSignInButton from "./ShopGoogleSignInButton";
 
 export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { onAuthenticated: (tokens: AuthTokens) => void; dark: boolean; onToggleTheme: () => void }) {
   const desktop = isDesktopApp();
@@ -16,6 +17,14 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
   const [ownerName, setOwnerName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  const authenticateWithGoogle = useCallback(async (tokens: AuthTokens) => {
+    if (isPlatformAdminSession(tokens)) {
+      throw new Error("Platform administrator accounts must sign in at /admin.");
+    }
+    await storeTokens(tokens, "shop");
+    onAuthenticated(tokens);
+  }, [onAuthenticated]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -76,6 +85,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
             {error && <div className="auth-error" role="alert">{error}</div>}
             <button className="auth-submit" type="submit" disabled={busy}>{busy ? <span className="button-spinner"/> : <>{mode === "signin" ? "Sign in to workspace" : "Create my shop"}<ArrowRight size={16}/></>}</button>
           </form>
+          {mode === "signin" && <ShopGoogleSignInButton onAuthenticated={authenticateWithGoogle} />}
           {mode === "register" ? <div className="trial-note"><ShieldCheck size={15}/> Your shop starts with a 14-day trial. No payment is collected during registration.</div> : <div className="auth-secure-note"><LockKeyhole size={13}/> Your connection is protected with encrypted authentication.</div>}
           <div className="auth-card-footer">By continuing, you agree to the Smart Print service terms and privacy policy.</div>
         </section>
