@@ -65,7 +65,7 @@ public sealed class AllowUnquotedPhotoDraftJobs : Migration
                     RAISE EXCEPTION
                         'Cannot roll back unquoted photo draft support while unquoted photo draft jobs exist.';
                 END IF;
-            END
+            END;
             $migration$;
 
             ALTER TABLE "PrintJobs"
