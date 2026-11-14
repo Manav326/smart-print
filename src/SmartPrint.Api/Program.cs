@@ -5663,6 +5663,19 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
     }
 
+    // Keep ticket-only discriminators (notably ID_DOCUMENT) out of PrintJobs.
+    // The earlier ticket-based ID PDF validation must run before this mapping.
+    if (!PrivateRelayPrintKindRules.TryMapTicketKindToPrintJobKind(
+            locked.PrintKind, out var printJobKind))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "private_print_kind_unsupported",
+            message = "This upload type is no longer supported. Please start a new upload."
+        });
+    }
+
     var now = DateTimeOffset.UtcNow;
     locked.CompletedUtc = now;
     var job = new PrintJob
@@ -5685,7 +5698,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         IsDuplex = locked.IsDuplex,
         Orientation = locked.Orientation,
         PrivatePrinting = true,
-        PrintKind = locked.PrintKind,
+        PrintKind = printJobKind,
         PhotoSizeCode = locked.PhotoSizeCode,
         PhotoCount = locked.PhotoCount ?? 0,
         PhotosPerPage = locked.PhotosPerPage,
