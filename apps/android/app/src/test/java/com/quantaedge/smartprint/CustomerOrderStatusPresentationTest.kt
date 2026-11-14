@@ -13,12 +13,29 @@ class CustomerOrderStatusPresentationTest {
             "PDF_EXPORTED" to "PDF ready",
             "REFUNDED" to "Refunded",
             "CANCELLED" to "Cancelled",
-            "FAILED" to "Failed"
+            "FAILED" to "Could not print"
         )
         expected.forEach { (status, label) ->
             assertEquals(label, CustomerOrderStatusPresentation.activityStatusLabel(status))
             assertNotEquals("In progress", CustomerOrderStatusPresentation.activityStatusLabel(status))
             assertTrue(CustomerOrderStatusPresentation.isTerminalStatus(status))
+        }
+    }
+
+    @Test
+    fun ordinaryPrintLifecycleUsesPlainCustomerLanguage() {
+        val expected = mapOf(
+            "AWAITING_CONFIGURATION" to "Being prepared",
+            "AWAITING_SHOP_APPROVAL" to "Shop reviewing",
+            "AWAITING_PAYMENT" to "Ready for payment",
+            "LOCAL_QUEUE_CLAIMED" to "Preparing to print",
+            "LOCAL_QUEUE_READY" to "Preparing to print",
+            "SPOOLER_ACCEPTED" to "Printing started",
+            "OUTPUT_UNCONFIRMED" to "Shop checking print",
+            "COMPLETED" to "Ready for collection"
+        )
+        expected.forEach { (status, label) ->
+            assertEquals(label, CustomerOrderStatusPresentation.activityStatusLabel(status))
         }
     }
 
@@ -57,7 +74,7 @@ class CustomerOrderStatusPresentationTest {
         assertEquals("MIXED_PROGRESS", CustomerOrderStatusPresentation.batchSummaryStatus(
             listOf("PRINTING", "AWAITING_PAYMENT")
         ))
-        assertEquals("In progress across files",
+        assertEquals("In progress",
             CustomerOrderStatusPresentation.activityStatusLabel("MIXED_PROGRESS"))
     }
 
