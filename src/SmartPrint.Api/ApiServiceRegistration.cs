@@ -92,6 +92,7 @@ public static class ApiServiceRegistration
         services.AddScoped<ShopPricingService>();
         services.AddScoped<ShopPaymentSettingsService>();
         services.AddScoped<ShopPaymentReviewService>();
+        services.AddScoped<ShopCustomerQueryService>();
         services.AddHttpClient<SubscriptionRazorpayService>();
         services.AddSingleton<DocumentStorage>();
         services.AddSingleton<PlatformAdCreativeStorage>();
