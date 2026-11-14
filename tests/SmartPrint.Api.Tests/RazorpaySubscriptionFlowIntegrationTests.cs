@@ -235,6 +235,75 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
+    public async Task SwitchingSameProductFromMonthlyToAnnualPreservesUnusedPaidTime()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+            var preservedEnd = DateTimeOffset.UtcNow.AddDays(12);
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanCode = "PRO",
+                Status = "Active",
+                BillingInterval = "Monthly",
+                PeriodStartUtc = DateTimeOffset.UtcNow.AddDays(-18),
+                PeriodEndUtc = preservedEnd,
+                CreatedUtc = DateTimeOffset.UtcNow
+            });
+            await fixture.Db.SaveChangesAsync();
+
+            var order = await fixture.Service.CreateOrderAsync(
+                fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
+                "Annual", "monthly-to-annual-" + Guid.NewGuid().ToString("N")[..12],
+                CancellationToken.None);
+            Assert.Equal(499900, order.AmountMinor);
+
+            var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
+            var verified = await fixture.Service.VerifyCheckoutAsync(
+                fixture.TenantId, order.OrderId, paymentId,
+                CheckoutSignature(order.OrderId, paymentId), CancellationToken.None);
+            var renewed = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.Id == verified.SubscriptionId);
+
+            Assert.Equal("Annual", renewed.BillingInterval);
+            Assert.Equal(preservedEnd, renewed.PeriodStartUtc);
+            Assert.Equal(preservedEnd.AddYears(1), renewed.PeriodEndUtc);
+        });
+    }
+
+    [Fact]
+    public async Task DifferentProductCannotBePurchasedMidCycleBeforeProrationIsAvailable()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanCode = "OTHER_PRODUCT",
+                Status = "Active",
+                BillingInterval = "Annual",
+                PeriodStartUtc = DateTimeOffset.UtcNow.AddDays(-10),
+                PeriodEndUtc = DateTimeOffset.UtcNow.AddDays(30),
+                CreatedUtc = DateTimeOffset.UtcNow
+            });
+            await fixture.Db.SaveChangesAsync();
+
+            var exception = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.CreateOrderAsync("different-product-switch"));
+
+            Assert.Equal("subscription_plan_change_requires_proration", exception.Code);
+            Assert.Equal(0, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal(0, await fixture.Db.ShopSubscriptionPayments.CountAsync());
+        });
+    }
+
+    [Fact]
     public async Task RenewalAfterExpiryStartsANewPeriodInsteadOfExtendingAnExpiredTerm()
     {
         await WithPostgresAsync(async fixture =>
