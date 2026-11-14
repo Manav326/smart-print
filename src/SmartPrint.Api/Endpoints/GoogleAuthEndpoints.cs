@@ -29,13 +29,14 @@ public static class GoogleAuthEndpoints
             }
         }).AllowAnonymous();
 
-        auth.MapGet("/google/config", (GoogleIdentityService google, HttpContext context) =>
+        auth.MapGet("/google/config", (GoogleIdentityService google, GoogleAuthNonceStore nonces, HttpContext context) =>
         {
             context.Response.Headers.CacheControl = "no-store";
             return Results.Ok(new
             {
                 configured = google.IsConfigured,
-                clientId = google.IsConfigured ? google.WebClientId : string.Empty
+                clientId = google.IsConfigured ? google.WebClientId : string.Empty,
+                nonce = google.IsConfigured ? nonces.Issue() : string.Empty
             });
         }).AllowAnonymous();
 
