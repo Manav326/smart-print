@@ -235,6 +235,41 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
+    public async Task RenewalAfterExpiryStartsANewPeriodInsteadOfExtendingAnExpiredTerm()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+            var expiredEnd = DateTimeOffset.UtcNow.AddDays(-1);
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanCode = "PRO",
+                Status = "Active",
+                BillingInterval = "Monthly",
+                PeriodStartUtc = expiredEnd.AddMonths(-1),
+                PeriodEndUtc = expiredEnd,
+                CreatedUtc = DateTimeOffset.UtcNow.AddDays(-31)
+            });
+            await fixture.Db.SaveChangesAsync();
+
+            var order = await fixture.CreateOrderAsync("expired-same-plan-renewal");
+            var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
+            var verified = await fixture.Service.VerifyCheckoutAsync(
+                fixture.TenantId, order.OrderId, paymentId,
+                CheckoutSignature(order.OrderId, paymentId), CancellationToken.None);
+
+            var renewed = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.Id == verified.SubscriptionId);
+
+            Assert.True(renewed.PeriodStartUtc > expiredEnd);
+            Assert.Equal(renewed.PeriodStartUtc.AddMonths(1), renewed.PeriodEndUtc);
+        });
+    }
+
+    [Fact]
     public async Task SameClientRequestIdReusesTheServerCreatedRazorpayOrder()
     {
         await WithPostgresAsync(async fixture =>
