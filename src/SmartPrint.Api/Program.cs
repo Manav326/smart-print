@@ -136,18 +136,6 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("public-api", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-        AgentRateLimitPartition.IsAgentApiRequest(context)
-            ? RateLimitPartition.GetTokenBucketLimiter("all-agents",
-                _ => new TokenBucketRateLimiterOptions
-                {
-                    TokenLimit = 5000,
-                    TokensPerPeriod = 500,
-                    ReplenishmentPeriod = TimeSpan.FromSeconds(1),
-                    AutoReplenishment = true,
-                    QueueLimit = 0
-                })
-            : RateLimitPartition.GetNoLimiter("non-agent"));
     options.AddPolicy("qr-session", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
