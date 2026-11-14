@@ -5431,14 +5431,18 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   });
   const hasSelectedLegacyIndividualPayment=payment!==null&&!payment.batchPayment&&
     ["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT","VERIFIED","PARTIALLY_REFUNDED"].includes(payment.status);
-  const batchPaymentStarted=batchPayment!==null&&batchPayment.status!=="REJECTED";
+  // A verified payment covers only the files linked to its PrintPayment rows.
+  // When a later upload has completed shop review, offer checkout for that new file set
+  // instead of leaving the customer stuck on the already-verified earlier payment.
+  const verifiedBatchHasMorePayableFiles=batchPayment?.status==="VERIFIED"&&batchPayableItems.length>0;
+  const batchPaymentStarted=batchPayment!==null&&batchPayment.status!=="REJECTED"&&!verifiedBatchHasMorePayableFiles;
   const acceptedQuoteExpired=shouldBlockBatchCheckoutForExpiredQuote(
     batchPayment?.status,
     quoteItems.some(item=>!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))&&quoteExpiredForBatchItem(item))
   );
   const batchCheckoutVisible=Boolean(batchId)&&!hasLegacyIndividualPayment&&
     (batchPaymentStarted||(!acceptedQuoteExpired&&batchCheckoutReady&&batchPayableItems.length>0));
-  const batchCheckoutUsesPayment=batchPayment!==null&&batchPayment.status!=="REJECTED";
+  const batchCheckoutUsesPayment=batchPaymentStarted;
   const legacyIndividualPayment=!batchId||hasSelectedLegacyIndividualPayment;
   const batchCheckoutAmount=batchCheckoutUsesPayment?batchPayment!.amountMinor:batchPayableTotal;
   const batchCheckoutFileCount=batchCheckoutUsesPayment?batchPayment!.fileCount:batchPayableItems.length;
