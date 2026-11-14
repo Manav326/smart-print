@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace SmartPrint.Api.Services;
 
@@ -32,7 +33,7 @@ public sealed class GoogleLoginNonceStore
             throw new InvalidOperationException("Google sign-in is temporarily busy. Please try again.");
 
         var nonce = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
-        _nonces[$"{surface}:{nonce}"] = now.Add(Lifetime);
+        _nonces[Hash(surface, nonce)] = now.Add(Lifetime);
         return nonce;
     }
 
@@ -43,9 +44,12 @@ public sealed class GoogleLoginNonceStore
             nonce.Length != 64)
             return false;
 
-        if (!_nonces.TryRemove($"{surface}:{nonce}", out var expiresUtc))
+        if (!_nonces.TryRemove(Hash(surface, nonce), out var expiresUtc))
             return false;
 
         return expiresUtc > DateTimeOffset.UtcNow;
     }
+
+    private static string Hash(string surface, string nonce) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{surface}:{nonce}"))).ToLowerInvariant();
 }
