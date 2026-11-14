@@ -33,7 +33,8 @@ public sealed record ShopPrintDispatchResult(
     PrintJob? Job = null,
     PrintDispatchPrinterSnapshot? Printer = null,
     string? OutputDestinationName = null,
-    bool DuplicateRequest = false);
+    bool DuplicateRequest = false,
+    string? OutputQueueName = null);
 
 public sealed class ShopPrintJobDispatchService(SmartPrintDbContext db, IHostEnvironment environment)
 {
@@ -291,6 +292,108 @@ public sealed class ShopPrintJobDispatchService(SmartPrintDbContext db, IHostEnv
             ShopPrintDispatchFailure.None,
             Job: job,
             OutputDestinationName: output);
+    }
+
+    public async Task<ShopPrintDispatchResult> RetryPrivateTestOutputAsync(
+        Guid jobId,
+        Guid tenantId,
+        Guid? actorId,
+        CancellationToken cancellationToken)
+    {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+        var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+            $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {tenantId} AND \"Id\" = {jobId} FOR UPDATE")
+            .ToListAsync(cancellationToken);
+        var job = lockedJobs.SingleOrDefault();
+        if (job is null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return new ShopPrintDispatchResult(ShopPrintDispatchFailure.NotFound);
+        }
+
+        var allowPrivateVirtualOutput = !environment.IsProduction() &&
+            (await db.PlatformOperationalSettings.AsNoTracking()
+                .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
+                .Select(item => (bool?)item.AllowPrivatePrintingVirtualOutput)
+                .SingleOrDefaultAsync(cancellationToken) ?? false);
+        if (environment.IsProduction() || !allowPrivateVirtualOutput ||
+            !job.PrivatePrinting || job.OutputType != PrivatePrintingOutputPolicy.TestVirtual ||
+            job.Status != "OUTPUT_UNCONFIRMED")
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return new ShopPrintDispatchResult(ShopPrintDispatchFailure.PrivateTestOutputNotRecoverable, Job: job);
+        }
+
+        if (job.PrinterDeviceId is not Guid printerId ||
+            job.ClaimedByAgentDeviceId is not Guid agentId ||
+            job.LocalQueueReceivedUtc is null)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return new ShopPrintDispatchResult(ShopPrintDispatchFailure.PrivateTestOutputLocalCopyMissing, Job: job);
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var onlineAfter = now.AddMinutes(-2);
+        var destination = await (
+            from printer in db.PrinterDevices.AsNoTracking()
+            join agent in db.AgentDevices.AsNoTracking()
+                on new { printer.TenantId, AgentId = printer.AgentDeviceId!.Value }
+                equals new { agent.TenantId, AgentId = agent.Id }
+            where printer.Id == printerId && printer.TenantId == tenantId &&
+                  printer.AgentDeviceId == agentId && printer.IsActive &&
+                  printer.OutputMode == "PDF_EXPORT" &&
+                  !string.IsNullOrWhiteSpace(printer.QueueName) &&
+                  printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+                  (printer.Status == "Ready" || printer.Status == "Busy") &&
+                  agent.RevokedUtc == null && agent.Status != "Revoked" &&
+                  agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
+            select new { printer.DisplayName, printer.QueueName }
+        ).SingleOrDefaultAsync(cancellationToken);
+        var verifiedPayment = await db.PrintPayments.AnyAsync(payment =>
+            payment.TenantId == tenantId && payment.PrintJobId == job.Id &&
+            (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED"),
+            cancellationToken);
+        if (destination is null || !verifiedPayment)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return new ShopPrintDispatchResult(ShopPrintDispatchFailure.PrivateTestOutputPrerequisitesNotMet, Job: job);
+        }
+
+        var previous = job.Status;
+        job.Status = "LOCAL_QUEUE_READY";
+        job.OutputType = PrivatePrintingOutputPolicy.TestVirtual;
+        job.OutputFilePath = null;
+        job.OutputFileName = null;
+        job.OutputSha256 = null;
+        job.OutputSizeBytes = null;
+        job.OutputCompletedUtc = null;
+        job.OutputConfirmedUtc = null;
+        job.SpoolerJobId = null;
+        job.SpoolerJobName = null;
+        job.SpoolerSubmittedUtc = null;
+        job.SpoolerObservedUtc = null;
+        job.PrintDispatchLeaseExpiresUtc = null;
+        job.FailureCode = null;
+        job.SpoolerStatus = null;
+        job.UpdatedUtc = now;
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = tenantId,
+            PrintJobId = job.Id,
+            PreviousStatus = previous,
+            NewStatus = job.Status,
+            ActorType = "ShopUser",
+            ActorId = actorId,
+            ReasonCode = "SHOP_CONFIRMED_NO_PRIVATE_TEST_PDF_AND_RETRY_REQUESTED",
+            CreatedUtc = now
+        });
+        await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return new ShopPrintDispatchResult(
+            ShopPrintDispatchFailure.None,
+            Job: job,
+            OutputDestinationName: destination.DisplayName,
+            OutputQueueName: destination.QueueName);
     }
 
     public async Task<ShopPrintDispatchResult> ConfirmOutputAsync(

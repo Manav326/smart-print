@@ -62,6 +62,58 @@ public static class ShopPrintJobDispatchEndpoints
             });
         });
 
+        shop.MapPost("/print-jobs/{jobId:guid}/retry-private-test-output", async (
+            Guid jobId,
+            ClaimsPrincipal principal,
+            ShopPrintJobDispatchService dispatch,
+            CancellationToken ct) =>
+        {
+            if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+                return Results.Forbid();
+
+            var result = await dispatch.RetryPrivateTestOutputAsync(
+                jobId, tenantId, GetActorId(principal), ct);
+            if (result.Failure == ShopPrintDispatchFailure.NotFound)
+                return Results.NotFound();
+            if (result.Failure == ShopPrintDispatchFailure.PrivateTestOutputNotRecoverable)
+            {
+                return Results.Conflict(new
+                {
+                    code = "private_test_output_not_recoverable",
+                    message = "Only an output-unconfirmed Private Printing test job can be retried while non-production virtual output is enabled."
+                });
+            }
+            if (result.Failure == ShopPrintDispatchFailure.PrivateTestOutputLocalCopyMissing)
+            {
+                return Results.Conflict(new
+                {
+                    code = "private_test_local_copy_missing",
+                    message = "The original protected local copy and its paired Agent are required. No cloud copy can be used for this retry."
+                });
+            }
+            if (result.Failure == ShopPrintDispatchFailure.PrivateTestOutputPrerequisitesNotMet)
+            {
+                return Results.Conflict(new
+                {
+                    code = "private_test_output_prerequisites_not_met",
+                    message = "The same paired Agent, its ready virtual test queue and verified payment are required before retrying."
+                });
+            }
+
+            var job = result.Job!;
+            return Results.Ok(new
+            {
+                job.Id,
+                job.JobNumber,
+                job.Status,
+                OutputMode = "PDF_EXPORT",
+                OutputType = PrivatePrintingOutputPolicy.TestVirtual,
+                PrinterName = result.OutputDestinationName,
+                QueueName = result.OutputQueueName,
+                PhysicalOutputConfirmed = false
+            });
+        });
+
         shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (
             Guid jobId,
             ClaimsPrincipal principal,

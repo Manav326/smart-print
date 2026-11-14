@@ -455,8 +455,9 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(contracts.includes('bool PdfBrandingEnabled = false'));
   assert.ok(batchReviewEndpoint.includes('request.PdfBrandingEnabled'));
   assert.ok(batchReviewService.includes('job.PdfBrandingEnabled = pdfBrandingEnabled'));
-  assert.match(batchReviewService, /foreach \\(var job in lockedJobs\\)\\s*\\{\\s*if \\(job\\.PdfBrandingEnabled/);
-  assert.doesNotMatch(batchReviewService, /foreach \\(var job in allBatchJobs\\)\\s*\\{\\s*if \\(job\\.PdfBrandingEnabled/);
+  assert.ok(batchReviewService.includes("foreach (var job in lockedJobs)"));
+  assert.ok(batchReviewService.includes("if (job.PdfBrandingEnabled == pdfBrandingEnabled)"));
+  assert.ok(!batchReviewService.includes("foreach (var job in allBatchJobs)"));
   assert.ok(batchReviewService.includes("CanEnablePdfBranding"));
   assert.ok(batchReviewService.includes("IdDocumentBrandingNotAllowed"));
   assert.ok(server.includes('candidate.PdfBrandingEnabled'));
