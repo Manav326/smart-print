@@ -1,3 +1,4 @@
+using SmartPrint.Api;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -46,109 +47,7 @@ if (Encoding.UTF8.GetByteCount(signingKeyText) < 32)
 var issuer = builder.Configuration["Authentication:Issuer"] ?? "QRtoPrint";
 var audience = builder.Configuration["Authentication:Audience"] ?? "QRtoPrint.Clients";
 
-builder.Services.AddProblemDetails();
-builder.Services.AddMemoryCache();
-builder.Services.AddHttpClient<PublicDownloadService>(client =>
-{
-    client.Timeout = Timeout.InfiniteTimeSpan;
-    client.DefaultRequestHeaders.UserAgent.ParseAdd("SmartPrint-Download-Proxy");
-}).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
-{
-    AllowAutoRedirect = false
-});
-builder.Services.AddDbContext<SmartPrintDbContext>(options => options.UseNpgsql(connectionString)
-    .ReplaceService<IMigrationsIdGenerator, LegacyCompatibleMigrationsIdGenerator>());
-builder.Services
-    .AddIdentityCore<AppUser>(options =>
-    {
-        options.User.RequireUniqueEmail = true;
-        options.Password.RequiredLength = 12;
-        options.Password.RequireDigit = true;
-        options.Password.RequireUppercase = true;
-        options.Password.RequireLowercase = true;
-        options.Password.RequireNonAlphanumeric = true;
-        options.Lockout.MaxFailedAccessAttempts = 5;
-        options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
-        options.SignIn.RequireConfirmedEmail = false;
-    })
-    .AddRoles<IdentityRole<Guid>>()
-    .AddEntityFrameworkStores<SmartPrintDbContext>()
-    .AddSignInManager();
-
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.MapInboundClaims = false;
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidIssuer = issuer,
-            ValidateAudience = true,
-            ValidAudience = audience,
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKeyText)),
-            ValidateLifetime = true,
-            ClockSkew = TimeSpan.FromSeconds(30),
-            NameClaimType = JwtRegisteredClaimNames.Sub,
-            RoleClaimType = "shop_role"
-        };
-    });
-builder.Services.AddAuthorization(options =>
-{
-    options.AddPolicy(PlatformAdminAuthorization.PolicyName, policy =>
-        policy.RequireAssertion(context => PlatformAdminAuthorization.IsPlatformAdmin(context.User)));
-});
-builder.Services.AddScoped<TokenIssuer>();
-builder.Services.AddScoped<TenantEntitlementService>();
-builder.Services.AddHttpClient<SubscriptionRazorpayService>();
-builder.Services.AddSingleton<DocumentStorage>();
-builder.Services.AddSingleton<PlatformAdCreativeStorage>();
-builder.Services.AddHostedService<DocumentRetentionWorker>();
-builder.Services.AddHostedService<PrivateRelayRetentionWorker>();
-builder.Services.AddSingleton<PrivateRelayWakeupService>(services =>
-    new PrivateRelayWakeupService(
-        connectionString,
-        services.GetRequiredService<ILogger<PrivateRelayWakeupService>>()));
-builder.Services.AddHostedService(services =>
-    services.GetRequiredService<PrivateRelayWakeupService>());
-builder.Services.AddRateLimiter(options =>
-{
-    options.AddPolicy("authentication", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    options.AddPolicy("public-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    options.AddPolicy("agent-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetAgentRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    options.AddPolicy("qr-session", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    options.AddPolicy("document-upload", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetSessionRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-});
-var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
-    .Get<string[]>()?
-    .Where(origin => !string.IsNullOrWhiteSpace(origin))
-    .Distinct(StringComparer.OrdinalIgnoreCase)
-    .ToArray();
-var corsOrigins = (configuredCorsOrigins is { Length: > 0 }
-    ? configuredCorsOrigins
-    : new[]
-    {
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000"
-    })
-    .Append("http://tauri.localhost")
-    .Distinct(StringComparer.OrdinalIgnoreCase)
-    .ToArray();
-builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
-    .WithOrigins(corsOrigins)
-    .AllowAnyHeader()
-    .AllowAnyMethod()));
+builder.Services.AddApiServices(builder.Configuration, connectionString, signingKeyText, issuer, audience);
 
 var app = builder.Build();
 
@@ -11833,15 +11732,6 @@ static async Task<bool> IsPrivatePrintingOutputQueueReadyAsync(
         agent.LastSeenUtc != null &&
         agent.LastSeenUtc >= now.AddMinutes(-2), ct);
 }
-
-static string GetRateLimitPartitionKey(HttpContext context) =>
-    context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-
-static string GetSessionRateLimitPartitionKey(HttpContext context) =>
-    GetRateLimitPartitionKey(context);
-
-static string GetAgentRateLimitPartitionKey(HttpContext context) =>
-    GetRateLimitPartitionKey(context);
 
 static async Task<(bool Allowed, DateTimeOffset? SuspendedAtUtc)> GetAgentClaimAccessAsync(
     Guid tenantId,
