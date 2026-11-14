@@ -86,6 +86,7 @@ public static class PlatformSubscriptionEndpoints
                 .ToListAsync(ct);
             var versionsById = planVersions.ToDictionary(item => item.Id);
 
+            var now = DateTimeOffset.UtcNow;
             var items = tenants.Select(tenant =>
             {
                 latestSubscriptions.TryGetValue(tenant.Id, out var subscription);
@@ -104,7 +105,8 @@ public static class PlatformSubscriptionEndpoints
                     {
                         subscription.Id,
                         subscription.PlanCode,
-                        subscription.Status,
+                        status = PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+                            subscription.Status, subscription.PeriodEndUtc, now),
                         subscription.BillingInterval,
                         subscription.PeriodStartUtc,
                         subscription.PeriodEndUtc,
