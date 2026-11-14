@@ -182,6 +182,9 @@ export default function ShopSubscriptionCheckout({
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [showAllPayments, setShowAllPayments] = useState(false);
+  const [paymentsHasMore, setPaymentsHasMore] = useState(false);
+  const [paymentsTotalCount, setPaymentsTotalCount] = useState(0);
+  const [paymentsLoadingMore, setPaymentsLoadingMore] = useState(false);
   const paymentsRef = useRef<ShopSubscriptionPaymentRecord[]>([]);
   const requestIds = useRef(new Map<string, string>());
   const pollSequence = useRef(0);
@@ -220,9 +223,12 @@ export default function ShopSubscriptionCheckout({
 
     let latestPayments: ShopSubscriptionPaymentRecord[] | null = null;
     if (paymentsResult.status === "fulfilled") {
-      latestPayments = paymentsResult.value;
+      const page = paymentsResult.value;
+      latestPayments = page.items;
       paymentsRef.current = latestPayments;
       setPayments(latestPayments);
+      setPaymentsTotalCount(page.totalCount);
+      setPaymentsHasMore(page.skip + page.items.length < page.totalCount);
       setHistoryError("");
     } else {
       setHistoryError(paymentsResult.reason instanceof Error
@@ -233,6 +239,27 @@ export default function ShopSubscriptionCheckout({
     setLoading(false);
     setRefreshing(false);
     return latestPayments;
+  }
+
+  async function loadMorePayments() {
+    if (paymentsLoadingMore || !paymentsHasMore) return;
+    setPaymentsLoadingMore(true);
+    setHistoryError("");
+    try {
+      const page = await getShopSubscriptionPayments(token, paymentsRef.current.length, 20);
+      const merged = [...paymentsRef.current, ...page.items];
+      paymentsRef.current = merged;
+      setPayments(merged);
+      setPaymentsTotalCount(page.totalCount);
+      setPaymentsHasMore(page.skip + page.items.length < page.totalCount);
+      setShowAllPayments(true);
+    } catch (exception) {
+      setHistoryError(exception instanceof Error
+        ? exception.message
+        : "Older subscription payments could not be loaded. Try again.");
+    } finally {
+      setPaymentsLoadingMore(false);
+    }
   }
 
   useEffect(() => {
@@ -565,10 +592,15 @@ export default function ShopSubscriptionCheckout({
         <div className="subscription-payment-history">
           <div className="subscription-payment-history-heading">
             <Clock3 size={15}/>
-            <strong>Subscription payment history ({payments.length})</strong>
-            {payments.length > 5 && (
-              <button type="button" className="secondary-button small" onClick={() => setShowAllPayments(value => !value)}>
-                {showAllPayments ? "Show recent" : "Show all"}
+            <strong>Subscription payment history ({paymentsTotalCount})</strong>
+            {payments.length > 5 && !showAllPayments && (
+              <button type="button" className="secondary-button small" onClick={() => setShowAllPayments(true)}>
+                Show all loaded
+              </button>
+            )}
+            {showAllPayments && (
+              <button type="button" className="secondary-button small" onClick={() => setShowAllPayments(false)}>
+                Show recent
               </button>
             )}
           </div>
@@ -589,6 +621,17 @@ export default function ShopSubscriptionCheckout({
               </div>
             </div>
           ))}
+          {showAllPayments && paymentsHasMore && (
+            <button
+              type="button"
+              className="secondary-button small subscription-payment-load-more"
+              onClick={() => void loadMorePayments()}
+              disabled={paymentsLoadingMore}
+            >
+              {paymentsLoadingMore ? <span className="button-spinner"/> : <RefreshCw size={13}/>}
+              {paymentsLoadingMore ? "Loading payments…" : `Load 20 older payments · ${Math.max(0, paymentsTotalCount - payments.length)} remaining`}
+            </button>
+          )}
         </div>
       )}
 
