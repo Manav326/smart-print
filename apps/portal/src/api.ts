@@ -433,6 +433,7 @@ export const signIn = (email: string, password: string) =>
 export interface GoogleAuthConfiguration {
   configured: boolean;
   clientId: string;
+  nonce: string;
 }
 
 export function getGoogleAuthConfiguration() {
