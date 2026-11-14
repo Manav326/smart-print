@@ -79,6 +79,27 @@ public sealed class AgentRuntimeReadinessTests
         Assert.True(snapshot.LocalUploadReady);
     }
 
+
+    [Fact]
+    public void PrintingReadinessRemainsHealthyWhenTheOptionalDocumentWorkerIsUnavailable()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var readiness = new AgentRuntimeReadiness();
+        readiness.SetQueueInitialized(true);
+        readiness.SetPrintWorkerRunning(true);
+        readiness.MarkHeartbeatSuccess(now);
+        readiness.MarkPrinterInventorySuccess(1, now);
+
+        // Document parser health is deliberately not part of print-worker readiness.
+        // A failed upload/parser request must not pause already accepted print jobs.
+        var snapshot = readiness.GetSnapshot(now);
+
+        Assert.True(snapshot.PrintWorkerRunning);
+        Assert.True(snapshot.QueueInitialized);
+        Assert.True(snapshot.HeartbeatFresh);
+        Assert.True(snapshot.LocalUploadReady);
+    }
+
     [Theory]
     [InlineData("not_paired")]
     [InlineData("identity_unavailable")]

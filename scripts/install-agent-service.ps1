@@ -24,6 +24,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 $resolvedExe = (Resolve-Path -LiteralPath $AgentExePath).Path
+$workerExeCandidate = Join-Path (Split-Path -Parent $resolvedExe) "SmartPrint.DocumentWorker.Windows.exe"
+$workerSetupScript = Join-Path $PSScriptRoot "install-document-worker-service.ps1"
+$workerPackageAvailable = Test-Path -LiteralPath $workerExeCandidate -PathType Leaf
+
 $portalUri = $null
 if (-not [Uri]::TryCreate($CustomerPortalOrigin.TrimEnd('/'), [UriKind]::Absolute, [ref]$portalUri)) {
     throw "Provide the canonical HTTPS customer portal origin without a path, query string, fragment, or credentials."
@@ -115,6 +119,24 @@ try {
 
     $newFirewallRule = New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Any -RemoteAddress LocalSubnet -Description "Allows same-local-subnet devices to reach the QRtoPrint local agent status and upload endpoints."
 
+    # The parser is optional to the printing service. Install/configure it only
+    # after the main Agent is confirmed healthy. A parser setup failure blocks
+    # document uploads, never the print queue, spooler monitoring or accepted jobs.
+    $workerReady = $false
+    if ($workerPackageAvailable -and (Test-Path -LiteralPath $workerSetupScript -PathType Leaf)) {
+        try {
+            & $workerSetupScript -WorkerExePath $workerExeCandidate
+            $workerReady = $true
+        }
+        catch {
+            Write-Warning "The isolated document parser could not be configured: $($_.Exception.Message)"
+            Write-Warning "SmartPrint printing remains installed and running. New document uploads/photo revisions will return a temporary-unavailable response until the parser is repaired."
+        }
+    }
+    else {
+        Write-Warning "The isolated document parser package/helper is missing. SmartPrint printing remains installed and running; new uploads and photo revisions are blocked until the parser is repaired."
+    }
+
     # The new version is running and reachable. Old version-specific rules are
     # now safe to remove; any cleanup failure must not roll back a healthy Agent.
     Get-NetFirewallRule -ErrorAction SilentlyContinue |
@@ -128,14 +150,45 @@ try {
     $currentAgentDirectory = Split-Path -Parent $resolvedExe
     $agentRoot = Split-Path -Parent $currentAgentDirectory
     if ((Split-Path -Leaf $agentRoot) -ieq "agent") {
+        $keepDirectories = [System.Collections.Generic.List[string]]::new()
+        $keepDirectories.Add($currentAgentDirectory)
+
+        # If parser setup failed during an upgrade, its previous executable must
+        # remain on disk. Removing that version would orphan the optional worker.
+        $workerRegistration = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrintSmartPrintDocumentWorker'" -ErrorAction SilentlyContinue
+        if ($workerRegistration -and -not [string]::IsNullOrWhiteSpace([string]$workerRegistration.PathName)) {
+            $workerImage = [string]$workerRegistration.PathName
+            if ($workerImage -match '^\s*"([^"]+)"') { $workerImage = $Matches[1] }
+            else { $workerImage = ($workerImage -split '\s+', 2)[0] }
+            $workerDirectory = Split-Path -Parent $workerImage
+            $workerDirectoryAlreadyKept = $false
+            foreach ($keepDirectory in $keepDirectories) {
+                if ([string]::Equals($keepDirectory, $workerDirectory, [StringComparison]::OrdinalIgnoreCase)) {
+                    $workerDirectoryAlreadyKept = $true
+                    break
+                }
+            }
+            if ((Test-Path -LiteralPath $workerDirectory -PathType Container) -and -not $workerDirectoryAlreadyKept) {
+                $keepDirectories.Add($workerDirectory)
+            }
+        }
+
         Get-ChildItem -LiteralPath $agentRoot -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -ne $currentAgentDirectory } |
+            Where-Object {
+                $candidate = $_.FullName
+                -not ($keepDirectories | Where-Object { [string]::Equals($_, $candidate, [StringComparison]::OrdinalIgnoreCase) })
+            } |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host "Configured the local Agent API CORS origin: $allowedOrigin"
     Write-Host "QRtoPrint Smart Print Agent $AgentVersion is installed and running." -ForegroundColor Green
     Write-Host "The local Agent accepts connections only from devices on the connected local subnet."
+    if ($workerReady) {
+        Write-Host "Document parsing is optional, LocalService-isolated and demand-started; it stops after two minutes idle."
+    } else {
+        Write-Warning "Printing is healthy. Document uploads/photo revisions are temporarily disabled because the isolated parser is unavailable."
+    }
     Write-Host "Use Get-Service $serviceName to inspect the service state."
 }
 catch {

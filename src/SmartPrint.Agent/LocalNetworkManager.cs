@@ -55,11 +55,15 @@ public sealed class LocalNetworkManager(LocalNetworkPreferenceStore preferences,
     public bool IsRemoteClientOnSelectedNetwork(IPAddress? remoteAddress, IPAddress? localAddress)
     {
         if (remoteAddress is null || localAddress is null) return false;
-        if (IPAddress.IsLoopback(remoteAddress))
-            return IPAddress.IsLoopback(localAddress);
 
+        // Normalize dual-stack socket addresses before the loopback check.
+        // IPv4 loopback can arrive as ::ffff:127.0.0.1; treating that as a
+        // non-loopback remote would incorrectly require the selected shop NIC
+        // and block the Agent's own localhost readiness probe.
         if (remoteAddress.IsIPv4MappedToIPv6) remoteAddress = remoteAddress.MapToIPv4();
         if (localAddress.IsIPv4MappedToIPv6) localAddress = localAddress.MapToIPv4();
+        if (IPAddress.IsLoopback(remoteAddress))
+            return IPAddress.IsLoopback(localAddress);
         if (remoteAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork ||
             localAddress.AddressFamily != System.Net.Sockets.AddressFamily.InterNetwork)
             return false;

@@ -117,4 +117,34 @@ public sealed class LocalNetworkEndpointDiscoveryTests
                 IPAddress.Parse(local),
                 prefixLength));
     }
+    [Theory]
+    [InlineData("127.0.0.1", "127.0.0.1", true)]
+    [InlineData("127.0.0.1", "::ffff:127.0.0.1", true)]
+    [InlineData("::ffff:127.0.0.1", "127.0.0.1", true)]
+    [InlineData("::ffff:127.0.0.1", "::ffff:127.0.0.1", true)]
+    [InlineData("::ffff:127.0.0.1", "192.168.31.47", false)]
+    public void TreatsIpv4MappedLoopbackAsLoopbackBeforeCheckingSavedShopNetwork(
+        string remoteAddress, string localAddress, bool expected)
+    {
+        var preferencePath = Path.Combine(Path.GetTempPath(), "smartprint-network-pref-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            // The saved fixture network intentionally does not exist on the hosted runner.
+            // Loopback readiness must still work without silently selecting that NIC.
+            var preferences = new LocalNetworkPreferenceStore(preferencePath);
+            preferences.SetPreferredNetworkId("LIFECYCLE-QA-SHOP-NETWORK");
+            var manager = new LocalNetworkManager(preferences, new LocalAgentApiState());
+
+            Assert.Equal(
+                expected,
+                manager.IsRemoteClientOnSelectedNetwork(
+                    IPAddress.Parse(remoteAddress),
+                    IPAddress.Parse(localAddress)));
+        }
+        finally
+        {
+            if (File.Exists(preferencePath)) File.Delete(preferencePath);
+        }
+    }
+
 }

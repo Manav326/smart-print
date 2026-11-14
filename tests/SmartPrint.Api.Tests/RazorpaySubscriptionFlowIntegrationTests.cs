@@ -310,6 +310,46 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
+    public async Task ConcurrentCheckoutVerificationAndCapturedWebhookActivateSubscriptionExactlyOnce()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var order = await fixture.CreateOrderAsync();
+            var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
+            var body = WebhookBody("payment.captured", paymentId, order.OrderId, order.AmountMinor, "captured");
+
+            await using var webhookDb = fixture.CreateAdditionalDbContext();
+            var webhookService = fixture.CreateService(webhookDb);
+
+            var webhookTask = Task.Run(() => webhookService.ProcessWebhookAsync(
+                body,
+                WebhookSignature(body),
+                "evt_concurrent_checkout_capture",
+                CancellationToken.None));
+            var checkoutTask = Task.Run(() => fixture.Service.VerifyCheckoutAsync(
+                fixture.TenantId,
+                order.OrderId,
+                paymentId,
+                CheckoutSignature(order.OrderId, paymentId),
+                CancellationToken.None));
+
+            var webhookResult = await webhookTask.WaitAsync(TimeSpan.FromSeconds(20));
+            var checkoutResult = await checkoutTask.WaitAsync(TimeSpan.FromSeconds(20));
+
+            Assert.Contains(webhookResult.Status, new[] { "PROCESSED_CAPTURED", "PROCESSED_DUPLICATE_PAYMENT" });
+            Assert.True(checkoutResult.DuplicateRequest || checkoutResult.Status == "CAPTURED");
+
+            await using var verification = fixture.CreateAdditionalDbContext();
+            var payment = await verification.ShopSubscriptionPayments.SingleAsync();
+            Assert.Equal("CAPTURED", payment.Status);
+            Assert.NotNull(payment.AssignedSubscriptionId);
+            Assert.Equal(2, await verification.TenantSubscriptions.CountAsync());
+            Assert.Equal(1, await verification.PlatformSubscriptionAudits.CountAsync());
+            Assert.Single(await verification.RazorpayWebhookEvents.ToListAsync());
+        });
+    }
+
+    [Fact]
     public async Task FailedEventArrivingAfterCaptureCannotDowngradeSubscription()
     {
         await WithPostgresAsync(async fixture =>

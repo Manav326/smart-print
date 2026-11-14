@@ -29,6 +29,12 @@ var builderArguments = args
     .Where(argument => !string.Equals(argument, bootstrapPlatformAdminArgument, StringComparison.OrdinalIgnoreCase))
     .ToArray();
 var builder = WebApplication.CreateBuilder(builderArguments);
+var configuredShutdownTimeout = builder.Configuration.GetValue<TimeSpan?>("HostOptions:ShutdownTimeout")
+    ?? TimeSpan.FromSeconds(30);
+builder.Services.Configure<HostOptions>(options =>
+{
+    options.ShutdownTimeout = configuredShutdownTimeout;
+});
 var connectionString = builder.Configuration.GetConnectionString("SmartPrint")
     ?? (builder.Environment.IsDevelopment()
         ? "Host=localhost;Port=5432;Database=qrtoprint;Username=postgres;Password=postgres"
@@ -101,6 +107,8 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddHttpClient<SubscriptionRazorpayService>();
+builder.Services.AddSingleton<SmartPrint.Documents.IDocumentThreatScanner, SmartPrint.Api.Security.ClamAvDocumentThreatScanner>();
+builder.Services.AddHttpClient<SmartPrint.Documents.IDocumentAnalyzer, SmartPrint.Api.Security.IsolatedDocumentAnalyzer>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddSingleton<PlatformAdCreativeStorage>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
@@ -2668,6 +2676,23 @@ shop.MapPost("/photo-jobs", async (
             await using var input = upload.OpenReadStream();
             stored = await storage.ValidateAndStoreAsync(tenantId, documentId, outputName, input, upload.Length, ct);
         }
+        catch (DocumentThreatScanException exception) when (!exception.ThreatDetected)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "The malware scanner could not confirm this document is safe. The upload was blocked.");
+        }
+        catch (DocumentThreatScanException exception)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message });
+        }
+        catch (DocumentProcessingException)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Document security processing is temporarily unavailable. The upload was not accepted.");
+        }
         catch (DocumentValidationException exception)
         {
             await transaction.RollbackAsync(ct);
@@ -4067,6 +4092,23 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     {
         await using var input = file.OpenReadStream();
         stored = await storage.ValidateAndStoreAsync(tenantId, newDocumentId, outputName, input, file.Length, ct);
+    }
+    catch (DocumentThreatScanException exception) when (!exception.ThreatDetected)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "The malware scanner could not confirm this document is safe. The upload was blocked.");
+    }
+    catch (DocumentThreatScanException exception)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message });
+    }
+    catch (DocumentProcessingException)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Document security processing is temporarily unavailable. The upload was not accepted.");
     }
     catch (DocumentValidationException exception)
     {
@@ -8796,6 +8838,20 @@ publicApi.MapPost("/sessions/current/jobs", async (
         stored = await storage.ValidateAndStoreAsync(
             session.TenantId, documentId, originalName, input, file.Length, ct);
     }
+    catch (DocumentThreatScanException exception) when (!exception.ThreatDetected)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "The malware scanner could not confirm this document is safe. The upload was blocked.");
+    }
+    catch (DocumentThreatScanException exception)
+    {
+        return Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message });
+    }
+    catch (DocumentProcessingException)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Document security processing is temporarily unavailable. The upload was not accepted.");
+    }
     catch (DocumentValidationException exception)
     {
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
@@ -10046,6 +10102,20 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         await using var input = file.OpenReadStream();
         stored = await storage.ValidateAndStoreAsync(
             preflightTicket.TenantId, documentId, preflightTicket.OriginalFileName, input, preflightTicket.SizeBytes, ct);
+    }
+    catch (DocumentThreatScanException exception) when (!exception.ThreatDetected)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "The malware scanner could not confirm this document is safe. The upload was blocked.");
+    }
+    catch (DocumentThreatScanException exception)
+    {
+        return Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message });
+    }
+    catch (DocumentProcessingException)
+    {
+        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Document security processing is temporarily unavailable. The upload was not accepted.");
     }
     catch (DocumentValidationException exception)
     {

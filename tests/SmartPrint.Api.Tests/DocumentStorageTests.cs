@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Text;
 using Microsoft.Extensions.Configuration;
 using SmartPrint.Api.Domain;
+using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Api.Storage;
 using SmartPrint.Documents;
 
@@ -106,6 +107,7 @@ public sealed class DocumentStorageTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+
     [Fact]
     public async Task DeletingAStoredDocumentRemovesItsPayloadFileAndReleasesItsStorageEntry()
     {
@@ -123,6 +125,34 @@ public sealed class DocumentStorageTests
 
             Assert.False(File.Exists(path));
             Assert.Throws<FileNotFoundException>(() => storage.OpenRead(stored.StorageKey));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task RejectsMaliciousDocumentBeforeWritingAnyEncryptedBytes()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Documents:StorageRoot"] = root,
+                ["Documents:EncryptionKey"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            }).Build();
+            using var storage = new DocumentStorage(
+                configuration,
+                new TestWebHostEnvironment(root, "Production"),
+                new RejectDocumentThreatScanner(),
+                new AllowDocumentAnalyzer(),
+                NullLogger<DocumentStorage>.Instance);
+
+            await using var input = new MemoryStream(ValidPng);
+            var exception = await Assert.ThrowsAsync<DocumentThreatScanException>(() =>
+                storage.ValidateAndStoreAsync(Guid.NewGuid(), Guid.NewGuid(), "infected.png", input, ValidPng.Length, CancellationToken.None));
+
+            Assert.True(exception.ThreatDetected);
+            Assert.Empty(Directory.GetFiles(root, "*", SearchOption.AllDirectories));
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -227,7 +257,7 @@ public sealed class DocumentStorageTests
         {
             var configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
             var environment = new TestWebHostEnvironment(root, "Production");
-            Assert.Throws<InvalidOperationException>(() => new DocumentStorage(configuration, environment));
+            Assert.Throws<InvalidOperationException>(() => new DocumentStorage(configuration, environment, new AllowDocumentThreatScanner(), new AllowDocumentAnalyzer(), NullLogger<DocumentStorage>.Instance));
         }
         finally { Directory.Delete(root, recursive: true); }
     }
@@ -246,7 +276,24 @@ public sealed class DocumentStorageTests
             ["Documents:StorageRoot"] = root,
             ["Documents:EncryptionKey"] = key
         }).Build();
-        return new DocumentStorage(configuration, new TestWebHostEnvironment(root, "Production"));
+        return new DocumentStorage(configuration, new TestWebHostEnvironment(root, "Production"), new AllowDocumentThreatScanner(), new AllowDocumentAnalyzer(), NullLogger<DocumentStorage>.Instance);
+    }
+
+    private sealed class AllowDocumentAnalyzer : IDocumentAnalyzer
+    {
+        public Task<DocumentAnalysis> AnalyzeAsync(ReadOnlyMemory<byte> document, string extension, CancellationToken cancellationToken) =>
+            Task.FromResult(DocumentAnalyzer.Analyse(document.ToArray(), extension));
+    }
+
+    private sealed class AllowDocumentThreatScanner : IDocumentThreatScanner
+    {
+        public Task ScanAsync(ReadOnlyMemory<byte> document, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class RejectDocumentThreatScanner : IDocumentThreatScanner
+    {
+        public Task ScanAsync(ReadOnlyMemory<byte> document, CancellationToken cancellationToken) =>
+            throw new DocumentThreatScanException("test threat", threatDetected: true);
     }
 
     private static string CreateTemporaryDirectory()

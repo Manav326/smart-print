@@ -279,6 +279,11 @@ public sealed class LocalAgentApiHostedService(
                 options.MemoryBufferThreshold = checked((int)UploadLimits.MaxMultipartRequestBytes);
             });
 
+            // This is a separate WebApplication container from the outer Windows
+            // Service host. Register endpoint-injected scanners/parsers here rather
+            // than relying on registrations made by Agent Program.cs.
+            builder.Services.AddLocalAgentDocumentProcessingServices();
+
             // Retain loopback-only static origins for local development. The production
             // HTTPS origin is supplied dynamically by the authenticated API heartbeat.
             state.SetConfiguredOrigins(allowedOrigins.Where(origin =>
@@ -383,6 +388,8 @@ public sealed class LocalAgentApiHostedService(
             app.MapPost("/api/v1/local/documents/{jobId:guid}/photo-revision", async (
                 Guid jobId,
                 HttpContext context,
+                WindowsDefenderDocumentThreatScanner threatScanner,
+                WindowsLocalDocumentAnalyzer documentAnalyzer,
                 CancellationToken ct) =>
             {
                 AgentCredentials? credentials;
@@ -441,15 +448,43 @@ public sealed class LocalAgentApiHostedService(
                     bytes = memory.ToArray();
                 }
 
+                try
+                {
+                    await threatScanner.ScanAsync(bytes, ".pdf", ct);
+                    logger.LogInformation(
+                        "Local photo revision passed Defender scanning. JobId={JobId} SizeBytes={SizeBytes}",
+                        jobId, bytes.LongLength);
+                }
+                catch (DocumentThreatScanException exception)
+                {
+                    logger.LogWarning(
+                        exception,
+                        "Local photo revision rejected by document security scanning. JobId={JobId} ThreatDetected={ThreatDetected} SizeBytes={SizeBytes}",
+                        jobId, exception.ThreatDetected, bytes.LongLength);
+                    CryptographicOperations.ZeroMemory(bytes);
+                    return exception.ThreatDetected
+                        ? Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message })
+                        : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                            title: "The shop's malware scanner could not confirm that this document is safe. The upload was blocked.");
+                }
+
                 DocumentAnalysis analysis;
                 try
                 {
-                    analysis = DocumentAnalyzer.Analyse(bytes, ".pdf");
+                    analysis = await documentAnalyzer.AnalyzeAsync(bytes, ".pdf", ct);
                 }
                 catch (DocumentValidationException exception)
                 {
                     CryptographicOperations.ZeroMemory(bytes);
                     return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
+                }
+                catch (DocumentProcessingException exception)
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    logger.LogWarning(exception, "Photo revision parser unavailable. JobId={JobId}; print queue remains active.", jobId);
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status503ServiceUnavailable,
+                        title: "The isolated document processor is temporarily unavailable. Your existing print jobs are not affected.");
                 }
                 if (!string.Equals(analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
                 {
@@ -838,6 +873,8 @@ public sealed class LocalAgentApiHostedService(
             app.MapPost("/api/v1/local/uploads/{ticketId:guid}", async (
                 Guid ticketId,
                 HttpContext context,
+                WindowsDefenderDocumentThreatScanner threatScanner,
+                WindowsLocalDocumentAnalyzer documentAnalyzer,
                 CancellationToken ct) =>
             {
                 AgentCredentials? credentials;
@@ -1048,10 +1085,29 @@ public sealed class LocalAgentApiHostedService(
                         return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the authorised upload." });
                     }
 
+                    try
+                    {
+                        await threatScanner.ScanAsync(bytes, claim.FileExtension, ct);
+                        logger.LogInformation(
+                            "Local upload passed Defender scanning. TicketId={TicketId} SizeBytes={SizeBytes}",
+                            ticketId, bytes.LongLength);
+                    }
+                    catch (DocumentThreatScanException exception)
+                    {
+                        logger.LogWarning(
+                            exception,
+                            "Local upload rejected by document security scanning. TicketId={TicketId} ThreatDetected={ThreatDetected} SizeBytes={SizeBytes}",
+                            ticketId, exception.ThreatDetected, bytes.LongLength);
+                        return exception.ThreatDetected
+                            ? Results.UnprocessableEntity(new { code = "document_security_rejected", message = exception.Message })
+                            : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                                title: "The shop's malware scanner could not confirm that this document is safe. The upload was blocked.");
+                    }
+
                     DocumentAnalysis analysis;
                     try
                     {
-                        analysis = DocumentAnalyzer.Analyse(bytes, claim.FileExtension);
+                        analysis = await documentAnalyzer.AnalyzeAsync(bytes, claim.FileExtension, ct);
                     }
                     catch (DocumentValidationException exception)
                     {
@@ -1059,6 +1115,13 @@ public sealed class LocalAgentApiHostedService(
                             "document_not_supported",
                             exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
                         return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
+                    }
+                    catch (DocumentProcessingException exception)
+                    {
+                        logger.LogWarning(exception, "Local document parser unavailable. TicketId={TicketId}; print queue remains active.", ticketId);
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status503ServiceUnavailable,
+                            title: "The isolated document processor is temporarily unavailable. Your existing print jobs are not affected.");
                     }
 
                     if (!string.Equals(analysis.Extension, claim.FileExtension, StringComparison.OrdinalIgnoreCase) ||

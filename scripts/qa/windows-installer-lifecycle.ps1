@@ -63,6 +63,8 @@ foreach ($entry in @(@{Name="InstallerV1";Path=$InstallerV1}, @{Name="InstallerV
 
 $ErrorActionPreference = "Stop"
 $serviceName = "QRtoPrintSmartPrintAgent"
+$workerServiceName = "QRtoPrintSmartPrintDocumentWorker"
+$workerFirewallPrefix = "QRtoPrint Smart Print Document Worker outbound block"
 $firewallPrefix = "QRtoPrint Smart Print Agent Local API"
 $testPrinterName = "SmartPrint Lifecycle QA Queue"
 $fixtureProject = Join-Path $env:RUNNER_TEMP "SmartPrintLifecycleFixture"
@@ -181,24 +183,62 @@ function Wait-LocalApiReady([int]$TimeoutSeconds = 45) {
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     $uri = "http://127.0.0.1:17842/api/v1/local/status"
     $poll = 0
+    $lastHttpStatus = $null
+    $lastResponseBody = $null
+    $lastRequestError = $null
     do {
         $poll++
         if ($poll -eq 1 -or $poll % 10 -eq 0) {
             Write-Host "[QA-PROGRESS] Agent local API and identity readiness | poll=$poll | elapsed=$($poll)s." -ForegroundColor DarkCyan
         }
         try {
-            $status = Invoke-RestMethod -Uri $uri -Method Get -TimeoutSec 3
-            if ($status.status -eq "LOCAL_ENDPOINT_READY" -and
+            $response = Invoke-WebRequest -Uri $uri -Method Get -TimeoutSec 3 -SkipHttpErrorCheck
+            $lastHttpStatus = [int]$response.StatusCode
+            $lastResponseBody = [string]$response.Content
+            $status = $null
+            try { $status = $response.Content | ConvertFrom-Json -ErrorAction Stop } catch { }
+            if ($lastHttpStatus -eq 200 -and
+                $status.status -eq "LOCAL_ENDPOINT_READY" -and
                 $status.agentDeviceId -eq $expectedIdentityId) {
                 return
             }
         }
         catch {
-            # The Windows service can report Running before the LAN listener finishes starting.
+            $lastRequestError = $_.Exception.Message
         }
         Start-Sleep -Seconds 1
     } while ((Get-Date) -lt $deadline)
-    throw "The Agent service is running, but its local print API did not become ready with the preserved shop identity."
+
+    $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+    $safeService = if ($service) {
+        "State=$($service.State); StartName=$($service.StartName); PathName=$($service.PathName)"
+    } else { "Service registration is absent." }
+    $identity = if (Test-Path -LiteralPath $identityPath -PathType Leaf) {
+        $file = Get-Item -LiteralPath $identityPath
+        "Identity file exists; bytes=$($file.Length); lastWriteUtc=$($file.LastWriteTimeUtc.ToString('O'))"
+    } else { "Identity file is missing." }
+    $eventMessages = @()
+    try {
+        $eventMessages = @(Get-WinEvent -FilterHashtable @{
+            LogName = "Application"
+            StartTime = (Get-Date).AddMinutes(-3)
+        } -ErrorAction Stop |
+            Where-Object {
+                $_.ProviderName -match "SmartPrint|QRtoPrint|\.NET Runtime|Application Error" -or
+                $_.Message -match "SmartPrint|QRtoPrint"
+            } |
+            Select-Object -Last 12 |
+            ForEach-Object { "$($_.TimeCreated.ToString('O')) [$($_.ProviderName)] $($_.LevelDisplayName): $($_.Message -replace '\s+', ' ')" })
+    } catch { }
+    $eventSummary = if ($eventMessages.Count -gt 0) { $eventMessages -join " || " } else { "No matching recent Application events." }
+    throw "Agent local API readiness failed. HTTP=$lastHttpStatus; response=$lastResponseBody; requestError=$lastRequestError; $safeService; $identity; recentEvents=$eventSummary"
+}
+
+function Assert-DesktopPayloadExcludesCiOnlyBinary {
+    $productionDesktop = Join-Path $installRoot "SmartPrint.Desktop.exe"
+    $qaDesktop = Join-Path $installRoot "SmartPrint.Desktop.QA.exe"
+    Assert-True (Test-Path -LiteralPath $productionDesktop -PathType Leaf) "The production Windows Desktop executable was not installed."
+    Assert-True (-not (Test-Path -LiteralPath $qaDesktop)) "The CI-only WebView2 DevTools executable must never be shipped in the customer installer."
 }
 
 function Assert-ServiceVersion([string]$ExpectedVersion) {
@@ -208,6 +248,120 @@ function Assert-ServiceVersion([string]$ExpectedVersion) {
     Assert-True ($path -match [regex]::Escape("\agent\$ExpectedVersion-")) "Service points to the wrong Agent payload: $path"
     Assert-True (Test-Path -LiteralPath $path -PathType Leaf) "The Agent executable configured in the Windows service does not exist: $path"
     Wait-LocalApiReady
+}
+
+function Assert-OptionalParserService {
+    $worker = Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $worker) "The optional isolated document parser service was not installed."
+    Assert-True ($worker.Status -eq "Stopped") "The optional parser must remain stopped until an upload needs analysis; current state: $($worker.Status)."
+
+    $registration = Get-CimInstance -ClassName Win32_Service -Filter "Name='$workerServiceName'" -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $registration) "Windows Service Control Manager has no isolated parser registration."
+    Assert-True ($registration.StartMode -eq "Manual") "The parser service must be demand-started, not started automatically with the print Agent."
+    Assert-True ($registration.StartName -eq "NT AUTHORITY\LocalService") "The parser must run as the restricted LocalService identity, not LocalSystem."
+    $workerPath = ([string]$registration.PathName).Trim().Trim('"')
+    Assert-True (Test-Path -LiteralPath $workerPath -PathType Leaf) "The parser service executable is missing: $workerPath"
+
+    $agent = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+    Assert-True ($agent -and $agent.Status -eq "Running") "The primary printing Agent must remain Running while the optional parser is stopped."
+    Wait-LocalApiReady
+}
+
+function Assert-DocumentWorkerRuntimeIsolation {
+    Write-Host "[QA-ACTION] Exercise the on-demand LocalService parser over its restricted named pipe." -ForegroundColor Cyan
+    $taskName = "SmartPrintLifecycleParserAcceptance"
+    $networkProbeTaskName = "SmartPrintLifecycleNetworkServicePipeProbe"
+    $localProbeTaskName = "SmartPrintLifecycleLocalServicePipeProbe"
+    $probeRoot = Join-Path $env:RUNNER_TEMP "SmartPrintParserAcceptance"
+    $systemResultPath = Join-Path $probeRoot "system-analysis.json"
+    $networkProbeDirectory = Join-Path $probeRoot "network-service"
+    $networkResultPath = Join-Path $networkProbeDirectory "pipe-probe.txt"
+    $localProbeDirectory = Join-Path $probeRoot "local-service"
+    $localResultPath = Join-Path $localProbeDirectory "pipe-probe.txt"
+    $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
+    $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
+    Assert-True (Test-Path -LiteralPath $assemblyPath) "The parser acceptance fixture assembly was not built."
+
+    New-Item -ItemType Directory -Force -Path $probeRoot, $networkProbeDirectory, $localProbeDirectory | Out-Null
+    $script:ownsParserAcceptanceDirectory = $true
+
+    try {
+        Remove-Item -LiteralPath $systemResultPath -Force -ErrorAction SilentlyContinue
+        $systemArguments = '"' + $assemblyPath + '" analyze-worker "' + $systemResultPath + '"'
+        $systemAction = New-ScheduledTaskAction -Execute $dotnetPath -Argument $systemArguments
+        $systemPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+        Register-ScheduledTask -TaskName $taskName -Action $systemAction -Principal $systemPrincipal | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+
+        $deadline = (Get-Date).AddSeconds(35)
+        while (-not (Test-Path -LiteralPath $systemResultPath) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+        }
+        Assert-True (Test-Path -LiteralPath $systemResultPath) "The LocalSystem Agent could not complete a real LocalService document-worker analysis."
+        $analysis = Get-Content -LiteralPath $systemResultPath -Raw | ConvertFrom-Json
+        Assert-True ($analysis.pageCount -eq 1 -and $analysis.mediaType -eq "image/png") "The restricted parser returned unexpected analysis metadata."
+
+        $worker = Get-Service -Name $workerServiceName -ErrorAction Stop
+        Assert-True ($worker.Status -eq "Running") "The document worker did not start on demand."
+        $registration = Get-CimInstance -ClassName Win32_Service -Filter "Name='$workerServiceName'"
+        Assert-True ($registration.StartName -eq "NT AUTHORITY\LocalService") "The parser service is not running as LocalService."
+
+        # The worker's unique service SID is the only non-SYSTEM pipe principal.
+        # Prove both ordinary LocalService and NetworkService processes are denied.
+        & icacls.exe (Split-Path -Parent $assemblyPath) /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(RX)" "NT AUTHORITY\LOCAL SERVICE:(OI)(CI)(RX)" /T | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not grant the unprivileged service probes read/execute access to the isolated fixture assembly." }
+        & icacls.exe $networkProbeDirectory /grant "NT AUTHORITY\NETWORK SERVICE:(OI)(CI)(M)" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not grant the NetworkService probe its result-file access." }
+        & icacls.exe $localProbeDirectory /grant "NT AUTHORITY\LOCAL SERVICE:(OI)(CI)(M)" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not grant the LocalService probe its result-file access." }
+
+        $networkArguments = '"' + $assemblyPath + '" probe-worker-pipe "' + $networkResultPath + '"'
+        $networkAction = New-ScheduledTaskAction -Execute $dotnetPath -Argument $networkArguments
+        $networkPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\NETWORK SERVICE" -LogonType ServiceAccount -RunLevel Limited
+        Register-ScheduledTask -TaskName $networkProbeTaskName -Action $networkAction -Principal $networkPrincipal | Out-Null
+        Start-ScheduledTask -TaskName $networkProbeTaskName
+
+        $networkDeadline = (Get-Date).AddSeconds(20)
+        while (-not (Test-Path -LiteralPath $networkResultPath) -and (Get-Date) -lt $networkDeadline) {
+            Start-Sleep -Milliseconds 250
+        }
+        Assert-True (Test-Path -LiteralPath $networkResultPath) "The unprivileged NetworkService pipe probe did not produce a result."
+        $networkResult = (Get-Content -LiteralPath $networkResultPath -Raw).Trim()
+        Assert-True ($networkResult -eq "REJECTED") "The isolated worker pipe did not reject NetworkService: $networkResult"
+
+        $localArguments = '"' + $assemblyPath + '" probe-worker-pipe "' + $localResultPath + '"'
+        $localAction = New-ScheduledTaskAction -Execute $dotnetPath -Argument $localArguments
+        $localPrincipal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\LocalService" -LogonType ServiceAccount -RunLevel Limited
+        Register-ScheduledTask -TaskName $localProbeTaskName -Action $localAction -Principal $localPrincipal | Out-Null
+        Start-ScheduledTask -TaskName $localProbeTaskName
+
+        $localDeadline = (Get-Date).AddSeconds(20)
+        while (-not (Test-Path -LiteralPath $localResultPath) -and (Get-Date) -lt $localDeadline) {
+            Start-Sleep -Milliseconds 250
+        }
+        Assert-True (Test-Path -LiteralPath $localResultPath) "The ordinary LocalService pipe probe did not produce a result."
+        $localResult = (Get-Content -LiteralPath $localResultPath -Raw).Trim()
+        Assert-True ($localResult -eq "REJECTED") "The isolated worker pipe did not reject ordinary LocalService: $localResult"
+
+        Write-Host "[QA-RESULT] PASS: LocalSystem can use the restricted worker; ordinary LocalService and NetworkService clients are denied." -ForegroundColor Green
+    }
+    finally {
+        Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $networkProbeTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName $localProbeTaskName -Confirm:$false -ErrorAction SilentlyContinue
+        $worker = Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue
+        if ($worker -and $worker.Status -ne "Stopped") {
+            Stop-Service -Name $workerServiceName -Force
+            (Get-Service -Name $workerServiceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
+        }
+        if ($script:ownsParserAcceptanceDirectory) {
+            Remove-Item -LiteralPath $probeRoot -Recurse -Force -ErrorAction SilentlyContinue
+            $script:ownsParserAcceptanceDirectory = $false
+        }
+        $agent = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        Assert-True ($agent -and $agent.Status -eq "Running") "The primary print Agent stopped during isolated parser acceptance."
+        Wait-LocalApiReady
+    }
 }
 
 function Invoke-Fixture([string]$Mode) {
@@ -305,6 +459,7 @@ $v2Installed = $false
 try {
     Write-Host "[QA-PREFLIGHT] Confirming this runner has no existing SmartPrint install, Agent service, fixture printer, task, firewall rule, or machine data to overwrite." -ForegroundColor Cyan
     Assert-True (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) "Refusing to test on a runner that already has the SmartPrint Agent service."
+    Assert-True (-not (Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue)) "Refusing to test on a runner that already has the optional document worker service."
     Assert-True (-not (Test-Path -LiteralPath $installRoot)) "Refusing to test on a runner that already has a SmartPrint installation directory."
     Assert-True (-not (Get-Printer -Name $testPrinterName -ErrorAction SilentlyContinue)) "Refusing to overwrite an existing printer queue named '$testPrinterName'."
     Assert-True (-not (Get-ScheduledTask -TaskName "SmartPrintLifecycleSystemPrinterProbe" -ErrorAction SilentlyContinue)) "Refusing to replace an existing lifecycle printer-probe task."
@@ -334,6 +489,7 @@ try {
     @'
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Agent;
 
@@ -423,6 +579,63 @@ else if (mode == "discover-printer")
     await File.WriteAllTextAsync(args[1], "FOUND");
     Console.WriteLine($"LocalSystem Agent discovery found '{expectedQueue}'.");
 }
+else if (mode == "analyze-worker")
+{
+    if (args.Length < 2)
+        throw new ArgumentException("analyze-worker requires a result path.");
+
+    // DocumentAnalyzer validates these fixed PNG header fields; the isolated
+    // worker still receives the bytes through its real service and child-process path.
+    byte[] png =
+    [
+        137, 80, 78, 71, 13, 10, 26, 10,
+        0, 0, 0, 13, 73, 72, 68, 82,
+        0, 0, 0, 1, 0, 0, 0, 1
+    ];
+    var configuration = new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["Agent:DocumentWorkerPipeName"] = WindowsLocalDocumentAnalyzer.DefaultPipeName,
+            ["Agent:DocumentWorkerTimeoutSeconds"] = "20"
+        })
+        .Build();
+    var analyzer = new WindowsLocalDocumentAnalyzer(
+        configuration, new WindowsLocalDocumentWorkerServiceStarter());
+    SmartPrint.Documents.DocumentAnalysis? analysis = null;
+    for (var request = 0; request < 2; request++)
+    {
+        analysis = await analyzer.AnalyzeAsync(png, ".png", CancellationToken.None);
+        if (analysis.PageCount != 1 ||
+            analysis.MediaType != "image/png" ||
+            !analysis.PageSizesJson.Contains("\"pixelWidth\":1", StringComparison.Ordinal))
+            throw new InvalidOperationException($"The LocalService worker returned unexpected PNG analysis on request {request + 1}.");
+    }
+    await File.WriteAllTextAsync(args[1], System.Text.Json.JsonSerializer.Serialize(analysis));
+    Console.WriteLine("The LocalSystem Agent client successfully completed two successive analyses through the LocalService worker and restricted parser child.");
+}
+else if (mode == "probe-worker-pipe")
+{
+    if (args.Length < 2)
+        throw new ArgumentException("probe-worker-pipe requires a result path.");
+
+    using var pipe = new System.IO.Pipes.NamedPipeClientStream(
+        ".", WindowsLocalDocumentAnalyzer.DefaultPipeName,
+        System.IO.Pipes.PipeDirection.InOut,
+        System.IO.Pipes.PipeOptions.Asynchronous);
+    try
+    {
+        await pipe.ConnectAsync(2500);
+        throw new InvalidOperationException("Network Service unexpectedly connected to the restricted document-worker pipe.");
+    }
+    catch (UnauthorizedAccessException)
+    {
+        await File.WriteAllTextAsync(args[1], "REJECTED");
+    }
+    catch (IOException exception) when ((exception.HResult & 0xFFFF) == 5)
+    {
+        await File.WriteAllTextAsync(args[1], "REJECTED");
+    }
+}
 else
 {
     throw new ArgumentException($"Unknown fixture mode: {mode}");
@@ -443,6 +656,10 @@ else
             $script:ownsInstall = $true
             Invoke-Setup $InstallerV1
             Assert-ServiceVersion "0.1.10"
+            Assert-DesktopPayloadExcludesCiOnlyBinary
+            Assert-OptionalParserService
+            Assert-DocumentWorkerRuntimeIsolation
+            Assert-OptionalParserService
             Assert-PreservedFixtures
             Assert-QueueUntouched
             $script:servicePathAfterFirstInstall = Get-ServiceBinaryPath
@@ -453,6 +670,7 @@ else
         Invoke-Check "Reinstall the exact same Windows installer while Agent service is running" {
             Invoke-Setup $InstallerV1
             Assert-ServiceVersion "0.1.10"
+            Assert-OptionalParserService
             Assert-PreservedFixtures
             Assert-QueueUntouched
         } | Out-Null
@@ -464,6 +682,8 @@ else
         $upgradeOk = Invoke-Check "Upgrade Windows installation N to N+1" {
             Invoke-Setup $InstallerV2
             Assert-ServiceVersion "0.1.11"
+            Assert-DesktopPayloadExcludesCiOnlyBinary
+            Assert-OptionalParserService
             Assert-PreservedFixtures
             Assert-QueueUntouched
             $script:v2Installed = $true
@@ -531,6 +751,9 @@ else
         $uninstallOk = Invoke-Check "Normal uninstall removes service but preserves printers and recovery data" {
             Invoke-Uninstall
             Assert-True (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) "The Agent service still exists after uninstall."
+            Assert-True (-not (Get-Service -Name $workerServiceName -ErrorAction SilentlyContinue)) "The optional document worker service still exists after uninstall."
+            $workerRules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$workerFirewallPrefix*" })
+            Assert-True ($workerRules.Count -eq 0) "The isolated document worker outbound firewall rule remains after uninstall."
             $rules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue |
                 Where-Object { $_.DisplayName -like "$firewallPrefix*" })
             Assert-True ($rules.Count -eq 0) "SmartPrint firewall rules remain after uninstall."
@@ -542,6 +765,7 @@ else
             Invoke-Check "Reinstall after uninstall recovers the same machine identity and queue" {
                 Invoke-Setup $InstallerV2
                 Assert-ServiceVersion "0.1.11"
+                Assert-OptionalParserService
                 Assert-PreservedFixtures
                 Assert-QueueUntouched
             } | Out-Null

@@ -10,8 +10,6 @@ public sealed record DocumentAnalysis(
     string MediaType,
     string Extension);
 
-public sealed class DocumentValidationException(string message) : Exception(message);
-
 public static class DocumentAnalyzer
 {
     private const int MaximumPages = 500;
