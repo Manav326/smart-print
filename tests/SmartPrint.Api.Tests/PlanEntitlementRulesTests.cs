@@ -55,6 +55,24 @@ public sealed class PlanEntitlementRulesTests
     }
 
     [Fact]
+    public void ExpiryOnlyGrandfathersWorkAcceptedBeforeThePaidPeriodEnded()
+    {
+        var now = new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
+        var periodEnd = now.AddMinutes(-5);
+
+        Assert.True(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Expired", periodEnd, periodEnd.AddMinutes(-1), now));
+        Assert.False(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Expired", periodEnd, periodEnd, now));
+        Assert.False(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Expired", periodEnd, now, now));
+        Assert.False(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Cancelled", periodEnd, periodEnd.AddMinutes(-1), now));
+        Assert.False(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Expired", now.AddDays(1), periodEnd, now));
+    }
+
+    [Fact]
     public void DocumentSizeMustBePositiveAndNoGreaterThanPlanMaximum()
     {
         Assert.True(PlanEntitlementRules.AllowsDocument(null, 1));
