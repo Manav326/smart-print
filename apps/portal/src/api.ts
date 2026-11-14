@@ -1530,7 +1530,7 @@ async function uploadCustomerPrivateRelay(
       status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
     } catch (exception) {
       if (exception instanceof ApiError && exception.status >= 400) throw exception;
-      await new Promise(resolve => window.setTimeout(resolve, 900));
+      await new Promise(resolve => window.setTimeout(resolve, 5_000));
       continue;
     }
     if (status.state === "READY") {
@@ -1554,11 +1554,11 @@ async function uploadCustomerPrivateRelay(
         status.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
       );
     }
-    await new Promise(resolve => window.setTimeout(resolve, 900));
+    await new Promise(resolve => window.setTimeout(resolve, 5_000));
   }
 
   throw new LocalUploadOutcomeUnknownError(
-    "Your encrypted document reached the shop's secure transfer queue, but the shop computer is still checking it. SmartPrint has kept the same request; retry this file to refresh it without creating a duplicate."
+    "Your file is still being prepared. Tap Retry to check its status."
   );
 }
 

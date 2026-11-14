@@ -21,8 +21,8 @@ const readyStatuses = new Set(["COMPLETED","PDF_EXPORTED"]);
 const flowSteps: Array<{id:OrderJourneyStage;title:string;detail:string;icon:typeof Inbox}> = [
   {id:"received",title:"Received",detail:"Files arrive safely",icon:Inbox},
   {id:"review",title:"Review",detail:"Accept or exclude files",icon:FileText},
-  {id:"payment",title:"Payment",detail:"Confirm the real payment",icon:Wallet},
-  {id:"printing",title:"Printing",detail:"Agent sends to printer",icon:Printer},
+  {id:"payment",title:"Payment",detail:"Confirm payment received",icon:Wallet},
+  {id:"printing",title:"Printing",detail:"Shop computer prints",icon:Printer},
   {id:"ready",title:"Ready",detail:"Output checked and complete",icon:PackageCheck}
 ];
 function money(value:number,currency:string){return new Intl.NumberFormat("en-IN",{style:"currency",currency:currency||"INR",maximumFractionDigits:2}).format(Math.max(0,value)/100);}
@@ -30,12 +30,13 @@ function paymentLabel(payment:ShopPayment|null,stage:OrderJourneyStage){
   if(!payment)return stage==="payment"?"Checkout not started":"Not due yet";
   switch(payment.status){
     case "AWAITING_CUSTOMER_PAYMENT":return "Waiting for customer payment";
-    case "CUSTOMER_REPORTED":return "Customer reported payment · verify";
-    case "CASH_AWAITING_PAYMENT":return "Cash expected at counter";
-    case "VERIFIED":return "Payment verified";
-    case "PARTIALLY_REFUNDED":return "Verified · partial refund";
-    case "REJECTED":return "Payment rejected · customer can retry";
-    default:return payment.status.replaceAll("_"," ").toLowerCase();
+    case "CUSTOMER_REPORTED":return "Customer says paid · confirm receipt";
+    case "CASH_AWAITING_PAYMENT":return "Cash due at counter";
+    case "VERIFIED":return "Payment received";
+    case "PARTIALLY_REFUNDED":return "Partly refunded";
+    case "REJECTED":return "Payment not confirmed · customer may retry";
+    case "REFUNDED":return "Payment returned";
+    default:return "Payment update";
   }
 }
 function isAgentOnline(agent:AgentDevice){return !agent.revokedUtc&&agent.status==="Online"&&!!agent.lastSeenUtc&&Date.parse(agent.lastSeenUtc)>Date.now()-120000;}
@@ -49,7 +50,7 @@ function printerSummary(jobs:ShopPrintJob[],printers:PrinterDevice[],agents:Agen
   const connected=assigned.filter(printer=>printer.isActive&&!!printer.agentDeviceId&&online.has(printer.agentDeviceId));
   const names=Array.from(new Set(assigned.map(printer=>printer.displayName).filter(Boolean)));
   return connected.length
-    ? {name:names.join(", ")||"Assigned printer",detail:"Connected · Windows Agent recently online",ready:true}
+    ? {name:names.join(", ")||"Assigned printer",detail:"Connected · shop computer online",ready:true}
     : {name:names.join(", ")||"Assigned printer",detail:"Assigned · waiting for shop computer",ready:false};
 }
 function PrinterVisual({stage,attention}:{stage:OrderJourneyStage;attention:boolean}){
