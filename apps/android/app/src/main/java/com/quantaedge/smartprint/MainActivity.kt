@@ -17,6 +17,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.Menu
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -197,6 +198,7 @@ class MainActivity : AppCompatActivity() {
     private var profileReturnDestination = HOME
     private var librarySearchQuery = ""
     private var librarySelectionMode = false
+    private var bottomNavigationVisible = true
     private lateinit var bottomNavigationContent: LinearLayout
     private val bottomNavigationItemViews = linkedMapOf<Int, Triple<View, ImageView, TextView>>()
     private var webViewThemeBootstrapInstalled = false
@@ -792,24 +794,58 @@ class MainActivity : AppCompatActivity() {
         root.addView(topGlass, FrameLayout.LayoutParams(-1, dp(64), Gravity.TOP))
 
         val useRail = ResponsiveLayoutPolicy.useNavigationRail(resources.configuration.orientation)
-        navigation = if (useRail) NavigationRailView(this) else BottomNavigationView(this)
-        navigation.apply {
+        navigation = createNavigation(useRail, resources.configuration)
+        if (!useRail) createBottomNavigationContent(resources.configuration.screenWidthDp)
+        bottomGlass = BlurView(this).apply {
+            foreground = SmartPrintGlass.edge(this@MainActivity)
+            if (!useRail) addView(bottomNavigationContent, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
+        }
+        if (useRail) {
+            root.addView(navigation, FrameLayout.LayoutParams(dp(80), -1, Gravity.START or Gravity.TOP).apply {
+                topMargin = dp(64)
+            })
+        } else {
+            root.addView(bottomGlass, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
+        }
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
+        setContentView(root)
+        SmartPrintGlass.bindBlur(topGlass, blurTarget, this, R.color.qp_glass_top_overlay, backdrop)
+        SmartPrintGlass.bindBlur(bottomGlass, blurTarget, this, R.color.qp_glass_bottom_overlay, backdrop)
+        ViewCompat.requestApplyInsets(root)
+    }
+
+    private fun createNavigation(
+        useRail: Boolean,
+        configuration: Configuration,
+        selectedItemId: Int = HOME
+    ): NavigationBarView {
+        val created = if (useRail) NavigationRailView(this) else BottomNavigationView(this)
+        created.apply {
             menu.add(Menu.NONE, HOME, 0, "Home").apply {
-                setIcon(R.drawable.ic_nav_home); setContentDescription("Home")
+                setIcon(R.drawable.ic_nav_home)
+                setContentDescription("Home")
             }
             menu.add(Menu.NONE, FILES, 1, "Files").apply {
-                setIcon(R.drawable.ic_nav_files); setContentDescription("My Files")
+                setIcon(R.drawable.ic_nav_files)
+                setContentDescription("My Files")
             }
             menu.add(Menu.NONE, SCAN_PRINT, 2, "Print").apply {
-                setIcon(R.drawable.ic_nav_scan_print); setContentDescription("Print at a shop")
+                setIcon(R.drawable.ic_nav_scan_print)
+                setContentDescription("Print at a shop")
             }
             menu.add(Menu.NONE, ACTIVITY, 3, "Activity").apply {
-                setIcon(R.drawable.ic_nav_activity); setContentDescription("Activity")
+                setIcon(R.drawable.ic_nav_activity)
+                setContentDescription("Activity")
             }
-            labelVisibilityMode = if (useRail || ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(
-                    resources.configuration.screenWidthDp
-                )) NavigationBarView.LABEL_VISIBILITY_LABELED
-                else NavigationBarView.LABEL_VISIBILITY_SELECTED
+            labelVisibilityMode = if (
+                useRail || ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(configuration.screenWidthDp)
+            ) NavigationBarView.LABEL_VISIBILITY_LABELED
+            else NavigationBarView.LABEL_VISIBILITY_SELECTED
             (this as? BottomNavigationView)?.setItemHorizontalTranslationEnabled(false)
             setItemTextAppearanceActive(R.style.TextAppearance_SmartPrint_Navigation)
             setItemTextAppearanceInactive(R.style.TextAppearance_SmartPrint_Navigation)
@@ -835,44 +871,75 @@ class MainActivity : AppCompatActivity() {
                     else -> false
                 }
             }
+            menu.findItem(selectedItemId)?.isChecked = true
         }
+        return created
+    }
 
-        if (!useRail) {
-            bottomNavigationContent = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER
-                setPadding(dp(4), 0, dp(4), 0)
-                clipChildren = false
-                clipToPadding = false
-            }
+    private fun createBottomNavigationContent(screenWidthDp: Int) {
+        bottomNavigationContent = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(4), 0, dp(4), 0)
+            clipChildren = false
+            clipToPadding = false
+        }
+        bottomNavigationItemViews.clear()
+        addBottomNavigationItem(HOME, "Home", "Home", R.drawable.ic_nav_home)
+        addBottomNavigationItem(FILES, "Files", "My Files", R.drawable.ic_nav_files)
+        addBottomNavigationItem(SCAN_PRINT, "Print", "Print at a shop", R.drawable.ic_nav_scan_print)
+        addBottomNavigationItem(ACTIVITY, "Activity", "Activity", R.drawable.ic_nav_activity)
+        updateBottomNavigationSelection(navigation.selectedItemId, screenWidthDp)
+    }
+
+    private fun applyResponsiveNavigation(configuration: Configuration) {
+        if (!::navigation.isInitialized || !::content.isInitialized || !::bottomGlass.isInitialized) return
+
+        val useRail = ResponsiveLayoutPolicy.useNavigationRail(configuration.orientation)
+        val currentlyUsesRail = navigation is NavigationRailView
+        if (useRail != currentlyUsesRail) {
+            val root = findViewById<ViewGroup>(R.id.smartprint_native_root) ?: return
+            val selectedItemId = navigation.selectedItemId.takeIf {
+                navigation.menu.findItem(it) != null
+            } ?: HOME
+
+            root.removeView(navigation)
+            root.removeView(bottomGlass)
+            bottomGlass.removeAllViews()
             bottomNavigationItemViews.clear()
-            addBottomNavigationItem(HOME, "Home", "Home", R.drawable.ic_nav_home)
-            addBottomNavigationItem(FILES, "Files", "My Files", R.drawable.ic_nav_files)
-            addBottomNavigationItem(SCAN_PRINT, "Print", "Print at a shop", R.drawable.ic_nav_scan_print)
-            addBottomNavigationItem(ACTIVITY, "Activity", "Activity", R.drawable.ic_nav_activity)
-            updateBottomNavigationSelection(navigation.selectedItemId)
-        }
-        bottomGlass = BlurView(this).apply {
-            foreground = SmartPrintGlass.edge(this@MainActivity)
-            if (!useRail) addView(bottomNavigationContent, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
-        }
-        if (useRail) {
-            root.addView(navigation, FrameLayout.LayoutParams(dp(80), -1, Gravity.START or Gravity.TOP).apply {
-                topMargin = dp(64)
-            })
-        } else {
-            root.addView(bottomGlass, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
+
+            navigation = createNavigation(useRail, configuration, selectedItemId)
+            if (useRail) {
+                root.addView(
+                    navigation,
+                    FrameLayout.LayoutParams(dp(80), -1, Gravity.START or Gravity.TOP).apply {
+                        topMargin = dp(64)
+                    }
+                )
+            } else {
+                createBottomNavigationContent(configuration.screenWidthDp)
+                bottomGlass.addView(
+                    bottomNavigationContent,
+                    FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM)
+                )
+                root.addView(bottomGlass, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
+            }
+            setBottomNavigationVisible(bottomNavigationVisible)
+            return
         }
 
-        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            insets
-        }
-        setContentView(root)
-        SmartPrintGlass.bindBlur(topGlass, blurTarget, this, R.color.qp_glass_top_overlay, backdrop)
-        SmartPrintGlass.bindBlur(bottomGlass, blurTarget, this, R.color.qp_glass_bottom_overlay, backdrop)
-        ViewCompat.requestApplyInsets(root)
+        navigation.labelVisibilityMode = if (
+            useRail || ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(configuration.screenWidthDp)
+        ) NavigationBarView.LABEL_VISIBILITY_LABELED
+        else NavigationBarView.LABEL_VISIBILITY_SELECTED
+        if (!useRail) updateBottomNavigationSelection(navigation.selectedItemId, configuration.screenWidthDp)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Keep the current Activity, WebView, DOM, form values and native screen alive.
+        // Only swap the responsive navigation chrome when the orientation class changes.
+        applyResponsiveNavigation(newConfig)
     }
 
     private fun addBottomNavigationItem(destinationId: Int, label: String, description: String, iconResource: Int) {
@@ -914,9 +981,12 @@ class MainActivity : AppCompatActivity() {
         bottomNavigationContent.addView(item, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(52)))
     }
 
-    private fun updateBottomNavigationSelection(selectedId: Int) {
+    private fun updateBottomNavigationSelection(
+        selectedId: Int,
+        screenWidthDp: Int = resources.configuration.screenWidthDp
+    ) {
         if (!::bottomNavigationContent.isInitialized) return
-        val showEveryLabel = ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(resources.configuration.screenWidthDp)
+        val showEveryLabel = ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(screenWidthDp)
         bottomNavigationItemViews.forEach { (id, views) ->
             val (item, icon, title) = views
             val selected = id == selectedId
@@ -948,6 +1018,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setBottomNavigationVisible(visible: Boolean) {
+        bottomNavigationVisible = visible
         val visibility = if (visible) View.VISIBLE else View.GONE
         val rail = navigation is NavigationRailView
         navigation.visibility = if (rail) visibility else View.GONE
