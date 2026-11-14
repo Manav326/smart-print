@@ -1530,7 +1530,7 @@ async function uploadCustomerPrivateRelay(
       status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
     } catch (exception) {
       if (exception instanceof ApiError && exception.status >= 400) throw exception;
-      await new Promise(resolve => window.setTimeout(resolve, 900));
+      await new Promise(resolve => window.setTimeout(resolve, 5_000));
       continue;
     }
     if (status.state === "READY") {
@@ -1554,7 +1554,7 @@ async function uploadCustomerPrivateRelay(
         status.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
       );
     }
-    await new Promise(resolve => window.setTimeout(resolve, 900));
+    await new Promise(resolve => window.setTimeout(resolve, 5_000));
   }
 
   throw new LocalUploadOutcomeUnknownError(
