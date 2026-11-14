@@ -1,13 +1,11 @@
 using System.Net.Mail;
-using System.Text.Json;
 using System.Security.Cryptography;
 using Google.Apis.Auth;
-using SmartPrint.Api.Security;
 
 namespace SmartPrint.Api.Services;
 
 /// <summary>Verifies provider-signed Google OpenID ID tokens for SmartPrint login.</summary>
-public sealed class GoogleIdentityService(IConfiguration configuration, GoogleAuthNonceStore nonces)
+public sealed class GoogleIdentityService(IConfiguration configuration)
 {
     public const string LoginProvider = "Google";
 
@@ -67,25 +65,17 @@ public sealed class GoogleIdentityService(IConfiguration configuration, GoogleAu
                 StatusCodes.Status503ServiceUnavailable);
         }
 
-        var nonce = ReadNonceClaim(token);
-        if (string.IsNullOrWhiteSpace(expectedNonce) ||
-            expectedNonce.Length != 64 ||
-            nonce.Length != expectedNonce.Length ||
-            !CryptographicOperations.FixedTimeEquals(
-                System.Text.Encoding.UTF8.GetBytes(nonce),
-                System.Text.Encoding.UTF8.GetBytes(expectedNonce)))
+        var signedNonce = payload.Nonce ?? string.Empty;
+        var expected = expectedNonce ?? string.Empty;
+        var signedNonceBytes = System.Text.Encoding.UTF8.GetBytes(signedNonce);
+        var expectedNonceBytes = System.Text.Encoding.UTF8.GetBytes(expected);
+        if (expected.Length != 64 ||
+            signedNonceBytes.Length != expectedNonceBytes.Length ||
+            !CryptographicOperations.FixedTimeEquals(signedNonceBytes, expectedNonceBytes))
         {
             throw new GoogleIdentityException(
                 "google_nonce_invalid",
-                "This Google sign-in request has expired. Please start again.",
-                StatusCodes.Status401Unauthorized);
-        }
-
-        if (!nonces.TryConsume(payload.Nonce, expectedNonce))
-        {
-            throw new GoogleIdentityException(
-                "google_nonce_invalid",
-                "This Google sign-in request has expired or was already used. Please try again.",
+                "This Google sign-in request has expired or does not match the signed Google credential. Please try again.",
                 StatusCodes.Status401Unauthorized);
         }
 
@@ -111,30 +101,6 @@ public sealed class GoogleIdentityService(IConfiguration configuration, GoogleAu
         return new VerifiedGoogleIdentity(subject, email, name);
     }
 
-    private static string ReadNonceClaim(string signedToken)
-    {
-        var parts = signedToken.Split('.');
-        if (parts.Length != 3) return string.Empty;
-
-        try
-        {
-            var payload = parts[1].Replace('-', '+').Replace('_', '/');
-            payload = payload.PadRight(payload.Length + ((4 - payload.Length % 4) % 4), '=');
-            using var document = JsonDocument.Parse(Convert.FromBase64String(payload));
-            return document.RootElement.TryGetProperty("nonce", out var nonce) &&
-                   nonce.ValueKind == JsonValueKind.String
-                ? nonce.GetString() ?? string.Empty
-                : string.Empty;
-        }
-        catch (FormatException)
-        {
-            return string.Empty;
-        }
-        catch (JsonException)
-        {
-            return string.Empty;
-        }
-    }
 }
 
 public sealed record VerifiedGoogleIdentity(string Subject, string Email, string DisplayName);
