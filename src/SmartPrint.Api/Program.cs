@@ -126,7 +126,7 @@ builder.Services.AddRateLimiter(options =>
         await response.WriteAsJsonAsync(new
         {
             code = "rate_limit_exceeded",
-            message = "SmartPrint is busy. Please wait a moment and try again."
+            message = "Please wait a moment, then try again."
         }, cancellationToken);
     };
 
