@@ -4474,61 +4474,6 @@ function smartPrintNativeHeadline(status:string):string {
   }
 }
 
-function smartPrintNativeStatus(status:string):string {
-  switch(status) {
-    case "AWAITING_SHOP_APPROVAL": return "The shop is reviewing your files. No payment has been collected.";
-    case "AWAITING_PAYMENT": return "Your files are accepted. Complete payment to continue.";
-    case "AWAITING_CUSTOMER_PAYMENT": return "Complete the payment using the details shown.";
-    case "AWAITING_COUNTER_PAYMENT": return "Please pay at the shop counter.";
-    case "PAYMENT_REPORTED": return "Your payment details were sent to the shop. The shop is checking the payment.";
-    case "PAYMENT_REJECTED": return "The payment could not be confirmed. Please check with the shop before paying again.";
-    case "PAID_AUTHORISED": return "Payment received. The shop is preparing your print.";
-    case "LOCAL_QUEUE_CLAIMED":
-    case "LOCAL_QUEUE_READY": return "Your files have reached the shop and are being prepared for printing.";
-    case "PRINT_AUTHORISED": return "The shop approved your print. Printing will start shortly.";
-    case "PRINT_SUBMITTING": return "Your print is starting.";
-    case "SPOOLER_ACCEPTED":
-    case "PRINTING": return "Your print is in progress. The shop will confirm when the pages are ready.";
-    case "OUTPUT_UNCONFIRMED": return "The shop is checking the printer and will confirm whether your pages were printed. Please do not pay or upload the same file again.";
-    case "TEST_OUTPUT_READY": return "This was a test only. No physical pages were printed.";
-    case "COMPLETED": return "Your pages are printed and ready for collection.";
-    case "PDF_EXPORTED": return "Your PDF is ready.";
-    case "REFUNDED": return "This file was not printed and the payment was returned.";
-    case "CANCELLED": return "This request was cancelled.";
-    case "FAILED": return "Printing could not be completed. Please speak to the shop before submitting again.";
-    case "REJECTED": return "The shop could not accept this file. Please ask the shop for help.";
-    case "QUOTE_EXPIRED": return "The price has expired. Please request a fresh quote.";
-    default: return "Your request is being processed. Refresh to check again.";
-  }
-}
-
-function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):string {
-  switch(status) {
-    case "AWAITING_SHOP_APPROVAL": return "The shop is reviewing your files. No payment has been collected.";
-    case "AWAITING_PAYMENT": return "Your files are accepted. Complete payment to continue.";
-    case "AWAITING_COUNTER_PAYMENT": return "Please pay at the shop counter.";
-    case "AWAITING_CUSTOMER_PAYMENT": return "Complete the payment using the details shown.";
-    case "PAYMENT_REPORTED": return "The shop is checking your payment.";
-    case "PAID_AUTHORISED": return "Payment received. The shop is preparing your print.";
-    case "LOCAL_QUEUE_CLAIMED":
-    case "LOCAL_QUEUE_READY": return "Your files have reached the shop and are being prepared.";
-    case "PRINT_AUTHORISED": return "The shop approved your print. Printing will start shortly.";
-    case "PRINT_SUBMITTING": return "Your print is starting.";
-    case "SPOOLER_ACCEPTED":
-    case "PRINTING": return "Your print is in progress. The shop will confirm when the pages are ready.";
-    case "OUTPUT_UNCONFIRMED": return "The shop is checking whether your pages were printed. Please do not submit the same file again.";
-    case "TEST_OUTPUT_READY": return "This was a test only. No physical pages were printed.";
-    case "COMPLETED": return "Printing is complete. Your pages are ready for collection.";
-    case "PDF_EXPORTED": return "Your PDF is ready.";
-    case "REFUNDED": return "This file was not printed and the payment was returned.";
-    case "CANCELLED": return "This request was cancelled.";
-    case "FAILED": return "Printing could not be completed. Please speak to the shop.";
-    case "QUOTE_EXPIRED": return "The price has expired. Please request a fresh quote.";
-    case "REJECTED": return "The shop could not accept this file. Please ask for help.";
-    default: return hasQuote ? "Check the price and print options before sending your request to the shop." : "Choose your files to get started.";
-  }
-}
-
 function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,privatePrintingVirtualOutputEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,onStartNewSession}:{dark:boolean;publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;privatePrintingVirtualOutputEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;onStartNewSession:()=>void}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   // Private Printing is available only with a live paired Agent/key and a ready
