@@ -40,6 +40,8 @@ import org.hamcrest.Matchers.allOf
 import org.junit.Test
 import org.junit.runner.RunWith
 import eightbitlab.com.blurview.BlurView
+import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.navigationrail.NavigationRailView
 import android.view.View
 import android.widget.LinearLayout
 import android.widget.TextView
