@@ -1,10 +1,10 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Services;
+using static SmartPrint.Api.Security.EndpointIdentity;
 
 namespace SmartPrint.Api.Endpoints;
 
@@ -19,9 +19,7 @@ public static class PlatformTenantStatusEndpoints
             PlatformTenantStatusService statuses,
             CancellationToken ct) =>
         {
-            Guid? actorId = Guid.TryParse(
-                principal.FindFirstValue(JwtRegisteredClaimNames.Sub),
-                out var parsedActorId) ? parsedActorId : null;
+            var actorId = GetActorId(principal);
             var result = await statuses.ChangeAsync(tenantId, actorId, request, ct);
             if (result.Failure == PlatformTenantStatusFailure.InvalidRequest)
             {

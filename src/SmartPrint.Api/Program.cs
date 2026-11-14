@@ -19,6 +19,7 @@ using SmartPrint.Api.Domain;
 using SmartPrint.Api.Endpoints;
 using SmartPrint.Api.Pricing;
 using SmartPrint.Api.Security;
+using static SmartPrint.Api.Security.EndpointIdentity;
 using SmartPrint.Api.Storage;
 using SmartPrint.Api.Services;
 using SmartPrint.Documents;
@@ -10859,12 +10860,6 @@ static async Task<object?> GetLocalAgentInfoAsync(
     };
 }
 
-static bool TryGetTenantId(ClaimsPrincipal principal, out Guid tenantId) =>
-    Guid.TryParse(principal.FindFirstValue("tenant_id"), out tenantId);
-
-static Guid? GetActorId(ClaimsPrincipal principal) =>
-    Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var actorId) ? actorId : null;
-
 static async Task<AgentDevice?> AuthenticateAgentAsync(
     HttpContext context,
     SmartPrintDbContext db,
@@ -10893,9 +10888,6 @@ static async Task<AgentDevice?> AuthenticateAgentAsync(
     var storedHash = Convert.FromHexString(device.SecretHash);
     return CryptographicOperations.FixedTimeEquals(suppliedHash, storedHash) ? device : null;
 }
-
-static bool IsShopOwner(ClaimsPrincipal principal) =>
-    principal.FindAll("shop_role").Any(claim => claim.Value is "ShopOwner" or "ShopManager");
 
 static bool IsValidUpiId(string? value)
 {
