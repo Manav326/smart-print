@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   formatSubscriptionAmount,
+  getAnnualSavingsMinor,
+  getAnnualSavingsPercent,
   getPaidBillingIntervals,
   isUnsettledSubscriptionPayment,
   subscriptionPaymentActionLabel,
@@ -40,6 +42,18 @@ test("both unset prices produce no checkout choices", () => {
 test("subscription plan price is formatted from paise in Indian currency format", () => {
   assert.equal(formatSubscriptionAmount(49900, "INR"), "₹499.00");
   assert.equal(formatSubscriptionAmount(125050, "INR"), "₹1,250.50");
+});
+
+test("annual billing savings compare against twelve monthly payments", () => {
+  const plan = { monthlyPriceMinor: 14900, annualPriceMinor: 149900 };
+  assert.equal(getAnnualSavingsMinor(plan), 28900);
+  assert.equal(getAnnualSavingsPercent(plan), 16);
+  assert.equal(getAnnualSavingsMinor({ monthlyPriceMinor: 14900, annualPriceMinor: 189900 }), 0);
+});
+
+test("annual savings are not shown when either billing interval is unavailable", () => {
+  assert.equal(getAnnualSavingsMinor({ monthlyPriceMinor: null, annualPriceMinor: 149900 }), 0);
+  assert.equal(getAnnualSavingsPercent({ monthlyPriceMinor: 14900, annualPriceMinor: null }), 0);
 });
 
 test("only unresolved payment states block a new subscription order", () => {
