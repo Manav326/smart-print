@@ -14,6 +14,7 @@ import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.json.JSONObject
@@ -256,6 +257,128 @@ class IdStudioInstrumentedTest {
         } finally {
             store.deletePrepared(file)
         }
+    }
+
+
+    @Test
+    fun idCaptureStepKeepsFrontPreviewAndShowsNextOnlyAfterBothSidesAreSaved() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("smartprint.customer.last-shop", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        val store = IdStudioStore(context.filesDir, context.cacheDir)
+        val draftId = store.createDraft()
+        store.saveScan(draftId, "front", ByteArrayInputStream(testJpeg()))
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredField("idStudioDraftId").apply {
+                        isAccessible = true
+                    }.set(activity, draftId)
+                    MainActivity::class.java.getDeclaredMethod("showIdStudioBackStep").apply {
+                        isAccessible = true
+                    }.invoke(activity)
+                }
+                onView(withText("Capture back side")).check(matches(isDisplayed()))
+                onView(withContentDescription("ID front scan preview")).check(matches(isDisplayed()))
+                onView(withContentDescription("ID back scan preview")).check(matches(isDisplayed()))
+
+                store.saveScan(draftId, "back", ByteArrayInputStream(testJpeg()))
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredMethod("showIdStudioBackStep").apply {
+                        isAccessible = true
+                    }.invoke(activity)
+                }
+                onView(withText("Next")).check(matches(isDisplayed()))
+                onView(withContentDescription("ID front scan preview")).check(matches(isDisplayed()))
+                onView(withContentDescription("ID back scan preview")).check(matches(isDisplayed()))
+                onView(withText("Next")).perform(click())
+                onView(withText("Save")).check(matches(isDisplayed()))
+            }
+        } finally {
+            store.deleteDraft(draftId)
+        }
+    }
+
+
+    @Test
+    fun idCapturePreviewOverlayKeepsBothSidesCompactAndQueuesRetakesSerially() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        context.getSharedPreferences("smartprint.customer.last-shop", Context.MODE_PRIVATE)
+            .edit().clear().commit()
+        val store = IdStudioStore(context.filesDir, context.cacheDir)
+        val draftId = store.createDraft()
+        store.saveScan(draftId, "front", ByteArrayInputStream(testJpeg()))
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredField("idStudioDraftId").apply {
+                        isAccessible = true
+                    }.set(activity, draftId)
+                    MainActivity::class.java.getDeclaredField("pendingIdStudioSide").apply {
+                        isAccessible = true
+                    }.set(activity, "back")
+
+                    val overlay = MainActivity::class.java.getDeclaredMethod(
+                        "createIdCaptureOverlayView"
+                    ).apply { isAccessible = true }.invoke(activity) as android.widget.LinearLayout
+
+                    assertEquals("The capture overlay contains only the two side previews.", 2, overlay.childCount)
+                    assertTrue(
+                        "The Front tile remains a compact thumbnail control.",
+                        overlay.getChildAt(0).contentDescription.toString().contains("Front", true) ||
+                            overlay.getChildAt(0).contentDescription.toString().contains("front", true)
+                    )
+                    assertTrue(
+                        "The Back tile remains a compact thumbnail control.",
+                        overlay.getChildAt(1).contentDescription.toString().contains("Back", true) ||
+                            overlay.getChildAt(1).contentDescription.toString().contains("back", true)
+                    )
+
+                    // Tapping a thumbnail queues the retake instead of stacking a
+                    // second ML Kit activity above the currently active scanner.
+                    overlay.getChildAt(0).performClick()
+                    assertEquals(
+                        "A Front retake is queued for after the active scanner closes.",
+                        "front",
+                        MainActivity::class.java.getDeclaredField("queuedIdStudioSide")
+                            .apply { isAccessible = true }.get(activity)
+                    )
+                    assertEquals(
+                        "The current Back scan remains the only active scanner session.",
+                        "back",
+                        MainActivity::class.java.getDeclaredField("pendingIdStudioSide")
+                            .apply { isAccessible = true }.get(activity)
+                    )
+                    overlay.getChildAt(0).performClick()
+                    assertNull(
+                        "Tapping the selected thumbnail again clears the queued retake.",
+                        MainActivity::class.java.getDeclaredField("queuedIdStudioSide")
+                            .apply { isAccessible = true }.get(activity)
+                    )
+                }
+            }
+        } finally {
+            store.deleteDraft(draftId)
+        }
+    }
+
+
+    @Test
+    fun idCaptureOverlayPermissionExplanationIsRememberedOnce() {
+        assertFalse(
+            "Already-granted overlay access must never trigger another explanation.",
+            IdCaptureOverlayPermissionPolicy.shouldExplain(isGranted = true, alreadyExplained = false)
+        )
+        assertTrue(
+            "The explanation is shown on the first attempt when access is missing.",
+            IdCaptureOverlayPermissionPolicy.shouldExplain(isGranted = false, alreadyExplained = false)
+        )
+        assertFalse(
+            "After the one-time explanation, SmartPrint must not prompt automatically again.",
+            IdCaptureOverlayPermissionPolicy.shouldExplain(isGranted = false, alreadyExplained = true)
+        )
     }
 
     private fun testJpeg(): ByteArray {
