@@ -39,12 +39,42 @@ const emptyForm: PlanForm = {
   advancedReportsEnabled: false
 };
 
+function currencyMinorUnitDigits(currency: string): number {
+  try {
+    return new Intl.NumberFormat("en-IN", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 2;
+  } catch {
+    return 2;
+  }
+}
+
+function priceInputFromMinor(value: number | null, currency: string): string {
+  if (value === null) return "";
+  const digits = currencyMinorUnitDigits(currency);
+  const formatted = (value / (10 ** digits)).toFixed(digits);
+  return digits === 0 ? formatted : formatted.replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+}
+
+function optionalMoneyMinor(value: string, label: string, currency: string): number | null {
+  const raw = value.trim();
+  if (!raw) return null;
+  const digits = currencyMinorUnitDigits(currency);
+  const fractionPattern = digits === 0 ? "" : "(?:\\.\\d{1," + digits + "})?";
+  if (!new RegExp("^\\d+" + fractionPattern + "$").test(raw)) {
+    throw new Error(label + " must be a non-negative amount with at most " + digits + " decimal places, or left blank.");
+  }
+  const [wholePart, fractionPart = ""] = raw.split(".");
+  const multiplier = 10 ** digits;
+  const minor = Number(wholePart) * multiplier +
+    Number((fractionPart || "").padEnd(digits, "0") || "0");
+  if (!Number.isSafeInteger(minor)) throw new Error(label + " is outside the supported amount range.");
+  return minor;
+}
 function formFromVersion(version?: PlatformPlanVersion): PlanForm {
   if (!version) return { ...emptyForm };
   return {
     currency: version.currency,
-    monthlyPriceMinor: version.monthlyPriceMinor?.toString() ?? "",
-    annualPriceMinor: version.annualPriceMinor?.toString() ?? "",
+    monthlyPriceMinor: priceInputFromMinor(version.monthlyPriceMinor, version.currency),
+    annualPriceMinor: priceInputFromMinor(version.annualPriceMinor, version.currency),
     maxPrinters: version.maxPrinters?.toString() ?? "",
     maxAgentDevices: version.maxAgentDevices?.toString() ?? "",
     maxQrStations: version.maxQrStations?.toString() ?? "",
@@ -70,8 +100,8 @@ function toVersionInput(form: PlanForm): PlatformPlanVersionInput {
   if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Enter a three-letter currency code.");
   return {
     currency,
-    monthlyPriceMinor: optionalInteger(form.monthlyPriceMinor, "Monthly price (minor units)", true),
-    annualPriceMinor: optionalInteger(form.annualPriceMinor, "Annual price (minor units)", true),
+    monthlyPriceMinor: optionalMoneyMinor(form.monthlyPriceMinor, "Monthly price", currency),
+    annualPriceMinor: optionalMoneyMinor(form.annualPriceMinor, "Annual price", currency),
     maxPrinters: optionalInteger(form.maxPrinters, "Printer limit", false),
     maxAgentDevices: optionalInteger(form.maxAgentDevices, "Agent computer limit", false),
     maxQrStations: optionalInteger(form.maxQrStations, "QR station limit", false),
@@ -92,7 +122,16 @@ function draftVersion(plan: PlatformPlan): PlatformPlanVersion | undefined {
 }
 
 function formatPrice(value: number | null, currency: string): string {
-  return value === null ? "Not set" : `${currency} ${value.toLocaleString("en-IN")} minor units`;
+  if (value === null) return "Not set";
+  try {
+    const digits = currencyMinorUnitDigits(currency);
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency
+    }).format(value / (10 ** digits));
+  } catch {
+    return `${currency} ${(value / 100).toFixed(2)}`;
+  }
 }
 
 export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens }) {
@@ -237,7 +276,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
     try {
       await publishPlatformPlanVersion(tokens.accessToken, selectedPlan.id, currentDraft.version);
       await reload(selectedPlan.id);
-      setSuccess(`Version ${currentDraft.version} published. New subscriptions may reference this version when assignment is implemented.`);
+      setSuccess(`Version ${currentDraft.version} published. New subscriptions can now use these terms.`);
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not publish this plan version.");
     } finally {
@@ -245,8 +284,8 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
     }
   }
 
-  const monthlyMinor = optionalPreview(form.monthlyPriceMinor);
-  const annualMinor = optionalPreview(form.annualPriceMinor);
+  const monthlyMinor = optionalPreview(form.monthlyPriceMinor, form.currency);
+  const annualMinor = optionalPreview(form.annualPriceMinor, form.currency);
 
   return (
     <section className="platform-plans">
@@ -321,7 +360,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
               </div>
               <PlanVersionEditor form={form} onChange={changeForm}/>
               <div className="platform-plan-editor-actions">
-                <span className="platform-plan-note">Prices are entered in minor currency units. Blank values are not configured; zero is explicitly free.</span>
+                <span className="platform-plan-note">Enter amounts in the selected currency. Blank means unavailable, while zero is explicitly free.</span>
                 <button className="primary-button" onClick={() => void savePlan()} disabled={Boolean(busy)}>
                   {busy === "save" ? <LoaderCircle size={14} className="platform-spin"/> : <Save size={14}/>} Create plan draft
                 </button>
@@ -367,7 +406,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                   <>
                     <PlanVersionEditor form={form} onChange={changeForm}/>
                     <div className="platform-plan-editor-actions">
-                      <span className="platform-plan-note">Current entries: monthly {monthlyMinor === null ? "not set" : `${form.currency.toUpperCase()} ${monthlyMinor.toLocaleString("en-IN")} minor units`}; annual {annualMinor === null ? "not set" : `${form.currency.toUpperCase()} ${annualMinor.toLocaleString("en-IN")} minor units`}.</span>
+                      <span className="platform-plan-note">Current entries: monthly {formatPrice(monthlyMinor, form.currency.toUpperCase())}; annual {formatPrice(annualMinor, form.currency.toUpperCase())}.</span>
                       <button className="primary-button" onClick={() => void savePlan()} disabled={Boolean(busy)}>
                         {busy === "save" ? <LoaderCircle size={14} className="platform-spin"/> : <Save size={14}/>} Save draft
                       </button>
@@ -415,10 +454,12 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
   );
 }
 
-function optionalPreview(value: string): number | null {
-  if (!value.trim()) return null;
-  const number = Number(value);
-  return Number.isSafeInteger(number) && number >= 0 ? number : null;
+function optionalPreview(value: string, currency: string): number | null {
+  try {
+    return optionalMoneyMinor(value, "Price", currency);
+  } catch {
+    return null;
+  }
 }
 
 function Field({ label, hint, wide, children }: {
@@ -437,12 +478,14 @@ function PlanVersionEditor({ form, onChange }: {
   form: PlanForm;
   onChange: <K extends keyof PlanForm>(key: K, value: PlanForm[K]) => void;
 }) {
+  const currencyLabel = form.currency.trim().toUpperCase() === "INR" ? "₹" : form.currency.toUpperCase();
+  const priceStep = 10 ** -currencyMinorUnitDigits(form.currency);
   return (
     <div className="platform-plan-version-editor">
-      <div className="platform-plan-subheading"><div><h4>Pricing</h4><p>Amounts are stored as integer minor units for the selected currency.</p></div><Field label="Currency"><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder="INR"/></Field></div>
+      <div className="platform-plan-subheading"><div><h4>Pricing</h4><p>Enter amounts in {currencyLabel}; SmartPrint stores the currency's minor units.</p></div><Field label="Currency"><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder="INR"/></Field></div>
       <div className="platform-plan-meta-grid">
-        <Field label="Monthly price · minor units"><input type="number" min="0" step="1" value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="Blank = unavailable"/></Field>
-        <Field label="Annual price · minor units"><input type="number" min="0" step="1" value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="Blank = unavailable"/></Field>
+        <Field label={`Monthly price (${currencyLabel})`}><input type="number" min="0" step={priceStep} value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="e.g. 149"/></Field>
+        <Field label={`Annual price (${currencyLabel})`}><input type="number" min="0" step={priceStep} value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="e.g. 1499"/></Field>
       </div>
 
       <div className="platform-plan-subheading"><div><h4>Usage limits</h4><p>Blank means no configured cap; positive numbers enforce the configured limit when enforcement is connected.</p></div><span className="platform-plan-unlimited">Optional limits</span></div>

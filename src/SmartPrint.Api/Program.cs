@@ -295,9 +295,13 @@ platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct
     var activeTenantCount = await db.Tenants.AsNoTracking()
         .CountAsync(tenant => tenant.Status == "Active", ct);
     var trialSubscriptionCount = await db.TenantSubscriptions.AsNoTracking()
-        .CountAsync(subscription => subscription.Status == "Trial" && subscription.PeriodEndUtc > now, ct);
+        .CountAsync(subscription => subscription.Status == "Trial" &&
+                                    subscription.PeriodStartUtc <= now &&
+                                    subscription.PeriodEndUtc > now, ct);
     var activeSubscriptionCount = await db.TenantSubscriptions.AsNoTracking()
-        .CountAsync(subscription => subscription.Status == "Active" && subscription.PeriodEndUtc > now, ct);
+        .CountAsync(subscription => (subscription.Status == "Active" || subscription.Status == "Scheduled") &&
+                                    subscription.PeriodStartUtc <= now &&
+                                    subscription.PeriodEndUtc > now, ct);
     var printerCount = await db.PrinterDevices.AsNoTracking().CountAsync(ct);
     var activePrinterCount = await db.PrinterDevices.AsNoTracking()
         .CountAsync(printer => printer.IsActive, ct);
@@ -310,7 +314,17 @@ platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct
         .CountAsync(job => job.CreatedUtc >= recentStart && job.CreatedUtc < now, ct);
 
     var subscriptionsByStatus = await db.TenantSubscriptions.AsNoTracking()
-        .GroupBy(subscription => subscription.Status)
+        .GroupBy(subscription =>
+            (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+            subscription.PeriodEndUtc <= now
+                ? "Expired"
+                : (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                  subscription.PeriodStartUtc > now
+                    ? "Scheduled"
+                    : subscription.Status == "Scheduled" &&
+                      subscription.PeriodStartUtc <= now && subscription.PeriodEndUtc > now
+                        ? "Active"
+                        : subscription.Status)
         .Select(group => new { status = group.Key, count = group.Count() })
         .OrderByDescending(group => group.count)
         .ThenBy(group => group.status)
@@ -389,17 +403,48 @@ platform.MapGet("/tenants", async (
             tenant.CreatedUtc,
             PlanCode = db.TenantSubscriptions.AsNoTracking()
                 .Where(subscription => subscription.TenantId == tenant.Id)
-                .OrderByDescending(subscription => subscription.CreatedUtc)
+                .OrderByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodStartUtc <= recentEnd && subscription.PeriodEndUtc > recentEnd)
+                .ThenByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodEndUtc > recentEnd)
+                .ThenBy(subscription => subscription.PeriodStartUtc)
+                .ThenByDescending(subscription => subscription.CreatedUtc)
                 .Select(subscription => subscription.PlanCode)
                 .FirstOrDefault(),
             SubscriptionStatus = db.TenantSubscriptions.AsNoTracking()
                 .Where(subscription => subscription.TenantId == tenant.Id)
-                .OrderByDescending(subscription => subscription.CreatedUtc)
-                .Select(subscription => subscription.Status)
+                .OrderByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodStartUtc <= recentEnd && subscription.PeriodEndUtc > recentEnd)
+                .ThenByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodEndUtc > recentEnd)
+                .ThenBy(subscription => subscription.PeriodStartUtc)
+                .ThenByDescending(subscription => subscription.CreatedUtc)
+                .ThenByDescending(subscription => subscription.Id)
+                .Select(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodEndUtc <= recentEnd
+                        ? "Expired"
+                        : (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                          subscription.PeriodStartUtc > recentEnd
+                            ? "Scheduled"
+                            : subscription.Status == "Scheduled"
+                                ? "Active"
+                                : subscription.Status)
                 .FirstOrDefault(),
             SubscriptionPeriodEndUtc = db.TenantSubscriptions.AsNoTracking()
                 .Where(subscription => subscription.TenantId == tenant.Id)
-                .OrderByDescending(subscription => subscription.CreatedUtc)
+                .OrderByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodStartUtc <= recentEnd && subscription.PeriodEndUtc > recentEnd)
+                .ThenByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodEndUtc > recentEnd)
+                .ThenBy(subscription => subscription.PeriodStartUtc)
+                .ThenByDescending(subscription => subscription.CreatedUtc)
                 .Select(subscription => (DateTimeOffset?)subscription.PeriodEndUtc)
                 .FirstOrDefault(),
             PrinterCount = db.PrinterDevices.AsNoTracking()
@@ -1364,22 +1409,23 @@ shop.MapGet("/subscription", async (
         return Results.Forbid();
     }
 
-    var subscription = await db.TenantSubscriptions.AsNoTracking()
-        .Where(item => item.TenantId == tenantId)
-        .OrderByDescending(item => item.CreatedUtc)
-        .ThenByDescending(item => item.Id)
-        .Select(item => new
-        {
-            item.Id,
-            item.PlanCode,
-            item.Status,
-            item.BillingInterval,
-            item.PeriodStartUtc,
-            item.PeriodEndUtc,
-            item.CreatedUtc,
-            item.PlanVersionId
-        })
-        .FirstOrDefaultAsync(ct);
+    var entitlement = await entitlements.GetForTenantAsync(tenantId, ct);
+    var subscription = entitlement.SubscriptionId is Guid subscriptionId
+        ? await db.TenantSubscriptions.AsNoTracking()
+            .Where(item => item.Id == subscriptionId && item.TenantId == tenantId)
+            .Select(item => new
+            {
+                item.Id,
+                item.PlanCode,
+                item.Status,
+                item.BillingInterval,
+                item.PeriodStartUtc,
+                item.PeriodEndUtc,
+                item.CreatedUtc,
+                item.PlanVersionId
+            })
+            .SingleOrDefaultAsync(ct)
+        : null;
     if (subscription is null)
     {
         return Results.NotFound();
@@ -1415,7 +1461,6 @@ shop.MapGet("/subscription", async (
             .SingleOrDefaultAsync(ct)
         : null;
 
-    var entitlement = await entitlements.GetForTenantAsync(tenantId, ct);
     var now = DateTimeOffset.UtcNow;
     var periodStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
     var periodEnd = periodStart.AddMonths(1);
@@ -1436,7 +1481,7 @@ shop.MapGet("/subscription", async (
         {
             subscription.Id,
             subscription.PlanCode,
-            subscription.Status,
+            status = entitlement.SubscriptionStatus,
             subscription.BillingInterval,
             subscription.PeriodStartUtc,
             subscription.PeriodEndUtc,
@@ -2969,7 +3014,7 @@ shop.MapGet("/reports/summary", async (
     var plan = await entitlements.GetForTenantAsync(tenantId, ct);
     if (!plan.IsAccessActive)
         return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "This shop's trial or subscription period is no longer active.");
+            title: "Your shop's SmartPrint subscription is inactive. Renew it from the Subscription page to restore access.");
     if (!plan.AdvancedReportsEnabled)
         return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
             title: "Advanced reporting is not included in this shop's current plan.");
@@ -5548,8 +5593,12 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     }
 
     var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
-    if (!subscription.IsAccessActive)
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
+    if (!subscription.IsAccessActive &&
+        !PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            subscription.SubscriptionStatus, subscription.PeriodEndUtc, ticket.CreatedUtc, DateTimeOffset.UtcNow))
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "shop_subscription_expired",
+            detail: "New uploads are blocked because this shop's subscription expired. Only uploads accepted before expiry can be finalised.");
     if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
         return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "This document exceeds the maximum size configured for this shop's plan.");
 
@@ -6406,9 +6455,13 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     }
 
     var subscription = await entitlements.GetForTenantAsync(device.TenantId, ct);
-    if (!subscription.IsAccessActive)
+    if (!subscription.IsAccessActive &&
+        !PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            subscription.SubscriptionStatus, subscription.PeriodEndUtc, ticket.CreatedUtc, now))
     {
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "shop_subscription_expired",
+            detail: "New uploads are blocked because this shop's subscription expired. Only uploads accepted before expiry can be finalised.");
     }
     if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
     {
@@ -8758,7 +8811,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         return Results.Problem(
             statusCode: StatusCodes.Status403Forbidden,
-            title: "This shop's trial or subscription period is no longer active.");
+            title: "shop_temporarily_unavailable",
+            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
     }
 
     var stationDefaultPrinterId = await db.QrStations.AsNoTracking()
@@ -9450,7 +9504,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
     if (!subscription.IsAccessActive)
     {
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "This shop's trial or subscription period is no longer active.");
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden, title: "shop_temporarily_unavailable",
+            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
     }
     if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, request.SizeBytes))
     {
@@ -10152,14 +10207,22 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             }));
 
         var subscription = await entitlements.GetForTenantAsync(ticket.TenantId, ct);
-        if (!subscription.IsAccessActive)
+        var grandfatheredUpload = PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            subscription.SubscriptionStatus, subscription.PeriodEndUtc, ticket.CreatedUtc, commitNow);
+        if (!subscription.IsAccessActive && !grandfatheredUpload)
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-                title: "This shop's trial or subscription period is no longer active."));
+                title: "shop_temporarily_unavailable",
+                detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance."));
         var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
             db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
         if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
-            return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-                title: "Secure HTTPS recovery is not available while the paired shop Agent is online on this plan."));
+        {
+            // The original plan rule still blocks new HTTPS recovery when the Agent is online.
+            // Only the already-accepted pre-expiry upload receives a narrow finish-only exception.
+            if (!grandfatheredUpload || !subscription.CloudAssistedPrintingIncluded)
+                return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                    title: "Secure HTTPS recovery is not available while the paired shop Agent is online on this plan."));
+        }
         if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
                 title: "This document exceeds the maximum size configured for this shop's plan."));
@@ -10168,7 +10231,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         var hasExistingMonthlyReservation = LocalUploadRecoveryRules.HasExistingMonthlyQuotaReservation(
             ticket.CreatedUtc, ticket.CompletedUtc, DateTimeOffset.UtcNow,
             TimeSpan.FromHours(maximumRecoveryAgeHours));
-        if (!hasExistingMonthlyReservation)
+        if (!hasExistingMonthlyReservation && !grandfatheredUpload)
         {
             var quota = await entitlements.CheckCapacityAsync(
                 ticket.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
@@ -10351,9 +10414,6 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     }
 
     var subscription = await entitlements.GetForTenantAsync(session.TenantId, ct);
-    if (!subscription.IsAccessActive)
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "This shop's trial or subscription period is no longer active.");
 
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
@@ -10364,6 +10424,27 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     {
         await transaction.RollbackAsync(ct);
         return Results.NotFound();
+    }
+
+    if (!subscription.IsAccessActive)
+    {
+        var localTicketCreatedUtc = await db.LocalPrintUploadTickets.AsNoTracking()
+            .Where(item => item.TenantId == session.TenantId && item.PrintJobId == job.Id)
+            .OrderBy(item => item.CreatedUtc)
+            .Select(item => (DateTimeOffset?)item.CreatedUtc)
+            .FirstOrDefaultAsync(ct);
+        var acceptedUtc = localTicketCreatedUtc is DateTimeOffset ticketAcceptedUtc &&
+                          ticketAcceptedUtc < job.CreatedUtc
+            ? ticketAcceptedUtc
+            : job.CreatedUtc;
+        if (!PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+                subscription.SubscriptionStatus, subscription.PeriodEndUtc, acceptedUtc, now))
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                title: "shop_temporarily_unavailable",
+                detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
+        }
     }
 
     var savedQuoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
@@ -11694,6 +11775,12 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
         return Results.NotFound(new { code = "station_not_available", message = "This print station is unavailable. Please ask the shop operator for help." });
     }
 
+    var customerEntitlements = await entitlements.GetForTenantAsync(station.TenantId, ct);
+    if (!customerEntitlements.IsAccessActive)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "shop_temporarily_unavailable",
+            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
+
     var now = DateTimeOffset.UtcNow;
     var rawToken = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
     var session = new CustomerPrintSession
@@ -11707,7 +11794,6 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
     };
     db.CustomerPrintSessions.Add(session);
     await db.SaveChangesAsync(ct);
-    var customerEntitlements = await entitlements.GetForTenantAsync(station.TenantId, ct);
     return Results.Created("/api/v1/public/sessions/current", new
     {
         session.Id,

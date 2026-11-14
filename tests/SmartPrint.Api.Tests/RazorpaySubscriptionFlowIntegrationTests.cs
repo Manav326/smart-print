@@ -235,6 +235,226 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
+    public async Task EarlyRenewalKeepsTheCurrentPlanVersionUntilTheScheduledPeriodBegins()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+
+            var currentVersion = await fixture.Db.SubscriptionPlanVersions.SingleAsync(
+                item => item.Id == fixture.PlanVersionId);
+            currentVersion.CloudAssistedPrintingEnabled = false;
+            currentVersion.MaxPrinters = 4;
+            var now = DateTimeOffset.UtcNow;
+            var paidThrough = now.AddDays(14);
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanVersionId = currentVersion.Id,
+                PlanCode = "PRO",
+                Status = "Active",
+                BillingInterval = "Monthly",
+                PeriodStartUtc = now.AddMonths(-1),
+                PeriodEndUtc = paidThrough,
+                CreatedUtc = now.AddDays(-30)
+            });
+
+            var nextVersion = new SubscriptionPlanVersion
+            {
+                Id = Guid.NewGuid(),
+                PlanId = currentVersion.PlanId,
+                Version = currentVersion.Version + 1,
+                Status = "Published",
+                Currency = "INR",
+                MonthlyPriceMinor = currentVersion.MonthlyPriceMinor,
+                AnnualPriceMinor = currentVersion.AnnualPriceMinor,
+                MaxPrinters = 1,
+                MaxAgentDevices = currentVersion.MaxAgentDevices,
+                MaxQrStations = currentVersion.MaxQrStations,
+                MaxMonthlyPrintJobs = currentVersion.MaxMonthlyPrintJobs,
+                MaxDocumentBytes = currentVersion.MaxDocumentBytes,
+                CloudAssistedPrintingEnabled = true,
+                WhiteLabelEnabled = currentVersion.WhiteLabelEnabled,
+                AdvancedReportsEnabled = currentVersion.AdvancedReportsEnabled,
+                PublishedUtc = now,
+                CreatedUtc = now,
+                UpdatedUtc = now
+            };
+            fixture.Db.SubscriptionPlanVersions.Add(nextVersion);
+            await fixture.Db.SaveChangesAsync();
+
+            var order = await fixture.Service.CreateOrderAsync(
+                fixture.TenantId, fixture.OwnerId, nextVersion.Id,
+                "Monthly", "scheduled-version-" + Guid.NewGuid().ToString("N")[..12],
+                CancellationToken.None);
+            var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
+            var verified = await fixture.Service.VerifyCheckoutAsync(
+                fixture.TenantId, order.OrderId, paymentId,
+                CheckoutSignature(order.OrderId, paymentId), CancellationToken.None);
+
+            var current = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId &&
+                        item.PlanVersionId == currentVersion.Id);
+            var scheduled = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.Id == verified.SubscriptionId);
+
+            Assert.Equal("Active", current.Status);
+            Assert.Equal("Scheduled", scheduled.Status);
+            Assert.Equal(paidThrough, scheduled.PeriodStartUtc);
+            Assert.Equal(paidThrough.AddMonths(1), scheduled.PeriodEndUtc);
+
+            var entitlement = await new TenantEntitlementService(fixture.Db)
+                .GetForTenantAsync(fixture.TenantId, CancellationToken.None);
+            Assert.Equal(current.Id, entitlement.SubscriptionId);
+            Assert.Equal(currentVersion.Id, entitlement.PlanVersionId);
+            Assert.Equal(4, entitlement.MaxPrinters);
+            Assert.False(entitlement.CloudAssistedPrintingIncluded);
+            Assert.Equal("Active", entitlement.SubscriptionStatus);
+            Assert.True(entitlement.IsAccessActive);
+        });
+    }
+
+    [Fact]
+    public async Task SwitchingSameProductFromMonthlyToAnnualPreservesUnusedPaidTime()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+            var preservedEnd = DateTimeOffset.UtcNow.AddDays(12);
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanCode = "PRO",
+                Status = "Active",
+                BillingInterval = "Monthly",
+                PeriodStartUtc = DateTimeOffset.UtcNow.AddDays(-18),
+                PeriodEndUtc = preservedEnd,
+                CreatedUtc = DateTimeOffset.UtcNow
+            });
+            await fixture.Db.SaveChangesAsync();
+
+            var order = await fixture.Service.CreateOrderAsync(
+                fixture.TenantId, fixture.OwnerId, fixture.PlanVersionId,
+                "Annual", "monthly-to-annual-" + Guid.NewGuid().ToString("N")[..12],
+                CancellationToken.None);
+            Assert.Equal(499900, order.AmountMinor);
+
+            var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
+            var verified = await fixture.Service.VerifyCheckoutAsync(
+                fixture.TenantId, order.OrderId, paymentId,
+                CheckoutSignature(order.OrderId, paymentId), CancellationToken.None);
+            var renewed = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.Id == verified.SubscriptionId);
+
+            Assert.Equal("Annual", renewed.BillingInterval);
+            Assert.Equal(preservedEnd, renewed.PeriodStartUtc);
+            Assert.Equal(preservedEnd.AddYears(1), renewed.PeriodEndUtc);
+        });
+    }
+
+    [Fact]
+    public async Task ExpiredPlanRetainsFeatureInclusionForAcceptedWorkButDoesNotGrantNewAccess()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+            var version = await fixture.Db.SubscriptionPlanVersions.SingleAsync(
+                item => item.Id == fixture.PlanVersionId);
+            version.CloudAssistedPrintingEnabled = true;
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanVersionId = fixture.PlanVersionId,
+                PlanCode = "PRO",
+                Status = "Active",
+                BillingInterval = "Monthly",
+                PeriodStartUtc = DateTimeOffset.UtcNow.AddMonths(-2),
+                PeriodEndUtc = DateTimeOffset.UtcNow.AddDays(-1),
+                CreatedUtc = DateTimeOffset.UtcNow.AddDays(-1)
+            });
+            await fixture.Db.SaveChangesAsync();
+
+            var snapshot = await new TenantEntitlementService(fixture.Db)
+                .GetForTenantAsync(fixture.TenantId, CancellationToken.None);
+
+            Assert.Equal("Expired", snapshot.SubscriptionStatus);
+            Assert.False(snapshot.IsAccessActive);
+            Assert.True(snapshot.CloudAssistedPrintingIncluded);
+            Assert.False(snapshot.CloudAssistedPrintingEnabled);
+        });
+    }
+
+    [Fact]
+    public async Task DifferentProductCannotBePurchasedMidCycleBeforeProrationIsAvailable()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanCode = "OTHER_PRODUCT",
+                Status = "Active",
+                BillingInterval = "Annual",
+                PeriodStartUtc = DateTimeOffset.UtcNow.AddDays(-10),
+                PeriodEndUtc = DateTimeOffset.UtcNow.AddDays(30),
+                CreatedUtc = DateTimeOffset.UtcNow
+            });
+            await fixture.Db.SaveChangesAsync();
+
+            var exception = await Assert.ThrowsAsync<SubscriptionPaymentException>(() =>
+                fixture.CreateOrderAsync("different-product-switch"));
+
+            Assert.Equal("subscription_plan_change_requires_proration", exception.Code);
+            Assert.Equal(0, fixture.Razorpay.CreateOrderCalls);
+            Assert.Equal(0, await fixture.Db.ShopSubscriptionPayments.CountAsync());
+        });
+    }
+
+    [Fact]
+    public async Task RenewalAfterExpiryStartsANewPeriodInsteadOfExtendingAnExpiredTerm()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+            var expiredEnd = DateTimeOffset.UtcNow.AddDays(-1);
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanCode = "PRO",
+                Status = "Active",
+                BillingInterval = "Monthly",
+                PeriodStartUtc = expiredEnd.AddMonths(-1),
+                PeriodEndUtc = expiredEnd,
+                CreatedUtc = DateTimeOffset.UtcNow.AddDays(-31)
+            });
+            await fixture.Db.SaveChangesAsync();
+
+            var order = await fixture.CreateOrderAsync("expired-same-plan-renewal");
+            var paymentId = fixture.Razorpay.PaymentIdFor(order.OrderId);
+            var verified = await fixture.Service.VerifyCheckoutAsync(
+                fixture.TenantId, order.OrderId, paymentId,
+                CheckoutSignature(order.OrderId, paymentId), CancellationToken.None);
+
+            var renewed = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.Id == verified.SubscriptionId);
+
+            Assert.True(renewed.PeriodStartUtc > expiredEnd);
+            Assert.Equal(renewed.PeriodStartUtc.AddMonths(1), renewed.PeriodEndUtc);
+        });
+    }
+
+    [Fact]
     public async Task SameClientRequestIdReusesTheServerCreatedRazorpayOrder()
     {
         await WithPostgresAsync(async fixture =>

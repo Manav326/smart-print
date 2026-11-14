@@ -53,6 +53,7 @@ public static class PlatformSubscriptionEndpoints
                 .ToListAsync(ct);
 
             var tenantIds = tenants.Select(tenant => tenant.Id).ToArray();
+            var now = DateTimeOffset.UtcNow;
             var subscriptions = await db.TenantSubscriptions.AsNoTracking()
                 .Where(item => tenantIds.Contains(item.TenantId))
                 .OrderByDescending(item => item.CreatedUtc)
@@ -60,7 +61,21 @@ public static class PlatformSubscriptionEndpoints
                 .ToListAsync(ct);
             var latestSubscriptions = subscriptions
                 .GroupBy(item => item.TenantId)
-                .ToDictionary(group => group.Key, group => group.First());
+                .ToDictionary(
+                    group => group.Key,
+                    group =>
+                        group.Where(item => PlanEntitlementRules.IsSubscriptionAccessActive(
+                                item.Status, item.PeriodStartUtc, item.PeriodEndUtc, now))
+                            .OrderByDescending(item => item.PeriodStartUtc)
+                            .ThenByDescending(item => item.CreatedUtc)
+                            .FirstOrDefault()
+                        ?? group.Where(item =>
+                                (item.Status == "Active" || item.Status == "Trial" || item.Status == "Scheduled") &&
+                                item.PeriodStartUtc > now && item.PeriodEndUtc > now)
+                            .OrderBy(item => item.PeriodStartUtc)
+                            .ThenBy(item => item.CreatedUtc)
+                            .FirstOrDefault()
+                        ?? group.First());
 
             var versionIds = latestSubscriptions.Values
                 .Where(item => item.PlanVersionId != null)
@@ -104,7 +119,8 @@ public static class PlatformSubscriptionEndpoints
                     {
                         subscription.Id,
                         subscription.PlanCode,
-                        subscription.Status,
+                        status = PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+                            subscription.Status, subscription.PeriodStartUtc, subscription.PeriodEndUtc, now),
                         subscription.BillingInterval,
                         subscription.PeriodStartUtc,
                         subscription.PeriodEndUtc,

@@ -259,6 +259,10 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             entity.HasIndex(x => new { x.PlanId, x.Version }).IsUnique();
             entity.HasIndex(x => new { x.PlanId, x.Status });
+            entity.HasIndex(x => x.PlanId)
+                .HasDatabaseName("IX_SubscriptionPlanVersions_PlanId_Draft")
+                .IsUnique()
+                .HasFilter("\"Status\" = 'Draft'");
             entity.HasOne<SubscriptionPlan>().WithMany()
                 .HasForeignKey(x => x.PlanId)
                 .OnDelete(DeleteBehavior.Cascade);

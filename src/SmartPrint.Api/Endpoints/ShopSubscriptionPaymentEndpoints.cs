@@ -64,15 +64,23 @@ public static class ShopSubscriptionPaymentEndpoints
         shop.MapGet("/subscription/payments", async (
             ClaimsPrincipal principal,
             SmartPrintDbContext db,
+            int? skip,
+            int? take,
             CancellationToken ct) =>
         {
             if (!HasShopAccess(principal) || !TryGetTenantId(principal, out var tenantId))
                 return Results.Forbid();
 
-            var payments = await db.ShopSubscriptionPayments.AsNoTracking()
-                .Where(item => item.TenantId == tenantId)
+            var pageSkip = Math.Clamp(skip ?? 0, 0, 1_000_000);
+            var pageTake = Math.Clamp(take ?? 20, 1, 50);
+            var query = db.ShopSubscriptionPayments.AsNoTracking()
+                .Where(item => item.TenantId == tenantId);
+            var totalCount = await query.CountAsync(ct);
+            var items = await query
                 .OrderByDescending(item => item.CreatedUtc)
-                .Take(20)
+                .ThenByDescending(item => item.Id)
+                .Skip(pageSkip)
+                .Take(pageTake)
                 .Select(item => new
                 {
                     item.Id,
@@ -90,7 +98,7 @@ public static class ShopSubscriptionPaymentEndpoints
                 })
                 .ToListAsync(ct);
 
-            return Results.Ok(payments);
+            return Results.Ok(new { items, skip = pageSkip, take = pageTake, totalCount });
         });
 
         shop.MapPost("/subscription/payments/{paymentId:guid}/resume", async (

@@ -43,6 +43,56 @@ public sealed class PlanEntitlementRulesTests
     }
 
     [Fact]
+    public void EffectiveStatusBecomesExpiredWhenTrialOrPaidPeriodEnds()
+    {
+        var now = new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
+
+        Assert.Equal("Expired", PlanEntitlementRules.GetEffectiveSubscriptionStatus("Active", now, now));
+        Assert.Equal("Expired", PlanEntitlementRules.GetEffectiveSubscriptionStatus("Trial", now.AddTicks(-1), now));
+        Assert.Equal("Active", PlanEntitlementRules.GetEffectiveSubscriptionStatus("Active", now.AddTicks(1), now));
+        Assert.Equal("Superseded", PlanEntitlementRules.GetEffectiveSubscriptionStatus("Superseded", now.AddDays(-1), now));
+        Assert.Equal("Unconfigured", PlanEntitlementRules.GetEffectiveSubscriptionStatus(null, now, now));
+    }
+
+    [Fact]
+    public void ScheduledSubscriptionIsNotActiveUntilItsPaidStartAndThenExpiresNormally()
+    {
+        var now = new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
+        var start = now.AddDays(10);
+        var end = start.AddMonths(1);
+
+        Assert.Equal("Scheduled", PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+            "Scheduled", start, end, now));
+        Assert.False(PlanEntitlementRules.IsSubscriptionAccessActive("Scheduled", start, end, now));
+
+        Assert.Equal("Active", PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+            "Scheduled", start, end, start));
+        Assert.True(PlanEntitlementRules.IsSubscriptionAccessActive("Scheduled", start, end, start));
+
+        Assert.Equal("Expired", PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+            "Scheduled", start, end, end));
+        Assert.False(PlanEntitlementRules.IsSubscriptionAccessActive("Scheduled", start, end, end));
+    }
+
+    [Fact]
+    public void ExpiryOnlyGrandfathersWorkAcceptedBeforeThePaidPeriodEnded()
+    {
+        var now = new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
+        var periodEnd = now.AddMinutes(-5);
+
+        Assert.True(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Expired", periodEnd, periodEnd.AddMinutes(-1), now));
+        Assert.False(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Expired", periodEnd, periodEnd, now));
+        Assert.False(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Expired", periodEnd, now, now));
+        Assert.False(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Cancelled", periodEnd, periodEnd.AddMinutes(-1), now));
+        Assert.False(PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+            "Expired", now.AddDays(1), periodEnd, now));
+    }
+
+    [Fact]
     public void DocumentSizeMustBePositiveAndNoGreaterThanPlanMaximum()
     {
         Assert.True(PlanEntitlementRules.AllowsDocument(null, 1));

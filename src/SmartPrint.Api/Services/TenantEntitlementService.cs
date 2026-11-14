@@ -14,14 +14,18 @@ public enum TenantQuotaResource
 
 public sealed record TenantEntitlementSnapshot(
     Guid TenantId,
+    Guid? SubscriptionId,
     string PlanCode,
     string SubscriptionStatus,
     Guid? PlanVersionId,
+    DateTimeOffset? PeriodStartUtc,
+    DateTimeOffset? PeriodEndUtc,
     int? MaxPrinters,
     int? MaxAgentDevices,
     int? MaxQrStations,
     int? MaxMonthlyPrintJobs,
     long? MaxDocumentBytes,
+    bool CloudAssistedPrintingIncluded,
     bool CloudAssistedPrintingEnabled,
     bool WhiteLabelEnabled,
     bool AdvancedReportsEnabled,
@@ -39,21 +43,58 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
 {
     public async Task<TenantEntitlementSnapshot> GetForTenantAsync(Guid tenantId, CancellationToken cancellationToken)
     {
-        var subscription = await db.TenantSubscriptions.AsNoTracking()
+        var now = DateTimeOffset.UtcNow;
+        var eligible = db.TenantSubscriptions.AsNoTracking()
+            .Where(item => item.TenantId == tenantId &&
+                (item.Status == "Active" || item.Status == "Trial" || item.Status == "Scheduled"));
+        var subscription = await eligible
+            .Where(item => item.PeriodStartUtc <= now && item.PeriodEndUtc > now)
+            .OrderByDescending(item => item.PeriodStartUtc)
+            .ThenByDescending(item => item.CreatedUtc)
+            .ThenByDescending(item => item.Id)
+            .Select(item => new
+            {
+                item.Id, item.PlanCode, item.Status, item.PlanVersionId,
+                item.PeriodStartUtc, item.PeriodEndUtc
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        // If the current paid term has ended, surface the earliest already-paid future term.
+        // It remains Scheduled and cannot grant access until its PeriodStartUtc is reached.
+        subscription ??= await eligible
+            .Where(item => item.PeriodStartUtc > now && item.PeriodEndUtc > now)
+            .OrderBy(item => item.PeriodStartUtc)
+            .ThenBy(item => item.CreatedUtc)
+            .ThenBy(item => item.Id)
+            .Select(item => new
+            {
+                item.Id, item.PlanCode, item.Status, item.PlanVersionId,
+                item.PeriodStartUtc, item.PeriodEndUtc
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        subscription ??= await db.TenantSubscriptions.AsNoTracking()
             .Where(item => item.TenantId == tenantId)
             .OrderByDescending(item => item.CreatedUtc)
             .ThenByDescending(item => item.Id)
-            .Select(item => new { item.PlanCode, item.Status, item.PlanVersionId, item.PeriodEndUtc })
+            .Select(item => new
+            {
+                item.Id, item.PlanCode, item.Status, item.PlanVersionId,
+                item.PeriodStartUtc, item.PeriodEndUtc
+            })
             .FirstOrDefaultAsync(cancellationToken);
 
         var tenantStatus = await db.Tenants.AsNoTracking()
             .Where(item => item.Id == tenantId)
             .Select(item => item.Status)
             .SingleOrDefaultAsync(cancellationToken);
+        var effectiveSubscriptionStatus = PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+            subscription?.Status, subscription?.PeriodStartUtc ?? now,
+            subscription?.PeriodEndUtc ?? now, now);
         var accessActive = TenantAccessRules.IsActive(tenantStatus) &&
             subscription is not null &&
             PlanEntitlementRules.IsSubscriptionAccessActive(
-                subscription.Status, subscription.PeriodEndUtc, DateTimeOffset.UtcNow);
+                subscription.Status, subscription.PeriodStartUtc, subscription.PeriodEndUtc, now);
 
         var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, cancellationToken);
@@ -67,10 +108,10 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         if (subscription?.PlanVersionId is not Guid planVersionId)
         {
             return new TenantEntitlementSnapshot(
-                tenantId, subscription?.PlanCode ?? "UNCONFIGURED",
-                subscription?.Status ?? "Unconfigured", null,
+                tenantId, subscription?.Id, subscription?.PlanCode ?? "UNCONFIGURED",
+                effectiveSubscriptionStatus, null, subscription?.PeriodStartUtc, subscription?.PeriodEndUtc,
                 null, null, null, isTrialPlan ? trialMonthlyLimit : null, null,
-                accessActive, false, accessActive, true, accessActive);
+                false, accessActive, false, accessActive, true, accessActive);
         }
 
         var version = await db.SubscriptionPlanVersions.AsNoTracking()
@@ -82,9 +123,11 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         }
 
         return new TenantEntitlementSnapshot(
-            tenantId, subscription.PlanCode, subscription.Status, version.Id,
+            tenantId, subscription.Id, subscription.PlanCode, effectiveSubscriptionStatus,
+            version.Id, subscription.PeriodStartUtc, subscription.PeriodEndUtc,
             version.MaxPrinters, version.MaxAgentDevices, version.MaxQrStations,
             isTrialPlan ? trialMonthlyLimit : version.MaxMonthlyPrintJobs, version.MaxDocumentBytes,
+            version.CloudAssistedPrintingEnabled,
             version.CloudAssistedPrintingEnabled && accessActive,
             version.WhiteLabelEnabled && accessActive,
             version.AdvancedReportsEnabled && accessActive,
@@ -116,7 +159,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             return new TenantQuotaDecision(
                 false,
                 "subscription_inactive",
-                "This shop's trial or subscription period has ended or is inactive. Contact the platform team to restore access.",
+                "Your shop's SmartPrint subscription is inactive. Open Subscription in your shop dashboard to review plans and restore access.",
                 0,
                 0);
         }

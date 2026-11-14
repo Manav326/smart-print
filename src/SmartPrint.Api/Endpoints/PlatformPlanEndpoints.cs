@@ -151,6 +151,11 @@ public static class PlatformPlanEndpoints
                 return Results.ValidationProblem(errors);
             }
 
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            var draftLockKey = $"platform-plan-draft:{planId:N}";
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(6, hashtext({draftLockKey}))", ct);
+
             var plan = await db.SubscriptionPlans.SingleOrDefaultAsync(item => item.Id == planId, ct);
             if (plan is null)
             {
@@ -162,9 +167,21 @@ public static class PlatformPlanEndpoints
                 return Results.Conflict(new { message = "System plan entitlements are protected." });
             }
 
-            var draft = await db.SubscriptionPlanVersions
-                .SingleOrDefaultAsync(version => version.PlanId == planId && version.Status == "Draft", ct);
+            // The partial unique index guarantees one draft per plan. Order defensively
+            // so older databases with duplicate drafts still recover instead of throwing.
+            var drafts = await db.SubscriptionPlanVersions
+                .Where(version => version.PlanId == planId && version.Status == "Draft")
+                .OrderByDescending(version => version.Version)
+                .ThenByDescending(version => version.UpdatedUtc)
+                .ToListAsync(ct);
+            var draft = drafts.FirstOrDefault();
             var now = DateTimeOffset.UtcNow;
+            foreach (var supersededDraft in drafts.Skip(1))
+            {
+                supersededDraft.Status = "Retired";
+                supersededDraft.UpdatedUtc = now;
+            }
+
             if (draft is null)
             {
                 var latestVersion = await db.SubscriptionPlanVersions
@@ -182,6 +199,7 @@ public static class PlatformPlanEndpoints
 
             plan.UpdatedUtc = now;
             await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
             return Results.Ok(ToResponse(draft));
         });
 
@@ -191,6 +209,11 @@ public static class PlatformPlanEndpoints
             SmartPrintDbContext db,
             CancellationToken ct) =>
         {
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            var draftLockKey = $"platform-plan-draft:{planId:N}";
+            await db.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock(6, hashtext({draftLockKey}))", ct);
+
             var plan = await db.SubscriptionPlans.SingleOrDefaultAsync(item => item.Id == planId, ct);
             if (plan is null)
             {
@@ -228,6 +251,7 @@ public static class PlatformPlanEndpoints
             version.UpdatedUtc = now;
             plan.UpdatedUtc = now;
             await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
             return Results.Ok(ToResponse(version));
         });
 

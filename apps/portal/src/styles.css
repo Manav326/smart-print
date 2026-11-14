@@ -489,7 +489,7 @@ html[data-theme="dark"] .customer-private-purge-complete{background:#18372d;bord
 .subscription-document-limit strong{font-size:9px;color:var(--text)}
 .subscription-usage-footnote{margin-top:12px;color:var(--faint);font-size:7px;line-height:1.5}
 @media(max-width:950px){.subscription-hero-grid{grid-template-columns:1fr}}
-@media(max-width:600px){.subscription-current-panel,.subscription-feature-panel,.subscription-usage-panel{padding:14px}.subscription-period,.subscription-prices,.subscription-usage-grid{grid-template-columns:1fr}.subscription-period{gap:10px}.subscription-usage-heading{align-items:flex-start;flex-direction:column}.subscription-updated{white-space:normal}}
+@media(max-width:600px){.subscription-current-panel,.subscription-feature-panel,.subscription-usage-panel{padding:14px}.subscription-period,.subscription-prices,.subscription-usage-grid{grid-template-columns:1fr}.subscription-period{gap:10px}.subscription-usage-heading{align-items:flex-start;flex-direction:column}.subscription-updated{white-space:normal}.subscription-expiry-reminder{align-items:flex-start;flex-direction:column}.subscription-expiry-reminder button{width:100%}.subscription-payment-history-amount{justify-items:start}.subscription-payment-history-amount button{width:auto}}
 
 
 /* Platform shop-subscription administration */
@@ -3371,6 +3371,13 @@ html[data-theme="dark"] .auth-proof {
 @media(max-width:520px){.photo-order-receipt .modal-actions{display:grid;grid-template-columns:1fr}.photo-order-receipt .modal-actions button{width:100%}.photo-order-upi{padding:12px}}
 
 /* Shop-owner subscription checkout is intentionally separate from customer print-payment UI. */
+.subscription-expiry-reminder{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 14px;padding:12px 14px;border:1px solid rgba(245,183,84,.3);border-radius:11px;background:rgba(245,183,84,.08)}
+.subscription-expiry-reminder>div{display:grid;gap:4px;min-width:0}
+.subscription-expiry-reminder strong{font-size:9px;color:var(--text)}
+.subscription-expiry-reminder span{font-size:8px;line-height:1.5;color:var(--muted)}
+.subscription-expiry-reminder button{flex:0 0 auto}
+.subscription-expiry-reminder.expired{border-color:rgba(240,110,110,.32);background:rgba(240,110,110,.08)}
+.subscription-expiry-reminder.expired strong{color:var(--red)}
 .subscription-payment-panel { display: grid; gap: 18px; margin-top: 18px; }
 .subscription-payment-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
 .subscription-payment-heading h2 { margin: 5px 0 6px; font-size: 1.2rem; color: var(--text); }
@@ -3394,12 +3401,19 @@ html[data-theme="dark"] .auth-proof {
 .subscription-payment-message { display: flex; align-items: flex-start; gap: 8px; line-height: 1.45; }
 .subscription-payment-empty { padding: 20px; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); text-align: center; }
 .subscription-payment-history { display: grid; gap: 0; border-top: 1px solid var(--border-soft); padding-top: 14px; }
+.subscription-payment-limit-note{display:block;color:var(--muted);font-size:.72rem;line-height:1.45}
+.subscription-payment-renewal-note{padding:11px 12px;border:1px solid rgba(88,214,160,.25);border-radius:10px;background:rgba(88,214,160,.07);color:var(--muted);font-size:.8rem}
+.subscription-payment-renewal-note svg{flex:0 0 auto;color:var(--green)}
+.subscription-payment-reference{display:block;margin-top:5px;font-size:.72rem;overflow-wrap:anywhere}
 .subscription-payment-history-heading { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; color: var(--text); font-size: .83rem; }
 .subscription-payment-history-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--border-soft); }
 .subscription-payment-history-row > div { display: grid; gap: 3px; min-width: 0; }
 .subscription-payment-history-row > div strong { color: var(--text); font-size: .79rem; }
 .subscription-payment-history-row small { color: var(--muted); font-size: .7rem; }
 .subscription-payment-history-row > strong { color: var(--text); font-size: .8rem; white-space: nowrap; }
+.subscription-payment-history-amount{display:grid;justify-items:end;gap:6px}
+.subscription-payment-history-amount button{font-size:.7rem;min-height:27px;padding:5px 8px}
+.subscription-payment-load-more{display:inline-flex;align-items:center;justify-content:center;gap:7px;justify-self:center;margin-top:10px;min-height:34px}
 .subscription-payment-history-status { padding: 4px 7px; border-radius: 7px; color: var(--muted); background: var(--surface-3); font-size: .67rem; font-weight: 750; white-space: nowrap; }
 .subscription-payment-history-status.captured { color: var(--green); }
 .subscription-payment-history-status.failed { color: var(--red); }
