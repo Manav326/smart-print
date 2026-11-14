@@ -119,19 +119,45 @@ export function orderJourneyStageLabel(stage: OrderJourneyStage): string {
 }
 export function orderJourneyStatusLabel(status: string): string {
   const labels: Record<string,string> = {
-    UPLOADED:"Uploaded", VALIDATING:"Checking files", ANALYSING:"Reading files",
-    AWAITING_CONFIGURATION:"Options needed", AWAITING_CUSTOMER_APPROVAL:"Customer approval",
-    AWAITING_SHOP_APPROVAL:"Needs your review", AWAITING_PAYMENT:"Waiting for payment",
-    AWAITING_COUNTER_PAYMENT:"Pay at counter", QUOTE_EXPIRED:"Quote needs refresh",
-    PAYMENT_REJECTED:"Payment needs retry", PAID_AUTHORISED:"Paid · ready for setup",
-    LOCAL_QUEUE_CLAIMED:"Sending to shop computer", LOCAL_QUEUE_READY:"Secured on shop computer",
-    PRINT_AUTHORISED:"Ready to print", PRINT_SUBMITTING:"Sending to printer",
-    SPOOLER_ACCEPTED:"Printer accepted job", PRINTING:"Printing",
-    OUTPUT_UNCONFIRMED:"Check paper output", PDF_EXPORTING:"Creating PDF",
-    PDF_EXPORTED:"PDF saved", COMPLETED:"Completed", REJECTED:"Excluded",
-    REFUNDED:"Refunded", PARTIALLY_REFUNDED:"Partly refunded", FAILED:"Failed", CANCELLED:"Cancelled"
+    UPLOADED:"Received",
+    VALIDATING:"Checking files",
+    ANALYSING:"Checking files",
+    AWAITING_CONFIGURATION:"Being prepared",
+    AWAITING_CUSTOMER_APPROVAL:"Customer approval needed",
+    AWAITING_SHOP_APPROVAL:"Needs your review",
+    AWAITING_PAYMENT:"Ready for payment",
+    AWAITING_CUSTOMER_PAYMENT:"Ready for payment",
+    AWAITING_COUNTER_PAYMENT:"Pay at shop",
+    CASH_AWAITING_PAYMENT:"Cash payment due",
+    CUSTOMER_REPORTED:"Payment being checked",
+    PAYMENT_REPORTED:"Payment being checked",
+    QUOTE_EXPIRED:"Price needs refreshing",
+    PAYMENT_REJECTED:"Payment not confirmed",
+    PAID_AUTHORISED:"Payment received",
+    VERIFIED:"Payment received",
+    LOCAL_QUEUE_CLAIMED:"Preparing to print",
+    LOCAL_QUEUE_READY:"Preparing to print",
+    PRINT_AUTHORISED:"Ready to print",
+    PRINT_SUBMITTING:"Sending to printer",
+    SPOOLER_ACCEPTED:"Sent to printer",
+    SUBMITTING_TO_SPOOLER:"Sent to printer",
+    QUEUED:"Waiting to print",
+    PRINTING:"Printing",
+    OUTPUT_UNCONFIRMED:"Check print result",
+    TEST_OUTPUT_READY:"Test complete",
+    PDF_EXPORTING:"Preparing PDF",
+    PDF_EXPORTED:"PDF ready",
+    COMPLETED:"Ready for collection",
+    REJECTED:"Not accepted",
+    REFUNDED:"Refunded",
+    PARTIALLY_REFUNDED:"Partly refunded",
+    PARTIALLY_COMPLETED:"Some files complete",
+    MIXED_OUTCOME:"Some files need attention",
+    MIXED_PROGRESS:"In progress",
+    FAILED:"Could not print",
+    CANCELLED:"Cancelled"
   };
-  return labels[status] ?? status.replaceAll("_"," ").toLowerCase().replace(/\b\w/g, letter=>letter.toUpperCase());
+  return labels[status] ?? "In progress";
 }
 
 
