@@ -2,11 +2,12 @@ using System.Net.Mail;
 using System.Text.Json;
 using System.Security.Cryptography;
 using Google.Apis.Auth;
+using SmartPrint.Api.Security;
 
 namespace SmartPrint.Api.Services;
 
 /// <summary>Verifies provider-signed Google OpenID ID tokens for SmartPrint login.</summary>
-public sealed class GoogleIdentityService(IConfiguration configuration)
+public sealed class GoogleIdentityService(IConfiguration configuration, GoogleAuthNonceStore nonces)
 {
     public const string LoginProvider = "Google";
 
@@ -77,6 +78,14 @@ public sealed class GoogleIdentityService(IConfiguration configuration)
             throw new GoogleIdentityException(
                 "google_nonce_invalid",
                 "This Google sign-in request has expired. Please start again.",
+                StatusCodes.Status401Unauthorized);
+        }
+
+        if (!nonces.TryConsume(payload.Nonce, expectedNonce))
+        {
+            throw new GoogleIdentityException(
+                "google_nonce_invalid",
+                "This Google sign-in request has expired or was already used. Please try again.",
                 StatusCodes.Status401Unauthorized);
         }
 
