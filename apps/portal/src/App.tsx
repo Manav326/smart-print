@@ -1392,7 +1392,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       ? `Create a non-production Private Printing test PDF for ${job.jobNumber}? The Agent stores it in its protected test folder for up to 24 hours. This is not a physical print and cannot be collected as a printed order.`
       : pdfExport
         ? `Save a PDF for ${job.jobNumber} in the shop's QRtoPrint Exports folder? No Windows printer dialog will be opened.`
-        : `Start printing ${job.jobNumber} on ${job.printerName || "the assigned printer"}? The document will be submitted once to Windows. Spooler acceptance is not proof of paper output.`,
+        : `Start printing ${job.jobNumber} on ${job.printerName || "the assigned printer"}? SmartPrint will send this job once. Please check the actual pages before marking the order complete.`,
       privateTestOutput ? "Create private test PDF?" : pdfExport ? "Save PDF export?" : "Start printing?",
       privateTestOutput ? "Create test PDF" : pdfExport ? "Save PDF" : "Start printing");
     if (!ok) return;
@@ -1403,7 +1403,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         ? "Private test PDF authorised. The Agent will save a protected local test artifact; no physical print is recorded."
         : pdfExport
           ? "PDF export authorised. The Windows Agent will create the PDF in the shop's export folder."
-          : "Print authorised. The Windows agent will submit this job once.");
+          : "Printing has started. Check the printed pages before marking the order complete.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not start printing.");
@@ -3449,10 +3449,10 @@ function prettyStatus(status:string) {
     PAID_AUTHORISED:"Payment received",
     LOCAL_QUEUE_CLAIMED:"Preparing to print",
     LOCAL_QUEUE_READY:"Ready to print",
-    PRINT_AUTHORISED:"Printing started",
-    PRINT_SUBMITTING:"Printing started",
-    SPOOLER_ACCEPTED:"Printing started",
-    PRINTING:"Printing",
+    PRINT_AUTHORISED:"Ready to print",
+    PRINT_SUBMITTING:"Starting print",
+    SPOOLER_ACCEPTED:"Printing in progress",
+    PRINTING:"Printing in progress",
     OUTPUT_UNCONFIRMED:"Shop checking print",
     TEST_OUTPUT_READY:"Test complete",
     PDF_EXPORTING:"Preparing PDF",
@@ -4423,8 +4423,8 @@ function smartPrintNativeHeadline(status:string):string {
     case "PAID_AUTHORISED": return "Payment received";
     case "LOCAL_QUEUE_CLAIMED":
     case "LOCAL_QUEUE_READY": return "Preparing your print";
-    case "PRINT_AUTHORISED":
-    case "PRINT_SUBMITTING":
+    case "PRINT_AUTHORISED": return "Ready to print";
+    case "PRINT_SUBMITTING": return "Starting print";
     case "SPOOLER_ACCEPTED":
     case "PRINTING": return "Printing in progress";
     case "OUTPUT_UNCONFIRMED": return "Shop checking your print";
@@ -4451,10 +4451,10 @@ function smartPrintNativeStatus(status:string):string {
     case "PAID_AUTHORISED": return "Payment received. The shop is preparing your print.";
     case "LOCAL_QUEUE_CLAIMED":
     case "LOCAL_QUEUE_READY": return "Your files have reached the shop and are being prepared for printing.";
-    case "PRINT_AUTHORISED":
-    case "PRINT_SUBMITTING":
+    case "PRINT_AUTHORISED": return "The shop approved your print. Printing will start shortly.";
+    case "PRINT_SUBMITTING": return "Your print is starting.";
     case "SPOOLER_ACCEPTED":
-    case "PRINTING": return "Your print is in progress.";
+    case "PRINTING": return "Your print is in progress. The shop will confirm when the pages are ready.";
     case "OUTPUT_UNCONFIRMED": return "The shop is checking the printer and will confirm whether your pages were printed. Please do not pay or upload the same file again.";
     case "TEST_OUTPUT_READY": return "This was a test only. No physical pages were printed.";
     case "COMPLETED": return "Your pages are printed and ready for collection.";
@@ -4478,10 +4478,10 @@ function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):stri
     case "PAID_AUTHORISED": return "Payment received. The shop is preparing your print.";
     case "LOCAL_QUEUE_CLAIMED":
     case "LOCAL_QUEUE_READY": return "Your files have reached the shop and are being prepared.";
-    case "PRINT_AUTHORISED":
-    case "PRINT_SUBMITTING":
+    case "PRINT_AUTHORISED": return "The shop approved your print. Printing will start shortly.";
+    case "PRINT_SUBMITTING": return "Your print is starting.";
     case "SPOOLER_ACCEPTED":
-    case "PRINTING": return "Your print is in progress.";
+    case "PRINTING": return "Your print is in progress. The shop will confirm when the pages are ready.";
     case "OUTPUT_UNCONFIRMED": return "The shop is checking whether your pages were printed. Please do not submit the same file again.";
     case "TEST_OUTPUT_READY": return "This was a test only. No physical pages were printed.";
     case "COMPLETED": return "Printing is complete. Your pages are ready for collection.";
@@ -5720,7 +5720,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         :jobStatus.status==="PAYMENT_REJECTED"?"The payment could not be confirmed. Please check with the shop before paying again."
         :jobStatus.status==="PAID_AUTHORISED"?"Payment received. The shop is preparing your print."
         :jobStatus.status==="LOCAL_QUEUE_CLAIMED"||jobStatus.status==="LOCAL_QUEUE_READY"?"Your files have reached the shop and are being prepared for printing."
-        :["PRINT_AUTHORISED","PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus.status)?"Your print is in progress."
+        :jobStatus.status==="PRINT_AUTHORISED"?"The shop approved your print. Printing will start shortly.":["PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus.status)?"Your print is in progress. The shop will confirm when the pages are ready."
         :jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and will confirm whether your pages were printed. Please do not pay or upload the same file again."
         :jobStatus.status==="COMPLETED"?"Your pages are printed and ready for collection."
         :jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready."
@@ -5833,7 +5833,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}
     </section>}
-    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="PAID_AUTHORISED"?"Payment received. The shop is preparing your print.":["PRINT_AUTHORISED","PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus?.status??"")?"Your print is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking whether your pages were printed. Please do not submit the same file again.":jobStatus?.status==="COMPLETED"?"Printing is complete. Your pages are ready for collection.":jobStatus?.status==="PDF_EXPORTED"?"Your PDF is ready.":jobStatus?.status==="REFUNDED"?"This file was not printed and the payment was returned.":jobStatus?.status==="CANCELLED"?"This request was cancelled.":jobStatus?.status==="FAILED"?"Printing could not be completed. Please speak to the shop.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"||jobStatus?.status==="LOCAL_QUEUE_READY"?"Your files have reached the shop and are being prepared.":jobStatus?.status==="AWAITING_PAYMENT"?"Your files are accepted. Complete payment to continue.":jobStatus?.status==="PAYMENT_REPORTED"?"The shop is checking your payment.":quote?"Check the price and print options before sending your request to the shop.":"Choose your files to get started."}</span></div>
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="PAID_AUTHORISED"?"Payment received. The shop is preparing your print.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop approved your print. Printing will start shortly.":["PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus?.status??"")?"Your print is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking whether your pages were printed. Please do not submit the same file again.":jobStatus?.status==="COMPLETED"?"Printing is complete. Your pages are ready for collection.":jobStatus?.status==="PDF_EXPORTED"?"Your PDF is ready.":jobStatus?.status==="REFUNDED"?"This file was not printed and the payment was returned.":jobStatus?.status==="CANCELLED"?"This request was cancelled.":jobStatus?.status==="FAILED"?"Printing could not be completed. Please speak to the shop.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"||jobStatus?.status==="LOCAL_QUEUE_READY"?"Your files have reached the shop and are being prepared.":jobStatus?.status==="AWAITING_PAYMENT"?"Your files are accepted. Complete payment to continue.":jobStatus?.status==="PAYMENT_REPORTED"?"The shop is checking your payment.":quote?"Check the price and print options before sending your request to the shop.":"Choose your files to get started."}</span></div>
   </section></>;
 }
 
