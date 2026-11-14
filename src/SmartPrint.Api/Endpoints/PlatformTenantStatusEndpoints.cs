@@ -19,7 +19,7 @@ public static class PlatformTenantStatusEndpoints
             PlatformTenantStatusService statuses,
             CancellationToken ct) =>
         {
-            var actorId = Guid.TryParse(
+            Guid? actorId = Guid.TryParse(
                 principal.FindFirstValue(JwtRegisteredClaimNames.Sub),
                 out var parsedActorId) ? parsedActorId : null;
             var result = await statuses.ChangeAsync(tenantId, actorId, request, ct);
