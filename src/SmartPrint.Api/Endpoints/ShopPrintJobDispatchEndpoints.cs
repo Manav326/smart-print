@@ -43,6 +43,12 @@ public static class ShopPrintJobDispatchEndpoints
                         code = "print_prerequisites_not_met",
                         message = "Verified payment and the same paired computer's live printer queue are required."
                     });
+                case ShopPrintDispatchFailure.PrivatePrintingOutputRequired:
+                    return Results.Conflict(new
+                    {
+                        code = "private_printing_physical_output_required",
+                        message = "Private Printing requires a connected physical printer. Virtual printers are available only when the Company Main Admin enables non-production test output."
+                    });
             }
 
             var job = result.Job!;

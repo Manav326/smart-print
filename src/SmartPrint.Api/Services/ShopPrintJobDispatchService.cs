@@ -12,6 +12,7 @@ public enum ShopPrintDispatchFailure
     JobNotReady,
     BatchPrinterMismatch,
     PrerequisitesNotMet,
+    PrivatePrintingOutputRequired,
     PdfExportNotRecoverable,
     PdfExportLocalCopyMissing,
     PdfExportPrerequisitesNotMet,
@@ -149,7 +150,7 @@ public sealed class ShopPrintJobDispatchService(SmartPrintDbContext db, IHostEnv
         {
             await transaction.RollbackAsync(cancellationToken);
             return new ShopPrintDispatchResult(
-                ShopPrintDispatchFailure.PrerequisitesNotMet,
+                ShopPrintDispatchFailure.PrivatePrintingOutputRequired,
                 Job: job);
         }
 
