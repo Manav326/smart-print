@@ -43,6 +43,18 @@ public sealed class PlanEntitlementRulesTests
     }
 
     [Fact]
+    public void EffectiveStatusBecomesExpiredWhenTrialOrPaidPeriodEnds()
+    {
+        var now = new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
+
+        Assert.Equal("Expired", PlanEntitlementRules.GetEffectiveSubscriptionStatus("Active", now, now));
+        Assert.Equal("Expired", PlanEntitlementRules.GetEffectiveSubscriptionStatus("Trial", now.AddTicks(-1), now));
+        Assert.Equal("Active", PlanEntitlementRules.GetEffectiveSubscriptionStatus("Active", now.AddTicks(1), now));
+        Assert.Equal("Superseded", PlanEntitlementRules.GetEffectiveSubscriptionStatus("Superseded", now.AddDays(-1), now));
+        Assert.Equal("Unconfigured", PlanEntitlementRules.GetEffectiveSubscriptionStatus(null, now, now));
+    }
+
+    [Fact]
     public void DocumentSizeMustBePositiveAndNoGreaterThanPlanMaximum()
     {
         Assert.True(PlanEntitlementRules.AllowsDocument(null, 1));
