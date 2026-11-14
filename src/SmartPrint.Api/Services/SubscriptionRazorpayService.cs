@@ -148,6 +148,26 @@ public sealed class SubscriptionRazorpayService(
                     StatusCodes.Status409Conflict);
             }
 
+            var now = DateTimeOffset.UtcNow;
+            var currentSubscription = await db.TenantSubscriptions.AsNoTracking()
+                .Where(item => item.TenantId == tenantId)
+                .OrderByDescending(item => item.CreatedUtc)
+                .ThenByDescending(item => item.Id)
+                .Select(item => new { item.PlanCode, item.Status, item.PeriodEndUtc })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (currentSubscription is not null &&
+                string.Equals(currentSubscription.Status, "Active", StringComparison.OrdinalIgnoreCase) &&
+                currentSubscription.PeriodEndUtc > now &&
+                !string.Equals(currentSubscription.PlanCode, candidate.Plan.Code, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SubscriptionPaymentException(
+                    "subscription_plan_change_requires_proration",
+                    "Your current paid plan remains active until " +
+                    currentSubscription.PeriodEndUtc.ToString("dd MMM yyyy", System.Globalization.CultureInfo.InvariantCulture) +
+                    ". Switching to a different product before then is paused until a credit or proration quote can be shown. You will not be charged for a change that discards unused paid time.",
+                    StatusCodes.Status409Conflict);
+            }
+
             if (!PlatformSubscriptionAssignmentRules.TryResolve(
                     candidate.Plan,
                     candidate.Version,
