@@ -10681,21 +10681,10 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         });
     }
 
-    var pendingLocalUpload = await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(ticket =>
-        ticket.TenantId == session.TenantId &&
-        ticket.CustomerSessionId == session.Id &&
-        ticket.BatchId == batchId &&
-        ticket.CompletedUtc == null &&
-        ticket.ExpiresUtc > now, ct);
-    if (pendingLocalUpload)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new
-        {
-            code = "batch_uploads_still_processing",
-            message = "A document is still being transferred to the shop computer. Wait for its upload to finish or expire, then refresh the batch before checkout."
-        });
-    }
+    // Checkout is a snapshot of the locked, accepted jobs currently in this batch.
+    // The PrintPayment rows below are the immutable membership of this payment attempt.
+    // An unfinished upload has no PrintJob yet, so it is excluded automatically; if it
+    // completes later, it remains a separate unpaid file and must pass shop review first.
 
     var activeBatchPayment = await db.PrintBatchPayments.SingleOrDefaultAsync(
         item => item.TenantId == session.TenantId &&
@@ -10713,9 +10702,10 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
                 code = "batch_payment_attempt_already_active",
                 message = "A payment attempt is already active for this batch. Complete or ask the shop to reject it before selecting another method."
             });
-        return Results.Ok(BuildBatchPaymentResponse(
-            activeBatchPayment,
-            jobs.Count(item => item.Status is not ("REJECTED" or "REFUNDED"))));
+        var activePaymentFileCount = await db.PrintPayments.AsNoTracking()
+            .CountAsync(item => item.TenantId == session.TenantId &&
+                                item.BatchPaymentId == activeBatchPayment.Id, ct);
+        return Results.Ok(BuildBatchPaymentResponse(activeBatchPayment, activePaymentFileCount));
     }
 
     var settledOrApprovedStates = new HashSet<string>(StringComparer.Ordinal)
