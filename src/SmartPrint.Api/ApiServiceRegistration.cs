@@ -100,6 +100,7 @@ public static class ApiServiceRegistration
         services.AddScoped<ShopPrintJobSettingsService>();
         services.AddScoped<ShopPrintJobEventsService>();
         services.AddScoped<ShopPrintJobReadService>();
+        services.AddScoped<ShopPrintJobDispatchService>();
         services.AddScoped<ShopPaymentQueryService>();
         services.AddHttpClient<SubscriptionRazorpayService>();
         services.AddSingleton<DocumentStorage>();
