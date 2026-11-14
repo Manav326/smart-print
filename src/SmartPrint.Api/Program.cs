@@ -1007,37 +1007,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
     return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc });
 });
 
-shop.MapGet("/print-jobs/{jobId:guid}/events", async (
-    Guid jobId,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    if (!TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    if (!await db.PrintJobs.AsNoTracking().AnyAsync(job => job.Id == jobId && job.TenantId == tenantId, ct))
-    {
-        return Results.NotFound();
-    }
-
-    var events = await db.PrintJobEvents.AsNoTracking()
-        .Where(item => item.TenantId == tenantId && item.PrintJobId == jobId)
-        .OrderBy(item => item.CreatedUtc)
-        .Select(item => new
-        {
-            item.Id,
-            item.PreviousStatus,
-            item.NewStatus,
-            item.ActorType,
-            item.ReasonCode,
-            item.CreatedUtc
-        })
-        .ToListAsync(ct);
-    return Results.Ok(events);
-});
+shop.MapShopPrintJobEventsEndpoints();
 
 shop.MapPost("/print-jobs/{jobId:guid}/photo-revision-grant", async (
     Guid jobId,
