@@ -1,3 +1,4 @@
+using Xunit;
 using System.Net;
 using Microsoft.AspNetCore.Http;
 using SmartPrint.Api.Security;
@@ -46,5 +47,18 @@ public sealed class AgentRateLimitPartitionTests
         if (agentId is not null)
             context.Request.Headers["X-Print-Agent-Id"] = agentId;
         return context;
+    }
+
+    [Theory]
+    [InlineData("/api/v1/agent/jobs/claim", true)]
+    [InlineData("/api/v1/agent/private-relays/pending", true)]
+    [InlineData("/api/v1/agents/jobs/claim", false)]
+    [InlineData("/api/v1/public/stations/abc/sessions", false)]
+    public void Shared_global_safety_limiter_only_applies_to_agent_api_paths(string path, bool expected)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Path = path;
+
+        Assert.Equal(expected, AgentRateLimitPartition.IsAgentApiRequest(context));
     }
 }
