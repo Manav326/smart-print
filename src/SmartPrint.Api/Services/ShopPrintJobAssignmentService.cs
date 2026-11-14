@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 
