@@ -72,7 +72,7 @@ public static class ShopSubscriptionPaymentEndpoints
             var payments = await db.ShopSubscriptionPayments.AsNoTracking()
                 .Where(item => item.TenantId == tenantId)
                 .OrderByDescending(item => item.CreatedUtc)
-                .Take(20)
+                .ThenByDescending(item => item.Id)
                 .Select(item => new
                 {
                     item.Id,
