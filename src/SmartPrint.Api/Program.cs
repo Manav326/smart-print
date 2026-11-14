@@ -315,368 +315,8 @@ shop.MapGet("/subscription", async (
 
 shop.MapShopAccountEndpoints();
 
-shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
-{
-    if (!TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var onlineAfter = DateTimeOffset.UtcNow.AddMinutes(-2);
-    var printers = await db.PrinterDevices.AsNoTracking()
-        .Where(printer => printer.TenantId == tenantId)
-        .OrderBy(printer => printer.DisplayName)
-        .Select(printer => new
-        {
-            printer.Id,
-            printer.DisplayName,
-            printer.Manufacturer,
-            printer.Model,
-            printer.ConnectionType,
-            printer.OutputMode,
-            printer.ConnectionAddress,
-            printer.QueueName,
-            printer.IsDefault,
-            printer.AgentDeviceId,
-            printer.CapabilitiesJson,
-            Status = printer.Status == "AgentRevoked"
-                ? "AgentRevoked"
-                : printer.AgentDeviceId != null &&
-                  !db.AgentDevices.AsNoTracking().Any(agent =>
-                      agent.Id == printer.AgentDeviceId && agent.TenantId == tenantId &&
-                      agent.RevokedUtc == null && agent.Status != "Revoked" &&
-                      agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter)
-                    ? "AgentOffline"
-                    : printer.AgentDeviceId != null && printer.OutputMode == "PDF_EXPORT"
-                        ? "Ready"
-                        : printer.AgentDeviceId != null &&
-                          (printer.LastSeenUtc == null || printer.LastSeenUtc < onlineAfter)
-                            ? "InventoryStale"
-                            : printer.Status,
-            printer.IsActive,
-            printer.LastSeenUtc
-        })
-        .ToListAsync(ct);
-    return Results.Ok(printers);
-});
-
-shop.MapPost("/printers", async (
-    CreatePrinterRequest request,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    TenantEntitlementService entitlements,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var connectionTypes = new[] { "USB", "LAN", "IPP", "WindowsQueue" };
-    if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 160 ||
-        string.IsNullOrWhiteSpace(request.Manufacturer) || request.Manufacturer.Trim().Length > 80 ||
-        string.IsNullOrWhiteSpace(request.Model) || request.Model.Trim().Length > 120 ||
-        !connectionTypes.Contains(request.ConnectionType, StringComparer.OrdinalIgnoreCase))
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["printer"] = ["A name, manufacturer, model and supported connection type are required."]
-        });
-    }
-
-    var capabilities = request.CapabilitiesJson ?? "{}";
-    try
-    {
-        using var parsed = JsonDocument.Parse(capabilities);
-        if (parsed.RootElement.ValueKind != JsonValueKind.Object || capabilities.Length > 16000)
-        {
-            throw new JsonException();
-        }
-    }
-    catch (JsonException)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["capabilitiesJson"] = ["Printer capabilities must be a valid JSON object under 16 KB."]
-        });
-    }
-
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.Printer, ct);
-    var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.Printer, ct);
-    if (!quota.Allowed)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-    }
-
-    var printer = new PrinterDevice
-    {
-        TenantId = tenantId,
-        DisplayName = request.DisplayName.Trim(),
-        Manufacturer = request.Manufacturer.Trim(),
-        Model = request.Model.Trim(),
-        ConnectionType = connectionTypes.Single(value => value.Equals(request.ConnectionType, StringComparison.OrdinalIgnoreCase)),
-        ConnectionAddress = string.IsNullOrWhiteSpace(request.ConnectionAddress) ? null : request.ConnectionAddress.Trim(),
-        QueueName = string.IsNullOrWhiteSpace(request.QueueName) ? null : request.QueueName.Trim(),
-        CapabilitiesJson = capabilities,
-        Status = "Unknown",
-        IsActive = true
-    };
-    db.PrinterDevices.Add(printer);
-    await db.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
-    return Results.Created($"/api/v1/shop/printers/{printer.Id}", new
-    {
-        printer.Id,
-        printer.DisplayName,
-        printer.Manufacturer,
-        printer.Model,
-        printer.ConnectionType,
-        printer.OutputMode,
-        printer.ConnectionAddress,
-        printer.QueueName,
-        printer.CapabilitiesJson,
-        printer.Status,
-        printer.IsActive
-    });
-});
-
-shop.MapPatch("/printers/{printerId:guid}/active", async (
-    Guid printerId,
-    bool isActive,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var printer = await db.PrinterDevices.SingleOrDefaultAsync(x => x.Id == printerId && x.TenantId == tenantId, ct);
-    if (printer is null)
-    {
-        return Results.NotFound();
-    }
-
-    if (!isActive)
-    {
-        var activeJobNumber = await db.PrintJobs.AsNoTracking()
-            .Where(job => job.TenantId == tenantId &&
-                          job.PrinterDeviceId == printerId &&
-                          (job.Status == "LOCAL_QUEUE_CLAIMED" ||
-                           job.Status == "LOCAL_QUEUE_READY" ||
-                           job.Status == "PRINT_AUTHORISED" ||
-                           job.Status == "PRINT_SUBMITTING" ||
-                           job.Status == "SPOOLER_ACCEPTED" ||
-                           job.Status == "PRINTING"))
-            .OrderByDescending(job => job.CreatedUtc)
-            .Select(job => job.JobNumber)
-            .FirstOrDefaultAsync(ct);
-
-        if (!string.IsNullOrWhiteSpace(activeJobNumber))
-        {
-            return Results.Conflict(new
-            {
-                code = "printer_has_active_output",
-                message = $"Printer cannot be disabled while job {activeJobNumber} is active in the Windows Agent or spooler. Resolve that same job first; disabling it does not cancel Windows output."
-            });
-        }
-    }
-
-    printer.IsActive = isActive;
-    printer.UpdatedUtc = DateTimeOffset.UtcNow;
-    await db.SaveChangesAsync(ct);
-    return Results.Ok(new { printer.Id, printer.IsActive, printer.UpdatedUtc });
-});
-
-shop.MapGet("/qr-stations", async (ClaimsPrincipal principal, SmartPrintDbContext db, IConfiguration configuration, CancellationToken ct) =>
-{
-    if (!TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var stations = await db.QrStations.AsNoTracking()
-        .Where(station => station.TenantId == tenantId)
-        .OrderBy(station => station.DisplayName)
-        .Select(station => new
-        {
-            station.Id,
-            station.PrinterDeviceId,
-            station.DisplayName,
-            station.PublicCodeHint,
-            station.PublicCode,
-            station.IsEnabled,
-            station.CreatedUtc
-        })
-        .ToListAsync(ct);
-    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-    return Results.Ok(stations.Select(station => new
-    {
-        station.Id,
-        station.PrinterDeviceId,
-        station.DisplayName,
-        station.PublicCodeHint,
-        station.IsEnabled,
-        station.CreatedUtc,
-        PublicUrl = station.PublicCode is not null ? $"{portalBase}/s/{station.PublicCode}" : null
-    }));
-});
-
-shop.MapPost("/qr-stations", async (
-    CreateQrStationRequest request,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    IConfiguration configuration,
-    TenantEntitlementService entitlements,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-    if (!Uri.TryCreate(portalBase, UriKind.Absolute, out var portalUri) ||
-        portalUri.Scheme != Uri.UriSchemeHttps || portalUri.AbsolutePath != "/" ||
-        !string.IsNullOrEmpty(portalUri.Query) || !string.IsNullOrEmpty(portalUri.Fragment) ||
-        !string.IsNullOrEmpty(portalUri.UserInfo))
-    {
-        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The canonical public HTTPS URL is not configured.");
-    }
-
-    if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 120)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["displayName"] = ["A station name of up to 120 characters is required."]
-        });
-    }
-
-    if (request.PrinterDeviceId is Guid printerId)
-    {
-        var selectedPrinterOutputMode = await db.PrinterDevices.AsNoTracking()
-            .Where(printer => printer.Id == printerId && printer.TenantId == tenantId && printer.IsActive)
-            .Select(printer => printer.OutputMode)
-            .SingleOrDefaultAsync(ct);
-        if (selectedPrinterOutputMode is null)
-        {
-            return Results.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["printerDeviceId"] = ["Select an active printer that belongs to this shop."]
-            });
-        }
-        if (selectedPrinterOutputMode is not ("PHYSICAL" or "PDF_EXPORT"))
-        {
-            return Results.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["printerDeviceId"] = ["This virtual/document driver is not supported for SmartPrint output. Select a physical printer or Microsoft Print to PDF for non-production testing."]
-            });
-        }
-    }
-
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.QrStation, ct);
-    var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.QrStation, ct);
-    if (!quota.Allowed)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-    }
-
-    var publicCode = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
-    var station = new QrStation
-    {
-        TenantId = tenantId,
-        PrinterDeviceId = request.PrinterDeviceId,
-        DisplayName = request.DisplayName.Trim(),
-        PublicCodeHash = HashOpaqueToken(publicCode),
-        PublicCode = publicCode,
-        PublicCodeHint = publicCode[^4..]
-    };
-    db.QrStations.Add(station);
-    await db.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
-
-    return Results.Created($"/api/v1/shop/qr-stations/{station.Id}", new
-    {
-        station.Id,
-        station.DisplayName,
-        station.PrinterDeviceId,
-        station.PublicCodeHint,
-        station.IsEnabled,
-        PublicUrl = $"{portalBase}/s/{publicCode}"
-    });
-});
-
-shop.MapPost("/qr-stations/{stationId:guid}/rotate-code", async (
-    Guid stationId,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    IConfiguration configuration,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-    if (!Uri.TryCreate(portalBase, UriKind.Absolute, out var portalUri) ||
-        portalUri.Scheme != Uri.UriSchemeHttps || portalUri.AbsolutePath != "/" ||
-        !string.IsNullOrEmpty(portalUri.Query) || !string.IsNullOrEmpty(portalUri.Fragment) ||
-        !string.IsNullOrEmpty(portalUri.UserInfo))
-    {
-        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The canonical public HTTPS URL is not configured.");
-    }
-
-    var station = await db.QrStations.SingleOrDefaultAsync(
-        item => item.Id == stationId && item.TenantId == tenantId, ct);
-    if (station is null)
-    {
-        return Results.NotFound();
-    }
-
-    var publicCode = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
-    station.PublicCodeHash = HashOpaqueToken(publicCode);
-    station.PublicCode = publicCode;
-    station.PublicCodeHint = publicCode[^4..];
-    await db.SaveChangesAsync(ct);
-
-    return Results.Ok(new
-    {
-        station.Id,
-        station.PublicCodeHint,
-        PublicUrl = $"{portalBase}/s/{publicCode}"
-    });
-});
-
-shop.MapPatch("/qr-stations/{stationId:guid}/enabled", async (
-    Guid stationId,
-    bool isEnabled,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var station = await db.QrStations.SingleOrDefaultAsync(
-        item => item.Id == stationId && item.TenantId == tenantId, ct);
-    if (station is null)
-    {
-        return Results.NotFound();
-    }
-
-    station.IsEnabled = isEnabled;
-    await db.SaveChangesAsync(ct);
-    return Results.Ok(new { station.Id, station.IsEnabled });
-});
-
+shop.MapShopPrinterEndpoints();
+shop.MapShopStationEndpoints();
 
 shop.MapGet("/pricing", async (
     ClaimsPrincipal principal,
@@ -3705,7 +3345,7 @@ shopAgents.MapPost("/agent-enrollment-codes", async (
     var enrollment = new AgentEnrollmentCode
     {
         TenantId = tenantId,
-        CodeHash = HashOpaqueToken(code),
+        CodeHash = OpaqueTokenHasher.HashOpaqueToken(code),
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(10),
         CreatedByUserId = GetActorId(principal)
@@ -3806,7 +3446,7 @@ agentApi.MapPost("/enroll", async (
     }
 
     var now = DateTimeOffset.UtcNow;
-    var codeHash = HashOpaqueToken(request.Code.Trim());
+    var codeHash = OpaqueTokenHasher.HashOpaqueToken(request.Code.Trim());
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     var enrollment = await db.AgentEnrollmentCodes.SingleOrDefaultAsync(
         item => item.CodeHash == codeHash && item.UsedUtc == null && item.ExpiresUtc > now, ct);
@@ -3816,7 +3456,7 @@ agentApi.MapPost("/enroll", async (
         return Results.Unauthorized();
     }
 
-    var fingerprintHash = HashOpaqueToken(request.Fingerprint);
+    var fingerprintHash = OpaqueTokenHasher.HashOpaqueToken(request.Fingerprint);
 
     // Serialize enrollments for the same physical Windows identity across tenants.
     // This prevents two shops from claiming the same PC during concurrent activation.
@@ -3857,7 +3497,7 @@ agentApi.MapPost("/enroll", async (
         TenantId = enrollment.TenantId,
         DeviceName = request.DeviceName.Trim(),
         FingerprintHash = fingerprintHash,
-        SecretHash = HashOpaqueToken(rawSecret),
+        SecretHash = OpaqueTokenHasher.HashOpaqueToken(rawSecret),
         Status = "Online",
         CreatedUtc = now,
         LastSeenUtc = now
@@ -4768,7 +4408,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
     byte[] storedGrantHash;
     try
     {
-        suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
+        suppliedGrantHash = Convert.FromHexString(OpaqueTokenHasher.HashOpaqueToken(rawGrant));
         storedGrantHash = Convert.FromHexString(ticket.GrantHash);
     }
     catch (FormatException)
@@ -4921,7 +4561,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     byte[] storedGrantHash;
     try
     {
-        suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
+        suppliedGrantHash = Convert.FromHexString(OpaqueTokenHasher.HashOpaqueToken(rawGrant));
         storedGrantHash = Convert.FromHexString(ticket.GrantHash);
     }
     catch (FormatException)
@@ -7216,7 +6856,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.BadRequest(new { code = "invalid_batch_id", message = "The upload batch identifier is invalid." });
     }
     var batchId = string.IsNullOrWhiteSpace(rawBatchId) ? Guid.NewGuid() : Guid.Parse(rawBatchId);
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var now = DateTimeOffset.UtcNow;
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
@@ -7855,7 +7495,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
 
     var batchId = request.BatchId ?? Guid.NewGuid();
     var now = DateTimeOffset.UtcNow;
-    var customerSessionTokenHash = HashOpaqueToken(rawToken);
+    var customerSessionTokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == customerSessionTokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null)
@@ -7876,7 +7516,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             message = "Every file in a batch must use the same privacy choice. Start a new batch to change between Standard and Private Printing."
         });
 
-    var grantHash = HashOpaqueToken(request.GrantToken);
+    var grantHash = OpaqueTokenHasher.HashOpaqueToken(request.GrantToken);
     var existing = await db.LocalPrintUploadTickets.AsNoTracking()
         .SingleOrDefaultAsync(item =>
             item.TenantId == session.TenantId &&
@@ -8406,7 +8046,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         return Results.BadRequest(new { code = "private_relay_envelope_invalid" });
 
     var now = DateTimeOffset.UtcNow;
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null && item.ExpiresUtc > now)
@@ -8423,7 +8063,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     byte[] expectedHash;
     try
     {
-        grantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
+        grantHash = Convert.FromHexString(OpaqueTokenHasher.HashOpaqueToken(rawGrant));
         expectedHash = Convert.FromHexString(ticket.GrantHash);
     }
     catch (FormatException) { return Results.Unauthorized(); }
@@ -8544,7 +8184,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
         return Results.Unauthorized();
 
     var now = DateTimeOffset.UtcNow;
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null && item.ExpiresUtc > now)
@@ -8561,7 +8201,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
     byte[] expectedHash;
     try
     {
-        suppliedHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
+        suppliedHash = Convert.FromHexString(OpaqueTokenHasher.HashOpaqueToken(rawGrant));
         expectedHash = Convert.FromHexString(ticket.GrantHash);
     }
     catch (FormatException) { return Results.Unauthorized(); }
@@ -8620,7 +8260,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         return Results.Unauthorized();
 
     var now = DateTimeOffset.UtcNow;
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null)
@@ -8644,7 +8284,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
         });
     }
 
-    var suppliedGrantHash = Convert.FromHexString(HashOpaqueToken(rawGrant));
+    var suppliedGrantHash = Convert.FromHexString(OpaqueTokenHasher.HashOpaqueToken(rawGrant));
     var preflightGrantHash = Convert.FromHexString(preflightTicket.GrantHash);
     if (!CryptographicOperations.FixedTimeEquals(suppliedGrantHash, preflightGrantHash))
         return Results.Unauthorized();
@@ -9008,7 +8648,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     }
 
     var now = DateTimeOffset.UtcNow;
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null && item.ExpiresUtc > now)
@@ -9269,7 +8909,7 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         });
 
     var now = DateTimeOffset.UtcNow;
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null && item.ExpiresUtc > now)
@@ -9532,7 +9172,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/payments", async (
     }
 
     var now = DateTimeOffset.UtcNow;
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null && item.ExpiresUtc > now)
@@ -9676,7 +9316,7 @@ publicApi.MapPost("/batch-payments/{paymentId:guid}/report", async (
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
     if (string.IsNullOrWhiteSpace(rawToken)) return Results.Unauthorized();
     var now = DateTimeOffset.UtcNow;
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null && item.ExpiresUtc > now)
@@ -9829,7 +9469,7 @@ publicApi.MapPost("/payments/{paymentId:guid}/report", async (
     }
 
     var now = DateTimeOffset.UtcNow;
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
                        item.RevokedUtc == null && item.ExpiresUtc > now)
@@ -9956,7 +9596,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/accept-quote", async (
         return Results.Unauthorized();
     }
 
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var now = DateTimeOffset.UtcNow;
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
@@ -10042,7 +9682,7 @@ publicApi.MapPost("/sessions/current/renew", async (
     }
 
     var now = DateTimeOffset.UtcNow;
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var session = await db.CustomerPrintSessions.SingleOrDefaultAsync(
         item => item.TokenHash == tokenHash &&
                 item.Status == "Active" &&
@@ -10127,7 +9767,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         return Results.Unauthorized();
     }
 
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var now = DateTimeOffset.UtcNow;
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
@@ -10274,8 +9914,8 @@ publicApi.MapPost("/sessions/current/resume", async (
         return Results.Unauthorized();
     }
 
-    var tokenHash = HashOpaqueToken(rawToken);
-    var codeHash = HashOpaqueToken(request.PublicCode);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
+    var codeHash = OpaqueTokenHasher.HashOpaqueToken(request.PublicCode);
     var now = DateTimeOffset.UtcNow;
     var station = await db.QrStations.AsNoTracking()
         .Where(item => item.PublicCodeHash == codeHash && item.IsEnabled)
@@ -10355,7 +9995,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
     IHostEnvironment environment,
     CancellationToken ct) =>
 {
-    var codeHash = HashOpaqueToken(publicCode);
+    var codeHash = OpaqueTokenHasher.HashOpaqueToken(publicCode);
     var station = await db.QrStations.AsNoTracking().SingleOrDefaultAsync(
         item => item.PublicCodeHash == codeHash && item.IsEnabled, ct);
     if (station is null)
@@ -10370,7 +10010,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
         TenantId = station.TenantId,
         QrStationId = station.Id,
         CustomerUserId = CustomerIdentity.GetCustomerId(context.User),
-        TokenHash = HashOpaqueToken(rawToken),
+        TokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken),
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
@@ -10431,7 +10071,7 @@ publicApi.MapGet("/sessions/current", async (
         return Results.Unauthorized();
     }
 
-    var tokenHash = HashOpaqueToken(rawToken);
+    var tokenHash = OpaqueTokenHasher.HashOpaqueToken(rawToken);
     var now = DateTimeOffset.UtcNow;
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
@@ -10592,7 +10232,7 @@ static async ValueTask<object?> EnforceTenantActiveAsync(
             .SingleOrDefaultAsync(http.RequestAborted);
     else if (http.Request.RouteValues.TryGetValue("publicCode", out var routeCode) && routeCode is not null)
     {
-        var codeHash = HashOpaqueToken(routeCode.ToString()!);
+        var codeHash = OpaqueTokenHasher.HashOpaqueToken(routeCode.ToString()!);
         tenantId = await db.QrStations.AsNoTracking()
             .Where(item => item.PublicCodeHash == codeHash)
             .Select(item => (Guid?)item.TenantId)
@@ -10603,7 +10243,7 @@ static async ValueTask<object?> EnforceTenantActiveAsync(
         var sessionToken = http.Request.Headers["X-Print-Session"].FirstOrDefault();
         if (!string.IsNullOrWhiteSpace(sessionToken))
         {
-            var tokenHash = HashOpaqueToken(sessionToken);
+            var tokenHash = OpaqueTokenHasher.HashOpaqueToken(sessionToken);
             tenantId = await db.CustomerPrintSessions.AsNoTracking()
                 .Where(item => item.TokenHash == tokenHash)
                 .Select(item => (Guid?)item.TenantId)
@@ -10708,7 +10348,7 @@ static async Task<AgentDevice?> AuthenticateAgentAsync(
         return null;
     }
 
-    var suppliedHash = Convert.FromHexString(HashOpaqueToken(secret));
+    var suppliedHash = Convert.FromHexString(OpaqueTokenHasher.HashOpaqueToken(secret));
     var storedHash = Convert.FromHexString(device.SecretHash);
     return CryptographicOperations.FixedTimeEquals(suppliedHash, storedHash) ? device : null;
 }
@@ -10803,8 +10443,6 @@ static bool IsValidPageSizesJson(string value)
 static bool IsHexColor(string value) =>
     value is { Length: 7 } && value[0] == '#' && value[1..].All(Uri.IsHexDigit);
 
-static string HashOpaqueToken(string token) =>
-    Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
 
 await app.RunAsync();
 
