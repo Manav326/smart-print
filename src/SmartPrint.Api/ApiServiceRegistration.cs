@@ -82,6 +82,8 @@ public static class ApiServiceRegistration
 
         services.AddScoped<TokenIssuer>();
         services.AddScoped<TenantEntitlementService>();
+        services.AddScoped<PlatformOverviewService>();
+        services.AddScoped<PlatformTenantStatusService>();
         services.AddHttpClient<SubscriptionRazorpayService>();
         services.AddSingleton<DocumentStorage>();
         services.AddSingleton<PlatformAdCreativeStorage>();
