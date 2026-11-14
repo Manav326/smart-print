@@ -3401,6 +3401,7 @@ html[data-theme="dark"] .auth-proof {
 .subscription-payment-message { display: flex; align-items: flex-start; gap: 8px; line-height: 1.45; }
 .subscription-payment-empty { padding: 20px; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); text-align: center; }
 .subscription-payment-history { display: grid; gap: 0; border-top: 1px solid var(--border-soft); padding-top: 14px; }
+.subscription-payment-limit-note{display:block;color:var(--muted);font-size:.72rem;line-height:1.45}
 .subscription-payment-renewal-note{padding:11px 12px;border:1px solid rgba(88,214,160,.25);border-radius:10px;background:rgba(88,214,160,.07);color:var(--muted);font-size:.8rem}
 .subscription-payment-renewal-note svg{flex:0 0 auto;color:var(--green)}
 .subscription-payment-reference{display:block;margin-top:5px;font-size:.72rem;overflow-wrap:anywhere}
