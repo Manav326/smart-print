@@ -47,6 +47,7 @@ import BrandLockup from "./BrandLockup";
 import OrderJourneyPage from "./OrderJourneyPage";
 import ShopAdPlacement from "./ShopAdPlacement";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
+import { getSubscriptionReminderState } from "./subscription-checkout-state";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
@@ -3755,13 +3756,13 @@ function SubscriptionExpiryReminder({
   summary: ShopSubscriptionSummary;
   onNavigate: () => void;
 }) {
-  const daysRemaining = Math.ceil(
-    (Date.parse(summary.subscription.periodEndUtc) - Date.now()) / 86_400_000
+  const reminderState = getSubscriptionReminderState(
+    summary.subscription.status,
+    summary.entitlements.isAccessActive,
+    summary.subscription.periodEndUtc
   );
-  const expired = summary.subscription.status.toLowerCase() === "expired" ||
-    (Number.isFinite(daysRemaining) && daysRemaining <= 0);
-  const dueSoon = summary.entitlements.isAccessActive &&
-    Number.isFinite(daysRemaining) && daysRemaining <= 7;
+  const expired = reminderState === "expired";
+  const dueSoon = reminderState === "due-soon";
   if (!expired && !dueSoon) return null;
 
   const isTrial = summary.subscription.status.toLowerCase() === "trial";
