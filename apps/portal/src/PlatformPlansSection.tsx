@@ -261,7 +261,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
     try {
       await publishPlatformPlanVersion(tokens.accessToken, selectedPlan.id, currentDraft.version);
       await reload(selectedPlan.id);
-      setSuccess(`Version ${currentDraft.version} published. New subscriptions may reference this version when assignment is implemented.`);
+      setSuccess(`Version ${currentDraft.version} published. New subscriptions can now use these terms.`);
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not publish this plan version.");
     } finally {
