@@ -348,6 +348,64 @@ public sealed class PostgresMigrationUpgradeTests
             });
             await Assert.ThrowsAsync<DbUpdateException>(() => invalidDensityContext.SaveChangesAsync());
         }
+
+        // A private ID_DOCUMENT ticket must materialise as the schema-supported DOCUMENT job.
+        await VerifyPrivateIdDocumentJobPersistsAsDocumentAsync(
+            options, tenant.Id, station.Id, session.Id, now);
+    }
+
+    private static async Task VerifyPrivateIdDocumentJobPersistsAsDocumentAsync(
+        DbContextOptions<SmartPrintDbContext> options,
+        Guid tenantId,
+        Guid stationId,
+        Guid sessionId,
+        DateTimeOffset now)
+    {
+        Assert.True(PrivateRelayPrintKindRules.TryMapTicketKindToPrintJobKind(
+            "ID_DOCUMENT", out var printJobKind));
+        Assert.Equal("DOCUMENT", printJobKind);
+
+        var jobId = Guid.NewGuid();
+        await using (var seed = new SmartPrintDbContext(options))
+        {
+            seed.PrintJobs.Add(new PrintJob
+            {
+                Id = jobId,
+                TenantId = tenantId,
+                QrStationId = stationId,
+                CustomerSessionId = sessionId,
+                JobNumber = $"SP-ID-{Guid.NewGuid():N}"[..24],
+                IdempotencyKey = $"PRIVATE-ID-DOCUMENT-{Guid.NewGuid():N}",
+                Status = "AWAITING_CONFIGURATION",
+                PageCount = 1,
+                Copies = 1,
+                ColourMode = "Colour",
+                PaperSize = "A4",
+                IsDuplex = false,
+                Orientation = "PORTRAIT",
+                PrivatePrinting = true,
+                PrintKind = printJobKind,
+                PhotoCount = 0,
+                PhotoUnitPriceMinorSnapshot = 0,
+                Currency = "INR",
+                QuotedAmountMinor = 0,
+                CreatedUtc = now,
+                UpdatedUtc = now
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var verification = new SmartPrintDbContext(options);
+        var savedJob = await verification.PrintJobs.AsNoTracking()
+            .SingleAsync(item => item.Id == jobId);
+
+        Assert.Equal("DOCUMENT", savedJob.PrintKind);
+        Assert.True(savedJob.PrivatePrinting);
+        Assert.Equal(1, savedJob.PageCount);
+        Assert.Null(savedJob.PhotoSizeCode);
+        Assert.Equal(0, savedJob.PhotoCount);
+        Assert.Null(savedJob.PhotosPerPage);
+        Assert.Equal(0L, savedJob.PhotoUnitPriceMinorSnapshot);
     }
 
     private static async Task VerifyConcurrentLocalBatchReservationsStayOnOneComputerAsync(
