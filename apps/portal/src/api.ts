@@ -1546,7 +1546,7 @@ async function uploadCustomerPrivateRelay(
   }
 
   throw new LocalUploadOutcomeUnknownError(
-    "We're still preparing this file for printing. Tap Retry to check again; you do not need to upload the file again."
+    "Your file is still being prepared. Tap Retry to check its status."
   );
 }
 
