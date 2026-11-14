@@ -10388,14 +10388,25 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         return Results.NotFound();
     }
 
-    if (!subscription.IsAccessActive &&
-        !PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
-            subscription.SubscriptionStatus, subscription.PeriodEndUtc, job.CreatedUtc, now))
+    if (!subscription.IsAccessActive)
     {
-        await transaction.RollbackAsync(ct);
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "shop_temporarily_unavailable",
-            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
+        var localTicketCreatedUtc = await db.LocalPrintUploadTickets.AsNoTracking()
+            .Where(item => item.TenantId == session.TenantId && item.PrintJobId == job.Id)
+            .OrderBy(item => item.CreatedUtc)
+            .Select(item => (DateTimeOffset?)item.CreatedUtc)
+            .FirstOrDefaultAsync(ct);
+        var acceptedUtc = localTicketCreatedUtc is DateTimeOffset ticketAcceptedUtc &&
+                          ticketAcceptedUtc < job.CreatedUtc
+            ? ticketAcceptedUtc
+            : job.CreatedUtc;
+        if (!PlanEntitlementRules.CanFinishAcceptedWorkAfterExpiry(
+                subscription.SubscriptionStatus, subscription.PeriodEndUtc, acceptedUtc, now))
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                title: "shop_temporarily_unavailable",
+                detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
+        }
     }
 
     var savedQuoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
@@ -11726,6 +11737,12 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
         return Results.NotFound(new { code = "station_not_available", message = "This print station is unavailable. Please ask the shop operator for help." });
     }
 
+    var customerEntitlements = await entitlements.GetForTenantAsync(station.TenantId, ct);
+    if (!customerEntitlements.IsAccessActive)
+        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+            title: "shop_temporarily_unavailable",
+            detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance.");
+
     var now = DateTimeOffset.UtcNow;
     var rawToken = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
     var session = new CustomerPrintSession
@@ -11739,7 +11756,6 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
     };
     db.CustomerPrintSessions.Add(session);
     await db.SaveChangesAsync(ct);
-    var customerEntitlements = await entitlements.GetForTenantAsync(station.TenantId, ct);
     return Results.Created("/api/v1/public/sessions/current", new
     {
         session.Id,
