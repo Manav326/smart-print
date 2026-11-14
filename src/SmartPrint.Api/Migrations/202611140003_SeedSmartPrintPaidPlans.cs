@@ -37,17 +37,33 @@ public sealed class SeedSmartPrintPaidPlans : Migration
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.Sql("""
-            DELETE FROM "SubscriptionPlanVersions"
-            WHERE "Id" IN (
+            DELETE FROM "SubscriptionPlanVersions" AS version
+            WHERE version."Id" IN (
                 'd1490000-0000-4000-8000-000000000011',
                 'd1499000-0000-4000-8000-000000000022'
-            );
+            )
+              AND NOT EXISTS (
+                  SELECT 1 FROM "TenantSubscriptions" subscription
+                  WHERE subscription."PlanVersionId" = version."Id"
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM "ShopSubscriptionPayments" payment
+                  WHERE payment."PlanVersionId" = version."Id"
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM "PlatformSubscriptionAudits" audit
+                  WHERE audit."PlanVersionId" = version."Id"
+              );
 
-            DELETE FROM "SubscriptionPlans"
-            WHERE "Id" IN (
+            DELETE FROM "SubscriptionPlans" AS plan
+            WHERE plan."Id" IN (
                 'd1490000-0000-4000-8000-000000000001',
                 'd1499000-0000-4000-8000-000000000002'
-            );
+            )
+              AND NOT EXISTS (
+                  SELECT 1 FROM "SubscriptionPlanVersions" version
+                  WHERE version."PlanId" = plan."Id"
+              );
             """);
     }
 }
