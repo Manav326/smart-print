@@ -295,9 +295,13 @@ platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct
     var activeTenantCount = await db.Tenants.AsNoTracking()
         .CountAsync(tenant => tenant.Status == "Active", ct);
     var trialSubscriptionCount = await db.TenantSubscriptions.AsNoTracking()
-        .CountAsync(subscription => subscription.Status == "Trial" && subscription.PeriodEndUtc > now, ct);
+        .CountAsync(subscription => subscription.Status == "Trial" &&
+                                    subscription.PeriodStartUtc <= now &&
+                                    subscription.PeriodEndUtc > now, ct);
     var activeSubscriptionCount = await db.TenantSubscriptions.AsNoTracking()
-        .CountAsync(subscription => subscription.Status == "Active" && subscription.PeriodEndUtc > now, ct);
+        .CountAsync(subscription => (subscription.Status == "Active" || subscription.Status == "Scheduled") &&
+                                    subscription.PeriodStartUtc <= now &&
+                                    subscription.PeriodEndUtc > now, ct);
     var printerCount = await db.PrinterDevices.AsNoTracking().CountAsync(ct);
     var activePrinterCount = await db.PrinterDevices.AsNoTracking()
         .CountAsync(printer => printer.IsActive, ct);
@@ -311,10 +315,16 @@ platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct
 
     var subscriptionsByStatus = await db.TenantSubscriptions.AsNoTracking()
         .GroupBy(subscription =>
-            (subscription.Status == "Active" || subscription.Status == "Trial") &&
+            (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
             subscription.PeriodEndUtc <= now
                 ? "Expired"
-                : subscription.Status)
+                : (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                  subscription.PeriodStartUtc > now
+                    ? "Scheduled"
+                    : subscription.Status == "Scheduled" &&
+                      subscription.PeriodStartUtc <= now && subscription.PeriodEndUtc > now
+                        ? "Active"
+                        : subscription.Status)
         .Select(group => new { status = group.Key, count = group.Count() })
         .OrderByDescending(group => group.count)
         .ThenBy(group => group.status)
@@ -393,22 +403,48 @@ platform.MapGet("/tenants", async (
             tenant.CreatedUtc,
             PlanCode = db.TenantSubscriptions.AsNoTracking()
                 .Where(subscription => subscription.TenantId == tenant.Id)
-                .OrderByDescending(subscription => subscription.CreatedUtc)
+                .OrderByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodStartUtc <= recentEnd && subscription.PeriodEndUtc > recentEnd)
+                .ThenByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodEndUtc > recentEnd)
+                .ThenBy(subscription => subscription.PeriodStartUtc)
+                .ThenByDescending(subscription => subscription.CreatedUtc)
                 .Select(subscription => subscription.PlanCode)
                 .FirstOrDefault(),
             SubscriptionStatus = db.TenantSubscriptions.AsNoTracking()
                 .Where(subscription => subscription.TenantId == tenant.Id)
-                .OrderByDescending(subscription => subscription.CreatedUtc)
+                .OrderByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodStartUtc <= recentEnd && subscription.PeriodEndUtc > recentEnd)
+                .ThenByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodEndUtc > recentEnd)
+                .ThenBy(subscription => subscription.PeriodStartUtc)
+                .ThenByDescending(subscription => subscription.CreatedUtc)
                 .ThenByDescending(subscription => subscription.Id)
                 .Select(subscription =>
-                    (subscription.Status == "Active" || subscription.Status == "Trial") &&
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
                     subscription.PeriodEndUtc <= recentEnd
                         ? "Expired"
-                        : subscription.Status)
+                        : (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                          subscription.PeriodStartUtc > recentEnd
+                            ? "Scheduled"
+                            : subscription.Status == "Scheduled"
+                                ? "Active"
+                                : subscription.Status)
                 .FirstOrDefault(),
             SubscriptionPeriodEndUtc = db.TenantSubscriptions.AsNoTracking()
                 .Where(subscription => subscription.TenantId == tenant.Id)
-                .OrderByDescending(subscription => subscription.CreatedUtc)
+                .OrderByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodStartUtc <= recentEnd && subscription.PeriodEndUtc > recentEnd)
+                .ThenByDescending(subscription =>
+                    (subscription.Status == "Active" || subscription.Status == "Trial" || subscription.Status == "Scheduled") &&
+                    subscription.PeriodEndUtc > recentEnd)
+                .ThenBy(subscription => subscription.PeriodStartUtc)
+                .ThenByDescending(subscription => subscription.CreatedUtc)
                 .Select(subscription => (DateTimeOffset?)subscription.PeriodEndUtc)
                 .FirstOrDefault(),
             PrinterCount = db.PrinterDevices.AsNoTracking()
@@ -1373,22 +1409,23 @@ shop.MapGet("/subscription", async (
         return Results.Forbid();
     }
 
-    var subscription = await db.TenantSubscriptions.AsNoTracking()
-        .Where(item => item.TenantId == tenantId)
-        .OrderByDescending(item => item.CreatedUtc)
-        .ThenByDescending(item => item.Id)
-        .Select(item => new
-        {
-            item.Id,
-            item.PlanCode,
-            item.Status,
-            item.BillingInterval,
-            item.PeriodStartUtc,
-            item.PeriodEndUtc,
-            item.CreatedUtc,
-            item.PlanVersionId
-        })
-        .FirstOrDefaultAsync(ct);
+    var entitlement = await entitlements.GetForTenantAsync(tenantId, ct);
+    var subscription = entitlement.SubscriptionId is Guid subscriptionId
+        ? await db.TenantSubscriptions.AsNoTracking()
+            .Where(item => item.Id == subscriptionId && item.TenantId == tenantId)
+            .Select(item => new
+            {
+                item.Id,
+                item.PlanCode,
+                item.Status,
+                item.BillingInterval,
+                item.PeriodStartUtc,
+                item.PeriodEndUtc,
+                item.CreatedUtc,
+                item.PlanVersionId
+            })
+            .SingleOrDefaultAsync(ct)
+        : null;
     if (subscription is null)
     {
         return Results.NotFound();
@@ -1424,7 +1461,6 @@ shop.MapGet("/subscription", async (
             .SingleOrDefaultAsync(ct)
         : null;
 
-    var entitlement = await entitlements.GetForTenantAsync(tenantId, ct);
     var now = DateTimeOffset.UtcNow;
     var periodStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
     var periodEnd = periodStart.AddMonths(1);
@@ -1445,8 +1481,7 @@ shop.MapGet("/subscription", async (
         {
             subscription.Id,
             subscription.PlanCode,
-            status = PlanEntitlementRules.GetEffectiveSubscriptionStatus(
-                subscription.Status, subscription.PeriodEndUtc, now),
+            status = entitlement.SubscriptionStatus,
             subscription.BillingInterval,
             subscription.PeriodStartUtc,
             subscription.PeriodEndUtc,
