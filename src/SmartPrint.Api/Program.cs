@@ -310,7 +310,11 @@ platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct
         .CountAsync(job => job.CreatedUtc >= recentStart && job.CreatedUtc < now, ct);
 
     var subscriptionsByStatus = await db.TenantSubscriptions.AsNoTracking()
-        .GroupBy(subscription => subscription.Status)
+        .GroupBy(subscription =>
+            (subscription.Status == "Active" || subscription.Status == "Trial") &&
+            subscription.PeriodEndUtc <= now
+                ? "Expired"
+                : subscription.Status)
         .Select(group => new { status = group.Key, count = group.Count() })
         .OrderByDescending(group => group.count)
         .ThenBy(group => group.status)
@@ -1436,7 +1440,8 @@ shop.MapGet("/subscription", async (
         {
             subscription.Id,
             subscription.PlanCode,
-            subscription.Status,
+            status = PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+                subscription.Status, subscription.PeriodEndUtc, now),
             subscription.BillingInterval,
             subscription.PeriodStartUtc,
             subscription.PeriodEndUtc,
