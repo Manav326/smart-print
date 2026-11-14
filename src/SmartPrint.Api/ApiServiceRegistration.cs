@@ -87,6 +87,7 @@ public static class ApiServiceRegistration
         services.AddScoped<AccountRegistrationService>();
         services.AddScoped<AuthenticationSessionService>();
         services.AddScoped<ShopAccountService>();
+        services.AddScoped<ShopSubscriptionQueryService>();
         services.AddScoped<ShopPrinterService>();
         services.AddScoped<ShopStationService>();
         services.AddScoped<ShopPricingService>();

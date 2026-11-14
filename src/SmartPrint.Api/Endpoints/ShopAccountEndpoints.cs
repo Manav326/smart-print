@@ -14,6 +14,18 @@ public static class ShopAccountEndpoints
 {
     public static RouteGroupBuilder MapShopAccountEndpoints(this RouteGroupBuilder shop)
     {
+        shop.MapGet("/subscription", async (
+            ClaimsPrincipal principal,
+            ShopSubscriptionQueryService subscriptions,
+            CancellationToken ct) =>
+        {
+            if (!TryGetTenantId(principal, out var tenantId))
+                return Results.Forbid();
+
+            var result = await subscriptions.GetAsync(tenantId, ct);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        });
+
         shop.MapGet("/profile", async (
             ClaimsPrincipal principal,
             ShopAccountService accounts,
