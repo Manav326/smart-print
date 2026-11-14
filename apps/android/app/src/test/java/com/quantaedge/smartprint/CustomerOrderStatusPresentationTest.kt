@@ -112,7 +112,7 @@ class CustomerOrderStatusPresentationTest {
 
     @Test
     fun batchTotalHasOneDedicatedSummaryLine() {
-        assertEquals("Batch total: 40.00 INR · Payment verified · 2 files",
+        assertEquals("Batch total: 40.00 INR · Payment received · 2 files",
             CustomerOrderStatusPresentation.batchPaymentSummary("VERIFIED", 4_000L, "INR", 2))
     }
 }
