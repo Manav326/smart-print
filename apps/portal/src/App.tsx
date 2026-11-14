@@ -3714,9 +3714,9 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
         <section className="panel subscription-feature-panel">
           <div className="panel-heading"><div><h2>Included capabilities</h2><p>Resolved from the version assigned to your subscription</p></div></div>
           <div className="subscription-feature-list">
-            <FeatureLine label="Cloud-assisted printing" enabled={entitlements.cloudAssistedPrintingEnabled}/>
-            <FeatureLine label="White-label experience" enabled={entitlements.whiteLabelEnabled}/>
-            <FeatureLine label="Advanced reports" enabled={entitlements.advancedReportsEnabled}/>
+            <FeatureLine label="Cloud-assisted printing" enabled={plan?.cloudAssistedPrintingEnabled ?? entitlements.cloudAssistedPrintingEnabled}/>
+            <FeatureLine label="White-label experience" enabled={plan?.whiteLabelEnabled ?? entitlements.whiteLabelEnabled}/>
+            <FeatureLine label="Advanced reports" enabled={plan?.advancedReportsEnabled ?? entitlements.advancedReportsEnabled}/>
           </div>
           <div className="subscription-upgrade-note">
             <CreditCard size={15}/>
