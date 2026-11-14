@@ -3758,8 +3758,8 @@ function SubscriptionExpiryReminder({
   const daysRemaining = Math.ceil(
     (Date.parse(summary.subscription.periodEndUtc) - Date.now()) / 86_400_000
   );
-  const expired = !summary.entitlements.isAccessActive &&
-    (summary.subscription.status.toLowerCase() === "expired" || daysRemaining <= 0);
+  const expired = summary.subscription.status.toLowerCase() === "expired" ||
+    (Number.isFinite(daysRemaining) && daysRemaining <= 0);
   const dueSoon = summary.entitlements.isAccessActive &&
     Number.isFinite(daysRemaining) && daysRemaining <= 7;
   if (!expired && !dueSoon) return null;
