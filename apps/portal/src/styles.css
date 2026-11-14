@@ -3819,3 +3819,7 @@ html[data-theme="dark"] .brand-lockup-logo-dark { display: block; }
 .auth-google-signin__retry{display:grid;justify-items:center;gap:8px}
 .auth-google-signin__retry-button{border:1px solid rgba(154,138,255,.35);background:rgba(142,123,241,.1);color:#c9c0ff;border-radius:7px;padding:8px 12px;font:600 9px "DM Sans",sans-serif;cursor:pointer}
 .auth-google-signin__retry-button:hover{background:rgba(142,123,241,.18)}
+
+.auth-google-signin__retry{display:grid;gap:8px}
+.auth-google-signin__retry-button{justify-self:center;min-height:35px;padding:0 13px;border:1px solid rgba(164,151,245,.28);border-radius:8px;background:rgba(128,108,224,.12);color:#c9c0ff;font:600 9px "DM Sans",sans-serif;cursor:pointer}
+.auth-google-signin__retry-button:hover{background:rgba(128,108,224,.2)}
