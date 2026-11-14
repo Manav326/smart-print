@@ -2001,6 +2001,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
           {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X size={15}/></button></div>}
           {toast && <div className="inline-success" role="status"><Check size={15}/><span>{toast}</span><button onClick={() => setToast("")} aria-label="Dismiss message"><X size={15}/></button></div>}
+          {subscription && <SubscriptionExpiryReminder summary={subscription} onNavigate={() => navAction("Subscription")}/>}
 
           {active === "Overview" && <ShopAdPlacement placement="SHOP_OVERVIEW"/>}
           {active === "Order Journey" && <OrderJourneyPage
@@ -3675,7 +3676,7 @@ function initials(value:string) { return value.trim().split(/\s+/).slice(0,2).ma
 function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscriptionSummary; token: string; onUpdated: (summary: ShopSubscriptionSummary) => void }) {
   const { subscription, plan, entitlements, usage } = summary;
   const status = subscription.status.toLowerCase();
-  const statusTone = status === "active" ? "tone-success" : status === "trial" ? "tone-warning" : "tone-neutral";
+  const statusTone = status === "active" ? "tone-success" : status === "trial" ? "tone-warning" : status === "expired" ? "tone-danger" : "tone-neutral";
   const planName = plan?.name ?? (subscription.planCode === "TRIAL" ? "Trial plan" : subscription.planCode);
   const periodStart = formatIstDate(subscription.periodStartUtc);
   const periodEnd = formatIstDate(subscription.periodEndUtc);
@@ -3703,7 +3704,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
             <div><span>Annual plan price</span><strong>{price(plan?.annualPriceMinor, plan?.currency ?? "INR")}</strong></div>
           </div>
           {!entitlements.isAccessActive && (
-            <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>This trial or subscription is no longer active. New print requests are paused. Contact SmartPrint by QuantaEdge support to restore access.</span></div>
+            <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>{status === "expired" ? "Your subscription expired. Renew using the plans below to restore access. Existing customer payment records and completed jobs remain available." : "Shop access is currently restricted. Review your account status or contact SmartPrint support for assistance."}</span></div>
           )}
           {entitlements.isLegacyUnconfigured && entitlements.isAccessActive && (
             <div className="subscription-legacy-note"><ShieldCheck size={15}/><span>This subscription predates plan assignment. Existing shop access is being preserved until its terms are explicitly assigned.</span></div>
@@ -3724,7 +3725,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
         </section>
       </div>
 
-      <ShopSubscriptionCheckout token={token} onSubscriptionUpdated={onUpdated}/>
+      <ShopSubscriptionCheckout token={token} onSubscriptionUpdated={onUpdated} currentSubscription={subscription}/>
 
       <section className="panel subscription-usage-panel">
         <div className="subscription-usage-heading">
@@ -3744,6 +3745,38 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
         <div className="subscription-usage-footnote">Disabled printers, QR stations and offline agents still count as registered resources unless removed or revoked. Revoked agent computers are excluded.</div>
       </section>
     </section>
+  );
+}
+
+function SubscriptionExpiryReminder({
+  summary,
+  onNavigate
+}: {
+  summary: ShopSubscriptionSummary;
+  onNavigate: () => void;
+}) {
+  const daysRemaining = Math.ceil(
+    (Date.parse(summary.subscription.periodEndUtc) - Date.now()) / 86_400_000
+  );
+  const expired = !summary.entitlements.isAccessActive &&
+    summary.subscription.status.toLowerCase() === "expired";
+  const dueSoon = summary.entitlements.isAccessActive &&
+    Number.isFinite(daysRemaining) && daysRemaining <= 7;
+  if (!expired && !dueSoon) return null;
+
+  const isTrial = summary.subscription.status.toLowerCase() === "trial";
+  return (
+    <div className={expired ? "subscription-expiry-reminder expired" : "subscription-expiry-reminder"}>
+      <div>
+        <strong>{expired ? "Your SmartPrint subscription has expired" : isTrial ? "Your SmartPrint trial is ending soon" : "Your SmartPrint subscription is ending soon"}</strong>
+        <span>{expired
+          ? "New print requests are paused. Renew below to restore access; your existing customer payment records remain available."
+          : `Your current access ends on ${formatIstDate(summary.subscription.periodEndUtc)}. Renew before then to keep accepting new print requests.`}</span>
+      </div>
+      <button type="button" className="secondary-button small" onClick={onNavigate}>
+        {expired ? "Renew subscription" : "Review renewal"}
+      </button>
+    </div>
   );
 }
 
