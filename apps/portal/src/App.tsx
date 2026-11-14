@@ -4414,84 +4414,84 @@ function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCu
 
 function smartPrintNativeHeadline(status:string):string {
   switch(status) {
-    case "AWAITING_SHOP_APPROVAL": return "Awaiting shop review";
-    case "AWAITING_PAYMENT": return "Payment required";
-    case "AWAITING_CUSTOMER_PAYMENT": return "Complete UPI payment";
-    case "AWAITING_COUNTER_PAYMENT": return "Pay at counter";
-    case "PAYMENT_REPORTED": return "Verification pending";
-    case "PAYMENT_REJECTED": return "Payment not verified";
-    case "PAID_AUTHORISED": return "Payment verified";
-    case "LOCAL_QUEUE_CLAIMED": return "Transferring to shop";
-    case "LOCAL_QUEUE_READY": return "Queued at shop";
-    case "PRINT_AUTHORISED": return "Printing authorised";
-    case "PRINT_SUBMITTING": return "Sending to printer";
-    case "SPOOLER_ACCEPTED": return "Printer queue accepted";
-    case "PRINTING": return "Printing";
-    case "OUTPUT_UNCONFIRMED": return "Output check pending";
-    case "TEST_OUTPUT_READY": return "Test PDF generated";
-    case "COMPLETED": return "Ready to collect";
+    case "AWAITING_SHOP_APPROVAL": return "Shop reviewing your files";
+    case "AWAITING_PAYMENT": return "Ready for payment";
+    case "AWAITING_CUSTOMER_PAYMENT": return "Complete payment";
+    case "AWAITING_COUNTER_PAYMENT": return "Pay at the shop";
+    case "PAYMENT_REPORTED": return "Shop checking payment";
+    case "PAYMENT_REJECTED": return "Payment not confirmed";
+    case "PAID_AUTHORISED": return "Payment received";
+    case "LOCAL_QUEUE_CLAIMED":
+    case "LOCAL_QUEUE_READY": return "Preparing your print";
+    case "PRINT_AUTHORISED":
+    case "PRINT_SUBMITTING":
+    case "SPOOLER_ACCEPTED":
+    case "PRINTING": return "Printing in progress";
+    case "OUTPUT_UNCONFIRMED": return "Shop checking your print";
+    case "TEST_OUTPUT_READY": return "Test complete";
+    case "COMPLETED": return "Ready for collection";
     case "PDF_EXPORTED": return "PDF ready";
-    case "REFUNDED": return "Fully refunded";
+    case "REFUNDED": return "Refunded";
     case "CANCELLED": return "Cancelled";
-    case "FAILED": return "Failed";
-    case "REJECTED": return "Request declined";
-    case "QUOTE_EXPIRED": return "Quote expired";
+    case "FAILED": return "Could not print";
+    case "REJECTED": return "Not accepted";
+    case "QUOTE_EXPIRED": return "Price needs refreshing";
     default: return "Request in progress";
   }
 }
 
 function smartPrintNativeStatus(status:string):string {
   switch(status) {
-    case "AWAITING_SHOP_APPROVAL": return "Awaiting shop approval.";
-    case "AWAITING_PAYMENT": return "Quote ready · Payment required.";
-    case "AWAITING_CUSTOMER_PAYMENT": return "Pay shop · Submit UTR.";
-    case "AWAITING_COUNTER_PAYMENT": return "Pay at the counter.";
-    case "PAYMENT_REPORTED": return "UTR sent · Verify pending.";
-    case "PAYMENT_REJECTED": return "Payment not verified.";
-    case "PAID_AUTHORISED": return "Payment verified · Print pending.";
-    case "LOCAL_QUEUE_CLAIMED": return "Transferring to shop.";
-    case "LOCAL_QUEUE_READY": return "Queued · Operator pending.";
-    case "PRINT_AUTHORISED": return "Printing authorised.";
-    case "PRINT_SUBMITTING": return "Sending to printer.";
-    case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
-    case "PRINTING": return "Printing in progress.";
-    case "OUTPUT_UNCONFIRMED": return "Shop confirming print output.";
-    case "TEST_OUTPUT_READY": return "A non-production test PDF was generated. No physical print was made.";
-    case "COMPLETED": return "Ready for collection.";
-    case "PDF_EXPORTED": return "Your PDF was saved and verified.";
-    case "REFUNDED": return "The file was excluded and its full payment was returned.";
-    case "CANCELLED": return "This request was cancelled. No further print work will be produced.";
-    case "FAILED": return "This request could not be completed. Contact the shop before submitting again.";
-    case "REJECTED": return "Shop rejected request."
-    case "QUOTE_EXPIRED": return "Quote expired.";
-    default: return "Status updated.";
+    case "AWAITING_SHOP_APPROVAL": return "The shop is reviewing your files. No payment has been collected.";
+    case "AWAITING_PAYMENT": return "Your files are accepted. Complete payment to continue.";
+    case "AWAITING_CUSTOMER_PAYMENT": return "Complete the payment using the details shown.";
+    case "AWAITING_COUNTER_PAYMENT": return "Please pay at the shop counter.";
+    case "PAYMENT_REPORTED": return "Your payment details were sent to the shop. The shop is checking the payment.";
+    case "PAYMENT_REJECTED": return "The payment could not be confirmed. Please check with the shop before paying again.";
+    case "PAID_AUTHORISED": return "Payment received. The shop is preparing your print.";
+    case "LOCAL_QUEUE_CLAIMED":
+    case "LOCAL_QUEUE_READY": return "Your files have reached the shop and are being prepared for printing.";
+    case "PRINT_AUTHORISED":
+    case "PRINT_SUBMITTING":
+    case "SPOOLER_ACCEPTED":
+    case "PRINTING": return "Your print is in progress.";
+    case "OUTPUT_UNCONFIRMED": return "The shop is checking the printer and will confirm whether your pages were printed. Please do not pay or upload the same file again.";
+    case "TEST_OUTPUT_READY": return "This was a test only. No physical pages were printed.";
+    case "COMPLETED": return "Your pages are printed and ready for collection.";
+    case "PDF_EXPORTED": return "Your PDF is ready.";
+    case "REFUNDED": return "This file was not printed and the payment was returned.";
+    case "CANCELLED": return "This request was cancelled.";
+    case "FAILED": return "Printing could not be completed. Please speak to the shop before submitting again.";
+    case "REJECTED": return "The shop could not accept this file. Please ask the shop for help.";
+    case "QUOTE_EXPIRED": return "The price has expired. Please request a fresh quote.";
+    default: return "Your request is being processed. Refresh to check again.";
   }
 }
 
 function smartPrintNativeBoundary(status:string|undefined,hasQuote:boolean):string {
   switch(status) {
-    case "AWAITING_SHOP_APPROVAL": return "Shop review · No payment.";
-    case "AWAITING_PAYMENT": return "Pay shop · Verification required.";
-    case "AWAITING_COUNTER_PAYMENT": return "Counter payment · Await confirmation.";
-    case "AWAITING_CUSTOMER_PAYMENT": return "Submit UTR · Shop verifies.";
-    case "PAYMENT_REPORTED": return "UTR pending · Shop verifies.";
-    case "PAID_AUTHORISED": return "Payment verified · Printing not started.";
-    case "LOCAL_QUEUE_CLAIMED": return "Secure transfer · Not printing.";
-    case "LOCAL_QUEUE_READY": return "Queued · Operator approval needed.";
-    case "PRINT_AUTHORISED": return "Shop approved physical printing.";
-    case "PRINT_SUBMITTING": return "Sending to printer.";
-    case "SPOOLER_ACCEPTED": return "Queue accepted · Paper unconfirmed.";
-    case "PRINTING": return "Printing · Output unconfirmed.";
-    case "OUTPUT_UNCONFIRMED": return "Output unconfirmed · Shop checks pages.";
-    case "TEST_OUTPUT_READY": return "Test output only · Not a physical print.";
-    case "COMPLETED": return "Output confirmed · Collect print.";
-    case "PDF_EXPORTED": return "PDF saved · Ready to use.";
-    case "REFUNDED": return "Fully refunded · No printing will take place.";
-    case "CANCELLED": return "Cancelled · No further print work.";
-    case "FAILED": return "Failed · Contact the shop before retrying.";
-    case "QUOTE_EXPIRED": return "Quote expired · Request another."
-    case "REJECTED": return "Request rejected · Ask shop.";
-    default: return hasQuote ? "Quote only · No payment." : "No payment yet.";
+    case "AWAITING_SHOP_APPROVAL": return "The shop is reviewing your files. No payment has been collected.";
+    case "AWAITING_PAYMENT": return "Your files are accepted. Complete payment to continue.";
+    case "AWAITING_COUNTER_PAYMENT": return "Please pay at the shop counter.";
+    case "AWAITING_CUSTOMER_PAYMENT": return "Complete the payment using the details shown.";
+    case "PAYMENT_REPORTED": return "The shop is checking your payment.";
+    case "PAID_AUTHORISED": return "Payment received. The shop is preparing your print.";
+    case "LOCAL_QUEUE_CLAIMED":
+    case "LOCAL_QUEUE_READY": return "Your files have reached the shop and are being prepared.";
+    case "PRINT_AUTHORISED":
+    case "PRINT_SUBMITTING":
+    case "SPOOLER_ACCEPTED":
+    case "PRINTING": return "Your print is in progress.";
+    case "OUTPUT_UNCONFIRMED": return "The shop is checking whether your pages were printed. Please do not submit the same file again.";
+    case "TEST_OUTPUT_READY": return "This was a test only. No physical pages were printed.";
+    case "COMPLETED": return "Printing is complete. Your pages are ready for collection.";
+    case "PDF_EXPORTED": return "Your PDF is ready.";
+    case "REFUNDED": return "This file was not printed and the payment was returned.";
+    case "CANCELLED": return "This request was cancelled.";
+    case "FAILED": return "Printing could not be completed. Please speak to the shop.";
+    case "QUOTE_EXPIRED": return "The price has expired. Please request a fresh quote.";
+    case "REJECTED": return "The shop could not accept this file. Please ask for help.";
+    default: return hasQuote ? "Check the price and print options before sending your request to the shop." : "Choose your files to get started.";
   }
 }
 
