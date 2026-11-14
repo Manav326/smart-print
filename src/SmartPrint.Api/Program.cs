@@ -103,6 +103,7 @@ builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddHttpClient<SubscriptionRazorpayService>();
 builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddSingleton<PlatformAdCreativeStorage>();
+builder.Services.AddSingleton<AgentRateLimitService>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
 builder.Services.AddHostedService<PrivateRelayRetentionWorker>();
 builder.Services.AddSingleton<PrivateRelayWakeupService>(services =>
@@ -113,15 +114,38 @@ builder.Services.AddHostedService(services =>
     services.GetRequiredService<PrivateRelayWakeupService>());
 builder.Services.AddRateLimiter(options =>
 {
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.OnRejected = async (rejected, cancellationToken) =>
+    {
+        var response = rejected.HttpContext.Response;
+        response.StatusCode = StatusCodes.Status429TooManyRequests;
+        var retryAfterSeconds = rejected.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
+            ? Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))
+            : 5;
+        response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        await response.WriteAsJsonAsync(new
+        {
+            code = "rate_limit_exceeded",
+            message = "Please wait a moment, then try again."
+        }, cancellationToken);
+    };
+
     options.AddPolicy("authentication", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("public-api", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    options.AddPolicy("agent-api", context =>
-        RateLimitPartition.GetFixedWindowLimiter(GetAgentRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    // A generous process-wide ceiling supplements each authenticated Agent's
+    // independent allowance and protects the API from fleet-wide bursts.
+    options.AddPolicy("agent-api-global", _ =>
+        RateLimitPartition.GetFixedWindowLimiter("all-agents",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 12000,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
     options.AddPolicy("qr-session", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -5160,8 +5184,37 @@ shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
 });
 
 var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
-    .RequireRateLimiting("agent-api")
-    .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
+    .RequireRateLimiting("agent-api-global")
+    .AddEndpointFilter(async (context, next) =>
+    {
+        var http = context.HttpContext;
+        var isEnrollment = string.Equals(
+            http.Request.Path.Value, "/api/v1/agent/enroll", StringComparison.OrdinalIgnoreCase);
+
+        if (!isEnrollment)
+        {
+            var db = http.RequestServices.GetRequiredService<SmartPrintDbContext>();
+            var device = await AuthenticateAgentAsync(http, db, http.RequestAborted);
+            if (device is null) return Results.Unauthorized();
+
+            http.Items[AgentRateLimitService.AuthenticatedAgentItemKey] = device;
+            var decision = http.RequestServices.GetRequiredService<AgentRateLimitService>()
+                .TryAcquire(device.Id, DateTimeOffset.UtcNow);
+            if (!decision.IsAllowed)
+            {
+                var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(decision.RetryAfter.TotalSeconds));
+                http.Response.Headers.RetryAfter =
+                    retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                return Results.Json(new
+                {
+                    code = "agent_rate_limit_exceeded",
+                    message = "The shop computer is busy. It will retry automatically."
+                }, statusCode: StatusCodes.Status429TooManyRequests);
+            }
+        }
+
+        return await EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false);
+    });
 
 agentApi.MapPost("/enroll", async (
     AgentEnrollmentRequest request,
@@ -5243,7 +5296,7 @@ agentApi.MapPost("/enroll", async (
     await transaction.CommitAsync(ct);
     return Results.Created("/api/v1/agent/heartbeat",
         new AgentEnrollmentResponse(device.Id, rawSecret, device.CreatedUtc));
-});
+}).RequireRateLimiting("authentication");
 
 
 agentApi.MapGet("/jobs/private-purge", async (
@@ -5418,7 +5471,7 @@ agentApi.MapGet("/private-relays/pending", async (
     }
 
     return Results.Ok(new AgentPrivateRelayPendingResponse(items));
-}).RequireRateLimiting("agent-api");
+});
 
 agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     Guid ticketId,
@@ -5468,7 +5521,7 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     context.Response.Headers["X-Print-Encrypted-Key"] = relay.PrivateRelayWrappedKey;
     context.Response.Headers["X-Print-Encrypted-Iv"] = relay.PrivateRelayIv;
     return Results.File(ciphertext, "application/octet-stream", enableRangeProcessing: false);
-}).RequireRateLimiting("agent-api");
+});
 
 agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     Guid ticketId,
@@ -5733,7 +5786,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             DuplicateRequest = false
         }
     });
-}).RequireRateLimiting("agent-api");
+});
 
 agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     Guid ticketId,
@@ -5770,7 +5823,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     ticket.ExpiresUtc = ticket.PrivateRelayFailedUtc.Value;
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = false });
-}).RequireRateLimiting("agent-api");
+});
 
 agentApi.MapPost("/jobs/claim", async (
     HttpContext context,
@@ -10708,21 +10761,10 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         });
     }
 
-    var pendingLocalUpload = await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(ticket =>
-        ticket.TenantId == session.TenantId &&
-        ticket.CustomerSessionId == session.Id &&
-        ticket.BatchId == batchId &&
-        ticket.CompletedUtc == null &&
-        ticket.ExpiresUtc > now, ct);
-    if (pendingLocalUpload)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new
-        {
-            code = "batch_uploads_still_processing",
-            message = "A document is still being transferred to the shop computer. Wait for its upload to finish or expire, then refresh the batch before checkout."
-        });
-    }
+    // Checkout is a snapshot of the locked, accepted jobs currently in this batch.
+    // The PrintPayment rows below are the immutable membership of this payment attempt.
+    // An unfinished upload has no PrintJob yet, so it is excluded automatically; if it
+    // completes later, it remains a separate unpaid file and must pass shop review first.
 
     var activeBatchPayment = await db.PrintBatchPayments.SingleOrDefaultAsync(
         item => item.TenantId == session.TenantId &&
@@ -10740,20 +10782,14 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
                 code = "batch_payment_attempt_already_active",
                 message = "A payment attempt is already active for this batch. Complete or ask the shop to reject it before selecting another method."
             });
-        return Results.Ok(BuildBatchPaymentResponse(
-            activeBatchPayment,
-            jobs.Count(item => item.Status is not ("REJECTED" or "REFUNDED"))));
+        var activePaymentFileCount = await db.PrintPayments.AsNoTracking()
+            .CountAsync(item => item.TenantId == session.TenantId &&
+                                item.BatchPaymentId == activeBatchPayment.Id, ct);
+        return Results.Ok(BuildBatchPaymentResponse(activeBatchPayment, activePaymentFileCount));
     }
 
-    var settledOrApprovedStates = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "REJECTED", "REFUNDED", "AWAITING_PAYMENT", "PAYMENT_REJECTED",
-        "AWAITING_CUSTOMER_PAYMENT", "PAYMENT_REPORTED", "AWAITING_COUNTER_PAYMENT",
-        "PAID_AUTHORISED", "LOCAL_QUEUE_CLAIMED", "LOCAL_QUEUE_READY",
-        "PRINT_AUTHORISED", "PRINT_SUBMITTING", "SPOOLER_ACCEPTED", "PRINTING",
-        "OUTPUT_UNCONFIRMED", "COMPLETED"
-    };
-    var pendingReview = jobs.FirstOrDefault(job => !settledOrApprovedStates.Contains(job.Status));
+    var pendingReview = jobs.FirstOrDefault(job =>
+        !BatchPaymentSelectionRules.IsReviewComplete(job.Status));
     if (pendingReview is not null)
         return Results.Conflict(new
         {
@@ -10762,7 +10798,7 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         });
 
     var payableJobs = jobs
-        .Where(job => job.Status is "AWAITING_PAYMENT" or "PAYMENT_REJECTED")
+        .Where(job => BatchPaymentSelectionRules.IsPayable(job.Status))
         .ToList();
     if (payableJobs.Count == 0)
         return Results.Conflict(new
@@ -11926,9 +11962,6 @@ static string GetRateLimitPartitionKey(HttpContext context) =>
 static string GetSessionRateLimitPartitionKey(HttpContext context) =>
     GetRateLimitPartitionKey(context);
 
-static string GetAgentRateLimitPartitionKey(HttpContext context) =>
-    GetRateLimitPartitionKey(context);
-
 static async Task<(bool Allowed, DateTimeOffset? SuspendedAtUtc)> GetAgentClaimAccessAsync(
     Guid tenantId,
     SmartPrintDbContext db,
@@ -12121,6 +12154,12 @@ static async Task<AgentDevice?> AuthenticateAgentAsync(
     SmartPrintDbContext db,
     CancellationToken cancellationToken)
 {
+    if (context.Items.TryGetValue(AgentRateLimitService.AuthenticatedAgentItemKey, out var cached) &&
+        cached is AgentDevice authenticatedDevice)
+    {
+        return authenticatedDevice;
+    }
+
     if (!Guid.TryParse(context.Request.Headers["X-Print-Agent-Id"].FirstOrDefault(), out var agentId))
     {
         return null;

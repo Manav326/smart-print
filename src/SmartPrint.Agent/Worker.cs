@@ -117,6 +117,50 @@ public sealed class Worker(
             byte[]? plaintext = null;
             try
             {
+                // If an earlier attempt already decrypted and DPAPI-protected this exact
+                // document, do not download or decrypt it again. Revalidate the protected
+                // local copy and retry only the server acknowledgement.
+                var stagedEntry = localQueueStore.Find(ticket.PrintJobId);
+                if (stagedEntry is not null && stagedEntry.PrivatePrinting &&
+                    stagedEntry.State == "LOCAL_UPLOAD_STAGED")
+                {
+                    if (stagedEntry.SizeBytes != ticket.SizeBytes ||
+                        !string.Equals(stagedEntry.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("The protected local copy does not match the pending private relay.");
+
+                    var stagedPlaintext = localQueueStore.ReadDocument(ticket.PrintJobId);
+                    try
+                    {
+                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedPlaintext, ticket.FileExtension);
+                        if (!string.Equals(stagedAnalysis.Extension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
+                            !string.Equals(stagedAnalysis.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException("The protected local copy no longer matches the original file type.");
+
+                        using var stagedCompletion = await SendAgentRequestAsync(
+                            client, credentials,
+                            $"api/v1/agent/private-relays/{ticket.TicketId:D}/complete",
+                            new LocalPrintUploadCompletionRequest(
+                                stagedAnalysis.PageCount, stagedAnalysis.PageSizesJson, stagedAnalysis.Extension,
+                                stagedAnalysis.MediaType, ticket.SizeBytes, ticket.Sha256),
+                            cancellationToken);
+                        if (!stagedCompletion.IsSuccessStatusCode)
+                        {
+                            logger.LogWarning("Private relay completion for {JobNumber} returned HTTP {StatusCode}; its existing protected local copy is retained for acknowledgement retry.", ticket.JobNumber, (int)stagedCompletion.StatusCode);
+                            retryableFailure = true;
+                        }
+                        else
+                        {
+                            await localQueueStore.MarkLocalUploadFinalizedAsync(ticket.PrintJobId, cancellationToken);
+                            logger.LogInformation("Private relay {JobNumber} was confirmed using its existing protected local copy; no second payload download was needed.", ticket.JobNumber);
+                        }
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(stagedPlaintext);
+                    }
+                    continue;
+                }
+
                 using var contentResponse = await SendAgentGetRequestAsync(
                     client, credentials,
                     $"api/v1/agent/private-relays/{ticket.TicketId:D}/content", cancellationToken);
@@ -782,7 +826,7 @@ public sealed class Worker(
         // polling interval (which may be configured as high as five minutes).
         // The short poll means the Agent receives a server confirmation promptly
         // without delaying or duplicating ordinary print work.
-        var pollInterval = TimeSpan.FromSeconds(3);
+        var pollInterval = TimeSpan.FromSeconds(10);
         while (!cancellationToken.IsCancellationRequested)
         {
             try

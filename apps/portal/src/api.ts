@@ -1558,7 +1558,7 @@ async function uploadCustomerPrivateRelay(
   }
 
   throw new LocalUploadOutcomeUnknownError(
-    "Your encrypted document reached the shop's secure transfer queue, but the shop computer is still checking it. SmartPrint has kept the same request; retry this file to refresh it without creating a duplicate."
+    "Your file is still being prepared. Tap Retry to check its status."
   );
 }
 
