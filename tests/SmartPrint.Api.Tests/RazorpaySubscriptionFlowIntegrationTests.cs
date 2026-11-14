@@ -282,6 +282,9 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
             var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
                 item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
             trial.Status = "Superseded";
+            var version = await fixture.Db.SubscriptionPlanVersions.SingleAsync(
+                item => item.Id == fixture.PlanVersionId);
+            version.CloudAssistedPrintingEnabled = true;
             fixture.Db.TenantSubscriptions.Add(new TenantSubscription
             {
                 TenantId = fixture.TenantId,
@@ -291,7 +294,7 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
                 BillingInterval = "Monthly",
                 PeriodStartUtc = DateTimeOffset.UtcNow.AddMonths(-2),
                 PeriodEndUtc = DateTimeOffset.UtcNow.AddDays(-1),
-                CreatedUtc = DateTimeOffset.UtcNow.AddMonths(-1)
+                CreatedUtc = DateTimeOffset.UtcNow.AddDays(-1)
             });
             await fixture.Db.SaveChangesAsync();
 
