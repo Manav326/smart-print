@@ -275,6 +275,37 @@ public sealed class RazorpaySubscriptionFlowIntegrationTests
     }
 
     [Fact]
+    public async Task ExpiredPlanRetainsFeatureInclusionForAcceptedWorkButDoesNotGrantNewAccess()
+    {
+        await WithPostgresAsync(async fixture =>
+        {
+            var trial = await fixture.Db.TenantSubscriptions.SingleAsync(
+                item => item.TenantId == fixture.TenantId && item.PlanCode == "TRIAL");
+            trial.Status = "Superseded";
+            fixture.Db.TenantSubscriptions.Add(new TenantSubscription
+            {
+                TenantId = fixture.TenantId,
+                PlanVersionId = fixture.PlanVersionId,
+                PlanCode = "PRO",
+                Status = "Active",
+                BillingInterval = "Monthly",
+                PeriodStartUtc = DateTimeOffset.UtcNow.AddMonths(-2),
+                PeriodEndUtc = DateTimeOffset.UtcNow.AddDays(-1),
+                CreatedUtc = DateTimeOffset.UtcNow.AddMonths(-1)
+            });
+            await fixture.Db.SaveChangesAsync();
+
+            var snapshot = await new TenantEntitlementService(fixture.Db)
+                .GetForTenantAsync(fixture.TenantId, CancellationToken.None);
+
+            Assert.Equal("Expired", snapshot.SubscriptionStatus);
+            Assert.False(snapshot.IsAccessActive);
+            Assert.True(snapshot.CloudAssistedPrintingIncluded);
+            Assert.False(snapshot.CloudAssistedPrintingEnabled);
+        });
+    }
+
+    [Fact]
     public async Task DifferentProductCannotBePurchasedMidCycleBeforeProrationIsAvailable()
     {
         await WithPostgresAsync(async fixture =>
