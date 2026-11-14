@@ -23,6 +23,7 @@ public sealed record TenantEntitlementSnapshot(
     int? MaxQrStations,
     int? MaxMonthlyPrintJobs,
     long? MaxDocumentBytes,
+    bool CloudAssistedPrintingIncluded,
     bool CloudAssistedPrintingEnabled,
     bool WhiteLabelEnabled,
     bool AdvancedReportsEnabled,
@@ -74,7 +75,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
                 tenantId, subscription?.PlanCode ?? "UNCONFIGURED",
                 effectiveSubscriptionStatus, null, subscription?.PeriodEndUtc,
                 null, null, null, isTrialPlan ? trialMonthlyLimit : null, null,
-                accessActive, false, accessActive, true, accessActive);
+                false, accessActive, false, accessActive, true, accessActive);
         }
 
         var version = await db.SubscriptionPlanVersions.AsNoTracking()
@@ -89,6 +90,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             tenantId, subscription.PlanCode, effectiveSubscriptionStatus, version.Id, subscription.PeriodEndUtc,
             version.MaxPrinters, version.MaxAgentDevices, version.MaxQrStations,
             isTrialPlan ? trialMonthlyLimit : version.MaxMonthlyPrintJobs, version.MaxDocumentBytes,
+            version.CloudAssistedPrintingEnabled,
             version.CloudAssistedPrintingEnabled && accessActive,
             version.WhiteLabelEnabled && accessActive,
             version.AdvancedReportsEnabled && accessActive,
