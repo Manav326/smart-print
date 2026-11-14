@@ -412,12 +412,15 @@ export default function ShopSubscriptionCheckout({
   const currentPaidTerm = currentSubscription.status === "Active" &&
     Date.parse(currentSubscription.periodEndUtc) > Date.now();
 
-  function copyPendingPaymentReference() {
+  async function copyPendingPaymentReference() {
     if (!pendingPayment) return;
-    void navigator.clipboard.writeText(pendingPayment.razorpayOrderId).then(
-      () => setNotice("Payment reference copied. Share it with SmartPrint support if the order remains unresolved."),
-      () => setNotice("Payment reference: " + pendingPayment.razorpayOrderId)
-    );
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard is unavailable");
+      await navigator.clipboard.writeText(pendingPayment.razorpayOrderId);
+      setNotice("Payment reference copied. Share it with SmartPrint support if the order remains unresolved.");
+    } catch {
+      setNotice("Payment reference: " + pendingPayment.razorpayOrderId);
+    }
   }
 
   function printReceipt(payment: ShopSubscriptionPaymentRecord) {
