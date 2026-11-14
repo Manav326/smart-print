@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using SmartPrint.Api.Domain;
 using SmartPrint.Api.Services;
 using static SmartPrint.Api.Security.EndpointIdentity;
 
