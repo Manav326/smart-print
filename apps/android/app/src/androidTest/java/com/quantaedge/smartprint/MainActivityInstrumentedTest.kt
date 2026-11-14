@@ -1,6 +1,9 @@
 package com.quantaedge.smartprint
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.pm.ActivityInfo
+import android.content.res.Configuration
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.util.Base64
@@ -46,6 +49,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 
 @RunWith(AndroidJUnit4::class)
 class MainActivityInstrumentedTest {
@@ -1755,6 +1759,106 @@ class QrScannerPermissionInstrumentedTest {
         } finally {
             store.delete(source)
             store.delete(destination)
+        }
+    }
+
+
+    @Test
+    fun orientationAndWindowSizeChangesKeepTheActiveWebViewAndCurrentScreen() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val expectedHandledChanges =
+            ActivityInfo.CONFIG_ORIENTATION or
+                ActivityInfo.CONFIG_SCREEN_SIZE or
+                ActivityInfo.CONFIG_SMALLEST_SCREEN_SIZE or
+                ActivityInfo.CONFIG_SCREEN_LAYOUT or
+                ActivityInfo.CONFIG_KEYBOARD_HIDDEN
+
+        fun assertActivityHandlesSizeChanges(activityClass: Class<*>) {
+            val info = context.packageManager.getActivityInfo(
+                ComponentName(context, activityClass),
+                0
+            )
+            assertEquals(
+                "The activity must handle size/orientation changes without automatic recreation.",
+                expectedHandledChanges,
+                info.configChanges and expectedHandledChanges
+            )
+        }
+
+        assertActivityHandlesSizeChanges(MainActivity::class.java)
+        assertActivityHandlesSizeChanges(QrScannerActivity::class.java)
+
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                    isAccessible = true
+                }.set(activity, null)
+                MainActivity::class.java.getDeclaredField("portalHost").apply {
+                    isAccessible = true
+                }.set(activity, null)
+
+                val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
+                    isAccessible = true
+                }.invoke(activity) as WebView
+                webView.loadDataWithBaseURL(
+                    BuildConfig.SERVICE_BASE_URL,
+                    "<html><body><input id='draft' value='keep this page alive'></body></html>",
+                    "text/html",
+                    "UTF-8",
+                    null
+                )
+                MainActivity::class.java.getDeclaredMethod("showPrint").apply {
+                    isAccessible = true
+                }.invoke(activity)
+
+                val content = MainActivity::class.java.getDeclaredField("content").apply {
+                    isAccessible = true
+                }.get(activity) as android.widget.FrameLayout
+                assertSame("The Print screen must host the shared WebView.", webView, content.getChildAt(0))
+                val originalUrl = webView.url
+
+                val landscape = Configuration(activity.resources.configuration).apply {
+                    orientation = Configuration.ORIENTATION_LANDSCAPE
+                    screenWidthDp = 720
+                    screenHeightDp = 420
+                    smallestScreenWidthDp = 420
+                }
+                activity.onConfigurationChanged(landscape)
+
+                var navigation = MainActivity::class.java.getDeclaredField("navigation").apply {
+                    isAccessible = true
+                }.get(activity) as com.google.android.material.navigation.NavigationBarView
+                assertTrue("Landscape must use the navigation rail.", navigation is NavigationRailView)
+                assertEquals("The selected Print destination must remain selected.", 3, navigation.selectedItemId)
+                assertSame("Orientation changes must not replace the active WebView.", webView, content.getChildAt(0))
+                assertEquals("Orientation changes must not navigate or reload the page.", originalUrl, webView.url)
+
+                val resizedLandscape = Configuration(landscape).apply {
+                    screenWidthDp = 900
+                    screenHeightDp = 520
+                }
+                activity.onConfigurationChanged(resizedLandscape)
+                navigation = MainActivity::class.java.getDeclaredField("navigation").apply {
+                    isAccessible = true
+                }.get(activity) as com.google.android.material.navigation.NavigationBarView
+                assertTrue("Resizing within landscape must keep the navigation rail.", navigation is NavigationRailView)
+                assertSame("Window resizing must keep the same WebView instance.", webView, content.getChildAt(0))
+
+                val portrait = Configuration(resizedLandscape).apply {
+                    orientation = Configuration.ORIENTATION_PORTRAIT
+                    screenWidthDp = 400
+                    screenHeightDp = 820
+                    smallestScreenWidthDp = 400
+                }
+                activity.onConfigurationChanged(portrait)
+                navigation = MainActivity::class.java.getDeclaredField("navigation").apply {
+                    isAccessible = true
+                }.get(activity) as com.google.android.material.navigation.NavigationBarView
+                assertTrue("Portrait must restore the bottom navigation.", navigation is BottomNavigationView)
+                assertEquals("The selected Print destination must remain selected.", 3, navigation.selectedItemId)
+                assertSame("Returning to portrait must keep the same active WebView.", webView, content.getChildAt(0))
+                assertEquals("The active page must remain at the same URL.", originalUrl, webView.url)
+            }
         }
     }
 
