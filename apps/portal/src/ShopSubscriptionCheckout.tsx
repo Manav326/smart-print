@@ -11,8 +11,11 @@ import {
   type ShopSubscriptionPlanOption,
   type ShopSubscriptionSummary
 } from "./api";
+import { formatIstDate, formatIstDateTime } from "./date-time";
 import {
   formatSubscriptionAmount,
+  getAnnualSavingsMinor,
+  getAnnualSavingsPercent,
   getPaidBillingIntervals,
   isUnsettledSubscriptionPayment,
   subscriptionPaymentActionLabel,
@@ -105,14 +108,69 @@ function priceFor(plan: ShopSubscriptionPlanOption, interval: SubscriptionBillin
   return interval === "Monthly" ? plan.monthlyPriceMinor : plan.annualPriceMinor;
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, character => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+  })[character] ?? character);
+}
+
+function printSubscriptionReceipt(payment: ShopSubscriptionPaymentRecord): boolean {
+  if (payment.status !== "CAPTURED" || !payment.razorpayPaymentId) return false;
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) return false;
+  printWindow.opener = null;
+
+  const rows: Array<[string, string]> = [
+    ["Receipt reference", payment.id.toUpperCase()],
+    ["Product", "SmartPrint subscription"],
+    ["Billing interval", payment.billingInterval === "Annual" ? "Annual" : "Monthly"],
+    ["Amount paid", formatSubscriptionAmount(payment.amountMinor, payment.currency)],
+    ["Payment status", "Verified"],
+    ["Paid on", formatIstDateTime(payment.verifiedUtc ?? payment.createdUtc)],
+    ["Razorpay payment ID", payment.razorpayPaymentId],
+    ["Razorpay order ID", payment.razorpayOrderId],
+    ["Subscription reference", payment.assignedSubscriptionId ?? "Not available"]
+  ];
+  const details = rows.map(([label, value]) =>
+    "<div class=\"receipt-row\"><span>" + escapeHtml(label) +
+    "</span><strong>" + escapeHtml(value) + "</strong></div>"
+  ).join("");
+
+  printWindow.document.open();
+  printWindow.document.write(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SmartPrint subscription payment receipt</title>
+<style>
+*{box-sizing:border-box}body{margin:0;padding:36px;font:14px/1.5 Arial,sans-serif;color:#18202c;background:#fff}
+main{width:min(100%,680px);margin:0 auto;border:1px solid #d9dee7;border-radius:14px;padding:30px}
+header{display:flex;justify-content:space-between;align-items:flex-start;gap:20px;border-bottom:1px solid #e5e9ef;padding-bottom:20px;margin-bottom:18px}
+h1{font-size:22px;margin:5px 0}.eyebrow{font-size:10px;letter-spacing:.12em;font-weight:700;color:#657084}
+.amount{font-size:25px;font-weight:700;margin:18px 0}
+.receipt-row{display:flex;justify-content:space-between;gap:20px;padding:11px 0;border-bottom:1px solid #edf0f4}
+.receipt-row span{color:#637085}.receipt-row strong{text-align:right;overflow-wrap:anywhere}
+.note{margin-top:22px;color:#6b7482;font-size:11px}
+@media print{body{padding:0}main{border:0;border-radius:0;width:100%;padding:18px}}
+</style></head><body><main><header><div><div class="eyebrow">SMARTPRINT BY QUANTAEDGE</div><h1>Subscription payment receipt</h1><div>Thank you for choosing SmartPrint.</div></div><div class="eyebrow">PAYMENT VERIFIED</div></header>
+<div class="amount">${escapeHtml(formatSubscriptionAmount(payment.amountMinor, payment.currency))}</div>
+${details}
+<p class="note">This is a payment receipt for your records, not a GST tax invoice. It confirms the payment recorded by SmartPrint; it does not replace any applicable tax invoice issued by the legal seller.</p>
+</main></body></html>`);
+  printWindow.document.close();
+  printWindow.focus();
+  window.setTimeout(() => printWindow.print(), 250);
+  return true;
+}
+
 const statusPollDelays = [1500, 3000, 5000, 8000];
 
 export default function ShopSubscriptionCheckout({
   token,
-  onSubscriptionUpdated
+  onSubscriptionUpdated,
+  currentSubscription
 }: {
   token: string;
   onSubscriptionUpdated: (summary: ShopSubscriptionSummary) => void;
+  currentSubscription: ShopSubscriptionSummary["subscription"];
 }) {
   const [plans, setPlans] = useState<ShopSubscriptionPlanOption[]>([]);
   const [payments, setPayments] = useState<ShopSubscriptionPaymentRecord[]>([]);
@@ -123,6 +181,7 @@ export default function ShopSubscriptionCheckout({
   const [historyError, setHistoryError] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [showAllPayments, setShowAllPayments] = useState(false);
   const paymentsRef = useRef<ShopSubscriptionPaymentRecord[]>([]);
   const requestIds = useRef(new Map<string, string>());
   const pollSequence = useRef(0);
@@ -350,6 +409,22 @@ export default function ShopSubscriptionCheckout({
   }
 
   const pendingPayment = payments.find(payment => isUnsettledSubscriptionPayment(payment.status));
+  const currentPaidTerm = currentSubscription.status === "Active" &&
+    Date.parse(currentSubscription.periodEndUtc) > Date.now();
+
+  function copyPendingPaymentReference() {
+    if (!pendingPayment) return;
+    void navigator.clipboard.writeText(pendingPayment.razorpayOrderId).then(
+      () => setNotice("Payment reference copied. Share it with SmartPrint support if the order remains unresolved."),
+      () => setNotice("Payment reference: " + pendingPayment.razorpayOrderId)
+    );
+  }
+
+  function printReceipt(payment: ShopSubscriptionPaymentRecord) {
+    if (!printSubscriptionReceipt(payment)) {
+      setError("Your browser blocked the receipt window. Allow pop-ups for SmartPrint and try again.");
+    }
+  }
 
   return (
     <section className="panel subscription-payment-panel" aria-labelledby="subscription-payment-heading">
@@ -374,11 +449,17 @@ export default function ShopSubscriptionCheckout({
           <Clock3 size={16}/>
           <span>
             <strong>Existing subscription payment needs your attention.</strong>{" "}
-            {pendingPayment.planCode} · {pendingPayment.billingInterval} · {formatSubscriptionAmount(pendingPayment.amountMinor, pendingPayment.currency)} — {subscriptionPaymentStatusMessage(pendingPayment.status)}{" "}
+            SmartPrint · {pendingPayment.billingInterval} · {formatSubscriptionAmount(pendingPayment.amountMinor, pendingPayment.currency)} — {subscriptionPaymentStatusMessage(pendingPayment.status)}{" "}
             {pendingPayment.status === "CAPTURED_REVIEW_REQUIRED"
               ? "Do not pay again. SmartPrint support must finish reviewing this payment."
               : "Continue this exact order to avoid creating a duplicate charge. Unpaid Razorpay orders cannot be cancelled from this page."}
+            <small className="subscription-payment-reference">Payment reference: {pendingPayment.razorpayOrderId}</small>
           </span>
+          {pendingPayment.status !== "CAPTURED_REVIEW_REQUIRED" && (
+            <button type="button" className="secondary-button small" onClick={copyPendingPaymentReference}>
+              Copy reference
+            </button>
+          )}
           {pendingPayment.status !== "CAPTURED_REVIEW_REQUIRED" && (
             <button
               type="button"
@@ -390,6 +471,13 @@ export default function ShopSubscriptionCheckout({
               {subscriptionPaymentActionLabel(pendingPayment.status)}
             </button>
           )}
+        </div>
+      )}
+
+      {currentPaidTerm && (
+        <div className="subscription-payment-message subscription-payment-renewal-note" role="status">
+          <ShieldCheck size={16}/>
+          <span>Your current paid term remains active through <strong>{formatIstDate(currentSubscription.periodEndUtc)}</strong>. A SmartPrint renewal payment made now will begin after that date, preserving the time you have already paid for.</span>
         </div>
       )}
 
@@ -410,17 +498,18 @@ export default function ShopSubscriptionCheckout({
               <article className="subscription-payment-plan" key={plan.id}>
                 <div className="subscription-payment-plan-top">
                   <div>
-                    <span className="subscription-payment-plan-code">{plan.planCode} · v{plan.version}</span>
+                    <span className="subscription-payment-plan-code">ONE SMARTPRINT SUBSCRIPTION</span>
                     <h3>{plan.name}</h3>
                   </div>
                   <span className="subscription-payment-plan-lock"><ShieldCheck size={16}/></span>
                 </div>
                 {plan.description && <p className="subscription-payment-description">{plan.description}</p>}
                 <div className="subscription-payment-entitlements">
-                  <span><strong>{plan.maxPrinters ?? "—"}</strong> printers</span>
-                  <span><strong>{plan.maxAgentDevices ?? "—"}</strong> computers</span>
-                  <span><strong>{plan.maxQrStations ?? "—"}</strong> QR stations</span>
-                  <span><strong>{plan.maxMonthlyPrintJobs?.toLocaleString("en-IN") ?? "—"}</strong> monthly jobs</span>
+                  <span><strong>{plan.maxPrinters == null ? "No plan cap" : `Up to ${plan.maxPrinters.toLocaleString("en-IN")}`}</strong> printers</span>
+                  <span><strong>{plan.maxAgentDevices == null ? "No plan cap" : `Up to ${plan.maxAgentDevices.toLocaleString("en-IN")}`}</strong> computers</span>
+                  <span><strong>{plan.maxQrStations == null ? "No plan cap" : `Up to ${plan.maxQrStations.toLocaleString("en-IN")}`}</strong> QR stations</span>
+                  <span><strong>{plan.maxMonthlyPrintJobs == null ? "No plan cap" : `Up to ${plan.maxMonthlyPrintJobs.toLocaleString("en-IN")}`}</strong> monthly jobs</span>
+                  <span><strong>{plan.maxDocumentBytes == null ? "No plan cap" : `Up to ${(plan.maxDocumentBytes / (1024 * 1024)).toLocaleString("en-IN", { maximumFractionDigits: 1 })} MB`}</strong> cloud document size</span>
                   <span className={plan.cloudAssistedPrintingEnabled ? "included" : ""}>Cloud-assisted printing {plan.cloudAssistedPrintingEnabled ? "included" : "not included"}</span>
                   <span className={plan.whiteLabelEnabled ? "included" : ""}>White-label {plan.whiteLabelEnabled ? "included" : "not included"}</span>
                   <span className={plan.advancedReportsEnabled ? "included" : ""}>Advanced reports {plan.advancedReportsEnabled ? "included" : "not included"}</span>
@@ -429,18 +518,29 @@ export default function ShopSubscriptionCheckout({
                   {intervals.map(interval => {
                     const amount = priceFor(plan, interval);
                     const key = plan.id + "|" + interval;
+                    const annualSavings = interval === "Annual" ? getAnnualSavingsMinor(plan) : 0;
+                    const annualSavingsPercent = interval === "Annual" ? getAnnualSavingsPercent(plan) : 0;
+                    const blockedProductSwitch = currentPaidTerm &&
+                      currentSubscription.planCode !== plan.planCode;
+                    const buttonDisabled = Boolean(busyOption) || Boolean(pendingPayment) ||
+                      Boolean(historyError) || blockedProductSwitch;
                     return amount === null ? null : (
                       <button
                         key={key}
                         type="button"
                         className="primary-button subscription-payment-button"
                         onClick={() => void startCheckout(plan, interval)}
-                        disabled={Boolean(busyOption) || Boolean(pendingPayment) || Boolean(historyError)}
+                        disabled={buttonDisabled}
+                        title={blockedProductSwitch ? "Switching to a different product before your current paid term ends requires a credit quote." : undefined}
                       >
                         {busyOption === key ? <span className="button-spinner"/> : <CreditCard size={15}/>}
                         <span>
-                          <strong>Pay {formatSubscriptionAmount(amount, plan.currency)}</strong>
-                          <small>{interval === "Monthly" ? "per month" : "per year"}</small>
+                          <strong>{currentPaidTerm ? "Pay for next term " : "Pay "}{formatSubscriptionAmount(amount, plan.currency)}</strong>
+                          <small>
+                            {interval === "Monthly" ? "per month" : "per year"}
+                            {annualSavings > 0 ? ` · save ${formatSubscriptionAmount(annualSavings, plan.currency)} (${annualSavingsPercent}%)` : ""}
+                            {currentPaidTerm ? ` · starts after ${formatIstDate(currentSubscription.periodEndUtc)}` : ""}
+                          </small>
                         </span>
                       </button>
                     );
@@ -454,15 +554,30 @@ export default function ShopSubscriptionCheckout({
 
       {payments.length > 0 && (
         <div className="subscription-payment-history">
-          <div className="subscription-payment-history-heading"><Clock3 size={15}/><strong>Recent subscription payments</strong></div>
-          {payments.slice(0, 5).map(payment => (
+          <div className="subscription-payment-history-heading">
+            <Clock3 size={15}/>
+            <strong>Subscription payment history ({payments.length})</strong>
+            {payments.length > 5 && (
+              <button type="button" className="secondary-button small" onClick={() => setShowAllPayments(value => !value)}>
+                {showAllPayments ? "Show recent" : "Show all"}
+              </button>
+            )}
+          </div>
+          {(showAllPayments ? payments : payments.slice(0, 5)).map(payment => (
             <div className="subscription-payment-history-row" key={payment.id}>
               <div>
-                <strong>{payment.planCode} · {payment.billingInterval}</strong>
-                <small>{new Date(payment.createdUtc).toLocaleString("en-IN")}</small>
+                <strong>SmartPrint · {payment.billingInterval}</strong>
+                <small>Created {formatIstDateTime(payment.createdUtc)}{payment.verifiedUtc ? ` · verified ${formatIstDateTime(payment.verifiedUtc)}` : ""}</small>
+                <small>Order: {payment.razorpayOrderId}</small>
+                {payment.razorpayPaymentId && <small>Payment: {payment.razorpayPaymentId}</small>}
               </div>
               <span className={"subscription-payment-history-status " + payment.status.toLowerCase()}>{subscriptionPaymentStatusLabel(payment.status)}</span>
-              <strong>{formatSubscriptionAmount(payment.amountMinor, payment.currency)}</strong>
+              <div className="subscription-payment-history-amount">
+                <strong>{formatSubscriptionAmount(payment.amountMinor, payment.currency)}</strong>
+                {payment.status === "CAPTURED" && payment.razorpayPaymentId && (
+                  <button type="button" className="secondary-button small" onClick={() => printReceipt(payment)}>Print receipt</button>
+                )}
+              </div>
             </div>
           ))}
         </div>
