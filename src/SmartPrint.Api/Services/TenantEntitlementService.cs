@@ -50,10 +50,13 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
             .Where(item => item.Id == tenantId)
             .Select(item => item.Status)
             .SingleOrDefaultAsync(cancellationToken);
+        var now = DateTimeOffset.UtcNow;
+        var effectiveSubscriptionStatus = PlanEntitlementRules.GetEffectiveSubscriptionStatus(
+            subscription?.Status, subscription?.PeriodEndUtc ?? now, now);
         var accessActive = TenantAccessRules.IsActive(tenantStatus) &&
             subscription is not null &&
             PlanEntitlementRules.IsSubscriptionAccessActive(
-                subscription.Status, subscription.PeriodEndUtc, DateTimeOffset.UtcNow);
+                subscription.Status, subscription.PeriodEndUtc, now);
 
         var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, cancellationToken);
@@ -68,7 +71,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         {
             return new TenantEntitlementSnapshot(
                 tenantId, subscription?.PlanCode ?? "UNCONFIGURED",
-                subscription?.Status ?? "Unconfigured", null,
+                effectiveSubscriptionStatus, null,
                 null, null, null, isTrialPlan ? trialMonthlyLimit : null, null,
                 accessActive, false, accessActive, true, accessActive);
         }
@@ -82,7 +85,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         }
 
         return new TenantEntitlementSnapshot(
-            tenantId, subscription.PlanCode, subscription.Status, version.Id,
+            tenantId, subscription.PlanCode, effectiveSubscriptionStatus, version.Id,
             version.MaxPrinters, version.MaxAgentDevices, version.MaxQrStations,
             isTrialPlan ? trialMonthlyLimit : version.MaxMonthlyPrintJobs, version.MaxDocumentBytes,
             version.CloudAssistedPrintingEnabled && accessActive,
