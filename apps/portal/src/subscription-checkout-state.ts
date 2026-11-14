@@ -50,6 +50,23 @@ export function getAnnualSavingsPercent(plan: SubscriptionPriceOptions): number 
   return Math.round(getAnnualSavingsMinor(plan) / fullYearAtMonthlyRate * 100);
 }
 
+export type SubscriptionReminderState = "expired" | "due-soon" | null;
+
+export function getSubscriptionReminderState(
+  status: string,
+  isAccessActive: boolean,
+  periodEndUtc: string,
+  now = Date.now()
+): SubscriptionReminderState {
+  const periodEnd = Date.parse(periodEndUtc);
+  if (status.toLowerCase() === "expired" || (Number.isFinite(periodEnd) && periodEnd <= now)) {
+    return "expired";
+  }
+  if (!isAccessActive || !Number.isFinite(periodEnd)) return null;
+  const daysRemaining = Math.ceil((periodEnd - now) / 86_400_000);
+  return daysRemaining <= 7 ? "due-soon" : null;
+}
+
 export function isUnsettledSubscriptionPayment(status: string): boolean {
   return ["CREATING", "CREATION_UNKNOWN", "CREATED", "FAILED", "CAPTURED_REVIEW_REQUIRED"]
     .includes(status.toUpperCase());
