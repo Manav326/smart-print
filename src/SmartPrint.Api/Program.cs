@@ -146,12 +146,14 @@ builder.Services.AddRateLimiter(options =>
                 QueueLimit = 0
             }));
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-        context.Request.Path.StartsWithSegments("/api/v1/agent")
-            ? RateLimitPartition.GetFixedWindowLimiter("all-agents",
-                _ => new FixedWindowRateLimiterOptions
+        AgentRateLimitPartition.IsAgentApiRequest(context)
+            ? RateLimitPartition.GetTokenBucketLimiter("all-agents",
+                _ => new TokenBucketRateLimiterOptions
                 {
-                    PermitLimit = 6000,
-                    Window = TimeSpan.FromMinutes(1),
+                    TokenLimit = 5000,
+                    TokensPerPeriod = 500,
+                    ReplenishmentPeriod = TimeSpan.FromSeconds(1),
+                    AutoReplenishment = true,
                     QueueLimit = 0
                 })
             : RateLimitPartition.GetNoLimiter("non-agent"));
