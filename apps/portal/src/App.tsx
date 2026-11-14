@@ -3463,7 +3463,7 @@ function prettyStatus(status:string) {
     FAILED:"Could not print",
     CANCELLED:"Cancelled"
   };
-  return names[status] || status.replaceAll("_"," ").toLowerCase().replace(/\\b\\w/g,letter=>letter.toUpperCase());
+  return names[status] || status.split("_").map(part=>part.charAt(0).toUpperCase()+part.slice(1).toLowerCase()).join(" ");
 }
 function printBlockMessage(code:string):string {
   switch(code) {
@@ -4949,7 +4949,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       const uploadError=exception instanceof LocalUploadOutcomeUnknownError
         ? privatePrinting
-          ? "We're still preparing this file for printing. Tap Retry to check again; you do not need to upload the file again."
+          ? "Your file is still being prepared. Tap Retry to check its status."
           : cloudAssistedPrintingEnabled
             ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
             : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
