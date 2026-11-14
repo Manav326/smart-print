@@ -58,59 +58,17 @@ function optionalMoneyMinor(value: string, label: string, currency: string): num
   const raw = value.trim();
   if (!raw) return null;
   const digits = currencyMinorUnitDigits(currency);
-  const fractionPattern = digits === 0 ? "" : `(?:\\.\\d{1,${digits}})?`;
-  if (!new RegExp(`^\\d+${fractionPattern}import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { formatIstDate } from "./date-time";
-import {
-  CheckCircle2, CirclePlus, Cloud, FileText, Layers3, LoaderCircle,
-  LockKeyhole, RefreshCw, Save, ShieldCheck, Sparkles, ToggleLeft, ToggleRight
-} from "lucide-react";
-import {
-  createPlatformPlan, getPlatformPlans, publishPlatformPlanVersion,
-  savePlatformPlanDraft, updatePlatformPlan,
-  type AuthTokens, type PlatformPlan, type PlatformPlanVersion,
-  type PlatformPlanVersionInput
-} from "./api";
-
-type PlanForm = {
-  currency: string;
-  monthlyPriceMinor: string;
-  annualPriceMinor: string;
-  maxPrinters: string;
-  maxAgentDevices: string;
-  maxQrStations: string;
-  maxMonthlyPrintJobs: string;
-  maxDocumentBytes: string;
-  cloudAssistedPrintingEnabled: boolean;
-  whiteLabelEnabled: boolean;
-  advancedReportsEnabled: boolean;
-};
-
-const emptyForm: PlanForm = {
-  currency: "INR",
-  monthlyPriceMinor: "",
-  annualPriceMinor: "",
-  maxPrinters: "",
-  maxAgentDevices: "",
-  maxQrStations: "",
-  maxMonthlyPrintJobs: "",
-  maxDocumentBytes: "",
-  cloudAssistedPrintingEnabled: false,
-  whiteLabelEnabled: false,
-  advancedReportsEnabled: false
-};
-
-).test(raw)) {
-    throw new Error(`${label} must be a non-negative amount with at most ${digits} decimal places, or left blank.`);
+  const fractionPattern = digits === 0 ? "" : "(?:\\.\\d{1," + digits + "})?";
+  if (!new RegExp("^\\d+" + fractionPattern + "$").test(raw)) {
+    throw new Error(label + " must be a non-negative amount with at most " + digits + " decimal places, or left blank.");
   }
   const [wholePart, fractionPart = ""] = raw.split(".");
   const multiplier = 10 ** digits;
   const minor = Number(wholePart) * multiplier +
     Number((fractionPart || "").padEnd(digits, "0") || "0");
-  if (!Number.isSafeInteger(minor)) throw new Error(`${label} is outside the supported amount range.`);
+  if (!Number.isSafeInteger(minor)) throw new Error(label + " is outside the supported amount range.");
   return minor;
 }
-
 function formFromVersion(version?: PlatformPlanVersion): PlanForm {
   if (!version) return { ...emptyForm };
   return {
