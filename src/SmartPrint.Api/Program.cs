@@ -145,14 +145,16 @@ builder.Services.AddRateLimiter(options =>
                 AutoReplenishment = true,
                 QueueLimit = 0
             }));
-    options.AddPolicy("agent-api-global", _ =>
-        RateLimitPartition.GetFixedWindowLimiter("all-agents",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 6000,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            }));
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        context.Request.Path.StartsWithSegments("/api/v1/agent")
+            ? RateLimitPartition.GetFixedWindowLimiter("all-agents",
+                _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 6000,
+                    Window = TimeSpan.FromMinutes(1),
+                    QueueLimit = 0
+                })
+            : RateLimitPartition.GetNoLimiter("non-agent"));
     options.AddPolicy("qr-session", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -5147,7 +5149,6 @@ shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
 
 var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
     .RequireRateLimiting("agent-api")
-    .RequireRateLimiting("agent-api-global")
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false));
 
 agentApi.MapPost("/enroll", async (
