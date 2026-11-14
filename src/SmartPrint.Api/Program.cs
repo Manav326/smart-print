@@ -10761,10 +10761,22 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         });
     }
 
-    // Checkout is a snapshot of the locked, accepted jobs currently in this batch.
-    // The PrintPayment rows below are the immutable membership of this payment attempt.
-    // An unfinished upload has no PrintJob yet, so it is excluded automatically; if it
-    // completes later, it remains a separate unpaid file and must pass shop review first.
+    // All files in the customer's batch must finish uploading before one checkout.
+    var pendingLocalUpload = await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(ticket =>
+        ticket.TenantId == session.TenantId &&
+        ticket.CustomerSessionId == session.Id &&
+        ticket.BatchId == batchId &&
+        ticket.CompletedUtc == null &&
+        ticket.ExpiresUtc > now, ct);
+    if (pendingLocalUpload)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_uploads_still_processing",
+            message = "One or more files are still being prepared. Wait until all files are ready, then pay once for the complete batch."
+        });
+    }
 
     var activeBatchPayment = await db.PrintBatchPayments.SingleOrDefaultAsync(
         item => item.TenantId == session.TenantId &&
@@ -10794,7 +10806,7 @@ publicApi.MapPost("/batches/{batchId:guid}/payments", async (
         return Results.Conflict(new
         {
             code = "batch_review_not_complete",
-            message = "The shop must finish reviewing every file in this batch before checkout can start."
+            message = "The shop is still reviewing some files. Payment will be available when the whole batch is ready."
         });
 
     var payableJobs = jobs
