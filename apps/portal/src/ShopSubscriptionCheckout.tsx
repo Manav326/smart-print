@@ -179,6 +179,7 @@ export default function ShopSubscriptionCheckout({
   const [busyOption, setBusyOption] = useState<string | null>(null);
   const [planError, setPlanError] = useState("");
   const [historyError, setHistoryError] = useState("");
+  const [olderPaymentsError, setOlderPaymentsError] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [showAllPayments, setShowAllPayments] = useState(false);
@@ -186,6 +187,8 @@ export default function ShopSubscriptionCheckout({
   const [paymentsTotalCount, setPaymentsTotalCount] = useState(0);
   const [paymentsLoadingMore, setPaymentsLoadingMore] = useState(false);
   const paymentsRef = useRef<ShopSubscriptionPaymentRecord[]>([]);
+  const paymentHistoryGeneration = useRef(0);
+  const loadingMorePaymentsRef = useRef(false);
   const requestIds = useRef(new Map<string, string>());
   const pollSequence = useRef(0);
   const mounted = useRef(true);
@@ -202,6 +205,7 @@ export default function ShopSubscriptionCheckout({
   }
 
   async function refreshData(showSpinner = false): Promise<ShopSubscriptionPaymentRecord[] | null> {
+    const historyGeneration = ++paymentHistoryGeneration.current;
     if (showSpinner) {
       setRefreshing(true);
       setError("");
@@ -222,7 +226,7 @@ export default function ShopSubscriptionCheckout({
     }
 
     let latestPayments: ShopSubscriptionPaymentRecord[] | null = null;
-    if (paymentsResult.status === "fulfilled") {
+    if (historyGeneration === paymentHistoryGeneration.current && paymentsResult.status === "fulfilled") {
       const page = paymentsResult.value;
       latestPayments = page.items;
       paymentsRef.current = latestPayments;
@@ -230,7 +234,8 @@ export default function ShopSubscriptionCheckout({
       setPaymentsTotalCount(page.totalCount);
       setPaymentsHasMore(page.skip + page.items.length < page.totalCount);
       setHistoryError("");
-    } else {
+      setOlderPaymentsError("");
+    } else if (historyGeneration === paymentHistoryGeneration.current && paymentsResult.status === "rejected") {
       setHistoryError(paymentsResult.reason instanceof Error
         ? paymentsResult.reason.message
         : "Payment history could not be refreshed. Checkout is paused until SmartPrint can confirm whether a payment is already pending.");
@@ -242,22 +247,29 @@ export default function ShopSubscriptionCheckout({
   }
 
   async function loadMorePayments() {
-    if (paymentsLoadingMore || !paymentsHasMore) return;
+    if (loadingMorePaymentsRef.current || !paymentsHasMore) return;
+    loadingMorePaymentsRef.current = true;
     setPaymentsLoadingMore(true);
-    setHistoryError("");
+    setOlderPaymentsError("");
+    const historyGeneration = paymentHistoryGeneration.current;
     try {
       const page = await getShopSubscriptionPayments(token, paymentsRef.current.length, 20);
-      const merged = [...paymentsRef.current, ...page.items];
+      if (historyGeneration !== paymentHistoryGeneration.current) return;
+      const knownIds = new Set(paymentsRef.current.map(payment => payment.id));
+      const merged = [...paymentsRef.current, ...page.items.filter(payment => !knownIds.has(payment.id))];
       paymentsRef.current = merged;
       setPayments(merged);
       setPaymentsTotalCount(page.totalCount);
       setPaymentsHasMore(page.skip + page.items.length < page.totalCount);
       setShowAllPayments(true);
     } catch (exception) {
-      setHistoryError(exception instanceof Error
-        ? exception.message
-        : "Older subscription payments could not be loaded. Try again.");
+      if (historyGeneration === paymentHistoryGeneration.current) {
+        setOlderPaymentsError(exception instanceof Error
+          ? exception.message
+          : "Older subscription payments could not be loaded. Try again.");
+      }
     } finally {
+      loadingMorePaymentsRef.current = false;
       setPaymentsLoadingMore(false);
     }
   }
@@ -586,6 +598,10 @@ export default function ShopSubscriptionCheckout({
             );
           })}
         </div>
+      )}
+
+      {olderPaymentsError && (
+        <div className="inline-error subscription-payment-message" role="alert">{olderPaymentsError}</div>
       )}
 
       {payments.length > 0 && (
