@@ -41,7 +41,7 @@ const emptyForm: PlanForm = {
 
 function currencyMinorUnitDigits(currency: string): number {
   try {
-    return new Intl.NumberFormat("en-IN", { style: "currency", currency }).resolvedOptions().maximumFractionDigits;
+    return new Intl.NumberFormat("en-IN", { style: "currency", currency }).resolvedOptions().maximumFractionDigits ?? 2;
   } catch {
     return 2;
   }
