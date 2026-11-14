@@ -114,38 +114,12 @@ builder.Services.AddHostedService(services =>
     services.GetRequiredService<PrivateRelayWakeupService>());
 builder.Services.AddRateLimiter(options =>
 {
-    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-    options.OnRejected = async (rejected, cancellationToken) =>
-    {
-        var response = rejected.HttpContext.Response;
-        response.StatusCode = StatusCodes.Status429TooManyRequests;
-        var retryAfterSeconds = rejected.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
-            ? Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))
-            : 5;
-        response.Headers.RetryAfter = retryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        await response.WriteAsJsonAsync(new
-        {
-            code = "rate_limit_exceeded",
-            message = "Please wait a moment, then try again."
-        }, cancellationToken);
-    };
-
     options.AddPolicy("authentication", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 20, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     options.AddPolicy("public-api", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
-    // A generous process-wide ceiling supplements each authenticated Agent's
-    // independent allowance and protects the API from fleet-wide bursts.
-    options.AddPolicy("agent-api-global", _ =>
-        RateLimitPartition.GetFixedWindowLimiter("all-agents",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = 12000,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0
-            }));
     options.AddPolicy("qr-session", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -5184,8 +5158,7 @@ shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
 });
 
 var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
-    .RequireRateLimiting("agent-api-global")
-    .AddEndpointFilter(async (context, next) =>
+        .AddEndpointFilter(async (context, next) =>
     {
         var http = context.HttpContext;
         var isEnrollment = string.Equals(
