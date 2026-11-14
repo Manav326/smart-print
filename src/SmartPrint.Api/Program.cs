@@ -10180,11 +10180,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 detail: "This shop is temporarily unable to accept new print requests. Please contact the shop for assistance."));
         var recoveryAgentAvailable = await GetLocalAgentInfoAsync(
             db, ticket.TenantId, ticket.PrinterDeviceId, commitNow, ct) is not null;
-        var cloudRecoveryIncluded = subscription.CloudAssistedPrintingEnabled ||
-            (grandfatheredUpload && subscription.CloudAssistedPrintingIncluded);
-        if (!cloudRecoveryIncluded && recoveryAgentAvailable)
-            return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-                title: "Secure HTTPS recovery is not available while the paired shop Agent is online on this plan."));
+        if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)
+        {
+            // The original plan rule still blocks new HTTPS recovery when the Agent is online.
+            // Only the already-accepted pre-expiry upload receives a narrow finish-only exception.
+            if (!grandfatheredUpload || !subscription.CloudAssistedPrintingIncluded)
+                return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status403Forbidden,
+                    title: "Secure HTTPS recovery is not available while the paired shop Agent is online on this plan."));
+        }
         if (!PlanEntitlementRules.AllowsDocument(subscription.MaxDocumentBytes, ticket.SizeBytes))
             return await RejectAndCleanAsync(Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge,
                 title: "This document exceeds the maximum size configured for this shop's plan."));
