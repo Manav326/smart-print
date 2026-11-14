@@ -5,6 +5,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
+import androidx.exifinterface.media.ExifInterface
+import java.io.ByteArrayInputStream
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
@@ -226,17 +228,52 @@ object IdCardPdfComposer {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
         require(bounds.outWidth > 0 && bounds.outHeight > 0) {
-            "A scanned card side could not be decoded. Please scan that side again."
+            "This ID photo could not be decoded. Choose another image."
         }
         var sample = 1
         while (max(bounds.outWidth / sample, bounds.outHeight / sample) > maxEdge) sample *= 2
-        return BitmapFactory.decodeByteArray(
+        val decoded = BitmapFactory.decodeByteArray(
             bytes, 0, bytes.size,
             BitmapFactory.Options().apply {
                 inSampleSize = sample
                 inPreferredConfig = Bitmap.Config.ARGB_8888
             }
-        ) ?: error("A scanned card side could not be decoded. Please scan that side again.")
+        ) ?: error("This ID photo could not be decoded. Choose another image.")
+
+        // Phone gallery images often store portrait/landscape orientation in EXIF
+        // instead of rotating the pixels. Apply it before layout and preview so an
+        // imported image prints the same way it appears in the gallery.
+        val orientation = runCatching {
+            ExifInterface(ByteArrayInputStream(bytes)).getAttributeInt(
+                ExifInterface.TAG_ORIENTATION,
+                ExifInterface.ORIENTATION_NORMAL
+            )
+        }.getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val transform = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> transform.setScale(-1f, 1f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> transform.setRotate(180f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> transform.setScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                transform.setRotate(90f)
+                transform.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_90 -> transform.setRotate(90f)
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                transform.setRotate(270f)
+                transform.postScale(-1f, 1f)
+            }
+            ExifInterface.ORIENTATION_ROTATE_270 -> transform.setRotate(270f)
+            else -> return decoded
+        }
+        return try {
+            Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, transform, true).also {
+                if (it !== decoded) decoded.recycle()
+            }
+        } catch (error: Exception) {
+            decoded.recycle()
+            throw error
+        }
     }
 
     private fun drawCropGuides(canvas: Canvas, card: RectF, offset: Float, length: Float) {
