@@ -14,6 +14,7 @@ public enum ShopPrintDispatchFailure
     PrerequisitesNotMet,
     PrivatePrintingOutputRequired,
     PdfExportNotRecoverable,
+    PrivateOutputConfirmationInvalid,
     PdfExportLocalCopyMissing,
     PdfExportPrerequisitesNotMet,
     PdfExportConfirmationNotAllowed,
@@ -207,6 +208,10 @@ public sealed class ShopPrintJobDispatchService(SmartPrintDbContext db, IHostEnv
             return new ShopPrintDispatchResult(ShopPrintDispatchFailure.NotFound);
         }
 
+        if (job.PrivatePrinting)
+            return new ShopPrintDispatchResult(
+                ShopPrintDispatchFailure.PrivatePrintingOutputRequired, Job: job);
+
         var printerIsPdfExport = job.PrinterDeviceId is Guid assignedPrinterId &&
             await db.PrinterDevices.AnyAsync(printer =>
                 printer.Id == assignedPrinterId &&
@@ -302,7 +307,7 @@ public sealed class ShopPrintJobDispatchService(SmartPrintDbContext db, IHostEnv
             return new ShopPrintDispatchResult(ShopPrintDispatchFailure.NotFound);
         }
 
-        if (job.OutputType == "PDF_EXPORT")
+        if (job.OutputType is "PDF_EXPORT" or "TEST_VIRTUAL")
         {
             return new ShopPrintDispatchResult(ShopPrintDispatchFailure.PdfExportConfirmationNotAllowed, Job: job);
         }
@@ -319,10 +324,18 @@ public sealed class ShopPrintJobDispatchService(SmartPrintDbContext db, IHostEnv
                 ShopPrintDispatchFailure.OutputNotReadyForConfirmation, Job: job);
         }
 
+        if (job.PrivatePrinting && (job.OutputType != "PHYSICAL" || job.ClaimedByAgentDeviceId is null))
+        {
+            return new ShopPrintDispatchResult(
+                ShopPrintDispatchFailure.PrivateOutputConfirmationInvalid, Job: job);
+        }
+
         var now = DateTimeOffset.UtcNow;
         var previous = job.Status;
         job.Status = "COMPLETED";
         job.OutputConfirmedUtc = now;
+        if (job.PrivatePrinting)
+            job.PrivateDocumentPurgeRequestedUtc ??= now;
         job.SpoolerObservedUtc = now;
         job.SpoolerStatus = "SHOP_CONFIRMED_OUTPUT";
         job.UpdatedUtc = now;

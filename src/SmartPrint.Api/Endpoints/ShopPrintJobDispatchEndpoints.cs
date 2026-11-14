@@ -11,6 +11,115 @@ public static class ShopPrintJobDispatchEndpoints
 {
     public static RouteGroupBuilder MapShopPrintJobDispatchEndpoints(this RouteGroupBuilder shop)
     {
+        shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export", async (
+            Guid jobId,
+            ClaimsPrincipal principal,
+            ShopPrintJobDispatchService dispatch,
+            CancellationToken ct) =>
+        {
+            if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+                return Results.Forbid();
+
+            var result = await dispatch.RetryPdfExportAsync(jobId, tenantId, GetActorId(principal), ct);
+            switch (result.Failure)
+            {
+                case ShopPrintDispatchFailure.NotFound:
+                    return Results.NotFound();
+                case ShopPrintDispatchFailure.PrivatePrintingOutputRequired:
+                    return Results.Conflict(new
+                    {
+                        code = "private_printing_physical_output_required",
+                        message = "Private Printing source documents cannot be exported or retried as managed PDFs."
+                    });
+                case ShopPrintDispatchFailure.PdfExportNotRecoverable:
+                    return Results.Conflict(new
+                    {
+                        code = "pdf_export_not_recoverable",
+                        message = "Only an output-unconfirmed job assigned to a PDF export destination can be retried."
+                    });
+                case ShopPrintDispatchFailure.PdfExportLocalCopyMissing:
+                    return Results.Conflict(new
+                    {
+                        code = "pdf_export_local_copy_missing",
+                        message = "The original protected local document and assigned Agent are required."
+                    });
+                case ShopPrintDispatchFailure.PdfExportPrerequisitesNotMet:
+                    return Results.Conflict(new
+                    {
+                        code = "pdf_export_prerequisites_not_met",
+                        message = "Verified payment and the same paired computer's live PDF export destination are required."
+                    });
+            }
+
+            var job = result.Job!;
+            return Results.Ok(new
+            {
+                job.Id,
+                job.JobNumber,
+                job.Status,
+                OutputMode = "PDF_EXPORT",
+                PrinterName = result.OutputDestinationName
+            });
+        });
+
+        shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (
+            Guid jobId,
+            ClaimsPrincipal principal,
+            ShopPrintJobDispatchService dispatch,
+            CancellationToken ct) =>
+        {
+            if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
+                return Results.Forbid();
+
+            var result = await dispatch.ConfirmOutputAsync(jobId, tenantId, GetActorId(principal), ct);
+            if (result.Failure == ShopPrintDispatchFailure.NotFound)
+                return Results.NotFound();
+
+            if (result.Failure == ShopPrintDispatchFailure.PdfExportConfirmationNotAllowed)
+            {
+                var isTestVirtual = result.Job?.OutputType == "TEST_VIRTUAL";
+                return Results.Conflict(new
+                {
+                    code = isTestVirtual ? "test_virtual_output_not_physical" : "pdf_export_not_physical_output",
+                    message = isTestVirtual
+                        ? "The test PDF was generated locally. It is not a physical print and cannot be marked as physically collected."
+                        : "PDF exports are confirmed when the local PDF file is saved and verified. Physical paper-output confirmation does not apply."
+                });
+            }
+
+            if (result.Failure == ShopPrintDispatchFailure.OutputNotReadyForConfirmation)
+            {
+                return Results.Conflict(new
+                {
+                    code = "output_not_ready_for_confirmation",
+                    message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages."
+                });
+            }
+
+            if (result.Failure == ShopPrintDispatchFailure.PrivateOutputConfirmationInvalid)
+            {
+                return Results.Conflict(new
+                {
+                    code = "private_output_confirmation_invalid",
+                    message = "Private Printing can be completed only after confirmed physical output from its assigned shop computer."
+                });
+            }
+
+            var job = result.Job!;
+            if (result.DuplicateRequest)
+            {
+                return Results.Ok(new
+                {
+                    job.Id,
+                    job.Status,
+                    job.OutputConfirmedUtc,
+                    DuplicateRequest = true
+                });
+            }
+
+            return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc });
+        });
+
         shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (
             Guid jobId,
             ClaimsPrincipal principal,
