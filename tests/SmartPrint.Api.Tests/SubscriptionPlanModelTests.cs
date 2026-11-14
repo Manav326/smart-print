@@ -22,6 +22,10 @@ public sealed class SubscriptionPlanModelTests
             index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(new[] { "Code" }));
         Assert.Contains(version.GetIndexes(), index =>
             index.IsUnique && index.Properties.Select(property => property.Name).SequenceEqual(new[] { "PlanId", "Version" }));
+        Assert.Contains(version.GetIndexes(), index =>
+            index.IsUnique &&
+            index.Properties.Select(property => property.Name).SequenceEqual(new[] { "PlanId" }) &&
+            index.GetFilter() == "\"Status\" = 'Draft'");
     }
 
     [Fact]
