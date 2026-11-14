@@ -3413,6 +3413,7 @@ html[data-theme="dark"] .auth-proof {
 .subscription-payment-history-row > strong { color: var(--text); font-size: .8rem; white-space: nowrap; }
 .subscription-payment-history-amount{display:grid;justify-items:end;gap:6px}
 .subscription-payment-history-amount button{font-size:.7rem;min-height:27px;padding:5px 8px}
+.subscription-payment-load-more{display:inline-flex;align-items:center;justify-content:center;gap:7px;justify-self:center;margin-top:10px;min-height:34px}
 .subscription-payment-history-status { padding: 4px 7px; border-radius: 7px; color: var(--muted); background: var(--surface-3); font-size: .67rem; font-weight: 750; white-space: nowrap; }
 .subscription-payment-history-status.captured { color: var(--green); }
 .subscription-payment-history-status.failed { color: var(--red); }
