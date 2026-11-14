@@ -14,4 +14,10 @@ public static class AgentRateLimitPartition
             ? $"{remoteAddress}|agent:{agentId:N}"
             : $"{remoteAddress}|agent:unidentified";
     }
+
+    public static bool IsAgentApiRequest(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return context.Request.Path.StartsWithSegments("/api/v1/agent", StringComparison.OrdinalIgnoreCase);
+    }
 }
