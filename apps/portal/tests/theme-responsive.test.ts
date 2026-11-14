@@ -400,14 +400,16 @@ test("offline requests use the existing secure queue and owner changes require c
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
   const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const settingsEndpoints = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobSettingsEndpoints.cs");
+  const settingsService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobSettingsService.cs");
 
   assert.ok(app.includes("secureQueueFallbackEnabled"));
   assert.ok(server.includes('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery"'));
   assert.ok(server.includes("if (!subscription.CloudAssistedPrintingEnabled && recoveryAgentAvailable)"));
   assert.doesNotMatch(api, /X-Print-Queue-Fallback|allowQueueFallback/);
   assert.doesNotMatch(server, /X-Print-Queue-Fallback|queueFallbackRequested/);
-  assert.ok(server.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
-  assert.ok(server.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
+  assert.ok(settingsEndpoints.includes('shop.MapPatch("/print-jobs/{jobId:guid}/settings"'));
+  assert.ok(settingsService.includes('job.Status = "AWAITING_CUSTOMER_APPROVAL";'));
   assert.ok(app.includes("onUpdateSettings={updatePrintJobSettings}"));
 });
 
@@ -439,6 +441,8 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
   const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const batchReviewService = read("../../../src/SmartPrint.Api/Services/ShopPrintBatchReviewService.cs");
+  const batchReviewEndpoint = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintBatchReviewEndpoints.cs");
   const contracts = read("../../../src/SmartPrint.Api/Contracts/ApiContracts.cs");
   const agent = read("../../../src/SmartPrint.Agent/WindowsPrintExecutor.cs");
   const pdfOverlay = read("../../../src/SmartPrint.Agent/PdfBrandingOverlay.cs");
@@ -449,10 +453,13 @@ test("PDF footer branding is opt-in per batch and cannot cover source content or
   assert.ok(app.includes('checked={pdfBrandingEnabled&&!hasIdDocument} disabled={busy||hasIdDocument}'));
   assert.ok(api.includes('body: JSON.stringify({ reviewedJobIds, acceptedJobIds, pdfBrandingEnabled })'));
   assert.ok(contracts.includes('bool PdfBrandingEnabled = false'));
-  assert.ok(server.includes('request.PdfBrandingEnabled'));
-  assert.ok(server.includes('job.PdfBrandingEnabled = request.PdfBrandingEnabled'));
-  assert.match(server, /foreach \(var job in lockedJobs\)\s*\{\s*if \(job\.PdfBrandingEnabled/);
-  assert.doesNotMatch(server, /foreach \(var job in allBatchJobs\)\s*\{\s*if \(job\.PdfBrandingEnabled/);
+  assert.ok(batchReviewEndpoint.includes('request.PdfBrandingEnabled'));
+  assert.ok(batchReviewService.includes('job.PdfBrandingEnabled = pdfBrandingEnabled'));
+  assert.ok(batchReviewService.includes("foreach (var job in lockedJobs)"));
+  assert.ok(batchReviewService.includes("if (job.PdfBrandingEnabled == pdfBrandingEnabled)"));
+  assert.ok(!batchReviewService.includes("foreach (var job in allBatchJobs)"));
+  assert.ok(batchReviewService.includes("CanEnablePdfBranding"));
+  assert.ok(batchReviewService.includes("IdDocumentBrandingNotAllowed"));
   assert.ok(server.includes('candidate.PdfBrandingEnabled'));
   assert.ok(queueModels.includes('bool PdfBrandingEnabled = false'));
   assert.ok(agent.includes('"SMARTPRINT_BRANDED_PDF_RENDERER"'));
@@ -487,13 +494,14 @@ test("customer payment settings refresh without reopening the QR session and exp
   const app = read("../src/App.tsx");
   const api = read("../src/api.ts");
   const server = read("../../../src/SmartPrint.Api/Program.cs");
+  const registration = read("../../../src/SmartPrint.Api/Services/AccountRegistrationService.cs");
   assert.match(app, /paymentOptions:session\.paymentOptions/);
   assert.match(app, /Cash at counter unavailable/);
   assert.match(app, /Disabled · customers will not see cash at the counter\./);
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
   assert.match(server, /var paymentOptions = await db\.ShopPaymentProfiles\.AsNoTracking\(\)/);
   assert.match(server, /PaymentOptions = paymentOptions/);
-  assert.match(server, /CashEnabled = false/);
+  assert.match(registration, /CashEnabled = false/);
 });
 
 test("Windows local document previews prefer the paired Agent loopback endpoint", () => {
