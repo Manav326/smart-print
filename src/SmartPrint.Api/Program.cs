@@ -136,6 +136,17 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("public-api", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 120, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    // A generous process-wide ceiling supplements the per-device Agent quota. It
+    // protects the API under fleet-wide bursts without making shops share the
+    // small per-device allowance.
+    options.AddPolicy("agent-api-global", _ =>
+        RateLimitPartition.GetFixedWindowLimiter("all-agents",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 12000,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            }));
     options.AddPolicy("qr-session", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
@@ -5129,6 +5140,7 @@ shopAgents.MapPatch("/agent-devices/{agentId:guid}/revoke", async (
 });
 
 var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
+    .RequireRateLimiting("agent-api-global")
     .AddEndpointFilter(async (context, next) =>
     {
         var http = context.HttpContext;
@@ -5240,7 +5252,7 @@ agentApi.MapPost("/enroll", async (
     await transaction.CommitAsync(ct);
     return Results.Created("/api/v1/agent/heartbeat",
         new AgentEnrollmentResponse(device.Id, rawSecret, device.CreatedUtc));
-});
+}).RequireRateLimiting("authentication");
 
 
 agentApi.MapGet("/jobs/private-purge", async (
