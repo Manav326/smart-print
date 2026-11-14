@@ -2,6 +2,7 @@ package com.quantaedge.smartprint
 
 import android.Manifest
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -131,6 +132,15 @@ class QrScannerActivity : AppCompatActivity() {
             hasCameraPermission() -> bindCamera()
             else -> showPermissionPanel()
         }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        // Keep the in-progress QR/photo scan alive; CameraX and the view hierarchy
+        // can respond to the new preview bounds without restarting the scanner Activity.
+        if (::previewHost.isInitialized) previewHost.requestLayout()
+        if (::previewView.isInitialized) previewView.requestLayout()
+        if (::overlay.isInitialized) overlay.requestLayout()
     }
 
     override fun onResume() {
