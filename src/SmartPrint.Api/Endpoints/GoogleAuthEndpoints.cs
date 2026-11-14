@@ -11,8 +11,9 @@ public static class GoogleAuthEndpoints
 {
     public static RouteGroupBuilder MapGoogleAuthEndpoints(this RouteGroupBuilder auth)
     {
-        auth.MapPost("/google/challenge", (GoogleChallengeRequest request, GoogleLoginNonceStore nonces) =>
+        auth.MapPost("/google/challenge", (GoogleChallengeRequest request, GoogleLoginNonceStore nonces, HttpContext context) =>
         {
+            context.Response.Headers.CacheControl = "no-store";
             if (request.Surface is not ("shop" or "customer"))
                 return Results.BadRequest(new { code = "google_surface_invalid", message = "The requested sign-in type is invalid." });
 
