@@ -9,8 +9,8 @@ public sealed class AgentRateLimitService
 {
     public const string AuthenticatedAgentItemKey = "SmartPrint.AuthenticatedAgentDevice";
 
-    public const int BurstCapacity = 60;
-    public const int TokensPerReplenishment = 30;
+    public const int BurstCapacity = 120;
+    public const int TokensPerReplenishment = 60;
     public static readonly TimeSpan ReplenishmentPeriod = TimeSpan.FromSeconds(15);
     public static readonly TimeSpan InactiveEntryRetention = TimeSpan.FromMinutes(2);
 
