@@ -17,12 +17,37 @@ export function getPaidBillingIntervals(plan: SubscriptionPriceOptions): Subscri
 }
 
 export function formatSubscriptionAmount(amountMinor: number, currency: string): string {
+  let minorUnitDigits = 2;
+  try {
+    minorUnitDigits = new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency
+    }).resolvedOptions().maximumFractionDigits ?? 2;
+  } catch {
+    // INR subscription payments are stored in paise; unsupported currency metadata
+    // falls back to the two-decimal representation used by the payment API.
+  }
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency,
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2
-  }).format(amountMinor / 100);
+    minimumFractionDigits: minorUnitDigits,
+    maximumFractionDigits: minorUnitDigits
+  }).format(amountMinor / (10 ** minorUnitDigits));
+}
+
+export function getAnnualSavingsMinor(plan: SubscriptionPriceOptions): number {
+  if (typeof plan.monthlyPriceMinor !== "number" ||
+      typeof plan.annualPriceMinor !== "number" ||
+      plan.monthlyPriceMinor <= 0 || plan.annualPriceMinor < 0) {
+    return 0;
+  }
+  return Math.max(0, plan.monthlyPriceMinor * 12 - plan.annualPriceMinor);
+}
+
+export function getAnnualSavingsPercent(plan: SubscriptionPriceOptions): number {
+  if (typeof plan.monthlyPriceMinor !== "number" || plan.monthlyPriceMinor <= 0) return 0;
+  const fullYearAtMonthlyRate = plan.monthlyPriceMinor * 12;
+  return Math.round(getAnnualSavingsMinor(plan) / fullYearAtMonthlyRate * 100);
 }
 
 export function isUnsettledSubscriptionPayment(status: string): boolean {
