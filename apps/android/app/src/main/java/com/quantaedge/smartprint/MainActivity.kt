@@ -46,6 +46,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.lifecycle.lifecycleScope
 import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -64,6 +70,8 @@ import com.google.android.material.card.MaterialCardView
 import com.google.android.material.bottomsheet.BottomSheetDialog
 import eightbitlab.com.blurview.BlurTarget
 import eightbitlab.com.blurview.BlurView
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
 import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
@@ -87,6 +95,9 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 internal object IdCaptureOverlayPermissionPolicy {
     fun shouldExplain(isGranted: Boolean, alreadyExplained: Boolean): Boolean =
@@ -174,6 +185,7 @@ class MainActivity : AppCompatActivity() {
     private var exportFolder: File? = null
     private var archiveFiles: List<File> = emptyList()
     private var accountCreateMode = false
+    private var googleSignInInProgress = false
     private var editingPdf: File? = null
     private val selectedFilePaths = linkedSetOf<String>()
     private val chooserSelectedFilePaths = linkedSetOf<String>()
@@ -1208,6 +1220,28 @@ class MainActivity : AppCompatActivity() {
         }, linearParams().apply { topMargin = dp(12) })
         formCard.addView(form)
         column.addView(formCard, linearParams())
+        column.addView(text("OR", 10, R.color.qp_muted, true).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(12))
+        }, linearParams())
+        column.addView(button("Continue with Google", false).apply {
+            isEnabled = !googleSignInInProgress
+            setOnClickListener { startGoogleCustomerSignIn() }
+        }, linearParams())
+        if (googleSignInInProgress) {
+            column.addView(text("Connecting securely to Google…", 10, R.color.qp_muted, false).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(8), dp(8), dp(8), 0)
+            }, linearParams())
+        } else {
+            column.addView(text(
+                "Sign in or create your SmartPrint account with Google. Your account works across participating print shops.",
+                10, R.color.qp_muted, false
+            ).apply {
+                gravity = Gravity.CENTER
+                setPadding(dp(8), dp(9), dp(8), 0)
+            }, linearParams())
+        }
         if (accountCreateMode) {
             column.addView(text("12+ chars · Upper · Lower · Number · Symbol", 11, R.color.qp_muted, false)
                 .apply { setPadding(dp(3), dp(9), dp(3), 0) })
@@ -1257,9 +1291,67 @@ class MainActivity : AppCompatActivity() {
         }.start()
     }
 
+    private fun startGoogleCustomerSignIn() {
+        if (googleSignInInProgress) return
+        googleSignInInProgress = true
+        showProfile()
+        toast("Preparing secure Google sign-in…")
+
+        lifecycleScope.launch {
+            try {
+                val (config, nonce) = withContext(Dispatchers.IO) {
+                    val serviceUrl = accountServiceUrl()
+                    CustomerAccountClient.googleAuthConfiguration(serviceUrl) to
+                        CustomerAccountClient.googleAuthChallenge(serviceUrl, "customer")
+                }
+                if (!config.configured || config.clientId.isBlank()) {
+                    throw IllegalStateException("Google sign-in is not configured on this SmartPrint server yet.")
+                }
+
+                val googleOption = GetSignInWithGoogleOption.Builder(config.clientId)
+                    .setNonce(nonce)
+                    .build()
+                val request = GetCredentialRequest.Builder()
+                    .addCredentialOption(googleOption)
+                    .build()
+                val response = CredentialManager.create(this@MainActivity).getCredential(
+                    context = this@MainActivity,
+                    request = request
+                )
+                val credential = response.credential
+                if (credential !is CustomCredential ||
+                    credential.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    throw IllegalStateException("Google did not return a supported sign-in credential.")
+                }
+
+                val idToken = GoogleIdTokenCredential.createFrom(credential.data).idToken
+                val auth = withContext(Dispatchers.IO) {
+                    CustomerAccountClient.signInWithGoogle(accountServiceUrl(), idToken, nonce)
+                }
+                customerAccountStore.save(auth)
+                accountCreateMode = false
+                showProfile()
+                toast("You're signed in to your SmartPrint customer account.")
+            } catch (_: GetCredentialCancellationException) {
+                toast("Google sign-in was cancelled.")
+            } catch (exception: Exception) {
+                toast("Google sign-in failed: ${message(exception)}")
+            } finally {
+                googleSignInInProgress = false
+                if (profileVisible && customerAccountStore.read() == null) showProfile()
+            }
+        }
+    }
+
     private fun signOutCustomer() {
         val auth = customerAccountStore.read()
         customerAccountStore.clear()
+        lifecycleScope.launch {
+            runCatching {
+                CredentialManager.create(this@MainActivity)
+                    .clearCredentialState(ClearCredentialStateRequest())
+            }
+        }
         showProfile()
         if (auth != null) Thread {
             try { CustomerAccountClient.logout(accountServiceUrl(), auth) } catch (_: Exception) { }

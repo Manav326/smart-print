@@ -20,6 +20,11 @@ import javax.crypto.spec.GCMParameterSpec
 
 class CustomerApiException(val statusCode: Int, message: String) : IllegalStateException(message)
 
+data class CustomerGoogleAuthConfiguration(
+    val configured: Boolean,
+    val clientId: String
+)
+
 data class CustomerAuth(
     val accessToken: String,
     val refreshToken: String,
@@ -147,6 +152,51 @@ class CustomerAccountStore(context: Context) {
 
 /** Small HTTPS client for the separate customer identity API. */
 object CustomerAccountClient {
+    fun googleAuthConfiguration(baseUrl: String): CustomerGoogleAuthConfiguration =
+        parseGoogleAuthConfiguration(request(baseUrl, "/api/v1/auth/google/config", null))
+
+    fun googleAuthChallenge(baseUrl: String, surface: String): String {
+        require(surface == "shop" || surface == "customer") { "The requested sign-in type is invalid." }
+        val response = request(
+            baseUrl,
+            "/api/v1/auth/google/challenge",
+            JSONObject().put("surface", surface)
+        )
+        return parseGoogleAuthChallenge(response)
+    }
+
+    internal fun parseGoogleAuthChallenge(response: JSONObject): String {
+        val nonce = response.optString("nonce").trim()
+        require(nonce.matches(Regex("^[a-fA-F0-9]{64}$"))) {
+            "SmartPrint could not prepare a secure Google sign-in request. Please try again."
+        }
+        return nonce
+    }
+
+    internal fun parseGoogleAuthConfiguration(response: JSONObject) = CustomerGoogleAuthConfiguration(
+        configured = response.optBoolean("configured", false),
+        clientId = response.optString("clientId").trim()
+    )
+
+    fun signInWithGoogle(baseUrl: String, credential: String, nonce: String): CustomerAuth {
+        require(credential.isNotBlank() && credential.length <= 10_000) {
+            "Google did not return a valid sign-in credential."
+        }
+        require(nonce.matches(Regex("^[a-fA-F0-9]{64}$"))) {
+            "The Google sign-in request could not be validated. Please try again."
+        }
+        val tokens = request(
+            baseUrl,
+            "/api/v1/auth/google/customer",
+            JSONObject().put("credential", credential).put("nonce", nonce)
+        ).toAuth("", "")
+        val profile = profile(baseUrl, tokens.accessToken)
+        return tokens.copy(
+            displayName = profile.optString("displayName", "Smart Print customer"),
+            email = profile.optString("email")
+        )
+    }
+
     fun signIn(baseUrl: String, email: String, password: String): CustomerAuth {
         val response = request(
             baseUrl,

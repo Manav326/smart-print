@@ -35,6 +35,7 @@ services:
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
       ConnectionStrings__SmartPrint: "Host=db;Port=5432;Database=${POSTGRES_DB:-qrtoprint};Username=${POSTGRES_USER:-qrtoprint};Password=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}"
       Authentication__SigningKey: ${AUTH_SIGNING_KEY:?Set AUTH_SIGNING_KEY in .env}
+      Google__WebClientId: ${GOOGLE_WEB_CLIENT_ID:-}
       Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:?Set DOCUMENTS_ENCRYPTION_KEY in .env}
       Razorpay__KeyId: ${RAZORPAY_KEY_ID:-}
       Razorpay__KeySecret: ${RAZORPAY_KEY_SECRET:-}

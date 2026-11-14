@@ -34,6 +34,7 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__SmartPrint: "Host=db;Port=5432;Database=${POSTGRES_DB:-qrtoprint};Username=${POSTGRES_USER:-qrtoprint};Password=${POSTGRES_PASSWORD:-qrtoprint-local-only-db-password}"
       Authentication__SigningKey: ${AUTH_SIGNING_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      Google__WebClientId: ${GOOGLE_WEB_CLIENT_ID:-}
       Documents__EncryptionKey: ${DOCUMENTS_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       Razorpay__KeyId: ${RAZORPAY_KEY_ID:-}
       Razorpay__KeySecret: ${RAZORPAY_KEY_SECRET:-}

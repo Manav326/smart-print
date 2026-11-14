@@ -99,6 +99,8 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAssertion(context => PlatformAdminAuthorization.IsPlatformAdmin(context.User)));
 });
 builder.Services.AddScoped<TokenIssuer>();
+builder.Services.AddSingleton<GoogleIdentityService>();
+builder.Services.AddSingleton<GoogleLoginNonceStore>();
 builder.Services.AddScoped<TenantEntitlementService>();
 builder.Services.AddHttpClient<SubscriptionRazorpayService>();
 builder.Services.AddSingleton<DocumentStorage>();
@@ -598,6 +600,7 @@ platform.MapGet("/tenants/{tenantId:guid}/status-history", async (
 });
 
 var auth = app.MapGroup("/api/v1/auth").RequireRateLimiting("authentication");
+auth.MapGoogleAuthEndpoints();
 auth.MapPost("/register-shop", async (
     RegisterShopRequest request,
     UserManager<AppUser> userManager,
