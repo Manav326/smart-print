@@ -11,12 +11,28 @@ public static class PlanEntitlementRules
           requestedCount <= maximum.Value - currentCount));
 
     public static bool IsSubscriptionAccessActive(string? status, DateTimeOffset periodEndUtc, DateTimeOffset now) =>
+        IsSubscriptionAccessActive(status, DateTimeOffset.MinValue, periodEndUtc, now);
+
+    public static bool IsSubscriptionAccessActive(
+        string? status,
+        DateTimeOffset periodStartUtc,
+        DateTimeOffset periodEndUtc,
+        DateTimeOffset now) =>
         (string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase) ||
-         string.Equals(status, "Trial", StringComparison.OrdinalIgnoreCase)) &&
+         string.Equals(status, "Trial", StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(status, "Scheduled", StringComparison.OrdinalIgnoreCase)) &&
+        periodStartUtc <= now &&
         periodEndUtc > now;
 
     public static string GetEffectiveSubscriptionStatus(
         string? status,
+        DateTimeOffset periodEndUtc,
+        DateTimeOffset now) =>
+        GetEffectiveSubscriptionStatus(status, DateTimeOffset.MinValue, periodEndUtc, now);
+
+    public static string GetEffectiveSubscriptionStatus(
+        string? status,
+        DateTimeOffset periodStartUtc,
         DateTimeOffset periodEndUtc,
         DateTimeOffset now)
     {
@@ -25,11 +41,23 @@ public static class PlanEntitlementRules
             return "Unconfigured";
         }
 
-        if ((string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase) ||
-             string.Equals(status, "Trial", StringComparison.OrdinalIgnoreCase)) &&
-            periodEndUtc <= now)
+        var canBecomeActive = string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(status, "Trial", StringComparison.OrdinalIgnoreCase) ||
+                              string.Equals(status, "Scheduled", StringComparison.OrdinalIgnoreCase);
+        if (canBecomeActive && periodEndUtc <= now)
         {
             return "Expired";
+        }
+
+        if (canBecomeActive && periodStartUtc > now)
+        {
+            return "Scheduled";
+        }
+
+        if (string.Equals(status, "Scheduled", StringComparison.OrdinalIgnoreCase) &&
+            periodStartUtc <= now && periodEndUtc > now)
+        {
+            return "Active";
         }
 
         return status;
