@@ -479,12 +479,13 @@ function PlanVersionEditor({ form, onChange }: {
   onChange: <K extends keyof PlanForm>(key: K, value: PlanForm[K]) => void;
 }) {
   const currencyLabel = form.currency.trim().toUpperCase() === "INR" ? "₹" : form.currency.toUpperCase();
+  const priceStep = 10 ** -currencyMinorUnitDigits(form.currency);
   return (
     <div className="platform-plan-version-editor">
       <div className="platform-plan-subheading"><div><h4>Pricing</h4><p>Enter amounts in {currencyLabel}; SmartPrint stores the currency's minor units.</p></div><Field label="Currency"><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder="INR"/></Field></div>
       <div className="platform-plan-meta-grid">
-        <Field label={`Monthly price (${currencyLabel})`}><input type="number" min="0" step="0.01" value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="e.g. 149"/></Field>
-        <Field label={`Annual price (${currencyLabel})`}><input type="number" min="0" step="0.01" value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="e.g. 1499"/></Field>
+        <Field label={`Monthly price (${currencyLabel})`}><input type="number" min="0" step={priceStep} value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="e.g. 149"/></Field>
+        <Field label={`Annual price (${currencyLabel})`}><input type="number" min="0" step={priceStep} value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="e.g. 1499"/></Field>
       </div>
 
       <div className="platform-plan-subheading"><div><h4>Usage limits</h4><p>Blank means no configured cap; positive numbers enforce the configured limit when enforcement is connected.</p></div><span className="platform-plan-unlimited">Optional limits</span></div>
