@@ -130,20 +130,20 @@ test("owner quote edits are sent through the existing print-job API", () => {
 
 test("paid jobs are staged while a physical printer is offline and checked at dispatch", () => {
   const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const dispatchEndpoints = read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobDispatchEndpoints.cs");
+  const dispatchService = read("../../../src/SmartPrint.Api/Services/ShopPrintJobDispatchService.cs");
   const claimStart = program.indexOf('agentApi.MapPost("/jobs/claim"');
   const claimEnd = program.indexOf('agentApi.MapGet("/jobs/{jobId:guid}/document"', claimStart);
-  const dispatchStart = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/dispatch"');
-  const dispatchEnd = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/retry-pdf-export"', dispatchStart);
   assert.ok(claimStart >= 0 && claimEnd > claimStart);
-  assert.ok(dispatchStart >= 0 && dispatchEnd > dispatchStart);
   const claimRoute = program.slice(claimStart, claimEnd);
-  const dispatchRoute = program.slice(dispatchStart, dispatchEnd);
   assert.match(claimRoute, /printer\.IsActive/);
   assert.match(claimRoute, /printer\.QueueName != null/);
   assert.doesNotMatch(claimRoute, /printer\.Status == "Ready"/);
   assert.doesNotMatch(claimRoute, /printer\.LastSeenUtc/);
-  assert.match(dispatchRoute, /printer\.Status == "Ready"/);
-  assert.match(dispatchRoute, /printer\.LastSeenUtc/);
+  assert.match(dispatchEndpoints, /shop\.MapPost\("\/print-jobs\/\{jobId:guid\}\/dispatch"/);
+  assert.match(dispatchService, /printer\.Status == "Ready"/);
+  assert.match(dispatchService, /printer\.LastSeenUtc/);
+  assert.match(dispatchService, /PrivatePrintingOutputPolicy\.IsEligible/);
 });
 
 test("plan-limited HTTPS fallback is only offered when the Agent is unavailable", () => {
@@ -180,14 +180,11 @@ test("pre-submission printer capability blocks are explained in the shop queue",
 
 test("a pre-output capability block clears the attempted spooler name so the existing job can be reassigned", () => {
   const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const assignment = read("../../../src/SmartPrint.Api/Services/ShopPrintJobAssignmentService.cs");
   const blockedStart = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/print-blocked"');
   const blockedEnd = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed"', blockedStart);
-  const assignmentStart = program.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/printer"');
-  const assignmentEnd = program.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/settings"', assignmentStart);
   assert.ok(blockedStart >= 0 && blockedEnd > blockedStart);
-  assert.ok(assignmentStart >= 0 && assignmentEnd > assignmentStart);
   const blocked = program.slice(blockedStart, blockedEnd);
-  const assignment = program.slice(assignmentStart, assignmentEnd);
   assert.match(blocked, /job\.Status = "LOCAL_QUEUE_READY"/);
   assert.match(blocked, /job\.SpoolerJobName = null/);
   assert.match(blocked, /job\.SpoolerJobId = null/);
@@ -198,10 +195,10 @@ test("a pre-output capability block clears the attempted spooler name so the exi
 });
 
 test("reassigning a blocked queued job clears the previous printer failure", () => {
-  const program = read("../../../src/SmartPrint.Api/Program.cs");
-  const resetStart = program.indexOf("if (needsQueueReset)");
-  const failureReset = program.indexOf("batchJob.FailureCode = null;", resetStart);
-  const spoolerReset = program.indexOf("batchJob.SpoolerStatus = null;", resetStart);
+  const assignment = read("../../../src/SmartPrint.Api/Services/ShopPrintJobAssignmentService.cs");
+  const resetStart = assignment.indexOf("if (needsQueueReset)");
+  const failureReset = assignment.indexOf("batchJob.FailureCode = null;", resetStart);
+  const spoolerReset = assignment.indexOf("batchJob.SpoolerStatus = null;", resetStart);
   assert.ok(resetStart >= 0 && failureReset > resetStart && spoolerReset > failureReset);
 });
 
@@ -383,9 +380,10 @@ test("photo quantities support up to 100 copies and automatically paginate over 
 
  
 test("cloud shop photo revisions require an unpaid review-stage image and validate every A4 page",()=>{
- const program=read("../../../src/SmartPrint.Api/Program.cs");
- const start=program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision"');
- const end=program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/preview-source"',start);
+ const program=read("../../../src/SmartPrint.Api/Program.cs") +
+    "\\n" + read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobReadEndpoints.cs");
+  const start=program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision"');
+  const end=program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/preview-source"',start);
  assert.ok(start>=0&&end>start);
  const route=program.slice(start,end);
  assert.match(route,/IsShopOwner\(principal\)/);
@@ -595,7 +593,8 @@ test("local shop Photo Studio revision authorization and completion enforce the 
 });
 
 test("cloud shop Photo Studio revisions validate complete A4 raster geometry before replacing the saved job",()=>{
-  const program=read("../../../src/SmartPrint.Api/Program.cs");
+  const program=read("../../../src/SmartPrint.Api/Program.cs") +
+    "\\n" + read("../../../src/SmartPrint.Api/Endpoints/ShopPrintJobReadEndpoints.cs");
   const start=program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision"');
   const end=program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/preview-source"',start);
   assert.ok(start>=0&&end>start);
@@ -613,7 +612,8 @@ test("shop-originated photo orders use their own tenant-owned job and the shared
  const app=read("../src/App.tsx");
  const studio=read("../src/PhotoStudio.tsx");
  const api=read("../src/api.ts");
- const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const program=read("../../../src/SmartPrint.Api/Program.cs") +
+    "\\n" + read("../../../src/SmartPrint.Api/Endpoints/ShopReportEndpoints.cs");
  const endpointStart=program.indexOf('shop.MapPost("/photo-jobs"');
  const endpointEnd=program.indexOf('shop.MapGet("/reports/summary"',endpointStart);
  assert.ok(endpointStart>=0&&endpointEnd>endpointStart);
