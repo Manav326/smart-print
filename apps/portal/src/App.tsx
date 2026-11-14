@@ -3433,35 +3433,34 @@ function spoolerStatusWarning(status?: string | null, printerStatus?: string | n
 }
 function prettyStatus(status:string) {
   const names:Record<string,string>={
-    AWAITING_CONFIGURATION:"Configure options",
-    AWAITING_CUSTOMER_APPROVAL:"Quote awaiting customer",
-    QUOTE_EXPIRED:"Quote expired",
-    AWAITING_SHOP_APPROVAL:"Awaiting shop approval",
-    REJECTED:"Rejected",
-    REFUNDED:"Fully refunded",
-    PARTIALLY_REFUNDED:"Partially refunded",
-
-    UPLOADED:"Uploaded",
-    VALIDATING:"Validating",
-    ANALYSING:"Analysing",
-    AWAITING_PAYMENT:"Awaiting payment",
-    AWAITING_COUNTER_PAYMENT:"Pay at counter",
-    AUTHORISED:"Authorised",
-    PAID_AUTHORISED:"Paid · authorised",
-    LOCAL_QUEUE_CLAIMED:"Transferring locally",
-    LOCAL_QUEUE_READY:"Local copy secured",
-    PRINT_AUTHORISED:"Ready to print",
-    PRINT_SUBMITTING:"Sending to printer",
-    SPOOLER_ACCEPTED:"Accepted by spooler",
+    AWAITING_CONFIGURATION:"Being prepared",
+    AWAITING_CUSTOMER_APPROVAL:"Waiting for your approval",
+    QUOTE_EXPIRED:"Price needs refreshing",
+    AWAITING_SHOP_APPROVAL:"Shop reviewing",
+    REJECTED:"Not accepted",
+    REFUNDED:"Refunded",
+    PARTIALLY_REFUNDED:"Partly refunded",
+    UPLOADED:"Received",
+    VALIDATING:"Checking files",
+    ANALYSING:"Checking files",
+    AWAITING_PAYMENT:"Ready for payment",
+    AWAITING_COUNTER_PAYMENT:"Pay at shop",
+    AUTHORISED:"Approved",
+    PAID_AUTHORISED:"Payment received",
+    LOCAL_QUEUE_CLAIMED:"Preparing to print",
+    LOCAL_QUEUE_READY:"Ready to print",
+    PRINT_AUTHORISED:"Printing started",
+    PRINT_SUBMITTING:"Printing started",
+    SPOOLER_ACCEPTED:"Printing started",
     PRINTING:"Printing",
-    OUTPUT_UNCONFIRMED:"Output unconfirmed",
-    TEST_OUTPUT_READY:"Test PDF created · not physically printed",
-    PDF_EXPORTING:"Creating PDF",
-    PDF_EXPORTED:"PDF saved",
-    QUEUED:"Queued",
-    SUBMITTING_TO_SPOOLER:"Sending to printer",
-    COMPLETED:"Completed",
-    FAILED:"Failed",
+    OUTPUT_UNCONFIRMED:"Shop checking print",
+    TEST_OUTPUT_READY:"Test complete",
+    PDF_EXPORTING:"Preparing PDF",
+    PDF_EXPORTED:"PDF ready",
+    QUEUED:"Waiting to print",
+    SUBMITTING_TO_SPOOLER:"Printing started",
+    COMPLETED:"Ready for collection",
+    FAILED:"Could not print",
     CANCELLED:"Cancelled"
   };
   return names[status] || status.replaceAll("_"," ").toLowerCase().replace(/\\b\\w/g,letter=>letter.toUpperCase());
@@ -4950,7 +4949,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       const uploadError=exception instanceof LocalUploadOutcomeUnknownError
         ? privatePrinting
-          ? "Your file is encrypted and attached to the same private print request. The shop computer is still checking it; tap Retry to refresh the status without creating a duplicate."
+          ? "We're still preparing this file for printing. Tap Retry to check again; you do not need to upload the file again."
           : cloudAssistedPrintingEnabled
             ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
             : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
@@ -5165,7 +5164,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
     } catch(exception) {
       if(batchId)await refreshBatchStatuses();
-      setError(exception instanceof ApiError?exception.message:"Could not start this payment method.");
+      setError(exception instanceof ApiError && exception.code==="batch_uploads_still_processing"
+        ? "One of your files is still being prepared. Please wait a moment, then try again. No payment has been started."
+        : exception instanceof ApiError && exception.code==="batch_review_not_complete"
+          ? "The shop is still reviewing your files. Payment will be ready when the review is complete."
+          : exception instanceof ApiError
+            ? exception.message
+            : "Could not start this payment method.");
     } finally {setBusy(false);}
   }
 
@@ -5702,14 +5707,29 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
     {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={prettyStatus(jobStatus.status)} tone={["REJECTED","REFUNDED","CANCELLED","FAILED"].includes(jobStatus.status)?"red":jobStatus.status==="AWAITING_PAYMENT"?"green":"amber"}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
       <strong>{jobStatus.status==="TEST_OUTPUT_READY"?"Development test PDF generated · no physical print was made":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
-      <p>{jobStatus.status==="TEST_OUTPUT_READY"?(jobStatus.privateDocumentPurgedUtc
-        ?"The Agent confirmed that the encrypted source copy was removed. The protected test PDF remains on the shop computer for up to 24 hours for QA. Your original on this device is unchanged; no physical print or collection is recorded."
-        :"The Agent saved and verified a test PDF. SmartPrint is removing the encrypted source copy; the test PDF remains in protected local storage for up to 24 hours. Your original is unchanged and no physical print is recorded.")
-        :jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"The paired shop computer confirmed that its private working copy was removed. Your original file on this device is unchanged.":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"The shop confirmed the physical pages. SmartPrint is removing the private working copy from the paired shop computer and will confirm here when it is done.":nativeAppMode ? smartPrintNativeStatus(jobStatus.status) : jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop will review your request next. No payment has been collected.":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready. Choose one of the payment methods enabled by the shop; the shop must verify payment before authorising the job.":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your paid document is being transferred securely to the shop's Windows computer. It has not been sent to the printer.":jobStatus.status==="LOCAL_QUEUE_READY"?"The document is safely stored in the shop's local queue and is waiting for the print operator. Physical printing has not started.":jobStatus.status==="PRINT_AUTHORISED"?"The shop has authorised printing. The Windows agent will submit the document once.":jobStatus.status==="PRINT_SUBMITTING"?"The Windows agent is submitting your document to the printer.":jobStatus.status==="SPOOLER_ACCEPTED"?"Windows accepted the job into the printer queue. This does not yet confirm paper output.":jobStatus.status==="PRINTING"?"The printer driver reports that the job is printing. The shop will confirm the pages before marking it complete.":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The printer queue could not confirm the final output. The shop operator is checking the pages before any retry.":jobStatus.status==="COMPLETED"?"The shop has checked the physical pages and marked your print ready for collection.":jobStatus.status==="PDF_EXPORTED"?"The shop saved and verified your PDF export.":jobStatus.status==="REFUNDED"?"The file was excluded and the full payment was returned.":jobStatus.status==="CANCELLED"?"This request was cancelled and will not be produced.":jobStatus.status==="FAILED"?"This request could not be completed. Contact the shop before trying again.":jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay the shop at the counter. The job is not authorised until the shop confirms receipt.":jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the UPI payment and submit its transaction reference. The shop must independently verify it.":jobStatus.status==="PAYMENT_REPORTED"?"Your UPI reference was sent to the shop. It is not marked paid until the shop verifies the transaction.":jobStatus.status==="PAID_AUTHORISED"?"The shop has verified your payment. The print queue is being prepared; physical printing has not yet started.":jobStatus.status==="PAYMENT_REJECTED"?"The shop could not verify that payment. Check with the shop before trying another method.":jobStatus.status==="REJECTED"?"Please speak with the shop operator if you need help with this request.":jobStatus.status==="QUOTE_EXPIRED"?"This quote is no longer valid. Please ask the shop for a fresh quote.":"Check back for the latest request status."}</p>
-      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the encrypted source copy</strong>The test PDF was verified locally. The Agent is removing the protected source; the test PDF remains in its separate protected folder for up to 24 hours.</span></div>}
-      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Private source copy removed</strong>The test PDF remains in the Agent's protected test folder for up to 24 hours. It is not a physical print or a collection-ready order.</span></div>}
-      {jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing your document from the shop computer</strong>The shop confirmed the physical print. SmartPrint is removing the shop-side working copy and will confirm when deletion is complete.</span></div>}
-      {jobStatus.privatePrinting&&jobStatus.status!=="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Document removed from the shop computer</strong>The paired computer confirmed deletion of its private working copy. Your original file on this device has not been deleted.</span></div>}
+      <p>{jobStatus.status==="TEST_OUTPUT_READY"?"This was a test only. No physical pages were printed."
+        :jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop is reviewing your files. No payment has been collected."
+        :jobStatus.status==="AWAITING_PAYMENT"?"Your files are accepted. Complete payment to continue."
+        :jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay at the shop counter."
+        :jobStatus.status==="AWAITING_CUSTOMER_PAYMENT"?"Complete the payment using the details shown."
+        :jobStatus.status==="PAYMENT_REPORTED"?"Your payment details were sent to the shop. The shop is checking the payment."
+        :jobStatus.status==="PAYMENT_REJECTED"?"The payment could not be confirmed. Please check with the shop before paying again."
+        :jobStatus.status==="PAID_AUTHORISED"?"Payment received. The shop is preparing your print."
+        :jobStatus.status==="LOCAL_QUEUE_CLAIMED"||jobStatus.status==="LOCAL_QUEUE_READY"?"Your files have reached the shop and are being prepared for printing."
+        :["PRINT_AUTHORISED","PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus.status)?"Your print is in progress."
+        :jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and will confirm whether your pages were printed. Please do not pay or upload the same file again."
+        :jobStatus.status==="COMPLETED"?"Your pages are printed and ready for collection."
+        :jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready."
+        :jobStatus.status==="REFUNDED"?"This file was not printed and the payment was returned."
+        :jobStatus.status==="CANCELLED"?"This request was cancelled."
+        :jobStatus.status==="FAILED"?"Printing could not be completed. Please speak to the shop before submitting again."
+        :jobStatus.status==="REJECTED"?"The shop could not accept this file. Please ask the shop for help."
+        :jobStatus.status==="QUOTE_EXPIRED"?"The price has expired. Please request a fresh quote."
+        :"Your request is being processed. Refresh to check again."}</p>
+      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the shop copy</strong>The test PDF is ready. The shop copy is being securely removed.</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Shop copy removed</strong>The test file is not a physical print and is not ready for collection.</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the shop copy</strong>Your pages are printed. SmartPrint is securely removing the shop copy.</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status!=="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Shop copy removed</strong>Your file has been removed from the shop computer. The original on your device is unchanged.</span></div>}
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">
         <ShieldCheck size={16}/>
