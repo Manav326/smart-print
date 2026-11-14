@@ -15,6 +15,26 @@ public static class PlanEntitlementRules
          string.Equals(status, "Trial", StringComparison.OrdinalIgnoreCase)) &&
         periodEndUtc > now;
 
+    public static string GetEffectiveSubscriptionStatus(
+        string? status,
+        DateTimeOffset periodEndUtc,
+        DateTimeOffset now)
+    {
+        if (status is null)
+        {
+            return "Unconfigured";
+        }
+
+        if ((string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(status, "Trial", StringComparison.OrdinalIgnoreCase)) &&
+            periodEndUtc <= now)
+        {
+            return "Expired";
+        }
+
+        return status;
+    }
+
     public static bool AllowsDocument(long? maximumBytes, long requestedBytes) =>
         requestedBytes > 0 &&
         (maximumBytes is null ||
