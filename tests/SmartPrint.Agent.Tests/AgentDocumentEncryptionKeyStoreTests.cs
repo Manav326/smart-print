@@ -6,6 +6,47 @@ namespace SmartPrint.Agent.Tests;
 public sealed class AgentDocumentEncryptionKeyStoreTests
 {
     [Fact]
+    public void MigratesLegacyMachineProtectedAgentKeyToCurrentUserProtection()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "smartprint-private-key-tests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "agent-document-key.dpapi");
+        try
+        {
+            var legacyStore = new AgentDocumentEncryptionKeyStore(path, DataProtectionScope.LocalMachine);
+            var legacyPublicKey = legacyStore.GetOrCreatePublicKey();
+
+            var currentUserStore = new AgentDocumentEncryptionKeyStore(path, DataProtectionScope.CurrentUser);
+            var migratedPublicKey = currentUserStore.GetOrCreatePublicKey();
+            Assert.Equal(legacyPublicKey, migratedPublicKey);
+
+            var protectedBytes = File.ReadAllBytes(path);
+            var entropy = "SmartPrint.Agent.PrivateDocumentKey.v1"u8.ToArray();
+            try
+            {
+                var privateBytes = ProtectedData.Unprotect(
+                    protectedBytes, entropy, DataProtectionScope.CurrentUser);
+                try
+                {
+                    using var rsa = RSA.Create();
+                    rsa.ImportPkcs8PrivateKey(privateBytes, out _);
+                    Assert.Equal(legacyPublicKey, Convert.ToBase64String(rsa.ExportSubjectPublicKeyInfo()));
+                }
+                finally { CryptographicOperations.ZeroMemory(privateBytes); }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(protectedBytes);
+                CryptographicOperations.ZeroMemory(entropy);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void PublicKeyWrapsPerUploadAesKeyAndPersistsAcrossStoreInstances()
     {
         var root = Path.Combine(Path.GetTempPath(), "smartprint-private-key-tests", Guid.NewGuid().ToString("N"));
