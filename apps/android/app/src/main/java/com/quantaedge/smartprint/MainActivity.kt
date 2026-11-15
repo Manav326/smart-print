@@ -58,6 +58,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.google.android.material.appbar.MaterialToolbar
@@ -111,6 +112,8 @@ class MainActivity : AppCompatActivity() {
         private const val FOLDER_PICKER_ACCEPT = "application/x-smartprint-folder-selection"
         private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES = UploadLimits.MAX_FILE_BYTES
         private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES = UploadLimits.MAX_BATCH_BYTES
+        private const val OFFLINE_PHOTO_STUDIO_ASSET_HOST = "appassets.androidplatform.net"
+        private const val OFFLINE_PHOTO_STUDIO_ASSET_URL = "https://appassets.androidplatform.net/photo-studio-offline.html"
     }
 
     private lateinit var store: LocalDocumentStore
@@ -153,6 +156,7 @@ class MainActivity : AppCompatActivity() {
     private var customerUploadPdfPreviewOpen = false
     private val customerUploadPdfPreviews = java.util.concurrent.ConcurrentHashMap<String, File>()
     private var webView: WebView? = null
+    private var photoStudioAssetLoader: WebViewAssetLoader? = null
     private var folderPath = ""
     private var pickerPath = ""
     private var pickerMode = false
@@ -1676,6 +1680,34 @@ class MainActivity : AppCompatActivity() {
             uri.path.orEmpty().trimEnd('/').equals("/photo-studio", ignoreCase = true)
     }
 
+    private fun isOfflinePhotoStudioPageUrl(rawUrl: String?): Boolean {
+        val uri = runCatching { Uri.parse(rawUrl.orEmpty()) }.getOrNull() ?: return false
+        return uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host.equals(OFFLINE_PHOTO_STUDIO_ASSET_HOST, ignoreCase = true) &&
+            uri.path.equals("/photo-studio-offline.html", ignoreCase = true)
+    }
+
+    private fun isPhotoStudioScreenUrl(rawUrl: String?): Boolean =
+        isPhotoStudioPageUrl(rawUrl) || isOfflinePhotoStudioPageUrl(rawUrl)
+
+    private fun isOfflinePhotoStudioAssetUrl(uri: Uri): Boolean =
+        uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host.equals(OFFLINE_PHOTO_STUDIO_ASSET_HOST, ignoreCase = true) &&
+            (uri.path.equals("/photo-studio-offline.html", ignoreCase = true) ||
+                uri.path.orEmpty().startsWith("/assets/"))
+
+    private fun isAllowedOfflinePhotoStudioBridgeMessage(data: String): Boolean =
+        data == "listPhotoStudioDocuments" ||
+            data.startsWith("savePhotoStudioDocument|") ||
+            data.startsWith("updatePhotoStudioDocument|") ||
+            data.startsWith("getPhotoStudioPreviewPage|") ||
+            data.startsWith("getPhotoStudioSource|") ||
+            data.startsWith("renamePhotoStudioDocument|") ||
+            data.startsWith("deletePhotoStudioDocument|") ||
+            data == "setPhotoStudioOpen|on" || data == "setPhotoStudioOpen|off" ||
+            data == "setSensitivePreview|on" || data == "setSensitivePreview|off" ||
+            data == "setTheme|light" || data == "setTheme|dark"
+
     private fun showPhotoStudioLoadError(message: String) {
         photoStudioLoadFailed = true
         val host = webView?.parent as? FrameLayout ?: return
@@ -1713,8 +1745,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDedicatedPhotoStudio() {
         fileChooserReturnToPhotoStudio = false
-        // Do not early-return merely because the WebView URL is already /photo-studio:
-        // the native file picker detaches the WebView from the content container.
+        // Android uses the bundled build of the shared React Photo Studio. This
+        // keeps every editor tool available without relying on a hosted page.
+        // Do not early-return: the native file picker detaches the WebView.
         // Every entry must restore the WebView to the visible screen.
         idStudioScreenOpen = false
         privateIdViewerOpen = false
@@ -1734,8 +1767,8 @@ class MainActivity : AppCompatActivity() {
         val view = ensureWebView()
         (view.parent as? ViewGroup)?.removeView(view)
         photoStudioLoadingOverlay = null
-        val studioUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/photo-studio"
-        val pageReady = !photoStudioLoadFailed && isPhotoStudioPageUrl(view.url) && view.progress >= 100
+        val pageReady = !photoStudioLoadFailed &&
+            isOfflinePhotoStudioPageUrl(view.url) && view.progress >= 100
         val host = FrameLayout(this)
         host.addView(view, FrameLayout.LayoutParams(-1, -1))
         if (!pageReady) {
@@ -1756,9 +1789,9 @@ class MainActivity : AppCompatActivity() {
             host.addView(loading, FrameLayout.LayoutParams(-1, -1))
         }
         content.addView(host, frameParams())
-        if (photoStudioLoadFailed || !isPhotoStudioPageUrl(view.url)) {
+        if (!pageReady) {
             photoStudioLoadFailed = false
-            view.loadUrl(studioUrl)
+            view.loadUrl(OFFLINE_PHOTO_STUDIO_ASSET_URL)
         }
     }
 
@@ -2780,7 +2813,7 @@ class MainActivity : AppCompatActivity() {
         (view.parent as? ViewGroup)?.removeView(view)
         content.addView(view, frameParams())
         val activeShopUrl = portalUrl
-        if (activeShopUrl != null && isPhotoStudioPageUrl(view.url)) view.loadUrl(activeShopUrl)
+        if (activeShopUrl != null && isPhotoStudioScreenUrl(view.url)) view.loadUrl(activeShopUrl)
     }
 
     private fun findLibraryScrollView(view: View?): ScrollView? {
@@ -3951,6 +3984,11 @@ class MainActivity : AppCompatActivity() {
         // The bridge is pinned to the configured service origin for this build.
         val trustedPage = Uri.parse(BuildConfig.SERVICE_BASE_URL)
         val trustedOrigin = "${trustedPage.scheme}://${trustedPage.authority}"
+        val offlinePhotoStudioOrigin = "https://$OFFLINE_PHOTO_STUDIO_ASSET_HOST"
+        photoStudioAssetLoader = WebViewAssetLoader.Builder()
+            .setDomain(OFFLINE_PHOTO_STUDIO_ASSET_HOST)
+            .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
         val themeBootstrapPlan = WebViewThemeBootstrapPolicy.create(
             documentStartScriptAvailable = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT),
             webMessageListenerAvailable = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
@@ -3965,7 +4003,7 @@ class MainActivity : AppCompatActivity() {
             WebViewCompat.addDocumentStartJavaScript(
                 view,
                 SmartPrintThemeWebBootstrap.script(),
-                setOf(trustedOrigin)
+                setOf(trustedOrigin, offlinePhotoStudioOrigin)
             )
             webViewThemeBootstrapInstalled = true
         }
@@ -3974,15 +4012,21 @@ class MainActivity : AppCompatActivity() {
             WebViewCompat.addWebMessageListener(
                 view,
                 "SmartPrintNative",
-                setOf(trustedOrigin)
+                setOf(trustedOrigin, offlinePhotoStudioOrigin)
             ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
-                // Only the fixed configured origin and the top-level document may use this bridge.
+                // Only the configured service origin and fixed packaged Photo Studio origin and the top-level document may use this bridge.
                 val data = message.data.orEmpty()
-                if (isMainFrame &&
-                    sourceOrigin.scheme == trustedPage.scheme &&
+                val serviceOrigin = sourceOrigin.scheme == trustedPage.scheme &&
                     sourceOrigin.host.equals(trustedPage.host, true) &&
-                    sourceOrigin.port == trustedPage.port) {
-                    if (data == "requestLocalNetworkAccess") {
+                    sourceOrigin.port == trustedPage.port
+                val offlineStudioOrigin = sourceOrigin.scheme.equals("https", true) &&
+                    sourceOrigin.host.equals(OFFLINE_PHOTO_STUDIO_ASSET_HOST, true) &&
+                    (sourceOrigin.port == -1 || sourceOrigin.port == 443) &&
+                    isOfflinePhotoStudioPageUrl(webView?.url)
+                if (isMainFrame && (serviceOrigin || offlineStudioOrigin)) {
+                    if (offlineStudioOrigin && !isAllowedOfflinePhotoStudioBridgeMessage(data)) {
+                        replyProxy.postMessage("PHOTO_LIBRARY_FAILED|This action is not available from the offline Photo Studio page.")
+                    } else if (data == "requestLocalNetworkAccess" && serviceOrigin)  {
                         runOnUiThread {
                             if (!isFinishing && !isDestroyed) requestLocalNetworkAccess(replyProxy)
                             else runCatching { replyProxy.postMessage("localNetworkAccess:denied") }
@@ -3998,7 +4042,7 @@ class MainActivity : AppCompatActivity() {
                             data.startsWith("renamePhotoStudioDocument|") ||
                             data.startsWith("deletePhotoStudioDocument|")
                         val photoStudioRouteActive = privatePhotoStudioPageOpen &&
-                            isPhotoStudioPageUrl(webView?.url)
+                            isPhotoStudioScreenUrl(webView?.url)
                         when {
                             data == "releaseStudioUploadFiles" || data == "releasePhotoStudioUploadFiles" -> {
                                 runOnUiThread {
@@ -4243,7 +4287,11 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 return when (uri.scheme?.lowercase(Locale.ROOT)) {
-                    "https" -> if (uri.host.equals(portalHost, true)) false else { launchExternal(uri); true }
+                    "https" -> when {
+                        isOfflinePhotoStudioAssetUrl(uri) -> false
+                        uri.host.equals(portalHost, true) -> false
+                        else -> { launchExternal(uri); true }
+                    }
                     "upi", "tel", "mailto" -> { launchExternal(uri); true }
                     "intent" -> { launchIntent(uri.toString()); true }
                     "http" -> !(allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) || allowedLocalDevelopmentEndpoint(uri))
@@ -4255,6 +4303,13 @@ class MainActivity : AppCompatActivity() {
             }
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val uri = request.url
+                if (uri.host.equals(OFFLINE_PHOTO_STUDIO_ASSET_HOST, true)) {
+                    return photoStudioAssetLoader?.shouldInterceptRequest(uri)
+                        ?: WebResourceResponse(
+                            "text/plain", "UTF-8", 404, "Not Found", emptyMap(),
+                            ByteArrayInputStream("Bundled Photo Studio asset not found.".toByteArray())
+                        )
+                }
                 if (uri.scheme.equals("http", true) &&
                     !allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) &&
                     !allowedLocalDevelopmentEndpoint(uri)) {
@@ -4267,7 +4322,7 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
-                if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(url)) {
+                if (privatePhotoStudioPageOpen && isPhotoStudioScreenUrl(url)) {
                     photoStudioLoadingOverlay?.let { overlay ->
                         (overlay.parent as? ViewGroup)?.removeView(overlay)
                     }
@@ -4293,13 +4348,13 @@ class MainActivity : AppCompatActivity() {
             ) {
                 super.onReceivedError(view, request, error)
                 if (request.isForMainFrame && privatePhotoStudioPageOpen &&
-                    isPhotoStudioPageUrl(request.url.toString())) {
+                    isPhotoStudioScreenUrl(request.url.toString())) {
                     showPhotoStudioLoadError("Check your connection and try again.")
                 }
             }
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: android.net.http.SslError) {
                 handler.cancel()
-                if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(view.url)) {
+                if (privatePhotoStudioPageOpen && isPhotoStudioScreenUrl(view.url)) {
                     showPhotoStudioLoadError(
                         "The secure connection failed. Your saved photo sheets remain on this device."
                     )
@@ -4318,7 +4373,7 @@ class MainActivity : AppCompatActivity() {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
                 fileChooserReturnToPhotoStudio =
-                    privatePhotoStudioPageOpen && isPhotoStudioPageUrl(webView.url)
+                    privatePhotoStudioPageOpen && isPhotoStudioScreenUrl(webView.url)
                 fileChooserSelectFolders = params.acceptTypes.any { accepted ->
                     accepted.split(',').any { it.trim().equals(FOLDER_PICKER_ACCEPT, ignoreCase = true) }
                 }

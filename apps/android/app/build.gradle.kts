@@ -35,6 +35,40 @@ val releaseKeyAlias = providers.environmentVariable("ANDROID_SIGNING_KEY_ALIAS")
 val releaseKeyPassword = providers.environmentVariable("ANDROID_SIGNING_KEY_PASSWORD").orNull
 val hasReleaseSigning = listOf(releaseKeystorePath, releaseKeystorePassword, releaseKeyAlias, releaseKeyPassword).all { !it.isNullOrBlank() }
 
+val repositoryRoot = rootProject.projectDir.resolve("../..").canonicalFile
+val portalRoot = repositoryRoot.resolve("apps/portal")
+val offlinePhotoStudioBuild = portalRoot.resolve("dist-android-offline")
+val generatedPhotoStudioAssets = layout.buildDirectory.dir("generated/photoStudioOfflineAssets")
+
+// The Android APK compiles the same React Photo Studio and editor sources as
+// the hosted portal. Never maintain a separate native or reduced editor.
+val pnpmCommand = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) {
+    listOf("cmd", "/c", "pnpm")
+} else {
+    listOf("pnpm")
+}
+val typecheckOfflinePhotoStudioPortal = tasks.register<Exec>("typecheckOfflinePhotoStudioPortal") {
+    workingDir = repositoryRoot
+    commandLine(pnpmCommand + listOf("--filter", "@smart-print/portal", "typecheck"))
+}
+val buildOfflinePhotoStudioPortal = tasks.register<Exec>("buildOfflinePhotoStudioPortal") {
+    dependsOn(typecheckOfflinePhotoStudioPortal)
+    workingDir = repositoryRoot
+    commandLine(pnpmCommand + listOf("--filter", "@smart-print/portal", "exec", "vite", "build"))
+    environment("VITE_BUILD_ANDROID_OFFLINE_PHOTO_STUDIO", "true")
+}
+val bundleOfflinePhotoStudioAssets = tasks.register<Sync>("bundleOfflinePhotoStudioAssets") {
+    dependsOn(buildOfflinePhotoStudioPortal)
+    from(offlinePhotoStudioBuild)
+    exclude("tests/**")
+    into(generatedPhotoStudioAssets)
+    doFirst {
+        if (!offlinePhotoStudioBuild.resolve("photo-studio-offline.html").isFile) {
+            throw GradleException("The shared offline Photo Studio page was not built for Android.")
+        }
+    }
+}
+
 android {
     buildFeatures { buildConfig = true }
     namespace = "com.quantaedge.smartprint"
@@ -82,6 +116,9 @@ kotlin {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
     }
 }
+
+android.sourceSets.getByName("main").assets.srcDir(generatedPhotoStudioAssets)
+tasks.named("preBuild").configure { dependsOn(bundleOfflinePhotoStudioAssets) }
 
 // Stream each Android JVM test as it starts and completes so local QA and CI
 // show the exact test currently executing instead of a silent Gradle wait.

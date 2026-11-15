@@ -963,4 +963,126 @@ class PhotoStudioWebViewInstrumentedTest {
             scenario.close()
         }
     }
+
+    @Test
+    fun androidLoadsTheSharedFullPhotoStudioFromBundledAssetsWithoutAServiceConnection() {
+        assumeTrue(
+            "Bundled Photo Studio WebView instrumentation is enabled only for the local .localqa package.",
+            BuildConfig.PHOTO_STUDIO_QA_ENABLED
+        )
+        val scenario = ActivityScenario.launch(MainActivity::class.java)
+        try {
+            scenario.onActivity { activity ->
+                MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                    isAccessible = true
+                }.set(activity, null)
+                MainActivity::class.java.getDeclaredField("portalHost").apply {
+                    isAccessible = true
+                }.set(activity, null)
+                MainActivity::class.java.getDeclaredMethod("showDedicatedPhotoStudio").apply {
+                    isAccessible = true
+                    invoke(activity)
+                }
+            }
+
+            waitFor(
+                scenario,
+                "location.host === 'appassets.androidplatform.net' && " +
+                    "location.pathname === '/photo-studio-offline.html' && " +
+                    "document.getElementById('private-photo-source') instanceof HTMLInputElement",
+                "bundled offline Photo Studio page and local document library"
+            )
+            assertEquals(
+                "The offline editor must not be a webpage loaded from the hosted service.",
+                "appassets.androidplatform.net",
+                decodeJavascriptString(evaluate(scenario, "window.location.host"))
+            )
+            assertEquals(
+                "The complete page must keep the narrow native library bridge.",
+                "true",
+                evaluate(scenario, "Boolean(window.SmartPrintNative)")
+            )
+            assertEquals(
+                "All page resources must be served from the packaged asset origin or in-memory data.",
+                "true",
+                evaluate(
+                    scenario,
+                    """performance.getEntriesByType('resource').every(entry => {
+                      if (entry.name.startsWith('data:') || entry.name.startsWith('blob:')) return true;
+                      try { return new URL(entry.name).host === 'appassets.androidplatform.net'; }
+                      catch { return false; }
+                    })"""
+                )
+            )
+
+            // Supply a local image through the same file input used by Browse phone.
+            // This opens the actual shared React editor, not a native substitute.
+            evaluate(
+                scenario,
+                """(() => {
+                  const canvas = document.createElement('canvas');
+                  canvas.width = 900;
+                  canvas.height = 1200;
+                  const context = canvas.getContext('2d');
+                  context.fillStyle = '#dcecff';
+                  context.fillRect(0, 0, canvas.width, canvas.height);
+                  context.fillStyle = '#394b78';
+                  context.beginPath();
+                  context.arc(450, 390, 190, 0, Math.PI * 2);
+                  context.fill();
+                  context.fillRect(240, 620, 420, 420);
+                  const input = document.getElementById('private-photo-source');
+                  canvas.toBlob(blob => {
+                    if (!input || !blob) {
+                      window.__offlinePhotoSourceError = 'The local test image could not be created.';
+                      return;
+                    }
+                    const file = new File([blob], 'offline-photo.png', { type: 'image/png' });
+                    Object.defineProperty(input, 'files', { configurable: true, value: [file] });
+                    input.dispatchEvent(new Event('change', { bubbles: true }));
+                    window.__offlinePhotoSourceReady = true;
+                  }, 'image/png');
+                  return 'queued';
+                })()"""
+            )
+            waitFor(
+                scenario,
+                "window.__offlinePhotoSourceReady === true",
+                "local photo source to be delivered to the editor"
+            )
+            waitFor(
+                scenario,
+                "document.querySelector('[role=dialog]') !== null && " +
+                    "document.querySelector('[role=dialog]')?.getAttribute('aria-busy') === 'false' && " +
+                    "document.getElementById('photo-studio-tool-background') !== null",
+                "the full shared Photo Studio editor to decode its local image"
+            )
+            assertEquals(
+                "The Android offline editor must expose the same five tools as the hosted Photo Studio.",
+                """["Sheet","Crop","Looks","Text","Background"]""",
+                decodeJavascriptString(
+                    evaluate(
+                        scenario,
+                        """JSON.stringify(Array.from(
+                          document.querySelectorAll('[role=dialog] nav[aria-label="Photo editing tools"] button')
+                        ).map(button => button.innerText.trim()))"""
+                    )
+                )
+            )
+
+            clickButton(scenario, "photo-studio-tool-crop")
+            waitFor(scenario, "Boolean(document.getElementById('photo-studio-zoom'))", "crop controls in offline editor")
+            clickButton(scenario, "photo-studio-tool-looks")
+            waitFor(scenario, "Boolean(document.getElementById('photo-studio-look-natural'))", "photo looks in offline editor")
+            clickButton(scenario, "photo-studio-tool-text")
+            waitFor(scenario, "Boolean(document.getElementById('photo-studio-add-text'))", "text layers in offline editor")
+            clickButton(scenario, "photo-studio-tool-background")
+            waitFor(scenario, "Boolean(document.getElementById('photo-studio-background-tolerance'))", "background replacement in offline editor")
+            clickButton(scenario, "photo-studio-cancel")
+            waitFor(scenario, "document.querySelector('[role=dialog]') === null", "offline Photo Studio editor to close")
+        } finally {
+            scenario.close()
+        }
+    }
+
 }
