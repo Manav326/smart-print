@@ -10501,8 +10501,9 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         .Where(item => item.TenantId == session.TenantId &&
                        item.CustomerSessionId == session.Id &&
                        item.PrintJobId == job.Id)
+        .OrderBy(item => item.CreatedUtc)
         .Select(item => new { item.PrintKind, item.PrivatePrinting })
-        .SingleOrDefaultAsync(ct);
+        .FirstOrDefaultAsync(ct);
 
     if (!subscription.IsAccessActive)
     {
