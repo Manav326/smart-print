@@ -78,6 +78,9 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611140004_AllowUnquotedPhotoDraftJobs",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611150001_AddIdDocumentPricing",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
