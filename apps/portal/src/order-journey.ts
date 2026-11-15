@@ -1,6 +1,10 @@
 import type { ShopPayment, ShopPrintJob } from "./api";
 
 export type OrderJourneyStage = "received" | "review" | "payment" | "printing" | "ready";
+
+export function isSpoolerJobRetained(status?: string | null): boolean {
+  return (status ?? "").trim().toUpperCase() === "RETAINED";
+}
 export interface ShopOrderJourney {
   key: string; batchId: string | null; name: string; reference: string; createdUtc: string;
   jobs: ShopPrintJob[]; payment: ShopPayment | null; stage: OrderJourneyStage; stageIndex: number;
