@@ -3827,7 +3827,7 @@ html[data-theme="dark"] .brand-lockup-logo-dark { display: block; }
 
 /* Customer uploader refinement: consistent inline preview, clear quote and readable status. */
 .customer-native-pdf-preview{display:grid;gap:8px;padding:10px;background:var(--surface-2);min-width:0}
-.customer-native-pdf-page{display:block;width:100%;max-height:min(52vh,520px);object-fit:contain;background:#fff;border-radius:7px}
+.customer-native-pdf-page{display:block;width:100%;max-height:min(58vh,420px);object-fit:contain;background:#fff;border-radius:7px}
 .customer-native-pdf-empty{min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:var(--muted);font-size:11px;text-align:center}
 .customer-native-pdf-empty .customer-file-studio-button{min-height:36px;padding:8px 13px;font-size:11px}
 .customer-native-pdf-controls{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -3851,7 +3851,7 @@ html[data-theme="dark"] .customer-upload-notice.warning{border-color:#6d5630;bac
 .customer-upi-download-status{display:flex;align-items:center;justify-content:center;gap:5px;color:var(--green);font-size:11px;line-height:1.4;text-align:center}
 .customer-upi-download-status svg{flex:0 0 auto}
 @media(max-width:520px){
- .customer-native-pdf-page{max-height:min(48vh,390px)}
+ .customer-native-pdf-page{max-height:min(60vh,480px)}
  .customer-native-pdf-controls button{min-height:40px;padding-inline:9px}
  .customer-upload-notice{font-size:11px}
  .customer-batch-quote-card>div:first-child>strong{font-size:clamp(20px,6vw,26px)}

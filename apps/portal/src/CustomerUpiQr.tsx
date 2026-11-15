@@ -28,15 +28,18 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,fileName}:Prop
   if(!value)return;
   setError("");setStatus("");
   try{
-   if(navigator.clipboard?.writeText)await navigator.clipboard.writeText(value);
-   else{
+   let copied=false;
+   try{
+    if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(value);copied=true;}
+   }catch{/* Fall back to the WebView-compatible copy path below. */}
+   if(!copied){
     const input=document.createElement("textarea");
     input.value=value;input.setAttribute("readonly","");
     input.style.position="fixed";input.style.opacity="0";
     document.body.appendChild(input);input.select();
-    const copied=document.execCommand("copy");input.remove();
-    if(!copied)throw new Error("Clipboard access is unavailable.");
+    copied=document.execCommand("copy");input.remove();
    }
+   if(!copied)throw new Error("Clipboard access is unavailable.");
    setStatus(label+" copied.");
   }catch(e){setError(e instanceof Error?e.message:"Could not copy "+label.toLowerCase()+".");}
  }

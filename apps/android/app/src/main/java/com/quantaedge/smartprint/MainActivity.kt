@@ -6628,8 +6628,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun createCustomerUploadPdfPreview(file: File, materializedPhotoPdf: File? = null): String? {
         if (idStudioStore.isPreparedDocument(file)) {
+            // The upload preparation path supplies the already-decrypted staging
+            // file and tracks it for secure release. Do not create an untracked copy.
             val materialized = materializedPhotoPdf?.takeIf { it.isFile }
-                ?: runCatching { idStudioStore.materializePreparedFile(file) }.getOrNull()
                 ?: return null
             val token = UUID.randomUUID().toString()
             customerUploadPdfPreviews[token] = materialized
