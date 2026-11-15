@@ -694,6 +694,7 @@ public sealed class WindowsPrintExecutor
 
     public static bool ShouldReleaseRetainedPrivateJob(uint statusFlags) =>
         (statusFlags & JobStatusRetained) != 0 &&
+        (statusFlags & JobStatusPrinted) != 0 &&
         (statusFlags & (JobStatusPrinting | JobStatusSpooling)) == 0;
 
     private static IntPtr CreateDevMode(IntPtr printer, string queueName, AgentLocalQueueEntry entry, bool landscape)
