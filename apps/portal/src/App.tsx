@@ -3168,6 +3168,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {job.printerAgentName&&job.outputMode!=="PDF_EXPORT"&&<small>Shop computer: {job.printerAgentName}</small>}
                 {job.printerSnapshotUtc&&<small>Output destination recorded: {formatIstDateTime(job.printerSnapshotUtc)}</small>}
                 {job.outputConfirmedUtc&&job.outputType!=="PDF_EXPORT"&&<small>Paper output manually confirmed by {job.outputConfirmedByName||"shop operator"} at {formatIstDateTime(job.outputConfirmedUtc)}</small>}
+                {job.spoolerStatus?.toUpperCase()==="RETAINED"&&<small className="queue-print-warning">{spoolerStatusWarning(job.spoolerStatus,job.printerStatus)}</small>}
               </div>}
               {!job.printerName&&job.storageMode==="LOCAL_AGENT"&&job.documentAgentDeviceName&&<div className="queue-batch-file-printer"><Printer size={13}/><strong>Stored on</strong><span>{job.documentAgentDeviceName}</span></div>}
               {batch.jobs.length > 1 && verifiedPdfExportPath(job) && <div className="queue-batch-file-output">
