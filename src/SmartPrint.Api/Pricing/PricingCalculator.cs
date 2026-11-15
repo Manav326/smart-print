@@ -34,6 +34,15 @@ public static class PricingCalculator
         return Math.Max(amount, pricing.MinimumChargeMinor);
     }
 
+    public static long CalculateIdDocument(ShopPricingProfile pricing)
+    {
+        ArgumentNullException.ThrowIfNull(pricing);
+        if (!pricing.IsConfigured) throw new InvalidOperationException("Shop pricing is not configured.");
+        if (pricing.IdDocumentPriceMinor <= 0)
+            throw new InvalidOperationException("ID card printing is not currently priced by this shop.");
+        return pricing.IdDocumentPriceMinor;
+    }
+
     public static long CalculatePhoto(int photoCount, string photoSizeCode, ShopPricingProfile pricing)
     {
         ArgumentNullException.ThrowIfNull(pricing);
