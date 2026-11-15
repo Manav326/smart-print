@@ -5,27 +5,22 @@ using System.Security.Principal;
 namespace SmartPrint.Agent;
 
 /// <summary>
-/// Per-Agent RSA key used only to wrap per-upload AES keys. Production storage
-/// uses DPAPI CurrentUser under the Agent service identity; older LocalMachine
-/// protected keys are migrated after successful decryption and validation.
+/// Per-Agent RSA key used only to wrap per-upload AES keys. The private key is
+/// protected with DPAPI LocalMachine and stored inside a SYSTEM-only directory.
 /// </summary>
 public sealed class AgentDocumentEncryptionKeyStore
 {
     private static readonly byte[] Entropy = "SmartPrint.Agent.PrivateDocumentKey.v1"u8.ToArray();
     private readonly string keyPath;
     private readonly bool applyWindowsAcl;
-    private readonly DataProtectionScope protectionScope;
     private readonly object sync = new();
 
-    public AgentDocumentEncryptionKeyStore(string? keyPath = null, DataProtectionScope? protectionScope = null)
+    public AgentDocumentEncryptionKeyStore(string? keyPath = null)
     {
         applyWindowsAcl = keyPath is null;
         this.keyPath = Path.GetFullPath(keyPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "QRtoPrint", "LocalQueue", "document-encryption-key.dpapi"));
-        this.protectionScope = protectionScope ?? (keyPath is null
-            ? DataProtectionScope.CurrentUser
-            : DataProtectionScope.LocalMachine);
     }
 
     public string GetOrCreatePublicKey()
@@ -80,23 +75,8 @@ public sealed class AgentDocumentEncryptionKeyStore
         {
             var protectedBytes = File.ReadAllBytes(keyPath);
             byte[] privateBytes;
-            var needsProtectionUpgrade = false;
-            try
-            {
-                try
-                {
-                    privateBytes = ProtectedData.Unprotect(protectedBytes, Entropy, protectionScope);
-                }
-                catch (CryptographicException) when (protectionScope == DataProtectionScope.CurrentUser)
-                {
-                    // Existing installations used LocalMachine DPAPI. Upgrade the
-                    // private key only after it has been successfully imported.
-                    privateBytes = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
-                    needsProtectionUpgrade = true;
-                }
-            }
+            try { privateBytes = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine); }
             finally { CryptographicOperations.ZeroMemory(protectedBytes); }
-
             try
             {
                 var rsa = RSA.Create();
@@ -105,9 +85,6 @@ public sealed class AgentDocumentEncryptionKeyStore
                     rsa.ImportPkcs8PrivateKey(privateBytes, out _);
                     if (rsa.KeySize < 2048)
                         throw new CryptographicException("The Agent document key is too small.");
-
-                    if (needsProtectionUpgrade)
-                        SaveProtectedPrivateKey(privateBytes);
                     return rsa;
                 }
                 catch
@@ -136,7 +113,7 @@ public sealed class AgentDocumentEncryptionKeyStore
 
     private void SaveProtectedPrivateKey(byte[] privateBytes)
     {
-        var protectedBytes = ProtectedData.Protect(privateBytes, Entropy, protectionScope);
+        var protectedBytes = ProtectedData.Protect(privateBytes, Entropy, DataProtectionScope.LocalMachine);
         var temporary = keyPath + ".tmp";
         try
         {
