@@ -206,17 +206,23 @@ public sealed class AgentLocalQueueStore
             64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
         {
             var zeroes = new byte[64 * 1024];
-            long remaining = stream.Length;
-            stream.Position = 0;
-            while (remaining > 0)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var count = (int)Math.Min(zeroes.Length, remaining);
-                await stream.WriteAsync(zeroes.AsMemory(0, count), cancellationToken);
-                remaining -= count;
+                long remaining = stream.Length;
+                stream.Position = 0;
+                while (remaining > 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var count = (int)Math.Min(zeroes.Length, remaining);
+                    await stream.WriteAsync(zeroes.AsMemory(0, count), cancellationToken);
+                    remaining -= count;
+                }
+                stream.Flush(flushToDisk: true);
             }
-            stream.Flush(flushToDisk: true);
-            CryptographicOperations.ZeroMemory(zeroes);
+            finally
+            {
+                CryptographicOperations.ZeroMemory(zeroes);
+            }
         }
         File.Delete(fullPath);
     }
@@ -237,34 +243,13 @@ public sealed class AgentLocalQueueStore
             documentPath + ".tmp",
             documentPath + ".photo-revision.bak",
             documentPath + ".photo.source",
-GetManifestPath(jobId) + ".tmp"
+            GetManifestPath(jobId) + ".tmp"
         };
 
         foreach (var candidate in paths)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var fullPath = Path.GetFullPath(candidate);
-            if (!fullPath.StartsWith(prefix, comparison))
-                throw new InvalidDataException("The orphaned private document path is outside the protected queue.");
-            if (!File.Exists(fullPath)) continue;
-
-            await using (var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Write, FileShare.None,
-                64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough | FileOptions.SequentialScan))
-            {
-                var zeroes = new byte[64 * 1024];
-                long remaining = stream.Length;
-                stream.Position = 0;
-                while (remaining > 0)
-                {
-                    var count = (int)Math.Min(zeroes.Length, remaining);
-                    await stream.WriteAsync(zeroes.AsMemory(0, count), cancellationToken);
-                    remaining -= count;
-                }
-                await stream.FlushAsync(cancellationToken);
-                stream.Flush(flushToDisk: true);
-                CryptographicOperations.ZeroMemory(zeroes);
-            }
-            File.Delete(fullPath);
+            await EraseProtectedQueueFileAsync(candidate, prefix, comparison, cancellationToken);
         }
     }
 
