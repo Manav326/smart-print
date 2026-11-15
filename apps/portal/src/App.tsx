@@ -1630,7 +1630,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onNavigate={navAction}
             onReviewBatch={openBatchReview}
             onVerifyPayment={verifyPayment}
-            onPreview={job=>{navAction("Print Queue");void previewJob(job,true);}}
+            onPreview={job=>void previewJob(job,true)}
             onApprove={approveJob}
             onReject={rejectJob}
             onRefund={job=>setRefundJob(job)}
@@ -2782,6 +2782,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {job.printerAgentName&&job.outputMode!=="PDF_EXPORT"&&<small>Shop computer: {job.printerAgentName}</small>}
                 {job.printerSnapshotUtc&&<small>Output destination recorded: {formatIstDateTime(job.printerSnapshotUtc)}</small>}
                 {job.outputConfirmedUtc&&job.outputType!=="PDF_EXPORT"&&<small>Paper output manually confirmed by {job.outputConfirmedByName||"shop operator"} at {formatIstDateTime(job.outputConfirmedUtc)}</small>}
+                {job.spoolerStatus?.toUpperCase()==="RETAINED"&&<small className="queue-print-warning">{spoolerStatusWarning(job.spoolerStatus,job.printerStatus)}</small>}
               </div>}
               {!job.printerName&&job.storageMode==="LOCAL_AGENT"&&job.documentAgentDeviceName&&<div className="queue-batch-file-printer"><Printer size={13}/><strong>Stored on</strong><span>{job.documentAgentDeviceName}</span></div>}
               {batch.jobs.length > 1 && verifiedPdfExportPath(job) && <div className="queue-batch-file-output">
@@ -2905,7 +2906,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
 }
 
 function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEvent[];onClose:()=>void}) {
-  return <Modal title={job.jobNumber} subtitle={`Audit history · ${job.document.originalFileName}`} onClose={onClose}>
+  return <Modal title={job.jobNumber} subtitle={job.privatePrinting?"Private print · audit history":`Audit history · ${job.document.originalFileName}`} onClose={onClose}>
     <div className="shop-history-list">{events.length===0?<p>No recorded events yet.</p>:events.map(event=><div key={event.id}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"Customer":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>
     <div className="modal-actions"><button className="secondary-button" onClick={onClose}>Close history</button></div>
   </Modal>;
@@ -3042,6 +3043,8 @@ function spoolerStatusWarning(status?: string | null, printerStatus?: string | n
   const printer = (printerStatus || "").toUpperCase();
   if (spooler === "OFFLINE" || printer === "OFFLINE")
     return "Printer is offline. Reconnect it; Windows may resume this same queued job. Do not start a duplicate.";
+  if (spooler === "RETAINED")
+    return "Windows is holding this print job. SmartPrint will release it only after Windows confirms printing is complete. Confirm output only after the physical pages have printed.";
   if (spooler === "PAPEROUT")
     return "The printer reports no paper. Refill it and check the same Windows queue before continuing.";
   if (spooler === "PAUSED" || printer === "PAUSED")

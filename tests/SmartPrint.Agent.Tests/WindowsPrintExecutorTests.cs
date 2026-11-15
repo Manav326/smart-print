@@ -30,6 +30,10 @@ public sealed class WindowsPrintExecutorTests
     [InlineData(0x00000010u, "PRINTING")]
     [InlineData(0x00000008u, "SPOOLING")]
     [InlineData(0x00000080u, "PRINTED")]
+    [InlineData(0x00002000u, "RETAINED")]
+    [InlineData(0x00002000u | 0x00000010u, "PRINTING")]
+    [InlineData(0x00002000u | 0x00000008u, "SPOOLING")]
+    [InlineData(0x00002000u | 0x00000080u, "PRINTED")]
     [InlineData(0u, "QUEUED")]
     public void ResolvesWindowsSpoolerStatusFlags(uint flags, string expected)
     {
@@ -41,9 +45,22 @@ public sealed class WindowsPrintExecutorTests
     [InlineData(0x00000040u | 0x00000010u, "PAPEROUT")]
     [InlineData(0x00000001u | 0x00000008u, "PAUSED")]
     [InlineData(0x00000400u | 0x00000010u, "USERINTERVENTION")]
+    [InlineData(0x00002000u | 0x00000020u, "OFFLINE")]
     public void PrinterFaultsTakePriorityOverActiveQueueFlags(uint flags, string expected)
     {
         Assert.Equal(expected, WindowsPrintExecutor.ResolveSpoolerStatus(flags));
+    }
+
+    [Theory]
+    [InlineData(0x00002000u, false)] // Held/retained is not proof of completed printing.
+    [InlineData(0x00002000u | 0x00000080u, true)]
+    [InlineData(0x00002000u | 0x00000010u, false)]
+    [InlineData(0x00002000u | 0x00000008u, false)]
+    [InlineData(0x00002000u | 0x00000001u | 0x00000080u, true)]
+    [InlineData(0x00000010u, false)]
+    public void ReleasesOnlyRetainedJobsThatAreNotActivelyPrinting(uint flags, bool expected)
+    {
+        Assert.Equal(expected, WindowsPrintExecutor.ShouldReleaseRetainedPrivateJob(flags));
     }
 
     [Fact]
@@ -65,6 +82,27 @@ public sealed class WindowsPrintExecutorTests
 
 public sealed class WindowsPrintToPdfSpoolerIntegrationTests
 {
+    [Fact]
+    public void OpensAWindowsQueueWithAdministrativeAccessForIdempotentRelease()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Assert.True(OperatingSystem.IsWindows(), "The spooler administration test requires a Windows runner.");
+        const string queueName = "Microsoft Print to PDF";
+        const int absentJobId = int.MaxValue;
+        var executor = new WindowsPrintExecutor();
+
+        Assert.Null(executor.GetJob(queueName, absentJobId));
+        // This opens the queue with PRINTER_ACCESS_ADMINISTER and verifies that
+        // releasing an already-absent job is a safe, idempotent cleanup operation.
+        executor.ReleaseRetainedJob(queueName, absentJobId);
+        Assert.Null(executor.GetJob(queueName, absentJobId));
+    }
+
     [Theory]
     [InlineData("Microsoft Print to PDF")]
     [InlineData("SmartPrint CI Secondary Queue")]

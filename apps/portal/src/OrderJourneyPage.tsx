@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Activity, AlertTriangle, ArrowRight, Check, Clock3, CreditCard, Eye, FileText, History, Image as ImageIcon, Inbox, PackageCheck, Printer, RefreshCw, RotateCcw, ShieldCheck, Wallet, Wifi, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Clock3, CreditCard, Eye, FileText, History, Image as ImageIcon, Inbox, PackageCheck, Printer, RefreshCw, RotateCcw, ShieldCheck, Wallet, Wifi, X } from "lucide-react";
 import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./api";
 import { formatIstDateTime } from "./date-time";
 import { buildShopOrderJourneys, filterShopOrderJourneys, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
@@ -53,14 +53,6 @@ function printerSummary(jobs:ShopPrintJob[],printers:PrinterDevice[],agents:Agen
     ? {name:names.join(", ")||"Assigned printer",detail:"Connected · shop computer online",ready:true}
     : {name:names.join(", ")||"Assigned printer",detail:"Assigned · waiting for shop computer",ready:false};
 }
-function PrinterVisual({stage,attention}:{stage:OrderJourneyStage;attention:boolean}){
-  const printing=stage==="printing"&&!attention,ready=stage==="ready";
-  return <div role="img" className={styles.machineVisual+(printing?" "+styles.machinePrinting:"")+(ready?" "+styles.machineReady:"")} aria-label={attention?"Printing needs attention":ready?"Print output complete":printing?"Print job in progress":"Print workflow illustration"}>
-    <div className={styles.paper}><span/><span/><span/><span/><i>{ready?<Check size={13}/>:<FileText size={13}/>}</i></div>
-    <div className={styles.printerTop}><div className={styles.printerTopLine}/><div className={styles.printerStatusDot}/></div>
-    <div className={styles.printerBody}><div className={styles.printerDisplay}><span/>{attention?"!":ready?"OK":printing?"RUN":"READY"}</div><div className={styles.printerSlot}/><div className={styles.printerTray}><span/><span/><span/></div></div><div className={styles.printerBase}/>
-  </div>;
-}
 function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssignPrinter,onDispatch,onConfirmOutput,onRetryPdfExport,onHistory,onOpenPhotoStudio}:{
   job:ShopPrintJob;printers:PrinterDevice[];
   onPreview:(job:ShopPrintJob)=>void;onApprove:(job:ShopPrintJob)=>void;onReject:(job:ShopPrintJob)=>void;
@@ -73,7 +65,7 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
   const assignable=["PAID_AUTHORISED","LOCAL_QUEUE_READY"].includes(job.status);
   const confirmable=job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT");
   return <div className={styles.fileActionPanel}>
-    <button type="button" className={styles.miniAction} onClick={()=>onPreview(job)}><Eye size={12}/> Preview</button>
+    {!job.privatePrinting&&<button type="button" className={styles.miniAction} onClick={()=>onPreview(job)}><Eye size={12}/> Preview</button>}
     <button type="button" className={styles.miniAction} onClick={()=>onHistory(job)}><History size={12}/> History</button>
     {canEditPhoto&&<button type="button" className={styles.miniAction} onClick={()=>onOpenPhotoStudio(job)}><ImageIcon size={12}/> Edit photo</button>}
     {job.status==="AWAITING_SHOP_APPROVAL"&&!job.batchId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onApprove(job)}><Check size={12}/> Accept</button>}
@@ -103,21 +95,25 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
   const allOutputsReady=journey.jobs.length>0&&journey.jobs.every(job=>readyStatuses.has(job.status));
   const headline=journey.isClosed?"No files moving forward":journey.attentionJobs.length?"Needs a quick check":journey.stage==="received"?"New order received":journey.stage==="review"?"Your review is next":journey.stage==="payment"?"Waiting for payment":journey.stage==="printing"?"Order is being prepared":allOutputsReady?"Ready for collection":"Print output saved";
   const stageIndex=journey.isClosed?1:journey.stageIndex;
+  const [filesExpanded,setFilesExpanded]=useState(false);
   return <article className={styles.orderCard}>
     <div className={styles.orderCardTop}><div className={styles.orderIdentity}>
-      <div className={styles.orderEyebrow}><span>ORDER</span><span className={styles.orderReference}>{journey.reference}</span>{journey.batchId&&<span className={styles.batchBadge}>Batch · {journey.batchId.slice(0,8).toUpperCase()}</span>}</div>
-      <h3>{journey.name}</h3><p><Clock3 size={13}/> Received {formatIstDateTime(journey.createdUtc)} · {journey.jobs.length} file(s)</p>
+      <div className={styles.orderEyebrow}><span>ORDER</span><span className={styles.orderReference}>{journey.reference}</span>{journey.batchId&&<span className={styles.batchBadge}>Batch · {journey.batchId.slice(0,8).toUpperCase()}</span>}{journey.privatePrinting&&<span className={styles.privateModeBadge}>Private · content hidden</span>}</div>
+      <h3>{journey.name}</h3><p><Clock3 size={13}/> Received {formatIstDateTime(journey.createdUtc)} · {journey.jobs.length} file(s) · {journey.acceptedCount} included · {journey.rejectedCount} excluded</p>
     </div><div className={styles.currentStatus+" "+styles["tone"+journey.stage[0].toUpperCase()+journey.stage.slice(1)]}><span/><strong>{headline}</strong></div></div>
     <div className={styles.miniProgress} aria-label={"Order progress: "+orderJourneyStageLabel(journey.stage)}>
       {flowSteps.map((step,index)=><span key={step.id} className={styles.progressSegment+(index<=stageIndex?" "+styles.progressComplete:"")+(index===stageIndex?" "+styles.progressCurrent:"")}/>)}
     </div>
     <div className={styles.orderFacts}>
-      <div><strong>{journey.acceptedCount}</strong><span>files included</span></div><div><strong>{journey.rejectedCount}</strong><span>excluded</span></div>
-      <div><strong>{journey.pageCount}</strong><span>pages to produce</span></div>
+      <div><strong>{journey.blackWhitePageCount}</strong><span>B&amp;W pages</span></div>
+      <div><strong>{journey.colourPageCount}</strong><span>Colour pages</span></div>
+      <div><strong>{journey.pageCount}</strong><span>Total output pages</span></div>
       <div><strong>{money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</strong><span>{journey.payment?"payment total":"quoted value"}</span></div>
+      {journey.photoCount>0&&<div><strong>{journey.photoCount}</strong><span>Photos</span></div>}
+      {journey.photoPageCount>0&&<div><strong>{journey.photoPageCount}</strong><span>Photo layout pages</span></div>}
     </div>
     <div className={styles.orderSignals}>
-      <div className={styles.signalRow}><span className={styles.signalIcon+(journey.payment?.status==="VERIFIED"||journey.payment?.status==="PARTIALLY_REFUNDED"?" "+styles.signalGood:"")}><CreditCard size={15}/></span><div><strong>Payment</strong><small>{paymentLabel(journey.payment,journey.stage)}</small></div></div>
+      <div className={styles.signalRow}><span className={styles.signalIcon+(journey.payment?.status==="VERIFIED"||journey.payment?.status==="PARTIALLY_REFUNDED"?" "+styles.signalGood:"")}><CreditCard size={15}/></span><div><strong>Payment</strong><small>{paymentLabel(journey.payment,journey.stage)} · {money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</small></div></div>
       <div className={styles.signalRow}><span className={styles.signalIcon+(printer.ready?" "+styles.signalGood:"")}><Printer size={15}/></span><div><strong>{printer.name}</strong><small>{printer.detail}</small></div></div>
       {journey.attentionJobs.length>0&&<div className={styles.attentionLine}><AlertTriangle size={14}/><span>{journey.attentionJobs.length} file(s) need attention. Check physical output before retrying.</span></div>}
     </div>
@@ -127,11 +123,21 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
       {journey.isClosed&&<span className={styles.closedHint}>All files have a recorded final decision.</span>}
     </div>
     <div className={styles.orderFileList}>
-      <div className={styles.sectionMicroHeading}>BATCH FILES · ACTIONS AVAILABLE HERE</div>
-      {journey.jobs.map(job=><div className={styles.orderFileItem} key={job.id}>
-        <div className={styles.orderFileMeta}><strong title={job.document.originalFileName}>{job.document.originalFileName}</strong><span>{job.pageCount} page(s) · {job.copies} {job.copies===1?"copy":"copies"} · {orderJourneyStatusLabel(job.status)}</span></div>
-        <FileActions job={job} printers={printers} {...actions}/>
-      </div>)}
+      <button type="button" className={styles.fileDetailsToggle} aria-expanded={filesExpanded} aria-controls={"order-files-"+journey.key} onClick={()=>setFilesExpanded(value=>!value)}>
+        <span><FileText size={13}/> File details &amp; actions</span>
+        <span>{journey.jobs.length} {journey.jobs.length===1?"file":"files"} <ChevronDown size={14} className={filesExpanded?styles.chevronOpen:""}/></span>
+      </button>
+      {filesExpanded&&<div className={styles.orderFileDetails} id={"order-files-"+journey.key}>
+        {journey.jobs.map((job,index)=><div className={styles.orderFileItem} key={job.id}>
+          <div className={styles.orderFileMeta}>
+            <strong title={job.privatePrinting?undefined:job.document.originalFileName}>
+              {job.privatePrinting?"Private file "+journey.jobs.slice(0,index+1).filter(item=>item.privatePrinting).length:job.document.originalFileName}
+            </strong>
+            <span>{job.pageCount} page(s) · {job.copies} {job.copies===1?"copy":"copies"} · {orderJourneyStatusLabel(job.status)}</span>
+          </div>
+          <FileActions job={job} printers={printers} {...actions}/>
+        </div>)}
+      </div>}
     </div>
   </article>;
 }
@@ -150,42 +156,37 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
   const agentsOnline=agents.filter(isAgentOnline).length;
   const reachable=printers.filter(p=>p.isActive&&!!p.agentDeviceId&&agents.some(a=>a.id===p.agentDeviceId&&isAgentOnline(a))).length;
   const inMotion=journeys.filter(j=>!j.isClosed).length;
-  const visualJourney=journeys.find(j=>j.attentionJobs.length>0)??journeys.find(j=>j.stage==="printing")??journeys[0];
+  const paymentsToVerify=journeys.filter(j=>j.canVerifyPayment).length;
+
   return <div className={styles.journeyPage}>
-    <header className={styles.pageHero}><div><div className={styles.eyebrow}><span className={styles.livePulse}/> LIVE ORDER CONTROL</div>
-      <h2>From customer upload to print handover.</h2><p>Manage orders here. Open the queue only when a file preview is needed.</p></div>
+    <header className={styles.pageHero}>
+      <div><div className={styles.eyebrow}><span className={styles.livePulse}/> LIVE ORDER CONTROL</div><p>Workload, payments and print status at a glance.</p></div>
       <div className={styles.heroActions}><span className={styles.liveLabel}><span/> Live shop view</span><button type="button" className={styles.refreshButton} onClick={onRefresh} disabled={refreshing}><RefreshCw size={15} className={refreshing?styles.spinning:""}/>{refreshing?"Refreshing":"Refresh"}</button></div>
     </header>
-    <section className={styles.flowPanel} aria-label="The order process">
-      <div className={styles.flowPanelHeader}><div><span className={styles.panelEyebrow}>THE PRINT JOURNEY</span><h3>Choose a stage to filter its orders</h3></div><span className={styles.flowPanelHint}>Select the same stage again to clear the filter</span></div>
-      <div className={styles.flowSteps}>{flowSteps.map((step,index)=>{const Icon=step.icon,count=counts[step.id],selected=stageFilter===step.id;return <div className={styles.flowStepWrap} key={step.id}>
-        <button type="button" aria-pressed={selected} className={styles.flowStepButton+(count>0?" "+styles.flowStepActive:"")+(selected?" "+styles.flowStepSelected:"")} onClick={()=>setStageFilter(current=>current===step.id?"all":step.id)}>
-          <span className={styles.flowIcon}><Icon size={19}/></span>
-          <span className={styles.flowStepCopy}><strong>{step.title}</strong><small>{count} {count===1?"order":"orders"}</small></span><span className={styles.flowStepDetail}>{step.detail}</span>
-        </button>{index<flowSteps.length-1&&<span className={styles.flowConnector} aria-hidden="true"><ArrowRight size={15}/></span>}</div>;})}</div>
-      <div className={styles.flowLegend}><div className={styles.legendCopy}><ShieldCheck size={16}/><span><strong>Safe by design</strong> — only accepted files move forward, and printing is never triggered just by receiving payment.</span></div>
-        <PrinterVisual stage={visualJourney?.stage??"received"} attention={(visualJourney?.attentionJobs.length??0)>0}/></div>
+
+    <section className={styles.stageFilters} aria-label="Filter orders by stage">
+      <button type="button" aria-pressed={stageFilter==="all"} className={styles.stageFilterButton+(stageFilter==="all"?" "+styles.stageFilterSelected:"")} onClick={()=>setStageFilter("all")}>
+        <span>All stages</span><strong>{journeys.length}</strong>
+      </button>
+      {flowSteps.map(step=>{const Icon=step.icon,count=counts[step.id],selected=stageFilter===step.id;return <button type="button" key={step.id} aria-pressed={selected} className={styles.stageFilterButton+(selected?" "+styles.stageFilterSelected:"")} onClick={()=>setStageFilter(current=>current===step.id?"all":step.id)}>
+        <Icon size={14}/><span>{step.title}</span><strong>{count}</strong>
+      </button>;})}
     </section>
-    <section className={styles.summaryStrip} aria-label="Shop order summary">
-      <div className={styles.summaryItem}><span className={styles.summaryIcon}><Activity size={17}/></span><div><strong>{inMotion}</strong><small>Orders in motion</small></div></div>
-      <div className={styles.summaryItem}><span className={styles.summaryIcon+" "+styles.summaryViolet}><FileText size={17}/></span><div><strong>{counts.review}</strong><small>Need file review</small></div></div>
-      <div className={styles.summaryItem}><span className={styles.summaryIcon+" "+styles.summaryAmber}><CreditCard size={17}/></span><div><strong>{journeys.filter(j=>j.canVerifyPayment).length}</strong><small>Payments to verify</small></div></div>
-      <div className={styles.summaryItem}><span className={styles.summaryIcon+" "+styles.summaryCyan}><Printer size={17}/></span><div><strong>{counts.printing}</strong><small>Orders printing</small></div></div>
-      <div className={styles.summaryItem}><span className={styles.summaryIcon+" "+styles.summaryGreen}><PackageCheck size={17}/></span><div><strong>{counts.ready}</strong><small>Ready / completed</small></div></div>
-    </section>
-    <section className={styles.operationsStrip} aria-label="Printer and Agent readiness">
-      <div className={styles.operationsLabel}><span className={styles.operationsGlyph}><Wifi size={16}/></span><div><strong>Shop floor readiness</strong><small>Live connection to the local Windows computer</small></div></div>
+
+    <section className={styles.operationsStrip} aria-label="Shop operations summary">
+      <div className={styles.operationsLabel}><span className={styles.operationsGlyph}><Wifi size={15}/></span><div><strong>{inMotion} active orders</strong><small>{paymentsToVerify} payments need verification</small></div></div>
       <div className={styles.operationMetric}><strong>{agentsOnline}</strong><span>Agents online</span></div>
       <div className={styles.operationMetric}><strong>{reachable}</strong><span>Printers reachable</span></div>
-      <button type="button" className={styles.subtleLink} onClick={()=>onNavigate("Print Agent")}>Shop computer settings <ArrowRight size={14}/></button>
+      <button type="button" className={styles.subtleLink} onClick={()=>onNavigate("Print Agent")}>Shop computer</button>
     </section>
-    <section className={styles.ordersSection}><div className={styles.ordersHeading}><div><span className={styles.panelEyebrow}>YOUR CUSTOMERS</span><h3>Order journeys</h3><p>Filter by batch ID, order ID, file name or folder name. These work together with stage filters.</p></div><span className={styles.ordersCount}>{filteredJourneys.length} of {journeys.length} orders</span></div>
+
+    <section className={styles.ordersSection}>
+      <div className={styles.ordersHeading}><div><span className={styles.panelEyebrow}>YOUR CUSTOMERS</span><h3>Order journeys</h3><p>Search by batch ID, order ID, file name or folder name.</p></div><span className={styles.ordersCount}>{filteredJourneys.length} of {journeys.length} orders</span></div>
       <div className={styles.orderFilters}>
         <label className={styles.orderSearch}><span>Find an order</span><input value={query} onChange={event=>setQuery(event.currentTarget.value)} placeholder="Batch ID, order ID, file or folder name" aria-label="Search order journey"/></label>
         <button type="button" className={styles.clearFilters} disabled={stageFilter==="all"&&!query} onClick={()=>{setStageFilter("all");setQuery("");}}>Clear filters</button>
       </div>
-      {journeys.length===0?<div className={styles.emptyState}><div className={styles.emptyIllustration}><div className={styles.emptySheet}><span/><span/><span/></div><div className={styles.emptyPrinter}><Printer size={27}/></div><i><Check size={13}/></i></div>
-        <h3>Your first customer order will appear here</h3><p>Share a QR station with your customers. Their uploaded files will appear here as one easy-to-follow journey.</p></div>
+      {journeys.length===0?<div className={styles.emptyState}><h3>Your first customer order will appear here</h3><p>Share a QR station with your customers. Their orders will appear here as one easy-to-follow journey.</p></div>
       :filteredJourneys.length===0?<div className={styles.emptyState}><h3>No matching orders</h3><p>Try another batch, order, file or folder name, or clear the current filters.</p><button type="button" className={styles.actionButton} onClick={()=>{setStageFilter("all");setQuery("");}}>Clear filters</button></div>
       :<div className={styles.orderList}>{filteredJourneys.map(j=><OrderCard key={j.key} journey={j} printers={printers} agents={agents} onReviewBatch={onReviewBatch} onVerifyPayment={onVerifyPayment} {...actions}/>)}</div>}
     </section>

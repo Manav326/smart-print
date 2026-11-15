@@ -628,6 +628,8 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
     document.querySelector('button[aria-label="Order Journey"]')?.classList.contains("active") === true,
     { timeout: 30000 }
   );
+  // File actions are intentionally collapsed by default in the compact Order Journey.
+  await page.getByRole("button", { name: /File details & actions/ }).click();
   await page.getByRole("button", { name: "Edit photo" }).waitFor({ state: "visible", timeout: 30000 });
   await page.getByRole("button", { name: "Edit photo" }).click();
   const dialog = page.getByRole("dialog", { name: "Photo Studio" });

@@ -48,7 +48,8 @@ public sealed class Worker(
             RunPrinterInventoryLoopAsync(stoppingToken),
             RunPrintWorkLoopAsync(stoppingToken),
             RunPrivateRelayLoopAsync(stoppingToken),
-            RunPrivateDocumentPurgeLoopAsync(stoppingToken));
+            RunPrivateDocumentPurgeLoopAsync(stoppingToken),
+            RunPrivateSpoolerCleanupLoopAsync(stoppingToken));
     }
 
     // A PostgreSQL-backed long poll wakes this Agent as soon as its own shop
@@ -1336,6 +1337,7 @@ public sealed class Worker(
         {
             ct.ThrowIfCancellationRequested();
             if (entry.SpoolerJobId is not > 0 || string.IsNullOrWhiteSpace(entry.QueueName)) continue;
+
             try
             {
                 var found = printExecutor.GetJob(entry.QueueName, entry.SpoolerJobId.Value);
@@ -1345,34 +1347,23 @@ public sealed class Worker(
                     await ReportOutputUnconfirmedAsync(client, credentials, entry.JobId, "SPOOLER_JOB_NO_LONGER_VISIBLE", "Windows no longer lists the spooler job; check actual paper output.", ct);
                     continue;
                 }
+
+                // Report the real Windows state. RETAINED alone must never be
+                // coerced to PRINTED; only JOB_STATUS_PRINTED maps to PRINTED.
                 await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, found.Status, ct);
-                using var status = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{entry.JobId}/spooler-status",
-                    new AgentSpoolerStatusRequest(found.JobId, found.Status, found.PagesPrinted, found.TotalPages), ct);
-                if (!status.IsSuccessStatusCode)
-                {
-                    logger.LogWarning("Spooler status returned HTTP {StatusCode}.", (int)status.StatusCode);
-                }
-                else
-                {
-                    var cloudState = await status.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
-                    if (cloudState?.Status == "COMPLETED")
-                        await localQueueStore.MarkOutputConfirmedAsync(entry.JobId, ct);
-                }
+                await ReportSpoolerStatusAsync(
+                    client, credentials, entry.JobId, found.JobId,
+                    found.Status, found.PagesPrinted, found.TotalPages, ct);
             }
-            catch (Win32Exception ex)
+            catch (Win32Exception exception)
             {
-                logger.LogWarning(ex, "Could not inspect Windows print job {SpoolerJobId}.", entry.SpoolerJobId);
+                logger.LogWarning(exception, "Could not inspect Windows print job {SpoolerJobId}.", entry.SpoolerJobId);
                 try
                 {
                     await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, "PRINTER_UNAVAILABLE", ct);
-                    using var status = await SendAgentRequestAsync(
-                        client,
-                        credentials,
-                        $"api/v1/agent/jobs/{entry.JobId}/spooler-status",
-                        new AgentSpoolerStatusRequest(entry.SpoolerJobId.Value, "PRINTER_UNAVAILABLE", 0, 0),
-                        ct);
-                    if (!status.IsSuccessStatusCode)
-                        logger.LogWarning("Printer-unavailable status for {JobNumber} returned HTTP {StatusCode}.", entry.JobNumber, (int)status.StatusCode);
+                    await ReportSpoolerStatusAsync(
+                        client, credentials, entry.JobId, entry.SpoolerJobId.Value,
+                        "PRINTER_UNAVAILABLE", 0, 0, ct);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested)
                 {
@@ -1383,8 +1374,144 @@ public sealed class Worker(
                     logger.LogWarning(reportException, "Could not report printer-unavailable state for {JobNumber}.", entry.JobNumber);
                 }
             }
-            catch (Exception ex) { logger.LogWarning(ex, "Spooler monitor error for {JobNumber}.", entry.JobNumber); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Spooler status monitoring failed for {JobNumber}.", entry.JobNumber);
+            }
         }
+    }
+
+    private async Task RunPrivateSpoolerCleanupLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await ProcessPendingPrivateSpoolerCleanupAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Private spooler cleanup cycle failed; pending queue records will be retried.");
+            }
+
+            try { await Task.Delay(pollInterval, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+        }
+    }
+
+    private async Task ProcessPendingPrivateSpoolerCleanupAsync(CancellationToken ct)
+    {
+        // Self-heal a transient failure between spooler acceptance and writing
+        // the independent cleanup record. The scan is limited to private jobs
+        // that still have a local manifest; it never reads or stores document data.
+        foreach (var candidate in localQueueStore.GetPrivateSpoolerCleanupCandidates())
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await localQueueStore.EnsurePrivateSpoolerCleanupTrackedAsync(
+                    candidate.JobId, candidate.QueueName, candidate.SpoolerJobId!.Value, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Could not restore the private spooler cleanup record for queue {QueueName}; it will be retried.",
+                    candidate.QueueName);
+            }
+        }
+
+        foreach (var cleanup in localQueueStore.GetPendingPrivateSpoolerCleanupEntries())
+        {
+            ct.ThrowIfCancellationRequested();
+            var attemptRecorded = false;
+            try
+            {
+                var found = printExecutor.GetJob(cleanup.QueueName, cleanup.SpoolerJobId);
+                if (found is null)
+                {
+                    // The spooler no longer exposes this job. This is the only
+                    // condition that allows removal of the content-free retry record.
+                    await localQueueStore.CompletePrivateSpoolerCleanupAsync(cleanup.JobId, ct);
+                    continue;
+                }
+
+                if (!WindowsPrintExecutor.ShouldReleaseRetainedPrivateJob(found.StatusFlags))
+                    continue; // Release only after Windows explicitly reports PRINTED; preserve held/uncertain jobs.
+
+                await localQueueStore.RecordPrivateSpoolerCleanupAttemptAsync(cleanup.JobId, ct);
+                attemptRecorded = true;
+                printExecutor.ReleaseRetainedJob(cleanup.QueueName, cleanup.SpoolerJobId);
+
+                var remaining = printExecutor.GetJob(cleanup.QueueName, cleanup.SpoolerJobId);
+                if (remaining is null)
+                {
+                    await localQueueStore.CompletePrivateSpoolerCleanupAsync(cleanup.JobId, ct);
+                    continue;
+                }
+
+                // A released, still-visible job may now be printing or waiting for
+                // printer readiness. Keep its minimal record and recheck next cycle.
+                logger.LogInformation(
+                    "Released a retained private spooler job; Windows still reports it in queue {QueueName} as {Status}. Cleanup remains pending.",
+                    cleanup.QueueName, remaining.Status);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                if (!attemptRecorded)
+                {
+                    try { await localQueueStore.RecordPrivateSpoolerCleanupAttemptAsync(cleanup.JobId, ct); }
+                    catch (Exception recordException)
+                    {
+                        logger.LogWarning(recordException, "Could not update the private spooler cleanup retry record for queue {QueueName}.", cleanup.QueueName);
+                    }
+                }
+                logger.LogWarning(
+                    exception,
+                    "Could not release or verify retained private spooler job {SpoolerJobId} in queue {QueueName}; the content-free cleanup record will be retried.",
+                    cleanup.SpoolerJobId, cleanup.QueueName);
+            }
+        }
+    }
+
+    private async Task ReportSpoolerStatusAsync(
+        HttpClient client,
+        AgentCredentials credentials,
+        Guid jobId,
+        int spoolerJobId,
+        string spoolerStatus,
+        int pagesPrinted,
+        int totalPages,
+        CancellationToken ct)
+    {
+        using var response = await SendAgentRequestAsync(
+            client, credentials, $"api/v1/agent/jobs/{jobId}/spooler-status",
+            new AgentSpoolerStatusRequest(spoolerJobId, spoolerStatus, pagesPrinted, totalPages), ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Spooler status for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);
+            return;
+        }
+
+        var cloudState = await response.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
+        if (cloudState?.Status == "COMPLETED")
+            await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
     }
 
     private async Task ReportSpoolerAcceptedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, int spoolerId, string spoolerName, string status, CancellationToken ct)

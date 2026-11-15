@@ -107,7 +107,8 @@ public sealed record AgentLocalQueueEntry(
     string? PhotoSourceDocumentName = null,
     string? PhotoSourceMediaType = null,
     string? PhotoSourceSha256 = null,
-    long? PhotoSourceSizeBytes = null);
+    long? PhotoSourceSizeBytes = null,
+    bool PrivateSpoolerCleanupCompleted = false);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
@@ -118,6 +119,18 @@ public sealed record PdfExportReceipt(string FileName, string OutputPath, long S
 public sealed record AgentSpoolerAcceptedRequest(int SpoolerJobId, string SpoolerJobName, string SpoolerStatus);
 public sealed record AgentPrintBlockedRequest(string ReasonCode, string Message);
 public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerStatus, int PagesPrinted, int TotalPages);
+
+// Persisted independently from the document manifest so spooler cleanup can
+// finish after the private source and customer/job metadata have been purged.
+// Deliberately contains no document name, content hash, size, or customer data.
+public sealed record AgentPrivateSpoolerCleanupEntry(
+    Guid JobId,
+    string QueueName,
+    int SpoolerJobId,
+    DateTimeOffset FirstObservedUtc,
+    DateTimeOffset LastAttemptUtc,
+    int AttemptCount);
+
 public sealed record WindowsSpoolerJob(int JobId, string DocumentName, string Status, uint StatusFlags, int PagesPrinted, int TotalPages);
 
 public sealed record AgentCloudSpoolerStatusResponse(Guid Id, string Status, bool? DuplicateRequest = null);

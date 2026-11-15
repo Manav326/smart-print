@@ -216,13 +216,52 @@ function Invoke-Fixture([string]$Mode) {
     if ($LASTEXITCODE -ne 0) { throw "Lifecycle fixture '$Mode' failed with exit code $LASTEXITCODE." }
 }
 
+function Invoke-FixtureAsSystem([string]$Mode, [string[]]$AdditionalArguments = @()) {
+    Write-Host "[QA-ACTION] Run protected Agent data-preservation fixture as LocalSystem: mode=$Mode" -ForegroundColor Cyan
+    $taskName = "SmartPrintLifecycleSystemPrinterProbe"
+    $resultPath = Join-Path $env:RUNNER_TEMP "smartprint-system-fixture-$Mode.txt"
+    $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
+    $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
+    Assert-True (Test-Path -LiteralPath $assemblyPath) "The Agent lifecycle fixture assembly was not built."
+
+    Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    $extraArguments = @($AdditionalArguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
+    $arguments = '"' + $assemblyPath + '" ' + $Mode + ' "' + $resultPath + '"'
+    if ($extraArguments.Count -gt 0) { $arguments += ' ' + ($extraArguments -join ' ') }
+    $action = New-ScheduledTaskAction -Execute $dotnetPath -Argument $arguments
+    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    try {
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
+        $script:ownsTask = $true
+        Start-ScheduledTask -TaskName $taskName
+        $deadline = (Get-Date).AddSeconds(45)
+        $poll = 0
+        while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
+            $poll++
+            if ($poll -eq 1 -or $poll % 10 -eq 0) {
+                Write-Host "[QA-PROGRESS] LocalSystem fixture | mode=$Mode | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
+            }
+            Start-Sleep -Milliseconds 500
+        }
+        Assert-True (Test-Path -LiteralPath $resultPath) "The LocalSystem lifecycle fixture '$Mode' did not produce a result."
+        return (Get-Content -LiteralPath $resultPath -Raw).Trim()
+    }
+    finally {
+        if ($script:ownsTask) {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+            $script:ownsTask = $false
+        }
+        Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Assert-PreservedFixtures {
     Assert-True (Test-Path -LiteralPath $identityPath -PathType Leaf) "The machine Agent identity was removed."
     $currentHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
     Assert-True ($currentHash -eq $identityHash) "The machine Agent identity changed during install/uninstall."
     Assert-True (Test-Path -LiteralPath $networkPreferencePath -PathType Leaf) "The shop's saved local-network selection was removed."
-    Invoke-Fixture "verify"
-    Assert-True (Test-Path -LiteralPath $queueManifest -PathType Leaf) "The protected local print queue manifest was removed."
+    $fixtureResult = Invoke-FixtureAsSystem "verify"
+    Assert-True ($fixtureResult -eq "VERIFIED") "The protected queue fixture verification returned an unexpected result: $fixtureResult"
 }
 
 function Add-QueueFixture {
@@ -237,40 +276,8 @@ function Add-QueueFixture {
 
 function Assert-SystemCanDiscoverFixturePrinter {
     Write-Host "[QA-ACTION] Verify Agent printer discovery as LocalSystem using the temporary lifecycle queue." -ForegroundColor Cyan
-    $taskName = "SmartPrintLifecycleSystemPrinterProbe"
-    $resultPath = Join-Path $env:RUNNER_TEMP "smartprint-system-printer-probe.txt"
-    $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
-    $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
-    Assert-True (Test-Path -LiteralPath $assemblyPath) "The Agent discovery fixture assembly was not built."
-
-    Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
-    $arguments = '"' + $assemblyPath + '" discover-printer "' + $resultPath + '" "' + $testPrinterName + '"'
-    $action = New-ScheduledTaskAction -Execute $dotnetPath -Argument $arguments
-    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    try {
-        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
-        $script:ownsTask = $true
-        Start-ScheduledTask -TaskName $taskName
-        $deadline = (Get-Date).AddSeconds(40)
-        $poll = 0
-        while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
-            $poll++
-            if ($poll -eq 1 -or $poll % 10 -eq 0) {
-                Write-Host "[QA-PROGRESS] LocalSystem printer discovery task | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
-            }
-            Start-Sleep -Milliseconds 500
-        }
-        Assert-True (Test-Path -LiteralPath $resultPath) "The LocalSystem printer-discovery task did not produce a result."
-        $result = Get-Content -LiteralPath $resultPath -Raw
-        Assert-True ($result.Trim() -eq "FOUND") "The Agent's LocalSystem printer-discovery result was unexpected: $result"
-    }
-    finally {
-        if ($script:ownsTask) {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-            $script:ownsTask = $false
-        }
-        Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
-    }
+    $result = Invoke-FixtureAsSystem "discover-printer" @($testPrinterName)
+    Assert-True ($result -eq "FOUND") "The Agent's LocalSystem printer-discovery result was unexpected: $result"
 }
 
 function Assert-QueueUntouched {
@@ -409,6 +416,8 @@ else if (mode == "verify")
         CryptographicOperations.ZeroMemory(protectedBytes);
     }
     Console.WriteLine("Verified the same DPAPI identity and decrypted local queue document.");
+    if (args.Length > 1)
+        await File.WriteAllTextAsync(args[1], "VERIFIED");
 }
 else if (mode == "discover-printer")
 {

@@ -17,6 +17,7 @@ public sealed class AgentLocalQueueStore
     private readonly string queueRoot;
     private readonly bool applyWindowsAcl;
     private readonly SemaphoreSlim stagedUploadLeaseGate = new(1, 1);
+    private readonly SemaphoreSlim privateSpoolerCleanupGate = new(1, 1);
 
     public AgentLocalQueueStore(string? rootOverride = null)
     {
@@ -36,9 +37,18 @@ public sealed class AgentLocalQueueStore
             SecureDirectory(queueRoot);
         }
 
+        var spoolerCleanupDirectory = GetPrivateSpoolerCleanupDirectory();
+        Directory.CreateDirectory(spoolerCleanupDirectory);
+        if (applyWindowsAcl) SecureDirectory(spoolerCleanupDirectory);
+        foreach (var temporaryCleanupFile in Directory.EnumerateFiles(spoolerCleanupDirectory, "*.tmp", SearchOption.TopDirectoryOnly))
+            File.Delete(temporaryCleanupFile);
+
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         foreach (var temporaryFile in Directory.EnumerateFiles(queueRoot, "*.tmp", SearchOption.TopDirectoryOnly))
         {
-            File.Delete(temporaryFile);
+            await EraseProtectedQueueFileAsync(temporaryFile, queuePrefix, comparison, cancellationToken);
         }
 
         foreach (var documentFile in Directory.EnumerateFiles(queueRoot, "*.qdoc", SearchOption.TopDirectoryOnly))
@@ -46,9 +56,9 @@ public sealed class AgentLocalQueueStore
             var manifestPath = Path.ChangeExtension(documentFile, ".json");
             if (!File.Exists(manifestPath))
             {
-                File.Delete(documentFile);
+                await EraseProtectedQueueFileAsync(documentFile, queuePrefix, comparison, cancellationToken);
                 var orphanedPhotoSource = documentFile + ".photo.source";
-                if (File.Exists(orphanedPhotoSource)) File.Delete(orphanedPhotoSource);
+                await EraseProtectedQueueFileAsync(orphanedPhotoSource, queuePrefix, comparison, cancellationToken);
             }
         }
         foreach (var photoSourceFile in Directory.EnumerateFiles(queueRoot, "*.qdoc.photo.source", SearchOption.TopDirectoryOnly))
@@ -62,7 +72,7 @@ public sealed class AgentLocalQueueStore
             var manifestPath = GetManifestPath(jobId);
             if (!File.Exists(manifestPath))
             {
-                File.Delete(photoSourceFile);
+                await EraseProtectedQueueFileAsync(photoSourceFile, queuePrefix, comparison, cancellationToken);
                 continue;
             }
 
@@ -102,27 +112,32 @@ public sealed class AgentLocalQueueStore
 
             if (documentStillOriginal)
             {
-                File.Delete(photoSourceFile); // Interrupted before the original move was needed.
+                await EraseProtectedQueueFileAsync(photoSourceFile, queuePrefix, comparison, cancellationToken);
                 continue;
             }
 
             if (string.IsNullOrWhiteSpace(entry.DocumentPath))
             {
-                File.Delete(photoSourceFile);
+                await EraseProtectedQueueFileAsync(photoSourceFile, queuePrefix, comparison, cancellationToken);
                 continue;
             }
             var documentPath = Path.GetFullPath(entry.DocumentPath);
-            var queuePrefix = Path.GetFullPath(queueRoot).TrimEnd(
-                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             if (!documentPath.StartsWith(queuePrefix, comparison))
                 throw new InvalidDataException("The interrupted photo document path is outside the protected queue.");
 
-            if (File.Exists(documentPath)) File.Delete(documentPath);
+            await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
             File.Move(photoSourceFile, documentPath);
         }
 
-        await Task.CompletedTask;
+        // Backfill durable cleanup tracking for private jobs accepted by older
+        // Agent versions before this independent retry record existed.
+        foreach (var entry in ReadEntries().Where(entry =>
+            entry.PrivatePrinting && !entry.PrivateSpoolerCleanupCompleted &&
+            entry.SpoolerJobId is > 0 && !string.IsNullOrWhiteSpace(entry.QueueName)))
+        {
+            await EnsurePrivateSpoolerCleanupTrackedAsync(
+                entry.JobId, entry.QueueName, entry.SpoolerJobId!.Value, cancellationToken);
+        }
     }
 
     public AgentLocalQueueEntry? Find(Guid jobId)
@@ -206,17 +221,23 @@ public sealed class AgentLocalQueueStore
             64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
         {
             var zeroes = new byte[64 * 1024];
-            long remaining = stream.Length;
-            stream.Position = 0;
-            while (remaining > 0)
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var count = (int)Math.Min(zeroes.Length, remaining);
-                await stream.WriteAsync(zeroes.AsMemory(0, count), cancellationToken);
-                remaining -= count;
+                long remaining = stream.Length;
+                stream.Position = 0;
+                while (remaining > 0)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    var count = (int)Math.Min(zeroes.Length, remaining);
+                    await stream.WriteAsync(zeroes.AsMemory(0, count), cancellationToken);
+                    remaining -= count;
+                }
+                stream.Flush(flushToDisk: true);
             }
-            stream.Flush(flushToDisk: true);
-            CryptographicOperations.ZeroMemory(zeroes);
+            finally
+            {
+                CryptographicOperations.ZeroMemory(zeroes);
+            }
         }
         File.Delete(fullPath);
     }
@@ -243,28 +264,7 @@ public sealed class AgentLocalQueueStore
         foreach (var candidate in paths)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var fullPath = Path.GetFullPath(candidate);
-            if (!fullPath.StartsWith(prefix, comparison))
-                throw new InvalidDataException("The orphaned private document path is outside the protected queue.");
-            if (!File.Exists(fullPath)) continue;
-
-            await using (var stream = new FileStream(fullPath, FileMode.Open, FileAccess.Write, FileShare.None,
-                64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough | FileOptions.SequentialScan))
-            {
-                var zeroes = new byte[64 * 1024];
-                long remaining = stream.Length;
-                stream.Position = 0;
-                while (remaining > 0)
-                {
-                    var count = (int)Math.Min(zeroes.Length, remaining);
-                    await stream.WriteAsync(zeroes.AsMemory(0, count), cancellationToken);
-                    remaining -= count;
-                }
-                await stream.FlushAsync(cancellationToken);
-                stream.Flush(flushToDisk: true);
-                CryptographicOperations.ZeroMemory(zeroes);
-            }
-            File.Delete(fullPath);
+            await EraseProtectedQueueFileAsync(candidate, prefix, comparison, cancellationToken);
         }
     }
 
@@ -508,8 +508,8 @@ public sealed class AgentLocalQueueStore
             var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
             if (!photoSourcePath.StartsWith(queuePrefix, comparison))
                 throw new InvalidDataException("The retained photo source path is outside the protected queue.");
-            if (File.Exists(documentPath)) File.Delete(documentPath);
-            if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
+            await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
+            await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, cancellationToken);
             if (File.Exists(manifestPath)) File.Delete(manifestPath);
             return true;
         }
@@ -545,10 +545,9 @@ public sealed class AgentLocalQueueStore
         var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
         if (!photoSourcePath.StartsWith(queuePrefix, comparison))
             throw new InvalidDataException("The retained photo source path is outside the protected queue.");
-        if (File.Exists(documentPath)) File.Delete(documentPath);
-        if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
+        await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
+        await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, cancellationToken);
         if (File.Exists(manifestPath)) File.Delete(manifestPath);
-        await Task.CompletedTask;
     }
 
     public string EnsurePrivateTestOutputDirectory()
@@ -615,6 +614,24 @@ public sealed class AgentLocalQueueStore
                 }
                 var privateManifestPath = GetManifestPath(entry.JobId);
                 if (File.Exists(privateManifestPath)) File.Delete(privateManifestPath);
+                removed++;
+                continue;
+            }
+
+            if (entry.PrivatePrinting &&
+                entry.OutputMode != PrinterOutputModeRules.PdfExport &&
+                entry.CompletedUtc is DateTimeOffset sanitizedPrivateCompletedUtc &&
+                sanitizedPrivateCompletedUtc <= privateTestCutoff &&
+                !entry.PrivatePurgePending &&
+                string.IsNullOrWhiteSpace(entry.DocumentPath) &&
+                entry.SizeBytes == 0 &&
+                string.IsNullOrEmpty(entry.Sha256))
+            {
+                // Once the cloud has acknowledged source redaction, a physical
+                // private job needs no local reconciliation manifest. This also
+                // cleans sanitized manifests left by earlier Agent versions.
+                var sanitizedManifestPath = GetManifestPath(entry.JobId);
+                if (File.Exists(sanitizedManifestPath)) File.Delete(sanitizedManifestPath);
                 removed++;
                 continue;
             }
@@ -839,7 +856,12 @@ public sealed class AgentLocalQueueStore
     {
         if (spoolerJobId <= 0) throw new ArgumentOutOfRangeException(nameof(spoolerJobId));
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
-        if (entry.State == "SPOOLER_ACCEPTED" && entry.SpoolerJobId == spoolerJobId) return;
+        if (entry.State == "SPOOLER_ACCEPTED" && entry.SpoolerJobId == spoolerJobId)
+        {
+            if (entry.PrivatePrinting && !entry.PrivateSpoolerCleanupCompleted)
+                await EnsurePrivateSpoolerCleanupTrackedAsync(jobId, entry.QueueName, spoolerJobId, ct);
+            return;
+        }
         if (entry.State != "SUBMITTING")
             throw new InvalidOperationException($"Cannot mark a local job spooler accepted from state {entry.State}.");
         await SaveManifestAsync(entry with
@@ -848,6 +870,8 @@ public sealed class AgentLocalQueueStore
             SpoolerJobName = spoolerJobName, SpoolerSubmittedUtc = DateTimeOffset.UtcNow,
             SpoolerStatus = "QUEUED", FailureCode = null
         }, ct);
+        if (entry.PrivatePrinting && !entry.PrivateSpoolerCleanupCompleted)
+            await EnsurePrivateSpoolerCleanupTrackedAsync(jobId, entry.QueueName, spoolerJobId, ct);
     }
 
     public async Task MarkReadyAfterBlockedAsync(Guid jobId, string reasonCode, CancellationToken ct)
@@ -939,6 +963,9 @@ public sealed class AgentLocalQueueStore
                     ? entry.DocumentPath + ".photo.source"
                     : Path.Combine(queueRootFull, jobId.ToString("N") + ".qdoc.photo.source");
             await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, ct);
+            // Also remove interrupted-write files and encrypted revision backups
+            // belonging to this job before the server is told that purge completed.
+            await PurgeUnindexedPrivateSourceAsync(jobId, ct);
 
             await SaveManifestAsync(entry with
             {
@@ -967,16 +994,37 @@ public sealed class AgentLocalQueueStore
 
     public async Task MarkPrivatePurgeAcknowledgedAsync(Guid jobId, CancellationToken ct)
     {
-        var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
-        if (!entry.PrivatePrinting ||
-            entry.State is not ("OUTPUT_CONFIRMED" or "TEST_OUTPUT_SOURCE_PURGED") ||
-            !entry.PrivatePurgePending ||
-            !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256) ||
-            !string.IsNullOrWhiteSpace(entry.PhotoSourcePath) ||
-            entry.PhotoSourceDocumentName is not null || entry.PhotoSourceMediaType is not null ||
-            entry.PhotoSourceSha256 is not null || entry.PhotoSourceSizeBytes is not null)
-            throw new InvalidOperationException("The private document and any retained photo source must be removed before purge acknowledgement.");
-        await SaveManifestAsync(entry with { PrivatePurgePending = false }, ct);
+        await stagedUploadLeaseGate.WaitAsync(ct);
+        try
+        {
+            var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
+            if (!entry.PrivatePrinting ||
+                entry.State is not ("OUTPUT_CONFIRMED" or "TEST_OUTPUT_SOURCE_PURGED") ||
+                !entry.PrivatePurgePending ||
+                !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256) ||
+                !string.IsNullOrWhiteSpace(entry.PhotoSourcePath) ||
+                entry.PhotoSourceDocumentName is not null || entry.PhotoSourceMediaType is not null ||
+                entry.PhotoSourceSha256 is not null || entry.PhotoSourceSizeBytes is not null)
+                throw new InvalidOperationException("The private document and any retained photo source must be removed before purge acknowledgement.");
+            if (entry.OutputMode == PrinterOutputModeRules.PdfExport &&
+                entry.State == "TEST_OUTPUT_SOURCE_PURGED")
+            {
+                // Non-production test output is kept in a separate, short local
+                // retention window so it can be automatically removed after 24 hours.
+                await SaveManifestAsync(entry with { PrivatePurgePending = false }, ct);
+                return;
+            }
+    
+            // For a real physical private print, the server has now acknowledged
+            // source-metadata redaction. No local job manifest is needed afterwards.
+            var manifestPath = GetManifestPath(jobId);
+            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+    
+        }
+        finally
+        {
+            stagedUploadLeaseGate.Release();
+        }
     }
 
     public async Task UpdateSpoolerStatusAsync(Guid jobId, string status, CancellationToken ct)
@@ -1304,28 +1352,170 @@ public sealed class AgentLocalQueueStore
         }
     }
 
+    private string GetPrivateSpoolerCleanupDirectory() => Path.Combine(queueRoot, "SpoolerCleanup");
+
+    private string GetPrivateSpoolerCleanupPath(Guid jobId) =>
+        Path.Combine(GetPrivateSpoolerCleanupDirectory(), jobId.ToString("N") + ".json");
+
+    public IReadOnlyList<AgentLocalQueueEntry> GetPrivateSpoolerCleanupCandidates() =>
+        ReadEntries().Where(entry =>
+            entry.PrivatePrinting && !entry.PrivateSpoolerCleanupCompleted &&
+            entry.SpoolerJobId is > 0 && !string.IsNullOrWhiteSpace(entry.QueueName)).ToArray();
+
+    public IReadOnlyList<AgentPrivateSpoolerCleanupEntry> GetPendingPrivateSpoolerCleanupEntries()
+    {
+        var directory = GetPrivateSpoolerCleanupDirectory();
+        if (!Directory.Exists(directory)) return Array.Empty<AgentPrivateSpoolerCleanupEntry>();
+
+        var entries = new List<AgentPrivateSpoolerCleanupEntry>();
+        foreach (var path in Directory.EnumerateFiles(directory, "*.json", SearchOption.TopDirectoryOnly))
+        {
+            var entry = JsonSerializer.Deserialize<AgentPrivateSpoolerCleanupEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions)
+                ?? throw new InvalidDataException("A private spooler cleanup record is invalid.");
+            if (entry.JobId == Guid.Empty ||
+                !string.Equals(Path.GetFileNameWithoutExtension(path), entry.JobId.ToString("N"), StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(entry.QueueName) || entry.QueueName.Length > 256 ||
+                entry.SpoolerJobId <= 0 || entry.AttemptCount < 0)
+                throw new InvalidDataException("A private spooler cleanup record contains invalid queue metadata.");
+            entries.Add(entry);
+        }
+
+        return entries.OrderBy(entry => entry.FirstObservedUtc).ToArray();
+    }
+
+    public async Task EnsurePrivateSpoolerCleanupTrackedAsync(
+        Guid jobId, string? queueName, int spoolerJobId, CancellationToken ct)
+    {
+        if (jobId == Guid.Empty || string.IsNullOrWhiteSpace(queueName) || queueName.Length > 256 || spoolerJobId <= 0)
+            throw new InvalidDataException("Private spooler cleanup metadata is invalid.");
+
+        await privateSpoolerCleanupGate.WaitAsync(ct);
+        try
+        {
+            // A stale candidate snapshot must never recreate a record after
+            // verified absence or after the server has already purged the manifest.
+            var manifest = Find(jobId);
+            if (manifest is null || !manifest.PrivatePrinting || manifest.PrivateSpoolerCleanupCompleted)
+                return;
+
+            var directory = GetPrivateSpoolerCleanupDirectory();
+            Directory.CreateDirectory(directory);
+            if (applyWindowsAcl) SecureDirectory(directory);
+
+            var path = GetPrivateSpoolerCleanupPath(jobId);
+            if (File.Exists(path))
+            {
+                var existing = JsonSerializer.Deserialize<AgentPrivateSpoolerCleanupEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions)
+                    ?? throw new InvalidDataException("A private spooler cleanup record is invalid.");
+                if (existing.JobId != jobId || existing.SpoolerJobId != spoolerJobId ||
+                    !string.Equals(existing.QueueName, queueName, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("A private spooler cleanup record cannot be rebound to a different Windows queue job.");
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            await SavePrivateSpoolerCleanupEntryAsync(new AgentPrivateSpoolerCleanupEntry(
+                jobId, queueName, spoolerJobId, now, now, 0), ct);
+        }
+        finally
+        {
+            privateSpoolerCleanupGate.Release();
+        }
+    }
+
+    public async Task RecordPrivateSpoolerCleanupAttemptAsync(Guid jobId, CancellationToken ct)
+    {
+        await privateSpoolerCleanupGate.WaitAsync(ct);
+        try
+        {
+            var path = GetPrivateSpoolerCleanupPath(jobId);
+            if (!File.Exists(path)) return;
+            var entry = JsonSerializer.Deserialize<AgentPrivateSpoolerCleanupEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions)
+                ?? throw new InvalidDataException("A private spooler cleanup record is invalid.");
+            await SavePrivateSpoolerCleanupEntryAsync(entry with
+            {
+                LastAttemptUtc = DateTimeOffset.UtcNow,
+                AttemptCount = checked(entry.AttemptCount + 1)
+            }, ct);
+        }
+        finally
+        {
+            privateSpoolerCleanupGate.Release();
+        }
+    }
+
+    public async Task CompletePrivateSpoolerCleanupAsync(Guid jobId, CancellationToken ct)
+    {
+        await privateSpoolerCleanupGate.WaitAsync(ct);
+        try
+        {
+            // Persist the verified-absent state while the source manifest still
+            // exists, so periodic backfill cannot recreate this cleanup record.
+            await stagedUploadLeaseGate.WaitAsync(ct);
+            try
+            {
+                var manifest = Find(jobId);
+                if (manifest is not null && manifest.PrivatePrinting && !manifest.PrivateSpoolerCleanupCompleted)
+                    await SaveManifestAsync(manifest with { PrivateSpoolerCleanupCompleted = true }, ct);
+            }
+            finally
+            {
+                stagedUploadLeaseGate.Release();
+            }
+
+            var path = GetPrivateSpoolerCleanupPath(jobId);
+            if (File.Exists(path)) File.Delete(path);
+            var temporaryPath = path + ".tmp";
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+        finally
+        {
+            privateSpoolerCleanupGate.Release();
+        }
+    }
+
+    private async Task SavePrivateSpoolerCleanupEntryAsync(
+        AgentPrivateSpoolerCleanupEntry entry, CancellationToken ct)
+    {
+        var path = GetPrivateSpoolerCleanupPath(entry.JobId);
+        var temporaryPath = path + ".tmp";
+        var json = JsonSerializer.Serialize(entry, JsonOptions);
+        await File.WriteAllTextAsync(temporaryPath, json, new UTF8Encoding(false), ct);
+        if (File.Exists(path)) File.Replace(temporaryPath, path, null, ignoreMetadataErrors: true);
+        else File.Move(temporaryPath, path);
+    }
+
     private string GetManifestPath(Guid jobId) =>
         Path.Combine(queueRoot, jobId.ToString("N") + ".json");
 
     private static void SecureDirectory(string directory)
     {
         var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-        var administratorsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        using var identity = WindowsIdentity.GetCurrent();
+        var ownerSid = identity.User
+            ?? throw new InvalidOperationException("The current Windows identity has no user SID.");
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.SetOwner(administratorsSid);
+        security.SetOwner(ownerSid);
+        // The production Agent service runs as LocalSystem, so its queue remains
+        // SYSTEM-owned and SYSTEM-only. Interactive diagnostics and the installer
+        // lifecycle fixture run under their own account; grant only that current
+        // identity access rather than making the directory writable by Administrators.
         security.AddAccessRule(new FileSystemAccessRule(
             systemSid,
             FileSystemRights.FullControl,
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
             PropagationFlags.None,
             AccessControlType.Allow));
-        security.AddAccessRule(new FileSystemAccessRule(
-            administratorsSid,
-            FileSystemRights.FullControl,
-            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-            PropagationFlags.None,
-            AccessControlType.Allow));
+        if (!ownerSid.Equals(systemSid))
+        {
+            security.AddAccessRule(new FileSystemAccessRule(
+                ownerSid,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+        }
         new DirectoryInfo(directory).SetAccessControl(security);
     }
 }
