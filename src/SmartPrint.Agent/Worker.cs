@@ -48,7 +48,8 @@ public sealed class Worker(
             RunPrinterInventoryLoopAsync(stoppingToken),
             RunPrintWorkLoopAsync(stoppingToken),
             RunPrivateRelayLoopAsync(stoppingToken),
-            RunPrivateDocumentPurgeLoopAsync(stoppingToken));
+            RunPrivateDocumentPurgeLoopAsync(stoppingToken),
+            RunPrivateSpoolerCleanupLoopAsync(stoppingToken));
     }
 
     // A PostgreSQL-backed long poll wakes this Agent as soon as its own shop
@@ -1337,18 +1338,6 @@ public sealed class Worker(
             ct.ThrowIfCancellationRequested();
             if (entry.SpoolerJobId is not > 0 || string.IsNullOrWhiteSpace(entry.QueueName)) continue;
 
-            // A successful delete must remain idempotent while the shop confirms
-            // physical output. Do not interpret the now-absent spooler job as an
-            // uncertain print and do not release the source early.
-            if (entry.PrivatePrinting &&
-                string.Equals(entry.SpoolerStatus, "PRIVATE_RETAINED_JOB_REMOVED", StringComparison.Ordinal))
-            {
-                await ReportSpoolerStatusAsync(
-                    client, credentials, entry.JobId, entry.SpoolerJobId.Value,
-                    "PRINTED", 0, 0, ct);
-                continue;
-            }
-
             try
             {
                 var found = printExecutor.GetJob(entry.QueueName, entry.SpoolerJobId.Value);
@@ -1359,48 +1348,16 @@ public sealed class Worker(
                     continue;
                 }
 
-                if (entry.PrivatePrinting &&
-                    (found.StatusFlags & 0x00002000u) != 0)
-                {
-                    var retainedStatus = "PRIVATE_RETAINED_JOB_DELETE_PENDING";
-                    try
-                    {
-                        // The delete request is scoped to this private job only.
-                        // Normal shop printing queues and global Windows policies
-                        // are not changed. Verify absence before reporting success.
-                        printExecutor.DeleteRetainedJob(entry.QueueName, found.JobId);
-                        var remaining = printExecutor.GetJob(entry.QueueName, found.JobId);
-                        retainedStatus = remaining is null
-                            ? "PRIVATE_RETAINED_JOB_REMOVED"
-                            : "PRIVATE_RETAINED_JOB_DELETE_PENDING";
-                    }
-                    catch (Exception exception) when (
-                        exception is Win32Exception or UnauthorizedAccessException)
-                    {
-                        retainedStatus = "PRIVATE_RETAINED_JOB_DELETE_FAILED";
-                        logger.LogWarning(exception,
-                            "Could not remove retained private Windows spooler job {SpoolerJobId} for {JobNumber}; it will be retried.",
-                            found.JobId, entry.JobNumber);
-                    }
-
-                    await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, retainedStatus, ct);
-                    await ReportSpoolerStatusAsync(
-                        client, credentials, entry.JobId, found.JobId,
-                        "PRINTED", found.PagesPrinted, found.TotalPages, ct);
-                    continue;
-                }
-
-                // Keep the existing shop-facing status vocabulary for
-                // ordinary jobs even when Windows marks the job as retained.
-                var reportedStatus = found.Status == "RETAINED" ? "PRINTED" : found.Status;
-                await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, reportedStatus, ct);
+                // Report the real Windows state. RETAINED alone must never be
+                // coerced to PRINTED; only JOB_STATUS_PRINTED maps to PRINTED.
+                await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, found.Status, ct);
                 await ReportSpoolerStatusAsync(
                     client, credentials, entry.JobId, found.JobId,
-                    reportedStatus, found.PagesPrinted, found.TotalPages, ct);
+                    found.Status, found.PagesPrinted, found.TotalPages, ct);
             }
-            catch (Win32Exception ex)
+            catch (Win32Exception exception)
             {
-                logger.LogWarning(ex, "Could not inspect Windows print job {SpoolerJobId}.", entry.SpoolerJobId);
+                logger.LogWarning(exception, "Could not inspect Windows print job {SpoolerJobId}.", entry.SpoolerJobId);
                 try
                 {
                     await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, "PRINTER_UNAVAILABLE", ct);
@@ -1417,7 +1374,95 @@ public sealed class Worker(
                     logger.LogWarning(reportException, "Could not report printer-unavailable state for {JobNumber}.", entry.JobNumber);
                 }
             }
-            catch (Exception ex) { logger.LogWarning(ex, "Spooler monitor error for {JobNumber}.", entry.JobNumber); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Spooler status monitoring failed for {JobNumber}.", entry.JobNumber);
+            }
+        }
+    }
+
+    private async Task RunPrivateSpoolerCleanupLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await ProcessPendingPrivateSpoolerCleanupAsync(ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Private spooler cleanup cycle failed; pending queue records will be retried.");
+            }
+
+            try { await Task.Delay(pollInterval, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+        }
+    }
+
+    private async Task ProcessPendingPrivateSpoolerCleanupAsync(CancellationToken ct)
+    {
+        foreach (var cleanup in localQueueStore.GetPendingPrivateSpoolerCleanupEntries())
+        {
+            ct.ThrowIfCancellationRequested();
+            var attemptRecorded = false;
+            try
+            {
+                var found = printExecutor.GetJob(cleanup.QueueName, cleanup.SpoolerJobId);
+                if (found is null)
+                {
+                    // The spooler no longer exposes this job. This is the only
+                    // condition that allows removal of the content-free retry record.
+                    await localQueueStore.CompletePrivateSpoolerCleanupAsync(cleanup.JobId, ct);
+                    continue;
+                }
+
+                if (!WindowsPrintExecutor.ShouldReleaseRetainedPrivateJob(found.StatusFlags))
+                    continue; // Never interrupt an actively printing or spooling job.
+
+                await localQueueStore.RecordPrivateSpoolerCleanupAttemptAsync(cleanup.JobId, ct);
+                attemptRecorded = true;
+                printExecutor.ReleaseRetainedJob(cleanup.QueueName, cleanup.SpoolerJobId);
+
+                var remaining = printExecutor.GetJob(cleanup.QueueName, cleanup.SpoolerJobId);
+                if (remaining is null)
+                {
+                    await localQueueStore.CompletePrivateSpoolerCleanupAsync(cleanup.JobId, ct);
+                    continue;
+                }
+
+                // A released, still-visible job may now be printing or waiting for
+                // printer readiness. Keep its minimal record and recheck next cycle.
+                logger.LogInformation(
+                    "Released a retained private spooler job; Windows still reports it in queue {QueueName} as {Status}. Cleanup remains pending.",
+                    cleanup.QueueName, remaining.Status);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                if (!attemptRecorded)
+                {
+                    try { await localQueueStore.RecordPrivateSpoolerCleanupAttemptAsync(cleanup.JobId, ct); }
+                    catch (Exception recordException)
+                    {
+                        logger.LogWarning(recordException, "Could not update the private spooler cleanup retry record for queue {QueueName}.", cleanup.QueueName);
+                    }
+                }
+                logger.LogWarning(
+                    exception,
+                    "Could not release or verify retained private spooler job {SpoolerJobId} in queue {QueueName}; the content-free cleanup record will be retried.",
+                    cleanup.SpoolerJobId, cleanup.QueueName);
+            }
         }
     }
 
