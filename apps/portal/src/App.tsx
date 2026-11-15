@@ -2016,7 +2016,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onNavigate={navAction}
             onReviewBatch={openBatchReview}
             onVerifyPayment={verifyPayment}
-            onPreview={job=>{navAction("Print Queue");void previewJob(job,true);}}
+            onPreview={job=>void previewJob(job,true)}
             onApprove={approveJob}
             onReject={rejectJob}
             onRefund={job=>setRefundJob(job)}
