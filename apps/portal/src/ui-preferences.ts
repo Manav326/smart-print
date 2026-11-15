@@ -5,7 +5,7 @@ import {
   writeThemePreference,
   type NativeThemePreferenceSnapshot,
   type ThemePreferenceStorage,
-} from "./theme-preference";
+} from "./theme-preference.ts";
 
 const SIDEBAR_COLLAPSED_KEY = "qrtoprint.sidebar-collapsed";
 
