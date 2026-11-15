@@ -368,14 +368,14 @@ test("customer print settings are preserved independently of printer capability 
   assert.ok(flow.includes("const privateQueueReady = localAgent?.printerStatus === \"Ready\""));
   assert.ok(flow.includes("void printerCapabilitiesJson;"));
   assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
-  // Settings are derived from the selected file/group defaults, while ID Studio
-  // receives a fixed portrait/A4/colour/single-sided profile of its own.
+  // Settings are derived from the selected file/group defaults. ID Studio keeps
+  // A4 portrait, one copy and single-sided output while preserving the chosen B&W/Colour mode.
   assert.ok(flow.includes("colourMode:selected.colourMode"));
   assert.ok(flow.includes("isDuplex:selected.isDuplex"));
   assert.ok(flow.includes('paperSize:selected.advancedEnabled?selected.paperSize:"A4"'));
   assert.ok(flow.includes('orientation:selected.advancedEnabled?selected.orientation:"AUTO"'));
-  assert.ok(flow.includes("if(isSmartPrintIdDocument(candidate)) return {"));
-  assert.ok(flow.includes('copies:1,colourMode:"Colour",isDuplex:false,paperSize:"A4",orientation:"PORTRAIT"'));
+  assert.ok(flow.includes("if(isSmartPrintIdDocument(candidate)) {"));
+  assert.ok(flow.includes("copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:\"A4\",orientation:\"PORTRAIT\""));
 });
 
 test("folder defaults inherit to files and advanced paper options are opt-in", () => {
@@ -389,9 +389,11 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
   assert.ok(flow.includes("checked={defaults.advancedEnabled}"));
   assert.ok(flow.includes("checked={own.advancedEnabled}"));
   assert.ok(flow.includes("{!isIdStudioGroup&&defaults.advancedEnabled&&"));
-  assert.ok(flow.includes("ID sheet · fixed settings."));
-  assert.ok(flow.includes('InfoTooltip label="ID sheet settings"'));
-  assert.ok(flow.includes("One colour copy, A4 portrait and single-sided printing"));
+  assert.ok(flow.includes("<span>ID sheet</span>"));
+  assert.ok(flow.includes("<span>Print mode</span>"));
+  assert.ok(flow.includes('>B&W</button>'));
+  assert.ok(flow.includes('>Colour</button>'));
+  assert.ok(flow.includes("A4\",orientation:\"PORTRAIT\""));
   assert.ok(flow.includes('{defaults.colourMode==="Mono"'));
   assert.ok(flow.includes('Copies · all files'));
 });
