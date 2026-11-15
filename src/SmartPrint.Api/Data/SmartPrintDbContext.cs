@@ -218,6 +218,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                     "\"IdDocumentPriceMinor\" >= 0");
             });
             entity.HasKey(x => x.TenantId);
+            entity.Property(x => x.IdDocumentPriceMinor).HasDefaultValue(0L);
             entity.Property(x => x.Version).IsConcurrencyToken();
             entity.HasOne<Tenant>().WithOne().HasForeignKey<ShopPricingProfile>(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
