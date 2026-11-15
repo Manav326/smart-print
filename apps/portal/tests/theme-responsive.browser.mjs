@@ -551,10 +551,21 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     const destination = page.locator(".sidebar").getByRole("button", { name: section, exact: true });
     await destination.click();
     if (section === "Order Journey") {
-      await page.getByRole("heading", { name: "From customer upload to print handover." }).waitFor({ state: "visible" });
-      const stageCounts = await page.locator("section[aria-label='The order process'] [class*='flowStepCopy'] small").allTextContents();
-      assert.deepEqual(stageCounts, ["1 order", "1 order", "1 order", "2 orders", "1 order"],
-        "The five process stages should count new, review, payment, printing and ready orders independently.");
+      await page.getByRole("heading", { name: "Order journeys", exact: true }).waitFor({ state: "visible" });
+      const stageCounts = await page.locator("section[aria-label='Filter orders by stage'] button").evaluateAll(buttons =>
+        buttons.map(button => ({
+          stage: button.querySelector("span")?.textContent?.trim() ?? "",
+          count: button.querySelector("strong")?.textContent?.trim() ?? ""
+        }))
+      );
+      assert.deepEqual(stageCounts, [
+        { stage: "All stages", count: "6" },
+        { stage: "Received", count: "1" },
+        { stage: "Review", count: "1" },
+        { stage: "Payment", count: "1" },
+        { stage: "Printing", count: "2" },
+        { stage: "Ready", count: "1" }
+      ], "The compact stage filters should count all six orders across the five process stages.");
       assert.equal(await page.getByRole("article").count(), 6,
         "The two multi-file customer batches should each appear as one order card.");
     }
