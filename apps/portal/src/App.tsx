@@ -2853,6 +2853,7 @@ function PricingPage({ pricing, onSave, busy }: {
     colourDuplexPerSheetMinor: number;
     minimumChargeMinor: number;
     photo35x45Minor:number; photo25x35Minor:number; photo2x2Minor:number; photo4x6Minor:number;
+    idDocumentPriceMinor:number;
   }) => void;
   busy: boolean;
 }) {
