@@ -13,14 +13,18 @@ public sealed class AgentDocumentEncryptionKeyStore
     private static readonly byte[] Entropy = "SmartPrint.Agent.PrivateDocumentKey.v1"u8.ToArray();
     private readonly string keyPath;
     private readonly bool applyWindowsAcl;
+    private readonly DataProtectionScope protectionScope;
     private readonly object sync = new();
 
-    public AgentDocumentEncryptionKeyStore(string? keyPath = null)
+    public AgentDocumentEncryptionKeyStore(string? keyPath = null, DataProtectionScope? protectionScope = null)
     {
         applyWindowsAcl = keyPath is null;
         this.keyPath = Path.GetFullPath(keyPath ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "QRtoPrint", "LocalQueue", "document-encryption-key.dpapi"));
+        this.protectionScope = protectionScope ?? (keyPath is null
+            ? DataProtectionScope.CurrentUser
+            : DataProtectionScope.LocalMachine);
     }
 
     public string GetOrCreatePublicKey()
@@ -56,18 +60,41 @@ public sealed class AgentDocumentEncryptionKeyStore
         {
             var protectedBytes = File.ReadAllBytes(keyPath);
             byte[] privateBytes;
-            try { privateBytes = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine); }
+            var needsProtectionUpgrade = false;
+            try
+            {
+                try
+                {
+                    privateBytes = ProtectedData.Unprotect(protectedBytes, Entropy, protectionScope);
+                }
+                catch (CryptographicException) when (protectionScope == DataProtectionScope.CurrentUser)
+                {
+                    // Existing installations used LocalMachine DPAPI. Upgrade the
+                    // private key only after it has been successfully imported.
+                    privateBytes = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
+                    needsProtectionUpgrade = true;
+                }
+            }
             finally { CryptographicOperations.ZeroMemory(protectedBytes); }
+
             try
             {
                 var rsa = RSA.Create();
-                rsa.ImportPkcs8PrivateKey(privateBytes, out _);
-                if (rsa.KeySize < 2048)
+                try
+                {
+                    rsa.ImportPkcs8PrivateKey(privateBytes, out _);
+                    if (rsa.KeySize < 2048)
+                        throw new CryptographicException("The Agent document key is too small.");
+
+                    if (needsProtectionUpgrade)
+                        SaveProtectedPrivateKey(privateBytes);
+                    return rsa;
+                }
+                catch
                 {
                     rsa.Dispose();
-                    throw new CryptographicException("The Agent document key is too small.");
+                    throw;
                 }
-                return rsa;
             }
             finally { CryptographicOperations.ZeroMemory(privateBytes); }
         }
@@ -77,14 +104,15 @@ public sealed class AgentDocumentEncryptionKeyStore
         Directory.CreateDirectory(directory);
         if (applyWindowsAcl && OperatingSystem.IsWindows())
         {
+            var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
             var security = new DirectorySecurity();
             security.SetAccessRuleProtection(true, false);
+            security.SetOwner(systemSid);
+            // The Agent service runs as LocalSystem; omit a routine read ACE for
+            // interactive Administrators. A local administrator can still take
+            // ownership or execute as SYSTEM, so this is defence in depth only.
             security.AddAccessRule(new FileSystemAccessRule(
-                new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
-                FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-                PropagationFlags.None, AccessControlType.Allow));
-            security.AddAccessRule(new FileSystemAccessRule(
-                new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+                systemSid,
                 FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None, AccessControlType.Allow));
             new DirectoryInfo(directory).SetAccessControl(security);
@@ -94,15 +122,7 @@ public sealed class AgentDocumentEncryptionKeyStore
         var plain = created.ExportPkcs8PrivateKey();
         try
         {
-            var protectedBytes = ProtectedData.Protect(plain, Entropy, DataProtectionScope.LocalMachine);
-            try
-            {
-                var temporary = keyPath + ".tmp";
-                File.WriteAllBytes(temporary, protectedBytes);
-                if (File.Exists(keyPath)) File.Replace(temporary, keyPath, null, true);
-                else File.Move(temporary, keyPath);
-            }
-            finally { CryptographicOperations.ZeroMemory(protectedBytes); }
+            SaveProtectedPrivateKey(plain);
         }
         catch
         {
@@ -111,5 +131,29 @@ public sealed class AgentDocumentEncryptionKeyStore
         }
         finally { CryptographicOperations.ZeroMemory(plain); }
         return created;
+    }
+
+    private void SaveProtectedPrivateKey(byte[] privateBytes)
+    {
+        var protectedBytes = ProtectedData.Protect(privateBytes, Entropy, protectionScope);
+        var temporary = keyPath + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(
+                temporary, FileMode.Create, FileAccess.Write, FileShare.None,
+                16 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
+            {
+                stream.Write(protectedBytes);
+                stream.Flush(flushToDisk: true);
+            }
+
+            if (File.Exists(keyPath)) File.Replace(temporary, keyPath, null, true);
+            else File.Move(temporary, keyPath);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(protectedBytes);
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
     }
 }
