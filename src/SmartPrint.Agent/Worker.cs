@@ -1449,7 +1449,7 @@ public sealed class Worker(
                 }
 
                 if (!WindowsPrintExecutor.ShouldReleaseRetainedPrivateJob(found.StatusFlags))
-                    continue; // Never interrupt an actively printing or spooling job.
+                    continue; // Release only after Windows explicitly reports PRINTED; preserve held/uncertain jobs.
 
                 await localQueueStore.RecordPrivateSpoolerCleanupAttemptAsync(cleanup.JobId, ct);
                 attemptRecorded = true;
