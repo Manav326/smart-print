@@ -8,9 +8,11 @@ import android.database.Cursor
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.BitmapDrawable
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.view.Gravity
 import android.view.Menu
@@ -58,6 +60,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.documentfile.provider.DocumentFile
 import androidx.webkit.JavaScriptReplyProxy
+import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.google.android.material.appbar.MaterialToolbar
@@ -111,6 +114,8 @@ class MainActivity : AppCompatActivity() {
         private const val FOLDER_PICKER_ACCEPT = "application/x-smartprint-folder-selection"
         private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES = UploadLimits.MAX_FILE_BYTES
         private const val MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES = UploadLimits.MAX_BATCH_BYTES
+        private const val OFFLINE_PHOTO_STUDIO_ASSET_HOST = "appassets.androidplatform.net"
+        private const val OFFLINE_PHOTO_STUDIO_ASSET_URL = "https://appassets.androidplatform.net/photo-studio-offline.html"
     }
 
     private lateinit var store: LocalDocumentStore
@@ -151,8 +156,13 @@ class MainActivity : AppCompatActivity() {
     private var idStudioReviewBitmap: Bitmap? = null
     private var idStudioReviewScans: Pair<ByteArray, ByteArray>? = null
     private var customerUploadPdfPreviewOpen = false
+    private var customerUploadPdfPreviewSensitive = false
+    private val customerUploadPdfPreviewSensitiveTokens = ConcurrentHashMap.newKeySet<String>()
+    private var pendingCustomerPaymentQrBytes: ByteArray? = null
+    private var pendingCustomerPaymentQrReply: JavaScriptReplyProxy? = null
     private val customerUploadPdfPreviews = java.util.concurrent.ConcurrentHashMap<String, File>()
     private var webView: WebView? = null
+    private var photoStudioAssetLoader: WebViewAssetLoader? = null
     private var folderPath = ""
     private var pickerPath = ""
     private var pickerMode = false
@@ -213,6 +223,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var exportOne: ActivityResultLauncher<String>
     private lateinit var exportTree: ActivityResultLauncher<Uri?>
     private lateinit var exportArchive: ActivityResultLauncher<String>
+    private lateinit var saveCustomerPaymentQr: ActivityResultLauncher<String>
     private lateinit var scannerLauncher: ActivityResultLauncher<Intent>
     private lateinit var documentScanLauncher: ActivityResultLauncher<IntentSenderRequest>
     private lateinit var idStudioPhonePhotoPicker: ActivityResultLauncher<Array<String>>
@@ -530,6 +541,30 @@ class MainActivity : AppCompatActivity() {
                 reportImport(counts[0], counts[1])
             } catch (e: Exception) { toast("Folder import failed: ${message(e)}") }
             refreshLibrary()
+        }
+        saveCustomerPaymentQr = registerForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+            val bytes = pendingCustomerPaymentQrBytes
+            val reply = pendingCustomerPaymentQrReply
+            pendingCustomerPaymentQrBytes = null
+            pendingCustomerPaymentQrReply = null
+            if (bytes == null) return@registerForActivityResult
+            if (uri == null) {
+                bytes.fill(0)
+                reply?.postMessage("CUSTOMER_PAYMENT_QR_CANCELLED|")
+                return@registerForActivityResult
+            }
+            try {
+                val output = contentResolver.openOutputStream(uri, "w")
+                    ?: error("The selected destination is unavailable.")
+                output.use { it.write(bytes) }
+                toast("Payment QR saved to your device.")
+                reply?.postMessage("CUSTOMER_PAYMENT_QR_SAVED|")
+            } catch (error: Exception) {
+                toast("QR save failed: " + message(error))
+                reply?.postMessage("CUSTOMER_PAYMENT_QR_FAILED|" + message(error))
+            } finally {
+                bytes.fill(0)
+            }
         }
         exportOne = registerForActivityResult(ActivityResultContracts.CreateDocument("*/*")) { uri ->
             val source = exportFile
@@ -1676,6 +1711,34 @@ class MainActivity : AppCompatActivity() {
             uri.path.orEmpty().trimEnd('/').equals("/photo-studio", ignoreCase = true)
     }
 
+    private fun isOfflinePhotoStudioPageUrl(rawUrl: String?): Boolean {
+        val uri = runCatching { Uri.parse(rawUrl.orEmpty()) }.getOrNull() ?: return false
+        return uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host.equals(OFFLINE_PHOTO_STUDIO_ASSET_HOST, ignoreCase = true) &&
+            uri.path.equals("/photo-studio-offline.html", ignoreCase = true)
+    }
+
+    private fun isPhotoStudioScreenUrl(rawUrl: String?): Boolean =
+        isPhotoStudioPageUrl(rawUrl) || isOfflinePhotoStudioPageUrl(rawUrl)
+
+    private fun isOfflinePhotoStudioAssetUrl(uri: Uri): Boolean =
+        uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host.equals(OFFLINE_PHOTO_STUDIO_ASSET_HOST, ignoreCase = true) &&
+            (uri.path.equals("/photo-studio-offline.html", ignoreCase = true) ||
+                uri.path.orEmpty().startsWith("/assets/"))
+
+    private fun isAllowedOfflinePhotoStudioBridgeMessage(data: String): Boolean =
+        data == "listPhotoStudioDocuments" ||
+            data.startsWith("savePhotoStudioDocument|") ||
+            data.startsWith("updatePhotoStudioDocument|") ||
+            data.startsWith("getPhotoStudioPreviewPage|") ||
+            data.startsWith("getPhotoStudioSource|") ||
+            data.startsWith("renamePhotoStudioDocument|") ||
+            data.startsWith("deletePhotoStudioDocument|") ||
+            data == "setPhotoStudioOpen|on" || data == "setPhotoStudioOpen|off" ||
+            data == "setSensitivePreview|on" || data == "setSensitivePreview|off" ||
+            data == "setTheme|light" || data == "setTheme|dark"
+
     private fun showPhotoStudioLoadError(message: String) {
         photoStudioLoadFailed = true
         val host = webView?.parent as? FrameLayout ?: return
@@ -1713,8 +1776,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun showDedicatedPhotoStudio() {
         fileChooserReturnToPhotoStudio = false
-        // Do not early-return merely because the WebView URL is already /photo-studio:
-        // the native file picker detaches the WebView from the content container.
+        // Android uses the bundled build of the shared React Photo Studio. This
+        // keeps every editor tool available without relying on a hosted page.
+        // Do not early-return: the native file picker detaches the WebView.
         // Every entry must restore the WebView to the visible screen.
         idStudioScreenOpen = false
         privateIdViewerOpen = false
@@ -1734,8 +1798,8 @@ class MainActivity : AppCompatActivity() {
         val view = ensureWebView()
         (view.parent as? ViewGroup)?.removeView(view)
         photoStudioLoadingOverlay = null
-        val studioUrl = BuildConfig.SERVICE_BASE_URL.trimEnd('/') + "/photo-studio"
-        val pageReady = !photoStudioLoadFailed && isPhotoStudioPageUrl(view.url) && view.progress >= 100
+        val pageReady = !photoStudioLoadFailed &&
+            isOfflinePhotoStudioPageUrl(view.url) && view.progress >= 100
         val host = FrameLayout(this)
         host.addView(view, FrameLayout.LayoutParams(-1, -1))
         if (!pageReady) {
@@ -1756,9 +1820,9 @@ class MainActivity : AppCompatActivity() {
             host.addView(loading, FrameLayout.LayoutParams(-1, -1))
         }
         content.addView(host, frameParams())
-        if (photoStudioLoadFailed || !isPhotoStudioPageUrl(view.url)) {
+        if (!pageReady) {
             photoStudioLoadFailed = false
-            view.loadUrl(studioUrl)
+            view.loadUrl(OFFLINE_PHOTO_STUDIO_ASSET_URL)
         }
     }
 
@@ -2780,7 +2844,7 @@ class MainActivity : AppCompatActivity() {
         (view.parent as? ViewGroup)?.removeView(view)
         content.addView(view, frameParams())
         val activeShopUrl = portalUrl
-        if (activeShopUrl != null && isPhotoStudioPageUrl(view.url)) view.loadUrl(activeShopUrl)
+        if (activeShopUrl != null && isPhotoStudioScreenUrl(view.url)) view.loadUrl(activeShopUrl)
     }
 
     private fun findLibraryScrollView(view: View?): ScrollView? {
@@ -3951,6 +4015,11 @@ class MainActivity : AppCompatActivity() {
         // The bridge is pinned to the configured service origin for this build.
         val trustedPage = Uri.parse(BuildConfig.SERVICE_BASE_URL)
         val trustedOrigin = "${trustedPage.scheme}://${trustedPage.authority}"
+        val offlinePhotoStudioOrigin = "https://$OFFLINE_PHOTO_STUDIO_ASSET_HOST"
+        photoStudioAssetLoader = WebViewAssetLoader.Builder()
+            .setDomain(OFFLINE_PHOTO_STUDIO_ASSET_HOST)
+            .addPathHandler("/", WebViewAssetLoader.AssetsPathHandler(this))
+            .build()
         val themeBootstrapPlan = WebViewThemeBootstrapPolicy.create(
             documentStartScriptAvailable = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT),
             webMessageListenerAvailable = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
@@ -3965,7 +4034,7 @@ class MainActivity : AppCompatActivity() {
             WebViewCompat.addDocumentStartJavaScript(
                 view,
                 SmartPrintThemeWebBootstrap.script(),
-                setOf(trustedOrigin)
+                setOf(trustedOrigin, offlinePhotoStudioOrigin)
             )
             webViewThemeBootstrapInstalled = true
         }
@@ -3974,15 +4043,21 @@ class MainActivity : AppCompatActivity() {
             WebViewCompat.addWebMessageListener(
                 view,
                 "SmartPrintNative",
-                setOf(trustedOrigin)
+                setOf(trustedOrigin, offlinePhotoStudioOrigin)
             ) { _, message, sourceOrigin, isMainFrame, replyProxy ->
-                // Only the fixed configured origin and the top-level document may use this bridge.
+                // Only the configured service origin and fixed packaged Photo Studio origin and the top-level document may use this bridge.
                 val data = message.data.orEmpty()
-                if (isMainFrame &&
-                    sourceOrigin.scheme == trustedPage.scheme &&
+                val serviceOrigin = sourceOrigin.scheme == trustedPage.scheme &&
                     sourceOrigin.host.equals(trustedPage.host, true) &&
-                    sourceOrigin.port == trustedPage.port) {
-                    if (data == "requestLocalNetworkAccess") {
+                    sourceOrigin.port == trustedPage.port
+                val offlineStudioOrigin = sourceOrigin.scheme.equals("https", true) &&
+                    sourceOrigin.host.equals(OFFLINE_PHOTO_STUDIO_ASSET_HOST, true) &&
+                    (sourceOrigin.port == -1 || sourceOrigin.port == 443) &&
+                    isOfflinePhotoStudioPageUrl(webView?.url)
+                if (isMainFrame && (serviceOrigin || offlineStudioOrigin)) {
+                    if (offlineStudioOrigin && !isAllowedOfflinePhotoStudioBridgeMessage(data)) {
+                        replyProxy.postMessage("PHOTO_LIBRARY_FAILED|This action is not available from the offline Photo Studio page.")
+                    } else if (data == "requestLocalNetworkAccess" && serviceOrigin)  {
                         runOnUiThread {
                             if (!isFinishing && !isDestroyed) requestLocalNetworkAccess(replyProxy)
                             else runCatching { replyProxy.postMessage("localNetworkAccess:denied") }
@@ -3998,7 +4073,7 @@ class MainActivity : AppCompatActivity() {
                             data.startsWith("renamePhotoStudioDocument|") ||
                             data.startsWith("deletePhotoStudioDocument|")
                         val photoStudioRouteActive = privatePhotoStudioPageOpen &&
-                            isPhotoStudioPageUrl(webView?.url)
+                            isPhotoStudioScreenUrl(webView?.url)
                         when {
                             data == "releaseStudioUploadFiles" || data == "releasePhotoStudioUploadFiles" -> {
                                 runOnUiThread {
@@ -4034,13 +4109,55 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }
                             }
-                            parts.size == 2 && parts[0] == "previewCustomerPdf" &&
-                                isCustomerUploadPdfPreviewToken(parts[1]) -> {
+                            parts.size == 3 && parts[0] == "previewCustomerPdf" &&
+                                isCustomerUploadPdfPreviewToken(parts[1]) && parts[2].toIntOrNull() != null -> {
                                 val token = parts[1]
+                                val pageIndex = parts[2].toInt()
                                 runOnUiThread {
                                     if (!isFinishing && !isDestroyed) {
-                                        showCustomerUploadPdfPreview(token)
-                                        replyProxy.postMessage("OK")
+                                        customerUploadPdfPreviewOpen = true
+                                        customerUploadPdfPreviewSensitive = token in customerUploadPdfPreviewSensitiveTokens
+                                        applySensitiveWindowProtection()
+                                        renderCustomerPdfPreview(token, pageIndex, replyProxy)
+                                    }
+                                }
+                            }
+                            data == "closeCustomerPdfPreview" -> {
+                                runOnUiThread {
+                                    customerUploadPdfPreviewOpen = false
+                                    customerUploadPdfPreviewSensitive = false
+                                    applySensitiveWindowProtection()
+                                    replyProxy.postMessage("OK")
+                                }
+                            }
+                            parts.size == 3 && parts[0] == "saveCustomerPaymentQr" -> {
+                                val rawName = parts[1].take(100)
+                                val safeName = rawName.replace(Regex("[^A-Za-z0-9._-]"), "-")
+                                    .let { if (it.endsWith(".png", true)) it else "$it.png" }
+                                val bytes = runCatching {
+                                    android.util.Base64.decode(parts[2], android.util.Base64.DEFAULT)
+                                }.getOrNull()
+                                val validPng = bytes != null && bytes.size in 8..1_000_000 &&
+                                    bytes.copyOfRange(0, 8).contentEquals(
+                                        byteArrayOf(0x89.toByte(), 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+                                    )
+                                if (!validPng || pendingCustomerPaymentQrBytes != null) {
+                                    bytes?.fill(0)
+                                    replyProxy.postMessage("CUSTOMER_PAYMENT_QR_FAILED|The QR image is invalid or another save is already in progress.")
+                                } else {
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) {
+                                            pendingCustomerPaymentQrBytes = bytes
+                                            pendingCustomerPaymentQrReply = replyProxy
+                                            runCatching { saveCustomerPaymentQr.launch(safeName) }.onFailure { error ->
+                                                pendingCustomerPaymentQrBytes?.fill(0)
+                                                pendingCustomerPaymentQrBytes = null
+                                                pendingCustomerPaymentQrReply = null
+                                                replyProxy.postMessage("CUSTOMER_PAYMENT_QR_FAILED|" + (error.message ?: "Could not open the save dialog."))
+                                            }
+                                        } else {
+                                            bytes?.fill(0)
+                                        }
                                     }
                                 }
                             }
@@ -4243,7 +4360,11 @@ class MainActivity : AppCompatActivity() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val uri = request.url
                 return when (uri.scheme?.lowercase(Locale.ROOT)) {
-                    "https" -> if (uri.host.equals(portalHost, true)) false else { launchExternal(uri); true }
+                    "https" -> when {
+                        isOfflinePhotoStudioAssetUrl(uri) -> false
+                        uri.host.equals(portalHost, true) -> false
+                        else -> { launchExternal(uri); true }
+                    }
                     "upi", "tel", "mailto" -> { launchExternal(uri); true }
                     "intent" -> { launchIntent(uri.toString()); true }
                     "http" -> !(allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) || allowedLocalDevelopmentEndpoint(uri))
@@ -4255,6 +4376,13 @@ class MainActivity : AppCompatActivity() {
             }
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val uri = request.url
+                if (uri.host.equals(OFFLINE_PHOTO_STUDIO_ASSET_HOST, true)) {
+                    return photoStudioAssetLoader?.shouldInterceptRequest(uri)
+                        ?: WebResourceResponse(
+                            "text/plain", "UTF-8", 404, "Not Found", emptyMap(),
+                            ByteArrayInputStream("Bundled Photo Studio asset not found.".toByteArray())
+                        )
+                }
                 if (uri.scheme.equals("http", true) &&
                     !allowedAgentLocalEndpoint(uri, request.method, request.requestHeaders) &&
                     !allowedLocalDevelopmentEndpoint(uri)) {
@@ -4267,7 +4395,7 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onPageFinished(view: WebView, url: String) {
                 super.onPageFinished(view, url)
-                if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(url)) {
+                if (privatePhotoStudioPageOpen && isPhotoStudioScreenUrl(url)) {
                     photoStudioLoadingOverlay?.let { overlay ->
                         (overlay.parent as? ViewGroup)?.removeView(overlay)
                     }
@@ -4293,13 +4421,13 @@ class MainActivity : AppCompatActivity() {
             ) {
                 super.onReceivedError(view, request, error)
                 if (request.isForMainFrame && privatePhotoStudioPageOpen &&
-                    isPhotoStudioPageUrl(request.url.toString())) {
+                    isPhotoStudioScreenUrl(request.url.toString())) {
                     showPhotoStudioLoadError("Check your connection and try again.")
                 }
             }
             override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: android.net.http.SslError) {
                 handler.cancel()
-                if (privatePhotoStudioPageOpen && isPhotoStudioPageUrl(view.url)) {
+                if (privatePhotoStudioPageOpen && isPhotoStudioScreenUrl(view.url)) {
                     showPhotoStudioLoadError(
                         "The secure connection failed. Your saved photo sheets remain on this device."
                     )
@@ -4318,7 +4446,7 @@ class MainActivity : AppCompatActivity() {
                 fileCallback?.onReceiveValue(null)
                 fileCallback = callback
                 fileChooserReturnToPhotoStudio =
-                    privatePhotoStudioPageOpen && isPhotoStudioPageUrl(webView.url)
+                    privatePhotoStudioPageOpen && isPhotoStudioScreenUrl(webView.url)
                 fileChooserSelectFolders = params.acceptTypes.any { accepted ->
                     accepted.split(',').any { it.trim().equals(FOLDER_PICKER_ACCEPT, ignoreCase = true) }
                 }
@@ -4888,7 +5016,8 @@ class MainActivity : AppCompatActivity() {
             (photoStudioOpen || privatePhotoStudioPageOpen) && !photoStudioCaptureAllowed
         val idCaptureBlocked = idStudioScreenOpen ||
             (privateIdViewerOpen && !privateIdPreviewCaptureAllowed)
-        if (privateStudioCaptureBlocked || idCaptureBlocked) {
+        val customerIdPreviewCaptureBlocked = customerUploadPdfPreviewOpen && customerUploadPdfPreviewSensitive
+        if (privateStudioCaptureBlocked || idCaptureBlocked || customerIdPreviewCaptureBlocked) {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         } else {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
@@ -6498,6 +6627,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createCustomerUploadPdfPreview(file: File, materializedPhotoPdf: File? = null): String? {
+        if (idStudioStore.isPreparedDocument(file)) {
+            // The upload preparation path supplies the already-decrypted staging
+            // file and tracks it for secure release. Do not create an untracked copy.
+            val materialized = materializedPhotoPdf?.takeIf { it.isFile }
+                ?: return null
+            val token = UUID.randomUUID().toString()
+            customerUploadPdfPreviews[token] = materialized
+            customerUploadPdfPreviewSensitiveTokens.add(token)
+            return token
+        }
         if (photoStudioStore.isPreparedDocument(file)) {
             val materialized = materializedPhotoPdf?.takeIf { it.isFile }
                 ?: runCatching { photoStudioStore.materializePdf(file) }.getOrNull()
@@ -6585,6 +6724,7 @@ class MainActivity : AppCompatActivity() {
         val previewDirectory = File(cacheDir, "customer-upload-pdf-preview").canonicalFile
         customerUploadPdfPreviews.entries.toList().forEach { entry ->
             if (entry.key !in retained && customerUploadPdfPreviews.remove(entry.key, entry.value)) {
+                customerUploadPdfPreviewSensitiveTokens.remove(entry.key)
                 val parent = runCatching { entry.value.canonicalFile.parentFile }.getOrNull()
                 if (parent == previewDirectory) entry.value.delete()
             }
@@ -6614,6 +6754,10 @@ class MainActivity : AppCompatActivity() {
             if (::photoStudioStore.isInitialized) photoStudioStore.releaseTransientFile(file)
         }
         customerUploadPdfPreviews.clear()
+        customerUploadPdfPreviewSensitiveTokens.clear()
+        customerUploadPdfPreviewSensitive = false
+        customerUploadPdfPreviewOpen = false
+        applySensitiveWindowProtection()
         previewDirectory.deleteRecursively()
     }
 
@@ -6793,6 +6937,73 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun renderCustomerPdfPreview(
+        token: String,
+        requestedPage: Int,
+        replyProxy: JavaScriptReplyProxy
+    ) {
+        Thread {
+            val response = try {
+                val file = customerUploadPdfPreviews[token]
+                    ?.takeIf { it.isFile && it.name.endsWith(".pdf", true) }
+                    ?: error("Please select this PDF again before previewing it.")
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                    PdfRenderer(descriptor).use { renderer ->
+                        require(renderer.pageCount > 0) { "This PDF has no pages to preview." }
+                        val pageIndex = requestedPage.coerceIn(0, renderer.pageCount - 1)
+                        val thumbnails = JSONArray()
+                        val first = maxOf(0, pageIndex - 2)
+                        val last = minOf(renderer.pageCount - 1, pageIndex + 2)
+                        for (index in first..last) {
+                            thumbnails.put(JSONObject()
+                                .put("index", index)
+                                .put("image", renderCustomerPdfPage(renderer, index, 112, 68)))
+                        }
+                        JSONObject()
+                            .put("token", token)
+                            .put("pageIndex", pageIndex)
+                            .put("pageCount", renderer.pageCount)
+                            .put("image", renderCustomerPdfPage(renderer, pageIndex, 1100, 82))
+                            .put("thumbnails", thumbnails)
+                            .let { "CUSTOMER_PDF_PREVIEW|" + it.toString() }
+                    }
+                }
+            } catch (error: Exception) {
+                "CUSTOMER_PDF_PREVIEW_FAILED|$token|" + message(error)
+            }
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
+            }
+        }.start()
+    }
+
+    private fun renderCustomerPdfPage(
+        renderer: PdfRenderer,
+        pageIndex: Int,
+        maximumEdge: Int,
+        quality: Int
+    ): String {
+        val page = renderer.openPage(pageIndex)
+        try {
+            val scale = minOf(1f, maximumEdge.toFloat() / maxOf(page.width, page.height).toFloat())
+            val width = maxOf(1, (page.width * scale).toInt())
+            val height = maxOf(1, (page.height * scale).toInt())
+            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            try {
+                bitmap.eraseColor(android.graphics.Color.WHITE)
+                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                return ByteArrayOutputStream().use { output ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, quality, output)
+                    android.util.Base64.encodeToString(output.toByteArray(), android.util.Base64.NO_WRAP)
+                }
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        } finally {
+            page.close()
+        }
+    }
+
     private fun showCustomerUploadPdfPreview(token: String) {
         val file = customerUploadPdfPreviews[token]
             ?.takeIf { it.isFile && it.name.endsWith(".pdf", true) }
@@ -6824,6 +7035,8 @@ class MainActivity : AppCompatActivity() {
         documentViewer = null
         viewingDocument = null
         customerUploadPdfPreviewOpen = false
+        customerUploadPdfPreviewSensitive = false
+        applySensitiveWindowProtection()
         showPrint()
     }
 

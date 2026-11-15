@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
+import android.os.Looper
 import android.webkit.ValueCallback
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -30,7 +31,7 @@ import java.util.concurrent.atomic.AtomicReference
 @RunWith(AndroidJUnit4::class)
 class NativeFilePickerInstrumentedTest {
     @Test
-    fun studioItemsAreSelectedWithoutLeavingThePickerAndWaitForOneFinalAction() {
+    fun studioItemsWaitForOneFinalActionAndReleaseUploadCopiesOnTheActivityMainThread() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         context.getSharedPreferences("smartprint.customer.last-shop", Context.MODE_PRIVATE)
             .edit().clear().commit()
@@ -121,9 +122,19 @@ class NativeFilePickerInstrumentedTest {
                 assertTrue(photoTemps.all { it.isFile })
                 assertTrue(idTemps.all { it.isFile })
 
-                MainActivity::class.java.getDeclaredMethod("releaseStudioUploadFiles").apply {
-                    isAccessible = true
-                }.invoke(activity)
+                // The production bridge dispatches this Activity/window cleanup on the
+                // main thread. Invoke it through ActivityScenario as well; calling this
+                // UI-touching method from the instrumentation runner thread causes
+                // ViewRootImpl.CalledFromWrongThreadException and does not model the app.
+                scenario.onActivity { activeActivity ->
+                    assertTrue(
+                        "Activity cleanup must execute on the main thread.",
+                        Looper.myLooper() === Looper.getMainLooper()
+                    )
+                    MainActivity::class.java.getDeclaredMethod("releaseStudioUploadFiles").apply {
+                        isAccessible = true
+                    }.invoke(activeActivity)
+                }
 
                 assertTrue("Successful upload cleanup must remove Photo Studio plaintext.", photoTemps.none { it.exists() })
                 assertTrue("Successful upload cleanup must remove ID Studio plaintext.", idTemps.none { it.exists() })

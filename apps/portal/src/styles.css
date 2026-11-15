@@ -3823,3 +3823,47 @@ html[data-theme="dark"] .brand-lockup-logo-dark { display: block; }
 .auth-google-signin__retry{display:grid;gap:8px}
 .auth-google-signin__retry-button{justify-self:center;min-height:35px;padding:0 13px;border:1px solid rgba(164,151,245,.28);border-radius:8px;background:rgba(128,108,224,.12);color:#c9c0ff;font:600 9px "DM Sans",sans-serif;cursor:pointer}
 .auth-google-signin__retry-button:hover{background:rgba(128,108,224,.2)}
+
+
+/* Customer uploader refinement: consistent inline preview, clear quote and readable status. */
+.customer-native-pdf-preview{display:grid;gap:8px;padding:10px;background:var(--surface-2);min-width:0}
+.customer-native-pdf-page{display:block;width:100%;max-height:min(58vh,420px);object-fit:contain;background:#fff;border-radius:7px}
+.customer-native-pdf-empty{min-height:180px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;color:var(--muted);font-size:11px;text-align:center}
+.customer-native-pdf-empty .customer-file-studio-button{min-height:36px;padding:8px 13px;font-size:11px}
+.customer-native-pdf-controls{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.customer-native-pdf-controls button{min-height:36px;padding:7px 11px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:11px;font-weight:700}
+.customer-native-pdf-controls button:disabled{opacity:.4}
+.customer-native-pdf-controls span{font-size:11px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums}
+.customer-native-pdf-thumbnails{display:flex;gap:7px;overflow-x:auto;max-width:100%;padding:2px 1px 5px;overscroll-behavior-x:contain}
+.customer-native-pdf-thumbnails button{flex:0 0 62px;display:grid;gap:3px;justify-items:center;padding:4px;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--muted);font-size:10px}
+.customer-native-pdf-thumbnails button[aria-current="page"]{border-color:var(--accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.customer-native-pdf-thumbnails img{width:50px;height:62px;object-fit:contain;background:#fff;border-radius:3px}
+.customer-upload-notice{margin-top:10px;padding:10px 12px;border:1px solid #cbd7e8;border-radius:9px;background:#f2f6fc;color:#405674;font-size:12px;line-height:1.5;text-align:left}
+.customer-upload-notice.warning{border-color:#e6d2a9;background:#fff8e9;color:#76551b}
+html[data-theme="dark"] .customer-upload-notice{border-color:#344b67;background:#182a40;color:#c6d9f2}
+html[data-theme="dark"] .customer-upload-notice.warning{border-color:#6d5630;background:#342a1b;color:#f0d49b}
+.customer-job-updated{display:block;margin:0 0 7px;color:var(--muted);font-size:10px;line-height:1.4;font-variant-numeric:tabular-nums}
+.customer-batch-quote-card>div:first-child>strong{display:block;max-width:100%;white-space:nowrap;overflow-wrap:normal;word-break:normal;font-size:clamp(21px,4vw,28px);line-height:1.12;font-variant-numeric:tabular-nums;letter-spacing:-.35px}
+.customer-batch-quote-card .customer-batch-print-total strong{white-space:nowrap;font-variant-numeric:tabular-nums}
+.customer-quote-explanation{display:flex;align-items:center;flex-wrap:wrap;gap:3px;margin:0;padding-top:2px}
+.customer-upi-quick-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:7px;width:100%}
+.customer-upi-quick-actions button{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:36px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:11px;font-weight:700}
+.customer-upi-download-status{display:flex;align-items:center;justify-content:center;gap:5px;color:var(--green);font-size:11px;line-height:1.4;text-align:center}
+.customer-upi-download-status svg{flex:0 0 auto}
+@media(max-width:520px){
+ .customer-native-pdf-page{max-height:min(60vh,480px)}
+ .customer-native-pdf-controls button{min-height:40px;padding-inline:9px}
+ .customer-upload-notice{font-size:11px}
+ .customer-batch-quote-card>div:first-child>strong{font-size:clamp(20px,6vw,26px)}
+}
+html[data-theme="dark"] .customer-native-pdf-controls button,
+html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--native-border,#39465c);background:var(--native-surface,#182233);color:var(--native-text,#eef2fb)}
+
+
+/* Customer clarity: keep connection choices distinct from the privacy choice above. */
+.customer-upload-mode-heading{grid-column:1/-1;display:grid;gap:3px;margin:0 0 2px;color:var(--text)}
+.customer-upload-mode-heading strong{font-size:12px;font-weight:750}
+.customer-upload-mode-heading small{font-size:11px;line-height:1.45;color:var(--muted)}
+.customer-payment-reference-hint{display:block;margin:5px 0 8px;color:var(--muted);font-size:11px;line-height:1.45}
+.customer-upi-download-status.success{color:var(--green)}
+.customer-upi-download-status.info{color:var(--muted)}

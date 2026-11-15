@@ -67,7 +67,7 @@ test("standard Cloud-assisted Photo Studio uploads keep photo identity through t
 
 test("private Photo Studio vault operations are scoped to the dedicated native route", () => {
   const main = read("../../../apps/android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
-  assert.match(main, /privatePhotoStudioPageOpen &&[\s\S]*isPhotoStudioPageUrl\(webView\?\.url\)/);
+  assert.match(main, /privatePhotoStudioPageOpen &&[\s\S]*isPhotoStudioScreenUrl\(webView\?\.url\)/);
   assert.match(main, /photoStudioLibraryCommand && !photoStudioRouteActive/);
 });
 
@@ -635,4 +635,76 @@ test("shop-originated photo orders use their own tenant-owned job and the shared
  assert.match(endpoint,/SHOP_PHOTO_ORDER_CREATED_AWAITING_PAYMENT/);
  assert.match(api,/form\.append\("paymentMethod", values\.paymentMethod\)/);
  assert.match(app,/buildCustomerUpiIntent\(/);
+});
+
+
+test("customer uploader keeps its batch example, inline Android PDF preview and real status transitions",()=>{
+ const app=read("../src/App.tsx");
+ const api=read("../src/api.ts");
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const css=read("../src/styles.css");
+ assert.match(app,/placeholder="e.g. Manjeet - College Notes"/);
+ assert.doesNotMatch(app,/Rahul\s*[–-]\s*College Notes/);
+ assert.match(app,/<CustomerNativePdfPreview[\s\S]*onPage=/);
+ assert.match(app,/event\.previousStatus!==event\.newStatus/);
+ assert.match(app,/customerStatusTone\(jobStatus\.status\)/);
+ assert.match(app,/Last updated · \{formatIstDateTime\(jobStatus\.updatedUtc\)\}/);
+ assert.match(api,/previousStatus\?: string \| null/);
+ assert.match(program,/new \{ item\.PreviousStatus, item\.NewStatus, item\.ActorType, item\.CreatedUtc \}/);
+ assert.match(css,/\.customer-native-pdf-preview/);
+ assert.match(css,/\.customer-batch-quote-card>div:first-child>strong\{[\s\S]*?white-space:nowrap/);
+});
+
+test("Android customer PDF preview stays inline and UPI QR downloads through the Android Save As picker",()=>{
+ const activity=read("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+ const qr=read("../src/CustomerUpiQr.tsx");
+ assert.match(activity,/parts\[0\] == "previewCustomerPdf"[\s\S]*?renderCustomerPdfPreview/);
+ assert.match(activity,/PdfRenderer\(descriptor\)/);
+ assert.match(activity,/customerUploadPdfPreviewSensitiveTokens/);
+ assert.match(activity,/ActivityResultContracts\.CreateDocument\("image\/png"\)/);
+ assert.match(activity,/parts\[0\] == "saveCustomerPaymentQr"/);
+ assert.match(qr,/saveCustomerPaymentQr\|/);
+ assert.match(qr,/navigator\.clipboard\?\.writeText/);
+ assert.match(qr,/Copy UPI ID/);
+});
+
+
+test("customer-facing print choices explain privacy versus connection without changing the available modes",()=>{
+ const app=read("../src/App.tsx");
+ assert.match(app,/How your files reach the shop/);
+ assert.match(app,/Choose a connection method\. Your privacy setting above stays the same\./);
+ assert.match(app,/Direct over shop Wi-Fi · unencrypted connection/);
+ assert.match(app,/Encrypted online transfer · print when ready/);
+ assert.match(app,/customerStatusLabel\(status:string\):string/);
+ assert.match(app,/Waiting for shop review/);
+ assert.match(app,/\{quoteEntries\.length\} files\{batchDocumentSourcePages>0/);
+ assert.match(app,/\{batchPrintedPages\} print pages\/sheets/);
+ assert.match(app,/UPI transaction ID \(UTR\)/);
+ assert.match(app,/Find it in your UPI app under payment details or transaction history/);
+ assert.ok(app.includes("Document pages are the original pages in uploaded documents, before copies are applied."));
+ assert.ok(app.includes("Print pages/sheets count output pages after copies."));
+ assert.ok(app.includes("two output pages may share one physical sheet."));
+});
+
+test("offline Photo Studio explains one-photo editing, friendly sizes, and shop print handoff",()=>{
+ const entry=read("../src/PrivatePhotoStudioEntry.tsx");
+ assert.ok(entry.includes("function photoSizeLabel(sizeCode:string):string"));
+ assert.ok(entry.includes('"35x45":"35 × 45 mm"'));
+ assert.ok(entry.includes('"25x35":"25 × 35 mm"'));
+ assert.ok(entry.includes('"2x2":"2 × 2 inch"'));
+ assert.ok(entry.includes('"4x6":"4 × 6 inch"'));
+ assert.ok(entry.includes("{photoSizeLabel(document.sizeCode)} · {document.photoCount} photos · {document.photosPerPage} per A4 sheet"));
+ assert.ok(entry.includes("Choose one original photo. Crop and enhance it, then set the number of copies and photos per A4 sheet in the editor."));
+ assert.ok(entry.includes("To print a saved sheet: tap Back to Home, scan the shop's QR code, then select the sheet under Photo Studio private documents in the shop's file picker."));
+});
+test("UPI amount copy is numeric and QR save feedback distinguishes success from pending or cancelled",()=>{
+ const qr=read("../src/CustomerUpiQr.tsx");
+ const css=read("../src/styles.css");
+ assert.match(qr,/amountMinor:number/);
+ assert.match(qr,/copyText\(\(amountMinor\/100\)\.toFixed\(2\),"Amount"\)/);
+ assert.match(qr,/statusTone==="success"\?<Check/);
+ assert.match(qr,/setStatusTone\("info"\)/);
+ assert.match(qr,/CUSTOMER_PAYMENT_QR_CANCELLED[\s\S]*?setStatusTone\("info"\)/);
+ assert.match(css,/\.customer-upi-download-status\.success/);
+ assert.match(css,/\.customer-upi-download-status\.info/);
 });

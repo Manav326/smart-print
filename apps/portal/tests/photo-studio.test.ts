@@ -30,13 +30,13 @@ test("caption labels reserve their own area and never shrink photo dimensions",(
  assert.equal(labelled.contentHeightMm,labelled.rows*52+(labelled.rows-1)*3);
 });
 test("private Photo Studio is independent of the cloud upload file-size limit",()=>{
- const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const library=readFileSync(new URL("../src/PrivatePhotoStudioEntry.tsx",import.meta.url),"utf8");
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- assert.match(app,/if\(selected\.size<=0\)/);
- assert.doesNotMatch(app,/selected\.size>UPLOAD_LIMITS\.maxFileBytes/);
- assert.match(app,/if\(source\.size<=0\|\|sheet\.file\.size<=0\)/);
- assert.doesNotMatch(app,/source\.size>UPLOAD_LIMITS\.maxFileBytes/);
- assert.doesNotMatch(app,/sheet\.file\.size>UPLOAD_LIMITS\.maxFileBytes/);
+ assert.match(library,/if\(selected\.size<=0\)/);
+ assert.doesNotMatch(library,/selected\.size>UPLOAD_LIMITS\.maxFileBytes/);
+ assert.match(library,/if\(source\.size<=0\|\|sheet\.file\.size<=0\)/);
+ assert.doesNotMatch(library,/source\.size>UPLOAD_LIMITS\.maxFileBytes/);
+ assert.doesNotMatch(library,/sheet\.file\.size>UPLOAD_LIMITS\.maxFileBytes/);
  assert.match(studio,/mode!=="private-library"&&jpegByteLength\+pdfStructureAllowance>MAX_FILE_BYTES/);
  assert.match(studio,/mode!=="private-library"&&pdf\.size>MAX_FILE_BYTES/);
 });
@@ -85,19 +85,19 @@ test("name and DOB are opt-in and are absent from the default photo sheet",()=>{
 
 
 test("private Photo Studio saves one photo locally with editable metadata and branded preview only",()=>{
- const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const library=readFileSync(new URL("../src/PrivatePhotoStudioEntry.tsx",import.meta.url),"utf8");
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
- assert.match(app,/function PrivatePhotoStudioEntry/);
- assert.match(app,/accept="image\/jpeg,image\/png,.jpg,.jpeg,.png"/);
- assert.match(app,/savePhotoStudioDocument\|/);
- assert.match(app,/updatePhotoStudioDocument\|/);
- assert.match(app,/getPhotoStudioSource\|/);
- assert.match(app,/renamePhotoStudioDocument\|/);
- assert.match(app,/deletePhotoStudioDocument\|/);
- assert.match(app,/mode="private-library"/);
- assert.match(app,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
- assert.match(app,/SmartPrint by QuantaEdge/);
+ assert.match(library,/function PrivatePhotoStudioEntry/);
+ assert.match(library,/accept="image\/jpeg,image\/png,.jpg,.jpeg,.png"/);
+ assert.match(library,/savePhotoStudioDocument\|/);
+ assert.match(library,/updatePhotoStudioDocument\|/);
+ assert.match(library,/getPhotoStudioSource\|/);
+ assert.match(library,/renamePhotoStudioDocument\|/);
+ assert.match(library,/deletePhotoStudioDocument\|/);
+ assert.match(library,/mode="private-library"/);
+ assert.match(library,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
+ assert.match(library,/SmartPrint by QuantaEdge/);
  assert.match(studio,/resolutionDpi:300,editorSettings/);
  assert.match(studio,/mode === "private-library"/);
  assert.match(css,/\.previewProtection::before/);
@@ -184,7 +184,8 @@ test("customer, shop order and private library share one strict JPG/PNG source p
  assert.match(app,/function isCustomerImage\(file:File\):boolean\s*\{\s*const identified=identifiedCustomerDocumentTypes\.get\(file\);/);
  assert.match(app,/if\(identified\)return identified\.mediaType==="image\/jpeg"\|\|identified\.mediaType==="image\/png";/);
  assert.match(app,/return isSupportedPhotoSource\(file\);/);
- assert.match(app,/resolvePhotoSourceMimeType\(selected\)/);
+ const library=readFileSync(new URL("../src/PrivatePhotoStudioEntry.tsx",import.meta.url),"utf8");
+ assert.match(library,/resolvePhotoSourceMimeType\(selected\)/);
  assert.match(app,/resolvePhotoSourceMimeType\(candidate\)/);
  assert.match(policy,/declaredMime === "image\/jpeg" \|\| declaredMime === "image\/png"/);
  assert.match(policy,/if \(declaredMime\)\s*\{/);

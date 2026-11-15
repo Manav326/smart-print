@@ -737,13 +737,13 @@ class MainActivityInstrumentedTest {
                     .apply { isAccessible = true }.get(activity) as? android.webkit.WebView
                 assertTrue("Photo Studio Home shortcut must open its private library route.", privatePage)
                 assertNotNull("Photo Studio route must be hosted in the app WebView.", webView)
-                assertEquals("/photo-studio", Uri.parse(webView?.url.orEmpty()).path)
+                assertEquals("/photo-studio-offline.html", Uri.parse(webView?.url.orEmpty()).path)
             }
         }
     }
 
     @Test
-    fun openingPhotoStudioAfterShopPrintAlwaysUsesConfiguredServiceOrigin() {
+    fun openingPhotoStudioAfterShopPrintUsesBundledOfflinePhotoStudioOrigin() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val shopUrl = "https://shop.example.test/station/12345678901234567890123456789012"
@@ -759,9 +759,13 @@ class MainActivityInstrumentedTest {
                     isAccessible = true
                 }.invoke(activity)
                 val studioUrl = Uri.parse(webView.url)
-                assertEquals("The Photo Studio route must not inherit the QR-selected shop host.",
-                    Uri.parse(BuildConfig.SERVICE_BASE_URL).host, studioUrl.host)
-                assertEquals("/photo-studio", studioUrl.path)
+                assertEquals(
+                    "The offline Photo Studio must use the packaged local asset origin.",
+                    "appassets.androidplatform.net",
+                    studioUrl.host
+                )
+                assertEquals("https", studioUrl.scheme)
+                assertEquals("/photo-studio-offline.html", studioUrl.path)
                 assertTrue(
                     "Photo Studio must activate its route-scoped private library bridge.",
                     MainActivity::class.java.getDeclaredField("privatePhotoStudioPageOpen")
@@ -783,7 +787,7 @@ class MainActivityInstrumentedTest {
             scenario.onActivity { activity ->
                 val webView = MainActivity::class.java.getDeclaredField("webView")
                     .apply { isAccessible = true }.get(activity) as WebView
-                assertEquals("/photo-studio", Uri.parse(webView.url).path)
+                assertEquals("/photo-studio-offline.html", Uri.parse(webView.url).path)
                 MainActivity::class.java.getDeclaredField("portalUrl").apply { isAccessible = true }
                     .set(activity, "https://shop.example.test/station/12345678901234567890123456789012")
                 MainActivity::class.java.getDeclaredField("portalHost").apply { isAccessible = true }
@@ -811,7 +815,7 @@ class MainActivityInstrumentedTest {
             scenario.onActivity { activity ->
                 val webView = MainActivity::class.java.getDeclaredField("webView")
                     .apply { isAccessible = true }.get(activity) as WebView
-                assertEquals("/photo-studio", Uri.parse(webView.url.orEmpty()).path)
+                assertEquals("/photo-studio-offline.html", Uri.parse(webView.url.orEmpty()).path)
                 MainActivity::class.java.getDeclaredField("fileChooserReturnToPhotoStudio")
                     .apply { isAccessible = true }.setBoolean(activity, true)
                 MainActivity::class.java.getDeclaredMethod("showPicker", Boolean::class.javaPrimitiveType!!)
@@ -825,14 +829,14 @@ class MainActivityInstrumentedTest {
                 MainActivity::class.java.getDeclaredMethod("cancelPicker").apply {
                     isAccessible = true
                 }.invoke(activity)
-                assertEquals("/photo-studio", Uri.parse(webView.url.orEmpty()).path)
+                assertEquals("/photo-studio-offline.html", Uri.parse(webView.url.orEmpty()).path)
                 assertNotNull("The same studio WebView must be reattached after picker cancellation.", webView.parent)
                 MainActivity::class.java.getDeclaredMethod("showDedicatedPhotoStudio").apply {
                     isAccessible = true
                 }.invoke(activity)
                 assertNotNull("Repeated Photo Studio entry must reattach the existing WebView.", webView.parent)
                 assertEquals("The selected shop-print route must not replace the private studio.",
-                    "/photo-studio", Uri.parse(webView.url.orEmpty()).path)
+                    "/photo-studio-offline.html", Uri.parse(webView.url.orEmpty()).path)
             }
         }
     }

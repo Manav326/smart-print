@@ -330,6 +330,12 @@ test('Windows installer lifecycle reports each case, wait and safe cleanup stage
 test('Android JVM and emulator test tasks expose per-test and package lifecycle progress', () => {
   assert.match(androidGradleSource, /events\("started", "passed", "skipped", "failed"\)/);
   assert.match(androidCiSource, /\[QA-STEP-START\] Android Espresso instrumentation/);
+  assert.match(androidCiSource, /androidLoadsTheSharedFullPhotoStudioFromBundledAssetsWithoutAServiceConnection/);
+  assert.match(androidCiSource, /expected=5/);
+  assert.match(androidCiSource, /qa_fixture_dir="\$RUNNER_TEMP\/smartprint-photo-studio-qa"/);
+  assert.match(androidCiSource, /cp -R "\$qa_fixture_dir\/\."/);
+  assert.doesNotMatch(androidCiSource, /cp -R apps\/portal\/dist(?:-android-offline)?\/\./);
+  assert.doesNotMatch(androidCiSource, /cp -R apps\/portal\/dist\/\./);
   assert.match(androidCiSource, /\[QA-STEP-START\] Android package install\/upgrade\/downgrade lifecycle/);
   assert.match(androidLifecycleSource, /\[QA-PROGRESS\] Android emulator boot/);
   assert.match(runnerSource, /--console=plain/);

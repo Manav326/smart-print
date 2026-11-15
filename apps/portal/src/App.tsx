@@ -1,6 +1,6 @@
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { identifySupportedDocument, type SupportedDocumentType } from "./document-content-policy";
-import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound,
@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } from "./PhotoStudio";
+import PrivatePhotoStudioEntry from "./PrivatePhotoStudioEntry";
 import { isSupportedPhotoSource, resolvePhotoSourceMimeType } from "./photo-source-policy";
 import CustomerUpiQr from "./CustomerUpiQr";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
@@ -74,393 +75,6 @@ const sectionGroups: { label: string; items: Section[] }[] = [
   { label: "INSIGHTS", items: ["Reports"] }
 ];
 
-type PrivatePhotoStudioBridge = {
-  postMessage: (value: string) => void;
-  addEventListener?: (type: "message", listener: (event: MessageEvent) => void) => void;
-  removeEventListener?: (type: "message", listener: (event: MessageEvent) => void) => void;
-  onmessage?: ((event: MessageEvent) => void) | null;
-};
-
-type PrivatePhotoStudioDocument = {
-  id: string;
-  title: string;
-  sizeCode: string;
-  photoCount: number;
-  photosPerPage: number;
-  pageCount: number;
-  resolutionDpi: number;
-  sizeBytes: number;
-  thumbnailBase64?: string;
-};
-
-function bytesToBase64(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize)));
-  }
-  return btoa(binary);
-}
-
-function base64ToBytes(value:string):Uint8Array {
-  const binary=atob(value);
-  const bytes=new Uint8Array(binary.length);
-  for(let index=0;index<binary.length;index++)bytes[index]=binary.charCodeAt(index);
-  return bytes;
-}
-
-function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
-  const [source,setSource]=useState<File|null>(null);
-  const [saving,setSaving]=useState(false);
-  const [status,setStatus]=useState("");
-  const [error,setError]=useState("");
-  const [inputKey,setInputKey]=useState(0);
-  const [documents,setDocuments]=useState<PrivatePhotoStudioDocument[]>([]);
-  const [libraryLoading,setLibraryLoading]=useState(true);
-  const [editingDocumentId,setEditingDocumentId]=useState<string|null>(null);
-  const [initialSettings,setInitialSettings]=useState<Partial<PhotoStudioEditorSettings>|undefined>(undefined);
-  const [preview,setPreview]=useState<{id:string;title:string;pageIndex:number;pageCount:number;image:string|null}|null>(null);
-  const [renameTarget,setRenameTarget]=useState<PrivatePhotoStudioDocument|null>(null);
-  const [renameValue,setRenameValue]=useState("");
-  const [deleteTarget,setDeleteTarget]=useState<PrivatePhotoStudioDocument|null>(null);
-  const [menuDocumentId,setMenuDocumentId]=useState<string|null>(null);
-  const nativeBridge=()=> (window as Window & {SmartPrintNative?:PrivatePhotoStudioBridge}).SmartPrintNative;
-
-  function refreshLibrary(){
-    setLibraryLoading(true);
-    const bridge=nativeBridge();
-    if(!bridge){setLibraryLoading(false);setError("Open Photo Studio from the SmartPrint Android app to use its private document library.");return;}
-    bridge.postMessage("listPhotoStudioDocuments");
-  }
-
-  useEffect(()=>{
-    const bridge=nativeBridge();
-    if(!bridge){setLibraryLoading(false);return;}
-    const onMessage=(event:MessageEvent)=>{
-      const message=String(event.data??"");
-      if(message.startsWith("PHOTO_LIBRARY|")){
-        try{
-          const parsed=JSON.parse(message.slice("PHOTO_LIBRARY|".length)) as PrivatePhotoStudioDocument[];
-          setDocuments(Array.isArray(parsed)?parsed:[]);
-          setLibraryLoading(false);
-          setError("");
-        }catch{
-          setLibraryLoading(false);
-          setError("The saved Photo Studio library could not be read.");
-        }
-      }else if(message.startsWith("PHOTO_LIBRARY_FAILED|")){
-        setLibraryLoading(false);
-        setError(message.slice("PHOTO_LIBRARY_FAILED|".length)||"The saved Photo Studio library could not be read.");
-      }else if(message.startsWith("PHOTO_SAVED|")||message.startsWith("PHOTO_UPDATED|")){
-        setSaving(false);
-        setSource(null);
-        setEditingDocumentId(null);
-        setInitialSettings(undefined);
-        setInputKey(value=>value+1);
-        setStatus(message.startsWith("PHOTO_UPDATED|")
-          ? "Your photo sheet was updated privately. Its saved print details are retained."
-          : "Saved privately on this device. Connect to a shop whenever you are ready to print.");
-        setError("");
-        refreshLibrary();
-      }else if(message.startsWith("PHOTO_SAVE_FAILED|")||message.startsWith("PHOTO_UPDATE_FAILED|")){
-        setSaving(false);
-        setError(message.slice(message.indexOf("|")+1)||"The private photo sheet could not be saved.");
-      }else if(message.startsWith("PHOTO_PREVIEW_PAGE|")){
-        const parts=message.split("|",4);
-        if(parts.length===4){
-          setPreview(current=>current&&current.id===parts[1]?{...current,pageIndex:Number(parts[2])||0,image:parts[3]}:current);
-        }
-      }else if(message.startsWith("PHOTO_PREVIEW_FAILED|")){
-        setError(message.slice("PHOTO_PREVIEW_FAILED|".length)||"The private photo preview could not be opened.");
-        closePreview();
-      }else if(message.startsWith("PHOTO_SOURCE|")){
-        try{
-          const payload=JSON.parse(message.slice("PHOTO_SOURCE|".length)) as {
-            metadata: Record<string,unknown>;
-            sourceBase64: string;
-          };
-          const metadata=payload.metadata;
-          const mime=typeof metadata.sourceMime==="string"?metadata.sourceMime:"";
-          const name=typeof metadata.sourceName==="string"?metadata.sourceName:"photo.jpg";
-          const supportedMime=resolvePhotoSourceMimeType({type:mime,name});
-          if(!supportedMime){
-            setError("This saved original is not a JPG or PNG photo and cannot be reopened in Photo Studio.");
-            return;
-          }
-          const bytes=base64ToBytes(payload.sourceBase64);
-          setSource(new File([bytes],name,{type:supportedMime,lastModified:Date.now()}));
-          const saved=metadata.editorSettings;
-          setInitialSettings(saved&&typeof saved==="object"?saved as Partial<PhotoStudioEditorSettings>:undefined);
-          setEditingDocumentId(String(metadata.id??""));
-          setStatus("");
-          setError("");
-          setMenuDocumentId(null);
-        }catch{
-          setError("The original photo could not be reopened for editing.");
-        }
-      }else if(message.startsWith("PHOTO_SOURCE_FAILED|")){
-        setError(message.slice("PHOTO_SOURCE_FAILED|".length)||"The original photo could not be reopened.");
-      }else if(message.startsWith("PHOTO_RENAMED|")){
-        setRenameTarget(null);
-        setRenameValue("");
-        setMenuDocumentId(null);
-        setStatus("Document name updated.");
-        refreshLibrary();
-      }else if(message.startsWith("PHOTO_RENAME_FAILED|")){
-        setError(message.slice("PHOTO_RENAME_FAILED|".length)||"The document could not be renamed.");
-      }else if(message.startsWith("PHOTO_DELETED|")){
-        setMenuDocumentId(null);
-        setPreview(current=>current?.id===message.slice("PHOTO_DELETED|".length)?null:current);
-        setStatus("Private photo document deleted from this device.");
-        refreshLibrary();
-      }else if(message.startsWith("PHOTO_DELETE_FAILED|")){
-        setError(message.slice("PHOTO_DELETE_FAILED|".length)||"The private photo document could not be deleted.");
-      }
-    };
-    if(bridge.addEventListener){
-      bridge.addEventListener("message",onMessage);
-    }else{
-      const previous=bridge.onmessage;
-      bridge.onmessage=event=>{previous?.(event);onMessage(event);};
-    }
-    bridge.postMessage("listPhotoStudioDocuments");
-    return ()=>{
-      bridge.removeEventListener?.("message",onMessage);
-      if(bridge.onmessage===onMessage)bridge.onmessage=null;
-      bridge.postMessage("setSensitivePreview|on");
-      bridge.postMessage("setPhotoStudioOpen|off");
-    };
-  },[]);
-
-  function chooseSource(event:ChangeEvent<HTMLInputElement>){
-    const selected=event.currentTarget.files?.[0]??null;
-    if(!selected)return;
-    const supportedMime=resolvePhotoSourceMimeType(selected);
-    if(!supportedMime){setError("Choose one JPG or PNG photo.");event.currentTarget.value="";return;}
-    if(selected.size<=0){setError("Choose a non-empty photo.");event.currentTarget.value="";return;}
-    const normalized=selected.type===supportedMime?selected:new File([selected],selected.name,{type:supportedMime,lastModified:selected.lastModified});
-    setSource(normalized);setEditingDocumentId(null);setInitialSettings(undefined);setStatus("");setError("");
-  }
-
-  async function savePreparedSheets(sheets:PreparedPhotoSheet[]){
-    const sheet=sheets[0];
-    if(!source||!sheet||saving)return;
-    const bridge=nativeBridge();
-    if(!bridge){setError("Open Photo Studio from the SmartPrint Android app to save a private sheet.");return;}
-    if(source.size<=0||sheet.file.size<=0){
-      setError("The original photo or prepared sheet is empty. Choose the photo again and retry.");
-      return;
-    }
-    setSaving(true);setError("");setStatus("Saving securely on this device…");
-    try{
-      const [sourceBuffer,pdfBuffer]=await Promise.all([source.arrayBuffer(),sheet.file.arrayBuffer()]);
-      const payload={
-        title:source.name.replace(/\.[^.]+$/,"").slice(0,80)||"Photo sheet",
-        sourceName:source.name.slice(0,180),
-        sourceMime:source.type||"image/jpeg",
-        sourceBase64:bytesToBase64(sourceBuffer),
-        pdfBase64:bytesToBase64(pdfBuffer),
-        sizeCode:sheet.sizeCode,
-        photoCount:sheet.photoCount,
-        photosPerPage:sheet.photosPerPage,
-        pageCount:Math.ceil(sheet.photoCount/sheet.photosPerPage),
-        resolutionDpi:sheet.resolutionDpi??300,
-        captionHeightMm:sheet.captionHeightMm,
-        editorSettings:sheet.editorSettings??null
-      };
-      const encoded=JSON.stringify(payload);
-      bridge.postMessage(editingDocumentId
-        ? "updatePhotoStudioDocument|"+editingDocumentId+"|"+encoded
-        : "savePhotoStudioDocument|"+encoded);
-    }catch(cause){
-      setSaving(false);
-      setError(cause instanceof Error?cause.message:"The private photo sheet could not be transferred to this device.");
-    }
-  }
-
-  function openPreview(document:PrivatePhotoStudioDocument,pageIndex=0){
-    const bridge=nativeBridge();
-    if(!bridge){setError("Open Photo Studio from the SmartPrint Android app to preview saved sheets.");return;}
-    setMenuDocumentId(null);
-    setPreview({id:document.id,title:document.title,pageIndex,pageCount:Math.max(1,document.pageCount||1),image:null});
-    bridge.postMessage("setPhotoStudioOpen|on");
-    bridge.postMessage("setSensitivePreview|off");
-    bridge.postMessage("getPhotoStudioPreviewPage|"+document.id+"|"+pageIndex);
-  }
-
-  function closePreview(){
-    nativeBridge()?.postMessage("setSensitivePreview|on");
-    nativeBridge()?.postMessage("setPhotoStudioOpen|off");
-    setPreview(null);
-  }
-
-  function changePreviewPage(next:number){
-    if(!preview)return;
-    const pageIndex=Math.min(preview.pageCount-1,Math.max(0,next));
-    setPreview({...preview,pageIndex,image:null});
-    nativeBridge()?.postMessage("getPhotoStudioPreviewPage|"+preview.id+"|"+pageIndex);
-  }
-
-  function beginEdit(document:PrivatePhotoStudioDocument){
-    setMenuDocumentId(null);
-    nativeBridge()?.postMessage("getPhotoStudioSource|"+document.id);
-  }
-
-  function beginRename(document:PrivatePhotoStudioDocument){
-    setMenuDocumentId(null);
-    setRenameTarget(document);
-    setRenameValue(document.title);
-  }
-
-  function submitRename(event:FormEvent<HTMLFormElement>){
-    event.preventDefault();
-    if(!renameTarget)return;
-    const title=renameValue.trim().slice(0,80);
-    if(!title){setError("Enter a document name.");return;}
-    nativeBridge()?.postMessage("renamePhotoStudioDocument|"+renameTarget.id+"|"+title);
-  }
-
-  function deleteDocument(document:PrivatePhotoStudioDocument){
-    setMenuDocumentId(null);
-    setDeleteTarget(document);
-  }
-
-  function confirmDeleteDocument(){
-    if(!deleteTarget)return;
-    nativeBridge()?.postMessage("deletePhotoStudioDocument|"+deleteTarget.id);
-    setDeleteTarget(null);
-  }
-
-  if(source){
-    return <>
-      <PhotoStudio
-        source={source}
-        mode="private-library"
-        dark={dark}
-        photoPrices={{}}
-        initialPhotoCount={initialSettings?.copiesInput?Number(initialSettings.copiesInput):undefined}
-        initialSettings={initialSettings}
-        onCancel={()=>{setSource(null);setEditingDocumentId(null);setInitialSettings(undefined);setError("");}}
-        onApply={savePreparedSheets}
-      />
-      {saving&&<div role="status" style={{position:"fixed",inset:0,zIndex:10000,display:"grid",placeItems:"center",background:"rgba(8,16,30,.72)",color:"#fff",fontWeight:700}}>Saving privately…</div>}
-      {error&&<div role="alert" style={{position:"fixed",left:16,right:16,bottom:16,zIndex:10001,padding:14,borderRadius:10,background:"#fff0f0",color:"#9a2626",fontSize:13}}>{error}</div>}
-    </>;
-  }
-
-  return <main className={"private-photo-studio-entry"+(dark?" dark":"")} style={{minHeight:"100dvh",padding:"24px 18px 36px",background:"var(--surface,#f6f8fc)",color:"var(--text,#172033)"}}>
-    <section style={{width:"min(100%,760px)",margin:"0 auto"}}>
-      <header style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:18}}>
-        <div>
-          <div style={{fontSize:10,fontWeight:800,letterSpacing:".14em",color:"var(--accent,#5366c9)"}}>SMARTPRINT BY QUANTAEDGE</div>
-          <h1 style={{fontSize:26,lineHeight:1.2,margin:"7px 0 4px"}}>Photo Studio</h1>
-          <p style={{fontSize:13,lineHeight:1.5,margin:0,color:"var(--muted,#64748b)"}}>Your private photo sheets, saved on this device.</p>
-        </div>
-        <button type="button" onClick={refreshLibrary} disabled={libraryLoading} style={{border:"1px solid var(--border,#dbe2ec)",background:"var(--card,#fff)",color:"inherit",borderRadius:10,padding:"9px 12px",fontWeight:700}}>Refresh</button>
-      </header>
-
-      <section style={{padding:17,border:"1px solid var(--border,#dbe2ec)",borderRadius:16,background:"var(--card,#fff)",marginBottom:18,boxShadow:"0 8px 24px rgba(20,38,66,.05)"}}>
-        <div style={{fontSize:16,fontWeight:750}}>Prepare one photo</div>
-        <p style={{fontSize:12,lineHeight:1.5,color:"var(--muted,#64748b)",margin:"5px 0 12px"}}>Choose a single photo to crop, enhance and arrange. Your original and finished sheet remain encrypted on this device.</p>
-        <label htmlFor="private-photo-source" style={{display:"inline-flex",alignItems:"center",gap:8,padding:"11px 15px",borderRadius:10,background:"var(--accent,#4f5fc4)",color:"#fff",fontSize:13,fontWeight:750,cursor:"pointer"}}>
-          Choose one photo
-          <input key={inputKey} id="private-photo-source" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={chooseSource} style={{position:"absolute",width:1,height:1,opacity:0,pointerEvents:"none"}}/>
-        </label>
-      </section>
-
-      <section>
-        <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,marginBottom:10}}>
-          <h2 style={{fontSize:18,margin:0}}>Saved photo documents</h2>
-          <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{documents.length} saved</span>
-        </div>
-        {libraryLoading&&<p role="status" style={{fontSize:13,color:"var(--muted,#64748b)"}}>Loading your private documents…</p>}
-        {!libraryLoading&&documents.length===0&&<div style={{padding:22,border:"1px dashed var(--border,#c8d1df)",borderRadius:14,textAlign:"center",background:"var(--card,#fff)"}}>
-          <strong style={{fontSize:14}}>No saved photo sheets yet</strong>
-          <p style={{fontSize:12,color:"var(--muted,#64748b)",margin:"6px 0 0"}}>Your prepared documents will appear here. You can print them later through a connected shop.</p>
-        </div>}
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(min(100%,310px),1fr))",gap:12}}>
-          {documents.map(document=><article key={document.id} style={{display:"flex",gap:12,alignItems:"stretch",minWidth:0,padding:12,border:"1px solid var(--border,#dbe2ec)",borderRadius:14,background:"var(--card,#fff)",boxShadow:"0 4px 14px rgba(20,38,66,.04)"}}>
-            <div style={{width:88,flex:"0 0 88px",alignSelf:"flex-start",position:"relative",overflow:"hidden",borderRadius:8,border:"1px solid var(--border,#dbe2ec)",background:"#fff",aspectRatio:"210/297"}}>
-              {document.thumbnailBase64
-                ? <img src={"data:image/jpeg;base64,"+document.thumbnailBase64} alt={"Preview of "+document.title} style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>
-                : <div style={{display:"grid",placeItems:"center",height:"100%",fontSize:10,color:"#64748b"}}>A4 PHOTO</div>}
-              <span style={{position:"absolute",left:3,right:3,bottom:4,fontSize:6,fontWeight:800,textAlign:"center",color:"#46536e",background:"rgba(255,255,255,.74)",padding:2}}>SmartPrint by QuantaEdge</span>
-            </div>
-            <div style={{minWidth:0,flex:1,display:"flex",flexDirection:"column",gap:5}}>
-              <strong style={{fontSize:14,lineHeight:1.35,overflowWrap:"anywhere"}}>{document.title||"Photo sheet"}</strong>
-              <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{document.sizeCode} · {document.photoCount} photos · {document.photosPerPage}/A4 sheet</span>
-              <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{document.pageCount} A4 {document.pageCount===1?"page":"pages"} · {document.resolutionDpi||300} DPI</span>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginTop:"auto",flexWrap:"wrap"}}>
-                <button type="button" onClick={()=>openPreview(document)} style={{padding:"7px 12px",borderRadius:8,border:0,background:"var(--accent,#4f5fc4)",color:"#fff",fontSize:12,fontWeight:750}}>View</button>
-                <button type="button" aria-label={"More actions for "+document.title} aria-expanded={menuDocumentId===document.id} onClick={()=>setMenuDocumentId(value=>value===document.id?null:document.id)} style={{width:34,height:32,borderRadius:8,border:"1px solid var(--border,#dbe2ec)",background:"transparent",color:"inherit",fontSize:20,lineHeight:1}}>⋮</button>
-              </div>
-              {menuDocumentId===document.id&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                <button type="button" onClick={()=>beginEdit(document)} style={actionStyle}>Edit</button>
-                <button type="button" onClick={()=>beginRename(document)} style={actionStyle}>Rename</button>
-                <button type="button" onClick={()=>deleteDocument(document)} style={{...actionStyle,color:"#b42318"}}>Delete</button>
-              </div>}
-            </div>
-          </article>)}
-        </div>
-      </section>
-
-      <p style={{fontSize:11,lineHeight:1.5,color:"var(--muted,#64748b)",marginTop:18}}>To print a saved sheet, connect to a shop and choose it from the Photo Studio private documents section in the shop's file picker. The preview carries SmartPrint security and QuantaEdge branding; the actual print sheet is clean.</p>
-      {status&&<p role="status" style={{fontSize:12,color:"var(--accent,#5366c9)",marginTop:12}}>{status}</p>}
-      {error&&<p role="alert" style={{fontSize:12,color:"#bd3434",marginTop:12}}>{error}</p>}
-    </section>
-
-    {renameTarget&&<div role="presentation" onClick={event=>{if(event.target===event.currentTarget)setRenameTarget(null);}} style={{position:"fixed",inset:0,zIndex:1000,display:"grid",placeItems:"center",padding:18,background:"rgba(10,18,32,.52)"}}>
-      <form onSubmit={submitRename} role="dialog" aria-modal="true" aria-labelledby="photo-rename-title" style={{width:"min(100%,380px)",padding:20,borderRadius:14,background:"var(--card,#fff)",color:"var(--text,#172033)",boxShadow:"0 20px 54px rgba(0,0,0,.22)"}}>
-        <h2 id="photo-rename-title" style={{fontSize:17,margin:"0 0 12px"}}>Rename photo document</h2>
-        <input autoFocus maxLength={80} value={renameValue} onChange={event=>setRenameValue(event.target.value)} aria-label="Document name" style={{width:"100%",boxSizing:"border-box",padding:11,borderRadius:8,border:"1px solid var(--border,#c8d1df)",background:"var(--surface,#fff)",color:"inherit"}}/>
-        <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14}}>
-          <button type="button" onClick={()=>setRenameTarget(null)} style={actionStyle}>Cancel</button>
-          <button type="submit" style={{...actionStyle,background:"var(--accent,#4f5fc4)",color:"#fff",borderColor:"transparent"}}>Save name</button>
-        </div>
-      </form>
-    </div>}
-
-    {deleteTarget&&<div role="presentation" onClick={event=>{if(event.target===event.currentTarget)setDeleteTarget(null);}} style={{position:"fixed",inset:0,zIndex:1050,display:"grid",placeItems:"center",padding:18,background:"rgba(10,18,32,.56)"}}>
-      <section role="dialog" aria-modal="true" aria-labelledby="photo-delete-title" style={{width:"min(100%,380px)",padding:20,borderRadius:14,background:"var(--card,#fff)",color:"var(--text,#172033)",boxShadow:"0 20px 54px rgba(0,0,0,.22)"}}>
-        <h2 id="photo-delete-title" style={{fontSize:17,margin:"0 0 10px"}}>Delete private photo document?</h2>
-        <p style={{fontSize:13,lineHeight:1.55,color:"var(--muted,#64748b)",margin:"0 0 16px"}}>Delete “{deleteTarget.title}” and its saved original photo from this device? This cannot be undone.</p>
-        <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
-          <button type="button" onClick={()=>setDeleteTarget(null)} style={actionStyle}>Keep document</button>
-          <button type="button" onClick={confirmDeleteDocument} style={{...actionStyle,background:"#b42318",color:"#fff",borderColor:"transparent"}}>Delete</button>
-        </div>
-      </section>
-    </div>}
-
-    {preview&&<div role="presentation" onClick={event=>{if(event.target===event.currentTarget)closePreview();}} style={{position:"fixed",inset:0,zIndex:1100,display:"grid",gridTemplateRows:"auto minmax(0,1fr) auto",padding:14,background:"rgba(4,10,20,.94)",color:"#fff"}}>
-      <header style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"4px 2px 12px"}}>
-        <div style={{minWidth:0}}>
-          <strong style={{fontSize:14,display:"block",overflowWrap:"anywhere"}}>{preview.title}</strong>
-          <span style={{fontSize:11,opacity:.78}}>Private preview · Page {preview.pageIndex+1} of {preview.pageCount}</span>
-        </div>
-        <button type="button" onClick={closePreview} style={{padding:"8px 12px",border:"1px solid #ffffff55",borderRadius:8,background:"transparent",color:"#fff"}}>Close</button>
-      </header>
-      <div style={{minHeight:0,display:"grid",placeItems:"center",overflow:"auto"}}>
-        {preview.image
-          ? <div style={{position:"relative",width:"min(100%,620px)",maxHeight:"100%",aspectRatio:"210/297",background:"#fff",boxShadow:"0 12px 36px rgba(0,0,0,.4)"}}>
-              <img src={"data:image/jpeg;base64,"+preview.image} alt={"A4 photo-sheet preview, page "+(preview.pageIndex+1)} style={{display:"block",width:"100%",height:"100%",objectFit:"contain"}}/>
-              <div aria-hidden="true" style={{position:"absolute",inset:0,pointerEvents:"none",display:"grid",placeItems:"center",backgroundImage:"repeating-linear-gradient(135deg,transparent 0 66px,rgba(35,48,74,.035) 66px 68px)"}}>
-                <span style={{position:"absolute",left:"7%",right:"7%",top:"42%",transform:"rotate(-28deg)",fontSize:"clamp(10px,2vw,16px)",lineHeight:2.2,fontWeight:900,letterSpacing:".18em",textAlign:"center",color:"rgba(38,52,78,.15)"}}>SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW</span>
-                <strong style={{position:"absolute",left:"8%",right:"8%",bottom:"7%",padding:"8px 10px",border:"1px solid rgba(44,59,84,.22)",borderRadius:5,background:"rgba(255,255,255,.55)",color:"rgba(28,43,69,.72)",fontSize:"clamp(10px,1.8vw,15px)",letterSpacing:".12em",textAlign:"center"}}>SmartPrint by QuantaEdge</strong>
-              </div>
-            </div>
-          : <div role="status" style={{fontSize:13,opacity:.8}}>Preparing secure preview…</div>}
-      </div>
-      <footer style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,paddingTop:12}}>
-        <button type="button" disabled={preview.pageIndex===0} onClick={()=>changePreviewPage(preview.pageIndex-1)} style={{...actionStyle,background:"#ffffff12",color:"#fff",borderColor:"#ffffff55"}}>Previous</button>
-        <span style={{fontSize:12}}>Page {preview.pageIndex+1} / {preview.pageCount}</span>
-        <button type="button" disabled={preview.pageIndex>=preview.pageCount-1} onClick={()=>changePreviewPage(preview.pageIndex+1)} style={{...actionStyle,background:"#ffffff12",color:"#fff",borderColor:"#ffffff55"}}>Next</button>
-      </footer>
-    </div>}
-  </main>;
-}
-
-const actionStyle:CSSProperties={padding:"7px 10px",borderRadius:8,border:"1px solid var(--border,#dbe2ec)",background:"transparent",color:"inherit",fontSize:11,fontWeight:700,cursor:"pointer"};
 
 export default function App() {
   const route = resolvePortalRoute(window.location.pathname);
@@ -4449,6 +4063,20 @@ function isSmartPrintIdDocument(file:File):boolean {
 function isSmartPrintPhotoDocument(file:File):boolean {
   return (file as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="PHOTO";
 }
+type NativeCustomerPdfPreview = {
+  token:string; requestedPageIndex:number; pageIndex:number; pageCount:number;
+  image:string; thumbnails:Array<{index:number;image:string}>; loading:boolean;
+};
+function customerStatusTone(status:string):"green"|"red"|"amber"|"blue"|"slate" {
+  if(["COMPLETED","PDF_EXPORTED","PAID_AUTHORISED","REFUNDED"].includes(status))return "green";
+  if(["REJECTED","PAYMENT_REJECTED","FAILED","CANCELLED"].includes(status))return "red";
+  if(["AWAITING_PAYMENT","AWAITING_CUSTOMER_PAYMENT","AWAITING_COUNTER_PAYMENT","PAYMENT_REPORTED","QUOTE_EXPIRED"].includes(status))return "amber";
+  if(["AWAITING_SHOP_APPROVAL","LOCAL_QUEUE_CLAIMED","LOCAL_QUEUE_READY","PRINT_AUTHORISED","PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING","OUTPUT_UNCONFIRMED"].includes(status))return "blue";
+  return "slate";
+}
+function customerStatusLabel(status:string):string {
+  return status==="AWAITING_SHOP_APPROVAL"?"Waiting for shop review":prettyStatus(status);
+}
 function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSettings {
   if(!value||typeof value!=="object")return false;
   const settings=value as CustomerPhotoSettings;
@@ -4472,6 +4100,28 @@ function postSmartPrintNativeMessage(message:string):boolean {
   if(!bridge?.postMessage)return false;
   try {bridge.postMessage(message);return true;}
   catch {return false;}
+}
+
+function CustomerNativePdfPreview({token,preview,onOpen,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onOpen:()=>void;onPage:(page:number)=>void}) {
+  const current=preview?.token===token?preview:null;
+  return <div className="customer-native-pdf-preview">
+    {current?.image
+      ? <img className="customer-native-pdf-page" src={"data:image/jpeg;base64,"+current.image} alt={"PDF page "+(current.pageIndex+1)+" of "+current.pageCount}/>
+      : <div className="customer-native-pdf-empty">
+          {current?.loading?<><span className="button-spinner"/><span>Preparing document preview…</span></>:<><FileText size={22}/><span>Preview this PDF without leaving the upload page.</span><button type="button" className="customer-file-studio-button" onClick={onOpen}>Preview PDF</button></>}
+        </div>}
+    {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
+      <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous</button>
+      <span>Page {current.pageIndex+1} of {current.pageCount}</span>
+      <button type="button" disabled={current.loading||current.pageIndex>=current.pageCount-1} onClick={()=>onPage(current.pageIndex+1)}>Next</button>
+    </div>}
+    {current&&current.thumbnails.length>1&&<div className="customer-native-pdf-thumbnails" aria-label="PDF page thumbnails">
+      {current.thumbnails.map(page=><button type="button" key={page.index} aria-current={current.pageIndex===page.index?"page":undefined} onClick={()=>onPage(page.index)} disabled={current.loading}>
+        <img src={"data:image/jpeg;base64,"+page.image} alt={"Page "+(page.index+1)}/>
+        <span>{page.index+1}</span>
+      </button>)}
+    </div>}
+  </div>;
 }
 
 function consumeSmartPrintNativePrintKinds():Array<string|null>|undefined {
@@ -4562,6 +4212,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [selectedFileIndex,setSelectedFileIndex]=useState(0);
   const file=files[selectedFileIndex]??null;
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
+  const [nativePdfPreview,setNativePdfPreview]=useState<NativeCustomerPdfPreview|null>(null);
   const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>initialDraft?.uploaded??initialDraft?.uploadedBatch?.[0]??null);
   const [uploadedBatch,setUploadedBatch]=useState<UploadedPrintJob[]>(()=>initialDraft?.uploadedBatch??(initialDraft?.uploaded?[initialDraft.uploaded]:[]));
   const [uploadedFileFingerprints,setUploadedFileFingerprints]=useState<string[]>(()=>initialDraft?.uploadedFileFingerprints??[]);
@@ -4676,6 +4327,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
+  const [notice,setNotice]=useState<{kind:"info"|"warning";message:string}|null>(null);
   const [uploadMode,setUploadMode]=useState<"LOCAL"|"CLOUD">(
     localAgent?.endpoints.length ? "LOCAL" : "CLOUD"
   );
@@ -4808,7 +4460,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       if(refreshing)return;
       refreshing=true;
       try{
-        const results=await Promise.all(items.map(async item=>{
+        const selectedJobId=uploaded?.job.id;
+        const results=await Promise.all(items.filter(item=>item.job.id!==selectedJobId).map(async item=>{
           try{return [item.job.id,await getCustomerJobStatus(sessionToken,item.job.id)] as const;}
           catch{return null;}
         }));
@@ -4823,24 +4476,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           .filter((item):item is CustomerBatchPayment=>item!==null)
           .sort((left,right)=>paymentTimestamp(right)-paymentTimestamp(left))[0];
         rememberBatchPayment(latestBatchPayment);
-        const selectedId=uploaded?.job.id;
-        if(selectedId&&fresh[selectedId]){
-          const selected=fresh[selectedId];
-          if(selected.status==="Uploaded"||selected.status==="UPLOADED"||selected.status==="AWAITING_CONFIGURATION"){
-            setJobStatus(null);
-            setPayment(null);
-          } else {
-            rememberCustomerStatus(selected);
-          }
-        }
       } finally {refreshing=false;}
     };
     void refreshAll();
-    const awaitingPrivatePurge=jobStatus?.privatePrinting===true&&
-      (jobStatus.status==="COMPLETED"||jobStatus.status==="TEST_OUTPUT_READY")&&!jobStatus.privateDocumentPurgedUtc;
-    const timer=window.setInterval(()=>void refreshAll(),awaitingPrivatePurge?3000:30000);
+    const timer=window.setInterval(()=>void refreshAll(),30000);
     return ()=>{active=false;window.clearInterval(timer);};
-  },[sessionToken,batchStatusKey,uploaded?.job.id,jobStatus?.privatePrinting,jobStatus?.status,jobStatus?.privateDocumentPurgedUtc]);
+  },[sessionToken,batchStatusKey,uploaded?.job.id]);
 
   useEffect(()=>{
     if(!uploaded)return;
@@ -4861,6 +4502,37 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     });
     return ()=>{active=false;};
   },[sessionToken,uploaded?.job.id]);
+
+  useEffect(()=>{
+    if(!nativeAppMode)return;
+    const onNativePdfPreview=(event:MessageEvent)=>{
+      const message=typeof event.data==="string"?event.data:"";
+      if(message.startsWith("CUSTOMER_PDF_PREVIEW|")){
+        try{
+          const payload=JSON.parse(message.slice("CUSTOMER_PDF_PREVIEW|".length)) as {
+            token:string;pageIndex:number;pageCount:number;image:string;
+            thumbnails:Array<{index:number;image:string}>;
+          };
+          setNativePdfPreview(current=>current&&current.token===payload.token&&current.requestedPageIndex===payload.pageIndex
+            ?{...payload,requestedPageIndex:payload.pageIndex,loading:false}:current);
+        }catch{
+          setError("The PDF preview could not be displayed. You can still upload the document.");
+        }
+      }else if(message.startsWith("CUSTOMER_PDF_PREVIEW_FAILED|")){
+        const token=message.slice("CUSTOMER_PDF_PREVIEW_FAILED|".length).split("|",1)[0];
+        setNativePdfPreview(current=>current?.token===token?null:current);
+        setError("The PDF preview could not be prepared. You can still upload the document.");
+      }
+    };
+    window.addEventListener("message",onNativePdfPreview);
+    return ()=>window.removeEventListener("message",onNativePdfPreview);
+  },[nativeAppMode]);
+
+  useEffect(()=>{
+    if(!nativeAppMode)return;
+    setNativePdfPreview(null);
+    return ()=>{postSmartPrintNativeMessage("closeCustomerPdfPreview");};
+  },[file,nativeAppMode]);
 
   useEffect(()=>{
     if(!nativeAppMode)return;
@@ -4937,7 +4609,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
     if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
-    setBusy(true);setError("");setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,currentFile:pending[0]?.name??null});
+    setBusy(true);setError("");setNotice(null);setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,currentFile:pending[0]?.name??null});
     try {
       for(let index=0;index<pending.length;index++){
         const candidate=pending[index];
@@ -5311,13 +4983,31 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   }
   function openCustomerPdfPreview(candidate:File) {
     const token=smartPrintNativePdfPreviewTokens.get(candidate);
-    if(!token||!postSmartPrintNativeMessage("previewCustomerPdf|"+token)) {
+    if(!token){
       setError("Please select this PDF again before opening its preview.");
+      return;
+    }
+    setNativePdfPreview({token,requestedPageIndex:0,pageIndex:0,pageCount:0,image:"",thumbnails:[],loading:true});
+    if(!postSmartPrintNativeMessage("previewCustomerPdf|"+token+"|0")){
+      setNativePdfPreview(null);
+      setError("The PDF preview is unavailable. You can still upload the document.");
       return;
     }
     setError("");
   }
+  function requestCustomerPdfPreviewPage(token:string,pageIndex:number) {
+    const current=nativePdfPreview;
+    if(!current||current.token!==token||current.loading)return;
+    const target=Math.max(0,Math.min(current.pageCount-1,pageIndex));
+    if(target===current.pageIndex)return;
+    setNativePdfPreview({...current,requestedPageIndex:target,loading:true});
+    if(!postSmartPrintNativeMessage("previewCustomerPdf|"+token+"|"+target)){
+      setNativePdfPreview({...current,loading:false});
+      setError("The PDF page could not be opened.");
+    }
+  }
   async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
+    setNotice(null);
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
       return;
@@ -5440,7 +5130,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(nestedSkipped)notices.push("Nested folders are skipped; only files directly inside each selected folder are included.");
     if(unsupportedSkipped)notices.push("Files without a supported PDF, JPEG or PNG signature were skipped.");
     if(mismatchedNames.length)notices.push(`${mismatchedNames.length} file(s) were identified by their contents; their original filenames are preserved.`);
-    setError(notices.join(" "));
+    setError("");
+    setNotice(notices.length?{kind:nestedSkipped||unsupportedSkipped?"warning":"info",message:notices.join(" ")}:null);
   }
 
   function removeSelectedFile(fingerprint: string) {
@@ -5465,6 +5156,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     });
     setPhotoSettingsByFileFingerprint(current=>{const next={...current};delete next[fingerprint];return next;});
     setError("");
+    setNotice(null);
   }
 
   const pendingFilesCount=files.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate))).length;
@@ -5608,10 +5300,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {privatePrinting
       ? <div className="customer-private-transfer-note"><Lock size={16}/><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"End-to-end encrypted · development test PDF only · not physical fulfilment":"End-to-end encrypted · physical printer required"}</span></div>
       : <div className="customer-upload-modes">
+      <div className="customer-upload-mode-heading"><strong>How your files reach the shop</strong><small>Choose a connection method. Your privacy setting above stays the same.</small></div>
       {localAgent?.endpoints.length
-        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Local transfer · not encrypted</small></button>
+        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct over shop Wi-Fi · unencrypted connection</small></button>
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Unavailable</small></button>}
-      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Secure upload · print when ready</small></button>}
+      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Encrypted online transfer · print when ready</small></button>}
     </div>}
     {!localAgent?.endpoints.length&&<small className="customer-upload-local-note">Shop connection details <InfoTooltip label="Shop connection unavailable"><span>The paired shop computer has not reported a reachable local connection.</span></InfoTooltip></small>}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload unavailable. <InfoTooltip label="Upload unavailable"><span>No document was uploaded. Ask the shop to reconnect its print service, then try again.</span></InfoTooltip></div>}
@@ -5742,13 +5435,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {files.length>0&&!privatePrinting&&<label className="customer-batch-name-field">
   <span>Give this batch a name <small>Optional · shown to the shop</small></span>
   <input type="text" value={batchName} maxLength={50}
-    placeholder="e.g. Rahul – College Notes"
+    placeholder="e.g. Manjeet - College Notes"
     disabled={busy||uploadedBatch.length>0}
     onChange={event=>setBatchName(event.target.value)}
   />
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply. <InfoTooltip label="Folder settings"><span>Settings apply to every file in this folder. Use Custom on a file to change its settings.</span></InfoTooltip></small>}
-    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<button type="button" className="customer-flow-button" onClick={()=>openCustomerPdfPreview(file)}><FileText size={16}/> Preview PDF</button>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
+    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onOpen={()=>openCustomerPdfPreview(file)} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div>{!nativeAppMode&&<small>Updates after each file.</small>}</div>}
     {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?<>Local transfer is not encrypted. <InfoTooltip label="Local transfer security"><span>Shop Wi-Fi uses local HTTP. Choose Cloud-assisted for encrypted HTTPS transfer.</span></InfoTooltip></>:<>Check shop Wi-Fi first. <InfoTooltip label="Shop Wi-Fi access"><span>In a browser, tap Check shop Wi-Fi above to grant local network access.</span></InfoTooltip></>}</small>}
@@ -5763,24 +5456,23 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
             <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??batchStatuses[item.job.id]?.printKind??item.job.printKind)}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${item.job.pageCount} pages × ${printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies = ${item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} pages requested · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
-              label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":prettyStatus(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
-              tone={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"amber":
-                ["REJECTED","PAYMENT_REJECTED"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"red":
-                ["COMPLETED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[item.job.id]?.status??item.job.status??"").toUpperCase())?"green":"amber"}
+              label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":customerStatusLabel(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
+              tone={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"amber":customerStatusTone(statusForBatchItem(item))}
             />
           </button>)}
         </section>)}
       </div>}
-      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><div className="uploaded-document-title"><strong>{resolveCustomerDocumentName(uploaded,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[uploaded.job.id]??batchStatuses[uploaded.job.id]?.printKind??uploaded.job.printKind)}/></div><span>{(photoSettingsByJobId[uploaded.job.id]||batchStatuses[uploaded.job.id]?.printKind==="PHOTO"||uploaded.job.printKind==="PHOTO")?`${photoSettingsByJobId[uploaded.job.id]?.photoCount??batchStatuses[uploaded.job.id]?.photoCount??uploaded.job.photoCount??0} photos · ${photoSettingsByJobId[uploaded.job.id]?.sizeCode??batchStatuses[uploaded.job.id]?.photoSizeCode??uploaded.job.photoSizeCode??""} · ${uploaded.job.pageCount} A4 pages`:`${uploaded.job.pageCount} ${uploaded.job.pageCount===1?"page":"pages"}`} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={prettyStatus(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={["REJECTED","PAYMENT_REJECTED","REFUNDED","CANCELLED","FAILED"].includes((batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"").toUpperCase())?"red":["COMPLETED","PDF_EXPORTED","PAID_AUTHORISED","AWAITING_PAYMENT"].includes((batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"").toUpperCase())?"green":"amber"}/></div>
+      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><div className="uploaded-document-title"><strong>{resolveCustomerDocumentName(uploaded,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[uploaded.job.id]??batchStatuses[uploaded.job.id]?.printKind??uploaded.job.printKind)}/></div><span>{(photoSettingsByJobId[uploaded.job.id]||batchStatuses[uploaded.job.id]?.printKind==="PHOTO"||uploaded.job.printKind==="PHOTO")?`${photoSettingsByJobId[uploaded.job.id]?.photoCount??batchStatuses[uploaded.job.id]?.photoCount??uploaded.job.photoCount??0} photos · ${photoSettingsByJobId[uploaded.job.id]?.sizeCode??batchStatuses[uploaded.job.id]?.photoSizeCode??uploaded.job.photoSizeCode??""} · ${uploaded.job.pageCount} A4 pages`:`${uploaded.job.pageCount} ${uploaded.job.pageCount===1?"page":"pages"}`} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={customerStatusLabel(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={customerStatusTone(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")}/></div>
       {batchId&&hasLegacyIndividualPayment&&<p className="customer-payment-warning">A file in this batch already has a separate individual payment. Complete or resolve that attempt before starting another payment for this batch. A second collection path is blocked to prevent duplicate charges.</p>}
       {canCalculateBatch&&<div className="customer-batch-quote-action">
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Review batch settings</h2></div><small>{quoteItems.length} files</small></div>
         <button className="customer-flow-button" disabled={busy} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
       </div>}
     </>}
+    {notice&&<div className={"customer-upload-notice "+notice.kind} role={notice.kind==="warning"?"alert":"status"}>{notice.message}</div>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchDocumentSourcePages} document pages · {batchIdDocumentSheets} ID card sheets · {batchPhotoCount} photos · {batchPrintedPages} output pages/sheets</small></div>
+      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files{batchDocumentSourcePages>0?` · ${batchDocumentSourcePages} document pages`:""} · {batchPrintedPages} print pages/sheets</small></div>
       <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[entry.item.job.id]??entry.quote!.printKind??entry.item.job.printKind)}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.printKind==="ID_DOCUMENT"?entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
       <div className="customer-batch-print-breakdown">
         {batchMonoPrintedPages>0&&<div><span>B&W · {batchMonoPrintedPages} output pages/sheets</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
@@ -5788,14 +5480,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         {batchIdDocumentSheets>0&&<div><span>ID card printing · {batchIdDocumentSheets} A4 portrait {batchIdDocumentSheets===1?"sheet":"sheets"}</span><strong>{formatMoney(batchIdDocumentAmount,quoteEntries[0].quote!.currency)}</strong></div>}
         {batchPhotoCount>0&&<div><span>Photo printing · {batchPhotoCount} finished photos</span><strong>{formatMoney(batchPhotoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
         <div className="customer-batch-print-total"><span>Total output pages/sheets</span><strong>{batchPrintedPages}</strong></div>
-        <div className="customer-batch-print-total"><span>Total payable</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong></div>
       </div>
-      <p className="customer-payment-model-note">Document pages use the shop's B&W/Colour rate card. Prepared ID cards use the separate flat ID-card rate and print as normal A4 documents in the selected B&W/Colour mode. Photo sheets use the saved per-photo rate for the selected size. Rejected files are excluded. After review, pay once for all accepted files.</p>
+      <p className="customer-payment-model-note customer-quote-explanation">Pricing varies by document type and print settings. <InfoTooltip label="How your quote is calculated"><span>Document pages are the original pages in uploaded documents, before copies are applied.</span><span>Print pages/sheets count output pages after copies. With duplex printing, two output pages may share one physical sheet.</span><span>Prepared ID cards use the configured ID-card rate and print as normal A4 documents.</span><span>Photo orders count finished photos and A4 output pages, using the saved per-photo rate for the selected size.</span><span>Rejected files are excluded. Pay once for all accepted files after review.</span></InfoTooltip></p>
     </div>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
-    {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={prettyStatus(jobStatus.status)} tone={["REJECTED","REFUNDED","CANCELLED","FAILED"].includes(jobStatus.status)?"red":jobStatus.status==="AWAITING_PAYMENT"?"green":"amber"}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
+    {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={customerStatusLabel(jobStatus.status)} tone={customerStatusTone(jobStatus.status)}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
       <strong>{jobStatus.status==="TEST_OUTPUT_READY"?"Development test PDF generated · no physical print was made":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
+      <small className="customer-job-updated">Last updated · {formatIstDateTime(jobStatus.updatedUtc)}</small>
       <p>{jobStatus.status==="TEST_OUTPUT_READY"?"This was a test only. No physical pages were printed."
         :jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop is reviewing your files. No payment has been collected."
         :jobStatus.status==="AWAITING_PAYMENT"?"Your files are accepted. Complete payment to continue."
@@ -5824,7 +5516,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         <ShieldCheck size={16}/>
         <span><strong>PDF footer selected by the shop.</strong> <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Reformatted or multi-copy exports may be flattened.</span><span>Ask for an unbranded single-copy export when PDF structure matters.</span></InfoTooltip></span>
       </div>}
-      {!!jobStatus.timeline?.length&&<div className="customer-state-timeline">{jobStatus.timeline.map((event,index)=><div key={index}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
+      {!!jobStatus.timeline?.filter(event=>event.previousStatus!==event.newStatus).length&&<div className="customer-state-timeline">{jobStatus.timeline.filter(event=>event.previousStatus!==event.newStatus).map((event,index)=><div key={event.createdUtc+"-"+index}><i/><span><strong>{customerStatusLabel(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
       {canStartNewSession&&<div className="customer-session-complete"><div><strong>Order finished</strong><span>Your order history is saved. You can start another print session when ready.</span></div><button className="customer-flow-button" onClick={onStartNewSession}><RefreshCw size={16}/> Start new session</button></div>}
 
       {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
@@ -5849,10 +5541,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             payeeName={payment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}
             upiId={payment.upiIdSnapshot||paymentOptions.upiId||""}
             amount={formatMoney(payment.amountMinor,payment.currency)}
+            amountMinor={payment.amountMinor}
             fileName={"smartprint-payment-"+payment.id.slice(0,12)+".png"}
           />
           <div className="customer-payment-reference">
-            <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
+            <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter transaction ID after paying"/></label>
+            <small className="customer-payment-reference-hint">Find it in your UPI app under payment details or transaction history.</small>
             <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
             <small className="customer-payment-warning">UPI transfers can still be declined by the bank or UPI provider. A downloaded QR offers a scan-from-image route; it does not bypass payment security checks.</small>
           </div>
@@ -5906,10 +5600,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           payeeName={batchPayment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}
           upiId={batchPayment.upiIdSnapshot||paymentOptions.upiId||""}
           amount={formatMoney(batchPayment.amountMinor,batchPayment.currency)}
+          amountMinor={batchPayment.amountMinor}
           fileName={"smartprint-batch-payment-"+batchPayment.id.slice(0,12)+".png"}
         />
         <div className="customer-payment-reference">
-          <label className="customer-reference-field">{nativeAppMode?"UTR":"UPI transaction reference / UTR"}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={nativeAppMode?"Enter UTR":"Enter UTR after paying"}/></label>
+          <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter transaction ID after paying"/></label>
+            <small className="customer-payment-reference-hint">Find it in your UPI app under payment details or transaction history.</small>
           <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
           <small className="customer-payment-warning">The shop verifies the actual UPI credit. A downloaded QR offers an alternative scan route; it cannot override a bank or UPI security decline.</small>
         </div>
