@@ -38,11 +38,13 @@ not add a second upload, extra confirmation, or a separate print screen.
   cleanup worker. Cleanup attempts overwrite-before-delete for managed queue
   files, but this is not a guarantee of forensic erasure on SSDs, snapshots,
   backups or other storage layers.
-- The Agent detects Windows jobs marked as retained and attempts to delete
-  those retained private jobs. It verifies that the job is no longer visible in
-  the Windows queue and retries deletion in the background if necessary. This
-  does not prove that a third-party driver or printer firmware has not retained
-  another copy.
+- The Agent detects Windows jobs marked as retained. It does not cancel active
+  printing: it waits while a job is printing or spooling, then releases a held
+  private job so printing can continue or Windows can remove a completed retained
+  job. A separate content-free cleanup record retains only the Windows queue name,
+  spooler job ID and retry metadata until the job is no longer visible. This record
+  survives source purge and Agent restart. This does not prove that a third-party
+  driver or printer firmware has not retained another copy.
 
 ## Metadata and limits
 
