@@ -1409,6 +1409,30 @@ public sealed class Worker(
 
     private async Task ProcessPendingPrivateSpoolerCleanupAsync(CancellationToken ct)
     {
+        // Self-heal a transient failure between spooler acceptance and writing
+        // the independent cleanup record. The scan is limited to private jobs
+        // that still have a local manifest; it never reads or stores document data.
+        foreach (var candidate in localQueueStore.GetPrivateSpoolerCleanupCandidates())
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                await localQueueStore.EnsurePrivateSpoolerCleanupTrackedAsync(
+                    candidate.JobId, candidate.QueueName, candidate.SpoolerJobId!.Value, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Could not restore the private spooler cleanup record for queue {QueueName}; it will be retried.",
+                    candidate.QueueName);
+            }
+        }
+
         foreach (var cleanup in localQueueStore.GetPendingPrivateSpoolerCleanupEntries())
         {
             ct.ThrowIfCancellationRequested();
