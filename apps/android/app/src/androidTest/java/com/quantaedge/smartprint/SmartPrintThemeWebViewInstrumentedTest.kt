@@ -19,6 +19,44 @@ import java.util.concurrent.atomic.AtomicReference
 
 @RunWith(AndroidJUnit4::class)
 class SmartPrintThemeWebViewInstrumentedTest {
+    companion object {
+        private const val TEST_PAGE_HTML =
+            """<!doctype html><html><head><meta name="theme-color" content="#f4f6fa"></head><body data-test-ready="ready">theme bridge test</body></html>"""
+    }
+
+    private fun loadTestPage(scenario: ActivityScenario<MainActivity>) {
+        scenario.onActivity { activity ->
+            val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
+                .apply { isAccessible = true }
+                .invoke(activity) as WebView
+            // loadDataWithBaseURL gives this fixture the same trusted origin as the
+            // configured portal, so localStorage survives a fresh document load.
+            // WebView.reload() would navigate to the real network URL instead of
+            // reloading the in-memory HTML fixture.
+            webView.loadDataWithBaseURL(
+                BuildConfig.SERVICE_BASE_URL,
+                TEST_PAGE_HTML,
+                "text/html",
+                "UTF-8",
+                null
+            )
+        }
+        awaitPageReady(scenario)
+    }
+
+    private fun awaitPageReady(scenario: ActivityScenario<MainActivity>) {
+        val deadline = SystemClock.elapsedRealtime() + TimeUnit.SECONDS.toMillis(5)
+        var state = "loading"
+        while (SystemClock.elapsedRealtime() < deadline) {
+            state = evaluate(
+                scenario,
+                """document.body ? document.body.getAttribute("data-test-ready") || "loading" : "loading""""
+            )
+            if (state == "ready") return
+            SystemClock.sleep(100)
+        }
+        assertEquals("The WebView fixture did not finish loading.", "ready", state)
+    }
     private fun evaluate(scenario: ActivityScenario<MainActivity>, script: String): String {
         val result = AtomicReference<String>()
         val completed = CountDownLatch(1)
@@ -57,20 +95,7 @@ class SmartPrintThemeWebViewInstrumentedTest {
             assertFalse(SmartPrintThemePreference.hasExplicitSelection(context))
 
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                scenario.onActivity { activity ->
-                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
-                        .apply { isAccessible = true }
-                        .invoke(activity) as WebView
-                    webView.loadDataWithBaseURL(
-                        BuildConfig.SERVICE_BASE_URL,
-                        "<!doctype html><html><head><meta name=\"theme-color\" content=\"#f4f6fa\"></head><body>theme bridge test</body></html>",
-                        "text/html",
-                        "UTF-8",
-                        null
-                    )
-                }
-
-                SystemClock.sleep(350)
+                loadTestPage(scenario)
                 val setResult = evaluate(
                     scenario,
                     """(() => {
@@ -87,13 +112,8 @@ class SmartPrintThemeWebViewInstrumentedTest {
                 assertTrue(SmartPrintThemePreference.hasExplicitSelection(context))
                 assertTrue(SmartPrintThemePreference.readUpdatedAt(context) > 0L)
 
-                scenario.onActivity { activity ->
-                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
-                        .apply { isAccessible = true }
-                        .invoke(activity) as WebView
-                    webView.reload()
-                }
-                SystemClock.sleep(450)
+                // Recreate the document at the same origin; the fixture is in-memory HTML.
+                loadTestPage(scenario)
 
                 val snapshot = JSONObject(evaluate(
                     scenario,
