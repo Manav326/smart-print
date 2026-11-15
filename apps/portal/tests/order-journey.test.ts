@@ -6,7 +6,9 @@ function job(v: Partial<ShopPrintJob> & Pick<ShopPrintJob,"id"|"jobNumber"|"stat
   return {
     id:v.id, jobNumber:v.jobNumber, status:v.status, batchId:v.batchId??null,
     batchName:v.batchName??null, batchGroupName:v.batchGroupName??null, rejectedPageNumbersJson:v.rejectedPageNumbersJson??"[]",
-    pageCount:v.pageCount??2,copies:v.copies??1,colourMode:"Mono",paperSize:"A4",isDuplex:false,
+    pageCount:v.pageCount??2,copies:v.copies??1,colourMode:v.colourMode??"Mono",paperSize:"A4",isDuplex:false,
+    printKind:v.printKind??"DOCUMENT",privatePrinting:v.privatePrinting??false,
+    photoCount:v.photoCount??0,photosPerPage:v.photosPerPage??null,photoSizeCode:v.photoSizeCode??null,
     currency:v.currency??"INR",quotedAmountMinor:v.quotedAmountMinor??1000,
     createdUtc:v.createdUtc??"2026-11-04T10:00:00Z",
     document:v.document??{originalFileName:v.jobNumber+".pdf",mediaType:"application/pdf",sizeBytes:1024},
@@ -110,4 +112,36 @@ test("invalid rejected-page metadata does not break shop journey totals", () => 
     job({id:"legacy",jobNumber:"SP-1",status:"PRINTING",pageCount:3,copies:2,rejectedPageNumbersJson:"not-json"})
   ], [])[0];
   assert.equal(order.pageCount, 6);
+});
+
+
+test("workload totals separate B&W, colour and photo layout pages while applying copies and page rejections", () => {
+  const order = buildShopOrderJourneys([
+    job({id:"mono",jobNumber:"SP-1",batchId:"workload",status:"PRINTING",pageCount:5,copies:2,rejectedPageNumbersJson:"[2]"}),
+    job({id:"colour-id",jobNumber:"SP-2",batchId:"workload",status:"PRINTING",pageCount:3,copies:1,colourMode:"Colour",printKind:"ID_DOCUMENT"}),
+    job({id:"photo",jobNumber:"SP-3",batchId:"workload",status:"PRINTING",pageCount:2,copies:1,printKind:"PHOTO",photoCount:7,photosPerPage:4})
+  ], [])[0];
+
+  assert.equal(order.blackWhitePageCount, 8);
+  assert.equal(order.colourPageCount, 3, "ID documents remain ordinary colour document pages");
+  assert.equal(order.photoCount, 7);
+  assert.equal(order.photoPageCount, 2);
+  assert.equal(order.pageCount, 13, "Total output pages include photo layout pages exactly once");
+});
+
+test("private orders use generic labels and never match original filenames in order search", () => {
+  const order = buildShopOrderJourneys([
+    job({id:"private-1",jobNumber:"SP-PRIVATE-1",batchId:"private-batch",batchName:"Sensitive folder name",
+      batchGroupName:"Sensitive group",status:"PRINTING",privatePrinting:true,
+      document:{originalFileName:"passport-scan.pdf",mediaType:"application/pdf",sizeBytes:100}}),
+    job({id:"private-2",jobNumber:"SP-PRIVATE-2",batchId:"private-batch",status:"PRINTING",privatePrinting:true,
+      document:{originalFileName:"identity-card.pdf",mediaType:"application/pdf",sizeBytes:100}})
+  ], [])[0];
+
+  assert.equal(order.privatePrinting,true);
+  assert.equal(order.name,"Private print order");
+  assert.equal(filterShopOrderJourneys([order],"all","passport-scan.pdf").length,0);
+  assert.equal(filterShopOrderJourneys([order],"all","identity-card.pdf").length,0);
+  assert.equal(filterShopOrderJourneys([order],"all","SP-PRIVATE-1").length,1,
+    "The operational order reference remains searchable");
 });
