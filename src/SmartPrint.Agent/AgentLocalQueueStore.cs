@@ -241,6 +241,8 @@ public sealed class AgentLocalQueueStore
             documentPath + ".tmp",
             documentPath + ".photo-revision.bak",
             documentPath + ".photo.source",
+            documentPath + ".scope-upgrade.tmp",
+            documentPath + ".photo.source.scope-upgrade.tmp",
             GetManifestPath(jobId) + ".tmp"
         };
 
