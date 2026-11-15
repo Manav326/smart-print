@@ -7,6 +7,44 @@ namespace SmartPrint.Agent.Tests;
 public sealed class AgentLocalQueueStoreTests
 {
     [Fact]
+    public async Task MigratesLegacyMachineProtectedDocumentToCurrentUserProtection()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var bytes = "Legacy private print document"u8.ToArray();
+            var job = CreateJob(bytes);
+            var legacyStore = new AgentLocalQueueStore(root, DataProtectionScope.LocalMachine);
+            await legacyStore.InitializeAsync(CancellationToken.None);
+            var entry = await legacyStore.EnqueueAsync(job, bytes, CancellationToken.None);
+
+            var currentUserStore = new AgentLocalQueueStore(root, DataProtectionScope.CurrentUser);
+            var recovered = currentUserStore.ReadDocument(job.Id);
+            try { Assert.Equal(bytes, recovered); }
+            finally { CryptographicOperations.ZeroMemory(recovered); }
+
+            var migratedBytes = await File.ReadAllBytesAsync(entry.DocumentPath);
+            try
+            {
+                var entropy = "QRtoPrint.Agent.LocalQueue.Document.v1"u8.ToArray();
+                var migratedPlaintext = ProtectedData.Unprotect(
+                    migratedBytes, entropy, DataProtectionScope.CurrentUser);
+                try { Assert.Equal(bytes, migratedPlaintext); }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(entropy);
+                    CryptographicOperations.ZeroMemory(migratedPlaintext);
+                }
+            }
+            finally { CryptographicOperations.ZeroMemory(migratedBytes); }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PersistsTheDocumentEncryptedAndAcknowledgesIdempotently()
     {
         var root = CreateTemporaryDirectory();
@@ -1138,11 +1176,12 @@ public sealed class AgentLocalQueueStoreTests
             Assert.False(store.Find(job.Id)!.PrivatePurgePending);
             Assert.Empty(store.GetPrivatePurgePendingJobs());
 
-            // The sanitized manifest remains for job reconciliation. A later
-            // standard-retention sweep must skip it rather than resolve an empty path.
+            // Once the server has acknowledged source-metadata redaction, the
+            // physical private-print manifest is no longer needed locally.
+            Assert.Null(store.Find(job.Id));
             Assert.Equal(0, await store.PruneRetainedEntriesAsync(
                 DateTimeOffset.UtcNow.AddDays(10), TimeSpan.FromDays(7), root, CancellationToken.None));
-            Assert.NotNull(store.Find(job.Id));
+            Assert.Null(store.Find(job.Id));
         }
         finally
         {
