@@ -18,16 +18,49 @@
 {"@type":"SoftwareApplication","@id":"__SMARTPRINT_ORIGIN__/#software","name":"SmartPrint","alternateName":"Smart Print by QuantaEdge","url":"__SMARTPRINT_ORIGIN__/","description":"Print-shop workflow software for QR document intake, per-file print choices, batch review, shop-controlled approvals, privacy options and connected Windows printers.","applicationCategory":"BusinessApplication","applicationSubCategory":"Print shop management software","operatingSystem":["Web","Windows","Android"],"publisher":{"@id":"__SMARTPRINT_ORIGIN__/#organization"},"featureList":["QR-code document intake for participating print shops","Per-file copy and colour settings with folder defaults","Multi-file batches with individual print-job review","Shop-controlled quotes, payment verification and print dispatch","Standard Printing and end-to-end encrypted Private Printing","Photo Studio and Android ID Studio","Shop reports and customer history","Windows Print Agent and installed printer queue discovery"]}
 ]}</script>
 <script>
-(() => {
-  let theme = "light";
-  try {
-    theme = localStorage.getItem("qrtoprint.theme") === "dark" ? "dark" : "light";
-  } catch {}
-  document.documentElement.dataset.theme = theme;
-  document.documentElement.style.colorScheme = theme;
-  const color = document.querySelector('meta[name="theme-color"]');
-  if (color) color.content = theme === "dark" ? "#0c0f16" : "#f4f6fa";
-})();
+  (() => {
+    const validTheme = value => value === "light" || value === "dark";
+    let localTheme = null;
+    let localUpdatedAt = 0;
+    try {
+      const canonical = localStorage.getItem("smartprint.theme");
+      const legacy = localStorage.getItem("qrtoprint.theme");
+      localTheme = validTheme(canonical) ? canonical : (validTheme(legacy) ? legacy : null);
+      const timestamp = Number(localStorage.getItem("smartprint.theme.updatedAt"));
+      localUpdatedAt = Number.isFinite(timestamp) && timestamp >= 0 ? Math.floor(timestamp) : 0;
+    } catch {}
+    let nativeTheme = null;
+    let nativeUpdatedAt = 0;
+    let nativeExplicit = false;
+    try {
+      const native = window.SmartPrintThemeNative;
+      const candidate = native && native.getTheme();
+      nativeTheme = validTheme(candidate) ? candidate : null;
+      const timestamp = Number(native && native.getThemeUpdatedAt());
+      nativeUpdatedAt = Number.isFinite(timestamp) && timestamp >= 0 ? Math.floor(timestamp) : 0;
+      nativeExplicit = !!(native && native.hasExplicitSelection());
+    } catch {}
+    let theme = "light";
+    if (!localTheme) theme = nativeTheme || "light";
+    else if (!nativeTheme) theme = localTheme;
+    else if (localUpdatedAt > nativeUpdatedAt) theme = localTheme;
+    else if (nativeUpdatedAt > localUpdatedAt) theme = nativeTheme;
+    else theme = nativeExplicit ? nativeTheme : localTheme;
+    const updatedAt = Math.max(1, Date.now(), localUpdatedAt + 1, nativeUpdatedAt + 1);
+    try {
+      localStorage.setItem("smartprint.theme", theme);
+      localStorage.setItem("smartprint.theme.updatedAt", String(updatedAt));
+      localStorage.removeItem("qrtoprint.theme");
+    } catch {}
+    try {
+      const native = window.SmartPrintThemeNative;
+      if (native && native.setTheme) native.setTheme(theme, updatedAt);
+    } catch {}
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    const color = document.querySelector('meta[name="theme-color"]');
+    if (color) color.content = theme === "dark" ? "#0c0f16" : "#f4f6fa";
+  })();
 </script>
 <title>Smart Print by QuantaEdge | Official SmartPrint Website</title>
 </head>

@@ -6,8 +6,43 @@
     <meta name="theme-color" content="#f4f6fa" />
     <script>
       (() => {
+        const validTheme = value => value === "light" || value === "dark";
+        let localTheme = null;
+        let localUpdatedAt = 0;
+        try {
+          const canonical = localStorage.getItem("smartprint.theme");
+          const legacy = localStorage.getItem("qrtoprint.theme");
+          localTheme = validTheme(canonical) ? canonical : (validTheme(legacy) ? legacy : null);
+          const timestamp = Number(localStorage.getItem("smartprint.theme.updatedAt"));
+          localUpdatedAt = Number.isFinite(timestamp) && timestamp >= 0 ? Math.floor(timestamp) : 0;
+        } catch {}
+        let nativeTheme = null;
+        let nativeUpdatedAt = 0;
+        let nativeExplicit = false;
+        try {
+          const native = window.SmartPrintThemeNative;
+          const candidate = native && native.getTheme();
+          nativeTheme = validTheme(candidate) ? candidate : null;
+          const timestamp = Number(native && native.getThemeUpdatedAt());
+          nativeUpdatedAt = Number.isFinite(timestamp) && timestamp >= 0 ? Math.floor(timestamp) : 0;
+          nativeExplicit = !!(native && native.hasExplicitSelection());
+        } catch {}
         let theme = "light";
-        try { theme = localStorage.getItem("qrtoprint.theme") === "dark" ? "dark" : "light"; } catch {}
+        if (!localTheme) theme = nativeTheme || "light";
+        else if (!nativeTheme) theme = localTheme;
+        else if (localUpdatedAt > nativeUpdatedAt) theme = localTheme;
+        else if (nativeUpdatedAt > localUpdatedAt) theme = nativeTheme;
+        else theme = nativeExplicit ? nativeTheme : localTheme;
+        const updatedAt = Math.max(1, Date.now(), localUpdatedAt + 1, nativeUpdatedAt + 1);
+        try {
+          localStorage.setItem("smartprint.theme", theme);
+          localStorage.setItem("smartprint.theme.updatedAt", String(updatedAt));
+          localStorage.removeItem("qrtoprint.theme");
+        } catch {}
+        try {
+          const native = window.SmartPrintThemeNative;
+          if (native && native.setTheme) native.setTheme(theme, updatedAt);
+        } catch {}
         document.documentElement.dataset.theme = theme;
         document.documentElement.style.colorScheme = theme;
         const color = document.querySelector('meta[name="theme-color"]');

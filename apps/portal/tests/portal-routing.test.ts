@@ -158,7 +158,8 @@ test("theme defaults to light, survives logout, and applies to the document root
     values.delete("qrtoprint.auth.shop");
     assert.equal(values.has("qrtoprint.auth.shop"), false);
     assert.equal(readDarkModePreference(), true);
-    assert.equal(values.get("qrtoprint.theme"), "dark");
+    assert.equal(values.get("smartprint.theme"), "dark");
+    assert.equal(values.has("qrtoprint.theme"), false);
   } finally {
     if (originalWindow === undefined) delete (globalThis as { window?: unknown }).window;
     else Object.defineProperty(globalThis, "window", { configurable: true, value: originalWindow });

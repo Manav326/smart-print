@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { readDarkModePreference } from "../src/ui-preferences.ts";
+import {
+  LEGACY_THEME_PREFERENCE_KEY,
+  THEME_PREFERENCE_KEY,
+  THEME_UPDATED_AT_KEY,
+  nextThemePreferenceTimestamp,
+  readThemePreference,
+  resolveThemePreference,
+  writeThemePreference,
+  type ThemePreferenceStorage,
+} from "../src/theme-preference.ts";
 import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "../src/local-preview-routing.ts";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
@@ -46,15 +56,82 @@ test("platform operational checkbox captures its event value before scheduling s
   assert.ok(!source.includes("allowPaidJobClaimsWhenSuspended: event.target.checked"));
 });
 
-test("first web visit is light and saved selection is restored before rendering", () => {
+test("first web visit is light and existing QRtoPrint theme choices migrate to SmartPrint", () => {
   const html = read("../index.html");
   const desktopHtml = read("../../desktop/index.html");
   assert.equal(readDarkModePreference(), false);
   for (const source of [html, desktopHtml]) {
+    assert.match(source, /localStorage\.getItem\("smartprint\.theme"\)/);
     assert.match(source, /localStorage\.getItem\("qrtoprint\.theme"\)/);
-    assert.match(source, /\? "dark" : "light"/);
+    assert.match(source, /smartprint\.theme\.updatedAt/);
     assert.match(source, /document\.documentElement\.dataset\.theme = theme/);
   }
+});
+
+test("legacy Light and Dark preferences migrate without losing the selected theme", () => {
+  class MemoryStorage implements ThemePreferenceStorage {
+    values = new Map<string, string>();
+    getItem(key: string) { return this.values.get(key) ?? null; }
+    setItem(key: string, value: string) { this.values.set(key, value); }
+    removeItem(key: string) { this.values.delete(key); }
+  }
+
+  for (const theme of ["light", "dark"] as const) {
+    const storage = new MemoryStorage();
+    storage.setItem(LEGACY_THEME_PREFERENCE_KEY, theme);
+    const migrated = readThemePreference(storage);
+    assert.equal(migrated.theme, theme);
+    assert.equal(storage.getItem(THEME_PREFERENCE_KEY), theme);
+    assert.equal(storage.getItem(LEGACY_THEME_PREFERENCE_KEY), null);
+  }
+});
+
+test("canonical SmartPrint preference wins over the legacy alias", () => {
+  class MemoryStorage implements ThemePreferenceStorage {
+    values = new Map<string, string>();
+    getItem(key: string) { return this.values.get(key) ?? null; }
+    setItem(key: string, value: string) { this.values.set(key, value); }
+    removeItem(key: string) { this.values.delete(key); }
+  }
+  const storage = new MemoryStorage();
+  storage.setItem(THEME_PREFERENCE_KEY, "light");
+  storage.setItem(LEGACY_THEME_PREFERENCE_KEY, "dark");
+  assert.equal(readThemePreference(storage).theme, "light");
+  assert.equal(storage.getItem(LEGACY_THEME_PREFERENCE_KEY), null);
+});
+
+test("native and embedded preferences reconcile by newest change and explicit native choice", () => {
+  assert.equal(resolveThemePreference(
+    { theme: "dark", updatedAt: 20 },
+    { theme: "light", updatedAt: 10, explicit: true },
+  ), "dark");
+  assert.equal(resolveThemePreference(
+    { theme: "dark", updatedAt: 10 },
+    { theme: "light", updatedAt: 20, explicit: false },
+  ), "light");
+  assert.equal(resolveThemePreference(
+    { theme: "dark", updatedAt: 0 },
+    { theme: "light", updatedAt: 0, explicit: true },
+  ), "light");
+  assert.equal(resolveThemePreference(
+    { theme: "dark", updatedAt: 0 },
+    { theme: "light", updatedAt: 0, explicit: false },
+  ), "dark");
+});
+
+test("theme preference writes canonical key and advances timestamps monotonically", () => {
+  class MemoryStorage implements ThemePreferenceStorage {
+    values = new Map<string, string>();
+    getItem(key: string) { return this.values.get(key) ?? null; }
+    setItem(key: string, value: string) { this.values.set(key, value); }
+    removeItem(key: string) { this.values.delete(key); }
+  }
+  const storage = new MemoryStorage();
+  const updatedAt = nextThemePreferenceTimestamp(100, 100, 120);
+  assert.equal(updatedAt, 121);
+  assert.equal(writeThemePreference(storage, "dark", updatedAt), true);
+  assert.equal(storage.getItem(THEME_PREFERENCE_KEY), "dark");
+  assert.equal(storage.getItem(THEME_UPDATED_AT_KEY), "121");
 });
 
 test("one accessible theme control is available to all application route families", () => {
