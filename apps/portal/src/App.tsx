@@ -3430,7 +3430,7 @@ function spoolerStatusWarning(status?: string | null, printerStatus?: string | n
   if (spooler === "OFFLINE" || printer === "OFFLINE")
     return "Printer is offline. Reconnect it; Windows may resume this same queued job. Do not start a duplicate.";
   if (spooler === "RETAINED")
-    return "Windows is holding this print job. SmartPrint will release it automatically when safe. Confirm output only after the physical pages have printed.";
+    return "Windows is holding this print job. SmartPrint will release it only after Windows confirms printing is complete. Confirm output only after the physical pages have printed.";
   if (spooler === "PAPEROUT")
     return "The printer reports no paper. Refill it and check the same Windows queue before continuing.";
   if (spooler === "PAUSED" || printer === "PAUSED")
