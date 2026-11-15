@@ -1491,18 +1491,31 @@ public sealed class AgentLocalQueueStore
     private static void SecureDirectory(string directory)
     {
         var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        using var identity = WindowsIdentity.GetCurrent();
+        var ownerSid = identity.User
+            ?? throw new InvalidOperationException("The current Windows identity has no user SID.");
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.SetOwner(systemSid);
-        // The queue is opened by the LocalSystem Agent service. Do not grant
-        // interactive Administrators a normal file-read ACE; an administrator
-        // can still take ownership or run as SYSTEM, so this is defence in depth.
+        security.SetOwner(ownerSid);
+        // The production Agent service runs as LocalSystem, so its queue remains
+        // SYSTEM-owned and SYSTEM-only. Interactive diagnostics and the installer
+        // lifecycle fixture run under their own account; grant only that current
+        // identity access rather than making the directory writable by Administrators.
         security.AddAccessRule(new FileSystemAccessRule(
             systemSid,
             FileSystemRights.FullControl,
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
             PropagationFlags.None,
             AccessControlType.Allow));
+        if (!ownerSid.Equals(systemSid))
+        {
+            security.AddAccessRule(new FileSystemAccessRule(
+                ownerSid,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+        }
         new DirectoryInfo(directory).SetAccessControl(security);
     }
 }
