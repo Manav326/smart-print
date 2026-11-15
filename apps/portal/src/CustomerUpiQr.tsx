@@ -1,14 +1,15 @@
 import { useEffect,useRef,useState } from "react";
-import { Check, Copy, Download } from "lucide-react";
+import { Check, Copy, Download, Info } from "lucide-react";
 import QRCode from "react-qr-code";
 
-type Props={uri:string|null;payeeName:string;upiId:string;amount:string;fileName:string};
+type Props={uri:string|null;payeeName:string;upiId:string;amount:string;amountMinor:number;fileName:string};
 
 /** Browser download and Android document-picker save for the same high-resolution UPI QR. */
-export default function CustomerUpiQr({uri,payeeName,upiId,amount,fileName}:Props){
+export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fileName}:Props){
  const root=useRef<HTMLDivElement|null>(null);
  const [error,setError]=useState("");
  const [status,setStatus]=useState("");
+ const [statusTone,setStatusTone]=useState<"success"|"info">("info");
  const [busy,setBusy]=useState(false);
  const nativeAppMode=typeof navigator!=="undefined"&&navigator.userAgent.includes("SmartPrintAndroid/1");
 
@@ -16,9 +17,9 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,fileName}:Prop
   if(!nativeAppMode)return;
   const onNativeMessage=(event:MessageEvent)=>{
    const message=typeof event.data==="string"?event.data:"";
-   if(message.startsWith("CUSTOMER_PAYMENT_QR_SAVED|")){setBusy(false);setError("");setStatus("Payment QR saved to your device.");}
-   else if(message.startsWith("CUSTOMER_PAYMENT_QR_CANCELLED|")){setBusy(false);setStatus("QR save cancelled.");}
-   else if(message.startsWith("CUSTOMER_PAYMENT_QR_FAILED|")){setBusy(false);setError(message.slice("CUSTOMER_PAYMENT_QR_FAILED|".length)||"The QR image could not be saved.");}
+   if(message.startsWith("CUSTOMER_PAYMENT_QR_SAVED|")){setBusy(false);setError("");setStatusTone("success");setStatus("Payment QR saved to your device.");}
+   else if(message.startsWith("CUSTOMER_PAYMENT_QR_CANCELLED|")){setBusy(false);setStatusTone("info");setStatus("QR save cancelled.");}
+   else if(message.startsWith("CUSTOMER_PAYMENT_QR_FAILED|")){setBusy(false);setStatus("");setError(message.slice("CUSTOMER_PAYMENT_QR_FAILED|".length)||"The QR image could not be saved.");}
   };
   window.addEventListener("message",onNativeMessage);
   return ()=>window.removeEventListener("message",onNativeMessage);
@@ -40,6 +41,7 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,fileName}:Prop
     copied=document.execCommand("copy");input.remove();
    }
    if(!copied)throw new Error("Clipboard access is unavailable.");
+   setStatusTone("success");
    setStatus(label+" copied.");
   }catch(e){setError(e instanceof Error?e.message:"Could not copy "+label.toLowerCase()+".");}
  }
@@ -74,6 +76,7 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,fileName}:Prop
     });
     bridge.postMessage("saveCustomerPaymentQr|"+fileName+"|"+dataUrl.slice(dataUrl.indexOf(",")+1));
     waitingForNativeSave=true;
+    setStatusTone("info");
     setStatus("Choose where to save the QR image.");
     return;
    }
@@ -81,6 +84,7 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,fileName}:Prop
    const anchor=document.createElement("a");anchor.href=pngUrl;anchor.download=fileName;anchor.rel="noopener";
    document.body.appendChild(anchor);anchor.click();anchor.remove();
    const downloadedUrl=pngUrl;window.setTimeout(()=>URL.revokeObjectURL(downloadedUrl),1500);pngUrl=null;
+   setStatusTone("info");
    setStatus("QR image download started.");
   }catch(e){setError(e instanceof Error?e.message:"The QR image could not be downloaded.");}
   finally{if(svgUrl)URL.revokeObjectURL(svgUrl);if(pngUrl)URL.revokeObjectURL(pngUrl);if(!waitingForNativeSave)setBusy(false);}
@@ -93,10 +97,10 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,fileName}:Prop
   <strong>{payeeName}</strong><span>{upiId}</span><strong className="customer-upi-amount">{amount}</strong>
   {uri&&<div className="customer-upi-quick-actions">
    <button type="button" className="secondary-button" onClick={()=>void copyText(upiId,"UPI ID")}><Copy size={13}/>Copy UPI ID</button>
-   <button type="button" className="secondary-button" onClick={()=>void copyText(amount,"Amount")}><Copy size={13}/>Copy amount</button>
+   <button type="button" className="secondary-button" onClick={()=>void copyText((amountMinor/100).toFixed(2),"Amount")}><Copy size={13}/>Copy amount</button>
   </div>}
   {uri&&<button type="button" className="secondary-button customer-upi-download" onClick={()=>void download()} disabled={busy}><Download size={15}/>{busy?"Preparing QR…":"Download QR image"}</button>}
-  {status&&<small className="customer-upi-download-status" role="status"><Check size={13}/>{status}</small>}
+  {status&&<small className={"customer-upi-download-status "+statusTone} role="status">{statusTone==="success"?<Check size={13}/>:<Info size={13}/>} {status}</small>}
   {error&&<small className="customer-upi-download-error" role="alert">{error}</small>}
   {uri&&<a href={uri} className="customer-flow-button customer-upi-open">Open UPI app</a>}
  </div>;
