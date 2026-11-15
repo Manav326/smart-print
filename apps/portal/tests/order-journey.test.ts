@@ -142,6 +142,8 @@ test("private orders use generic labels and never match original filenames in or
   assert.equal(order.name,"Private print order");
   assert.equal(filterShopOrderJourneys([order],"all","passport-scan.pdf").length,0);
   assert.equal(filterShopOrderJourneys([order],"all","identity-card.pdf").length,0);
+  assert.equal(filterShopOrderJourneys([order],"all","Sensitive folder name").length,0);
+  assert.equal(filterShopOrderJourneys([order],"all","Sensitive group").length,0);
   assert.equal(filterShopOrderJourneys([order],"all","SP-PRIVATE-1").length,1,
     "The operational order reference remains searchable");
 });
