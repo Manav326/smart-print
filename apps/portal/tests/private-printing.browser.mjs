@@ -389,6 +389,35 @@ async function installPrivatePrintingApiHarness(context, page) {
       }
     }
 
+    const quoteMatch = path.match(/^\/api\/v1\/public\/jobs\/([0-9a-f-]+)\/quote$/i);
+    if (quoteMatch && method === "POST") {
+      const ticket = [...tickets.values()].find(item => item.printJobId === quoteMatch[1]);
+      if (!ticket?.uploadResult) return badRequest("Unknown print job.", 404);
+      const values = request.postDataJSON();
+      return json({
+        id: quoteMatch[1],
+        batchId: ticket.batchId,
+        jobNumber: ticket.jobNumber,
+        status: "AWAITING_CUSTOMER_APPROVAL",
+        pageCount: ticket.uploadResult.job.pageCount,
+        copies: values.copies ?? 1,
+        colourMode: values.colourMode ?? "Mono",
+        paperSize: values.paperSize ?? "A4",
+        isDuplex: values.isDuplex ?? false,
+        orientation: values.orientation ?? "AUTO",
+        printKind: values.printKind ?? ticket.uploadResult.job.printKind ?? "DOCUMENT",
+        photoSizeCode: values.photoSizeCode ?? null,
+        photoCount: values.photoCount ?? null,
+        photosPerPage: values.photosPerPage ?? null,
+        photoUnitPriceMinor: 0,
+        currency: "INR",
+        quotedAmountMinor: 100,
+        amountMajor: 1,
+        pricingVersion: 1,
+        quoteExpiresUtc: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      });
+    }
+
     const statusMatch = path.match(/^\/api\/v1\/public\/jobs\/([0-9a-f-]+)\/status$/i);
     if (statusMatch && method === "GET") {
       const ticket = [...tickets.values()].find(item => item.printJobId === statusMatch[1]);
@@ -555,6 +584,12 @@ async function runScenario(browser) {
     "The customer upload receipt must retain each original filename in the local draft.");
   assert.ok(uploadedLabels.every(value => !value.includes("Private document")),
     "The customer receipt should show the original file name, not the server's anonymized placeholder.");
+  const persistedFilenameCount = await page.evaluate(publicCode => {
+    const draft = JSON.parse(localStorage.getItem("qrtoprint.customer-active-job:" + publicCode) ?? "null");
+    return Object.keys(draft?.privateFileNamesByJobId ?? {}).length;
+  }, STATION_CODE);
+  assert.equal(persistedFilenameCount, 8,
+    "The local job-ID filename registry must persist each private filename explicitly.");
   assert.ok(harness.ticketRequests.every(item =>
     item.originalFileName.startsWith("private-document")),
     "Showing original names locally must not expose them in private server-side ticket metadata.");
@@ -602,6 +637,19 @@ async function runScenario(browser) {
   assert.equal(fallbackKinds.filter(value => value.trim() === "Document").length, 1);
   assert.match(await page.locator(".customer-uploaded-batch").innerText(), /kept only on this device/i,
     "The customer must be told why a generic private filename is displayed.");
+
+  await page.getByRole("button", { name: "Calculate batch quote" }).click();
+  await page.locator(".customer-batch-quote-lines").waitFor({ state: "visible", timeout: 30000 });
+  const quoteLabels = await page.locator(".customer-batch-quote-lines").allTextContents();
+  assert.ok(quoteLabels.length === 1 && quoteLabels[0].includes("Private file"),
+    "Quote lines must use the same customer-safe filename fallback.");
+  assert.ok(!originalCustomerFileNames.some(name => quoteLabels.join(" ").includes(name)),
+    "Quote lines must not reintroduce an unavailable private filename.");
+  const quoteKinds = await page.locator(".customer-batch-quote-lines .print-kind-tag").allTextContents();
+  assert.equal(quoteKinds.filter(value => value.trim() === "ID card").length, 2,
+    "ID Studio must remain labelled as ID card in quote lines.");
+  assert.equal(quoteKinds.filter(value => value.trim() === "Photo").length, 5);
+  assert.equal(quoteKinds.filter(value => value.trim() === "Document").length, 1);
 
   const result = {
     label: "private-eight-document-development-virtual-printer-batch",
