@@ -3818,6 +3818,13 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
     if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED"))
         return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
 
+    if (PrintOutputConfirmationRules.IsSpoolerJobRetained(job.SpoolerStatus))
+        return Results.Conflict(new
+        {
+            code = "spooler_job_retained",
+            message = "Windows is still holding this print job in its queue. Confirmation is available after the Agent verifies that the job has left the queue; check the actual paper output before confirming."
+        });
+
     if (job.PrivatePrinting && (job.OutputType != "PHYSICAL" || job.ClaimedByAgentDeviceId is null))
         return Results.Conflict(new
         {
