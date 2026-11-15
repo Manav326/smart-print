@@ -16,19 +16,15 @@ public sealed class AgentLocalQueueStore
 
     private readonly string queueRoot;
     private readonly bool applyWindowsAcl;
-    private readonly DataProtectionScope protectionScope;
     private readonly SemaphoreSlim stagedUploadLeaseGate = new(1, 1);
 
-    public AgentLocalQueueStore(string? rootOverride = null, DataProtectionScope? protectionScope = null)
+    public AgentLocalQueueStore(string? rootOverride = null)
     {
         queueRoot = rootOverride ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "QRtoPrint",
             "LocalQueue");
         applyWindowsAcl = rootOverride is null;
-        this.protectionScope = protectionScope ?? (rootOverride is null
-            ? DataProtectionScope.CurrentUser
-            : DataProtectionScope.LocalMachine);
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -241,9 +237,7 @@ public sealed class AgentLocalQueueStore
             documentPath + ".tmp",
             documentPath + ".photo-revision.bak",
             documentPath + ".photo.source",
-            documentPath + ".scope-upgrade.tmp",
-            documentPath + ".photo.source.scope-upgrade.tmp",
-            GetManifestPath(jobId) + ".tmp"
+GetManifestPath(jobId) + ".tmp"
         };
 
         foreach (var candidate in paths)
@@ -357,7 +351,7 @@ public sealed class AgentLocalQueueStore
         byte[] protectedBytes;
         try
         {
-            protectedBytes = ProtectedData.Protect(plaintext, Entropy, protectionScope);
+            protectedBytes = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.LocalMachine);
         }
         finally
         {
@@ -1129,7 +1123,7 @@ public sealed class AgentLocalQueueStore
             byte[] protectedBytes;
             try
             {
-                protectedBytes = ProtectedData.Protect(plaintext, Entropy, protectionScope);
+                protectedBytes = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.LocalMachine);
             }
             finally
             {
@@ -1273,23 +1267,15 @@ public sealed class AgentLocalQueueStore
         var protectedBytes = File.ReadAllBytes(fullSourcePath);
         try
         {
-            var plaintext = UnprotectDocumentBytes(protectedBytes, out var needsProtectionUpgrade);
-            try
-            {
-                var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
-                if (plaintext.LongLength != entry.PhotoSourceSizeBytes.Value ||
-                    !string.Equals(actualHash, entry.PhotoSourceSha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("The retained original photo failed its integrity check.");
-
-                if (needsProtectionUpgrade)
-                    UpgradeDocumentProtectionScope(fullSourcePath, plaintext);
-                return plaintext;
-            }
-            catch
+            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
+            var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
+            if (plaintext.LongLength != entry.PhotoSourceSizeBytes.Value ||
+                !string.Equals(actualHash, entry.PhotoSourceSha256, StringComparison.OrdinalIgnoreCase))
             {
                 CryptographicOperations.ZeroMemory(plaintext);
-                throw;
+                throw new InvalidDataException("The retained original photo failed its integrity check.");
             }
+            return plaintext;
         }
         finally
         {
@@ -1304,66 +1290,20 @@ public sealed class AgentLocalQueueStore
         var protectedBytes = File.ReadAllBytes(entry.DocumentPath);
         try
         {
-            var plaintext = UnprotectDocumentBytes(protectedBytes, out var needsProtectionUpgrade);
-            try
-            {
-                var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
-                if (plaintext.LongLength != entry.SizeBytes ||
-                    !string.Equals(actualHash, entry.Sha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidDataException("The protected local document failed its integrity check.");
-
-                if (needsProtectionUpgrade)
-                    UpgradeDocumentProtectionScope(entry.DocumentPath, plaintext);
-                return plaintext;
-            }
-            catch
+            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
+            var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
+            if (plaintext.LongLength != entry.SizeBytes ||
+                !string.Equals(actualHash, entry.Sha256, StringComparison.OrdinalIgnoreCase))
             {
                 CryptographicOperations.ZeroMemory(plaintext);
-                throw;
+                throw new InvalidDataException("The protected local document failed its integrity check.");
             }
+
+            return plaintext;
         }
         finally
         {
             CryptographicOperations.ZeroMemory(protectedBytes);
-        }
-    }
-
-    private byte[] UnprotectDocumentBytes(byte[] protectedBytes, out bool needsProtectionUpgrade)
-    {
-        needsProtectionUpgrade = false;
-        try
-        {
-            return ProtectedData.Unprotect(protectedBytes, Entropy, protectionScope);
-        }
-        catch (CryptographicException) when (protectionScope == DataProtectionScope.CurrentUser)
-        {
-            // Existing installations used LocalMachine DPAPI. Migrate only after
-            // the decrypted bytes pass the manifest's size and SHA-256 checks.
-            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
-            needsProtectionUpgrade = true;
-            return plaintext;
-        }
-    }
-
-    private void UpgradeDocumentProtectionScope(string path, byte[] plaintext)
-    {
-        var upgradedBytes = ProtectedData.Protect(plaintext, Entropy, protectionScope);
-        var temporaryPath = path + ".scope-upgrade.tmp";
-        try
-        {
-            using (var stream = new FileStream(
-                temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None,
-                64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
-            {
-                stream.Write(upgradedBytes);
-                stream.Flush(flushToDisk: true);
-            }
-            File.Move(temporaryPath, path, overwrite: true);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(upgradedBytes);
-            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
         }
     }
 
