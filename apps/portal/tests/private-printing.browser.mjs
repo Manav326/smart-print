@@ -545,7 +545,7 @@ async function runScenario(browser) {
   const originalCustomerFileNames = [
     "id-card-one.pdf", "id-card-two.pdf",
     "saved-photo-sheet-one.pdf", "saved-photo-sheet-two.pdf", "saved-photo-sheet-three.pdf",
-    "college-document-multipage.pdf", "new-photo-one.jpg", "new-photo-two.jpg"
+    "college-document-multipage.pdf", "new-photo-one-4x6-photos.pdf", "new-photo-two-4x6-photos.pdf"
   ];
   assert.ok(originalCustomerFileNames.every(name =>
     uploadedLabels.some(label => label.includes(name))),
