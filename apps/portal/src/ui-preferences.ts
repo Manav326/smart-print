@@ -53,7 +53,7 @@ export function applyThemePreference(dark: boolean): void {
   const storage = getStorage();
   const local = readThemePreference(storage);
   const native = getNativeThemePreference();
-  const updatedAt = Math.max(local.updatedAt, native?.updatedAt ?? 0, 1);
+  const updatedAt = nextThemePreferenceTimestamp(Date.now(), local.updatedAt, native?.updatedAt ?? 0);
   writeThemePreference(storage, theme, updatedAt);
 
   // Android exposes a deliberately narrow theme-only bridge on every supported

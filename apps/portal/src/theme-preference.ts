@@ -38,16 +38,17 @@ export function readThemePreference(storage: ThemePreferenceStorage | null): The
     const updatedAt = parseUpdatedAt(storage.getItem(THEME_UPDATED_AT_KEY));
 
     if (!canonical && legacy) {
-      // Preserve both old Light and Dark choices. Do not remove the old key unless
-      // the canonical value was written successfully.
+      // Preserve both old Light and Dark choices. The canonical value is written
+      // first; optional timestamp/cleanup writes must not hide a successful read.
       storage.setItem(THEME_PREFERENCE_KEY, legacy);
-      storage.setItem(THEME_UPDATED_AT_KEY, String(updatedAt));
-      storage.removeItem(LEGACY_THEME_PREFERENCE_KEY);
+      try { storage.setItem(THEME_UPDATED_AT_KEY, String(updatedAt)); } catch { /* timestamp is optional */ }
+      try { storage.removeItem(LEGACY_THEME_PREFERENCE_KEY); } catch { /* best effort cleanup */ }
     } else if (canonical) {
       try { storage.removeItem(LEGACY_THEME_PREFERENCE_KEY); } catch { /* best effort cleanup */ }
     }
     return { theme, updatedAt };
   } catch {
+    // Storage read failures are non-fatal; first-install Light remains the default.
     return { theme: null, updatedAt: 0 };
   }
 }

@@ -64,7 +64,7 @@ test("first web visit is light and existing QRtoPrint theme choices migrate to S
     assert.match(source, /localStorage\.getItem\("smartprint\.theme"\)/);
     assert.match(source, /localStorage\.getItem\("qrtoprint\.theme"\)/);
     assert.match(source, /smartprint\.theme\.updatedAt/);
-    assert.match(source, /document\.documentElement\.dataset\.theme = theme/);
+    assert.match(source, /root\.dataset\.theme = theme/);
   }
 });
 
