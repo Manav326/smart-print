@@ -43,7 +43,12 @@ class SmartPrintThemeWebViewInstrumentedTest {
             SmartPrintThemePreference.PREFERENCES_NAME,
             Context.MODE_PRIVATE
         )
-        val previous = preferences.all.toMap()
+        val hadTheme = preferences.contains("theme")
+        val previousTheme = preferences.getString("theme", null)
+        val hadUpdatedAt = preferences.contains("theme.updatedAt")
+        val previousUpdatedAt = preferences.getLong("theme.updatedAt", 0L)
+        val hadExplicit = preferences.contains("theme.explicit")
+        val previousExplicit = preferences.getBoolean("theme.explicit", false)
         try {
             preferences.edit().clear().commit()
             SmartPrintThemePreference.apply(context)
@@ -105,8 +110,11 @@ class SmartPrintThemeWebViewInstrumentedTest {
                 assertEquals("dark", snapshot.getString("page"))
             }
         } finally {
-            preferences.edit().clear().commit()
-            preferences.edit().putAll(previous).commit()
+            val restore = preferences.edit().clear()
+            if (hadTheme) restore.putString("theme", previousTheme)
+            if (hadUpdatedAt) restore.putLong("theme.updatedAt", previousUpdatedAt)
+            if (hadExplicit) restore.putBoolean("theme.explicit", previousExplicit)
+            restore.commit()
             SmartPrintThemePreference.apply(context)
         }
     }
