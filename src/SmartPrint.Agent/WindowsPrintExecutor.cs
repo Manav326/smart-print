@@ -645,6 +645,7 @@ public sealed class WindowsPrintExecutor
 
     public WindowsSpoolerJob? GetJob(string queueName, int jobId)
     {
+        if (jobId <= 0) throw new ArgumentOutOfRangeException(nameof(jobId));
         using var handle = OpenQueue(queueName);
         _ = GetJobW(handle.Value, jobId, 1, IntPtr.Zero, 0, out var needed);
         var error = Marshal.GetLastWin32Error();
@@ -666,6 +667,22 @@ public sealed class WindowsPrintExecutor
             return ConvertJob(Marshal.PtrToStructure<JobInfo1W>(buffer));
         }
         finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    /// <summary>
+    /// Requests deletion of a retained Windows spooler job. Callers must verify
+    /// that the job is no longer present; a successful SetJob call alone is not
+    /// treated as proof that driver or printer firmware copies were erased.
+    /// </summary>
+    public void DeleteRetainedJob(string queueName, int jobId)
+    {
+        if (jobId <= 0) throw new ArgumentOutOfRangeException(nameof(jobId));
+        using var handle = OpenQueue(queueName);
+        if (SetJobW(handle.Value, jobId, 0, IntPtr.Zero, 5)) return; // JOB_CONTROL_DELETE
+
+        var error = Marshal.GetLastWin32Error();
+        if (error is 87 or 1168) return; // Invalid/absent job; caller verifies with GetJob.
+        throw new Win32Exception(error, "Could not delete the retained Windows print job.");
     }
 
     private static IntPtr CreateDevMode(IntPtr printer, string queueName, AgentLocalQueueEntry entry, bool landscape)
@@ -865,6 +882,9 @@ public sealed class WindowsPrintExecutor
         : (statusFlags & 0x00000001) != 0 ? "PAUSED"
         : (statusFlags & 0x00000002) != 0 ? "ERROR"
         : (statusFlags & 0x00000400) != 0 ? "USERINTERVENTION"
+        // JOB_STATUS_RETAINED: Windows keeps the completed job in the queue
+        // so it can be resubmitted. Private jobs are removed by the Agent monitor.
+        : (statusFlags & 0x00002000) != 0 ? "RETAINED"
         : (statusFlags & 0x00000010) != 0 ? "PRINTING"
         : (statusFlags & 0x00000008) != 0 ? "SPOOLING"
         : (statusFlags & 0x00000080) != 0 ? "PRINTED"
@@ -1122,4 +1142,6 @@ public sealed class WindowsPrintExecutor
     private static extern bool EnumJobsW(IntPtr printer, uint first, uint count, uint level, IntPtr jobs, int size, out int needed, out int returned);
     [DllImport("winspool.drv", EntryPoint="GetJobW", CharSet=CharSet.Unicode, SetLastError=true)]
     private static extern bool GetJobW(IntPtr printer, int jobId, uint level, IntPtr job, int size, out int needed);
+    [DllImport("winspool.drv", EntryPoint="SetJobW", CharSet=CharSet.Unicode, SetLastError=true)]
+    private static extern bool SetJobW(IntPtr printer, int jobId, uint level, IntPtr job, uint command);
 }
