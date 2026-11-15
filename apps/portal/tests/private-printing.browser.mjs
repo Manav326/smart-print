@@ -542,8 +542,19 @@ async function runScenario(browser) {
   assert.equal(selectedKinds.filter(value => value.trim() === "Document").length, 1,
     "Only the ordinary multi-page PDF must use the generic document label.");
   const uploadedLabels = await page.locator(".customer-uploaded-batch-item").allTextContents();
-  assert.ok(uploadedLabels.every(value => value.includes("Private document")),
-    "The upload receipt must use privacy-safe document names.");
+  const originalCustomerFileNames = [
+    "id-card-one.pdf", "id-card-two.pdf",
+    "saved-photo-sheet-one.pdf", "saved-photo-sheet-two.pdf", "saved-photo-sheet-three.pdf",
+    "college-document-multipage.pdf", "new-photo-one.jpg", "new-photo-two.jpg"
+  ];
+  assert.ok(originalCustomerFileNames.every(name =>
+    uploadedLabels.some(label => label.includes(name))),
+    "The customer upload receipt must retain each original filename in the local draft.");
+  assert.ok(uploadedLabels.every(value => !value.includes("Private document")),
+    "The customer receipt should show the original file name, not the server's anonymized placeholder.");
+  assert.ok(harness.ticketRequests.every(item =>
+    item.originalFileName.startsWith("private-document")),
+    "Showing original names locally must not expose them in private server-side ticket metadata.");
 
   const result = {
     label: "private-eight-document-development-virtual-printer-batch",
