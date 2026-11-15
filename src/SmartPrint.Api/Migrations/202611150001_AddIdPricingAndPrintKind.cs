@@ -58,6 +58,7 @@ public sealed class AddIdPricingAndPrintKind : Migration
                     OR
                     (
                         "PrintKind" = 'ID_DOCUMENT' AND
+                        "PrivatePrinting" = TRUE AND
                         "PageCount" = 1 AND
                         "Copies" = 1 AND
                         "PhotoSizeCode" IS NULL AND
