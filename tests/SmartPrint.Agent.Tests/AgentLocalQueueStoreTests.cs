@@ -1135,7 +1135,7 @@ public sealed class AgentLocalQueueStoreTests
             await store.PurgePrivateSourceAfterConfirmedOutputAsync(job.Id, CancellationToken.None);
             Assert.False(File.Exists(retainedPhotoPath));
             await store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None);
-            Assert.False(store.Find(job.Id)!.PrivatePurgePending);
+            Assert.Null(store.Find(job.Id));
             Assert.Empty(store.GetPrivatePurgePendingJobs());
 
             // Once the server has acknowledged source-metadata redaction, the
