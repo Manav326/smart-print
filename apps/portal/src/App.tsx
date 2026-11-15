@@ -4749,9 +4749,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     return {...baseline,...(groupSettings[name]??{})};
   };
   const settingsForFile=(candidate:File):CustomerSavedPrintSettings=> {
-    if(isSmartPrintIdDocument(candidate)) return {
-      copies:1,colourMode:"Colour",isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",advancedEnabled:false
-    };
+    if(isSmartPrintIdDocument(candidate)) {
+      const defaults=defaultsForGroup(groupNameForFile(candidate));
+      return {
+        copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",advancedEnabled:false
+      };
+    }
     const fingerprint=customerFileFingerprint(candidate);
     const defaults=defaultsForGroup(groupNameForFile(candidate));
     const own=fileSettings[fingerprint];
@@ -5041,7 +5044,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const idDocument=(printKindsOverride?.[item.job.id]??printKindsByJobId[item.job.id]??item.job.printKind)==="ID_DOCUMENT";
         try {
           nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
-            colourMode:photoSettings||idDocument?"Colour":settings.colourMode,
+            colourMode:photoSettings?"Colour":settings.colourMode,
             paperSize:photoSettings||idDocument?"A4":settings.paperSize,
             isDuplex:photoSettings||idDocument?false:settings.isDuplex,
             copies:photoSettings?1:idDocument?1:settings.copies,
@@ -5505,15 +5508,22 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   );
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
-  const acceptedDocumentEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind!=="PHOTO");
+  const acceptedDocumentEntries=acceptedQuoteEntries.filter(entry=>
+    entry.quote?.printKind!=="PHOTO"&&entry.quote?.printKind!=="ID_DOCUMENT");
+  const acceptedIdDocumentEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="ID_DOCUMENT");
   const acceptedPhotoEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="PHOTO");
+  const acceptedPaperEntries=[...acceptedDocumentEntries,...acceptedIdDocumentEntries];
   const batchDocumentSourcePages=acceptedDocumentEntries.reduce((total,entry)=>
     total+(entry.quote?.pageCount??entry.item.job.pageCount),0);
+  const batchIdDocumentSheets=acceptedIdDocumentEntries.reduce((total,entry)=>
+    total+(entry.quote?.pageCount??0),0);
+  const batchIdDocumentAmount=acceptedIdDocumentEntries.reduce((total,entry)=>
+    total+(entry.quote?.quotedAmountMinor??0),0);
   const batchPhotoCount=acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.photoCount??0),0);
   const batchPhotoAmount=acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.quotedAmountMinor??0),0);
-  const batchMonoPrintedPages=acceptedDocumentEntries.reduce((total,entry)=>
+  const batchMonoPrintedPages=acceptedPaperEntries.reduce((total,entry)=>
     total+(entry.quote?.colourMode==="Mono"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
-  const batchColourPrintedPages=acceptedDocumentEntries.reduce((total,entry)=>
+  const batchColourPrintedPages=acceptedPaperEntries.reduce((total,entry)=>
     total+(entry.quote?.colourMode==="Colour"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
   const batchPrintedPages=batchMonoPrintedPages+batchColourPrintedPages+
     acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.pageCount??0),0);
@@ -5594,7 +5604,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <div className="customer-folder-group-head">
             <div className="customer-folder-title"><FolderOpen size={16}/><span><strong>{group.name}</strong><small>{group.files.length} file(s)</small></span></div>
             {isIdStudioGroup
-              ? <small className="customer-upload-local-note">ID sheet · fixed settings. <InfoTooltip label="ID sheet settings"><span>One colour copy, A4 portrait and single-sided printing preserve the card's physical dimensions.</span></InfoTooltip></small>
+              ? <div className="customer-folder-defaults">
+                <div><span>ID sheet</span><strong className="customer-paper-default">A4 portrait · 1 copy · Single-sided</strong></div>
+                <div><span>Print mode</span><div className="customer-choice-row">
+                  <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
+                  <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
+                </div></div>
+              </div>
               : <div className="customer-folder-defaults">
               <div><span>Colour</span><div className="customer-choice-row">
                 <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
@@ -5726,16 +5742,17 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchDocumentSourcePages} document pages · {batchPhotoCount} photos · {batchPrintedPages} output pages/sheets</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{entry.item.document.originalFileName}<PrintKindTag printKind={entry.quote!.printKind}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
+      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchDocumentSourcePages} document pages · {batchIdDocumentSheets} ID card sheets · {batchPhotoCount} photos · {batchPrintedPages} output pages/sheets</small></div>
+      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{entry.item.document.originalFileName}<PrintKindTag printKind={entry.quote!.printKind}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.printKind==="ID_DOCUMENT"?entry.quote!.pageCount+" A4 portrait sheet(s) × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
       <div className="customer-batch-print-breakdown">
         {batchMonoPrintedPages>0&&<div><span>B&W · {batchMonoPrintedPages} document pages</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
         {batchColourPrintedPages>0&&<div><span>Colour · {batchColourPrintedPages} document pages</span><strong>{formatMoney(batchColourAmount,quoteEntries[0].quote!.currency)}</strong></div>}
+        {batchIdDocumentSheets>0&&<div><span>ID card printing · {batchIdDocumentSheets} A4 portrait sheet(s)</span><strong>{formatMoney(batchIdDocumentAmount,quoteEntries[0].quote!.currency)}</strong></div>}
         {batchPhotoCount>0&&<div><span>Photo printing · {batchPhotoCount} finished photos</span><strong>{formatMoney(batchPhotoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
         <div className="customer-batch-print-total"><span>Total output pages/sheets</span><strong>{batchPrintedPages}</strong></div>
         <div className="customer-batch-print-total"><span>Total payable</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong></div>
       </div>
-      <p className="customer-payment-model-note">Document pages use the shop's B&W/Colour rate card. Photo sheets use the saved per-photo rate for the selected size, shown on each line. Rejected files are excluded. After review, pay once for all accepted files.</p>
+      <p className="customer-payment-model-note">Document pages use the shop's B&W/Colour rate card. Prepared ID cards use the separate ID-card rate and print as normal A4 documents in the selected B&W/Colour mode. Photo sheets use the saved per-photo rate for the selected size. Rejected files are excluded. After review, pay once for all accepted files.</p>
     </div>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
