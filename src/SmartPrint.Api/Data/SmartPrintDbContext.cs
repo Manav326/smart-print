@@ -423,7 +423,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
         {
             entity.ToTable("PrintJobs", table =>
             {
-                table.HasCheckConstraint("CK_PrintJobs_PrintKind", "\"PrintKind\" IN ('DOCUMENT', 'PHOTO', 'ID_DOCUMENT')");
+                table.HasCheckConstraint("CK_PrintJobs_PrintKind", "\"PrintKind\" IN ('DOCUMENT', 'PHOTO')");
                 table.HasCheckConstraint("CK_PrintJobs_Origin", "\"Origin\" IN ('CUSTOMER_QR', 'SHOP_OWNER')");
                 table.HasCheckConstraint(
                     "CK_PrintJobs_PhotoQuoteSnapshot",
@@ -451,16 +451,6 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                         "QuotedAmountMinor" = 0 AND
                         "PricingVersion" IS NULL AND
                         "QuoteExpiresUtc" IS NULL
-                    )
-                    OR
-                    (
-                        "PrintKind" = 'ID_DOCUMENT' AND
-                        "PrivatePrinting" = TRUE AND
-                        "PageCount" = 1 AND
-                        "Copies" = 1 AND
-                        "PhotoSizeCode" IS NULL AND
-                        "PhotoCount" = 0 AND
-                        "PhotoUnitPriceMinorSnapshot" = 0
                     )
                     """);
             });
