@@ -28,7 +28,7 @@ The emulator reaches the fixture through an ADB reverse mapping to
 http://127.0.0.1:3000. That loopback route is allowed only in the explicitly
 enabled com.quantaedge.smartprint.localqa debug package. The normal Portal build
 separately asserts that the QA route is absent. After instrumentation, the
-runner parses JUnit XML and fails if any of the four Photo Studio cases is
+runner parses JUnit XML and fails if any of the five Photo Studio cases is
 missing, skipped, failed or duplicated. The later install-lifecycle APKs use
 the normal customer application ID and HTTPS public-origin setting.
 HELP
@@ -114,7 +114,7 @@ if [[ -f "$RUNNER_TEMP/smartprint-photo-studio-qa-server.log" ]]; then
 fi
 
 # Gradle can return success when JUnit Assumptions ignore the Photo Studio
-# tests. Require all four exact cases to exist and execute with no skip/failure.
+# tests. Require all five exact cases to exist and execute with no skip/failure.
 if [ "$ui_test_status" -eq 0 ]; then
   echo "[QA-STEP-START] Android Photo Studio coverage gate | parsing connected instrumentation JUnit XML."
   if python - <<'PY'
@@ -132,6 +132,7 @@ expected = {
     "shopOwnerCanEditAnExistingPhotoJobInsideAndroidWebViewAndSaveReplacementPdf",
     "androidSystemBackClosesPhotoStudioBeforeLeavingTheCustomerStation",
     "photoStudioModalStateAndSecureFlagSurviveActivityRecreation",
+    "androidLoadsTheSharedFullPhotoStudioFromBundledAssetsWithoutAServiceConnection",
 }
 root = ET.parse(reports[0]).getroot()
 matches = [
@@ -144,14 +145,14 @@ duplicates = sorted(name for name in expected if names.count(name) != 1)
 skipped = sorted(case.attrib.get("name", "") for case in matches if case.find("skipped") is not None)
 failed = sorted(case.attrib.get("name", "") for case in matches if case.find("failure") is not None or case.find("error") is not None)
 
-print(f"Android Photo Studio WebView cases: total={len(matches)} expected=4")
+print(f"Android Photo Studio WebView cases: total={len(matches)} expected=5")
 for case in matches:
     name = case.attrib.get("name", "<unnamed>")
     status = "SKIP" if case.find("skipped") is not None else "FAIL" if case.find("failure") is not None or case.find("error") is not None else "PASS"
     print(f"[ANDROID-PHOTOSTUDIO] {status} | {name}")
 
 problems = []
-if len(matches) != 4: problems.append(f"expected exactly 4 Photo Studio cases, found {len(matches)}")
+if len(matches) != 5: problems.append(f"expected exactly 5 Photo Studio cases, found {len(matches)}")
 if missing: problems.append("missing cases: " + ", ".join(missing))
 if duplicates: problems.append("missing/duplicated exact-one cases: " + ", ".join(duplicates))
 if skipped: problems.append("ignored cases: " + ", ".join(skipped))
@@ -160,7 +161,7 @@ if problems:
     for problem in problems:
         print("::error::" + problem, file=sys.stderr)
     raise SystemExit(1)
-print("PASS: all four Android Photo Studio WebView tests executed and passed.")
+print("PASS: all five Android Photo Studio WebView tests executed and passed.")
 PY
   then
     photostudio_gate_status=0
