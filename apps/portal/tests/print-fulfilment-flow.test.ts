@@ -677,7 +677,8 @@ test("customer-facing print choices explain privacy versus connection without ch
  assert.match(app,/Encrypted online transfer · print when ready/);
  assert.match(app,/customerStatusLabel\(status:string\):string/);
  assert.match(app,/Waiting for shop review/);
- assert.match(app,/\{quoteEntries\.length\} files · \{batchPrintedPages\} print pages\/sheets/);
+ assert.match(app,/\{quoteEntries\.length\} files\{batchDocumentSourcePages>0/);
+ assert.match(app,/\{batchPrintedPages\} print pages\/sheets/);
  assert.match(app,/UPI transaction ID \(UTR\)/);
  assert.match(app,/Find it in your UPI app under payment details or transaction history/);
 });
