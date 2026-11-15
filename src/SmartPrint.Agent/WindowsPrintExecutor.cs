@@ -35,6 +35,12 @@ public sealed class WindowsPrintExecutor
     private const int DcDuplex = 7;
     private const int DcOrientation = 17;
     private const int DcColorDevice = 32;
+    private const uint PrinterAccessAdminister = 0x00000004;
+    private const uint JobStatusPrinting = 0x00000010;
+    private const uint JobStatusSpooling = 0x00000008;
+    private const uint JobStatusPrinted = 0x00000080;
+    private const uint JobStatusRetained = 0x00002000;
+    private const uint JobControlRelease = 9;
     private const int LogPixelsX = 88;
     private const int LogPixelsY = 90;
     private const int HorzRes = 8;
@@ -670,20 +676,25 @@ public sealed class WindowsPrintExecutor
     }
 
     /// <summary>
-    /// Requests deletion of a retained Windows spooler job. Callers must verify
-    /// that the job is no longer present; a successful SetJob call alone is not
-    /// treated as proof that driver or printer firmware copies were erased.
+    /// Releases a retained job. This lets a held job continue printing and lets
+    /// Windows remove a completed retained job; it never cancels an in-flight job.
+    /// Callers must re-query the queue and keep their cleanup record until the
+    /// job is verified absent.
     /// </summary>
-    public void DeleteRetainedJob(string queueName, int jobId)
+    public void ReleaseRetainedJob(string queueName, int jobId)
     {
         if (jobId <= 0) throw new ArgumentOutOfRangeException(nameof(jobId));
-        using var handle = OpenQueue(queueName);
-        if (SetJobW(handle.Value, jobId, 0, IntPtr.Zero, 5)) return; // JOB_CONTROL_DELETE
+        using var handle = OpenQueueForJobAdministration(queueName);
+        if (SetJobW(handle.Value, jobId, 0, IntPtr.Zero, JobControlRelease)) return;
 
         var error = Marshal.GetLastWin32Error();
         if (error is 87 or 1168) return; // Invalid/absent job; caller verifies with GetJob.
-        throw new Win32Exception(error, "Could not delete the retained Windows print job.");
+        throw new Win32Exception(error, "Could not release the retained Windows print job.");
     }
+
+    public static bool ShouldReleaseRetainedPrivateJob(uint statusFlags) =>
+        (statusFlags & JobStatusRetained) != 0 &&
+        (statusFlags & (JobStatusPrinting | JobStatusSpooling)) == 0;
 
     private static IntPtr CreateDevMode(IntPtr printer, string queueName, AgentLocalQueueEntry entry, bool landscape)
     {
@@ -875,19 +886,18 @@ public sealed class WindowsPrintExecutor
     }
 
     public static string ResolveSpoolerStatus(uint statusFlags) =>
-        // Fault flags take precedence over PRINTING/SPOOLING so an offline
-        // or paper-out condition is never hidden behind queue activity.
+        // Fault flags take precedence over queue activity.
         (statusFlags & 0x00000020) != 0 ? "OFFLINE"
         : (statusFlags & 0x00000040) != 0 ? "PAPEROUT"
         : (statusFlags & 0x00000001) != 0 ? "PAUSED"
         : (statusFlags & 0x00000002) != 0 ? "ERROR"
         : (statusFlags & 0x00000400) != 0 ? "USERINTERVENTION"
-        // JOB_STATUS_RETAINED: Windows keeps the completed job in the queue
-        // so it can be resubmitted. Private jobs are removed by the Agent monitor.
-        : (statusFlags & 0x00002000) != 0 ? "RETAINED"
-        : (statusFlags & 0x00000010) != 0 ? "PRINTING"
-        : (statusFlags & 0x00000008) != 0 ? "SPOOLING"
-        : (statusFlags & 0x00000080) != 0 ? "PRINTED"
+        // RETAINED is not proof of completion: it can coexist with an active job.
+        // Preserve active and printed status before reporting a held queue entry.
+        : (statusFlags & JobStatusPrinting) != 0 ? "PRINTING"
+        : (statusFlags & JobStatusSpooling) != 0 ? "SPOOLING"
+        : (statusFlags & JobStatusPrinted) != 0 ? "PRINTED"
+        : (statusFlags & JobStatusRetained) != 0 ? "RETAINED"
         : "QUEUED";
 
     private static WindowsSpoolerJob ConvertJob(JobInfo1W item)
@@ -901,6 +911,14 @@ public sealed class WindowsPrintExecutor
     {
         if (!OpenPrinterW(queueName, out var handle, IntPtr.Zero))
             throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not open printer '{queueName}'.");
+        return new SafePrinterHandle(handle);
+    }
+
+    private static SafePrinterHandle OpenQueueForJobAdministration(string queueName)
+    {
+        var defaults = new PrinterDefaultsW { DesiredAccess = PrinterAccessAdminister };
+        if (!OpenPrinterW(queueName, out var handle, ref defaults))
+            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not open printer '{queueName}' for retained-job management.");
         return new SafePrinterHandle(handle);
     }
 
@@ -1089,6 +1107,14 @@ public sealed class WindowsPrintExecutor
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    private struct PrinterDefaultsW
+    {
+        public IntPtr DataType;
+        public IntPtr DevMode;
+        public uint DesiredAccess;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     private struct BitmapInfoHeader
     {
         public uint Size;
@@ -1117,6 +1143,8 @@ public sealed class WindowsPrintExecutor
 
     [DllImport("winspool.drv", EntryPoint="OpenPrinterW", CharSet=CharSet.Unicode, SetLastError=true)]
     private static extern bool OpenPrinterW(string name, out IntPtr printer, IntPtr defaults);
+    [DllImport("winspool.drv", EntryPoint="OpenPrinterW", CharSet=CharSet.Unicode, SetLastError=true)]
+    private static extern bool OpenPrinterW(string name, out IntPtr printer, ref PrinterDefaultsW defaults);
     [DllImport("winspool.drv", EntryPoint="ClosePrinter", SetLastError=true)]
     private static extern bool ClosePrinter(IntPtr printer);
     [DllImport("winspool.drv", EntryPoint="DocumentPropertiesW", CharSet=CharSet.Unicode, SetLastError=true)]
