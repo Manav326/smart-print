@@ -85,6 +85,7 @@ public sealed class ShopPricingProfile
     public long Photo25x35Minor { get; set; }
     public long Photo2x2Minor { get; set; }
     public long Photo4x6Minor { get; set; }
+    public long IdDocumentPriceMinor { get; set; }
     public int Version { get; set; } = 1;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
