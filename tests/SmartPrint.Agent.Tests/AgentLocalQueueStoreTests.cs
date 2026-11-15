@@ -1152,6 +1152,46 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task RemovesLegacySanitizedPrivatePhysicalManifestAfter24Hours()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "legacy sanitized private job"u8.ToArray();
+            var job = CreateJob(bytes) with { PrivatePrinting = true, StorageMode = "LOCAL_AGENT" };
+            var entry = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Private-Retention-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 791, "SmartPrint-Private-Retention-Test", CancellationToken.None);
+            await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
+            await store.PurgePrivateSourceAfterConfirmedOutputAsync(job.Id, CancellationToken.None);
+
+            // Recreate the sanitized manifest shape left behind by older Agents
+            // after the server acknowledgement was lost or the process stopped.
+            var sanitized = store.Find(job.Id)! with { PrivatePurgePending = false };
+            await File.WriteAllTextAsync(
+                Path.ChangeExtension(entry.DocumentPath, ".json"),
+                JsonSerializer.Serialize(sanitized, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+
+            var completed = sanitized.CompletedUtc!.Value;
+            Assert.Equal(0, await store.PruneRetainedEntriesAsync(
+                completed.AddHours(23), TimeSpan.FromDays(7), root, CancellationToken.None));
+            Assert.NotNull(store.Find(job.Id));
+
+            Assert.Equal(1, await store.PruneRetainedEntriesAsync(
+                completed.AddHours(25), TimeSpan.FromDays(7), root, CancellationToken.None));
+            Assert.Null(store.Find(job.Id));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PrivateTestOutputPurgesOnlyTheSourceThenErasesItsPdfAfter24Hours()
     {
         var root = CreateTemporaryDirectory();
