@@ -38,6 +38,16 @@ function base64ToBytes(value:string):Uint8Array {
   return bytes;
 }
 
+function photoSizeLabel(sizeCode:string):string {
+  const labels:Record<string,string>={
+    "35x45":"35 × 45 mm",
+    "25x35":"25 × 35 mm",
+    "2x2":"2 × 2 inch",
+    "4x6":"4 × 6 inch"
+  };
+  return labels[sizeCode]??sizeCode;
+}
+
 function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
   const [source,setSource]=useState<File|null>(null);
   const [saving,setSaving]=useState(false);
@@ -290,7 +300,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
 
       <section style={{padding:17,border:"1px solid var(--border,#dbe2ec)",borderRadius:16,background:"var(--card,#fff)",marginBottom:18,boxShadow:"0 8px 24px rgba(20,38,66,.05)"}}>
         <div style={{fontSize:16,fontWeight:750}}>Prepare one photo</div>
-        <p style={{fontSize:12,lineHeight:1.5,color:"var(--muted,#64748b)",margin:"5px 0 12px"}}>Choose a single photo to crop, enhance and arrange. Your original and finished sheet remain encrypted on this device.</p>
+        <p style={{fontSize:12,lineHeight:1.5,color:"var(--muted,#64748b)",margin:"5px 0 12px"}}>Choose one original photo. Crop and enhance it, then set the number of copies and photos per A4 sheet in the editor. Your original and finished sheet remain encrypted on this device.</p>
         <label htmlFor="private-photo-source" style={{display:"inline-flex",alignItems:"center",gap:8,padding:"11px 15px",borderRadius:10,background:"var(--accent,#4f5fc4)",color:"#fff",fontSize:13,fontWeight:750,cursor:"pointer"}}>
           Choose one photo
           <input key={inputKey} id="private-photo-source" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={chooseSource} style={{position:"absolute",width:1,height:1,opacity:0,pointerEvents:"none"}}/>
@@ -317,7 +327,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
             </div>
             <div style={{minWidth:0,flex:1,display:"flex",flexDirection:"column",gap:5}}>
               <strong style={{fontSize:14,lineHeight:1.35,overflowWrap:"anywhere"}}>{document.title||"Photo sheet"}</strong>
-              <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{document.sizeCode} · {document.photoCount} photos · {document.photosPerPage}/A4 sheet</span>
+              <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{photoSizeLabel(document.sizeCode)} · {document.photoCount} photos · {document.photosPerPage} per A4 sheet</span>
               <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{document.pageCount} A4 {document.pageCount===1?"page":"pages"} · {document.resolutionDpi||300} DPI</span>
               <div style={{display:"flex",alignItems:"center",gap:8,marginTop:"auto",flexWrap:"wrap"}}>
                 <button type="button" onClick={()=>openPreview(document)} style={{padding:"7px 12px",borderRadius:8,border:0,background:"var(--accent,#4f5fc4)",color:"#fff",fontSize:12,fontWeight:750}}>View</button>
@@ -333,7 +343,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         </div>
       </section>
 
-      <p style={{fontSize:11,lineHeight:1.5,color:"var(--muted,#64748b)",marginTop:18}}>To print a saved sheet, connect to a shop and choose it from the Photo Studio private documents section in the shop's file picker. The preview carries SmartPrint security and QuantaEdge branding; the actual print sheet is clean.</p>
+      <p style={{fontSize:11,lineHeight:1.5,color:"var(--muted,#64748b)",marginTop:18}}>To print a saved sheet: tap Back to Home, scan the shop's QR code, then select the sheet under Photo Studio private documents in the shop's file picker. The preview carries SmartPrint security and QuantaEdge branding; the actual print sheet is clean.</p>
       {status&&<p role="status" style={{fontSize:12,color:"var(--accent,#5366c9)",marginTop:12}}>{status}</p>}
       {error&&<p role="alert" style={{fontSize:12,color:"#bd3434",marginTop:12}}>{error}</p>}
     </section>
