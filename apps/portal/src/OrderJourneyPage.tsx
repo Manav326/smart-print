@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, Check, ChevronDown, Clock3, CreditCard, Eye, FileText, History, Image as ImageIcon, Inbox, PackageCheck, Printer, RefreshCw, RotateCcw, ShieldCheck, Wallet, Wifi, X } from "lucide-react";
 import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./api";
 import { formatIstDateTime } from "./date-time";
-import { buildShopOrderJourneys, filterShopOrderJourneys, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
+import { buildShopOrderJourneys, filterShopOrderJourneys, isSpoolerJobRetained, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
 import styles from "./OrderJourney.module.css";
 
 type ShopDestination = "Print Queue" | "Payments" | "Print Agent";
@@ -63,7 +63,8 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
   const canEditPhoto=job.photoSourceAvailable===true&&!job.privatePrinting&&job.status==="AWAITING_SHOP_APPROVAL";
   const canRefund=(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&["VERIFIED","PARTIALLY_REFUNDED"].includes(job.payment?.status??"")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId;
   const assignable=["PAID_AUTHORISED","LOCAL_QUEUE_READY"].includes(job.status);
-  const confirmable=job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT");
+  const spoolerJobRetained=isSpoolerJobRetained(job.spoolerStatus);
+  const confirmable=!spoolerJobRetained&&(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"));
   return <div className={styles.fileActionPanel}>
     {!job.privatePrinting&&<button type="button" className={styles.miniAction} onClick={()=>onPreview(job)}><Eye size={12}/> Preview</button>}
     <button type="button" className={styles.miniAction} onClick={()=>onHistory(job)}><History size={12}/> History</button>
@@ -77,6 +78,7 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
       </select>
     </label>}
     {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
+    {spoolerJobRetained&&<small className={styles.retainedOutputNotice} role="status">Windows is still holding this job. Confirmation becomes available after the Agent clears it from the queue.</small>}
     {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onConfirmOutput(job)}><Check size={12}/> Confirm output</button>}
     {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onRetryPdfExport(job)}><RotateCcw size={12}/> Save PDF again</button>}
     {canRefund&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onRefund(job)}><Wallet size={12}/> Refund</button>}
