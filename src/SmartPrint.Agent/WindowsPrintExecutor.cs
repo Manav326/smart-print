@@ -887,18 +887,17 @@ public sealed class WindowsPrintExecutor
     }
 
     public static string ResolveSpoolerStatus(uint statusFlags) =>
-        // Fault flags take precedence over queue activity.
-        (statusFlags & 0x00000020) != 0 ? "OFFLINE"
+        // RETAINED is safety-critical and must not be hidden by simultaneous fault or activity flags.
+        (statusFlags & JobStatusRetained) != 0 ? "RETAINED"
+        // When no retained entry exists, fault flags take precedence over queue activity.
+        : (statusFlags & 0x00000020) != 0 ? "OFFLINE"
         : (statusFlags & 0x00000040) != 0 ? "PAPEROUT"
         : (statusFlags & 0x00000001) != 0 ? "PAUSED"
         : (statusFlags & 0x00000002) != 0 ? "ERROR"
         : (statusFlags & 0x00000400) != 0 ? "USERINTERVENTION"
-        // RETAINED is not proof of completion: it can coexist with an active job.
-        // Preserve active and printed status before reporting a held queue entry.
         : (statusFlags & JobStatusPrinting) != 0 ? "PRINTING"
         : (statusFlags & JobStatusSpooling) != 0 ? "SPOOLING"
         : (statusFlags & JobStatusPrinted) != 0 ? "PRINTED"
-        : (statusFlags & JobStatusRetained) != 0 ? "RETAINED"
         : "QUEUED";
 
     private static WindowsSpoolerJob ConvertJob(JobInfo1W item)
