@@ -52,10 +52,11 @@ public sealed class WindowsPrintExecutorTests
     }
 
     [Theory]
-    [InlineData(0x00002000u, true)]
+    [InlineData(0x00002000u, false)] // Held/retained is not proof of completed printing.
     [InlineData(0x00002000u | 0x00000080u, true)]
     [InlineData(0x00002000u | 0x00000010u, false)]
     [InlineData(0x00002000u | 0x00000008u, false)]
+    [InlineData(0x00002000u | 0x00000001u | 0x00000080u, true)]
     [InlineData(0x00000010u, false)]
     public void ReleasesOnlyRetainedJobsThatAreNotActivelyPrinting(uint flags, bool expected)
     {
