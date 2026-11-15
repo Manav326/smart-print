@@ -30,13 +30,13 @@ test("caption labels reserve their own area and never shrink photo dimensions",(
  assert.equal(labelled.contentHeightMm,labelled.rows*52+(labelled.rows-1)*3);
 });
 test("private Photo Studio is independent of the cloud upload file-size limit",()=>{
- const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
+ const library=readFileSync(new URL("../src/PrivatePhotoStudioEntry.tsx",import.meta.url),"utf8");
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
- assert.match(app,/if\(selected\.size<=0\)/);
- assert.doesNotMatch(app,/selected\.size>UPLOAD_LIMITS\.maxFileBytes/);
- assert.match(app,/if\(source\.size<=0\|\|sheet\.file\.size<=0\)/);
- assert.doesNotMatch(app,/source\.size>UPLOAD_LIMITS\.maxFileBytes/);
- assert.doesNotMatch(app,/sheet\.file\.size>UPLOAD_LIMITS\.maxFileBytes/);
+ assert.match(library,/if\(selected\.size<=0\)/);
+ assert.doesNotMatch(library,/selected\.size>UPLOAD_LIMITS\.maxFileBytes/);
+ assert.match(library,/if\(source\.size<=0\|\|sheet\.file\.size<=0\)/);
+ assert.doesNotMatch(library,/source\.size>UPLOAD_LIMITS\.maxFileBytes/);
+ assert.doesNotMatch(library,/sheet\.file\.size>UPLOAD_LIMITS\.maxFileBytes/);
  assert.match(studio,/mode!=="private-library"&&jpegByteLength\+pdfStructureAllowance>MAX_FILE_BYTES/);
  assert.match(studio,/mode!=="private-library"&&pdf\.size>MAX_FILE_BYTES/);
 });
@@ -184,7 +184,8 @@ test("customer, shop order and private library share one strict JPG/PNG source p
  assert.match(app,/function isCustomerImage\(file:File\):boolean\s*\{\s*const identified=identifiedCustomerDocumentTypes\.get\(file\);/);
  assert.match(app,/if\(identified\)return identified\.mediaType==="image\/jpeg"\|\|identified\.mediaType==="image\/png";/);
  assert.match(app,/return isSupportedPhotoSource\(file\);/);
- assert.match(app,/resolvePhotoSourceMimeType\(selected\)/);
+ const library=readFileSync(new URL("../src/PrivatePhotoStudioEntry.tsx",import.meta.url),"utf8");
+ assert.match(library,/resolvePhotoSourceMimeType\(selected\)/);
  assert.match(app,/resolvePhotoSourceMimeType\(candidate\)/);
  assert.match(policy,/declaredMime === "image\/jpeg" \|\| declaredMime === "image\/png"/);
  assert.match(policy,/if \(declaredMime\)\s*\{/);
