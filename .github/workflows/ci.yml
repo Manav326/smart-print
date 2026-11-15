@@ -6,7 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: [main, "feature/**", "feat/**"]
+    branches: [main, "feature/**", "feat/**", "security/**"]
   pull_request:
     branches: [main, "feature/**", "feat/**"]
 
@@ -17,6 +17,62 @@ env:
   SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL }}
 
 jobs:
+  backup_crypto:
+    name: Encrypted backup and restore-drill script tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate PowerShell syntax and backup cryptography
+        shell: pwsh
+        run: ./scripts/qa/backup-crypto.tests.ps1
+      - name: Run isolated PostgreSQL and encrypted-document restore drill
+        shell: pwsh
+        run: ./scripts/qa/backup-restore-drill.tests.ps1
+
+  print_priority_contract:
+    name: Preserve printer priority and Agent independence
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify no fixed CPU throttle or parser dependency in printing path
+        shell: pwsh
+        run: ./scripts/qa/print-priority-contract.tests.ps1
+
+  clamav_integration:
+    name: Real ClamAV EICAR and clean-file integration
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Start official ClamAV engine with current signatures
+        shell: bash
+        run: |
+          docker run --detach --name smartprint-clamav-test \
+            --publish 127.0.0.1:13310:3310 \
+            clamav/clamav:1.5.4-debian13-slim
+          ready=0
+          for attempt in $(seq 1 180); do
+            if docker exec smartprint-clamav-test clamdscan --ping=1 --config-file=/etc/clamav/clamd.conf >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 5
+          done
+          if [ "$ready" -ne 1 ]; then
+            docker logs smartprint-clamav-test
+            exit 1
+          fi
+      - name: Run real ClamAV INSTREAM clean and EICAR rejection tests
+        env:
+          SMARTPRINT_TEST_CLAMAV: "1"
+          SMARTPRINT_CLAMAV_HOST: 127.0.0.1
+          SMARTPRINT_CLAMAV_PORT: "13310"
+        run: dotnet test tests/SmartPrint.Api.Tests/SmartPrint.Api.Tests.csproj --configuration Release --filter FullyQualifiedName~RealClamAvEngineDetectsEicarAndAcceptsAnUninfectedSample
+      - name: Remove ClamAV test container
+        if: always()
+        run: docker rm -f smartprint-clamav-test
   portal:
     runs-on: ubuntu-24.04
     steps:
@@ -211,7 +267,7 @@ jobs:
           PUBLIC_BASE_URL: https://example.invalid
           IMAGE_NAMESPACE: ghcr.io/compose-validation
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: docker compose --env-file .env.example -f compose.yml config --quiet
+        run: docker compose --env-file .env.example -f compose.yml config --format json > "$RUNNER_TEMP/smartprint-production-compose.json"
       - name: Validate local development Compose configuration
         if: ${{ !cancelled() }}
         env:
@@ -221,7 +277,11 @@ jobs:
           AUTH_SIGNING_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
           DOCUMENTS_ENCRYPTION_KEY: YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=
           PUBLIC_BASE_URL: https://example.invalid
-        run: docker compose -f compose.local.yml config --quiet
+        run: docker compose -f compose.local.yml config --format json > "$RUNNER_TEMP/smartprint-local-compose.json"
+
+      - name: Verify production and local Compose network isolation
+        if: ${{ !cancelled() }}
+        run: node scripts/qa/compose-network-isolation.mjs "$RUNNER_TEMP/smartprint-production-compose.json" "$RUNNER_TEMP/smartprint-local-compose.json"
 
   api_dotnet:
     runs-on: windows-latest
@@ -337,6 +397,7 @@ jobs:
         env:
           SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION: ${{ steps.pdf_queue.outcome == 'success' && '1' || '0' }}
           SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION: ${{ steps.secondary_queue.outcome == 'success' && '1' || '0' }}
+          SMARTPRINT_RUN_WINDOWS_DEFENDER_INTEGRATION: "1"
         run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
       - name: Remove the temporary secondary Windows queue
         if: always()
@@ -346,6 +407,18 @@ jobs:
         id: agent_publish
         if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
         run: dotnet publish src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/agent
+      - name: Publish restricted Windows document worker
+        id: document_worker_publish
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' && steps.agent_publish.outcome == 'success' }}
+        run: dotnet publish src/SmartPrint.DocumentWorker.Windows/SmartPrint.DocumentWorker.Windows.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/document-worker
+      - name: Add isolated document worker to the Windows Agent package
+        if: ${{ !cancelled() && steps.document_worker_publish.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          Copy-Item artifacts/document-worker/* artifacts/agent/ -Recurse -Force
+          if (-not (Test-Path artifacts/agent/SmartPrint.DocumentWorker.Windows.exe)) {
+            throw "The isolated LocalService parser executable was not packaged with the Agent."
+          }
       - name: Smoke-test non-interactive Agent pairing status command
         if: ${{ !cancelled() && steps.agent_publish.outcome == 'success' }}
         shell: pwsh
@@ -356,14 +429,14 @@ jobs:
             throw "Expected an unpaired Windows Agent to exit with code 2, got $($agentProcess.ExitCode)."
           }
       - name: Add Agent setup scripts and guide
-        if: ${{ !cancelled() && steps.agent_publish.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.document_worker_publish.outcome == 'success' }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path artifacts/agent | Out-Null
-          Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
+          Copy-Item scripts/pair-agent.ps1, scripts/install-agent-service.ps1, scripts/install-document-worker-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1, src/SmartPrint.Agent/appsettings.example.json, src/SmartPrint.Agent/README.md artifacts/agent/
       - name: Upload Windows Agent package
         id: agent_package_upload
-        if: ${{ always() && steps.agent_publish.outcome == 'success' }}
+        if: ${{ always() && steps.agent_publish.outcome == 'success' && steps.document_worker_publish.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: smart-print-agent-win-x64
@@ -653,6 +726,9 @@ jobs:
         with:
           name: smart-print-desktop-win-x64
           path: artifacts/desktop
+      - name: Verify customer installer excludes CI-only desktop payloads
+        shell: pwsh
+        run: ./scripts/qa/windows-installer-payload.tests.ps1
       - name: Build two versioned SmartPrint installers
         shell: pwsh
         run: |
@@ -972,6 +1048,20 @@ jobs:
             ${{ steps.image_namespace.outputs.value }}/smart-print-api:sha-${{ github.sha }}
           cache-from: type=gha,scope=smart-print-api
           cache-to: type=gha,mode=max,scope=smart-print-api
+      - name: Build and publish isolated document worker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile.document-worker
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
+          tags: |
+            ${{ steps.image_namespace.outputs.value }}/smart-print-document-worker:latest
+            ${{ steps.image_namespace.outputs.value }}/smart-print-document-worker:sha-${{ github.sha }}
+          cache-from: type=gha,scope=smart-print-document-worker
+          cache-to: type=gha,mode=max,scope=smart-print-document-worker
       - name: Build and publish portal image
         uses: docker/build-push-action@v7
         with:

@@ -10,11 +10,22 @@ public sealed class DocumentStorage : IDisposable
     private readonly IConfiguration configuration;
     private readonly IWebHostEnvironment environment;
     private readonly byte[] encryptionKey;
+    private readonly IDocumentThreatScanner threatScanner;
+    private readonly IDocumentAnalyzer documentAnalyzer;
+    private readonly ILogger<DocumentStorage> logger;
 
-    public DocumentStorage(IConfiguration configuration, IWebHostEnvironment environment)
+    public DocumentStorage(
+        IConfiguration configuration,
+        IWebHostEnvironment environment,
+        IDocumentThreatScanner threatScanner,
+        IDocumentAnalyzer documentAnalyzer,
+        ILogger<DocumentStorage> logger)
     {
         this.configuration = configuration;
         this.environment = environment;
+        this.threatScanner = threatScanner;
+        this.documentAnalyzer = documentAnalyzer;
+        this.logger = logger;
         encryptionKey = LoadEncryptionKey(configuration, environment);
     }
 
@@ -27,38 +38,88 @@ public sealed class DocumentStorage : IDisposable
         CancellationToken cancellationToken)
     {
         if (declaredLength is <= 0 or > UploadLimits.MaxFileBytes)
-        {
             throw new DocumentValidationException("File size must be within the upload size limit.");
-        }
 
-        await using var memory = new MemoryStream((int)declaredLength);
+        var extension = Path.GetExtension(originalFileName).ToLowerInvariant();
+        await using var memory = new MemoryStream(checked((int)declaredLength));
         await input.CopyToAsync(memory, cancellationToken);
         if (memory.Length != declaredLength || memory.Length > UploadLimits.MaxFileBytes)
-        {
             throw new DocumentValidationException("The uploaded file is incomplete or exceeds the upload size limit.");
-        }
 
         var bytes = memory.ToArray();
-        var analysis = DocumentAnalyzer.Analyse(bytes, Path.GetExtension(originalFileName).ToLowerInvariant());
-        var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-        var storageKey = $"{tenantId:N}/{documentId:N}{analysis.Extension}";
-        var fullPath = ResolveStoragePath(storageKey);
-        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        var encryptedBytes = Encrypt(bytes, encryptionKey);
-
-        await using (var output = new FileStream(
-            fullPath,
-            FileMode.CreateNew,
-            FileAccess.Write,
-            FileShare.None,
-            bufferSize: 64 * 1024,
-            FileOptions.Asynchronous | FileOptions.WriteThrough))
+        byte[]? encryptedBytes = null;
+        try
         {
-            await output.WriteAsync(encryptedBytes, cancellationToken);
-            await output.FlushAsync(cancellationToken);
-        }
+            // Malware scanning must complete before any untrusted document reaches a parser.
+            // Scanner outages and detections both fail closed.
+            try
+            {
+                await threatScanner.ScanAsync(bytes, cancellationToken);
+                logger.LogInformation(
+                    "Document security scan passed. TenantId={TenantId} DocumentId={DocumentId} Extension={Extension} SizeBytes={SizeBytes}",
+                    tenantId, documentId, extension, bytes.LongLength);
+            }
+            catch (DocumentThreatScanException exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Document security scan blocked an upload. TenantId={TenantId} DocumentId={DocumentId} Extension={Extension} SizeBytes={SizeBytes} ThreatDetected={ThreatDetected}",
+                    tenantId, documentId, extension, bytes.LongLength, exception.ThreatDetected);
+                throw;
+            }
 
-        return new StoredDocument(storageKey, sha, bytes.LongLength, analysis);
+            DocumentAnalysis analysis;
+            try
+            {
+                analysis = await documentAnalyzer.AnalyzeAsync(bytes, extension, cancellationToken);
+            }
+            catch (DocumentValidationException exception)
+            {
+                logger.LogWarning(
+                    exception,
+                    "Isolated document analysis rejected an upload. TenantId={TenantId} DocumentId={DocumentId} Extension={Extension} SizeBytes={SizeBytes}",
+                    tenantId, documentId, extension, bytes.LongLength);
+                throw;
+            }
+            catch (DocumentProcessingException exception)
+            {
+                logger.LogError(
+                    exception,
+                    "Isolated document analysis was unavailable; upload was blocked. TenantId={TenantId} DocumentId={DocumentId} Extension={Extension} SizeBytes={SizeBytes}",
+                    tenantId, documentId, extension, bytes.LongLength);
+                throw;
+            }
+
+            var sha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            // The content analyser chooses the canonical extension; the filename is never trusted
+            // to determine the stored content type.
+            var storageKey = $"{tenantId:N}/{documentId:N}{analysis.Extension}";
+            var fullPath = ResolveStoragePath(storageKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            encryptedBytes = Encrypt(bytes, encryptionKey);
+
+            await using (var output = new FileStream(
+                fullPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 64 * 1024,
+                FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                await output.WriteAsync(encryptedBytes, cancellationToken);
+                await output.FlushAsync(cancellationToken);
+            }
+
+            return new StoredDocument(storageKey, sha, bytes.LongLength, analysis);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (encryptedBytes is not null)
+                CryptographicOperations.ZeroMemory(encryptedBytes);
+            if (memory.TryGetBuffer(out var buffer))
+                CryptographicOperations.ZeroMemory(buffer.AsSpan(0, checked((int)memory.Length)));
+        }
     }
 
     // Stores already-encrypted Private Printing payloads as opaque bytes. This method
