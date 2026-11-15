@@ -198,3 +198,86 @@
  .printerAssignment select{max-width:72%;flex:1}
  .cardWorkflowActions .actionButton{width:auto;flex:1 1 100%}
 }
+
+
+/* Compact Order Journey: keep workload and next actions visible without
+   expanding every file in every order by default. */
+.stageFilters{
+  display:flex;align-items:center;flex-wrap:wrap;gap:7px;
+  padding:9px 10px;border:1px solid var(--border);border-radius:11px;
+  background:var(--surface);min-width:0
+}
+.stageFilterButton{
+  min-height:32px;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  padding:0 10px;border:1px solid transparent;border-radius:8px;
+  background:var(--surface-2);color:var(--muted);font:650 9px "DM Sans",sans-serif;
+  cursor:pointer;white-space:nowrap
+}
+.stageFilterButton strong{font-size:9px;color:var(--text);font-weight:800}
+.stageFilterButton:hover{border-color:var(--accent);color:var(--text)}
+.stageFilterSelected{border-color:color-mix(in srgb,var(--accent) 42%,var(--border));background:var(--accent-soft);color:var(--accent)}
+.stageFilterSelected strong{color:var(--accent)}
+.operationsStrip{min-height:48px;padding:7px 11px;gap:14px}
+.operationsLabel{gap:8px}
+.operationsGlyph{height:28px;width:28px}
+.operationsLabel strong{font-size:9px}
+.operationsLabel small{font-size:8px}
+.operationMetric{min-width:75px;padding-left:12px}
+.operationMetric strong{font-size:13px}
+.operationMetric span{font-size:7px}
+.subtleLink{font-size:8px}
+.orderCard{padding:12px 13px}
+.orderCardTop{align-items:center;gap:8px}
+.orderIdentity h3{margin:4px 0 3px}
+.orderIdentity p{flex-wrap:wrap;row-gap:3px;font-size:7.5px}
+.orderEyebrow{flex-wrap:wrap;row-gap:4px}
+.privateModeBadge{padding:2px 6px;border-radius:5px;background:color-mix(in srgb,var(--accent) 9%,var(--surface));color:var(--accent);font-size:7px;letter-spacing:0;font-weight:750}
+.miniProgress{margin:8px 0 8px}
+.orderFacts{grid-template-columns:repeat(auto-fit,minmax(78px,1fr));gap:8px;padding-bottom:9px}
+.orderFacts strong{font-size:12px}
+.orderFacts span{font-size:7px;white-space:normal;line-height:1.25}
+.orderSignals{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:8px 0 0;border-left:0;border-top:1px solid var(--border)}
+.signalRow{gap:6px}
+.signalIcon{height:24px;width:24px;flex-basis:24px}
+.signalRow strong{font-size:7.5px}
+.signalRow small{font-size:7px}
+.attentionLine{grid-column:1/-1}
+.cardWorkflowActions{gap:6px;padding-bottom:8px}
+.cardWorkflowActions .actionButton{height:30px;padding:0 9px;font-size:8px}
+.orderFileList{gap:7px;padding-top:8px}
+.fileDetailsToggle{
+  width:100%;min-height:33px;display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:0 10px;border:1px solid var(--border);border-radius:8px;
+  background:var(--surface-2);color:var(--text);font:650 8px "DM Sans",sans-serif;
+  cursor:pointer;text-align:left
+}
+.fileDetailsToggle>span{display:inline-flex;align-items:center;gap:6px;min-width:0}
+.fileDetailsToggle>span:last-child{flex:0 0 auto;color:var(--muted);font-weight:600}
+.fileDetailsToggle:hover{border-color:var(--accent)}
+.fileDetailsToggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chevronOpen{transform:rotate(180deg)}
+.orderFileDetails{display:grid;gap:7px;min-width:0}
+.orderFileItem{gap:6px;padding:8px 9px}
+.orderFileMeta{align-items:flex-start}
+.orderFileMeta strong{font-size:8.5px}
+.orderFileMeta span{font-size:7.5px}
+.fileActionPanel{gap:5px}
+.miniAction{min-height:27px;padding:3px 7px;font-size:7.5px}
+@media(max-width:650px){
+  .stageFilters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;padding:7px}
+  .stageFilterButton{min-width:0;justify-content:center;gap:5px;padding:0 5px;font-size:8px}
+  .stageFilterButton span{overflow:hidden;text-overflow:ellipsis}
+  .operationsStrip{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px}
+  .operationsLabel{grid-column:1/-1}
+  .operationMetric{min-width:0;padding-left:0;border-left:0}
+  .subtleLink{justify-self:end}
+  .orderCard{padding:10px}
+  .orderCardTop{align-items:flex-start}
+  .orderSignals{grid-template-columns:1fr 1fr}
+  .fileDetailsToggle{min-height:36px}
+  .orderFileMeta{align-items:flex-start;flex-direction:column;gap:3px}
+  .fileActionPanel{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
+  .miniAction{min-width:0;width:100%;font-size:7.5px}
+  .printerAssignment{grid-column:1/-1;justify-content:space-between}
+  .printerAssignment select{max-width:72%;flex:1}
+}
