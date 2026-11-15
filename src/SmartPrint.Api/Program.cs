@@ -2109,10 +2109,10 @@ shop.MapPut("/pricing", async (
         request.Photo35x45Minor,
         request.Photo25x35Minor,
         request.Photo2x2Minor,
-        request.Photo4x6Minor,
-        request.IdDocumentPriceMinor
+        request.Photo4x6Minor
     };
     if (rates.Any(amount => amount < 0 || amount > maximumRateMinor) ||
+        request.IdDocumentPriceMinor is < 0 or > maximumRateMinor ||
         request.MinimumChargeMinor < 0 || request.MinimumChargeMinor > maximumMinimumChargeMinor ||
         request.MonoPerSideMinor == 0 || request.ColourPerSideMinor == 0)
     {
@@ -2137,7 +2137,8 @@ shop.MapPut("/pricing", async (
     pricing.Photo25x35Minor = request.Photo25x35Minor;
     pricing.Photo2x2Minor = request.Photo2x2Minor;
     pricing.Photo4x6Minor = request.Photo4x6Minor;
-    pricing.IdDocumentPriceMinor = request.IdDocumentPriceMinor;
+    if (request.IdDocumentPriceMinor is long idDocumentPriceMinor)
+        pricing.IdDocumentPriceMinor = idDocumentPriceMinor;
     pricing.IsConfigured = true;
     pricing.Version++;
     pricing.UpdatedUtc = DateTimeOffset.UtcNow;
