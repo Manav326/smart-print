@@ -30,6 +30,8 @@ public sealed class WindowsPrintExecutorTests
     [InlineData(0x00000010u, "PRINTING")]
     [InlineData(0x00000008u, "SPOOLING")]
     [InlineData(0x00000080u, "PRINTED")]
+    [InlineData(0x00002000u, "RETAINED")]
+    [InlineData(0x00002000u | 0x00000010u, "RETAINED")]
     [InlineData(0u, "QUEUED")]
     public void ResolvesWindowsSpoolerStatusFlags(uint flags, string expected)
     {
@@ -41,6 +43,7 @@ public sealed class WindowsPrintExecutorTests
     [InlineData(0x00000040u | 0x00000010u, "PAPEROUT")]
     [InlineData(0x00000001u | 0x00000008u, "PAUSED")]
     [InlineData(0x00000400u | 0x00000010u, "USERINTERVENTION")]
+    [InlineData(0x00002000u | 0x00000020u, "OFFLINE")]
     public void PrinterFaultsTakePriorityOverActiveQueueFlags(uint flags, string expected)
     {
         Assert.Equal(expected, WindowsPrintExecutor.ResolveSpoolerStatus(flags));
