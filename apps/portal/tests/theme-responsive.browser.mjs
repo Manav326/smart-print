@@ -1282,7 +1282,7 @@ try {
       sessionStorage.removeItem("qrtoprint.auth.admin");
       sessionStorage.removeItem("qrtoprint.auth");
     });
-    assert.equal(await page.evaluate(() => localStorage.getItem("qrtoprint.theme")), "dark", "Sign-out must not clear appearance preference.");
+    assert.equal(await page.evaluate(() => localStorage.getItem("smartprint.theme")), "dark", "Sign-out must not clear appearance preference.");
     await page.goto(`${baseUrl}/admin`, { waitUntil: "domcontentloaded" });
     await waitForRoute(page, ".auth-screen");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
@@ -1416,7 +1416,7 @@ try {
     }
     await waitForRoute(page, ".auth-screen");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", `${route.label} sign-out must preserve Dark.`);
-    assert.equal(await page.evaluate(() => localStorage.getItem("qrtoprint.theme")), "dark");
+    assert.equal(await page.evaluate(() => localStorage.getItem("smartprint.theme")), "dark");
 
     await page.getByLabel("Email address").fill("theme-qa@example.invalid");
     await page.locator('input[autocomplete="current-password"]').fill("ThemeQa-Password-2026!");
