@@ -5,6 +5,8 @@ export interface ShopOrderJourney {
   key: string; batchId: string | null; name: string; reference: string; createdUtc: string;
   jobs: ShopPrintJob[]; payment: ShopPayment | null; stage: OrderJourneyStage; stageIndex: number;
   acceptedCount: number; rejectedCount: number; refundedCount: number; pageCount: number;
+  blackWhitePageCount: number; colourPageCount: number; photoCount: number; photoPageCount: number;
+  privatePrinting: boolean;
   quotedAmountMinor: number; currency: string; attentionJobs: ShopPrintJob[]; isClosed: boolean;
   canReview: boolean; canVerifyPayment: boolean;
 }
@@ -32,6 +34,20 @@ function produciblePages(job: ShopPrintJob): number {
   }
   return Math.max(0, pageCount - rejectedCount) * copies;
 }
+function isPhotoJob(job: ShopPrintJob): boolean {
+  return (job.printKind ?? "").toUpperCase() === "PHOTO";
+}
+
+function isColourJob(job: ShopPrintJob): boolean {
+  return /colou?r/i.test(job.colourMode ?? "");
+}
+
+function photoPrintCount(job: ShopPrintJob): number {
+  const count = Number.isFinite(job.photoCount) ? Math.max(0, Math.trunc(job.photoCount ?? 0)) : 0;
+  const copies = Number.isFinite(job.copies) ? Math.max(1, Math.trunc(job.copies)) : 1;
+  return count * copies;
+}
+
 const VERIFIED = new Set(["VERIFIED","PARTIALLY_REFUNDED"]);
 
 function latestPayment(entries: ShopPayment[]): ShopPayment | null {
@@ -89,12 +105,23 @@ export function buildShopOrderJourneys(jobs: ShopPrintJob[], payments: ShopPayme
     const stage = resolveStage(sortedJobs, payment);
     const latest = sortedJobs.reduce((value, job) => Date.parse(job.createdUtc)>Date.parse(value)?job.createdUtc:value, sortedJobs[0].createdUtc);
     const first = sortedJobs[0];
-    const fallback = sortedJobs.length > 1 ? "Batch " + key.slice(0,8).toUpperCase() : first.document.originalFileName;
+    const privatePrinting = sortedJobs.some(job => job.privatePrinting === true);
+    const fallback = privatePrinting
+      ? "Private print order"
+      : sortedJobs.length > 1 ? "Batch " + key.slice(0,8).toUpperCase() : first.document.originalFileName;
+    const documentJobs = active.filter(job => !isPhotoJob(job));
     result.push({
-      key, batchId, name: first.batchName?.trim() || first.batchGroupName?.trim() || fallback,
+      key, batchId, name: privatePrinting
+        ? "Private print order"
+        : first.batchName?.trim() || first.batchGroupName?.trim() || fallback,
       reference: first.jobNumber, createdUtc: latest, jobs: sortedJobs, payment, ...stage,
       acceptedCount: active.length, rejectedCount, refundedCount,
       pageCount: active.reduce((n,job)=>n+produciblePages(job),0),
+      blackWhitePageCount: documentJobs.reduce((n,job)=>n+(!isColourJob(job)?produciblePages(job):0),0),
+      colourPageCount: documentJobs.reduce((n,job)=>n+(isColourJob(job)?produciblePages(job):0),0),
+      photoCount: active.filter(isPhotoJob).reduce((n,job)=>n+photoPrintCount(job),0),
+      photoPageCount: active.filter(isPhotoJob).reduce((n,job)=>n+produciblePages(job),0),
+      privatePrinting,
       quotedAmountMinor: active.reduce((n,job)=>n+Math.max(0,job.quotedAmountMinor),0),
       currency: first.currency || payment?.currency || "INR", attentionJobs,
       canReview: !!batchId && (!payment || payment.status === "REJECTED") && sortedJobs.some(job=>REVIEW.has(job.status)),
@@ -174,7 +201,7 @@ export function filterShopOrderJourneys(
       order.key, order.batchId ?? "", order.name, order.reference,
       ...order.jobs.flatMap(job => [
         job.jobNumber, job.batchId ?? "", job.batchName ?? "",
-        job.batchGroupName ?? "", job.document.originalFileName
+        job.batchGroupName ?? "", job.privatePrinting ? "" : job.document.originalFileName
       ])
     ].join(" ").toLocaleLowerCase();
     return searchable.includes(needle);
