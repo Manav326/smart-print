@@ -58,16 +58,26 @@ public sealed class AgentDocumentEncryptionKeyStore
         if (applyWindowsAcl && OperatingSystem.IsWindows())
         {
             var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            using var identity = WindowsIdentity.GetCurrent();
+            var ownerSid = identity.User
+                ?? throw new InvalidOperationException("The current Windows identity has no user SID.");
             var security = new DirectorySecurity();
             security.SetAccessRuleProtection(true, false);
-            security.SetOwner(systemSid);
-            // The Agent service runs as LocalSystem; omit a routine read ACE for
-            // interactive Administrators. A local administrator can still take
-            // ownership or execute as SYSTEM, so this is defence in depth only.
+            security.SetOwner(ownerSid);
+            // The production Agent service runs as LocalSystem, so the key folder
+            // remains SYSTEM-owned and SYSTEM-only. Interactive diagnostics and
+            // lifecycle QA retain access only through their own identity.
             security.AddAccessRule(new FileSystemAccessRule(
                 systemSid,
                 FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None, AccessControlType.Allow));
+            if (!ownerSid.Equals(systemSid))
+            {
+                security.AddAccessRule(new FileSystemAccessRule(
+                    ownerSid,
+                    FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
+            }
             new DirectoryInfo(directory).SetAccessControl(security);
         }
 
