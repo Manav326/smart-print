@@ -213,6 +213,9 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 table.HasCheckConstraint(
                     "CK_ShopPricingProfiles_PhotoRates",
                     "\"Photo35x45Minor\" >= 0 AND \"Photo25x35Minor\" >= 0 AND \"Photo2x2Minor\" >= 0 AND \"Photo4x6Minor\" >= 0");
+                table.HasCheckConstraint(
+                    "CK_ShopPricingProfiles_IdDocumentPrice",
+                    "\"IdDocumentPriceMinor\" >= 0");
             });
             entity.HasKey(x => x.TenantId);
             entity.Property(x => x.Version).IsConcurrencyToken();
