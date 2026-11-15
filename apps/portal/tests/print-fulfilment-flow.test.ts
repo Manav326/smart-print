@@ -636,3 +636,34 @@ test("shop-originated photo orders use their own tenant-owned job and the shared
  assert.match(api,/form\.append\("paymentMethod", values\.paymentMethod\)/);
  assert.match(app,/buildCustomerUpiIntent\(/);
 });
+
+
+test("customer uploader keeps its batch example, inline Android PDF preview and real status transitions",()=>{
+ const app=read("../src/App.tsx");
+ const api=read("../src/api.ts");
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const css=read("../src/styles.css");
+ assert.match(app,/placeholder="e.g. Manjeet - College Notes"/);
+ assert.doesNotMatch(app,/Rahul\s*[–-]\s*College Notes/);
+ assert.match(app,/<CustomerNativePdfPreview[\s\S]*onPage=/);
+ assert.match(app,/event\.previousStatus!==event\.newStatus/);
+ assert.match(app,/customerStatusTone\(jobStatus\.status\)/);
+ assert.match(app,/Last updated · \{formatIstDateTime\(jobStatus\.updatedUtc\)\}/);
+ assert.match(api,/previousStatus\?: string \| null/);
+ assert.match(program,/new \{ item\.PreviousStatus, item\.NewStatus, item\.ActorType, item\.CreatedUtc \}/);
+ assert.match(css,/\.customer-native-pdf-preview/);
+ assert.match(css,/\.customer-batch-quote-card>div:first-child>strong\{[\s\S]*?white-space:nowrap/);
+});
+
+test("Android customer PDF preview stays inline and UPI QR downloads through the Android Save As picker",()=>{
+ const activity=read("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+ const qr=read("../src/CustomerUpiQr.tsx");
+ assert.match(activity,/parts\[0\] == "previewCustomerPdf"[\s\S]*?renderCustomerPdfPreview/);
+ assert.match(activity,/PdfRenderer\(descriptor\)/);
+ assert.match(activity,/customerUploadPdfPreviewSensitiveTokens/);
+ assert.match(activity,/ActivityResultContracts\.CreateDocument\("image\/png"\)/);
+ assert.match(activity,/parts\[0\] == "saveCustomerPaymentQr"/);
+ assert.match(qr,/saveCustomerPaymentQr\|/);
+ assert.match(qr,/navigator\.clipboard\?\.writeText/);
+ assert.match(qr,/Copy UPI ID/);
+});

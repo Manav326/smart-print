@@ -1942,7 +1942,7 @@ export interface CustomerJobStatus {
   outputType?: "PHYSICAL" | "PDF_EXPORT" | "TEST_VIRTUAL" | string;
   outputCompletedUtc?: string | null;
   updatedUtc: string;
-  timeline?: Array<{ newStatus: string; actorType: string; createdUtc: string }>;
+  timeline?: Array<{ previousStatus?: string | null; newStatus: string; actorType: string; createdUtc: string }>;
   payment?: CustomerPayment | null;
 }
 

@@ -1181,7 +1181,7 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
     var timeline = await db.PrintJobEvents.AsNoTracking()
         .Where(item => item.TenantId == ownedJob.TenantId && item.PrintJobId == jobId)
         .OrderBy(item => item.CreatedUtc)
-        .Select(item => new { item.NewStatus, item.ActorType, item.CreatedUtc })
+        .Select(item => new { item.PreviousStatus, item.NewStatus, item.ActorType, item.CreatedUtc })
         .ToListAsync(ct);
 
     var payment = await db.PrintPayments.AsNoTracking()
