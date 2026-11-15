@@ -81,6 +81,27 @@ public sealed class WindowsPrintExecutorTests
 
 public sealed class WindowsPrintToPdfSpoolerIntegrationTests
 {
+    [Fact]
+    public void OpensAWindowsQueueWithAdministrativeAccessForIdempotentRelease()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Assert.True(OperatingSystem.IsWindows(), "The spooler administration test requires a Windows runner.");
+        const string queueName = "Microsoft Print to PDF";
+        const int absentJobId = int.MaxValue;
+        var executor = new WindowsPrintExecutor();
+
+        Assert.Null(executor.GetJob(queueName, absentJobId));
+        // This opens the queue with PRINTER_ACCESS_ADMINISTER and verifies that
+        // releasing an already-absent job is a safe, idempotent cleanup operation.
+        executor.ReleaseRetainedJob(queueName, absentJobId);
+        Assert.Null(executor.GetJob(queueName, absentJobId));
+    }
+
     [Theory]
     [InlineData("Microsoft Print to PDF")]
     [InlineData("SmartPrint CI Secondary Queue")]
