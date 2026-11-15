@@ -1345,7 +1345,7 @@ public sealed class Worker(
             {
                 await ReportSpoolerStatusAsync(
                     client, credentials, entry.JobId, entry.SpoolerJobId.Value,
-                    "PRIVATE_RETAINED_JOB_REMOVED", 0, 0, ct);
+                    "PRINTED", 0, 0, ct);
                 continue;
             }
 
@@ -1386,7 +1386,7 @@ public sealed class Worker(
                     await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, retainedStatus, ct);
                     await ReportSpoolerStatusAsync(
                         client, credentials, entry.JobId, found.JobId,
-                        retainedStatus, found.PagesPrinted, found.TotalPages, ct);
+                        "PRINTED", found.PagesPrinted, found.TotalPages, ct);
                     continue;
                 }
 
