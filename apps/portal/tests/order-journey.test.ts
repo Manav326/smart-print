@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ShopPayment, ShopPrintJob } from "../src/api.ts";
-import { buildShopOrderJourneys, filterShopOrderJourneys } from "../src/order-journey.ts";
+import { buildShopOrderJourneys, filterShopOrderJourneys, isSpoolerJobRetained } from "../src/order-journey.ts";
 function job(v: Partial<ShopPrintJob> & Pick<ShopPrintJob,"id"|"jobNumber"|"status">): ShopPrintJob {
   return {
     id:v.id, jobNumber:v.jobNumber, status:v.status, batchId:v.batchId??null,
@@ -146,4 +146,16 @@ test("private orders use generic labels and never match original filenames in or
   assert.equal(filterShopOrderJourneys([order],"all","Sensitive group").length,0);
   assert.equal(filterShopOrderJourneys([order],"all","SP-PRIVATE-1").length,1,
     "The operational order reference remains searchable");
+});
+
+
+test("retained Windows spooler jobs cannot be confirmed, while cleared and uncertain jobs remain manually verifiable", () => {
+  assert.equal(isSpoolerJobRetained("RETAINED"), true);
+  assert.equal(isSpoolerJobRetained("retained"), true);
+  assert.equal(isSpoolerJobRetained(" Retained "), true);
+  assert.equal(isSpoolerJobRetained("PRINTED"), false);
+  assert.equal(isSpoolerJobRetained("OUTPUT_UNCONFIRMED"), false);
+  assert.equal(isSpoolerJobRetained("PRINTING"), false);
+  assert.equal(isSpoolerJobRetained(null), false);
+  assert.equal(isSpoolerJobRetained(undefined), false);
 });
