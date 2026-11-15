@@ -2081,6 +2081,7 @@ shop.MapGet("/pricing", async (
             pricing.Photo25x35Minor,
             pricing.Photo2x2Minor,
             pricing.Photo4x6Minor,
+            pricing.IdDocumentPriceMinor,
             pricing.Version,
             pricing.UpdatedUtc
         });
@@ -2108,7 +2109,8 @@ shop.MapPut("/pricing", async (
         request.Photo35x45Minor,
         request.Photo25x35Minor,
         request.Photo2x2Minor,
-        request.Photo4x6Minor
+        request.Photo4x6Minor,
+        request.IdDocumentPriceMinor
     };
     if (rates.Any(amount => amount < 0 || amount > maximumRateMinor) ||
         request.MinimumChargeMinor < 0 || request.MinimumChargeMinor > maximumMinimumChargeMinor ||
@@ -2135,6 +2137,7 @@ shop.MapPut("/pricing", async (
     pricing.Photo25x35Minor = request.Photo25x35Minor;
     pricing.Photo2x2Minor = request.Photo2x2Minor;
     pricing.Photo4x6Minor = request.Photo4x6Minor;
+    pricing.IdDocumentPriceMinor = request.IdDocumentPriceMinor;
     pricing.IsConfigured = true;
     pricing.Version++;
     pricing.UpdatedUtc = DateTimeOffset.UtcNow;
@@ -2152,6 +2155,7 @@ shop.MapPut("/pricing", async (
             pricing.Photo25x35Minor,
             pricing.Photo2x2Minor,
             pricing.Photo4x6Minor,
+            pricing.IdDocumentPriceMinor,
         pricing.Version,
         pricing.UpdatedUtc
     });
@@ -10614,14 +10618,24 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         }
         else
         {
-            amount = PricingCalculator.Calculate(
-                job.PageCount,
-                request.Copies,
-                request.ColourMode,
-                request.IsDuplex,
-                pricing);
-            pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
-                job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing);
+            if (isIdDocument)
+            {
+                // One prepared ID card is one A4 portrait sheet and uses its own
+                // configured flat rate, not the ordinary document per-page/minimum rate.
+                amount = PricingCalculator.CalculateIdDocument(pricing);
+                pageRefundAllocations = [amount];
+            }
+            else
+            {
+                amount = PricingCalculator.Calculate(
+                    job.PageCount,
+                    request.Copies,
+                    request.ColourMode,
+                    request.IsDuplex,
+                    pricing);
+                pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
+                    job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing);
+            }
             job.PrintKind = isIdDocument ? "ID_DOCUMENT" : "DOCUMENT";
             job.PhotoSizeCode = null;
             job.PhotoCount = 0;
