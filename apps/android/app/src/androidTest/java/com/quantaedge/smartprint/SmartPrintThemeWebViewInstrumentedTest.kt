@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -46,6 +47,9 @@ class SmartPrintThemeWebViewInstrumentedTest {
         try {
             preferences.edit().clear().commit()
             SmartPrintThemePreference.apply(context)
+            assertEquals(SmartPrintTheme.LIGHT, SmartPrintThemePreference.read(context))
+            assertEquals(0L, SmartPrintThemePreference.readUpdatedAt(context))
+            assertFalse(SmartPrintThemePreference.hasExplicitSelection(context))
 
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
@@ -75,6 +79,8 @@ class SmartPrintThemeWebViewInstrumentedTest {
                 assertEquals("available", setResult)
                 SystemClock.sleep(250)
                 assertEquals(SmartPrintTheme.DARK, SmartPrintThemePreference.read(context))
+                assertTrue(SmartPrintThemePreference.hasExplicitSelection(context))
+                assertTrue(SmartPrintThemePreference.readUpdatedAt(context) > 0L)
 
                 scenario.onActivity { activity ->
                     val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
