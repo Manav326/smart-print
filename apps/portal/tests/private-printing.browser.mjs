@@ -303,6 +303,9 @@ async function installPrivatePrintingApiHarness(context, page) {
     if (method === "POST" && path === "/api/v1/public/stations/" + STATION_CODE + "/sessions")
       return json(sessionResponse);
 
+    if (method === "POST" && path === "/api/v1/public/sessions/current/resume")
+      return json(sessionResponse);
+
     if (method === "POST" && path === "/api/v1/public/sessions/current/local-upload-tickets") {
       const body = request.postDataJSON();
       assert.equal(body.privatePrinting, true, "Every file in this scenario must request Private Printing.");
@@ -384,6 +387,35 @@ async function installPrivatePrintingApiHarness(context, page) {
         }
         return json({ accepted: true, duplicateRequest: false });
       }
+    }
+
+    const quoteMatch = path.match(/^\/api\/v1\/public\/jobs\/([0-9a-f-]+)\/quote$/i);
+    if (quoteMatch && method === "POST") {
+      const ticket = [...tickets.values()].find(item => item.printJobId === quoteMatch[1]);
+      if (!ticket?.uploadResult) return badRequest("Unknown print job.", 404);
+      const values = request.postDataJSON();
+      return json({
+        id: quoteMatch[1],
+        batchId: ticket.batchId,
+        jobNumber: ticket.jobNumber,
+        status: "AWAITING_CUSTOMER_APPROVAL",
+        pageCount: ticket.uploadResult.job.pageCount,
+        copies: values.copies ?? 1,
+        colourMode: values.colourMode ?? "Mono",
+        paperSize: values.paperSize ?? "A4",
+        isDuplex: values.isDuplex ?? false,
+        orientation: values.orientation ?? "AUTO",
+        printKind: values.printKind ?? ticket.uploadResult.job.printKind ?? "DOCUMENT",
+        photoSizeCode: values.photoSizeCode ?? null,
+        photoCount: values.photoCount ?? null,
+        photosPerPage: values.photosPerPage ?? null,
+        photoUnitPriceMinor: 0,
+        currency: "INR",
+        quotedAmountMinor: 100,
+        amountMajor: 1,
+        pricingVersion: 1,
+        quoteExpiresUtc: new Date(Date.now() + 60 * 60 * 1000).toISOString()
+      });
     }
 
     const statusMatch = path.match(/^\/api\/v1\/public\/jobs\/([0-9a-f-]+)\/status$/i);
@@ -552,9 +584,76 @@ async function runScenario(browser) {
     "The customer upload receipt must retain each original filename in the local draft.");
   assert.ok(uploadedLabels.every(value => !value.includes("Private document")),
     "The customer receipt should show the original file name, not the server's anonymized placeholder.");
+  await page.waitForFunction(publicCode => {
+    const draft = JSON.parse(localStorage.getItem("qrtoprint.customer-active-job:" + publicCode) ?? "null");
+    return Object.keys(draft?.privateFileNamesByJobId ?? {}).length === 8;
+  }, STATION_CODE, { timeout: 15000 });
+  const persistedFilenameCount = await page.evaluate(publicCode => {
+    const draft = JSON.parse(localStorage.getItem("qrtoprint.customer-active-job:" + publicCode) ?? "null");
+    return Object.keys(draft?.privateFileNamesByJobId ?? {}).length;
+  }, STATION_CODE);
+  assert.equal(persistedFilenameCount, 8,
+    "The local job-ID filename registry must persist each private filename explicitly.");
   assert.ok(harness.ticketRequests.every(item =>
     item.originalFileName.startsWith("private-document")),
     "Showing original names locally must not expose them in private server-side ticket metadata.");
+
+  // The customer filename map and ID kind must survive a same-device reload,
+  // while the server continues to return only anonymized private metadata.
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("heading", { name: /Private Printing QA Shop/ }).waitFor({ state: "visible", timeout: 30000 });
+  await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 8, null, { timeout: 30000 });
+  const restoredLabels = await page.locator(".customer-uploaded-batch-item").allTextContents();
+  assert.ok(originalCustomerFileNames.every(name =>
+    restoredLabels.some(label => label.includes(name))),
+    "All private filenames must be restored from the customer-local draft after reload.");
+  const restoredKinds = await page.locator(".customer-uploaded-batch-item .print-kind-tag").allTextContents();
+  assert.equal(restoredKinds.filter(value => value.trim() === "ID card").length, 2,
+    "ID Studio files must remain labelled ID card after restoring the private filename map.");
+  assert.equal(restoredKinds.filter(value => value.trim() === "Photo").length, 5);
+  assert.equal(restoredKinds.filter(value => value.trim() === "Document").length, 1);
+
+  // Simulate a device/session without the local filename metadata. The fallback
+  // must be clear and privacy-safe, and must not change the customer's ID labels.
+  await page.evaluate(publicCode => {
+    const key = "qrtoprint.customer-active-job:" + publicCode;
+    const draft = JSON.parse(localStorage.getItem(key) ?? "null");
+    if (!draft) throw new Error("The active customer draft was not persisted.");
+    draft.privateFileNamesByJobId = {};
+    for (const item of draft.uploadedBatch ?? []) {
+      if (item.job?.privatePrinting) item.document.originalFileName = "Private document";
+    }
+    if (draft.uploaded?.job?.privatePrinting) draft.uploaded.document.originalFileName = "Private document";
+    localStorage.setItem(key, JSON.stringify(draft));
+  }, STATION_CODE);
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.getByRole("heading", { name: /Private Printing QA Shop/ }).waitFor({ state: "visible", timeout: 30000 });
+  await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 8, null, { timeout: 30000 });
+  const fallbackLabels = await page.locator(".customer-uploaded-batch-item").allTextContents();
+  assert.ok(fallbackLabels.every(label => label.includes("Private file")),
+    "Unavailable private filenames must use the customer-safe Private file fallback.");
+  assert.ok(fallbackLabels.every(label => !label.includes("Private document")),
+    "The internal server placeholder must never appear in the customer UI.");
+  const fallbackKinds = await page.locator(".customer-uploaded-batch-item .print-kind-tag").allTextContents();
+  assert.equal(fallbackKinds.filter(value => value.trim() === "ID card").length, 2,
+    "ID cards must remain identified as ID cards even when the original filename is unavailable.");
+  assert.equal(fallbackKinds.filter(value => value.trim() === "Photo").length, 5);
+  assert.equal(fallbackKinds.filter(value => value.trim() === "Document").length, 1);
+  assert.match(await page.locator(".customer-uploaded-batch").innerText(), /kept only on this device/i,
+    "The customer must be told why a generic private filename is displayed.");
+
+  await page.getByRole("button", { name: "Calculate batch quote" }).click();
+  await page.locator(".customer-batch-quote-lines").waitFor({ state: "visible", timeout: 30000 });
+  const quoteLabels = await page.locator(".customer-batch-quote-lines").allTextContents();
+  assert.ok(quoteLabels.length === 1 && quoteLabels[0].includes("Private file"),
+    "Quote lines must use the same customer-safe filename fallback.");
+  assert.ok(!originalCustomerFileNames.some(name => quoteLabels.join(" ").includes(name)),
+    "Quote lines must not reintroduce an unavailable private filename.");
+  const quoteKinds = await page.locator(".customer-batch-quote-lines .print-kind-tag").allTextContents();
+  assert.equal(quoteKinds.filter(value => value.trim() === "ID card").length, 2,
+    "ID Studio must remain labelled as ID card in quote lines.");
+  assert.equal(quoteKinds.filter(value => value.trim() === "Photo").length, 5);
+  assert.equal(quoteKinds.filter(value => value.trim() === "Document").length, 1);
 
   const result = {
     label: "private-eight-document-development-virtual-printer-batch",
