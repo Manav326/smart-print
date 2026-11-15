@@ -17,6 +17,7 @@ public sealed class AgentLocalQueueStore
     private readonly string queueRoot;
     private readonly bool applyWindowsAcl;
     private readonly SemaphoreSlim stagedUploadLeaseGate = new(1, 1);
+    private readonly SemaphoreSlim privateSpoolerCleanupGate = new(1, 1);
 
     public AgentLocalQueueStore(string? rootOverride = null)
     {
@@ -1346,6 +1347,11 @@ public sealed class AgentLocalQueueStore
     private string GetPrivateSpoolerCleanupPath(Guid jobId) =>
         Path.Combine(GetPrivateSpoolerCleanupDirectory(), jobId.ToString("N") + ".json");
 
+    public IReadOnlyList<AgentLocalQueueEntry> GetPrivateSpoolerCleanupCandidates() =>
+        ReadEntries().Where(entry =>
+            entry.PrivatePrinting && entry.SpoolerJobId is > 0 &&
+            !string.IsNullOrWhiteSpace(entry.QueueName)).ToArray();
+
     public IReadOnlyList<AgentPrivateSpoolerCleanupEntry> GetPendingPrivateSpoolerCleanupEntries()
     {
         var directory = GetPrivateSpoolerCleanupDirectory();
@@ -1373,47 +1379,69 @@ public sealed class AgentLocalQueueStore
         if (jobId == Guid.Empty || string.IsNullOrWhiteSpace(queueName) || queueName.Length > 256 || spoolerJobId <= 0)
             throw new InvalidDataException("Private spooler cleanup metadata is invalid.");
 
-        var directory = GetPrivateSpoolerCleanupDirectory();
-        Directory.CreateDirectory(directory);
-        if (applyWindowsAcl) SecureDirectory(directory);
-
-        var path = GetPrivateSpoolerCleanupPath(jobId);
-        if (File.Exists(path))
+        await privateSpoolerCleanupGate.WaitAsync(ct);
+        try
         {
-            var existing = JsonSerializer.Deserialize<AgentPrivateSpoolerCleanupEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions)
-                ?? throw new InvalidDataException("A private spooler cleanup record is invalid.");
-            if (existing.JobId != jobId || existing.SpoolerJobId != spoolerJobId ||
-                !string.Equals(existing.QueueName, queueName, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidDataException("A private spooler cleanup record cannot be rebound to a different Windows queue job.");
-            return;
-        }
+            var directory = GetPrivateSpoolerCleanupDirectory();
+            Directory.CreateDirectory(directory);
+            if (applyWindowsAcl) SecureDirectory(directory);
 
-        var now = DateTimeOffset.UtcNow;
-        await SavePrivateSpoolerCleanupEntryAsync(new AgentPrivateSpoolerCleanupEntry(
-            jobId, queueName, spoolerJobId, now, now, 0), ct);
+            var path = GetPrivateSpoolerCleanupPath(jobId);
+            if (File.Exists(path))
+            {
+                var existing = JsonSerializer.Deserialize<AgentPrivateSpoolerCleanupEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions)
+                    ?? throw new InvalidDataException("A private spooler cleanup record is invalid.");
+                if (existing.JobId != jobId || existing.SpoolerJobId != spoolerJobId ||
+                    !string.Equals(existing.QueueName, queueName, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("A private spooler cleanup record cannot be rebound to a different Windows queue job.");
+                return;
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            await SavePrivateSpoolerCleanupEntryAsync(new AgentPrivateSpoolerCleanupEntry(
+                jobId, queueName, spoolerJobId, now, now, 0), ct);
+        }
+        finally
+        {
+            privateSpoolerCleanupGate.Release();
+        }
     }
 
     public async Task RecordPrivateSpoolerCleanupAttemptAsync(Guid jobId, CancellationToken ct)
     {
-        var path = GetPrivateSpoolerCleanupPath(jobId);
-        if (!File.Exists(path)) return;
-        var entry = JsonSerializer.Deserialize<AgentPrivateSpoolerCleanupEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions)
-            ?? throw new InvalidDataException("A private spooler cleanup record is invalid.");
-        await SavePrivateSpoolerCleanupEntryAsync(entry with
+        await privateSpoolerCleanupGate.WaitAsync(ct);
+        try
         {
-            LastAttemptUtc = DateTimeOffset.UtcNow,
-            AttemptCount = checked(entry.AttemptCount + 1)
-        }, ct);
+            var path = GetPrivateSpoolerCleanupPath(jobId);
+            if (!File.Exists(path)) return;
+            var entry = JsonSerializer.Deserialize<AgentPrivateSpoolerCleanupEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions)
+                ?? throw new InvalidDataException("A private spooler cleanup record is invalid.");
+            await SavePrivateSpoolerCleanupEntryAsync(entry with
+            {
+                LastAttemptUtc = DateTimeOffset.UtcNow,
+                AttemptCount = checked(entry.AttemptCount + 1)
+            }, ct);
+        }
+        finally
+        {
+            privateSpoolerCleanupGate.Release();
+        }
     }
 
-    public Task CompletePrivateSpoolerCleanupAsync(Guid jobId, CancellationToken ct)
+    public async Task CompletePrivateSpoolerCleanupAsync(Guid jobId, CancellationToken ct)
     {
-        ct.ThrowIfCancellationRequested();
-        var path = GetPrivateSpoolerCleanupPath(jobId);
-        if (File.Exists(path)) File.Delete(path);
-        var temporaryPath = path + ".tmp";
-        if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-        return Task.CompletedTask;
+        await privateSpoolerCleanupGate.WaitAsync(ct);
+        try
+        {
+            var path = GetPrivateSpoolerCleanupPath(jobId);
+            if (File.Exists(path)) File.Delete(path);
+            var temporaryPath = path + ".tmp";
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+        finally
+        {
+            privateSpoolerCleanupGate.Release();
+        }
     }
 
     private async Task SavePrivateSpoolerCleanupEntryAsync(
