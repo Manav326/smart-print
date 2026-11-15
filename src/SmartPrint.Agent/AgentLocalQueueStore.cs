@@ -994,28 +994,37 @@ public sealed class AgentLocalQueueStore
 
     public async Task MarkPrivatePurgeAcknowledgedAsync(Guid jobId, CancellationToken ct)
     {
-        var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
-        if (!entry.PrivatePrinting ||
-            entry.State is not ("OUTPUT_CONFIRMED" or "TEST_OUTPUT_SOURCE_PURGED") ||
-            !entry.PrivatePurgePending ||
-            !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256) ||
-            !string.IsNullOrWhiteSpace(entry.PhotoSourcePath) ||
-            entry.PhotoSourceDocumentName is not null || entry.PhotoSourceMediaType is not null ||
-            entry.PhotoSourceSha256 is not null || entry.PhotoSourceSizeBytes is not null)
-            throw new InvalidOperationException("The private document and any retained photo source must be removed before purge acknowledgement.");
-        if (entry.OutputMode == PrinterOutputModeRules.PdfExport &&
-            entry.State == "TEST_OUTPUT_SOURCE_PURGED")
+        await stagedUploadLeaseGate.WaitAsync(ct);
+        try
         {
-            // Non-production test output is kept in a separate, short local
-            // retention window so it can be automatically removed after 24 hours.
-            await SaveManifestAsync(entry with { PrivatePurgePending = false }, ct);
-            return;
+            var entry = Find(jobId) ?? throw new FileNotFoundException("The private print manifest is unavailable.");
+            if (!entry.PrivatePrinting ||
+                entry.State is not ("OUTPUT_CONFIRMED" or "TEST_OUTPUT_SOURCE_PURGED") ||
+                !entry.PrivatePurgePending ||
+                !string.IsNullOrWhiteSpace(entry.DocumentPath) || entry.SizeBytes != 0 || !string.IsNullOrEmpty(entry.Sha256) ||
+                !string.IsNullOrWhiteSpace(entry.PhotoSourcePath) ||
+                entry.PhotoSourceDocumentName is not null || entry.PhotoSourceMediaType is not null ||
+                entry.PhotoSourceSha256 is not null || entry.PhotoSourceSizeBytes is not null)
+                throw new InvalidOperationException("The private document and any retained photo source must be removed before purge acknowledgement.");
+            if (entry.OutputMode == PrinterOutputModeRules.PdfExport &&
+                entry.State == "TEST_OUTPUT_SOURCE_PURGED")
+            {
+                // Non-production test output is kept in a separate, short local
+                // retention window so it can be automatically removed after 24 hours.
+                await SaveManifestAsync(entry with { PrivatePurgePending = false }, ct);
+                return;
+            }
+    
+            // For a real physical private print, the server has now acknowledged
+            // source-metadata redaction. No local job manifest is needed afterwards.
+            var manifestPath = GetManifestPath(jobId);
+            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+    
         }
-
-        // For a real physical private print, the server has now acknowledged
-        // source-metadata redaction. No local job manifest is needed afterwards.
-        var manifestPath = GetManifestPath(jobId);
-        if (File.Exists(manifestPath)) File.Delete(manifestPath);
+        finally
+        {
+            stagedUploadLeaseGate.Release();
+        }
     }
 
     public async Task UpdateSpoolerStatusAsync(Guid jobId, string status, CancellationToken ct)
