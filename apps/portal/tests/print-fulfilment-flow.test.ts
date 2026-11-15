@@ -681,6 +681,22 @@ test("customer-facing print choices explain privacy versus connection without ch
  assert.match(app,/\{batchPrintedPages\} print pages\/sheets/);
  assert.match(app,/UPI transaction ID \(UTR\)/);
  assert.match(app,/Find it in your UPI app under payment details or transaction history/);
+ assert.match(app,/Document pages are the original pages in uploaded documents, before copies are applied/);
+ assert.match(app,/Print pages\\/sheets count output pages after copies/);
+ assert.match(app,/two output pages may share one physical sheet/);
+});
+
+test("offline Photo Studio explains one-photo editing, friendly sizes, and shop print handoff",()=>{
+ const entry=read("../src/PrivatePhotoStudioEntry.tsx");
+ assert.match(entry,/function photoSizeLabel\\(sizeCode:string\\):string/);
+ assert.match(entry,/"35x45":"35 × 45 mm"/);
+ assert.match(entry,/"25x35":"25 × 35 mm"/);
+ assert.match(entry,/"2x2":"2 × 2 inch"/);
+ assert.match(entry,/"4x6":"4 × 6 inch"/);
+ assert.match(entry,/photoSizeLabel\\(document\\.sizeCode\\)/);
+ assert.match(entry,/document\\.photosPerPage\\} per A4 sheet/);
+ assert.match(entry,/Choose one original photo[\\s\\S]*?number of copies and photos per A4 sheet in the editor/);
+ assert.match(entry,/tap Back to Home, scan the shop's QR code[\\s\\S]*?Photo Studio private documents/);
 });
 
 test("UPI amount copy is numeric and QR save feedback distinguishes success from pending or cancelled",()=>{
