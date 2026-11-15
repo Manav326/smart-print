@@ -1416,8 +1416,9 @@ public sealed class AgentLocalQueueStoreTests
 
             // Reinitialising simulates an upgrade from an Agent that had no
             // independent spooler-cleanup records.
-            await store.InitializeAsync(CancellationToken.None);
-            var restored = Assert.Single(store.GetPendingPrivateSpoolerCleanupEntries());
+            var restartedStore = new AgentLocalQueueStore(root);
+            await restartedStore.InitializeAsync(CancellationToken.None);
+            var restored = Assert.Single(restartedStore.GetPendingPrivateSpoolerCleanupEntries());
             Assert.Equal(marker.JobId, restored.JobId);
             Assert.Equal(marker.QueueName, restored.QueueName);
             Assert.Equal(marker.SpoolerJobId, restored.SpoolerJobId);
