@@ -200,8 +200,10 @@ export function filterShopOrderJourneys(
     const searchable = [
       order.key, order.batchId ?? "", order.name, order.reference,
       ...order.jobs.flatMap(job => [
-        job.jobNumber, job.batchId ?? "", job.batchName ?? "",
-        job.batchGroupName ?? "", job.privatePrinting ? "" : job.document.originalFileName
+        job.jobNumber, job.batchId ?? "",
+        job.privatePrinting ? "" : job.batchName ?? "",
+        job.privatePrinting ? "" : job.batchGroupName ?? "",
+        job.privatePrinting ? "" : job.document.originalFileName
       ])
     ].join(" ").toLocaleLowerCase();
     return searchable.includes(needle);
