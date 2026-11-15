@@ -688,7 +688,7 @@ test("UPI amount copy is numeric and QR save feedback distinguishes success from
  assert.match(qr,/amountMinor:number/);
  assert.match(qr,/copyText\(\(amountMinor\/100\)\.toFixed\(2\),"Amount"\)/);
  assert.match(qr,/statusTone==="success"\?<Check/);
- assert.match(qr,/statusTone==="info"/);
+ assert.match(qr,/setStatusTone\("info"\)/);
  assert.match(qr,/CUSTOMER_PAYMENT_QR_CANCELLED[\s\S]*?setStatusTone\("info"\)/);
  assert.match(css,/\.customer-upi-download-status\.success/);
  assert.match(css,/\.customer-upi-download-status\.info/);
