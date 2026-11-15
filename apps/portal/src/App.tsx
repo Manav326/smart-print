@@ -4415,8 +4415,8 @@ function storedCustomerPrivateFileNames(draft:StoredCustomerDraft|null):Record<s
   const names={...(draft?.privateFileNamesByJobId??{})};
   const items=[draft?.uploaded,...(draft?.uploadedBatch??[])];
   for(const item of items) {
-    if(item?.job.privatePrinting&&!isPrivateFilenamePlaceholder(item.document.originalFileName)) {
-      names[item.job.id]??=item.document.originalFileName;
+    if(item?.job.privatePrinting&&!isPrivateFilenamePlaceholder(item.document.originalFileName)&&isPrivateFilenamePlaceholder(names[item.job.id])) {
+      names[item.job.id]=item.document.originalFileName;
     }
   }
   return names;
