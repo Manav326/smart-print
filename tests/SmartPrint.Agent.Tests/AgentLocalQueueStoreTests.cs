@@ -1449,6 +1449,11 @@ public sealed class AgentLocalQueueStoreTests
             Assert.True(store.Find(job.Id)!.PrivateSpoolerCleanupCompleted);
             Assert.Empty(store.GetPrivateSpoolerCleanupCandidates());
 
+            // A stale retry/candidate from before completion cannot recreate it.
+            await store.EnsurePrivateSpoolerCleanupTrackedAsync(
+                job.Id, job.QueueName, 744, CancellationToken.None);
+            Assert.Empty(store.GetPendingPrivateSpoolerCleanupEntries());
+
             var restartedStore = new AgentLocalQueueStore(root);
             await restartedStore.InitializeAsync(CancellationToken.None);
             Assert.Empty(restartedStore.GetPendingPrivateSpoolerCleanupEntries());
