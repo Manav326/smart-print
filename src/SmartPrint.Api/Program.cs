@@ -4547,7 +4547,13 @@ shop.MapPost("/print-batches/{batchId:guid}/review", async (
         .ToListAsync(ct);
     var protectedJobIds = paymentProtectedJobIds.ToHashSet();
 
-    if (request.PdfBrandingEnabled && lockedJobs.Any(job => job.PrintKind == "ID_DOCUMENT"))
+    var includesIdDocument = request.PdfBrandingEnabled &&
+        await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(ticket =>
+            ticket.TenantId == tenantId &&
+            lockedJobIds.Contains(ticket.PrintJobId) &&
+            ticket.PrivatePrinting &&
+            ticket.PrintKind == "ID_DOCUMENT", ct);
+    if (includesIdDocument)
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
@@ -6585,6 +6591,17 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
     }
 
+    if (!PrivateRelayPrintKindRules.TryMapTicketKindToPrintJobKind(
+            ticket.PrintKind, out var printJobKind))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "local_upload_print_kind_unsupported",
+            message = "This upload type is no longer supported. Please start a new upload."
+        });
+    }
+
     var job = new PrintJob
     {
         Id = ticket.PrintJobId,
@@ -6605,7 +6622,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         IsDuplex = ticket.IsDuplex,
         Orientation = ticket.Orientation,
         PrivatePrinting = ticket.PrivatePrinting,
-        PrintKind = ticket.PrintKind,
+        PrintKind = printJobKind,
         PhotoSizeCode = ticket.PhotoSizeCode,
         PhotoCount = ticket.PhotoCount ?? 0,
         PhotosPerPage = ticket.PhotosPerPage,
@@ -9260,7 +9277,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     if (request.PrintKind is not ("DOCUMENT" or "PHOTO" or "ID_DOCUMENT") ||
         (isIdDocumentUpload && (!request.PrivatePrinting ||
             mediaType != "application/pdf" ||
-            request.ColourMode != "Colour" ||
             request.PaperSize != "A4" ||
             request.IsDuplex ||
             request.Copies != 1 ||
@@ -9271,7 +9287,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         {
             code = isIdDocumentUpload ? "id_document_private_printing_required" : "photo_metadata_invalid",
             message = isIdDocumentUpload
-                ? "ID card sheets require Private Printing, a one-page A4 portrait PDF, colour, one copy and single-sided output. Start a new Private Printing batch."
+                ? "ID card sheets require Private Printing, a one-page A4 portrait PDF, one copy and single-sided output. Start a new Private Printing batch."
                 : "Private Photo Studio sheets require a supported photo size, quantity, A4 sheet layout and a single-sided colour A4 PDF. No document was uploaded."
         });
     var sha = request.Sha256?.Trim().ToLowerInvariant();
@@ -10332,6 +10348,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
                 message = "This original file no longer fits within the batch limit. Contact the shop before creating another print request."
             }));
 
+        if (!PrivateRelayPrintKindRules.TryMapTicketKindToPrintJobKind(
+                ticket.PrintKind, out var printJobKind))
+            return await RejectAndCleanAsync(Results.Conflict(new
+            {
+                code = "local_upload_recovery_print_kind_unsupported",
+                message = "This upload type is no longer supported. Please start a new upload."
+            }));
+
         var job = new PrintJob
         {
             Id = ticket.PrintJobId,
@@ -10351,7 +10375,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             PaperSize = ticket.PaperSize,
             IsDuplex = ticket.IsDuplex,
             Orientation = ticket.Orientation,
-            PrintKind = ticket.PrintKind,
+            PrintKind = printJobKind,
             PhotoSizeCode = ticket.PhotoSizeCode,
             PhotoCount = ticket.PhotoCount ?? 0,
             PhotosPerPage = ticket.PhotosPerPage,
@@ -10473,6 +10497,13 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         return Results.NotFound();
     }
 
+    var localUploadTicket = await db.LocalPrintUploadTickets.AsNoTracking()
+        .Where(item => item.TenantId == session.TenantId &&
+                       item.CustomerSessionId == session.Id &&
+                       item.PrintJobId == job.Id)
+        .Select(item => new { item.PrintKind, item.PrivatePrinting })
+        .SingleOrDefaultAsync(ct);
+
     if (!subscription.IsAccessActive)
     {
         var localTicketCreatedUtc = await db.LocalPrintUploadTickets.AsNoTracking()
@@ -10507,23 +10538,23 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     }
 
     var isPhotoPrint = request.PrintKind == "PHOTO";
-    var isIdDocument = request.PrintKind == "ID_DOCUMENT";
+    var isIdDocument = localUploadTicket?.PrintKind == "ID_DOCUMENT";
     if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO" or "ID_DOCUMENT")) ||
+        (request.PrintKind == "ID_DOCUMENT" && !isIdDocument) ||
         (isIdDocument && (!job.PrivatePrinting ||
-            job.PrintKind != "ID_DOCUMENT" ||
+            localUploadTicket?.PrivatePrinting != true ||
+            job.PrintKind != "DOCUMENT" ||
+            isPhotoPrint ||
             job.PageCount != 1 ||
             request.Copies != 1 ||
-            request.ColourMode != "Colour" ||
             request.PaperSize != "A4" ||
             request.IsDuplex ||
             request.Orientation != "PORTRAIT")) ||
         (isPhotoPrint && (
-            job.PrintKind == "ID_DOCUMENT" ||
             (job.PrintKind == "PHOTO" &&
                 (request.PhotoSizeCode != job.PhotoSizeCode ||
                  request.PhotoCount != job.PhotoCount ||
                  request.PhotosPerPage != job.PhotosPerPage)))) ||
-        (job.PrintKind == "ID_DOCUMENT" && !isIdDocument) ||
         (job.PrintKind == "PHOTO" && !isPhotoPrint) ||
         job.PageCount is <= 0 or > 500 ||
         request.Copies is < 1 or > 100 ||
@@ -10637,7 +10668,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
                 pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
                     job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing);
             }
-            job.PrintKind = isIdDocument ? "ID_DOCUMENT" : "DOCUMENT";
+            job.PrintKind = "DOCUMENT";
             job.PhotoSizeCode = null;
             job.PhotoCount = 0;
             job.PhotosPerPage = null;
@@ -10685,7 +10716,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.PaperSize,
             job.IsDuplex,
             job.Orientation,
-            job.PrintKind,
+            PrintKind = isIdDocument ? "ID_DOCUMENT" : job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
         job.PhotosPerPage,
