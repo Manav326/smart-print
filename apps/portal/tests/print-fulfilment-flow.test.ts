@@ -667,3 +667,29 @@ test("Android customer PDF preview stays inline and UPI QR downloads through the
  assert.match(qr,/navigator\.clipboard\?\.writeText/);
  assert.match(qr,/Copy UPI ID/);
 });
+
+
+test("customer-facing print choices explain privacy versus connection without changing the available modes",()=>{
+ const app=read("../src/App.tsx");
+ assert.match(app,/How your files reach the shop/);
+ assert.match(app,/Choose a connection method\. Your privacy setting above stays the same\./);
+ assert.match(app,/Direct over shop Wi-Fi · unencrypted connection/);
+ assert.match(app,/Encrypted online transfer · print when ready/);
+ assert.match(app,/customerStatusLabel\(status:string\):string/);
+ assert.match(app,/Waiting for shop review/);
+ assert.match(app,/\{quoteEntries\.length\} files · \{batchPrintedPages\} print pages\/sheets/);
+ assert.match(app,/UPI transaction ID \(UTR\)/);
+ assert.match(app,/Find it in your UPI app under payment details or transaction history/);
+});
+
+test("UPI amount copy is numeric and QR save feedback distinguishes success from pending or cancelled",()=>{
+ const qr=read("../src/CustomerUpiQr.tsx");
+ const css=read("../src/styles.css");
+ assert.match(qr,/amountMinor:number/);
+ assert.match(qr,/copyText\(\(amountMinor\/100\)\.toFixed\(2\),"Amount"\)/);
+ assert.match(qr,/statusTone==="success"\?<Check/);
+ assert.match(qr,/statusTone==="info"/);
+ assert.match(qr,/CUSTOMER_PAYMENT_QR_CANCELLED[\s\S]*?setStatusTone\("info"\)/);
+ assert.match(css,/\.customer-upi-download-status\.success/);
+ assert.match(css,/\.customer-upi-download-status\.info/);
+});
