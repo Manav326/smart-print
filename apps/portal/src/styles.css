@@ -3858,3 +3858,12 @@ html[data-theme="dark"] .customer-upload-notice.warning{border-color:#6d5630;bac
 }
 html[data-theme="dark"] .customer-native-pdf-controls button,
 html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--native-border,#39465c);background:var(--native-surface,#182233);color:var(--native-text,#eef2fb)}
+
+
+/* Customer clarity: keep connection choices distinct from the privacy choice above. */
+.customer-upload-mode-heading{grid-column:1/-1;display:grid;gap:3px;margin:0 0 2px;color:var(--text)}
+.customer-upload-mode-heading strong{font-size:12px;font-weight:750}
+.customer-upload-mode-heading small{font-size:11px;line-height:1.45;color:var(--muted)}
+.customer-payment-reference-hint{display:block;margin:5px 0 8px;color:var(--muted);font-size:11px;line-height:1.45}
+.customer-upi-download-status.success{color:var(--green)}
+.customer-upi-download-status.info{color:var(--muted)}
