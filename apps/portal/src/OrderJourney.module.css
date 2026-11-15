@@ -125,6 +125,7 @@
 .signalRow small{font-size:7px;line-height:1.45;color:var(--muted)}
 .attentionLine{display:flex;align-items:flex-start;gap:6px;color:var(--amber);font-size:7px;line-height:1.45;padding:7px;border-radius:7px;background:rgba(233,185,106,.08)}
 .attentionLine svg{flex:0 0 auto}
+.confirmationBlocked{flex-basis:100%;grid-column:1/-1}
 .orderCardBottom{display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:10px;border-top:1px solid var(--border)}
 .nextStep{display:flex;flex-direction:column;gap:4px;min-width:0}
 .nextStep>span{font-size:7px;color:var(--faint);font-weight:800;letter-spacing:.9px}

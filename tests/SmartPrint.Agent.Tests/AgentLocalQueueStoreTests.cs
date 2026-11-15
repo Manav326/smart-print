@@ -463,6 +463,14 @@ public sealed class AgentLocalQueueStoreTests
             await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
             Assert.Equal("OUTPUT_UNCONFIRMED", store.Find(job.Id)!.State);
             Assert.Empty(store.GetAcknowledgedJobs());
+            Assert.Single(store.GetSpoolerTrackingJobs());
+
+            // Keep checking the same Windows spooler ID until the Agent verifies it is absent.
+            await store.UpdateSpoolerStatusAsync(job.Id, "RETAINED", CancellationToken.None);
+            Assert.Equal("RETAINED", store.Find(job.Id)!.SpoolerStatus);
+            Assert.Single(store.GetSpoolerTrackingJobs());
+            await store.MarkSpoolerJobAbsentAsync(job.Id, CancellationToken.None);
+            Assert.Null(store.Find(job.Id)!.SpoolerJobId);
             Assert.Empty(store.GetSpoolerTrackingJobs());
         }
         finally { Directory.Delete(root, recursive: true); }

@@ -3815,6 +3815,12 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
         });
     if (job.Status == "COMPLETED" && job.OutputConfirmedUtc != null)
         return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc, DuplicateRequest = true });
+    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.SpoolerStatus))
+        return Results.Conflict(new
+        {
+            code = "windows_spooler_job_retained",
+            message = "Windows is still holding this print job. Confirmation is available after the Agent verifies that the held spooler entry has cleared."
+        });
     if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED"))
         return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
 
@@ -7141,14 +7147,27 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
     if (job is null) return Results.NotFound();
     if (job.Status is "OUTPUT_UNCONFIRMED" or "COMPLETED")
     {
-        if (job.Status == "OUTPUT_UNCONFIRMED" && job.ClaimedByAgentDeviceId == device.Id &&
-            job.PrinterDeviceId is Guid existingPrinterId &&
-            await db.PrinterDevices.AnyAsync(printer =>
-                printer.Id == existingPrinterId && printer.TenantId == device.TenantId &&
-                printer.OutputMode == "PDF_EXPORT", ct))
+        if (job.Status == "OUTPUT_UNCONFIRMED" && job.ClaimedByAgentDeviceId == device.Id)
         {
-            job.OutputType = "PDF_EXPORT";
-            await db.SaveChangesAsync(ct);
+            var updated = false;
+            if (job.SpoolerJobId is > 0)
+            {
+                // The authenticated Agent has just verified that Windows no longer lists this spooler ID.
+                // Refresh stale RETAINED state so an old report cannot block the shop forever.
+                job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
+                job.SpoolerObservedUtc = DateTimeOffset.UtcNow;
+                job.UpdatedUtc = DateTimeOffset.UtcNow;
+                updated = true;
+            }
+            if (job.PrinterDeviceId is Guid existingPrinterId &&
+                await db.PrinterDevices.AnyAsync(printer =>
+                    printer.Id == existingPrinterId && printer.TenantId == device.TenantId &&
+                    printer.OutputMode == "PDF_EXPORT", ct))
+            {
+                job.OutputType = "PDF_EXPORT";
+                updated = true;
+            }
+            if (updated) await db.SaveChangesAsync(ct);
         }
         return Results.Ok(new { job.Id, job.Status, job.FailureCode, job.OutputType, DuplicateRequest = true });
     }
@@ -7186,21 +7205,34 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
 
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
-    if (job.Status is "OUTPUT_UNCONFIRMED" or "COMPLETED")
+    if (job.Status == "COMPLETED")
         return Results.Ok(new { job.Id, job.Status, DuplicateRequest = true });
-    if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING") || job.ClaimedByAgentDeviceId != device.Id || job.SpoolerJobId != request.SpoolerJobId)
+    if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED") ||
+        job.ClaimedByAgentDeviceId != device.Id || job.SpoolerJobId != request.SpoolerJobId)
         return Results.Conflict(new { code = "spooler_job_identity_mismatch" });
 
+    var now = DateTimeOffset.UtcNow;
+    // A transient Agent query failure is not proof that a previously retained Windows job has cleared.
+    if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownRetainedStatus(job.SpoolerStatus, request.SpoolerStatus))
+        job.SpoolerStatus = request.SpoolerStatus;
+    job.SpoolerObservedUtc = now;
+    job.UpdatedUtc = now;
+
+    // Keep OUTPUT_UNCONFIRMED intact; a fresh spooler observation may clear a stale
+    // RETAINED flag, but it must not silently mark the physical pages as complete.
+    if (job.Status == "OUTPUT_UNCONFIRMED")
+    {
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });
+    }
+
     var previous = job.Status;
-    job.SpoolerStatus = request.SpoolerStatus;
-    job.SpoolerObservedUtc = DateTimeOffset.UtcNow;
     job.Status = request.SpoolerStatus == "PRINTING" ? "PRINTING" : "SPOOLER_ACCEPTED";
-    job.UpdatedUtc = DateTimeOffset.UtcNow;
     if (previous != job.Status)
         db.PrintJobEvents.Add(new PrintJobEvent
         {
             TenantId = device.TenantId, PrintJobId = job.Id, PreviousStatus = previous, NewStatus = job.Status,
-            ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = "WINDOWS_SPOOLER_STATUS_UPDATED", CreatedUtc = DateTimeOffset.UtcNow
+            ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = "WINDOWS_SPOOLER_STATUS_UPDATED", CreatedUtc = now
         });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });

@@ -199,7 +199,7 @@ public sealed class AgentLocalQueueStore
         ReadEntries().Where(x => x.State == "SUBMITTING").ToArray();
 
     public IReadOnlyList<AgentLocalQueueEntry> GetSpoolerTrackingJobs() =>
-        ReadEntries().Where(x => x.State == "SPOOLER_ACCEPTED" && x.SpoolerJobId is > 0).ToArray();
+        ReadEntries().Where(x => (x.State is "SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED") && x.SpoolerJobId is > 0).ToArray();
 
     public IReadOnlyList<AgentLocalQueueEntry> GetPrivatePurgePendingJobs() =>
         ReadEntries().Where(entry => entry.PrivatePrinting &&
@@ -1030,8 +1030,15 @@ public sealed class AgentLocalQueueStore
     public async Task UpdateSpoolerStatusAsync(Guid jobId, string status, CancellationToken ct)
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
-        if (entry.State != "SPOOLER_ACCEPTED") return;
+        if (entry.State is not ("SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED")) return;
         await SaveManifestAsync(entry with { SpoolerStatus = status }, ct);
+    }
+
+    public async Task MarkSpoolerJobAbsentAsync(Guid jobId, CancellationToken ct)
+    {
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State != "OUTPUT_UNCONFIRMED" || entry.SpoolerJobId is null) return;
+        await SaveManifestAsync(entry with { SpoolerJobId = null, SpoolerStatus = "OUTPUT_UNCONFIRMED" }, ct);
     }
 
     public async Task ReplaceStagedPhotoDocumentAsync(

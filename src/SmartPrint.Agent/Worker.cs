@@ -1344,7 +1344,8 @@ public sealed class Worker(
                 if (found is null)
                 {
                     await localQueueStore.MarkOutputUnconfirmedAsync(entry.JobId, "SPOOLER_JOB_NO_LONGER_VISIBLE", ct);
-                    await ReportOutputUnconfirmedAsync(client, credentials, entry.JobId, "SPOOLER_JOB_NO_LONGER_VISIBLE", "Windows no longer lists the spooler job; check actual paper output.", ct);
+                    if (await ReportOutputUnconfirmedAsync(client, credentials, entry.JobId, "SPOOLER_JOB_NO_LONGER_VISIBLE", "Windows no longer lists the spooler job; check actual paper output.", ct))
+                        await localQueueStore.MarkSpoolerJobAbsentAsync(entry.JobId, ct);
                     continue;
                 }
 
@@ -1535,18 +1536,19 @@ public sealed class Worker(
         if (!response.IsSuccessStatusCode) logger.LogWarning("Print block for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);
     }
 
-    private async Task ReportOutputUnconfirmedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, string code, string message, CancellationToken ct)
+    private async Task<bool> ReportOutputUnconfirmedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, string code, string message, CancellationToken ct)
     {
         using var response = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{jobId}/output-unconfirmed",
             new AgentPrintBlockedRequest(code, message.Length > 300 ? message[..300] : message), ct);
         if (!response.IsSuccessStatusCode)
         {
             logger.LogWarning("Output reconciliation for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);
-            return;
+            return false;
         }
         var cloudState = await response.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
         if (cloudState?.Status == "COMPLETED")
             await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
+        return true;
     }
 
     private static async Task<HttpResponseMessage> SendAgentGetRequestAsync(

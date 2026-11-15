@@ -4,6 +4,7 @@ import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./ap
 import { formatIstDateTime } from "./date-time";
 import { buildShopOrderJourneys, filterShopOrderJourneys, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
 import styles from "./OrderJourney.module.css";
+import { isRetainedSpoolerJob } from "./spooler-output-confirmation";
 
 type ShopDestination = "Print Queue" | "Payments" | "Print Agent";
 interface Props {
@@ -64,6 +65,7 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
   const canRefund=(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&["VERIFIED","PARTIALLY_REFUNDED"].includes(job.payment?.status??"")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId;
   const assignable=["PAID_AUTHORISED","LOCAL_QUEUE_READY"].includes(job.status);
   const confirmable=job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT");
+  const spoolerRetained=isRetainedSpoolerJob(job.spoolerStatus);
   return <div className={styles.fileActionPanel}>
     {!job.privatePrinting&&<button type="button" className={styles.miniAction} onClick={()=>onPreview(job)}><Eye size={12}/> Preview</button>}
     <button type="button" className={styles.miniAction} onClick={()=>onHistory(job)}><History size={12}/> History</button>
@@ -77,7 +79,8 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
       </select>
     </label>}
     {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
-    {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onConfirmOutput(job)}><Check size={12}/> Confirm output</button>}
+    {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={spoolerRetained} title={spoolerRetained?"Windows still holds this job. Confirmation will be enabled after the Agent verifies that it has left the queue.":undefined} onClick={()=>onConfirmOutput(job)}><Check size={12}/> Confirm output</button>}
+    {confirmable&&spoolerRetained&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>Windows is still holding this print job. SmartPrint will enable confirmation after the Agent verifies that the held entry has cleared.</span></div>}
     {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onRetryPdfExport(job)}><RotateCcw size={12}/> Save PDF again</button>}
     {canRefund&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onRefund(job)}><Wallet size={12}/> Refund</button>}
   </div>;
