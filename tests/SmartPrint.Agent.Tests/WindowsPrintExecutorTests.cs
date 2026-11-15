@@ -31,7 +31,9 @@ public sealed class WindowsPrintExecutorTests
     [InlineData(0x00000008u, "SPOOLING")]
     [InlineData(0x00000080u, "PRINTED")]
     [InlineData(0x00002000u, "RETAINED")]
-    [InlineData(0x00002000u | 0x00000010u, "RETAINED")]
+    [InlineData(0x00002000u | 0x00000010u, "PRINTING")]
+    [InlineData(0x00002000u | 0x00000008u, "SPOOLING")]
+    [InlineData(0x00002000u | 0x00000080u, "PRINTED")]
     [InlineData(0u, "QUEUED")]
     public void ResolvesWindowsSpoolerStatusFlags(uint flags, string expected)
     {
@@ -47,6 +49,17 @@ public sealed class WindowsPrintExecutorTests
     public void PrinterFaultsTakePriorityOverActiveQueueFlags(uint flags, string expected)
     {
         Assert.Equal(expected, WindowsPrintExecutor.ResolveSpoolerStatus(flags));
+    }
+
+    [Theory]
+    [InlineData(0x00002000u, true)]
+    [InlineData(0x00002000u | 0x00000080u, true)]
+    [InlineData(0x00002000u | 0x00000010u, false)]
+    [InlineData(0x00002000u | 0x00000008u, false)]
+    [InlineData(0x00000010u, false)]
+    public void ReleasesOnlyRetainedJobsThatAreNotActivelyPrinting(uint flags, bool expected)
+    {
+        Assert.Equal(expected, WindowsPrintExecutor.ShouldReleaseRetainedPrivateJob(flags));
     }
 
     [Fact]
