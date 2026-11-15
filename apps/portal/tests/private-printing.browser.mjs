@@ -584,6 +584,10 @@ async function runScenario(browser) {
     "The customer upload receipt must retain each original filename in the local draft.");
   assert.ok(uploadedLabels.every(value => !value.includes("Private document")),
     "The customer receipt should show the original file name, not the server's anonymized placeholder.");
+  await page.waitForFunction(publicCode => {
+    const draft = JSON.parse(localStorage.getItem("qrtoprint.customer-active-job:" + publicCode) ?? "null");
+    return Object.keys(draft?.privateFileNamesByJobId ?? {}).length === 8;
+  }, STATION_CODE, { timeout: 15000 });
   const persistedFilenameCount = await page.evaluate(publicCode => {
     const draft = JSON.parse(localStorage.getItem("qrtoprint.customer-active-job:" + publicCode) ?? "null");
     return Object.keys(draft?.privateFileNamesByJobId ?? {}).length;
