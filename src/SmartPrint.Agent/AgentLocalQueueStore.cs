@@ -132,7 +132,8 @@ public sealed class AgentLocalQueueStore
         // Backfill durable cleanup tracking for private jobs accepted by older
         // Agent versions before this independent retry record existed.
         foreach (var entry in ReadEntries().Where(entry =>
-            entry.PrivatePrinting && entry.SpoolerJobId is > 0 && !string.IsNullOrWhiteSpace(entry.QueueName)))
+            entry.PrivatePrinting && !entry.PrivateSpoolerCleanupCompleted &&
+            entry.SpoolerJobId is > 0 && !string.IsNullOrWhiteSpace(entry.QueueName)))
         {
             await EnsurePrivateSpoolerCleanupTrackedAsync(
                 entry.JobId, entry.QueueName, entry.SpoolerJobId!.Value, cancellationToken);
@@ -857,7 +858,7 @@ public sealed class AgentLocalQueueStore
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
         if (entry.State == "SPOOLER_ACCEPTED" && entry.SpoolerJobId == spoolerJobId)
         {
-            if (entry.PrivatePrinting)
+            if (entry.PrivatePrinting && !entry.PrivateSpoolerCleanupCompleted)
                 await EnsurePrivateSpoolerCleanupTrackedAsync(jobId, entry.QueueName, spoolerJobId, ct);
             return;
         }
@@ -869,7 +870,7 @@ public sealed class AgentLocalQueueStore
             SpoolerJobName = spoolerJobName, SpoolerSubmittedUtc = DateTimeOffset.UtcNow,
             SpoolerStatus = "QUEUED", FailureCode = null
         }, ct);
-        if (entry.PrivatePrinting)
+        if (entry.PrivatePrinting && !entry.PrivateSpoolerCleanupCompleted)
             await EnsurePrivateSpoolerCleanupTrackedAsync(jobId, entry.QueueName, spoolerJobId, ct);
     }
 
@@ -1349,8 +1350,8 @@ public sealed class AgentLocalQueueStore
 
     public IReadOnlyList<AgentLocalQueueEntry> GetPrivateSpoolerCleanupCandidates() =>
         ReadEntries().Where(entry =>
-            entry.PrivatePrinting && entry.SpoolerJobId is > 0 &&
-            !string.IsNullOrWhiteSpace(entry.QueueName)).ToArray();
+            entry.PrivatePrinting && !entry.PrivateSpoolerCleanupCompleted &&
+            entry.SpoolerJobId is > 0 && !string.IsNullOrWhiteSpace(entry.QueueName)).ToArray();
 
     public IReadOnlyList<AgentPrivateSpoolerCleanupEntry> GetPendingPrivateSpoolerCleanupEntries()
     {
@@ -1433,6 +1434,20 @@ public sealed class AgentLocalQueueStore
         await privateSpoolerCleanupGate.WaitAsync(ct);
         try
         {
+            // Persist the verified-absent state while the source manifest still
+            // exists, so periodic backfill cannot recreate this cleanup record.
+            await stagedUploadLeaseGate.WaitAsync(ct);
+            try
+            {
+                var manifest = Find(jobId);
+                if (manifest is not null && manifest.PrivatePrinting && !manifest.PrivateSpoolerCleanupCompleted)
+                    await SaveManifestAsync(manifest with { PrivateSpoolerCleanupCompleted = true }, ct);
+            }
+            finally
+            {
+                stagedUploadLeaseGate.Release();
+            }
+
             var path = GetPrivateSpoolerCleanupPath(jobId);
             if (File.Exists(path)) File.Delete(path);
             var temporaryPath = path + ".tmp";
