@@ -1392,6 +1392,12 @@ public sealed class AgentLocalQueueStore
         await privateSpoolerCleanupGate.WaitAsync(ct);
         try
         {
+            // A stale candidate snapshot must never recreate a record after
+            // verified absence or after the server has already purged the manifest.
+            var manifest = Find(jobId);
+            if (manifest is null || !manifest.PrivatePrinting || manifest.PrivateSpoolerCleanupCompleted)
+                return;
+
             var directory = GetPrivateSpoolerCleanupDirectory();
             Directory.CreateDirectory(directory);
             if (applyWindowsAcl) SecureDirectory(directory);
