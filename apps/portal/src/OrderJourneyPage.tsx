@@ -166,7 +166,7 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
 
     <section className={styles.stageFilters} aria-label="Filter orders by stage">
       <button type="button" aria-pressed={stageFilter==="all"} className={styles.stageFilterButton+(stageFilter==="all"?" "+styles.stageFilterSelected:"")} onClick={()=>setStageFilter("all")}>
-        <span>All orders</span><strong>{journeys.length}</strong>
+        <span>All stages</span><strong>{journeys.length}</strong>
       </button>
       {flowSteps.map(step=>{const Icon=step.icon,count=counts[step.id],selected=stageFilter===step.id;return <button type="button" key={step.id} aria-pressed={selected} className={styles.stageFilterButton+(selected?" "+styles.stageFilterSelected:"")} onClick={()=>setStageFilter(current=>current===step.id?"all":step.id)}>
         <Icon size={14}/><span>{step.title}</span><strong>{count}</strong>
