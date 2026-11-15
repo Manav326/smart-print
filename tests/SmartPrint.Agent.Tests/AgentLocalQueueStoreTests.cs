@@ -1354,6 +1354,103 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+    [Fact]
+    public async Task PrivateSpoolerCleanupRecordSurvivesSourcePurgeAndIsRemovedOnlyAfterQueueAbsence()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "private spooler cleanup test"u8.ToArray();
+            var job = CreateJob(bytes) with { PrivatePrinting = true, StorageMode = "LOCAL_AGENT" };
+            var staged = await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Private-Cleanup-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 741, "SmartPrint-Private-Cleanup-Test", CancellationToken.None);
+
+            var cleanup = Assert.Single(store.GetPendingPrivateSpoolerCleanupEntries());
+            Assert.Equal(job.Id, cleanup.JobId);
+            Assert.Equal(job.QueueName, cleanup.QueueName);
+            Assert.Equal(741, cleanup.SpoolerJobId);
+            Assert.Equal(0, cleanup.AttemptCount);
+
+            await store.RecordPrivateSpoolerCleanupAttemptAsync(job.Id, CancellationToken.None);
+            Assert.Equal(1, Assert.Single(store.GetPendingPrivateSpoolerCleanupEntries()).AttemptCount);
+
+            // Output confirmation purges the document; server acknowledgement then
+            // removes the main job manifest. The content-free spooler cleanup record
+            // must survive both operations so deletion can still be retried.
+            await store.MarkOutputConfirmedAsync(job.Id, CancellationToken.None);
+            Assert.False(File.Exists(staged.DocumentPath));
+            await store.MarkPrivatePurgeAcknowledgedAsync(job.Id, CancellationToken.None);
+            Assert.Null(store.Find(job.Id));
+            Assert.Single(store.GetPendingPrivateSpoolerCleanupEntries());
+
+            await store.CompletePrivateSpoolerCleanupAsync(job.Id, CancellationToken.None);
+            Assert.Empty(store.GetPendingPrivateSpoolerCleanupEntries());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ExistingPrivateSpoolerJobsAreBackfilledAfterAnAgentUpgrade()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "legacy private spooler job"u8.ToArray();
+            var job = CreateJob(bytes) with { PrivatePrinting = true, StorageMode = "LOCAL_AGENT" };
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Legacy-Private-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 743, "SmartPrint-Legacy-Private-Test", CancellationToken.None);
+
+            var marker = Assert.Single(store.GetPendingPrivateSpoolerCleanupEntries());
+            await store.CompletePrivateSpoolerCleanupAsync(job.Id, CancellationToken.None);
+
+            // Reinitialising simulates an upgrade from an Agent that had no
+            // independent spooler-cleanup records.
+            await store.InitializeAsync(CancellationToken.None);
+            var restored = Assert.Single(store.GetPendingPrivateSpoolerCleanupEntries());
+            Assert.Equal(marker.JobId, restored.JobId);
+            Assert.Equal(marker.QueueName, restored.QueueName);
+            Assert.Equal(marker.SpoolerJobId, restored.SpoolerJobId);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StandardPrintJobsDoNotCreatePrivateSpoolerCleanupRecords()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "standard spooler job"u8.ToArray();
+            var job = CreateJob(bytes) with { PrivatePrinting = false };
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Standard-Cleanup-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 742, "SmartPrint-Standard-Cleanup-Test", CancellationToken.None);
+
+            Assert.Empty(store.GetPendingPrivateSpoolerCleanupEntries());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
