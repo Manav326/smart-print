@@ -4153,7 +4153,7 @@ class MainActivity : AppCompatActivity() {
                                                 pendingCustomerPaymentQrBytes?.fill(0)
                                                 pendingCustomerPaymentQrBytes = null
                                                 pendingCustomerPaymentQrReply = null
-                                                replyProxy.postMessage("CUSTOMER_PAYMENT_QR_FAILED|" + message(error))
+                                                replyProxy.postMessage("CUSTOMER_PAYMENT_QR_FAILED|" + (error.message ?: "Could not open the save dialog."))
                                             }
                                         } else {
                                             bytes?.fill(0)
