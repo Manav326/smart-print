@@ -16,15 +16,19 @@ public sealed class AgentLocalQueueStore
 
     private readonly string queueRoot;
     private readonly bool applyWindowsAcl;
+    private readonly DataProtectionScope protectionScope;
     private readonly SemaphoreSlim stagedUploadLeaseGate = new(1, 1);
 
-    public AgentLocalQueueStore(string? rootOverride = null)
+    public AgentLocalQueueStore(string? rootOverride = null, DataProtectionScope? protectionScope = null)
     {
         queueRoot = rootOverride ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
             "QRtoPrint",
             "LocalQueue");
         applyWindowsAcl = rootOverride is null;
+        this.protectionScope = protectionScope ?? (rootOverride is null
+            ? DataProtectionScope.CurrentUser
+            : DataProtectionScope.LocalMachine);
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -36,9 +40,12 @@ public sealed class AgentLocalQueueStore
             SecureDirectory(queueRoot);
         }
 
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         foreach (var temporaryFile in Directory.EnumerateFiles(queueRoot, "*.tmp", SearchOption.TopDirectoryOnly))
         {
-            File.Delete(temporaryFile);
+            await EraseProtectedQueueFileAsync(temporaryFile, queuePrefix, comparison, cancellationToken);
         }
 
         foreach (var documentFile in Directory.EnumerateFiles(queueRoot, "*.qdoc", SearchOption.TopDirectoryOnly))
@@ -46,9 +53,9 @@ public sealed class AgentLocalQueueStore
             var manifestPath = Path.ChangeExtension(documentFile, ".json");
             if (!File.Exists(manifestPath))
             {
-                File.Delete(documentFile);
+                await EraseProtectedQueueFileAsync(documentFile, queuePrefix, comparison, cancellationToken);
                 var orphanedPhotoSource = documentFile + ".photo.source";
-                if (File.Exists(orphanedPhotoSource)) File.Delete(orphanedPhotoSource);
+                await EraseProtectedQueueFileAsync(orphanedPhotoSource, queuePrefix, comparison, cancellationToken);
             }
         }
         foreach (var photoSourceFile in Directory.EnumerateFiles(queueRoot, "*.qdoc.photo.source", SearchOption.TopDirectoryOnly))
@@ -62,7 +69,7 @@ public sealed class AgentLocalQueueStore
             var manifestPath = GetManifestPath(jobId);
             if (!File.Exists(manifestPath))
             {
-                File.Delete(photoSourceFile);
+                await EraseProtectedQueueFileAsync(photoSourceFile, queuePrefix, comparison, cancellationToken);
                 continue;
             }
 
@@ -102,23 +109,20 @@ public sealed class AgentLocalQueueStore
 
             if (documentStillOriginal)
             {
-                File.Delete(photoSourceFile); // Interrupted before the original move was needed.
+                await EraseProtectedQueueFileAsync(photoSourceFile, queuePrefix, comparison, cancellationToken);
                 continue;
             }
 
             if (string.IsNullOrWhiteSpace(entry.DocumentPath))
             {
-                File.Delete(photoSourceFile);
+                await EraseProtectedQueueFileAsync(photoSourceFile, queuePrefix, comparison, cancellationToken);
                 continue;
             }
             var documentPath = Path.GetFullPath(entry.DocumentPath);
-            var queuePrefix = Path.GetFullPath(queueRoot).TrimEnd(
-                Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
             if (!documentPath.StartsWith(queuePrefix, comparison))
                 throw new InvalidDataException("The interrupted photo document path is outside the protected queue.");
 
-            if (File.Exists(documentPath)) File.Delete(documentPath);
+            await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
             File.Move(photoSourceFile, documentPath);
         }
 
@@ -351,7 +355,7 @@ public sealed class AgentLocalQueueStore
         byte[] protectedBytes;
         try
         {
-            protectedBytes = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.LocalMachine);
+            protectedBytes = ProtectedData.Protect(plaintext, Entropy, protectionScope);
         }
         finally
         {
@@ -508,8 +512,8 @@ public sealed class AgentLocalQueueStore
             var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
             if (!photoSourcePath.StartsWith(queuePrefix, comparison))
                 throw new InvalidDataException("The retained photo source path is outside the protected queue.");
-            if (File.Exists(documentPath)) File.Delete(documentPath);
-            if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
+            await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
+            await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, cancellationToken);
             if (File.Exists(manifestPath)) File.Delete(manifestPath);
             return true;
         }
@@ -545,10 +549,9 @@ public sealed class AgentLocalQueueStore
         var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
         if (!photoSourcePath.StartsWith(queuePrefix, comparison))
             throw new InvalidDataException("The retained photo source path is outside the protected queue.");
-        if (File.Exists(documentPath)) File.Delete(documentPath);
-        if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
+        await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
+        await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, cancellationToken);
         if (File.Exists(manifestPath)) File.Delete(manifestPath);
-        await Task.CompletedTask;
     }
 
     public string EnsurePrivateTestOutputDirectory()
@@ -615,6 +618,24 @@ public sealed class AgentLocalQueueStore
                 }
                 var privateManifestPath = GetManifestPath(entry.JobId);
                 if (File.Exists(privateManifestPath)) File.Delete(privateManifestPath);
+                removed++;
+                continue;
+            }
+
+            if (entry.PrivatePrinting &&
+                entry.OutputMode != PrinterOutputModeRules.PdfExport &&
+                entry.CompletedUtc is DateTimeOffset sanitizedPrivateCompletedUtc &&
+                sanitizedPrivateCompletedUtc <= privateTestCutoff &&
+                !entry.PrivatePurgePending &&
+                string.IsNullOrWhiteSpace(entry.DocumentPath) &&
+                entry.SizeBytes == 0 &&
+                string.IsNullOrEmpty(entry.Sha256))
+            {
+                // Once the cloud has acknowledged source redaction, a physical
+                // private job needs no local reconciliation manifest. This also
+                // cleans sanitized manifests left by earlier Agent versions.
+                var sanitizedManifestPath = GetManifestPath(entry.JobId);
+                if (File.Exists(sanitizedManifestPath)) File.Delete(sanitizedManifestPath);
                 removed++;
                 continue;
             }
@@ -939,6 +960,9 @@ public sealed class AgentLocalQueueStore
                     ? entry.DocumentPath + ".photo.source"
                     : Path.Combine(queueRootFull, jobId.ToString("N") + ".qdoc.photo.source");
             await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, ct);
+            // Also remove interrupted-write files and encrypted revision backups
+            // belonging to this job before the server is told that purge completed.
+            await PurgeUnindexedPrivateSourceAsync(jobId, ct);
 
             await SaveManifestAsync(entry with
             {
@@ -976,7 +1000,19 @@ public sealed class AgentLocalQueueStore
             entry.PhotoSourceDocumentName is not null || entry.PhotoSourceMediaType is not null ||
             entry.PhotoSourceSha256 is not null || entry.PhotoSourceSizeBytes is not null)
             throw new InvalidOperationException("The private document and any retained photo source must be removed before purge acknowledgement.");
-        await SaveManifestAsync(entry with { PrivatePurgePending = false }, ct);
+        if (entry.OutputMode == PrinterOutputModeRules.PdfExport &&
+            entry.State == "TEST_OUTPUT_SOURCE_PURGED")
+        {
+            // Non-production test output is kept in a separate, short local
+            // retention window so it can be automatically removed after 24 hours.
+            await SaveManifestAsync(entry with { PrivatePurgePending = false }, ct);
+            return;
+        }
+
+        // For a real physical private print, the server has now acknowledged
+        // source-metadata redaction. No local job manifest is needed afterwards.
+        var manifestPath = GetManifestPath(jobId);
+        if (File.Exists(manifestPath)) File.Delete(manifestPath);
     }
 
     public async Task UpdateSpoolerStatusAsync(Guid jobId, string status, CancellationToken ct)
@@ -1091,7 +1127,7 @@ public sealed class AgentLocalQueueStore
             byte[] protectedBytes;
             try
             {
-                protectedBytes = ProtectedData.Protect(plaintext, Entropy, DataProtectionScope.LocalMachine);
+                protectedBytes = ProtectedData.Protect(plaintext, Entropy, protectionScope);
             }
             finally
             {
@@ -1235,15 +1271,23 @@ public sealed class AgentLocalQueueStore
         var protectedBytes = File.ReadAllBytes(fullSourcePath);
         try
         {
-            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
-            var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
-            if (plaintext.LongLength != entry.PhotoSourceSizeBytes.Value ||
-                !string.Equals(actualHash, entry.PhotoSourceSha256, StringComparison.OrdinalIgnoreCase))
+            var plaintext = UnprotectDocumentBytes(protectedBytes, out var needsProtectionUpgrade);
+            try
+            {
+                var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
+                if (plaintext.LongLength != entry.PhotoSourceSizeBytes.Value ||
+                    !string.Equals(actualHash, entry.PhotoSourceSha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("The retained original photo failed its integrity check.");
+
+                if (needsProtectionUpgrade)
+                    UpgradeDocumentProtectionScope(fullSourcePath, plaintext);
+                return plaintext;
+            }
+            catch
             {
                 CryptographicOperations.ZeroMemory(plaintext);
-                throw new InvalidDataException("The retained original photo failed its integrity check.");
+                throw;
             }
-            return plaintext;
         }
         finally
         {
@@ -1258,20 +1302,66 @@ public sealed class AgentLocalQueueStore
         var protectedBytes = File.ReadAllBytes(entry.DocumentPath);
         try
         {
-            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
-            var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
-            if (plaintext.LongLength != entry.SizeBytes ||
-                !string.Equals(actualHash, entry.Sha256, StringComparison.OrdinalIgnoreCase))
+            var plaintext = UnprotectDocumentBytes(protectedBytes, out var needsProtectionUpgrade);
+            try
+            {
+                var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
+                if (plaintext.LongLength != entry.SizeBytes ||
+                    !string.Equals(actualHash, entry.Sha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("The protected local document failed its integrity check.");
+
+                if (needsProtectionUpgrade)
+                    UpgradeDocumentProtectionScope(entry.DocumentPath, plaintext);
+                return plaintext;
+            }
+            catch
             {
                 CryptographicOperations.ZeroMemory(plaintext);
-                throw new InvalidDataException("The protected local document failed its integrity check.");
+                throw;
             }
-
-            return plaintext;
         }
         finally
         {
             CryptographicOperations.ZeroMemory(protectedBytes);
+        }
+    }
+
+    private byte[] UnprotectDocumentBytes(byte[] protectedBytes, out bool needsProtectionUpgrade)
+    {
+        needsProtectionUpgrade = false;
+        try
+        {
+            return ProtectedData.Unprotect(protectedBytes, Entropy, protectionScope);
+        }
+        catch (CryptographicException) when (protectionScope == DataProtectionScope.CurrentUser)
+        {
+            // Existing installations used LocalMachine DPAPI. Migrate only after
+            // the decrypted bytes pass the manifest's size and SHA-256 checks.
+            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
+            needsProtectionUpgrade = true;
+            return plaintext;
+        }
+    }
+
+    private void UpgradeDocumentProtectionScope(string path, byte[] plaintext)
+    {
+        var upgradedBytes = ProtectedData.Protect(plaintext, Entropy, protectionScope);
+        var temporaryPath = path + ".scope-upgrade.tmp";
+        try
+        {
+            using (var stream = new FileStream(
+                temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None,
+                64 * 1024, FileOptions.WriteThrough | FileOptions.SequentialScan))
+            {
+                stream.Write(upgradedBytes);
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(upgradedBytes);
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
         }
     }
 
@@ -1310,18 +1400,14 @@ public sealed class AgentLocalQueueStore
     private static void SecureDirectory(string directory)
     {
         var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-        var administratorsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        security.SetOwner(administratorsSid);
+        security.SetOwner(systemSid);
+        // The queue is opened by the LocalSystem Agent service. Do not grant
+        // interactive Administrators a normal file-read ACE; an administrator
+        // can still take ownership or run as SYSTEM, so this is defence in depth.
         security.AddAccessRule(new FileSystemAccessRule(
             systemSid,
-            FileSystemRights.FullControl,
-            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-            PropagationFlags.None,
-            AccessControlType.Allow));
-        security.AddAccessRule(new FileSystemAccessRule(
-            administratorsSid,
             FileSystemRights.FullControl,
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
             PropagationFlags.None,
