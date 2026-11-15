@@ -281,3 +281,5 @@
   .printerAssignment{grid-column:1/-1;justify-content:space-between}
   .printerAssignment select{max-width:72%;flex:1}
 }
+
+.retainedOutputNotice{flex-basis:100%;color:var(--muted);font-size:9px;line-height:1.45;padding:2px 1px}
