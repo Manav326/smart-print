@@ -332,6 +332,8 @@ test('Android JVM and emulator test tasks expose per-test and package lifecycle 
   assert.match(androidCiSource, /\[QA-STEP-START\] Android Espresso instrumentation/);
   assert.match(androidCiSource, /androidLoadsTheSharedFullPhotoStudioFromBundledAssetsWithoutAServiceConnection/);
   assert.match(androidCiSource, /expected=5/);
+  assert.match(androidCiSource, /cp -R apps\/portal\/dist-android-offline\/\./);
+  assert.doesNotMatch(androidCiSource, /cp -R apps\/portal\/dist\/\./);
   assert.match(androidCiSource, /\[QA-STEP-START\] Android package install\/upgrade\/downgrade lifecycle/);
   assert.match(androidLifecycleSource, /\[QA-PROGRESS\] Android emulator boot/);
   assert.match(runnerSource, /--console=plain/);
