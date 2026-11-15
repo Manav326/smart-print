@@ -51,6 +51,26 @@ public sealed class PricingCalculatorTests
     }
 
     [Fact]
+    public void IdDocumentQuoteUsesItsOwnFlatRateAndIgnoresDocumentMinimumCharge()
+    {
+        var pricing = ConfiguredPricing(minimum: 5_000);
+        pricing.IdDocumentPriceMinor = 1_250;
+
+        Assert.Equal(1_250, PricingCalculator.CalculateIdDocument(pricing));
+    }
+
+    [Fact]
+    public void IdDocumentQuoteRequiresAnExplicitlyConfiguredRate()
+    {
+        var pricing = ConfiguredPricing();
+
+        var exception = Assert.Throws<InvalidOperationException>(
+            () => PricingCalculator.CalculateIdDocument(pricing));
+
+        Assert.Contains("ID card printing", exception.Message);
+    }
+
+    [Fact]
     public void PhotoQuoteUsesConfiguredPerPhotoRateWithoutDocumentMinimumCharge()
     {
         var pricing = ConfiguredPricing(minimum: 5_000);

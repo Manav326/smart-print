@@ -1132,6 +1132,7 @@ export interface ShopPricingProfile {
   photo25x35Minor: number;
   photo2x2Minor: number;
   photo4x6Minor: number;
+  idDocumentPriceMinor: number;
   version: number;
   updatedUtc: string;
 }
@@ -1263,6 +1264,7 @@ export function updateShopPricing(token: string, values: {
   photo25x35Minor: number;
   photo2x2Minor: number;
   photo4x6Minor: number;
+  idDocumentPriceMinor: number;
 }) {
   return apiRequest<ShopPricingProfile>("/api/v1/shop/pricing", {
     method: "PUT",

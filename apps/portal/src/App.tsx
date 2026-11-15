@@ -1564,6 +1564,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     colourDuplexPerSheetMinor: number;
     minimumChargeMinor: number;
     photo35x45Minor:number; photo25x35Minor:number; photo2x2Minor:number; photo4x6Minor:number;
+    idDocumentPriceMinor:number;
   }) {
     setBusy(true);
     try {
@@ -2852,6 +2853,7 @@ function PricingPage({ pricing, onSave, busy }: {
     colourDuplexPerSheetMinor: number;
     minimumChargeMinor: number;
     photo35x45Minor:number; photo25x35Minor:number; photo2x2Minor:number; photo4x6Minor:number;
+    idDocumentPriceMinor:number;
   }) => void;
   busy: boolean;
 }) {
@@ -2861,6 +2863,7 @@ function PricingPage({ pricing, onSave, busy }: {
   const [colourDuplex,setColourDuplex]=useState((pricing.colourDuplexPerSheetMinor/100).toFixed(2));
   const [minimum,setMinimum]=useState((pricing.minimumChargeMinor/100).toFixed(2));
   const [photo35x45,setPhoto35x45]=useState((pricing.photo35x45Minor/100).toFixed(2));const [photo25x35,setPhoto25x35]=useState((pricing.photo25x35Minor/100).toFixed(2));const [photo2x2,setPhoto2x2]=useState((pricing.photo2x2Minor/100).toFixed(2));const [photo4x6,setPhoto4x6]=useState((pricing.photo4x6Minor/100).toFixed(2));
+  const [idDocumentPrice,setIdDocumentPrice]=useState((pricing.idDocumentPriceMinor/100).toFixed(2));
   useEffect(()=>{
     setMono((pricing.monoPerSideMinor/100).toFixed(2));
     setColour((pricing.colourPerSideMinor/100).toFixed(2));
@@ -2868,9 +2871,10 @@ function PricingPage({ pricing, onSave, busy }: {
     setColourDuplex((pricing.colourDuplexPerSheetMinor/100).toFixed(2));
     setMinimum((pricing.minimumChargeMinor/100).toFixed(2));
     setPhoto35x45((pricing.photo35x45Minor/100).toFixed(2));setPhoto25x35((pricing.photo25x35Minor/100).toFixed(2));setPhoto2x2((pricing.photo2x2Minor/100).toFixed(2));setPhoto4x6((pricing.photo4x6Minor/100).toFixed(2));
+    setIdDocumentPrice((pricing.idDocumentPriceMinor/100).toFixed(2));
   },[pricing]);
   const toMinor=(value:string)=>Math.round(Number(value)*100);
-  const valid=[mono,colour,monoDuplex,colourDuplex,minimum,photo35x45,photo25x35,photo2x2,photo4x6].every(value=>value.trim()!==""&&Number.isFinite(Number(value))&&Number(value)>=0);
+  const valid=[mono,colour,monoDuplex,colourDuplex,minimum,photo35x45,photo25x35,photo2x2,photo4x6,idDocumentPrice].every(value=>value.trim()!==""&&Number.isFinite(Number(value))&&Number(value)>=0);
   return <section className="panel settings-panel pricing-page">
     <div className="settings-intro"><div className="settings-icon"><Wallet size={20}/></div><div><h2>Print rate card</h2><p>Set the prices your customers see before they authorise a job.</p></div><span className={pricing.isConfigured?"pricing-status configured":"pricing-status"}>{pricing.isConfigured?"Active rate card":"Not configured"}</span></div>
     <div className="pricing-disclaimer"><ShieldCheck size={16}/><span>Prices are stored in paise and calculated by the server. Updating this rate card affects new quotes; existing quotes retain their saved price and pricing version.</span></div>
@@ -2882,7 +2886,7 @@ function PricingPage({ pricing, onSave, busy }: {
         colourPerSideMinor:toMinor(colour),
         monoDuplexPerSheetMinor:toMinor(monoDuplex),
         colourDuplexPerSheetMinor:toMinor(colourDuplex),
-        minimumChargeMinor:toMinor(minimum),photo35x45Minor:toMinor(photo35x45),photo25x35Minor:toMinor(photo25x35),photo2x2Minor:toMinor(photo2x2),photo4x6Minor:toMinor(photo4x6)
+        minimumChargeMinor:toMinor(minimum),photo35x45Minor:toMinor(photo35x45),photo25x35Minor:toMinor(photo25x35),photo2x2Minor:toMinor(photo2x2),photo4x6Minor:toMinor(photo4x6),idDocumentPriceMinor:toMinor(idDocumentPrice)
       });
     }}>
       <div className="pricing-group-heading"><strong>Single-sided printing</strong><span>Price per A4 printed side</span></div>
@@ -2898,6 +2902,9 @@ function PricingPage({ pricing, onSave, busy }: {
       <div className="pricing-group-heading"><strong>Minimum order</strong><span>Applied if the calculated print total is lower</span></div>
       <label htmlFor="pricing-minimum-charge">Minimum job charge <span className="price-input-wrap minimum-price"><span aria-hidden="true">₹</span><input type="number" min="0" max="100000" step="0.01" aria-label="Minimum job charge" id="pricing-minimum-charge" value={minimum} onChange={e=>setMinimum(e.target.value)}/></span></label>
       <div className="pricing-group-heading"><strong>Photo printing</strong><span>Price per finished photo · ₹0 disables a size</span></div><div className="pricing-input-grid photo-pricing-grid"><label htmlFor="pricing-photo-35x45">35 × 45 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="35 × 45 mm" id="pricing-photo-35x45" value={photo35x45} onChange={e=>setPhoto35x45(e.target.value)}/></span></label><label htmlFor="pricing-photo-25x35">25 × 35 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="25 × 35 mm" id="pricing-photo-25x35" value={photo25x35} onChange={e=>setPhoto25x35(e.target.value)}/></span></label><label htmlFor="pricing-photo-2x2">2 × 2 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="2 × 2 inch" id="pricing-photo-2x2" value={photo2x2} onChange={e=>setPhoto2x2(e.target.value)}/></span></label><label htmlFor="pricing-photo-4x6">4 × 6 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="4 × 6 inch" id="pricing-photo-4x6" value={photo4x6} onChange={e=>setPhoto4x6(e.target.value)}/></span></label></div><div className="settings-summary"><ShieldCheck size={16}/><span>Photo rates are per finished photo, not per A4 sheet. The quote records the rate used.</span></div>
+       <div className="pricing-group-heading"><strong>ID card printing</strong><span>Price per prepared ID card · ₹0 disables ID card quotes</span></div>
+       <label htmlFor="pricing-id-document">Prepared ID card (one A4 sheet) <span className="price-input-wrap minimum-price"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Prepared ID card" id="pricing-id-document" value={idDocumentPrice} onChange={e=>setIdDocumentPrice(e.target.value)}/></span></label>
+       <div className="settings-summary"><ShieldCheck size={16}/><span>ID cards use this dedicated flat rate, independent of ordinary document page prices and minimum job charge.</span></div>
       <div className="settings-summary"><ShieldCheck size={16}/><span>Customer payment gateway setup is separate and is not active yet. This screen configures print quotations only; no money is collected here.</span></div>
       <div className="settings-actions"><button className="primary-button" disabled={busy||!valid||toMinor(mono)<=0||toMinor(colour)<=0}>{busy?<span className="button-spinner"/>:"Save print prices"}</button></div>
     </form>
@@ -4742,9 +4749,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     return {...baseline,...(groupSettings[name]??{})};
   };
   const settingsForFile=(candidate:File):CustomerSavedPrintSettings=> {
-    if(isSmartPrintIdDocument(candidate)) return {
-      copies:1,colourMode:"Colour",isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",advancedEnabled:false
-    };
+    if(isSmartPrintIdDocument(candidate)) {
+      const defaults=defaultsForGroup(groupNameForFile(candidate));
+      return {
+        copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",advancedEnabled:false
+      };
+    }
     const fingerprint=customerFileFingerprint(candidate);
     const defaults=defaultsForGroup(groupNameForFile(candidate));
     const own=fileSettings[fingerprint];
@@ -4908,11 +4918,16 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         // ID Studio sheets remain Private Printing only. Saved Photo Studio sheets
         // follow the customer's selected batch privacy mode (Private by default).
         if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards must use Private Printing. No normal cloud upload is allowed.",409);
-        const created=effectiveUploadMode==="LOCAL"&&localAgent
+        const uploadedItem=effectiveUploadMode==="LOCAL"&&localAgent
           ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)
           : idDocument
             ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded or sent to cloud storage.",409);})()
             : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings,printKind,photoSettings);
+        // Keep private filenames only in this customer's local draft. The upload
+        // request and server-side PrintDocument continue using an anonymized label.
+        const created=effectivePrivatePrinting
+          ? {...uploadedItem,document:{...uploadedItem.document,originalFileName:candidate.name}}
+          : uploadedItem;
         if(created.job.batchId&&created.job.batchId!==currentBatchId) {
           if(results.length>0) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
@@ -5029,7 +5044,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const idDocument=(printKindsOverride?.[item.job.id]??printKindsByJobId[item.job.id]??item.job.printKind)==="ID_DOCUMENT";
         try {
           nextQuotes[item.job.id]=await calculateCustomerQuote(sessionToken,item.job.id,{
-            colourMode:photoSettings||idDocument?"Colour":settings.colourMode,
+            colourMode:photoSettings?"Colour":settings.colourMode,
             paperSize:photoSettings||idDocument?"A4":settings.paperSize,
             isDuplex:photoSettings||idDocument?false:settings.isDuplex,
             copies:photoSettings?1:idDocument?1:settings.copies,
@@ -5493,15 +5508,22 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   );
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
-  const acceptedDocumentEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind!=="PHOTO");
+  const acceptedDocumentEntries=acceptedQuoteEntries.filter(entry=>
+    entry.quote?.printKind!=="PHOTO"&&entry.quote?.printKind!=="ID_DOCUMENT");
+  const acceptedIdDocumentEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="ID_DOCUMENT");
   const acceptedPhotoEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="PHOTO");
+  const acceptedPaperEntries=[...acceptedDocumentEntries,...acceptedIdDocumentEntries];
   const batchDocumentSourcePages=acceptedDocumentEntries.reduce((total,entry)=>
     total+(entry.quote?.pageCount??entry.item.job.pageCount),0);
+  const batchIdDocumentSheets=acceptedIdDocumentEntries.reduce((total,entry)=>
+    total+(entry.quote?.pageCount??0),0);
+  const batchIdDocumentAmount=acceptedIdDocumentEntries.reduce((total,entry)=>
+    total+(entry.quote?.quotedAmountMinor??0),0);
   const batchPhotoCount=acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.photoCount??0),0);
   const batchPhotoAmount=acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.quotedAmountMinor??0),0);
-  const batchMonoPrintedPages=acceptedDocumentEntries.reduce((total,entry)=>
+  const batchMonoPrintedPages=acceptedPaperEntries.reduce((total,entry)=>
     total+(entry.quote?.colourMode==="Mono"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
-  const batchColourPrintedPages=acceptedDocumentEntries.reduce((total,entry)=>
+  const batchColourPrintedPages=acceptedPaperEntries.reduce((total,entry)=>
     total+(entry.quote?.colourMode==="Colour"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
   const batchPrintedPages=batchMonoPrintedPages+batchColourPrintedPages+
     acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.pageCount??0),0);
@@ -5582,7 +5604,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <div className="customer-folder-group-head">
             <div className="customer-folder-title"><FolderOpen size={16}/><span><strong>{group.name}</strong><small>{group.files.length} file(s)</small></span></div>
             {isIdStudioGroup
-              ? <small className="customer-upload-local-note">ID sheet · fixed settings. <InfoTooltip label="ID sheet settings"><span>One colour copy, A4 portrait and single-sided printing preserve the card's physical dimensions.</span></InfoTooltip></small>
+              ? <div className="customer-folder-defaults">
+                <div><span>ID sheet</span><strong className="customer-paper-default">A4 portrait · 1 copy · Single-sided</strong></div>
+                <div><span>Print mode</span><div className="customer-choice-row">
+                  <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
+                  <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
+                </div></div>
+              </div>
               : <div className="customer-folder-defaults">
               <div><span>Colour</span><div className="customer-choice-row">
                 <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
@@ -5714,16 +5742,17 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     </>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchDocumentSourcePages} document pages · {batchPhotoCount} photos · {batchPrintedPages} output pages/sheets</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{entry.item.document.originalFileName}<PrintKindTag printKind={entry.quote!.printKind}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
+      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files · {batchDocumentSourcePages} document pages · {batchIdDocumentSheets} ID card sheets · {batchPhotoCount} photos · {batchPrintedPages} output pages/sheets</small></div>
+      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{entry.item.document.originalFileName}<PrintKindTag printKind={entry.quote!.printKind}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.printKind==="ID_DOCUMENT"?entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
       <div className="customer-batch-print-breakdown">
-        {batchMonoPrintedPages>0&&<div><span>B&W · {batchMonoPrintedPages} document pages</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
-        {batchColourPrintedPages>0&&<div><span>Colour · {batchColourPrintedPages} document pages</span><strong>{formatMoney(batchColourAmount,quoteEntries[0].quote!.currency)}</strong></div>}
+        {batchMonoPrintedPages>0&&<div><span>B&W · {batchMonoPrintedPages} output pages/sheets</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
+        {batchColourPrintedPages>0&&<div><span>Colour · {batchColourPrintedPages} output pages/sheets</span><strong>{formatMoney(batchColourAmount,quoteEntries[0].quote!.currency)}</strong></div>}
+        {batchIdDocumentSheets>0&&<div><span>ID card printing · {batchIdDocumentSheets} A4 portrait {batchIdDocumentSheets===1?"sheet":"sheets"}</span><strong>{formatMoney(batchIdDocumentAmount,quoteEntries[0].quote!.currency)}</strong></div>}
         {batchPhotoCount>0&&<div><span>Photo printing · {batchPhotoCount} finished photos</span><strong>{formatMoney(batchPhotoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
         <div className="customer-batch-print-total"><span>Total output pages/sheets</span><strong>{batchPrintedPages}</strong></div>
         <div className="customer-batch-print-total"><span>Total payable</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong></div>
       </div>
-      <p className="customer-payment-model-note">Document pages use the shop's B&W/Colour rate card. Photo sheets use the saved per-photo rate for the selected size, shown on each line. Rejected files are excluded. After review, pay once for all accepted files.</p>
+      <p className="customer-payment-model-note">Document pages use the shop's B&W/Colour rate card. Prepared ID cards use the separate flat ID-card rate and print as normal A4 documents in the selected B&W/Colour mode. Photo sheets use the saved per-photo rate for the selected size. Rejected files are excluded. After review, pay once for all accepted files.</p>
     </div>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
