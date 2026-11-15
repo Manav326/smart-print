@@ -95,7 +95,7 @@ public sealed class Worker(
         HttpClient client, AgentCredentials credentials, CancellationToken cancellationToken)
     {
         using var pendingResponse = await SendAgentGetRequestAsync(
-            client, credentials, "api/v1/agent/private-relays/pending?waitSeconds=25", cancellationToken);
+            client, credentials, $"api/v1/agent/private-relays/pending?waitSeconds={AgentCloudHttpTiming.PrivateRelayPendingWaitSeconds}", cancellationToken);
         if (!pendingResponse.IsSuccessStatusCode)
         {
             if (pendingResponse.StatusCode != HttpStatusCode.NotFound)
