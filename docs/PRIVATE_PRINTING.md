@@ -20,14 +20,14 @@ not add a second upload, extra confirmation, or a separate print screen.
   supplied through the authenticated API heartbeat/session.
 - The paired Agent decrypts in memory, validates the original hash and document
   structure, then stores the encrypted queue copy. Production queue files and
-  the Agent's private document key use DPAPI CurrentUser protection under the
-  Agent service identity. Existing LocalMachine-protected queue files and keys
-  are upgraded after successful decryption and integrity validation.
-- The production queue directory is ACL-restricted to SYSTEM. This prevents
-  ordinary interactive accounts from reading the files through normal Windows
-  file permissions. It is defence in depth, not protection against a local
-  administrator who can take ownership, execute as SYSTEM, inspect process
-  memory, or modify the OS.
+  the Agent's private document key use DPAPI LocalMachine protection, with the
+  queue and key directories ACL-restricted to SYSTEM. The DPAPI scope alone is
+  not user-isolated: the NTFS ACL is what prevents ordinary interactive accounts
+  from reading the protected files through normal Windows permissions.
+- This is defence in depth, not protection against a local administrator who
+  can take ownership, execute as SYSTEM, inspect process memory, or modify the
+  OS. The Agent remains compatible with its existing LocalSystem service
+  identity and LocalMachine-protected queue data.
 - Managed PDF export, source preview, source download and shop-side photo
   revision operations are blocked for Private Printing.
 - After confirmed physical output, the Agent removes its encrypted source and
