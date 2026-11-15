@@ -22,7 +22,7 @@ builder.Services.AddWindowsService(options =>
 });
 builder.Services.AddHttpClient("cloud", client =>
 {
-    client.Timeout = TimeSpan.FromSeconds(20);
+    client.Timeout = TimeSpan.FromSeconds(AgentCloudHttpTiming.RequestTimeoutSeconds);
 })
 .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
 {
