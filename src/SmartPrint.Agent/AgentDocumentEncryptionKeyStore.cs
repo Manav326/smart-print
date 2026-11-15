@@ -5,8 +5,9 @@ using System.Security.Principal;
 namespace SmartPrint.Agent;
 
 /// <summary>
-/// Per-Agent RSA key used only to wrap per-upload AES keys. The private key is
-/// protected with DPAPI LocalMachine and stored inside the protected queue.
+/// Per-Agent RSA key used only to wrap per-upload AES keys. Production storage
+/// uses DPAPI CurrentUser under the Agent service identity; older LocalMachine
+/// protected keys are migrated after successful decryption and validation.
 /// </summary>
 public sealed class AgentDocumentEncryptionKeyStore
 {
@@ -56,6 +57,25 @@ public sealed class AgentDocumentEncryptionKeyStore
 
     private RSA LoadOrCreate()
     {
+        var directory = Path.GetDirectoryName(keyPath)
+            ?? throw new InvalidOperationException("The Agent document key directory is unavailable.");
+        Directory.CreateDirectory(directory);
+        if (applyWindowsAcl && OperatingSystem.IsWindows())
+        {
+            var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            var security = new DirectorySecurity();
+            security.SetAccessRuleProtection(true, false);
+            security.SetOwner(systemSid);
+            // The Agent service runs as LocalSystem; omit a routine read ACE for
+            // interactive Administrators. A local administrator can still take
+            // ownership or execute as SYSTEM, so this is defence in depth only.
+            security.AddAccessRule(new FileSystemAccessRule(
+                systemSid,
+                FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None, AccessControlType.Allow));
+            new DirectoryInfo(directory).SetAccessControl(security);
+        }
+
         if (File.Exists(keyPath))
         {
             var protectedBytes = File.ReadAllBytes(keyPath);
@@ -97,25 +117,6 @@ public sealed class AgentDocumentEncryptionKeyStore
                 }
             }
             finally { CryptographicOperations.ZeroMemory(privateBytes); }
-        }
-
-        var directory = Path.GetDirectoryName(keyPath)
-            ?? throw new InvalidOperationException("The Agent document key directory is unavailable.");
-        Directory.CreateDirectory(directory);
-        if (applyWindowsAcl && OperatingSystem.IsWindows())
-        {
-            var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
-            var security = new DirectorySecurity();
-            security.SetAccessRuleProtection(true, false);
-            security.SetOwner(systemSid);
-            // The Agent service runs as LocalSystem; omit a routine read ACE for
-            // interactive Administrators. A local administrator can still take
-            // ownership or execute as SYSTEM, so this is defence in depth only.
-            security.AddAccessRule(new FileSystemAccessRule(
-                systemSid,
-                FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
-                PropagationFlags.None, AccessControlType.Allow));
-            new DirectoryInfo(directory).SetAccessControl(security);
         }
 
         var created = RSA.Create(3072);
