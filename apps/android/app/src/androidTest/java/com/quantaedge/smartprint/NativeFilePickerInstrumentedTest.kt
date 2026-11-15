@@ -121,9 +121,15 @@ class NativeFilePickerInstrumentedTest {
                 assertTrue(photoTemps.all { it.isFile })
                 assertTrue(idTemps.all { it.isFile })
 
-                MainActivity::class.java.getDeclaredMethod("releaseStudioUploadFiles").apply {
-                    isAccessible = true
-                }.invoke(activity)
+                // The production bridge dispatches this Activity/window cleanup on the
+                // main thread. Invoke it through ActivityScenario as well; calling this
+                // UI-touching method from the instrumentation runner thread causes
+                // ViewRootImpl.CalledFromWrongThreadException and does not model the app.
+                scenario.onActivity { activeActivity ->
+                    MainActivity::class.java.getDeclaredMethod("releaseStudioUploadFiles").apply {
+                        isAccessible = true
+                    }.invoke(activeActivity)
+                }
 
                 assertTrue("Successful upload cleanup must remove Photo Studio plaintext.", photoTemps.none { it.exists() })
                 assertTrue("Successful upload cleanup must remove ID Studio plaintext.", idTemps.none { it.exists() })
