@@ -46,6 +46,7 @@ import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPrefe
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
 import OrderJourneyPage from "./OrderJourneyPage";
+import { isSpoolerJobRetained } from "./order-journey";
 import ShopAdPlacement from "./ShopAdPlacement";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
 import { getSubscriptionReminderState } from "./subscription-checkout-state";
@@ -1053,6 +1054,10 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   }
 
   async function confirmPrintedOutput(job: ShopPrintJob) {
+    if (isSpoolerJobRetained(job.spoolerStatus)) {
+      setError("Windows is still holding this print job. Refresh after the Agent clears it from the queue, then check the actual paper output before confirming.");
+      return;
+    }
     const ok = await confirmInApp(`Have you physically checked all requested pages for ${job.jobNumber}? Only confirm after checking the actual paper output.`, "Confirm paper output", "Confirm output");
     if (!ok) return;
     setBusyJobId(job.id); setError("");
@@ -2812,7 +2817,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>{job.status==="REJECTED"?"Refund rejected file":"Review pages / refund"}</button>}
                 {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.privatePrinting&&job.outputMode==="PDF_EXPORT"?"Create test PDF":job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
                 {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>{job.privatePrinting&&job.outputType==="TEST_VIRTUAL"?"Retry test PDF":"Save PDF again"}</button>}
-                {(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus,job.printerStatus))} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}
+                {(job.status==="SPOOLER_ACCEPTED"||job.status==="PRINTING"||(job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode!=="PDF_EXPORT"))&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||isSpoolerJobRetained(job.spoolerStatus)||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus,job.printerStatus))} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}
               </div>
               {editingSettingsJobId===job.id&&editingPrintSettings&&<div className="queue-settings-editor">
                 <div><strong>Review print options</strong><small>The revised quote must be approved by the customer before payment or printing.</small></div>
