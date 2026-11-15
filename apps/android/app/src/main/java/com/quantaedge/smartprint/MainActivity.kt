@@ -20,6 +20,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.SslErrorHandler
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -1243,22 +1244,58 @@ class MainActivity : AppCompatActivity() {
         return scroll
     }
 
+    private inner class ThemePreferenceJavascriptInterface {
+        @JavascriptInterface
+        fun getTheme(): String = SmartPrintThemePreference.read(this@MainActivity).storedValue
+
+        @JavascriptInterface
+        fun getThemeUpdatedAt(): Long = SmartPrintThemePreference.readUpdatedAt(this@MainActivity)
+
+        @JavascriptInterface
+        fun hasExplicitSelection(): Boolean = SmartPrintThemePreference.hasExplicitSelection(this@MainActivity)
+
+        @JavascriptInterface
+        fun setTheme(value: String, updatedAtMillis: Double) {
+            val theme = when (value) {
+                SmartPrintTheme.LIGHT.storedValue -> SmartPrintTheme.LIGHT
+                SmartPrintTheme.DARK.storedValue -> SmartPrintTheme.DARK
+                else -> return
+            }
+            if (!updatedAtMillis.isFinite() || updatedAtMillis < 0.0 || updatedAtMillis > Long.MAX_VALUE.toDouble()) return
+            val updatedAt = updatedAtMillis.toLong()
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed) {
+                    SmartPrintThemePreference.saveIfNewer(this@MainActivity, theme, updatedAt)
+                }
+            }
+        }
+    }
+
     private fun chooseTheme(theme: SmartPrintTheme) {
-        // Keep an embedded customer WebView in sync without navigating away from
-        // an in-progress upload or print review.
+        // Keep the embedded customer WebView and native chrome in sync without
+        // navigating away from an in-progress upload or print review.
         val value = theme.storedValue
+        val updatedAt = SmartPrintThemePreference.nextUpdatedAt(this)
         webView?.evaluateJavascript(
             """
                 (() => {
-                  try { localStorage.setItem('qrtoprint.theme', '$value'); } catch {}
-                  document.documentElement.dataset.theme = '$value';
-                  document.documentElement.style.colorScheme = '$value';
+                  try {
+                    localStorage.setItem('smartprint.theme', '$value');
+                    localStorage.setItem('smartprint.theme.updatedAt', '$updatedAt');
+                    localStorage.removeItem('qrtoprint.theme');
+                  } catch {}
+                  const bridge = window.SmartPrintThemeNative;
+                  try { if (bridge && bridge.setTheme) bridge.setTheme('$value', $updatedAt); } catch {}
+                  if (document.documentElement) {
+                    document.documentElement.dataset.theme = '$value';
+                    document.documentElement.style.colorScheme = '$value';
+                  }
                   window.dispatchEvent(new CustomEvent('smartprint-theme-change', { detail: '$value' }));
                 })();
             """.trimIndent(),
             null
         )
-        SmartPrintThemePreference.save(this, theme)
+        SmartPrintThemePreference.save(this, theme, updatedAt)
     }
 
     private fun accountServiceUrl(): String = BuildConfig.SERVICE_BASE_URL
@@ -3914,21 +3951,26 @@ class MainActivity : AppCompatActivity() {
         // The bridge is pinned to the configured service origin for this build.
         val trustedPage = Uri.parse(BuildConfig.SERVICE_BASE_URL)
         val trustedOrigin = "${trustedPage.scheme}://${trustedPage.authority}"
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
-            val theme = SmartPrintThemePreference.read(this).storedValue
-            val bootstrap = """
-                (() => {
-                  const selected = '$theme';
-                  try { localStorage.setItem('qrtoprint.theme', selected); } catch {}
-                  document.documentElement.dataset.theme = selected;
-                  document.documentElement.style.colorScheme = selected;
-                })();
-            """.trimIndent()
-            WebViewCompat.addDocumentStartJavaScript(view, bootstrap, setOf(trustedOrigin))
+        val themeBootstrapPlan = WebViewThemeBootstrapPolicy.create(
+            documentStartScriptAvailable = WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT),
+            webMessageListenerAvailable = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
+        )
+        // This interface exposes only four appearance operations and no account,
+        // session, document, network or filesystem capabilities. It is independent
+        // of WEB_MESSAGE_LISTENER support, so old WebView providers can persist theme.
+        if (themeBootstrapPlan.installThemeJavascriptInterface) {
+            view.addJavascriptInterface(ThemePreferenceJavascriptInterface(), "SmartPrintThemeNative")
+        }
+        if (themeBootstrapPlan.injectAtDocumentStart) {
+            WebViewCompat.addDocumentStartJavaScript(
+                view,
+                SmartPrintThemeWebBootstrap.script(),
+                setOf(trustedOrigin)
+            )
             webViewThemeBootstrapInstalled = true
         }
         if (trustedPage.scheme in setOf("https", "http") && trustedPage.host != null &&
-            WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+            themeBootstrapPlan.webMessageListenerAvailable) {
             WebViewCompat.addWebMessageListener(
                 view,
                 "SmartPrintNative",
@@ -4237,29 +4279,12 @@ class MainActivity : AppCompatActivity() {
                     !loadedUrl.host.equals(trustedPage.host, true) ||
                     loadedUrl.port != trustedPage.port) return
 
-                val selectedTheme = SmartPrintThemePreference.read(this@MainActivity).storedValue
-                val script = if (webViewThemeBootstrapInstalled) """
-                    (() => {
-                      const selected = '$selectedTheme';
-                      try { localStorage.setItem('qrtoprint.theme', selected); } catch {}
-                      document.documentElement.dataset.theme = selected;
-                      document.documentElement.style.colorScheme = selected;
-                    })();
-                """.trimIndent() else """
-                    (() => {
-                      const selected = '$selectedTheme';
-                      try {
-                        if (localStorage.getItem('qrtoprint.theme') !== selected) {
-                          localStorage.setItem('qrtoprint.theme', selected);
-                          window.location.reload();
-                          return;
-                        }
-                      } catch {}
-                      document.documentElement.dataset.theme = selected;
-                      document.documentElement.style.colorScheme = selected;
-                    })();
-                """.trimIndent()
-                view.evaluateJavascript(script, null)
+                if (!webViewThemeBootstrapInstalled) {
+                    // Fallback for WebView providers without DOCUMENT_START_SCRIPT.
+                    // Reconcile saved preferences without forcing a reload or erasing
+                    // a newer selection made inside the embedded portal.
+                    view.evaluateJavascript(SmartPrintThemeWebBootstrap.script(), null)
+                }
             }
             override fun onReceivedError(
                 view: WebView,
