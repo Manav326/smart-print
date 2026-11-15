@@ -1360,7 +1360,7 @@ public sealed class Worker(
                 }
 
                 if (entry.PrivatePrinting &&
-                    string.Equals(found.Status, "RETAINED", StringComparison.Ordinal))
+                    (found.StatusFlags & 0x00002000u) != 0)
                 {
                     var retainedStatus = "PRIVATE_RETAINED_JOB_DELETE_PENDING";
                     try
@@ -1390,10 +1390,13 @@ public sealed class Worker(
                     continue;
                 }
 
-                await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, found.Status, ct);
+                // Keep the existing shop-facing status vocabulary for
+                // ordinary jobs even when Windows marks the job as retained.
+                var reportedStatus = found.Status == "RETAINED" ? "PRINTED" : found.Status;
+                await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, reportedStatus, ct);
                 await ReportSpoolerStatusAsync(
                     client, credentials, entry.JobId, found.JobId,
-                    found.Status, found.PagesPrinted, found.TotalPages, ct);
+                    reportedStatus, found.PagesPrinted, found.TotalPages, ct);
             }
             catch (Win32Exception ex)
             {
