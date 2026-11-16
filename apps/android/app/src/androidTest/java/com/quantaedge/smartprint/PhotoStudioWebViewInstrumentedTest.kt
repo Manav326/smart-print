@@ -230,6 +230,27 @@ class PhotoStudioWebViewInstrumentedTest {
         tapCssPoint(scenario, point.getDouble("x"), point.getDouble("y"))
     }
 
+    private fun tapPhotoBackgroundSample(scenario: ActivityScenario<MainActivity>) {
+        val coordinates = evaluate(
+            scenario,
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const canvas = document.getElementById('photo-studio-preview-canvas');
+              if (!dialog || !(canvas instanceof HTMLCanvasElement) || !dialog.contains(canvas)) return null;
+              const rect = canvas.getBoundingClientRect();
+              const xMm = Number(canvas.dataset.backgroundSampleXmm);
+              const yMm = Number(canvas.dataset.backgroundSampleYmm);
+              if (!Number.isFinite(xMm) || !Number.isFinite(yMm)) return null;
+              return JSON.stringify({
+                x: rect.left + rect.width * xMm / 210,
+                y: rect.top + rect.height * yMm / 297
+              });
+            })()"""
+        )
+        val point = JSONObject(decodeJavascriptString(coordinates))
+        tapCssPoint(scenario, point.getDouble("x"), point.getDouble("y"))
+    }
+
     private fun tapButtonId(scenario: ActivityScenario<MainActivity>, componentId: String) {
         val id = JSONObject.quote(componentId)
         waitFor(
@@ -687,7 +708,7 @@ class PhotoStudioWebViewInstrumentedTest {
                     "document.querySelector('[role=dialog]')?.innerText.includes('Not selected')"
                 )
             )
-            tapPhotoSheetPoint(scenario, 13.5, 10.0)
+            tapPhotoBackgroundSample(scenario)
             waitFor(
                 scenario,
                 "document.querySelector('[role=dialog]')?.innerText.includes('#D8E7F5')",
