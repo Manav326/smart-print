@@ -121,19 +121,33 @@ if ($previousService) {
 }
 
 # SmartPrint stores only its own machine identity, encrypted queue and network
-# preference below this product-specific directory. Give the built-in LocalService
-# identity access while keeping the data private to SYSTEM, Administrators and
+# preference below this product-specific directory. Migrate the old SYSTEM-only
+# tree while the Agent is stopped, then grant only SYSTEM, Administrators and
 # LocalService. No printer, driver, port, default-printer or Spooler state is changed.
-New-Item -ItemType Directory -Force -Path $agentDataRoot | Out-Null
-$icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
-$agentDataAcl = @(
-    "*S-1-5-18:(OI)(CI)F",      # LocalSystem
-    "*S-1-5-32-544:(OI)(CI)F", # Built-in Administrators
-    "*S-1-5-19:(OI)(CI)F"      # LocalService
-)
-& $icaclsPath $agentDataRoot /inheritance:r /grant:r @agentDataAcl /T /C /Q | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    throw "Could not restrict SmartPrint machine data to SYSTEM, Administrators and LocalService."
+function Set-AgentDataPermissions {
+    New-Item -ItemType Directory -Force -Path $agentDataRoot | Out-Null
+    $takeownPath = Join-Path $env:SystemRoot "System32\takeown.exe"
+    $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
+    & $takeownPath /F $agentDataRoot /R /D Y /A | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not take administrative ownership of the existing SmartPrint machine-data tree for ACL migration."
+    }
+
+    # Reset any protected, old SYSTEM-only child ACLs to the parent baseline,
+    # then replace inherited access with the exact SmartPrint principals.
+    & $icaclsPath $agentDataRoot /reset /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not reset the SmartPrint machine-data ACLs for migration."
+    }
+    $agentDataAcl = @(
+        "*S-1-5-18:(OI)(CI)F",      # LocalSystem
+        "*S-1-5-32-544:(OI)(CI)F", # Built-in Administrators
+        "*S-1-5-19:(OI)(CI)F"      # LocalService
+    )
+    & $icaclsPath $agentDataRoot /inheritance:r /grant:r @agentDataAcl /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not restrict SmartPrint machine data to SYSTEM, Administrators and LocalService."
+    }
 }
 
 $createdService = $false
@@ -146,11 +160,14 @@ try {
             (Get-Service -Name $serviceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
         }
 
+        Set-AgentDataPermissions
+
         & sc.exe config $serviceName binPath= $binaryPath start= auto | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not update the existing QRtoPrint service executable path." }
         Set-Service -Name $serviceName -StartupType Automatic
     }
     else {
+        Set-AgentDataPermissions
         New-Service -Name $serviceName -BinaryPathName $binaryPath -DisplayName "QRtoPrint Smart Print Agent" -Description "Secure local printer inventory and cloud heartbeat service for QRtoPrint." -StartupType Automatic | Out-Null
         $createdService = $true
     }
