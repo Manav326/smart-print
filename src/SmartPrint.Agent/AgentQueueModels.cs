@@ -36,7 +36,7 @@ public sealed record AgentClaimedJob(
     bool PdfBrandingEnabled = false,
     bool PrivatePrinting = false,
     string PrintKind = "DOCUMENT",
-    string PhotoPaperFinish = "GLOSSY",
+    string PhotoPaperFinish = "PLAIN",
     string PhotoOutputLayout = "A4_SHEET",
     string? PhotoSizeCode = null);
 
@@ -52,7 +52,7 @@ public sealed record AgentPrivateRelayItem(
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
     string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL",
-    string PhotoPaperFinish = "GLOSSY", string PhotoOutputLayout = "A4_SHEET",
+    string PhotoPaperFinish = "PLAIN", string PhotoOutputLayout = "A4_SHEET",
     string? PhotoSizeCode = null);
 
 public sealed record AgentPrivateTestOutputRequest(string FileName, long SizeBytes, string Sha256);
