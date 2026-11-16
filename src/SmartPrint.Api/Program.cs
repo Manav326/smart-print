@@ -5443,7 +5443,7 @@ agentApi.MapGet("/private-relays/pending", async (
                 printer.DisplayName, printer.QueueName!, ticket.FileExtension, ticket.MediaType,
                 ticket.SizeBytes, ticket.Sha256, ticket.ColourMode, ticket.PaperSize,
                 ticket.IsDuplex, ticket.Copies, ticket.Orientation, ticket.ExpiresUtc,
-                ticket.PrintKind, printer.OutputMode))
+                ticket.PrintKind, printer.OutputMode, ticket.PagesPerSheet))
             .Take(50)
             .ToListAsync(ct);
     }
@@ -5716,6 +5716,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         PaperSize = locked.PaperSize,
         IsDuplex = locked.IsDuplex,
         Orientation = locked.Orientation,
+        PagesPerSheet = locked.PagesPerSheet,
         PrivatePrinting = true,
         PrintKind = printJobKind,
         PhotoSizeCode = locked.PhotoSizeCode,
@@ -5782,7 +5783,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             Job = new
             {
                 job.Id, job.PrivatePrinting, job.PrintKind, job.JobNumber, job.Status, job.PageCount,
-                job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
+                job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation, job.PagesPerSheet,
                 job.PricingVersion, job.Currency, job.QuotedAmountMinor, job.CreatedUtc
             },
             Document = new
@@ -6328,6 +6329,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         ticket.IsDuplex,
         ticket.Copies,
         ticket.Orientation,
+        ticket.PagesPerSheet,
         ticket.ExpiresUtc
     });
 });
@@ -9330,6 +9332,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         request.ColourMode is not ("Mono" or "Colour") ||
         request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         request.Copies is < 1 or > 100 ||
+        request.PagesPerSheet is < 1 or > 500 ||
+        (request.PagesPerSheet > 1 && (request.PrintKind != "DOCUMENT" || mediaType != "application/pdf")) ||
         request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
     {
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = $"Local upload supports PDF, JPG/JPEG and PNG files up to {UploadLimits.MaxFileBytes / (1024 * 1024)} MB with a valid SHA-256 digest." });
@@ -9385,6 +9389,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.IsDuplex != request.IsDuplex ||
             existing.Copies != request.Copies ||
             existing.Orientation != request.Orientation ||
+            existing.PagesPerSheet != request.PagesPerSheet ||
             existing.PhotoSizeCode != request.PhotoSizeCode ||
             existing.PhotoCount != request.PhotoCount ||
             existing.PhotosPerPage != request.PhotosPerPage)
@@ -9441,6 +9446,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 lockedTicket.IsDuplex == request.IsDuplex &&
                 lockedTicket.Copies == request.Copies &&
                 lockedTicket.Orientation == request.Orientation &&
+                lockedTicket.PagesPerSheet == request.PagesPerSheet &&
                 lockedTicket.CompletedUtc is null &&
                 LocalUploadRecoveryRules.CanRenewExpiredTicket(
                     lockedTicket.CreatedUtc, lockedTicket.ExpiresUtc, lockedTicket.ClaimLeaseExpiresUtc,
@@ -9556,6 +9562,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             printer.Status,
             printer.LastSeenUtc,
             printer.OutputMode,
+            printer.CapabilitiesJson,
             agent.LocalEndpointsJson,
             agent.DocumentEncryptionPublicKey
         }
@@ -9571,6 +9578,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             message = request.PrivatePrinting
                 ? "The paired shop computer is offline. No document has been uploaded. Please retry when the shop computer reconnects."
                 : "The shop computer is temporarily unavailable. SmartPrint can keep this request securely online; the shop can release it when an Agent is ready."
+        });
+    }
+    if (!PrinterPagesPerSheetRules.Supports(stationPrinter.CapabilitiesJson, request.PagesPerSheet))
+    {
+        return Results.Conflict(new
+        {
+            code = "pages_per_sheet_not_supported",
+            message = "The assigned printer driver has not reported support for the selected pages-per-sheet value. Choose one of the options shown for this printer."
         });
     }
     if (request.PrivatePrinting)
@@ -9632,6 +9647,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         IsDuplex = request.IsDuplex,
         Copies = request.Copies,
         Orientation = request.Orientation,
+        PagesPerSheet = request.PagesPerSheet,
         PrivatePrinting = request.PrivatePrinting,
         PrintKind = request.PrintKind,
         PhotoSizeCode = request.PhotoSizeCode,
