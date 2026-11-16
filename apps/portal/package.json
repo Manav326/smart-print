@@ -10,6 +10,7 @@
     "validate:seo": "node scripts/validate-seo-assets.mjs"
   },
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "@tauri-apps/api": "^2.8.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",

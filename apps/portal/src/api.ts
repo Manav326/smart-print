@@ -1,3 +1,4 @@
+import { sha256Blob } from "./streaming-file-hash";
 import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { identifySupportedDocument } from "./document-content-policy";
@@ -1331,16 +1332,11 @@ async function requestCustomerLocalUploadTicket(
 ): Promise<CustomerLocalUploadTicket> {
   const identified=await identifySupportedDocument(file);
   if(!identified)throw new ApiError("The file contents are not a supported PDF, JPEG or PNG. Choose a valid document.",415,"document_content_unsupported");
-  const hashInput=await file.arrayBuffer();
-  let digest: ArrayBuffer;
-  try {
-    digest = await crypto.subtle.digest("SHA-256", hashInput);
-  } finally {
-    new Uint8Array(hashInput).fill(0);
-  }
+  // Hash the immutable File in 1 MiB slices. WebCrypto's digest API only
+  // accepts one complete ArrayBuffer; the incremental SHA-256 keeps customer
+  // upload preparation at O(1 MiB) memory instead of duplicating the full file.
+  const sha256 = await sha256Blob(file);
   const privateExtension=identified.extension;
-  const sha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-  new Uint8Array(digest).fill(0);
   const ticket = await apiRequest<Omit<CustomerLocalUploadTicket, "sha256">>("/api/v1/public/sessions/current/local-upload-tickets", {
     method: "POST",
     headers: {
