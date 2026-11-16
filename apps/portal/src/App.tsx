@@ -4997,7 +4997,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];delete previews[photoStudioSourceFingerprint];
     for(const sheet of sheets){
       const fp=customerFileFingerprint(sheet.file);groups[fp]=group;
-      settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
+      settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1};
       photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage};
       const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
       if(urls.length)previews[fp]=urls;
@@ -5174,7 +5174,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       for(const candidate of supported) {
         const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
         const group=nativeGroup||customerBatchGroupName(candidate);
-        if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
+        if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1};
       }
       return updated;
     });
