@@ -264,7 +264,6 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     $action = New-ScheduledTaskAction -Execute $fixtureExecutablePath -Argument $arguments -WorkingDirectory $serviceFixtureDirectory
     $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\LocalService" -LogonType ServiceAccount -RunLevel Limited
     try {
-        Copy-Item -LiteralPath $buildExecutablePath -Destination $fixtureExecutablePath -Force
         Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
         $script:ownsTask = $true
         $taskStartedAt = Get-Date
