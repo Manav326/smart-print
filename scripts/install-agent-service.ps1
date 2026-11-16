@@ -148,6 +148,25 @@ function Set-AgentDataPermissions {
     if ($LASTEXITCODE -ne 0) {
         throw "Could not restrict SmartPrint machine data to SYSTEM, Administrators and LocalService."
     }
+
+    # The encrypted document queue is more sensitive than pairing metadata.
+    # Keep it private to SYSTEM and the LocalService Agent, excluding even the
+    # Administrators group from its normal DACL.
+    $privateQueueRoot = Join-Path $agentDataRoot "LocalQueue"
+    if (Test-Path -LiteralPath $privateQueueRoot -PathType Container) {
+        $privateQueueAcl = @(
+            "*S-1-5-18:(OI)(CI)F", # LocalSystem
+            "*S-1-5-19:(OI)(CI)F"  # LocalService
+        )
+        & $icaclsPath $privateQueueRoot /inheritance:r /grant:r @privateQueueAcl /T /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not restrict the encrypted SmartPrint queue to SYSTEM and LocalService."
+        }
+        & $icaclsPath $privateQueueRoot /setowner "*S-1-5-19" /T /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not set the encrypted SmartPrint queue owner to LocalService."
+        }
+    }
 }
 
 $createdService = $false
