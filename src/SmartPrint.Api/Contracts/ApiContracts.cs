@@ -66,11 +66,20 @@ public sealed record AgentEnrollmentRequest(string Code, string Fingerprint, str
 
 public sealed record AgentEnrollmentResponse(Guid AgentDeviceId, string AgentSecret, DateTimeOffset CreatedUtc);
 
+public sealed record AgentStorageSnapshotRequest(
+    long DocumentCount,
+    long LogicalDocumentBytes,
+    long QueueDiskBytes,
+    long OutputFileCount,
+    long OutputFileBytes,
+    DateTimeOffset MeasuredUtc);
+
 public sealed record AgentHeartbeatRequest(
     string Version,
     string OperatingSystem,
     IReadOnlyList<string>? LocalEndpoints = null,
-    string? DocumentEncryptionPublicKey = null);
+    string? DocumentEncryptionPublicKey = null,
+    AgentStorageSnapshotRequest? StorageSnapshot = null);
 
 public sealed record AgentPrinterDiscoveryRequest(
     string QueueName,
