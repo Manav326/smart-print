@@ -94,7 +94,7 @@ public sealed class WindowsPrintExecutorTests
 public sealed class WindowsPrintToPdfSpoolerIntegrationTests
 {
     [Fact]
-    public void OpensAWindowsQueueWithAdministrativeAccessForIdempotentRelease()
+    public void OpensAWindowsQueueWithStandardPrintAccessForIdempotentRetainedJobRelease()
     {
         if (!string.Equals(
                 Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
@@ -108,8 +108,8 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
         var executor = new WindowsPrintExecutor();
 
         Assert.Null(executor.GetJob(queueName, absentJobId));
-        // This opens the queue with PRINTER_ACCESS_ADMINISTER and verifies that
-        // releasing an already-absent job is a safe, idempotent cleanup operation.
+        // The Agent must release only its own retained jobs using standard
+        // PRINTER_ACCESS_USE permission, without requiring printer administration.
         executor.ReleaseRetainedJob(queueName, absentJobId);
         Assert.Null(executor.GetJob(queueName, absentJobId));
     }
