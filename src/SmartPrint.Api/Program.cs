@@ -3817,6 +3817,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
         try
         {
             using var confirmationPayload = await JsonDocument.ParseAsync(httpRequest.Body, cancellationToken: ct);
+            if (confirmationPayload.RootElement.ValueKind != JsonValueKind.Object)
+                return Results.BadRequest(new { code = "invalid_output_confirmation_request", message = "The output confirmation request must be a JSON object." });
             manualQueueReconciliationConfirmed =
                 confirmationPayload.RootElement.TryGetProperty("manualQueueReconciliationConfirmed", out var manualValue) &&
                 manualValue.ValueKind == JsonValueKind.True;
