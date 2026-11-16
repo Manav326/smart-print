@@ -760,4 +760,9 @@ test("browser customer N-up preview is visual-only and leaves the original uploa
  assert.match(app,/Next sheet/);
  assert.match(preview,/embedPages/);
  assert.match(preview,/SmartPrint by QuantaEdge/);
+ const android=read("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
+ const nativePreviewStart=android.indexOf("private fun renderCustomerPdfSheet(");
+ const nativePreviewEnd=android.indexOf("private fun renderCustomerPdfPage(",nativePreviewStart);
+ assert.ok(nativePreviewStart>=0 && nativePreviewEnd>nativePreviewStart);
+ assert.match(android.slice(nativePreviewStart,nativePreviewEnd),/drawText\("SmartPrint by QuantaEdge"/);
 });
