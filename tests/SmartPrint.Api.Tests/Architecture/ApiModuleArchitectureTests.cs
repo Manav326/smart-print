@@ -56,7 +56,7 @@ public sealed class ApiModuleArchitectureTests
         var errors = new List<string>();
         foreach (var moduleDirectory in Directory.GetDirectories(modulesRoot))
         {
-            var moduleName = Path.GetFileName(moduleDirectory);
+            var moduleName = new DirectoryInfo(moduleDirectory).Name;
             foreach (var file in Directory.EnumerateFiles(moduleDirectory, "*.cs", SearchOption.AllDirectories))
             {
                 var relativePath = Path.GetRelativePath(moduleDirectory, file);
@@ -250,7 +250,7 @@ public sealed class ApiModuleArchitectureTests
 
         foreach (var moduleDirectory in Directory.GetDirectories(modulesRoot))
         {
-            var moduleName = Path.GetFileName(moduleDirectory);
+            var moduleName = new DirectoryInfo(moduleDirectory).Name;
             foreach (var path in Directory.EnumerateFiles(moduleDirectory, "*.cs", SearchOption.AllDirectories))
             {
                 var relativePath = Path.GetRelativePath(moduleDirectory, path);
@@ -267,7 +267,7 @@ public sealed class ApiModuleArchitectureTests
         var startingPoints = new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
         foreach (var startingPoint in startingPoints)
         {
-            var directory = new DirectoryInfo(startingPoint);
+            DirectoryInfo? directory = new DirectoryInfo(startingPoint);
             while (directory is not null)
             {
                 var projectPath = Path.Combine(directory.FullName, "src", "SmartPrint.Api", "SmartPrint.Api.csproj");
