@@ -113,6 +113,10 @@ public sealed class AgentControlPipeHostedService(
             PipeAccessRights.ReadWrite,
             AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(
+            new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null),
+            PipeAccessRights.FullControl,
+            AccessControlType.Allow));
+        security.AddAccessRule(new PipeAccessRule(
             new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
             PipeAccessRights.FullControl,
             AccessControlType.Allow));
