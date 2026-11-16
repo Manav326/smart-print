@@ -11686,6 +11686,11 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.Orientation,
             item.PricingVersion,
             item.PrintKind,
+            HasIdDocumentTicket = db.LocalPrintUploadTickets.AsNoTracking().Any(ticket =>
+                ticket.TenantId == item.TenantId &&
+                ticket.PrintJobId == item.Id &&
+                ticket.PrivatePrinting &&
+                ticket.PrintKind == "ID_DOCUMENT"),
             item.PhotoSizeCode,
             item.PhotoCount,
             item.PhotosPerPage,
@@ -11709,11 +11714,6 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
     // ID_DOCUMENT is intentionally ticket-only. Restore that discriminator for
     // the customer status contract so refreshing a quote cannot turn an ID card
     // into an ordinary DOCUMENT in the batch summary.
-    var hasIdDocumentTicket = await db.LocalPrintUploadTickets.AsNoTracking()
-        .AnyAsync(ticket => ticket.TenantId == session.TenantId &&
-                            ticket.PrintJobId == jobId &&
-                            ticket.PrivatePrinting &&
-                            ticket.PrintKind == "ID_DOCUMENT", ct);
     var job = new
     {
         storedJob.Id,
@@ -11728,7 +11728,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         storedJob.Orientation,
         storedJob.PricingVersion,
         PrintKind = PrivateRelayPrintKindRules.ResolveCustomerStatusPrintKind(
-            storedJob.PrintKind, hasIdDocumentTicket),
+            storedJob.PrintKind, storedJob.HasIdDocumentTicket),
         storedJob.PhotoSizeCode,
         storedJob.PhotoCount,
         storedJob.PhotosPerPage,
