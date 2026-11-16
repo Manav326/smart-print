@@ -120,3 +120,7 @@ The native app in `apps/android` is a customer-side companion, not a second back
 - The Android app does not include a local pricing engine, payment verification system or print executor. Physical printing continues on the paired Windows Agent.
 
 The first CI delivery is an unsigned debug APK and JVM tests. Instrumented UI tests, physical Android LAN testing, signed releases and store distribution remain release gates.
+
+## API modularization working agreement
+
+The API refactoring on `refactor/api-modularization-current-main` must follow the [API Refactoring Guidelines](API_REFACTORING_GUIDELINES.md). The guide defines endpoint, service, domain, contract and persistence responsibilities; documentation and commenting expectations; compatibility and security invariants; and the incremental validation workflow. It supplements this architecture document and does not replace the modular-monolith principles above.
