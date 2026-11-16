@@ -2,12 +2,13 @@ import BrandLockup from "./BrandLockup";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Activity, Building2, CheckCircle2, ChevronLeft, ChevronRight, Megaphone,
-  Clock3, CreditCard, Layers3, LogOut, Menu, Monitor, PauseCircle, PanelLeftClose, PanelLeftOpen, PlayCircle, Printer, RefreshCw, Search, Settings2, ShieldCheck
+  Clock3, CreditCard, Layers3, LogOut, Menu, Monitor, PauseCircle, PanelLeftClose, PanelLeftOpen, PlayCircle, Printer, RefreshCw, Search, Settings2, ShieldCheck, Wifi
 } from "lucide-react";
 import PlatformPlansSection from "./PlatformPlansSection";
 import PlatformSubscriptionsSection from "./PlatformSubscriptionsSection";
 import PlatformOperationsSection from "./PlatformOperationsSection";
 import PlatformAdvertisingSection from "./PlatformAdvertisingSection";
+import PlatformDataNetworkSection from "./PlatformDataNetworkSection";
 import { adminPathForSection, adminSectionFromPath } from "./portal-routing";
 import {
   getPlatformOverview, getPlatformTenants, getPlatformTenantStatusHistory, updatePlatformTenantStatus, logout,
@@ -17,7 +18,7 @@ import { readSidebarCollapsedPreference, saveSidebarCollapsedPreference } from "
 import ThemeToggleButton from "./ThemeToggleButton";
 import { formatIstDate, formatIstDateTime } from "./date-time";
 
-type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations" | "Advertising";
+type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations" | "Advertising" | "Data & Network";
 
 export default function PlatformAdminConsole({
   tokens,
@@ -136,14 +137,16 @@ export default function PlatformAdminConsole({
     setSidebarOpen(false);
   }
 
-  const title = section === "Overview" ? "Platform overview" : section === "Tenants" ? "Shop tenants" : section === "Plans" ? "Plans and entitlements" : section === "Subscriptions" ? "Shop subscriptions" : section === "Advertising" ? "Advertising" : "Operations and retention";
+  const title = section === "Overview" ? "Platform overview" : section === "Tenants" ? "Shop tenants" : section === "Plans" ? "Plans and entitlements" : section === "Subscriptions" ? "Shop subscriptions" : section === "Advertising" ? "Advertising" : section === "Data & Network" ? "Data & Network" : "Operations and retention";
   const subtitle = section === "Overview"
     ? "A cross-platform view of tenant health, subscriptions, devices and recent activity."
     : section === "Tenants"
       ? "Find shops and inspect their current subscription and connected-device footprint."
       : section === "Plans" ? "Configure versioned SaaS plans, prices and centrally managed capabilities."
       : section === "Subscriptions" ? "Manage trial and free-plan assignments with a permanent audit trail."
-       : section === "Advertising" ? "Create, schedule and measure campaigns across customer and shop-owner placements." : "Configure platform-wide print quotas, retention, cleanup schedules and suspended-shop recovery policy.";
+       : section === "Advertising" ? "Create, schedule and measure campaigns across customer and shop-owner placements."
+       : section === "Data & Network" ? "Measure original-document movement, shop Wi-Fi transfers, and Agent storage across your platform."
+       : "Configure platform-wide print quotas, retention, cleanup schedules and suspended-shop recovery policy.";"
 
   return (
     <div className={`app-shell platform-admin-shell${dark ? "" : " light"}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
@@ -162,6 +165,7 @@ export default function PlatformAdminConsole({
           <button title="Plans & entitlements" aria-current={section === "Plans" ? "page" : undefined} className={section === "Plans" ? "nav-item active" : "nav-item"} onClick={() => navigate("Plans")}><Layers3 size={17}/><span>Plans & entitlements</span></button>
           <button title="Shop subscriptions" aria-current={section === "Subscriptions" ? "page" : undefined} className={section === "Subscriptions" ? "nav-item active" : "nav-item"} onClick={() => navigate("Subscriptions")}><CreditCard size={17}/><span>Shop subscriptions</span></button>
           <button title="Advertising" aria-current={section === "Advertising" ? "page" : undefined} className={section === "Advertising" ? "nav-item active" : "nav-item"} onClick={() => navigate("Advertising")}><Megaphone size={17}/><span>Advertising</span></button>
+          <button title="Data & Network" aria-current={section === "Data & Network" ? "page" : undefined} className={section === "Data & Network" ? "nav-item active" : "nav-item"} onClick={() => navigate("Data & Network")}><Wifi size={17}/><span>Data & Network</span></button>
           <button title="Operations & retention" aria-current={section === "Operations" ? "page" : undefined} className={section === "Operations" ? "nav-item active" : "nav-item"} onClick={() => navigate("Operations")}><Settings2 size={17}/><span>Operations & retention</span></button>
         </nav>
         <div className="sidebar-bottom">
@@ -343,6 +347,7 @@ export default function PlatformAdminConsole({
           {section === "Subscriptions" && <PlatformSubscriptionsSection tokens={tokens}/>}
           {section === "Operations" && <PlatformOperationsSection tokens={tokens}/>}
           {section === "Advertising" && <PlatformAdvertisingSection tokens={tokens}/>}
+          {section === "Data & Network" && <PlatformDataNetworkSection tokens={tokens}/>}
         </div>
       </main>
     </div>
