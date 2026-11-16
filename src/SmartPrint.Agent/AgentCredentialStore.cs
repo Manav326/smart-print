@@ -220,10 +220,13 @@ public sealed class AgentCredentialStore
         var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
         var localServiceSid = new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null);
         var administratorsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+        using var identity = WindowsIdentity.GetCurrent();
+        var ownerSid = identity.User
+            ?? throw new InvalidOperationException("The current Windows identity has no user SID.");
 
         var directorySecurity = new DirectorySecurity();
         directorySecurity.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-        directorySecurity.SetOwner(administratorsSid);
+        directorySecurity.SetOwner(ownerSid);
         directorySecurity.AddAccessRule(new FileSystemAccessRule(
             systemSid,
             FileSystemRights.FullControl,
@@ -248,7 +251,7 @@ public sealed class AgentCredentialStore
         {
             var fileSecurity = new FileSecurity();
             fileSecurity.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
-            fileSecurity.SetOwner(administratorsSid);
+            fileSecurity.SetOwner(ownerSid);
             fileSecurity.AddAccessRule(new FileSystemAccessRule(systemSid, FileSystemRights.FullControl, AccessControlType.Allow));
             fileSecurity.AddAccessRule(new FileSystemAccessRule(localServiceSid, FileSystemRights.FullControl, AccessControlType.Allow));
             fileSecurity.AddAccessRule(new FileSystemAccessRule(administratorsSid, FileSystemRights.FullControl, AccessControlType.Allow));
