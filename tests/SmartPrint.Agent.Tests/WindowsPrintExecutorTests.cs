@@ -88,6 +88,61 @@ public sealed class WindowsPrintExecutorTests
 
         Assert.Equal("LOCAL_DOCUMENT_INTEGRITY_MISMATCH", exception.ReasonCode);
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(501)]
+    public void RejectsInvalidPagesPerSheetBeforeOpeningPrinter(int pagesPerSheet)
+    {
+        var bytes = "%PDF-1.7"u8.ToArray();
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-INVALID-NUP", Guid.NewGuid(), "Test printer", "Missing Windows queue",
+            "test.pdf", "application/pdf", Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            bytes.LongLength, 1, 1, "Mono", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            PagesPerSheet: pagesPerSheet);
+
+        var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+            new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None));
+
+        Assert.Equal("PAGES_PER_SHEET_INVALID", exception.ReasonCode);
+    }
+
+    [Fact]
+    public void RejectsNupForNonPdfDocumentsBeforeOpeningPrinter()
+    {
+        var bytes = "not a PNG payload"u8.ToArray();
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-NUP-NON-PDF", Guid.NewGuid(), "Test printer", "Missing Windows queue",
+            "photo.png", "image/png", Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            bytes.LongLength, 1, 1, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            PagesPerSheet: 4);
+
+        var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+            new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None));
+
+        Assert.Equal("PAGES_PER_SHEET_PDF_REQUIRED", exception.ReasonCode);
+    }
+
+    [Theory]
+    [InlineData("PHOTO")]
+    [InlineData("ID_DOCUMENT")]
+    public void RejectsNupForPreparedPrintKindsBeforeOpeningPrinter(string printKind)
+    {
+        var bytes = "%PDF-1.7"u8.ToArray();
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-NUP-PREPARED", Guid.NewGuid(), "Test printer", "Missing Windows queue",
+            "prepared.pdf", "application/pdf", Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            bytes.LongLength, 1, 1, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            PrintKind: printKind, PagesPerSheet: 4);
+
+        var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+            new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None));
+
+        Assert.Equal("PAGES_PER_SHEET_PDF_REQUIRED", exception.ReasonCode);
+    }
 }
 
 
