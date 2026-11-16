@@ -176,8 +176,8 @@ public sealed class Worker(
                     throw new InvalidDataException("The encrypted relay envelope is incomplete.");
 
                 ciphertext = await contentResponse.Content.ReadAsByteArrayAsync(cancellationToken);
-                if (ticket.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
-                    ciphertext.LongLength != ticket.SizeBytes + 16)
+                if (ticket.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
+                    ciphertext.LongLength != ticket.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
                     throw new InvalidDataException("The encrypted relay payload size does not match its ticket.");
 
                 aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
