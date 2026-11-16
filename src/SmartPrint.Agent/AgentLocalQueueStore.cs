@@ -411,7 +411,8 @@ public sealed class AgentLocalQueueStore
             PrivatePrinting: job.PrivatePrinting,
             PrintKind: job.PrintKind,
             PhotoPaperFinish: job.PhotoPaperFinish,
-            PhotoOutputLayout: job.PhotoOutputLayout);
+            PhotoOutputLayout: job.PhotoOutputLayout,
+            PhotoSizeCode: job.PhotoSizeCode);
 
         try
         {
@@ -719,7 +720,10 @@ public sealed class AgentLocalQueueStore
             OutputMode = job.OutputMode,
             PdfBrandingEnabled = job.PdfBrandingEnabled,
             PrivatePrinting = job.PrivatePrinting,
-            PrintKind = job.PrintKind
+            PrintKind = job.PrintKind,
+            PhotoPaperFinish = job.PhotoPaperFinish,
+            PhotoOutputLayout = job.PhotoOutputLayout,
+            PhotoSizeCode = job.PhotoSizeCode
         }, cancellationToken);
     }
 
