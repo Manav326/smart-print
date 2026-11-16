@@ -365,3 +365,54 @@ The API modularization is complete when:
 - No unsupported claim is made about production, shop-floor or physical-printer validation.
 
 A smaller, well-tested modular API is better than a large, superficially tidy rewrite. Prefer clarity, correctness and maintainability over the number of files extracted.
+
+## 13. Enforceable architecture guardrails
+
+These rules are enforced by `tests/SmartPrint.Api.Tests/Architecture/ApiModuleArchitectureTests.cs`. They are not merely review preferences.
+
+### Required enforcement
+
+- Keep module code under `src/SmartPrint.Api/Modules/<Capability>/<Layer>/`.
+- Keep each C# namespace aligned with its module and layer folder.
+- Allow cross-module dependencies only through the other module's `Contracts` or `Abstractions` namespace.
+- Keep `Program.cs` dependent on module `Registration` entry points only. It must not reach into module endpoint, service, domain or persistence implementations.
+- Keep `Domain` independent of ASP.NET Core, EF Core, persistence, storage, endpoint and application-service implementations.
+- Keep `Contracts` independent of ASP.NET Core, EF Core, persistence, storage, endpoint, service and domain implementations.
+- Keep `Services` independent of HTTP endpoint implementations and ASP.NET Core request/response types.
+- Keep endpoint modules free of database writes and transaction ownership; delegate those responsibilities to application services.
+- Add an architecture test whenever a new cross-cutting boundary or exception is approved. The exception must be narrow, explained and covered by a test.
+
+### How the tests work
+
+The architecture test suite scans C# source files in the Modules tree and validates folder/namespace alignment and dependency direction. It also checks the composition-root imports and looks for prohibited database-write/transaction calls in endpoint modules.
+
+The source scanner is a guardrail, not a full C# compiler or security analyzer. It must be kept simple, deterministic and maintainable. When a rule needs semantic/compiler-level analysis, prefer an explicit architecture test or a dedicated analyzer over an expanding collection of fragile regular expressions.
+
+### Incremental migration and legacy baseline
+
+- The current API has legacy endpoint and startup code outside the Modules tree. This is a recorded migration baseline, not a pattern for new code.
+- The first module extraction must place its implementation in the required module structure and make the architecture tests exercise real module files.
+- Do not move all legacy routes in one change just to make an architecture test pass.
+- As each capability is extracted, remove its old implementation and update its callers/tests in the same coherent slice. Avoid duplicate old and new implementations.
+- Do not add new feature workflows to the legacy Program.cs or root-level endpoint/service files while the migration is underway.
+- Do not weaken or skip the architecture tests to accommodate an avoidable dependency. Update the module design or introduce a narrowly documented contract instead.
+
+The architecture test project is part of the normal API test run. A change that violates module boundaries must fail CI just like a behavioral regression.
+
+## 14. Functionality-preservation rule
+
+**The refactoring must not compromise any existing functionality.** Code movement is not permission to simplify, remove, relax or redesign behavior.
+
+For every extraction:
+
+- Capture the current route, caller, authorization, validation, response, state transition and side-effect behavior before moving code.
+- Preserve customer, shop, platform and Agent workflows end to end.
+- Preserve all supported upload formats and limits, quote/pricing calculations, payment and refund behavior, print options, printer capabilities, output modes, retry/reconciliation flows, document retention and Private Printing protections.
+- Preserve web, Android, Windows desktop, Windows Agent, API, database and deployment compatibility.
+- Keep migration/schema changes out of pure structural refactors. When a schema change is independently necessary, explain it and validate both historical upgrade and fresh-install paths.
+- Do not mark a feature complete merely because the API builds. Run the relevant API, portal, Agent, Android, Windows, PostgreSQL and end-to-end tests for the affected behavior.
+- Compare the pre- and post-refactor public API and critical state transitions. Any intentional functional difference requires separate approval and a dedicated change description.
+- Keep rollback straightforward: each extraction should be small, isolated and revertible without losing unrelated fixes.
+
+When a test exposes an existing defect, report it separately. Do not silently change product behavior inside a refactoring commit. Fix it in a clearly identified, separately tested change or obtain explicit approval to include it.
+
