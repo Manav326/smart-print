@@ -57,35 +57,37 @@ internal static class PrinterCapabilityRules
         return matches.Length == 1 ? matches[0] : null;
     }
 
-    internal static short? SelectFourBySixPaperCode(
-        IReadOnlyList<(short Code, string Name, int WidthTenthMm, int HeightTenthMm)> papers)
+    internal static bool TryGetPhotoPaperDimensions(
+        string sizeCode,
+        out short widthTenthMm,
+        out short heightTenthMm)
     {
-        const int expectedWidth = 1016;
-        const int expectedHeight = 1524;
-        const int tolerance = 5;
-        var matches = papers
-            .Where(item =>
-            {
-                var exactDimensions =
-                    Math.Abs(item.WidthTenthMm - expectedWidth) <= tolerance &&
-                    Math.Abs(item.HeightTenthMm - expectedHeight) <= tolerance ||
-                    Math.Abs(item.WidthTenthMm - expectedHeight) <= tolerance &&
-                    Math.Abs(item.HeightTenthMm - expectedWidth) <= tolerance;
-                var name = new string((item.Name ?? string.Empty)
-                    .Where(char.IsLetterOrDigit)
-                    .Select(char.ToUpperInvariant)
-                    .ToArray());
-                var namedFourBySix = name.Contains("4X6", StringComparison.Ordinal) &&
-                    (name.Contains("PHOTO", StringComparison.Ordinal) ||
-                     name == "4X6" ||
-                     name.StartsWith("4X6", StringComparison.Ordinal));
-                return exactDimensions || namedFourBySix;
-            })
-            .Select(item => item.Code)
-            .Distinct()
-            .ToArray();
-        return matches.Length == 1 ? matches[0] : null;
+        (short Width, short Height)? dimensions = sizeCode.Trim().ToLowerInvariant() switch
+        {
+            "35x45" => (350, 450),
+            "25x35" => (250, 350),
+            "2x2" => (508, 508),
+            "4x6" => (1016, 1524),
+            _ => null
+        };
+        widthTenthMm = dimensions?.Width ?? 0;
+        heightTenthMm = dimensions?.Height ?? 0;
+        return dimensions.HasValue;
     }
+
+    internal static bool IsRequestedPhotoPaperSizeAccepted(
+        bool paperSizeFieldReported,
+        bool paperWidthFieldReported,
+        bool paperLengthFieldReported,
+        short actualPaperSize,
+        short actualWidthTenthMm,
+        short actualHeightTenthMm,
+        short expectedWidthTenthMm,
+        short expectedHeightTenthMm) =>
+        paperSizeFieldReported && paperWidthFieldReported && paperLengthFieldReported &&
+        actualPaperSize == 0 &&
+        actualWidthTenthMm == expectedWidthTenthMm &&
+        actualHeightTenthMm == expectedHeightTenthMm;
 
     internal static bool IsRequestedPhotoMediaTypeAccepted(
         bool fieldReported,
