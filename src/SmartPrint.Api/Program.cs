@@ -7951,6 +7951,22 @@ agentApi.MapPost("/heartbeat", async (
     }
     device.Status = "Online";
     device.LastSeenUtc = now;
+    if (request.StorageSnapshot is { } storageSnapshot &&
+        storageSnapshot.DocumentCount >= 0 &&
+        storageSnapshot.LogicalDocumentBytes >= 0 &&
+        storageSnapshot.QueueDiskBytes >= 0 &&
+        storageSnapshot.OutputFileCount >= 0 &&
+        storageSnapshot.OutputFileBytes >= 0 &&
+        storageSnapshot.MeasuredUtc >= now.AddHours(-1) &&
+        storageSnapshot.MeasuredUtc <= now.AddMinutes(1))
+    {
+        device.LocalQueueDocumentCount = storageSnapshot.DocumentCount;
+        device.LocalQueueLogicalBytes = storageSnapshot.LogicalDocumentBytes;
+        device.LocalQueueDiskBytes = storageSnapshot.QueueDiskBytes;
+        device.LocalOutputFileCount = storageSnapshot.OutputFileCount;
+        device.LocalOutputFileBytes = storageSnapshot.OutputFileBytes;
+        device.LocalStorageMeasuredUtc = storageSnapshot.MeasuredUtc;
+    }
     await db.SaveChangesAsync(ct);
     var publicBaseUrl = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
     var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
