@@ -171,6 +171,22 @@ public sealed class Qsp2DocumentFormatTests
             Qsp2DocumentFormat.DecryptAsync(encrypted, plaintext, dataKey, tenantId, documentId, sourceBytes.Length - 1));
     }
 
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(1_048_576, 1)]
+    [InlineData(1_048_577, 2)]
+    [InlineData(2_097_152, 2)]
+    public void EncryptedLengthIncludesHeaderRecordTagsAndAuthenticatedFooter(long plaintextLength, long expectedRecordCount)
+    {
+        var expected = Qsp2DocumentFormat.HeaderSizeBytes +
+            Qsp2DocumentFormat.HeaderMacSizeBytes +
+            plaintextLength +
+            expectedRecordCount * (sizeof(uint) + Qsp2DocumentFormat.AuthenticationTagSizeBytes) +
+            Qsp2DocumentFormat.FooterSizeBytes;
+
+        Assert.Equal(expected, Qsp2DocumentFormat.GetEncryptedLength(plaintextLength));
+    }
+
     [Fact]
     public async Task RandomAccessReaderAuthenticatesOnlyRequestedRecordsAndSupportsSeeking()
     {

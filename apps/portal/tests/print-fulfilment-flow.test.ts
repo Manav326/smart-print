@@ -392,7 +392,12 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.match(route,/IsShopOwner\(principal\)/);
  assert.match(route,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
  assert.match(route,/document\.StorageMode, "CLOUD"/);
- assert.match(route,/var photoSourceMediaType = document\.PhotoSourceMediaType \?\? document\.MediaType/);
+ assert.match(route,/var photoSourceMediaType = documentSnapshot\.PhotoSourceMediaType \?\? documentSnapshot\.MediaType/);
+ assert.match(route,/var documentSnapshot = await db\.PrintDocuments\.AsNoTracking\(\)/);
+ assert.match(route,/await using var transaction = await db\.Database\.BeginTransactionAsync\(ct\)/);
+ assert.match(route,/var document = await db\.PrintDocuments\.SingleOrDefaultAsync/);
+ assert.ok(route.indexOf("var documentSnapshot =") < route.indexOf("await using var transaction"));
+ assert.ok(route.indexOf("await using var transaction") < route.indexOf("var document = await db.PrintDocuments"));
  assert.match(route,/photoSourceMediaType is not \("image\/jpeg" or "image\/png"\)/);
  assert.match(route,/if \(job\.PrivatePrinting\)/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);

@@ -33,6 +33,26 @@ public static class Qsp2DocumentFormat
     internal static readonly byte[] RecordKeyInfo = "SmartPrint.QSP2.RecordKey.v1"u8.ToArray();
 
     /// <summary>
+    /// Calculates the exact QSP2 object length for an exact plaintext length.
+    /// Useful when a streaming HTTP body must declare a Content-Length without
+    /// first materialising any of the encrypted document.
+    /// </summary>
+    public static long GetEncryptedLength(
+        long plaintextLength,
+        int recordSizeBytes = DefaultRecordSizeBytes)
+    {
+        ValidateRecordSize(recordSizeBytes);
+        if (plaintextLength <= 0)
+            throw new ArgumentOutOfRangeException(nameof(plaintextLength));
+
+        var recordCount = checked((plaintextLength - 1) / recordSizeBytes + 1);
+        var perRecordOverhead = checked(recordCount *
+            (sizeof(uint) + (long)AuthenticationTagSizeBytes));
+        return checked(HeaderSizeBytes + HeaderMacSizeBytes +
+            plaintextLength + perRecordOverhead + FooterSizeBytes);
+    }
+
+    /// <summary>
     /// Opens a seekable authenticated reader over a QSP2 encrypted object. Only the
     /// requested records are decrypted, with a one-record cache for random-access
     /// document parsers. The caller owns the input stream unless leaveOpen is false.
