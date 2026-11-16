@@ -4080,11 +4080,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
 
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
+    var photoOutputLayout = form["photoOutputLayout"].FirstOrDefault() ?? "A4_SHEET";
+    var photoPaperFinish = form["photoPaperFinish"].FirstOrDefault() ?? "PLAIN";
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
         !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
         photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
-        photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
+        photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode) ||
+        !PhotoSheetPdfRules.IsValidPhotoOutputOptions(photoOutputLayout, photoPaperFinish, photosPerPage))
     {
         await transaction.RollbackAsync(ct);
         return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -4142,7 +4145,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
 
     if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
         stored.Analysis.PageCount != expectedPageCount ||
-        !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount))
+        !PhotoSheetPdfRules.HasExactlyPhotoPages(stored.Analysis.PageSizesJson, expectedPageCount, photoOutputLayout, photoSizeCode))
     {
         await storage.DeleteAsync(stored.StorageKey);
         await transaction.RollbackAsync(ct);
@@ -4188,6 +4191,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     job.PhotoSizeCode = photoSizeCode;
     job.PhotoCount = photoCount;
     job.PhotosPerPage = photosPerPage;
+    job.PhotoOutputLayout = photoOutputLayout;
+    job.PhotoPaperFinish = photoPaperFinish;
     job.PhotoUnitPriceMinorSnapshot = unitPrice;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
@@ -4243,6 +4248,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         job.PhotoSizeCode,
         job.PhotoCount,
         job.PhotosPerPage,
+        job.PhotoOutputLayout,
+        job.PhotoPaperFinish,
         job.PhotoUnitPriceMinorSnapshot,
         job.QuotedAmountMinor,
         job.PricingVersion,
