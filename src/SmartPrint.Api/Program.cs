@@ -2575,6 +2575,7 @@ shop.MapPost("/photo-jobs", async (
     HttpContext context,
     CancellationToken ct) =>
 {
+    Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = null;
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
         return Results.Forbid();
 
@@ -2687,7 +2688,7 @@ shop.MapPost("/photo-jobs", async (
     var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
     StoredDocument? stored = null;
 
-    Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = null;
+
 
     async Task CleanupUncommittedStorageAsync()
     {

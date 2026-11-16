@@ -166,7 +166,7 @@ public sealed class AgentLocalQueueStore
     public AgentLocalQueueEntry? Find(Guid jobId)
     {
         EnsureQueueIndexLoaded();
-        RefreshManifestFromDisk(jobId);
+        RefreshManifestFromDisk(jobId, forceReload: true);
         lock (queueIndexSync)
             return queueIndex!.TryGetValue(jobId, out var entry) ? entry : null;
     }
@@ -181,12 +181,29 @@ public sealed class AgentLocalQueueStore
 
     private void RefreshQueueIndexFromDisk()
     {
-        Guid[] jobIds;
-        lock (queueIndexSync)
-            jobIds = queueIndex!.Keys.ToArray();
+        var manifestPaths = Directory.Exists(queueRoot)
+            ? Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly).ToArray()
+            : Array.Empty<string>();
+        var presentJobIds = new HashSet<Guid>();
 
-        foreach (var jobId in jobIds)
+        foreach (var path in manifestPaths)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(path);
+            if (!Guid.TryParseExact(fileName, "N", out var jobId))
+                continue;
+
+            presentJobIds.Add(jobId);
             RefreshManifestFromDisk(jobId);
+        }
+
+        lock (queueIndexSync)
+        {
+            foreach (var staleId in queueIndex!.Keys.Where(jobId => !presentJobIds.Contains(jobId)).ToArray())
+            {
+                queueIndex.Remove(staleId);
+                queueManifestStamps.Remove(staleId);
+            }
+        }
     }
 
     /// <summary>
@@ -194,7 +211,7 @@ public sealed class AgentLocalQueueStore
     /// JSON. A file edited or replaced outside this process is reloaded; deletion
     /// removes it from the index. Normal writes still update the index directly.
     /// </summary>
-    private void RefreshManifestFromDisk(Guid jobId)
+    private void RefreshManifestFromDisk(Guid jobId, bool forceReload = false)
     {
         var path = GetManifestPath(jobId);
         var info = new FileInfo(path);
@@ -208,7 +225,8 @@ public sealed class AgentLocalQueueStore
             }
 
             var stamp = new ManifestStamp(info.Length, info.LastWriteTimeUtc.Ticks);
-            if (queueManifestStamps.TryGetValue(jobId, out var currentStamp) &&
+            if (!forceReload &&
+                queueManifestStamps.TryGetValue(jobId, out var currentStamp) &&
                 currentStamp == stamp)
                 return;
 
