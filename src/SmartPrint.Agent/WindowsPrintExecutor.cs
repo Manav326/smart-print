@@ -33,6 +33,9 @@ public sealed class WindowsPrintExecutor
 {
     private const int DmOrientation = 0x00000001;
     private const int DmPaperSize = 0x00000002;
+    private const int DmPaperLength = 0x00000004;
+    private const int DmPaperWidth = 0x00000008;
+    private const int DmMediaType = 0x02000000;
     private const int DmColor = 0x00000800;
     private const int DmDuplex = 0x00001000;
     private const int DcPapers = 2;
@@ -728,21 +731,56 @@ public sealed class WindowsPrintExecutor
                 throw new PrintExecutionBlockedException("PRINTER_DEVMODE_READ_FAILED", "The default printer settings could not be read.");
 
             var mode = Marshal.PtrToStructure<DevModeW>(pointer);
-            var paper = PaperCode(entry.PaperSize);
             var isIdDocument = string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase);
-            if (SupportsPaper(queueName, pointer, paper) is false && !isIdDocument)
-                throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
-            // For ID sheets, a negative capability-list result is advisory. Ask
-            // DocumentProperties to apply A4 and verify its response below rather
-            // than refusing the job solely from a possibly stale capability list.
+            var isPhoto = string.Equals(entry.PrintKind, "PHOTO", StringComparison.OrdinalIgnoreCase);
+            var isPhotoPaper = isPhoto && string.Equals(entry.PhotoOutputLayout, "PHOTO_PAPER", StringComparison.OrdinalIgnoreCase);
+            if (isPhoto && entry.PhotoOutputLayout is not ("A4_SHEET" or "PHOTO_PAPER"))
+                throw new PrintExecutionBlockedException("PHOTO_OUTPUT_LAYOUT_INVALID", "The requested photo output layout is not supported.");
+            if (isPhoto && !isPhotoPaper && entry.PhotoPaperFinish != "PLAIN")
+                throw new PrintExecutionBlockedException("PHOTO_MEDIA_LAYOUT_MISMATCH", "A4 sheet orders use regular A4 paper. Choose individual photo paper prints to select glossy or matte stock.");
+            if (isPhotoPaper && entry.PhotoPaperFinish is not ("GLOSSY" or "MATTE"))
+                throw new PrintExecutionBlockedException("PHOTO_FINISH_INVALID", "Individual photo prints require glossy or matte photo paper.");
+
+            var paper = PaperCode(entry.PaperSize);
+            short photoPaperWidth = 0, photoPaperHeight = 0;
+            short? photoMediaType = null;
+            if (isPhotoPaper)
+            {
+                if (entry.PhotoSizeCode is null ||
+                    !PrinterCapabilityRules.TryGetPhotoPaperDimensions(entry.PhotoSizeCode, out photoPaperWidth, out photoPaperHeight))
+                    throw new PrintExecutionBlockedException("PHOTO_PAPER_SIZE_INVALID", "The selected photo size is not supported for individual photo-paper printing.");
+
+                // The Windows DEVMODE uses tenths of a millimetre for custom media.
+                // The driver must retain the exact size or no job is submitted.
+                mode.PaperSize = 0;
+                mode.PaperWidth = photoPaperWidth;
+                mode.PaperLength = photoPaperHeight;
+                mode.Fields |= DmPaperSize | DmPaperWidth | DmPaperLength;
+
+                photoMediaType = WindowsPrinterCapabilityDiscovery.ResolvePhotoMediaTypeCode(queueName, pointer, entry.PhotoPaperFinish);
+                if (photoMediaType is null)
+                    throw new PrintExecutionBlockedException(
+                        "PHOTO_MEDIA_TYPE_UNSUPPORTED",
+                        $"The selected printer driver does not expose one unambiguous {entry.PhotoPaperFinish.ToLowerInvariant()} photo media type. Choose a printer that supports it or change the requested finish. No pages were sent.");
+                mode.MediaType = unchecked((ushort)photoMediaType.Value);
+                mode.Fields |= DmMediaType;
+            }
+            else
+            {
+                if (SupportsPaper(queueName, pointer, paper) is false && !isIdDocument)
+                    throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
+                // For ID sheets, a negative capability-list result is advisory. Ask
+                // DocumentProperties to apply A4 and verify its response below.
+                mode.PaperSize = paper;
+                mode.Fields |= DmPaperSize;
+            }
 
             var orientationCapability = DeviceCapabilitiesW(queueName, null, DcOrientation, IntPtr.Zero, pointer);
             if (landscape && orientationCapability == 0)
                 throw new PrintExecutionBlockedException("LANDSCAPE_UNSUPPORTED", "The installed printer driver reports that landscape orientation is not supported.");
 
-            mode.Fields |= DmOrientation | DmPaperSize;
+            mode.Fields |= DmOrientation;
             mode.Orientation = landscape ? (short)2 : (short)1;
-            mode.PaperSize = paper;
 
             if (entry.ColourMode == "Colour")
             {
@@ -776,8 +814,29 @@ public sealed class WindowsPrintExecutor
                 ApplyDriverPagesPerSheet(printer, queueName, pointer, size, entry.PagesPerSheet);
 
             var validated = Marshal.PtrToStructure<DevModeW>(pointer);
-            if ((validated.Fields & DmPaperSize) == 0 || validated.PaperSize != paper)
+            if (isPhotoPaper)
+            {
+                if (!PrinterCapabilityRules.IsRequestedPhotoPaperSizeAccepted(
+                    (validated.Fields & DmPaperSize) != 0,
+                    (validated.Fields & DmPaperWidth) != 0,
+                    (validated.Fields & DmPaperLength) != 0,
+                    validated.PaperSize, validated.PaperWidth, validated.PaperLength,
+                    photoPaperWidth, photoPaperHeight))
+                    throw new PrintExecutionBlockedException(
+                        "PHOTO_PAPER_SIZE_REJECTED",
+                        "The printer driver did not accept the selected photo's exact physical dimensions. No pages were sent.");
+            }
+            else if ((validated.Fields & DmPaperSize) == 0 || validated.PaperSize != paper)
                 throw new PrintExecutionBlockedException("PAPER_SIZE_REJECTED", "The printer driver did not accept the requested paper size.");
+
+            if (photoMediaType is short requestedMediaType &&
+                !PrinterCapabilityRules.IsRequestedPhotoMediaTypeAccepted(
+                    (validated.Fields & DmMediaType) != 0,
+                    validated.MediaType,
+                    requestedMediaType))
+                throw new PrintExecutionBlockedException(
+                    "PHOTO_MEDIA_TYPE_REJECTED",
+                    "The printer driver did not retain the requested photo paper finish. No pages were sent.");
             var expectedOrientation = landscape ? (short)2 : (short)1;
             if (!PrinterCapabilityRules.IsRequestedOrientationAccepted(
                     (validated.Fields & DmOrientation) != 0, validated.Orientation, expectedOrientation))
