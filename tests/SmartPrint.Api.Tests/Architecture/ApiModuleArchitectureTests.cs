@@ -224,6 +224,7 @@ public sealed class ApiModuleArchitectureTests
         var errors = new List<string>();
 
         var references = UsingDirective.Matches(source)
+            .Cast<Match>()
             .Select(match => match.Groups["namespace"].Value)
             .Concat(ModuleReference.Matches(source).Cast<Match>().Select(match => match.Value))
             .Where(reference => reference.StartsWith(ModuleNamespacePrefix, StringComparison.Ordinal));
