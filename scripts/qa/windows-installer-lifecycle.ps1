@@ -317,13 +317,18 @@ function Assert-PrivateQueueAcl {
     $queueRoot = Join-Path $programDataRoot "LocalQueue"
     Assert-True (Test-Path -LiteralPath $queueRoot -PathType Container) "The encrypted SmartPrint queue directory is missing."
 
+    # Keep the queue root protected. Child items may safely inherit from
+    # this protected root, so verify their effective allow ACEs rather than
+    # requiring every newly-created file to carry a redundant protected DACL.
+    $queueRootSecurity = Get-Acl -LiteralPath $queueRoot
+    Assert-True ($queueRootSecurity.AreAccessRulesProtected) "The encrypted SmartPrint queue root must have a protected DACL."
+
     # Verify every manifest, encrypted document, key and nested directory.
     # Checking only the root DACL can hide stale explicit ACEs on child files.
     $queueItems = @($queueRoot)
     $queueItems += @(Get-ChildItem -LiteralPath $queueRoot -Force -Recurse | ForEach-Object { $_.FullName })
     foreach ($queueItem in $queueItems) {
         $security = Get-Acl -LiteralPath $queueItem
-        Assert-True ($security.AreAccessRulesProtected) "The private queue item has an inheriting/unprotected DACL: $queueItem"
         $allowedSids = @(
             $security.Access |
                 Where-Object { $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow } |
