@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID, webcrypto } from "node:crypto";
-import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -17,12 +17,6 @@ const AGENT_ID = "11111111-1111-4111-8111-111111111111";
 const STATION_CODE = "PRIVATE-QA";
 const SESSION_TOKEN = "private-printing-browser-qa-session-token";
 
-function writePrivateRelayTrace(event) {
-  appendFileSync(join(artifactDirectory, "private-relay-trace.jsonl"), JSON.stringify({
-    at: new Date().toISOString(),
-    ...event
-  }) + "\n");
-}
 
 function qsp2EncryptedLength(plaintextLength) {
   const recordCount = Math.ceil(plaintextLength / (1024 * 1024));
