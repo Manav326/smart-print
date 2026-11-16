@@ -473,7 +473,8 @@ else if (mode == "verify")
     var roundTripStore = new AgentCredentialStore(roundTripPath);
     roundTripStore.Save(roundTripCredentials);
     var roundTripLoaded = roundTripStore.Load();
-    if (roundTripLoaded?.AgentDeviceId != roundTripCredentials.AgentDeviceId ||
+    if (roundTripLoaded is null ||
+        roundTripLoaded.AgentDeviceId != roundTripCredentials.AgentDeviceId ||
         roundTripLoaded.AgentSecret != roundTripCredentials.AgentSecret)
         throw new InvalidOperationException("The LocalService DPAPI identity save/read round-trip failed.");
     roundTripStore.Delete();
