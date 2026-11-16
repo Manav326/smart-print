@@ -286,6 +286,43 @@ function Add-QueueFixture {
     $script:originalSpoolerProcessId = [uint32]$spooler.ProcessId
 }
 
+function Set-LegacyAgentDataAclFixture {
+    Write-Host "[QA-ACTION] Simulate the previous release's SYSTEM/Administrators data ACL and SYSTEM-only encrypted queue." -ForegroundColor Cyan
+    $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
+    $legacyRootAcl = @(
+        "*S-1-5-18:(OI)(CI)F",      # LocalSystem
+        "*S-1-5-32-544:(OI)(CI)F" # Built-in Administrators
+    )
+    & $icaclsPath $programDataRoot /inheritance:r /grant:r @legacyRootAcl /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not create the legacy SmartPrint root ACL fixture."
+    }
+
+    $legacyQueueRoot = Join-Path $programDataRoot "LocalQueue"
+    $systemOnlyQueueAcl = "*S-1-5-18:(OI)(CI)F"
+    & $icaclsPath $legacyQueueRoot /inheritance:r /grant:r $systemOnlyQueueAcl /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not create the legacy SYSTEM-only encrypted queue ACL fixture."
+    }
+    & $icaclsPath $legacyQueueRoot /setowner "*S-1-5-18" /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not recreate SYSTEM ownership on the legacy encrypted queue fixture."
+    }
+
+    # Keep the lifecycle harness able to collect its test result while the
+    # application-owned identity/queue data is deliberately reverted to legacy ACLs.
+    $fixtureDataDirectory = Join-Path $programDataRoot "Lifecycle"
+    $fixtureAcl = @(
+        "*S-1-5-18:(OI)(CI)F",
+        "*S-1-5-32-544:(OI)(CI)F",
+        "*S-1-5-19:(OI)(CI)F"
+    )
+    & $icaclsPath $fixtureDataDirectory /inheritance:r /grant:r @fixtureAcl /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not preserve the isolated LocalService lifecycle result directory."
+    }
+}
+
 function Assert-LocalServiceIdentityIsNotElevated {
     Write-Host "[QA-ACTION] Verify LocalService identity and absence of local Administrators membership." -ForegroundColor Cyan
     $result = Invoke-FixtureAsLocalService "verify-service-identity"
@@ -597,7 +634,14 @@ else
         Assert-LocalServiceCanPrintFixture
     }
 
+    $legacyAclOk = $false
     if ($seedOk) {
+        $legacyAclOk = Invoke-Check "Simulate legacy SYSTEM-only Agent data ACLs" {
+            Set-LegacyAgentDataAclFixture
+        }
+    }
+
+    if ($seedOk -and $legacyAclOk) {
         $firstInstallOk = Invoke-Check "Fresh Windows installation (N)" {
             $script:ownsInstall = $true
             Invoke-Setup $InstallerV1
