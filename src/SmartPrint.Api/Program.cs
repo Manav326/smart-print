@@ -4160,7 +4160,6 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
     catch (DocumentValidationException exception)
     {
-        await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
     }
 
@@ -4169,7 +4168,6 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount))
     {
         await storage.DeleteAsync(stored.StorageKey);
-        await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_layout_invalid",
@@ -4189,7 +4187,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
 
     var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
-        $"SELECT * FROM ""PrintJobs"" WHERE ""Id"" = {jobId} AND ""TenantId"" = {tenantId} FOR UPDATE")
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
         .ToListAsync(ct);
     var job = lockedJobs.SingleOrDefault();
     if (job is null)
@@ -4210,7 +4208,10 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         return await RejectStagedRevisionAsync(Results.NotFound());
     if (!string.Equals(document.StorageMode, "CLOUD", StringComparison.Ordinal) ||
         !string.Equals(document.StorageKey, documentSnapshot.StorageKey, StringComparison.Ordinal) ||
-        !string.Equals(document.Sha256, documentSnapshot.Sha256, StringComparison.OrdinalIgnoreCase))
+        !string.Equals(document.Sha256, documentSnapshot.Sha256, StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(document.PhotoSourceStorageKey, documentSnapshot.PhotoSourceStorageKey, StringComparison.Ordinal) ||
+        !string.Equals(document.PhotoSourceSha256, documentSnapshot.PhotoSourceSha256, StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(document.PhotoSourceMediaType, documentSnapshot.PhotoSourceMediaType, StringComparison.Ordinal))
         return await RejectStagedRevisionAsync(Results.Conflict(new
         {
             code = "photo_revision_source_changed",
@@ -4320,8 +4321,31 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
     catch
     {
-        await transaction.RollbackAsync(ct);
-        await storage.DeleteAsync(stored.StorageKey);
+        try
+        {
+            await transaction.RollbackAsync(ct);
+        }
+        catch
+        {
+            // The transaction outcome may be uncertain. The reference check below
+            // decides whether the staged object is safe to remove.
+        }
+
+        bool referencedByCommittedDocument;
+        try
+        {
+            referencedByCommittedDocument = await db.PrintDocuments.AsNoTracking()
+                .AnyAsync(item => item.TenantId == tenantId && item.StorageKey == stored.StorageKey, ct);
+        }
+        catch
+        {
+            // A database outcome that cannot be checked is uncertain. Retain the
+            // encrypted object so a committed photo revision cannot lose its source.
+            throw;
+        }
+
+        if (!referencedByCommittedDocument)
+            await storage.DeleteAsync(stored.StorageKey);
         throw;
     }
 
