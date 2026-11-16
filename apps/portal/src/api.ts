@@ -789,6 +789,8 @@ export interface ShopCustomerJob {
   photoSizeCode?: string | null;
   photoCount?: number;
   photosPerPage?: number | null;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -890,6 +892,8 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   form.append("photoSizeCode", values.photoSizeCode);
   form.append("photoCount", String(values.photoCount));
   form.append("photosPerPage", String(values.photosPerPage));
+  form.append("photoOutputLayout", values.photoOutputLayout ?? "A4_SHEET");
+  form.append("photoPaperFinish", values.photoPaperFinish ?? "PLAIN");
   form.append("recipientType", values.recipientType);
   form.append("paymentMethod", values.paymentMethod);
   form.append("idempotencyKey", values.idempotencyKey);
@@ -1164,6 +1168,8 @@ export interface ShopPrintJob {
   photoSizeCode?: string | null;
   photoCount?: number;
   photosPerPage?: number | null;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -1327,7 +1333,7 @@ async function requestCustomerLocalUploadTicket(
   settings: CustomerPrintRequestSettings,
   privatePrinting = false,
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
-  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" }
 ): Promise<CustomerLocalUploadTicket> {
   const identified=await identifySupportedDocument(file);
   if(!identified)throw new ApiError("The file contents are not a supported PDF, JPEG or PNG. Choose a valid document.",415,"document_content_unsupported");
@@ -1365,6 +1371,8 @@ async function requestCustomerLocalUploadTicket(
       photoSizeCode: photoSettings?.sizeCode ?? null,
       photoCount: photoSettings?.photoCount ?? null,
       photosPerPage: photoSettings?.photosPerPage ?? null,
+      photoOutputLayout: photoSettings?.photoOutputLayout ?? "A4_SHEET",
+      photoPaperFinish: photoSettings?.photoPaperFinish ?? "PLAIN",
       detectedFileExtension: identified.extension
     })
   });
@@ -1400,7 +1408,7 @@ export async function uploadCustomerDocument(
   batchName?: string,
   settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" },
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
-  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" }
 ) {
   validateUploadFileSize(file);
   const identified=await identifySupportedDocument(file);
@@ -1443,6 +1451,8 @@ export async function uploadCustomerDocument(
     form.append("photoSizeCode", photoSettings.sizeCode);
     form.append("photoCount", String(photoSettings.photoCount));
     form.append("photosPerPage", String(photoSettings.photosPerPage ?? 1));
+    form.append("photoOutputLayout", photoSettings.photoOutputLayout ?? "A4_SHEET");
+    form.append("photoPaperFinish", photoSettings.photoPaperFinish ?? "PLAIN");
   }
   const uploaded = await apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
     method: "POST",
@@ -1617,7 +1627,7 @@ export async function uploadCustomerDocumentLocally(
   privatePrinting = false,
   localNetworkReady = true,
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
-  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" }
 ): Promise<UploadedPrintJob> {
   validateUploadFileSize(file);
   if (printKind === "ID_DOCUMENT" && !privatePrinting) {
@@ -1907,6 +1917,8 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
   photoSizeCode?: string;
   photoCount?: number;
   photosPerPage?: number;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
 }) {
   return apiRequest<PrintQuoteResult>(`/api/v1/public/jobs/${jobId}/quote`, {
     method: "POST",
@@ -1931,6 +1943,8 @@ export interface CustomerJobStatus {
   photoSizeCode?: string | null;
   photoCount?: number;
   photosPerPage?: number | null;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
