@@ -5632,7 +5632,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             });
         var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
         if (request.PageCount != expectedPageCount ||
-            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, expectedPageCount))
+            !PhotoSheetPdfRules.HasExactlyPhotoPages(request.PageSizesJson, expectedPageCount, ticket.PhotoOutputLayout, photoSizeCode))
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
@@ -6640,6 +6640,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         PhotoSizeCode = ticket.PhotoSizeCode,
         PhotoCount = ticket.PhotoCount ?? 0,
         PhotosPerPage = ticket.PhotosPerPage,
+        PhotoOutputLayout = ticket.PhotoOutputLayout,
+        PhotoPaperFinish = ticket.PhotoPaperFinish,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
