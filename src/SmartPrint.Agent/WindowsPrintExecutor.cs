@@ -99,7 +99,8 @@ public sealed class WindowsPrintExecutor
             ?? throw new ArgumentException("The output path must include a directory.", nameof(outputFilePath));
         Directory.CreateDirectory(outputDirectory);
 
-        return PrintCore(entry, bytes, cancellationToken, fullOutputPath);
+        using var stream = new MemoryStream(bytes, writable: false);
+        return PrintCore(entry, stream, cancellationToken, fullOutputPath);
     }
 
     private SpoolerPrintReceipt PrintCore(
@@ -996,7 +997,7 @@ public sealed class WindowsPrintExecutor
         RasterPage RenderPage(int pageIndex, int dpi);
     }
 
-    private sealed class PdfRasterDocument : IRasterDocument
+    private sealed unsafe class PdfRasterDocument : IRasterDocument
     {
         private readonly IntPtr documentMemory;
         private readonly int documentMemoryLength;

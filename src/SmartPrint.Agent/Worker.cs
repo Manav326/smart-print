@@ -1182,18 +1182,14 @@ public sealed class Worker(
 
                 await localQueueStore.MarkSubmissionStartedAsync(
                     job.Id, job.SpoolerJobName, ct, job.OutputMode);
-                var bytes = localQueueStore.ReadDocument(job.Id);
-                SpoolerPrintReceipt spoolerReceipt;
-                try
+                using var documentStream = localQueueStore.OpenDocumentReadStream(
+                    job.Id, credentials.AgentDeviceId);
+                var spoolerReceipt = printExecutor.Print(entry with
                 {
-                    spoolerReceipt = printExecutor.Print(entry with
-                    {
-                        OutputMode = job.OutputMode,
-                        SpoolerJobName = job.SpoolerJobName,
-                        RejectedPageNumbers = rejectedPages
-                    }, bytes, ct);
-                }
-                finally { CryptographicOperations.ZeroMemory(bytes); }
+                    OutputMode = job.OutputMode,
+                    SpoolerJobName = job.SpoolerJobName,
+                    RejectedPageNumbers = rejectedPages
+                }, documentStream, ct);
 
                 await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
                 await ReportSpoolerAcceptedAsync(client, credentials, job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, "QUEUED", ct);
