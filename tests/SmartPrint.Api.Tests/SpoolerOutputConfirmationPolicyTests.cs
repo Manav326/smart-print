@@ -10,17 +10,20 @@ public sealed class SpoolerOutputConfirmationPolicyTests
     [InlineData("OUTPUT_UNCONFIRMED", " Retained ")]
     public void RetainedWindowsJobCannotBeConfirmedFromAnyPhysicalOutputState(string jobStatus, string spoolerStatus)
     {
-        Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(jobStatus, spoolerStatus));
+        Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(jobStatus, spoolerStatus, 0, 4));
     }
 
     [Theory]
-    [InlineData("SPOOLER_ACCEPTED", "PRINTED")]
-    [InlineData("PRINTING", "QUEUED")]
-    [InlineData("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED")]
-    [InlineData("OUTPUT_UNCONFIRMED", "PRINTED")]
-    public void FreshNonRetainedAgentObservationAllowsPhysicalOutputConfirmation(string jobStatus, string spoolerStatus)
+    [InlineData("SPOOLER_ACCEPTED", "PRINTED", 4, 4, true)]
+    [InlineData("OUTPUT_UNCONFIRMED", "PRINTED", 4, 4, true)]
+    [InlineData("PRINTING", "QUEUED", 0, 4, false)]
+    [InlineData("PRINTING", "PRINTING", 3, 4, false)]
+    [InlineData("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", 0, 4, false)]
+    [InlineData("OUTPUT_UNCONFIRMED", "PRINTED", 3, 4, false)]
+    [InlineData("OUTPUT_UNCONFIRMED", "PRINTED", 4, 0, false)]
+    public void PhysicalOutputRequiresPrintedStatusAndAllPages(string jobStatus, string spoolerStatus, int pagesPrinted, int totalPages, bool expected)
     {
-        Assert.True(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(jobStatus, spoolerStatus));
+        Assert.Equal(expected, SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(jobStatus, spoolerStatus, pagesPrinted, totalPages));
     }
 
     [Theory]
@@ -29,7 +32,7 @@ public sealed class SpoolerOutputConfirmationPolicyTests
     [InlineData(null, "QUEUED")]
     public void NonOutputStatesCannotBeConfirmed(string? jobStatus, string? spoolerStatus)
     {
-        Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(jobStatus, spoolerStatus));
+        Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(jobStatus, spoolerStatus, 4, 4));
     }
 
     [Theory]
