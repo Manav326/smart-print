@@ -175,7 +175,7 @@ try {
         throw "The SmartPrint Agent did not start under the required LocalService identity."
     }
 
-    $newFirewallRule = New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Private -RemoteAddress LocalSubnet -Description "Allows same-local-subnet devices on a Windows Private network to reach the SmartPrint Agent endpoints."
+    $newFirewallRule = New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Private,Domain -RemoteAddress LocalSubnet -Description "Allows same-local-subnet devices on a Windows Private network to reach the SmartPrint Agent endpoints."
 
     # The new version is running and reachable. Old version-specific rules are
     # now safe to remove; any cleanup failure must not roll back a healthy Agent.
