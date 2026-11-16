@@ -76,6 +76,8 @@ $expectedNetworkId = "LIFECYCLE-QA-SHOP-NETWORK"
 $results = [System.Collections.Generic.List[object]]::new()
 $identityHash = $null
 $originalDefaultPrinter = $null
+$originalPrinterInventory = @()
+$originalSpoolerProcessId = $null
 $fixturePrinter = $null
 $installRoot = Join-Path $env:ProgramFiles "SmartPrint"
 $ownsInstall = $false
@@ -247,7 +249,7 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
             }
             Start-Sleep -Milliseconds 500
         }
-        Assert-True (Test-Path -LiteralPath $resultPath) "The LocalSystem lifecycle fixture '$Mode' did not produce a result."
+        Assert-True (Test-Path -LiteralPath $resultPath) "The LocalService lifecycle fixture '$Mode' did not produce a result."
         return (Get-Content -LiteralPath $resultPath -Raw).Trim()
     }
     finally {
@@ -271,11 +273,17 @@ function Assert-PreservedFixtures {
 function Add-QueueFixture {
     $default = Get-CimInstance Win32_Printer | Where-Object { $_.Default } | Select-Object -First 1
     $script:originalDefaultPrinter = if ($default) { $default.Name } else { $null }
+    $script:originalPrinterInventory = @(
+        Get-Printer | Select-Object Name, DriverName, PortName | Sort-Object Name
+    )
 
     $source = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction Stop
     Add-Printer -Name $testPrinterName -DriverName $source.DriverName -PortName $source.PortName -ErrorAction Stop
     $script:ownsPrinter = $true
     $script:fixturePrinter = Get-Printer -Name $testPrinterName -ErrorAction Stop
+    $spooler = Get-CimInstance -ClassName Win32_Service -Filter "Name='Spooler'"
+    Assert-True ($spooler.State -eq "Running" -and $spooler.ProcessId -gt 0) "The Windows Print Spooler must be running before the lifecycle test."
+    $script:originalSpoolerProcessId = [uint32]$spooler.ProcessId
 }
 
 function Assert-LocalServiceIdentityIsNotElevated {
@@ -317,6 +325,21 @@ function Assert-QueueUntouched {
     $default = Get-CimInstance Win32_Printer | Where-Object { $_.Default } | Select-Object -First 1
     $currentDefault = if ($default) { $default.Name } else { $null }
     Assert-True ($currentDefault -eq $originalDefaultPrinter) "SmartPrint changed the Windows default printer."
+
+    $expectedPrinterInventory = @($originalPrinterInventory) + @([PSCustomObject]@{
+        Name = $fixturePrinter.Name
+        DriverName = $fixturePrinter.DriverName
+        PortName = $fixturePrinter.PortName
+    })
+    $expectedPrinterKeys = @($expectedPrinterInventory | ForEach-Object { "$($_.Name)|$($_.DriverName)|$($_.PortName)" } | Sort-Object)
+    $actualPrinterKeys = @(Get-Printer | Select-Object Name, DriverName, PortName |
+        ForEach-Object { "$($_.Name)|$($_.DriverName)|$($_.PortName)" } | Sort-Object)
+    $printerChanges = @(Compare-Object -ReferenceObject $expectedPrinterKeys -DifferenceObject $actualPrinterKeys)
+    Assert-True ($printerChanges.Count -eq 0) "SmartPrint added, removed or modified an existing Windows printer queue, driver or port."
+
+    $spooler = Get-CimInstance -ClassName Win32_Service -Filter "Name='Spooler'"
+    Assert-True ($spooler.State -eq "Running") "SmartPrint stopped the Windows Print Spooler."
+    Assert-True ([uint32]$spooler.ProcessId -eq $originalSpoolerProcessId) "SmartPrint restarted the Windows Print Spooler."
     $rules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
     if ($rules.Count -gt 0) {
         Assert-True (($rules | Where-Object { $_.Profile -ne "Private" }).Count -eq 0) "The SmartPrint Agent firewall rule must be limited to the Private network profile."
