@@ -302,6 +302,8 @@ public sealed class PrintJob
     // The selected sheet density is part of the immutable photo quote/layout snapshot.
     // Nullable for legacy PHOTO jobs created before this column existed.
     public int? PhotosPerPage { get; set; }
+    public string PhotoPaperFinish { get; set; } = "PLAIN";
+    public string PhotoOutputLayout { get; set; } = "A4_SHEET";
     public long PhotoUnitPriceMinorSnapshot { get; set; }
     public int? PricingVersion { get; set; }
     public DateTimeOffset? QuoteExpiresUtc { get; set; }
@@ -316,6 +318,8 @@ public sealed class PrintJob
     public int? SpoolerJobId { get; set; }
     public string? SpoolerJobName { get; set; }
     public string? SpoolerStatus { get; set; }
+    public int SpoolerPagesPrinted { get; set; }
+    public int SpoolerTotalPages { get; set; }
     public DateTimeOffset? SpoolerSubmittedUtc { get; set; }
     public DateTimeOffset? SpoolerObservedUtc { get; set; }
     public DateTimeOffset? OutputConfirmedUtc { get; set; }
@@ -365,6 +369,8 @@ public sealed class LocalPrintUploadTicket
     public string? PhotoSizeCode { get; set; }
     public int? PhotoCount { get; set; }
     public int? PhotosPerPage { get; set; }
+    public string PhotoPaperFinish { get; set; } = "PLAIN";
+    public string PhotoOutputLayout { get; set; } = "A4_SHEET";
     public Guid TenantId { get; set; }
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }
