@@ -59,6 +59,7 @@ public sealed class AgentDocumentEncryptionKeyStore
         if (applyWindowsAcl && OperatingSystem.IsWindows())
         {
             var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            var localServiceSid = new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null);
             using var identity = WindowsIdentity.GetCurrent();
             var ownerSid = identity.User
                 ?? throw new InvalidOperationException("The current Windows identity has no user SID.");
@@ -76,6 +77,13 @@ public sealed class AgentDocumentEncryptionKeyStore
             {
                 security.AddAccessRule(new FileSystemAccessRule(
                     ownerSid,
+                    FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
+            }
+            if (!ownerSid.Equals(localServiceSid))
+            {
+                security.AddAccessRule(new FileSystemAccessRule(
+                    localServiceSid,
                     FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                     PropagationFlags.None, AccessControlType.Allow));
             }
