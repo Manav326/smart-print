@@ -276,7 +276,7 @@ public sealed class LocalAgentApiHostedService(
             builder.Services.Configure<FormOptions>(options =>
             {
                 options.MultipartBodyLengthLimit = UploadLimits.MaxMultipartRequestBytes;
-                options.MemoryBufferThreshold = checked((int)UploadLimits.MaxMultipartRequestBytes);
+                options.MemoryBufferThreshold = 64 * 1024;
             });
 
             // Retain loopback-only static origins for local development. The production
