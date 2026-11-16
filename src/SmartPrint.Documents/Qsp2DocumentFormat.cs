@@ -394,8 +394,12 @@ public static class Qsp2DocumentFormat
     private static byte[] DeriveKey(
         ReadOnlySpan<byte> dataKey,
         ReadOnlySpan<byte> salt,
-        ReadOnlySpan<byte> info) =>
-        HKDF.DeriveKey(HashAlgorithmName.SHA256, dataKey, DataKeySizeBytes, salt, info);
+        ReadOnlySpan<byte> info)
+    {
+        var derivedKey = new byte[DataKeySizeBytes];
+        HKDF.DeriveKey(HashAlgorithmName.SHA256, dataKey, salt, derivedKey, info);
+        return derivedKey;
+    }
 
     private static int GetExpectedRecordLength(
         long plaintextLength,
