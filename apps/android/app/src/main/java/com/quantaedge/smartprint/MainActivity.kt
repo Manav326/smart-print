@@ -7028,8 +7028,8 @@ class MainActivity : AppCompatActivity() {
             "PORTRAIT" -> false
             else -> firstPageLandscape
         }
-        val sheetWidth = if (landscape) 1500 else 1061
-        val sheetHeight = if (landscape) 1061 else 1500
+        val sheetWidth = if (landscape) 1500 else (1500f * shortSideMm / longSideMm).toInt().coerceAtLeast(1)
+        val sheetHeight = if (landscape) (1500f * shortSideMm / longSideMm).toInt().coerceAtLeast(1) else 1500
         val bitmap = Bitmap.createBitmap(sheetWidth, sheetHeight, Bitmap.Config.ARGB_8888)
         try {
             val canvas = android.graphics.Canvas(bitmap)
@@ -7043,6 +7043,7 @@ class MainActivity : AppCompatActivity() {
             val contentHeight = sheetHeight - margin * 2 - gap * (rows - 1)
             val cellWidth = contentWidth / columns
             val cellHeight = contentHeight / rows
+            val maximumPageEdge = maxOf(120, minOf(420, maxOf(cellWidth, cellHeight).toInt()))
             val imagePaint = android.graphics.Paint(
                 android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG
             )
@@ -7064,7 +7065,7 @@ class MainActivity : AppCompatActivity() {
                 try {
                     val pageScale = minOf(
                         1f,
-                        420f / maxOf(page.width, page.height).toFloat()
+                        maximumPageEdge.toFloat() / maxOf(page.width, page.height).toFloat()
                     )
                     val pageWidth = maxOf(1, (page.width * pageScale).toInt())
                     val pageHeight = maxOf(1, (page.height * pageScale).toInt())
