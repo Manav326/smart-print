@@ -1157,6 +1157,7 @@ export interface ShopPrintJob {
   paperSize: string;
   isDuplex: boolean;
   orientation?: string;
+  pagesPerSheet?: number;
   pdfBrandingEnabled?: boolean;
   privatePrinting?: boolean;
   pricingVersion?: number;
@@ -1212,6 +1213,7 @@ export interface UploadedPrintJob {
     paperSize?: string;
     isDuplex?: boolean;
     orientation?: string;
+    pagesPerSheet?: number;
     pricingVersion?: number;
     currency: string;
     quotedAmountMinor: number;
