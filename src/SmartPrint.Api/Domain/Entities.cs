@@ -368,7 +368,7 @@ public sealed class LocalPrintUploadTicket
     public string? PhotoSizeCode { get; set; }
     public int? PhotoCount { get; set; }
     public int? PhotosPerPage { get; set; }
-    public string PhotoPaperFinish { get; set; } = "GLOSSY";
+    public string PhotoPaperFinish { get; set; } = "PLAIN";
     public string PhotoOutputLayout { get; set; } = "A4_SHEET";
     public Guid TenantId { get; set; }
     public Guid CustomerSessionId { get; set; }
