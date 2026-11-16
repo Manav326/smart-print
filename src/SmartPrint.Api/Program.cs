@@ -9570,7 +9570,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.PagesPerSheet != request.PagesPerSheet ||
             existing.PhotoSizeCode != request.PhotoSizeCode ||
             existing.PhotoCount != request.PhotoCount ||
-            existing.PhotosPerPage != request.PhotosPerPage)
+            existing.PhotosPerPage != request.PhotosPerPage ||
+            existing.PhotoOutputLayout != request.PhotoOutputLayout ||
+            existing.PhotoPaperFinish != request.PhotoPaperFinish)
         {
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document, batch or set of print options." });
         }
@@ -10894,7 +10896,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             var photoDocument = await db.PrintDocuments.AsNoTracking()
                 .SingleOrDefaultAsync(item => item.TenantId == job.TenantId && item.PrintJobId == job.Id, ct);
             if (photoDocument is null ||
-                !PhotoSheetPdfRules.HasExactlyA4PortraitPages(photoDocument.PageSizesJson, expectedPageCount))
+                !PhotoSheetPdfRules.HasExactlyPhotoPages(photoDocument.PageSizesJson, expectedPageCount, job.PhotoOutputLayout, photoSizeCode))
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {

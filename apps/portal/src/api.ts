@@ -848,6 +848,8 @@ export interface ShopPhotoJobResult {
     photoSizeCode: string;
     photoCount: number;
     photosPerPage: number;
+    photoOutputLayout: "A4_SHEET" | "PHOTO_PAPER";
+    photoPaperFinish: "PLAIN" | "GLOSSY" | "MATTE";
     pageCount: number;
     photoUnitPriceMinorSnapshot: number;
     quotedAmountMinor: number;
@@ -879,6 +881,8 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   photoSizeCode: string;
   photoCount: number;
   photosPerPage: number;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
   recipientType: "EXISTING_CUSTOMER" | "WALK_IN";
   customerUserId?: string;
   recipientName?: string;
@@ -892,6 +896,8 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   form.append("photoSizeCode", values.photoSizeCode);
   form.append("photoCount", String(values.photoCount));
   form.append("photosPerPage", String(values.photosPerPage));
+  form.append("photoOutputLayout", values.photoOutputLayout ?? "A4_SHEET");
+  form.append("photoPaperFinish", values.photoPaperFinish ?? "PLAIN");
   form.append("recipientType", values.recipientType);
   form.append("paymentMethod", values.paymentMethod);
   form.append("idempotencyKey", values.idempotencyKey);
