@@ -4099,9 +4099,12 @@ function isSmartPrintIdDocument(file:File):boolean {
 function isSmartPrintPhotoDocument(file:File):boolean {
   return (file as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="PHOTO";
 }
+type CustomerNupDirection =
+  | "RightBottom" | "BottomRight" | "LeftBottom" | "BottomLeft"
+  | "RightTop" | "TopRight" | "LeftTop" | "TopLeft";
 type NativeCustomerPdfPreview = {
   token:string; requestedPageIndex:number; pageIndex:number; pageCount:number;
-  pagesPerSheet:number; paperSize:string; orientation:string;
+  pagesPerSheet:number; pagesPerSheetDirection:CustomerNupDirection; paperSize:string; orientation:string;
   firstSourcePage:number; lastSourcePage:number;
   image:string; thumbnails:Array<{index:number;image:string}>; loading:boolean;
 };
@@ -4110,6 +4113,7 @@ type BrowserCustomerNupPreview = {
   sheetIndex:number;
   sheetCount:number;
   pagesPerSheet:number;
+  pagesPerSheetDirection:CustomerNupDirection;
   firstSourcePage:number;
   lastSourcePage:number;
   loading:boolean;
@@ -4132,6 +4136,22 @@ function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSetting
   const maximum=maximumBySize[settings.sizeCode];
   return maximum!==undefined&&Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
     Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum;
+}
+
+function parseCustomerPagesPerSheetDirection(
+  capabilitiesJson?:string|null
+):CustomerNupDirection|null {
+  if(!capabilitiesJson)return null;
+  try {
+    const capabilities=JSON.parse(capabilitiesJson) as {pagesPerSheetDirection?:unknown};
+    const direction=capabilities.pagesPerSheetDirection;
+    return direction==="RightBottom"||direction==="BottomRight"||direction==="LeftBottom"||
+      direction==="BottomLeft"||direction==="RightTop"||direction==="TopRight"||
+      direction==="LeftTop"||direction==="TopLeft"
+      ?direction:null;
+  } catch {
+    return null;
+  }
 }
 
 function parseCustomerPagesPerSheetCapabilities(capabilitiesJson?:string|null):number[] {
@@ -4267,7 +4287,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const supportedPagesPerSheet=hasAssignedPrinter
     ?parseCustomerPagesPerSheetCapabilities(printerCapabilitiesJson)
     :[1];
-  const nupOptions=supportedPagesPerSheet.filter(value=>value>1);
+  const pagesPerSheetDirection=hasAssignedPrinter
+    ?parseCustomerPagesPerSheetDirection(printerCapabilitiesJson)
+    :null;
+  // A direction must be reported too, otherwise a customer preview could
+  // show a different page reading order from the eventual physical output.
+  const nupOptions=pagesPerSheetDirection
+    ?supportedPagesPerSheet.filter(value=>value>1)
+    :[];
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
@@ -4513,7 +4540,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       isDuplex:selected.isDuplex,
       paperSize:selected.advancedEnabled?selected.paperSize:"A4",
       orientation:selected.advancedEnabled?selected.orientation:"AUTO",
-      pagesPerSheet:selected.advancedEnabled&&isCustomerPdf(candidate)&&!isSmartPrintPhotoDocument(candidate)
+      pagesPerSheet:selected.advancedEnabled&&isCustomerPdf(candidate)&&!isSmartPrintPhotoDocument(candidate)&&
+        nupOptions.includes(selected.pagesPerSheet??1)
         ?(selected.pagesPerSheet??1):1,
       advancedEnabled:selected.advancedEnabled
     };
@@ -4579,11 +4607,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         try{
           const payload=JSON.parse(message.slice("CUSTOMER_PDF_PREVIEW|".length)) as {
             token:string;pageIndex:number;pageCount:number;pagesPerSheet:number;
+            pagesPerSheetDirection:CustomerNupDirection;
             paperSize:string;orientation:string;firstSourcePage:number;lastSourcePage:number;image:string;
             thumbnails:Array<{index:number;image:string}>;
           };
           setNativePdfPreview(current=>current&&current.token===payload.token&&
             current.requestedPageIndex===payload.pageIndex&&current.pagesPerSheet===payload.pagesPerSheet&&
+            current.pagesPerSheetDirection===payload.pagesPerSheetDirection&&
             current.paperSize===payload.paperSize&&current.orientation===payload.orientation
             ?{...payload,requestedPageIndex:payload.pageIndex,loading:false}:current);
         }catch{
@@ -4669,7 +4699,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
     const settings=settingsForFile(file);
     const pagesPerSheet=settings.pagesPerSheet??1;
-    if(pagesPerSheet<=1||photoSettingsByFileFingerprint[customerFileFingerprint(file)]){
+    if(pagesPerSheet<=1||!pagesPerSheetDirection||photoSettingsByFileFingerprint[customerFileFingerprint(file)]){
       setBrowserNupPreview(null);
       return;
     }
@@ -4682,6 +4712,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       sheetIndex,
       sheetCount:0,
       pagesPerSheet,
+      pagesPerSheetDirection,
       firstSourcePage:sheetIndex*pagesPerSheet+1,
       lastSourcePage:(sheetIndex+1)*pagesPerSheet,
       loading:true,
@@ -4695,6 +4726,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         pagesPerSheet,
         paperSize:settings.paperSize,
         orientation:settings.orientation,
+        pagesPerSheetDirection,
         sheetIndex
       });
       const outputBuffer=preview.bytes.buffer.slice(
@@ -4711,6 +4743,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         sheetIndex:preview.sheetIndex,
         sheetCount:preview.sheetCount,
         pagesPerSheet,
+        pagesPerSheetDirection,
         firstSourcePage:preview.firstSourcePage,
         lastSourcePage:preview.lastSourcePage,
         loading:false,
@@ -4723,6 +4756,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           sheetIndex,
           sheetCount:0,
           pagesPerSheet,
+          pagesPerSheetDirection,
           firstSourcePage:sheetIndex*pagesPerSheet+1,
           lastSourcePage:(sheetIndex+1)*pagesPerSheet,
           loading:false,
@@ -5154,7 +5188,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const settings=settingsForFile(candidate);
     const pagesPerSheet=settings.pagesPerSheet??1;
     return postSmartPrintNativeMessage(
-      "previewCustomerPdf|"+token+"|"+sheetIndex+"|"+pagesPerSheet+"|"+settings.paperSize+"|"+settings.orientation
+      "previewCustomerPdf|"+token+"|"+sheetIndex+"|"+pagesPerSheet+"|"+settings.paperSize+"|"+settings.orientation+"|"+(pagesPerSheetDirection??"RightBottom")
     );
   }
   function openCustomerPdfPreview(candidate:File) {
@@ -5168,12 +5202,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const pagesPerSheet=settings.pagesPerSheet??1;
     setNativePdfPreview({
       token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+      pagesPerSheetDirection:pagesPerSheetDirection??"RightBottom",
       paperSize:settings.paperSize,orientation:settings.orientation,
       firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:true
     });
     if(!postCustomerPdfPreviewRequest(token,0,candidate)){
       setNativePdfPreview({
         token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+        pagesPerSheetDirection:pagesPerSheetDirection??"RightBottom",
         paperSize:settings.paperSize,orientation:settings.orientation,
         firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:false
       });
