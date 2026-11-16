@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID, webcrypto } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -17,6 +17,13 @@ mkdirSync(artifactDirectory, { recursive: true });
 const AGENT_ID = "11111111-1111-4111-8111-111111111111";
 const STATION_CODE = "PRIVATE-QA";
 const SESSION_TOKEN = "private-printing-browser-qa-session-token";
+
+function writePrivateRelayTrace(event) {
+  appendFileSync(join(artifactDirectory, "private-relay-trace.jsonl"), JSON.stringify({
+    at: new Date().toISOString(),
+    ...event
+  }) + "\n");
+}
 
 function qsp2EncryptedLength(plaintextLength) {
   const recordCount = Math.ceil(plaintextLength / (1024 * 1024));
@@ -331,6 +338,14 @@ async function installPrivatePrintingApiHarness(context, page) {
   // acceptance test consumes the exact bytes emitted by the browser stream.
   const relayServer = createServer(async (incoming, outgoing) => {
     const relayPath = (incoming.url ?? "").split("?", 1)[0];
+    writePrivateRelayTrace({
+      event: "node-request-arrived",
+      method: incoming.method ?? null,
+      path: relayPath,
+      contentType: incoming.headers["content-type"] ?? null,
+      encryptedFormat: incoming.headers["x-print-encrypted-format"] ?? null,
+      encryptedSizeBytes: incoming.headers["x-print-encrypted-size"] ?? null
+    });
     const relayTicketId = relayPath.split("/").filter(Boolean).at(-1);
     const ticket = relayPath.startsWith("/private-relay/") ? tickets.get(relayTicketId) : null;
     if (!ticket) {
@@ -343,6 +358,11 @@ async function installPrivatePrintingApiHarness(context, page) {
     try {
       for await (const part of incoming) bodyParts.push(Buffer.from(part));
       const body = Buffer.concat(bodyParts);
+      writePrivateRelayTrace({
+        event: "node-body-consumed",
+        jobNumber: ticket.jobNumber,
+        bodyBytes: body.length
+      });
       const relayHeaders = incoming.headers;
       let diagnosticStage = "session-and-grant";
       let plaintext = null;
@@ -369,6 +389,12 @@ async function installPrivatePrintingApiHarness(context, page) {
         diagnosticStage = "accept-relay";
         ticket.uploadResult = makeUploadedJob(ticket, ticket.ticketRequest, plaintext);
         ticket.relayAccepted = true;
+        writePrivateRelayTrace({
+          event: "qsp2-accepted",
+          jobNumber: ticket.jobNumber,
+          plaintextBytes: plaintext.length,
+          encryptedBytes: envelope.ciphertext.length
+        });
         relayUploads.push({
           ticketId: ticket.id,
           printJobId: ticket.printJobId,
@@ -422,6 +448,12 @@ async function installPrivatePrintingApiHarness(context, page) {
       resolve(address.port);
     });
   });
+  writePrivateRelayTrace({ event: "node-server-listening", relayServerPort });
+  relayServer.on("connection", () => writePrivateRelayTrace({ event: "node-socket-open" }));
+  relayServer.on("clientError", error => writePrivateRelayTrace({
+    event: "node-client-error",
+    message: error.message
+  }));
   context.on("close", () => relayServer.close());
 
   const sessionResponse = {
@@ -533,9 +565,26 @@ async function installPrivatePrintingApiHarness(context, page) {
         // Preserve the browser's original ReadableStream body. The local Node
         // receiver consumes it from the socket; Playwright's postDataBuffer()
         // cannot expose streaming Fetch request bodies.
-        return route.continue({
-          url: `http://127.0.0.1:${relayServerPort}/private-relay/${ticket.id}`
+        writePrivateRelayTrace({
+          event: "playwright-route-forwarding",
+          jobNumber: ticket.jobNumber,
+          contentType: request.headers()["content-type"] ?? null,
+          encryptedFormat: request.headers()["x-print-encrypted-format"] ?? null,
+          encryptedSizeBytes: request.headers()["x-print-encrypted-size"] ?? null,
+          relayServerPort
         });
+        try {
+          return await route.continue({
+            url: `http://127.0.0.1:${relayServerPort}/private-relay/${ticket.id}`
+          });
+        } catch (error) {
+          writePrivateRelayTrace({
+            event: "playwright-route-forward-failed",
+            jobNumber: ticket.jobNumber,
+            message: error instanceof Error ? error.message : String(error)
+          });
+          throw error;
+        }
       }
     }
 
