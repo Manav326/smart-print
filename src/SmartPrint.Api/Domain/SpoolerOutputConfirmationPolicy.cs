@@ -12,8 +12,14 @@ public static class SpoolerOutputConfirmationPolicy
     public static bool IsPhysicalOutputConfirmationStatus(string? jobStatus) =>
         jobStatus?.Trim().ToUpperInvariant() is "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED";
 
-    public static bool CanConfirmPhysicalOutput(string? jobStatus, string? spoolerStatus) =>
-        IsPhysicalOutputConfirmationStatus(jobStatus) && !IsRetained(spoolerStatus);
+    public static bool CanConfirmPhysicalOutput(
+        string? jobStatus,
+        string? spoolerStatus,
+        int pagesPrinted,
+        int totalPages) =>
+        IsPhysicalOutputConfirmationStatus(jobStatus) &&
+        string.Equals(spoolerStatus?.Trim(), "PRINTED", StringComparison.OrdinalIgnoreCase) &&
+        totalPages > 0 && pagesPrinted >= totalPages;
 
     public static bool ShouldPreserveLastKnownRetainedStatus(string? currentStatus, string? incomingStatus) =>
         IsRetained(currentStatus) &&
