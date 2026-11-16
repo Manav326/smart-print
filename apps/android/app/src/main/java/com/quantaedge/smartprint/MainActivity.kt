@@ -6943,10 +6943,33 @@ class MainActivity : AppCompatActivity() {
             }.orEmpty()
             (if (siblings.any { sameDocument(it, documentFile) }) siblings else siblings + documentFile)
         }
-        val reader = SmartPrintDocumentViewer(this, documentFile, images, startPosition, documentMimeType) { current ->
-            viewingDocument = current
-            setToolbarPage(if (isPreparedId) "ID card preview" else current.name)
+        val documentFolderPath = if (isPreparedId) "" else
+            documentFile.parentFile?.let { store.pathOf(it) }.orEmpty()
+        val documentBreadcrumbs = mutableListOf("My Files" to "")
+        var breadcrumbPath = ""
+        documentFolderPath.split('/').filter { it.isNotBlank() }.forEach { segment ->
+            breadcrumbPath = if (breadcrumbPath.isBlank()) segment else "$breadcrumbPath/$segment"
+            documentBreadcrumbs += segment to breadcrumbPath
         }
+        val reader = SmartPrintDocumentViewer(
+            context = this,
+            startFile = documentFile,
+            imageSiblings = images,
+            startPosition = startPosition,
+            documentMimeType = documentMimeType,
+            onNavigateImage = { current ->
+                viewingDocument = current
+                setToolbarPage(if (isPreparedId) "ID card preview" else current.name)
+            },
+            folderBreadcrumbs = if (isPreparedId) emptyList() else documentBreadcrumbs,
+            onNavigateFolder = { destination ->
+                documentViewer?.dispose()
+                documentViewer = null
+                viewingDocument = null
+                this@MainActivity.folderPath = destination
+                showFiles()
+            }
+        )
         documentViewer = reader
         if (isPreparedId) {
             val previewFrame = FrameLayout(this)
