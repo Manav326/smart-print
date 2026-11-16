@@ -1251,6 +1251,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     try{
       const result=await createShopPhotoJob(tokens.accessToken,sheet.file,{
         photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,
+        photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish,
         recipientType:draft.recipientType,customerUserId:draft.customerUserId,
         recipientName:draft.recipientName,recipientPhone:draft.recipientPhone,
         paymentMethod:draft.paymentMethod,idempotencyKey:draft.idempotencyKey
@@ -1341,9 +1342,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setToast("");
     try{
       if(editor.job.storageMode==="LOCAL_AGENT") {
-        await replaceShopPhotoDocumentLocally(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}));
+        await replaceShopPhotoDocumentLocally(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}),sheet.photoOutputLayout,sheet.photoPaperFinish);
       } else {
-        await replaceShopPhotoDocument(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}));
+        await replaceShopPhotoDocument(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}),sheet.photoOutputLayout,sheet.photoPaperFinish);
       }
     }catch(exception){
       setError(exception instanceof Error?exception.message:"Could not save the enhanced photo sheet.");
@@ -1352,14 +1353,14 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
     setShopPhotoStudio(null);
     setFocusShopPhotoEdit(false);
-    setToast("The enhanced multi-page A4 photo PDF is saved to the same print job and its photo price has been recalculated.");
+    setToast(sheet.photoOutputLayout==="PHOTO_PAPER"?"The individual photo-paper prints are saved to the same job. Printer compatibility will be checked before dispatch.":"The A4 photo sheet is saved to the same print job and its photo price has been recalculated.");
     try{
       await reload();
       const blob=await downloadShopDocument(tokens.accessToken,editor.job.id,"original");
       const detectedMediaType=await identifyDocumentPreviewMediaType(blob);
       const mediaType=detectedMediaType==="application/pdf"?detectedMediaType:"";
       const previewBlob=mediaType?new Blob([blob],{type:mediaType}):blob;
-      const savedJob:ShopPrintJob={...editor.job,photoEditorSettingsJson:JSON.stringify(sheet.editorSettings??{}),printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
+      const savedJob:ShopPrintJob={...editor.job,photoEditorSettingsJson:JSON.stringify(sheet.editorSettings??{}),printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish,document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
       setPreview({name:sheet.file.name,url:URL.createObjectURL(previewBlob),blob:previewBlob,mediaType,job:savedJob,readOnly:true});
     }catch{
       setError("The A4 photo PDF was saved to the existing print job, but the queue could not refresh its preview. Refresh the queue before approving or printing.");
@@ -4009,7 +4010,7 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
   return Array.isArray(groups)?groups:undefined;
 }
 type CustomerSavedPrintSettings = CustomerPrintRequestSettings & { advancedEnabled?: boolean };
-type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage?: number };
+type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" };
 function customerPhotoSizeLabel(sizeCode?:string|null):string {
   switch(sizeCode){
     case "35x45": return "35 × 45 mm";
@@ -4134,8 +4135,12 @@ function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSetting
   const settings=value as CustomerPhotoSettings;
   const maximumBySize:Record<string,number>={"35x45":25,"25x35":49,"2x2":15,"4x6":1};
   const maximum=maximumBySize[settings.sizeCode];
+  const outputLayout=settings.photoOutputLayout??"A4_SHEET";
+  const finish=settings.photoPaperFinish??"PLAIN";
   return maximum!==undefined&&Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
-    Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum;
+    Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum&&
+    (outputLayout==="A4_SHEET"||outputLayout==="PHOTO_PAPER")&&
+    (outputLayout==="A4_SHEET"?finish==="PLAIN":finish==="GLOSSY"||finish==="MATTE");
 }
 
 function parseCustomerPagesPerSheetDirection(
@@ -4962,7 +4967,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             orientation:photoSettings?"AUTO":idDocument?"PORTRAIT":settings.orientation,
             pagesPerSheet:photoSettings||idDocument?1:(settings.pagesPerSheet??1),
             ...(photoSettings
-              ?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount}
+              ?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount,photoOutputLayout:photoSettings.photoOutputLayout??"A4_SHEET",photoPaperFinish:photoSettings.photoPaperFinish??"PLAIN"}
               :idDocument?{printKind:"ID_DOCUMENT" as const}:{printKind:"DOCUMENT" as const})
           });
         } catch(exception) {
@@ -5156,7 +5161,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     for(const sheet of sheets){
       const fp=customerFileFingerprint(sheet.file);groups[fp]=group;
       settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1};
-      photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage};
+      photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish};
       const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
       if(urls.length)previews[fp]=urls;
     }
