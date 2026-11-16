@@ -9312,14 +9312,16 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         _ => null
     };
     var isIdDocumentUpload = request.PrintKind == "ID_DOCUMENT";
-    var hasPhotoMetadata = request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null;
+    var hasPhotoMetadata = request.PhotoSizeCode is not null || request.PhotoCount is not null || request.PhotosPerPage is not null ||
+        request.PhotoOutputLayout != "A4_SHEET" || request.PhotoPaperFinish != "PLAIN";
     var validPhotoMetadata = request.PrintKind == "PHOTO" &&
         request.PhotoSizeCode is string photoSizeCode &&
         (photoSizeCode is "35x45" or "25x35" or "2x2" or "4x6") &&
         request.PhotoCount is >= 1 and <= UploadLimits.MaxPhotoCount &&
         request.PhotosPerPage is int photosPerPage &&
         photosPerPage >= 1 &&
-        photosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode);
+        photosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode) &&
+        PhotoSheetPdfRules.IsValidPhotoOutputOptions(request.PhotoOutputLayout, request.PhotoPaperFinish, photosPerPage);
     var invalidPrivatePhotoUpload = request.PrivatePrinting && request.PrintKind == "PHOTO" &&
         (!validPhotoMetadata || mediaType != "application/pdf" ||
          request.ColourMode != "Colour" || request.PaperSize != "A4" ||
@@ -9339,7 +9341,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             code = isIdDocumentUpload ? "id_document_private_printing_required" : "photo_metadata_invalid",
             message = isIdDocumentUpload
                 ? "ID card sheets require Private Printing, a one-page A4 portrait PDF, one copy and single-sided output. Start a new Private Printing batch."
-                : "Private Photo Studio sheets require a supported photo size, quantity, A4 sheet layout and a single-sided colour A4 PDF. No document was uploaded."
+                : "Private Photo Studio output requires a supported photo size and valid A4-sheet or individual photo-paper layout. No document was uploaded."
         });
     var sha = request.Sha256?.Trim().ToLowerInvariant();
     if (mediaType is null || request.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
@@ -9740,6 +9742,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             racedTicket.PhotoSizeCode == request.PhotoSizeCode &&
             racedTicket.PhotoCount == request.PhotoCount &&
             racedTicket.PhotosPerPage == request.PhotosPerPage &&
+            racedTicket.PhotoOutputLayout == request.PhotoOutputLayout &&
+            racedTicket.PhotoPaperFinish == request.PhotoPaperFinish &&
             CryptographicOperations.FixedTimeEquals(
                 Convert.FromHexString(racedTicket.GrantHash),
                 Convert.FromHexString(grantHash));
