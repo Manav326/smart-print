@@ -5443,7 +5443,7 @@ agentApi.MapGet("/private-relays/pending", async (
                 printer.DisplayName, printer.QueueName!, ticket.FileExtension, ticket.MediaType,
                 ticket.SizeBytes, ticket.Sha256, ticket.ColourMode, ticket.PaperSize,
                 ticket.IsDuplex, ticket.Copies, ticket.Orientation, ticket.ExpiresUtc,
-                ticket.PrintKind, printer.OutputMode))
+                ticket.PrintKind, printer.OutputMode, ticket.PhotoPaperFinish, ticket.PhotoOutputLayout, ticket.PhotoSizeCode))
             .Take(50)
             .ToListAsync(ct);
     }
@@ -5916,6 +5916,9 @@ agentApi.MapPost("/jobs/claim", async (
             job.PdfBrandingEnabled,
             job.PrivatePrinting,
             job.PrintKind,
+            job.PhotoPaperFinish,
+            job.PhotoOutputLayout,
+            job.PhotoSizeCode,
             job.Currency,
             job.QuotedAmountMinor,
             job.PrinterDeviceId,
@@ -6005,6 +6008,9 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.PdfBrandingEnabled,
             candidate.PrivatePrinting,
             candidate.PrintKind,
+            candidate.PhotoPaperFinish,
+            candidate.PhotoOutputLayout,
+            candidate.PhotoSizeCode,
             candidate.Currency,
             candidate.QuotedAmountMinor,
             candidate.PrinterDeviceId,
@@ -9641,6 +9647,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         PhotoSizeCode = request.PhotoSizeCode,
         PhotoCount = request.PhotoCount,
         PhotosPerPage = request.PhotosPerPage,
+        PhotoPaperFinish = request.PhotoPaperFinish,
+        PhotoOutputLayout = request.PhotoOutputLayout,
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
