@@ -72,7 +72,7 @@ test("QSP2 private encoder emits a correct header, record layout and authenticat
   assert.equal(readU32(encrypted, 8), 100);
   assert.equal(readU64(encrypted, 12), BigInt(bytes.length));
   assert.equal(readU32(encrypted, 20), 1024 * 1024);
-  assert.equal(readU64(encrypted, 24), 2);
+  assert.equal(readU64(encrypted, 24), 2n);
   assert.equal(encrypted.length, factory.encryptedSizeBytes);
 
   const dataKey = new Uint8Array(privateDecrypt({
