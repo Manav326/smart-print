@@ -7278,6 +7278,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
 
     if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(request.EditorSettingsJson, out _))
         return Results.BadRequest(new { code = "photo_editor_settings_invalid", message = "The Photo Studio editing settings are invalid. Reopen the editor and save again." });
+    if (!PhotoSheetPdfRules.IsValidPhotoOutputOptions(request.PhotoOutputLayout, request.PhotoPaperFinish, request.PhotosPerPage))
+        return Results.BadRequest(new { code = "photo_output_options_invalid", message = "Choose regular A4 paper or individual photo paper with a supported finish." });
 
     var grantToken = context.Request.Headers["X-Print-Photo-Revision-Grant"].FirstOrDefault();
     if (!LocalDocumentPhotoRevisionGrant.TryValidate(
@@ -7332,11 +7334,11 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
             ["photoSheet"] = ["The prepared local photo sheet metadata is invalid."]
         });
 
-    if (!PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, request.PageCount))
+    if (!PhotoSheetPdfRules.HasExactlyPhotoPages(request.PageSizesJson, request.PageCount, request.PhotoOutputLayout, request.PhotoSizeCode))
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_layout_invalid",
-            message = "The revised local photo PDF must contain only portrait A4 pages with one full-page 300-DPI photo raster on each page."
+            message = "The revised local photo PDF must match the selected A4-sheet or physical photo-paper dimensions."
         });
 
     var hasPayment = await db.PrintPayments.AnyAsync(item =>
@@ -7382,6 +7384,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
         request.PhotoCount,
         request.PageCount,
         request.PhotosPerPage,
+        request.PhotoOutputLayout,
+        request.PhotoPaperFinish,
         PhotoUnitPriceMinor = unitPrice,
         QuotedAmountMinor = amount,
         PricingVersion = pricing.Version
@@ -7400,6 +7404,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
 
     if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(request.EditorSettingsJson, out var editorSettingsJson))
         return Results.BadRequest(new { code = "photo_editor_settings_invalid", message = "The Photo Studio editing settings are invalid. Reopen the editor and save again." });
+    if (!PhotoSheetPdfRules.IsValidPhotoOutputOptions(request.PhotoOutputLayout, request.PhotoPaperFinish, request.PhotosPerPage))
+        return Results.BadRequest(new { code = "photo_output_options_invalid", message = "Choose regular A4 paper or individual photo paper with a supported finish." });
 
     if (request.PageCount is < 1 or > 100 ||
         request.PhotoCount is < 1 or > UploadLimits.MaxPhotoCount ||
@@ -7422,11 +7428,11 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         return Results.Unauthorized();
 
     if (string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000 ||
-        !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, request.PageCount))
+        !PhotoSheetPdfRules.HasExactlyPhotoPages(request.PageSizesJson, request.PageCount, request.PhotoOutputLayout, request.PhotoSizeCode))
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_layout_invalid",
-            message = "The completed local photo PDF must contain only portrait A4 pages with one full-page 300-DPI photo raster on each page."
+            message = "The completed local photo PDF must match the selected A4-sheet or physical photo-paper dimensions."
         });
 
     if (request.ExpectedQuotedAmountMinor is not long expectedQuotedAmountMinor ||
@@ -7483,6 +7489,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.PhotoSizeCode == request.PhotoSizeCode &&
         job.PhotoCount == request.PhotoCount &&
         job.PhotosPerPage == request.PhotosPerPage &&
+        job.PhotoOutputLayout == request.PhotoOutputLayout &&
+        job.PhotoPaperFinish == request.PhotoPaperFinish &&
         job.QuotedAmountMinor == request.ExpectedQuotedAmountMinor &&
         job.PricingVersion == request.ExpectedPricingVersion &&
         string.Equals(
@@ -7623,6 +7631,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
     job.PhotoSizeCode = request.PhotoSizeCode;
     job.PhotoCount = request.PhotoCount;
     job.PhotosPerPage = request.PhotosPerPage;
+    job.PhotoOutputLayout = request.PhotoOutputLayout;
+    job.PhotoPaperFinish = request.PhotoPaperFinish;
     job.PhotoUnitPriceMinorSnapshot = unitPrice;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
@@ -7656,6 +7666,8 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         job.PhotoSizeCode,
         job.PhotoCount,
         job.PhotosPerPage,
+        job.PhotoOutputLayout,
+        job.PhotoPaperFinish,
         job.PhotoUnitPriceMinorSnapshot,
         job.QuotedAmountMinor,
         job.PricingVersion,
