@@ -749,3 +749,15 @@ test("Android customer PDF previews render automatically and receive native brid
   assert.doesNotMatch(app, /window\.addEventListener\("message",onNativePdfPreview\)/);
   assert.match(app, /openCustomerPdfPreview\(file\);\n  \},\[file,nativeAppMode,photoSettingsByFileFingerprint,groupSettings,fileSettings\]\)/);
 });
+
+
+test("browser customer N-up preview is visual-only and leaves the original upload unchanged",()=>{
+ const app=read("../src/App.tsx");
+ const preview=read("../src/customer-nup-preview.ts");
+ assert.match(app,/createCustomerNupPreview/);
+ assert.match(app,/The original PDF is uploaded unchanged/);
+ assert.match(app,/Previous sheet/);
+ assert.match(app,/Next sheet/);
+ assert.match(preview,/embedPages/);
+ assert.match(preview,/SmartPrint by QuantaEdge/);
+});
