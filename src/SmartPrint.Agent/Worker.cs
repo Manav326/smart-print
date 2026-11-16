@@ -129,10 +129,10 @@ public sealed class Worker(
                         !string.Equals(stagedEntry.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidDataException("The protected local copy does not match the pending private relay.");
 
-                    var stagedPlaintext = localQueueStore.ReadDocument(ticket.PrintJobId);
-                    try
+                    using (var stagedDocument = localQueueStore.OpenDocumentReadStream(
+                        ticket.PrintJobId, credentials.AgentDeviceId))
                     {
-                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedPlaintext, ticket.FileExtension);
+                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedDocument, ticket.FileExtension);
                         if (!string.Equals(stagedAnalysis.Extension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
                             !string.Equals(stagedAnalysis.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase))
                             throw new InvalidDataException("The protected local copy no longer matches the original file type.");
@@ -154,10 +154,6 @@ public sealed class Worker(
                             await localQueueStore.MarkLocalUploadFinalizedAsync(ticket.PrintJobId, cancellationToken);
                             logger.LogInformation("Private relay {JobNumber} was confirmed using its existing protected local copy; no second payload download was needed.", ticket.JobNumber);
                         }
-                    }
-                    finally
-                    {
-                        CryptographicOperations.ZeroMemory(stagedPlaintext);
                     }
                     continue;
                 }
