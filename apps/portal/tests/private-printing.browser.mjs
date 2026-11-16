@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID, webcrypto } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -143,8 +144,7 @@ async function createJpeg(page, background) {
   return Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
 }
 
-function extractEncryptedFile(request) {
-  const headers = request.headers();
+function extractEncryptedFile(headers, body) {
   const contentType = headers["content-type"] ?? "";
   assert.match(contentType, /^application\/vnd\.smartprint\.qsp2(?:;|$)/i,
     "Private relay must stream the QSP2 document, not wrap it in multipart form data.");
@@ -152,8 +152,7 @@ function extractEncryptedFile(request) {
   assert.ok(headers["x-print-encrypted-key"], "QSP2 must wrap its one-time data key for the paired Agent.");
   assert.equal(headers["x-print-encrypted-iv"], undefined,
     "QSP2 derives unique nonces per record and must not use the legacy single IV.");
-  const body = request.postDataBuffer();
-  assert.ok(body && body.length >= 200, "Private relay must include a complete QSP2 stream.");
+  assert.ok(Buffer.isBuffer(body) && body.length >= 200, "Private relay must include a complete QSP2 stream.");
   assert.equal(body.subarray(0, 4).toString("ascii"), "QSP2");
   assert.equal(Number(headers["x-print-encrypted-size"]), body.length);
   return {
@@ -327,6 +326,104 @@ async function installPrivatePrintingApiHarness(context, page) {
   const unhandledApi = [];
   let nextJobNumber = 1;
 
+  // Playwright does not expose request.postDataBuffer() for Fetch ReadableStream
+  // bodies. Forward the one raw QSP2 endpoint to this local HTTP receiver so the
+  // acceptance test consumes the exact bytes emitted by the browser stream.
+  const relayServer = createServer(async (incoming, outgoing) => {
+    const relayPath = (incoming.url ?? "").split("?", 1)[0];
+    const relayTicketId = relayPath.split("/").filter(Boolean).at(-1);
+    const ticket = relayPath.startsWith("/private-relay/") ? tickets.get(relayTicketId) : null;
+    if (!ticket) {
+      outgoing.writeHead(404, { "content-type": "application/json" });
+      outgoing.end(JSON.stringify({ message: "Unknown private upload ticket." }));
+      return;
+    }
+
+    const bodyParts = [];
+    try {
+      for await (const part of incoming) bodyParts.push(Buffer.from(part));
+      const body = Buffer.concat(bodyParts);
+      const relayHeaders = incoming.headers;
+      let diagnosticStage = "session-and-grant";
+      let plaintext = null;
+      try {
+        assert.equal(relayHeaders["x-print-session"], SESSION_TOKEN);
+        const grant = relayHeaders["x-print-upload-grant"];
+        assert.ok(grant && grant.length >= 40, "Private relay must use its opaque upload grant.");
+
+        diagnosticStage = "capture-qsp2-stream";
+        const envelope = extractEncryptedFile(relayHeaders, body);
+
+        diagnosticStage = "authenticate-qsp2-header-records-and-footer";
+        plaintext = await decryptPrivateRelay(ticket, envelope, keyPair.privateKey);
+
+        diagnosticStage = "verify-decrypted-document";
+        assert.equal(plaintext.length, ticket.sizeBytes, "Decrypted size must match the upload ticket.");
+        assert.equal(createHash("sha256").update(plaintext).digest("hex"), ticket.sha256,
+          "Decrypted bytes must match the original upload hash.");
+        assert.ok(plaintext.subarray(0, 5).equals(Buffer.from("%PDF-", "ascii")),
+          "Every prepared document must be PDF content.");
+        assert.equal(envelope.ciphertext.length, qsp2EncryptedLength(plaintext.length),
+          "QSP2 wire length must include the header, per-record authentication tags and authenticated footer.");
+
+        diagnosticStage = "accept-relay";
+        ticket.uploadResult = makeUploadedJob(ticket, ticket.ticketRequest, plaintext);
+        ticket.relayAccepted = true;
+        relayUploads.push({
+          ticketId: ticket.id,
+          printJobId: ticket.printJobId,
+          sha256: ticket.sha256,
+          plaintextBytes: plaintext.length,
+          encryptedBytes: envelope.ciphertext.length,
+          printKind: ticket.ticketRequest.printKind ?? "DOCUMENT",
+          photoSizeCode: ticket.ticketRequest.photoSizeCode ?? null,
+          photoCount: ticket.ticketRequest.photoCount ?? null,
+          photosPerPage: ticket.ticketRequest.photosPerPage ?? null,
+          pageCount: ticket.uploadResult.job.pageCount
+        });
+        outgoing.writeHead(200, { "content-type": "application/json" });
+        outgoing.end(JSON.stringify({ accepted: true, duplicateRequest: false }));
+      } catch (error) {
+        writeFileSync(join(artifactDirectory, "private-relay-failure.json"), JSON.stringify({
+          jobNumber: ticket.jobNumber,
+          stage: diagnosticStage,
+          message: error instanceof Error ? error.message : String(error),
+          contentType: relayHeaders["content-type"] ?? null,
+          encryptedFormat: relayHeaders["x-print-encrypted-format"] ?? null,
+          encryptedSizeBytes: relayHeaders["x-print-encrypted-size"] ?? null,
+          bodyBytes: body.length,
+          ticketBytes: ticket.sizeBytes
+        }, null, 2));
+        outgoing.writeHead(400, { "content-type": "application/json" });
+        outgoing.end(JSON.stringify({
+          code: "private_relay_test_failed",
+          message: error instanceof Error ? error.message : String(error)
+        }));
+      } finally {
+        if (plaintext) plaintext.fill(0);
+        body.fill(0);
+      }
+    } catch (error) {
+      outgoing.writeHead(400, { "content-type": "application/json" });
+      outgoing.end(JSON.stringify({
+        code: "private_relay_stream_read_failed",
+        message: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  });
+  const relayServerPort = await new Promise((resolve, reject) => {
+    relayServer.once("error", reject);
+    relayServer.listen(0, "127.0.0.1", () => {
+      const address = relayServer.address();
+      if (!address || typeof address === "string") {
+        reject(new Error("The Private Printing relay test server did not bind to a TCP port."));
+        return;
+      }
+      resolve(address.port);
+    });
+  });
+  context.on("close", () => relayServer.close());
+
   const sessionResponse = {
     id: randomUUID(),
     status: "Active",
@@ -433,62 +530,12 @@ async function installPrivatePrintingApiHarness(context, page) {
         return json({ state: "READY", uploadResult: ticket.uploadResult });
       }
       if (path.endsWith("/private-relay") && method === "POST") {
-        const relayHeaders = request.headers();
-        let diagnosticStage = "session-and-grant";
-        let encryptedBodyBytes = null;
-        let plaintext = null;
-        try {
-          assert.equal(relayHeaders["x-print-session"], SESSION_TOKEN);
-          const grant = relayHeaders["x-print-upload-grant"];
-          assert.ok(grant && grant.length >= 40, "Private relay must use its opaque upload grant.");
-
-          diagnosticStage = "capture-qsp2-stream";
-          const envelope = extractEncryptedFile(request);
-          encryptedBodyBytes = envelope.ciphertext.length;
-
-          diagnosticStage = "authenticate-qsp2-header-records-and-footer";
-          plaintext = await decryptPrivateRelay(ticket, envelope, keyPair.privateKey);
-
-          diagnosticStage = "verify-decrypted-document";
-          assert.equal(plaintext.length, ticket.sizeBytes, "Decrypted size must match the upload ticket.");
-          assert.equal(createHash("sha256").update(plaintext).digest("hex"), ticket.sha256,
-            "Decrypted bytes must match the original upload hash.");
-          assert.ok(plaintext.subarray(0, 5).equals(Buffer.from("%PDF-", "ascii")),
-            "Every prepared document must be PDF content.");
-          assert.equal(envelope.ciphertext.length, qsp2EncryptedLength(plaintext.length),
-            "QSP2 wire length must include the header, per-record authentication tags and authenticated footer.");
-
-          diagnosticStage = "accept-relay";
-          ticket.uploadResult = makeUploadedJob(ticket, ticket.ticketRequest, plaintext);
-          ticket.relayAccepted = true;
-          relayUploads.push({
-            ticketId: ticket.id,
-            printJobId: ticket.printJobId,
-            sha256: ticket.sha256,
-            plaintextBytes: plaintext.length,
-            encryptedBytes: envelope.ciphertext.length,
-            printKind: ticket.ticketRequest.printKind ?? "DOCUMENT",
-            photoSizeCode: ticket.ticketRequest.photoSizeCode ?? null,
-            photoCount: ticket.ticketRequest.photoCount ?? null,
-            photosPerPage: ticket.ticketRequest.photosPerPage ?? null,
-            pageCount: ticket.uploadResult.job.pageCount
-          });
-          return json({ accepted: true, duplicateRequest: false });
-        } catch (error) {
-          writeFileSync(join(artifactDirectory, "private-relay-failure.json"), JSON.stringify({
-            jobNumber: ticket.jobNumber,
-            stage: diagnosticStage,
-            message: error instanceof Error ? error.message : String(error),
-            contentType: relayHeaders["content-type"] ?? null,
-            encryptedFormat: relayHeaders["x-print-encrypted-format"] ?? null,
-            encryptedSizeBytes: relayHeaders["x-print-encrypted-size"] ?? null,
-            bodyBytes: encryptedBodyBytes,
-            ticketBytes: ticket.sizeBytes
-          }, null, 2));
-          throw error;
-        } finally {
-          if (plaintext) plaintext.fill(0);
-        }
+        // Preserve the browser's original ReadableStream body. The local Node
+        // receiver consumes it from the socket; Playwright's postDataBuffer()
+        // cannot expose streaming Fetch request bodies.
+        return route.continue({
+          url: `http://127.0.0.1:${relayServerPort}/private-relay/${ticket.id}`
+        });
       }
     }
 
