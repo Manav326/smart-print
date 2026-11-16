@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using PDFiumCore;
 using SkiaSharp;
+using SmartPrint.Documents;
 
 namespace SmartPrint.Agent;
 
@@ -61,8 +62,20 @@ public sealed class WindowsPrintExecutor
         return true;
     });
 
-    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, byte[] bytes, CancellationToken cancellationToken) =>
-        PrintCore(entry, bytes, cancellationToken, outputFilePath: null);
+    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, byte[] bytes, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(bytes);
+        using var stream = new MemoryStream(bytes, writable: false);
+        return PrintCore(entry, stream, cancellationToken, outputFilePath: null);
+    }
+
+    /// <summary>
+    /// Prints from a seekable authenticated stream. QSP2 documents are verified
+    /// against their authenticated footer and are read by PDFium through random
+    /// access callbacks; no complete-document byte array is created.
+    /// </summary>
+    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, Stream documentStream, CancellationToken cancellationToken) =>
+        PrintCore(entry, documentStream, cancellationToken, outputFilePath: null);
 
     /// <summary>
     /// Submits a real Windows GDI print job to the selected printer queue, directing
@@ -91,7 +104,7 @@ public sealed class WindowsPrintExecutor
 
     private SpoolerPrintReceipt PrintCore(
         AgentLocalQueueEntry entry,
-        byte[] bytes,
+        Stream documentStream,
         CancellationToken cancellationToken,
         string? outputFilePath)
     {
@@ -99,11 +112,13 @@ public sealed class WindowsPrintExecutor
             throw new PrintExecutionBlockedException("WINDOWS_REQUIRED", "Physical printing is available only on the Windows Print Agent.");
         if (string.IsNullOrWhiteSpace(entry.QueueName))
             throw new PrintExecutionBlockedException("PRINTER_QUEUE_MISSING", "The assigned Windows printer queue name is missing.");
-        if (bytes.LongLength != entry.SizeBytes ||
-            !CryptographicOperations.FixedTimeEquals(SHA256.HashData(bytes), Convert.FromHexString(entry.Sha256)))
+        if (!documentStream.CanRead || !documentStream.CanSeek ||
+            documentStream.Length != entry.SizeBytes ||
+            !MatchesDocumentHash(documentStream, entry.Sha256))
             throw new PrintExecutionBlockedException("LOCAL_DOCUMENT_INTEGRITY_MISMATCH", "The local document does not match the verified upload.");
 
-        using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
+        documentStream.Position = 0;
+        using var raster = OpenDocument(documentStream, entry.MediaType, entry.ColourMode == "Mono");
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
         if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase) &&
@@ -815,11 +830,58 @@ public sealed class WindowsPrintExecutor
         return printable;
     }
 
+    private static bool MatchesDocumentHash(Stream documentStream, string expectedSha256)
+    {
+        if (documentStream is Qsp2DocumentReadStream authenticatedDocument)
+            return string.Equals(authenticatedDocument.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase);
+
+        var originalPosition = documentStream.Position;
+        try
+        {
+            documentStream.Position = 0;
+            var actual = SHA256.HashData(documentStream);
+            try
+            {
+                if (expectedSha256.Length != 64)
+                    return false;
+                var expected = Convert.FromHexString(expectedSha256);
+                try
+                {
+                    return CryptographicOperations.FixedTimeEquals(actual, expected);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(expected);
+                }
+            }
+            catch (FormatException)
+            {
+                return false;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(actual);
+            }
+        }
+        finally
+        {
+            documentStream.Position = originalPosition;
+        }
+    }
+
     private static IRasterDocument OpenDocument(byte[] bytes, string mediaType, bool mono)
     {
         if (mediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase)) return new PdfRasterDocument(bytes, mono);
         if (mediaType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) || mediaType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
             return new ImageRasterDocument(bytes, mono);
+        throw new PrintExecutionBlockedException("DOCUMENT_TYPE_UNSUPPORTED", $"The document type '{mediaType}' cannot be printed by this agent.");
+    }
+
+    private static IRasterDocument OpenDocument(Stream stream, string mediaType, bool mono)
+    {
+        if (mediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase)) return new PdfRasterDocument(stream, mono);
+        if (mediaType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) || mediaType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
+            return new ImageRasterDocument(stream, mono);
         throw new PrintExecutionBlockedException("DOCUMENT_TYPE_UNSUPPORTED", $"The document type '{mediaType}' cannot be printed by this agent.");
     }
 
@@ -940,6 +1002,9 @@ public sealed class WindowsPrintExecutor
         private readonly int documentMemoryLength;
         private readonly FpdfDocumentT document;
         private readonly bool mono;
+        private readonly FPDF_FILEACCESS? fileAccess;
+        private readonly GCHandle fileAccessContextHandle;
+        private readonly PDFiumCore.Delegates.Func_int___IntPtr_ulong_bytePtr_ulong? fileAccessReadCallback;
         public PdfRasterDocument(byte[] bytes, bool mono)
         {
             _ = PdfiumInitialized.Value;
@@ -965,6 +1030,99 @@ public sealed class WindowsPrintExecutor
             using var page = LoadPage(0);
             FirstPageLandscape = fpdfview.FPDF_GetPageWidthF(page.Value) > fpdfview.FPDF_GetPageHeightF(page.Value);
         }
+        public PdfRasterDocument(Stream stream, bool mono)
+        {
+            ArgumentNullException.ThrowIfNull(stream);
+            if (!stream.CanRead || !stream.CanSeek || stream.Length <= 0)
+                throw new PrintExecutionBlockedException("PDF_RENDER_OPEN_FAILED", "PDFium requires a readable, seekable PDF stream.");
+
+            _ = PdfiumInitialized.Value;
+            this.mono = mono;
+            var context = new PdfiumStreamContext(stream);
+            var contextHandle = GCHandle.Alloc(context);
+            var access = new FPDF_FILEACCESS();
+            FpdfDocumentT? loadedDocument = null;
+            try
+            {
+                access.MFileLen = checked((ulong)stream.Length);
+                access.MParam = GCHandle.ToIntPtr(contextHandle);
+                PDFiumCore.Delegates.Func_int___IntPtr_ulong_bytePtr_ulong callback = ReadPdfiumBlock;
+                access.MGetBlock = callback;
+
+                loadedDocument = fpdfview.FPDF_LoadCustomDocument(access, string.Empty);
+                if (loadedDocument is null)
+                    throw new PrintExecutionBlockedException(
+                        "PDF_RENDER_OPEN_FAILED",
+                        $"PDFium could not open the authenticated PDF stream (error {fpdfview.FPDF_GetLastError()}).");
+
+                document = loadedDocument;
+                fileAccess = access;
+                fileAccessContextHandle = contextHandle;
+                fileAccessReadCallback = callback;
+                HasDigitalSignatures = fpdf_signature.FPDF_GetSignatureCount(document) != 0;
+                HasInteractiveForms = fpdf_formfill.FPDF_GetFormType(document) != 0;
+                PageCount = fpdfview.FPDF_GetPageCount(document);
+                if (PageCount is <= 0 or > 500)
+                    throw new PrintExecutionBlockedException("PDF_PAGE_COUNT_INVALID", "The PDF page count is not supported.");
+
+                using var page = LoadPage(0);
+                FirstPageLandscape = fpdfview.FPDF_GetPageWidthF(page.Value) > fpdfview.FPDF_GetPageHeightF(page.Value);
+            }
+            catch
+            {
+                if (loadedDocument is not null)
+                    fpdfview.FPDF_CloseDocument(loadedDocument);
+                access.Dispose();
+                if (contextHandle.IsAllocated) contextHandle.Free();
+                throw;
+            }
+        }
+
+        private static unsafe int ReadPdfiumBlock(IntPtr parameter, ulong position, byte* buffer, ulong size)
+        {
+            try
+            {
+                if (parameter == IntPtr.Zero || buffer == null || size > int.MaxValue || position > long.MaxValue)
+                    return 0;
+
+                var handle = GCHandle.FromIntPtr(parameter);
+                if (handle.Target is not PdfiumStreamContext context)
+                    return 0;
+
+                var length = checked((int)size);
+                var offset = checked((long)position);
+                lock (context.Sync)
+                {
+                    if (offset < 0 || offset > context.Stream.Length || length > context.Stream.Length - offset)
+                        return 0;
+
+                    context.Stream.Position = offset;
+                    var destination = new Span<byte>(buffer, length);
+                    var total = 0;
+                    while (total < destination.Length)
+                    {
+                        var read = context.Stream.Read(destination[total..]);
+                        if (read == 0)
+                            return 0;
+                        total += read;
+                    }
+                }
+
+                return 1;
+            }
+            catch
+            {
+                // Exceptions must never cross the unmanaged PDFium callback boundary.
+                return 0;
+            }
+        }
+
+        private sealed class PdfiumStreamContext(Stream stream)
+        {
+            public Stream Stream { get; } = stream;
+            public object Sync { get; } = new();
+        }
+
         public int PageCount { get; }
         public bool FirstPageLandscape { get; }
         public bool HasDigitalSignatures { get; }
@@ -1000,8 +1158,15 @@ public sealed class WindowsPrintExecutor
         public void Dispose()
         {
             fpdfview.FPDF_CloseDocument(document);
-            Marshal.Copy(new byte[documentMemoryLength], 0, documentMemory, documentMemoryLength);
-            Marshal.FreeHGlobal(documentMemory);
+            if (documentMemory != IntPtr.Zero)
+            {
+                Marshal.Copy(new byte[documentMemoryLength], 0, documentMemory, documentMemoryLength);
+                Marshal.FreeHGlobal(documentMemory);
+            }
+            fileAccess?.Dispose();
+            if (fileAccessContextHandle.IsAllocated)
+                fileAccessContextHandle.Free();
+            GC.KeepAlive(fileAccessReadCallback);
         }
         private LoadedPage LoadPage(int index)
         {
@@ -1022,9 +1187,16 @@ public sealed class WindowsPrintExecutor
         private readonly SKImage image;
         private readonly bool mono;
         public ImageRasterDocument(byte[] bytes, bool mono)
+            : this(new MemoryStream(bytes, writable: false), mono)
+        {
+        }
+
+        public ImageRasterDocument(Stream stream, bool mono)
         {
             this.mono = mono;
-            using var stream = new MemoryStream(bytes, false);
+            if (!stream.CanRead || !stream.CanSeek)
+                throw new PrintExecutionBlockedException("IMAGE_RENDER_OPEN_FAILED", "The image source must be readable and seekable.");
+            stream.Position = 0;
             using var bitmap = SKBitmap.Decode(stream);
             if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0 ||
                 (long)bitmap.Width * bitmap.Height > MaxRasterPixels ||
