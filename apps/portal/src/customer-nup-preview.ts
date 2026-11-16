@@ -4,6 +4,7 @@ export type CustomerNupPreviewOptions = {
   pagesPerSheet: number;
   paperSize: string;
   orientation: string;
+  pagesPerSheetDirection: string;
   sheetIndex: number;
 };
 
@@ -73,8 +74,12 @@ export async function createCustomerNupPreview(
   const cellHeight = contentHeight / rows;
 
   embeddedPages.forEach((embeddedPage, index) => {
-    const column = index % columns;
-    const row = Math.floor(index / columns);
+    const { column, row } = resolveGridPosition(
+      index,
+      columns,
+      rows,
+      options.pagesPerSheetDirection
+    );
     const inset = Math.min(cellWidth, cellHeight) * 0.035;
     const availableWidth = Math.max(1, cellWidth - inset * 2);
     const availableHeight = Math.max(1, cellHeight - inset * 2);
@@ -126,6 +131,39 @@ export async function createCustomerNupPreview(
     firstSourcePage: firstPageIndex + 1,
     lastSourcePage: lastPageIndexExclusive
   };
+}
+
+function resolveGridPosition(
+  index: number,
+  columns: number,
+  rows: number,
+  direction: string
+): { column: number; row: number } {
+  switch (direction) {
+    case "BottomRight":
+      return { column: Math.floor(index / rows), row: index % rows };
+    case "LeftBottom":
+      return { column: columns - 1 - (index % columns), row: Math.floor(index / columns) };
+    case "BottomLeft":
+      return { column: columns - 1 - Math.floor(index / rows), row: index % rows };
+    case "RightTop":
+      return { column: index % columns, row: rows - 1 - Math.floor(index / columns) };
+    case "TopRight":
+      return { column: Math.floor(index / rows), row: rows - 1 - (index % rows) };
+    case "LeftTop":
+      return {
+        column: columns - 1 - (index % columns),
+        row: rows - 1 - Math.floor(index / columns)
+      };
+    case "TopLeft":
+      return {
+        column: columns - 1 - Math.floor(index / rows),
+        row: rows - 1 - (index % rows)
+      };
+    case "RightBottom":
+    default:
+      return { column: index % columns, row: Math.floor(index / columns) };
+  }
 }
 
 function paperDimensions(paperSize: string): [number, number] {
