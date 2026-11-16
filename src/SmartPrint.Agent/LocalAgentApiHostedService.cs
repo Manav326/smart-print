@@ -1019,7 +1019,7 @@ public sealed class LocalAgentApiHostedService(
                                 !string.Equals(context.Request.ContentType?.Split(';', 2)[0].Trim(),
                                     "application/vnd.smartprint.qsp2", StringComparison.OrdinalIgnoreCase) ||
                                 !long.TryParse(context.Request.Headers["X-Print-Encrypted-Size"].FirstOrDefault(), out var encryptedSize) ||
-                                encryptedSize != expectedEncryptedSize || context.Request.ContentLength != expectedEncryptedSize)
+                                encryptedSize != expectedEncryptedSize || (context.Request.ContentLength is long contentLength && contentLength != expectedEncryptedSize))
                                 return Results.BadRequest(new { code = "private_document_envelope_invalid", message = "The QSP2 encrypted stream does not match its authorised upload." });
 
                             dataKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
