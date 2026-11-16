@@ -113,14 +113,13 @@ public sealed class Qsp2DocumentReadStream : Stream
             {
                 ReadExactly(encryptedInput, footerCore);
                 ReadExactly(encryptedInput, footerTag);
-            Qsp2DocumentFormat.ValidateFooterCore(footerCore, recordCount, plaintextLength);
+                Qsp2DocumentFormat.ValidateFooterCore(footerCore, recordCount, plaintextLength);
 
-            var footerNonce = Qsp2DocumentFormat.BuildNonce(localNoncePrefix, recordCount);
-            var footerAad = Qsp2DocumentFormat.BuildFooterAad(localHeaderHash, footerCore);
-            using (var footerAes = new AesGcm(localRecordKey, Qsp2DocumentFormat.AuthenticationTagSizeBytes))
-            {
+                var footerNonce = Qsp2DocumentFormat.BuildNonce(localNoncePrefix, recordCount);
+                var footerAad = Qsp2DocumentFormat.BuildFooterAad(localHeaderHash, footerCore);
                 try
                 {
+                    using var footerAes = new AesGcm(localRecordKey, Qsp2DocumentFormat.AuthenticationTagSizeBytes);
                     footerAes.Decrypt(
                         footerNonce,
                         ReadOnlySpan<byte>.Empty,
@@ -132,53 +131,54 @@ public sealed class Qsp2DocumentReadStream : Stream
                 {
                     throw new InvalidDataException("The QSP2 final authentication record is invalid.", exception);
                 }
-            }
-            finally
-            {
-                CryptographicOperations.ZeroMemory(footerNonce);
-                CryptographicOperations.ZeroMemory(footerAad);
-                CryptographicOperations.ZeroMemory(footerTag);
-            }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(footerNonce);
+                    CryptographicOperations.ZeroMemory(footerAad);
+                }
 
                 var footerDigest = footerCore.AsSpan(20, 32);
                 if (!string.IsNullOrWhiteSpace(expectedSha256))
-            {
-                byte[] expectedDigest;
-                try
                 {
-                    if (expectedSha256.Length != 64)
-                        throw new FormatException();
-                    expectedDigest = Convert.FromHexString(expectedSha256);
-                }
-                catch (FormatException exception)
-                {
-                    throw new ArgumentException("The expected SHA-256 digest must be a 64-character hexadecimal value.", nameof(expectedSha256), exception);
-                }
+                    byte[] expectedDigest;
+                    try
+                    {
+                        if (expectedSha256.Length != 64)
+                            throw new FormatException();
+                        expectedDigest = Convert.FromHexString(expectedSha256);
+                    }
+                    catch (FormatException exception)
+                    {
+                        throw new ArgumentException(
+                            "The expected SHA-256 digest must be a 64-character hexadecimal value.",
+                            nameof(expectedSha256),
+                            exception);
+                    }
 
-                try
-                {
-                    if (!CryptographicOperations.FixedTimeEquals(footerDigest, expectedDigest))
-                        throw new InvalidDataException("The QSP2 footer digest does not match the stored document metadata.");
+                    try
+                    {
+                        if (!CryptographicOperations.FixedTimeEquals(footerDigest, expectedDigest))
+                            throw new InvalidDataException("The QSP2 footer digest does not match the stored document metadata.");
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(expectedDigest);
+                    }
                 }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(expectedDigest);
-                }
-            }
 
                 Sha256 = Convert.ToHexString(footerDigest).ToLowerInvariant();
 
-            // Ownership of these key-derived values transfers to the stream.
-            headerHash = localHeaderHash;
-            noncePrefix = localNoncePrefix;
-            recordKey = localRecordKey;
-            localHeaderHash = null;
-            localNoncePrefix = null;
-            localRecordKey = null;
+                // Ownership of these key-derived values transfers to the stream.
+                headerHash = localHeaderHash;
+                noncePrefix = localNoncePrefix;
+                recordKey = localRecordKey;
+                localHeaderHash = null;
+                localNoncePrefix = null;
+                localRecordKey = null;
 
-            ciphertextBuffer = ArrayPool<byte>.Shared.Rent(recordSizeBytes);
-            plaintextBuffer = ArrayPool<byte>.Shared.Rent(recordSizeBytes);
-            aes = new AesGcm(recordKey, Qsp2DocumentFormat.AuthenticationTagSizeBytes);
+                ciphertextBuffer = ArrayPool<byte>.Shared.Rent(recordSizeBytes);
+                plaintextBuffer = ArrayPool<byte>.Shared.Rent(recordSizeBytes);
+                aes = new AesGcm(recordKey, Qsp2DocumentFormat.AuthenticationTagSizeBytes);
                 encryptedInput.Position = recordsOffset;
             }
             finally
