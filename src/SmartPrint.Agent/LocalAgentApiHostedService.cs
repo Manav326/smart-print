@@ -1158,11 +1158,23 @@ public sealed class LocalAgentApiHostedService(
                         }
 
                         input.Position = 0;
-                        await localQueueStore.EnqueueLocalUploadStreamingAsync(
-                            CreateStagedJob(analysis),
-                            credentials.AgentDeviceId,
-                            input,
-                            ct);
+                        try
+                        {
+                            await localQueueStore.EnqueueLocalUploadStreamingAsync(
+                                CreateStagedJob(analysis),
+                                credentials.AgentDeviceId,
+                                input,
+                                ct);
+                        }
+                        catch (InvalidDataException exception) when (
+                            exception.Message.Contains("SHA-256", StringComparison.OrdinalIgnoreCase))
+                        {
+                            return Results.UnprocessableEntity(new
+                            {
+                                code = "local_upload_integrity_mismatch",
+                                message = "The document hash does not match the authorised upload."
+                            });
+                        }
                     }
                 }
 

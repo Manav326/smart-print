@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using SmartPrint.Agent;
+using SmartPrint.Documents;
 
 namespace SmartPrint.Agent.Tests;
 
@@ -60,6 +61,7 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal("QLQ2", System.Text.Encoding.ASCII.GetString(persisted, 0, 4));
             Assert.False(bytes.AsSpan().SequenceEqual(persisted));
             Assert.Equal(agentScopeId, entry.DocumentScopeId);
+            Assert.Equal(bytes, store.ReadDocument(job.Id));
 
             using var document = store.OpenDocumentReadStream(job.Id, agentScopeId);
             Assert.True(document.CanSeek);
