@@ -17,6 +17,14 @@ public static class PrinterPagesPerSheetRules
             if (document.RootElement.ValueKind != JsonValueKind.Object)
                 return false;
 
+            var direction = document.RootElement.TryGetProperty("pagesPerSheetDirection", out var directionValue) &&
+                            directionValue.ValueKind == JsonValueKind.String
+                ? directionValue.GetString()
+                : null;
+            if (direction is not ("RightBottom" or "BottomRight" or "LeftBottom" or "BottomLeft" or
+                "RightTop" or "TopRight" or "LeftTop" or "TopLeft"))
+                return false;
+
             foreach (var property in document.RootElement.EnumerateObject())
             {
                 if (!string.Equals(property.Name, "pagesPerSheet", StringComparison.OrdinalIgnoreCase) ||
