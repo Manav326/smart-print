@@ -36,7 +36,7 @@ public sealed record ShopPricingRequest(
     long Photo4x6Minor = 0,
     long? IdDocumentPriceMinor = null);
 
-public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies, string? PrintKind = "DOCUMENT", string? PhotoSizeCode = null, int? PhotoCount = null, string Orientation = "AUTO", int? PhotosPerPage = null);
+public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies, string? PrintKind = "DOCUMENT", string? PhotoSizeCode = null, int? PhotoCount = null, string Orientation = "AUTO", int? PhotosPerPage = null, string PhotoOutputLayout = "A4_SHEET", string PhotoPaperFinish = "PLAIN");
 
 public sealed record UpdatePrintJobSettingsRequest(
     string ColourMode,
@@ -166,7 +166,7 @@ public sealed record AgentPrivateRelayItem(
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
     string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL",
-    string PhotoPaperFinish = "GLOSSY", string PhotoOutputLayout = "A4_SHEET",
+    string PhotoPaperFinish = "PLAIN", string PhotoOutputLayout = "A4_SHEET",
     string? PhotoSizeCode = null);
 
 public sealed record AgentPrivateTestOutputRequest(string FileName, long SizeBytes, string Sha256);
