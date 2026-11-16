@@ -292,6 +292,39 @@ public static class WindowsPrinterCapabilityDiscovery
         _ => "Driver paper " + code
     };
 
+    internal static short? ResolvePhotoMediaTypeCode(string queueName, IntPtr devMode, string finish)
+    {
+        if (string.IsNullOrWhiteSpace(queueName)) return null;
+        var count = DeviceCapabilitiesW(queueName, null, DcMediaTypes, IntPtr.Zero, devMode);
+        if (count is <= 0 or > MaximumReportedItems) return null;
+
+        var codeBuffer = Marshal.AllocHGlobal(count * sizeof(short));
+        var nameBuffer = Marshal.AllocHGlobal(count * FixedNameCharacters * sizeof(char));
+        try
+        {
+            var codeCount = DeviceCapabilitiesW(queueName, null, DcMediaTypes, codeBuffer, devMode);
+            var nameCount = DeviceCapabilitiesW(queueName, null, DcMediaTypeNames, nameBuffer, devMode);
+            if (codeCount != count || nameCount != count) return null;
+
+            var values = new List<(short Code, string Name)>(count);
+            for (var index = 0; index < count; index++)
+            {
+                var code = Marshal.ReadInt16(codeBuffer, index * sizeof(short));
+                var name = Marshal.PtrToStringUni(
+                    IntPtr.Add(nameBuffer, index * FixedNameCharacters * sizeof(char)),
+                    FixedNameCharacters)?.TrimEnd('\0', ' ');
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                values.Add((code, name));
+            }
+            return values.Count == count ? PrinterCapabilityRules.SelectPhotoMediaTypeCode(values, finish) : null;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(codeBuffer);
+            Marshal.FreeHGlobal(nameBuffer);
+        }
+    }
+
     private static int ReadCount(string queueName, short capability)
     {
         var count = DeviceCapabilitiesW(queueName, null, capability, IntPtr.Zero, IntPtr.Zero);
