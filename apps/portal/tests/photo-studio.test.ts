@@ -143,10 +143,12 @@ test("the shared Photo Studio explains different save actions for customers and 
  assert.match(app,/PhotoStudio source=\{shopPhotoStudio\.source\} mode="shop"/);
 });
 
-test("shop owners can inspect the actual prepared photo PDF before approving the job",()=>{
+test("shop owners preview the prepared photo PDF through the shared fixed-size media surface",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
- assert.match(app,/isPdf&&job\.printKind==="PHOTO"[\s\S]*?<iframe src=\{url\} title=\{name\}\//);
- assert.match(app,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
+ const preview=readFileSync(new URL("../src/ShopDocumentPreviewSurface.tsx",import.meta.url),"utf8");
+ assert.match(app,/<ShopDocumentPreviewSurface name=\{name\} url=\{url\} mediaType=\{mediaType\} printKind=\{job\.printKind\}/);
+ assert.match(preview,/canRender && isPdf/);
+ assert.match(preview,/SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW/);
 });
 
 test("Photo Studio locks background scroll and supports accessible keyboard dismissal",()=>{
