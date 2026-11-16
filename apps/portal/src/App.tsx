@@ -3995,7 +3995,7 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
   return Array.isArray(groups)?groups:undefined;
 }
 type CustomerSavedPrintSettings = CustomerPrintRequestSettings & { advancedEnabled?: boolean };
-type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage?: number };
+type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" };
 function customerPhotoSizeLabel(sizeCode?:string|null):string {
   switch(sizeCode){
     case "35x45": return "35 × 45 mm";
@@ -4086,8 +4086,12 @@ function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSetting
   const settings=value as CustomerPhotoSettings;
   const maximumBySize:Record<string,number>={"35x45":25,"25x35":49,"2x2":15,"4x6":1};
   const maximum=maximumBySize[settings.sizeCode];
+  const outputLayout=settings.photoOutputLayout??"A4_SHEET";
+  const finish=settings.photoPaperFinish??"PLAIN";
   return maximum!==undefined&&Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
-    Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum;
+    Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum&&
+    (outputLayout==="A4_SHEET"||outputLayout==="PHOTO_PAPER")&&
+    (outputLayout==="A4_SHEET"?finish==="PLAIN":finish==="GLOSSY"||finish==="MATTE");
 }
 
 const identifiedCustomerDocumentTypes=new WeakMap<File,SupportedDocumentType>();
@@ -4780,7 +4784,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             copies:photoSettings?1:idDocument?1:settings.copies,
             orientation:photoSettings?"AUTO":idDocument?"PORTRAIT":settings.orientation,
             ...(photoSettings
-              ?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount}
+              ?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount,photoOutputLayout:photoSettings.photoOutputLayout??"A4_SHEET",photoPaperFinish:photoSettings.photoPaperFinish??"PLAIN"}
               :idDocument?{printKind:"ID_DOCUMENT" as const}:{printKind:"DOCUMENT" as const})
           });
         } catch(exception) {
@@ -4974,7 +4978,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     for(const sheet of sheets){
       const fp=customerFileFingerprint(sheet.file);groups[fp]=group;
       settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
-      photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage};
+      photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish};
       const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
       if(urls.length)previews[fp]=urls;
     }
