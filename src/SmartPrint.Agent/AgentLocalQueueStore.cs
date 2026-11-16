@@ -1419,7 +1419,7 @@ public sealed class AgentLocalQueueStore
             // For a real physical private print, the server has now acknowledged
             // source-metadata redaction. No local job manifest is needed afterwards.
             var manifestPath = GetManifestPath(jobId);
-            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+            RemoveManifest(jobId, manifestPath);
     
         }
         finally
