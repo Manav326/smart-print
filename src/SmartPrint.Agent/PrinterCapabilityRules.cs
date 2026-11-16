@@ -102,4 +102,4 @@ internal static class PrinterCapabilityRules
         short actualOrientation,
         short requestedOrientation) =>
         orientationFieldReported && actualOrientation == requestedOrientation;
-
+}
