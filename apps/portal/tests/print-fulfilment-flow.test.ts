@@ -736,10 +736,15 @@ test("Android customer PDF previews render automatically and receive native brid
   assert.ok(componentStart >= 0 && componentEnd > componentStart);
   const preview = app.slice(componentStart, componentEnd);
   assert.doesNotMatch(preview, /Preview PDF/);
-  assert.match(preview, /Preparing document preview/);
+  assert.match(preview, /Preparing print layout preview/);
   assert.match(preview, /Preview unavailable/);
+  assert.match(preview, /Previous sheet/);
+  assert.match(preview, /Next sheet/);
+  assert.match(preview, /The original PDF is sent to the printer driver unchanged/);
+  assert.match(app, /previewCustomerPdf\|\"\+token\+\"\|\"\+sheetIndex\+\"\|\"\+pagesPerSheet/);
+  assert.match(app, /current\.pagesPerSheet===payload\.pagesPerSheet/);
   assert.match(app, /bridge\.addEventListener\("message",onNativePdfPreview\)/);
   assert.match(app, /bridge\.removeEventListener!\("message",onNativePdfPreview\)/);
   assert.doesNotMatch(app, /window\.addEventListener\("message",onNativePdfPreview\)/);
-  assert.match(app, /openCustomerPdfPreview\(file\);\n  \},\[file,nativeAppMode,photoSettingsByFileFingerprint\]\)/);
+  assert.match(app, /openCustomerPdfPreview\(file\);\n  \},\[file,nativeAppMode,photoSettingsByFileFingerprint,groupSettings,fileSettings\]\)/);
 });
