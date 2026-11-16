@@ -247,7 +247,8 @@ public sealed class Worker(
                     ticket.QueueName, "Private document", analysis.MediaType, ticket.SizeBytes,
                     ticket.Sha256, ticket.ExpiresUtc, "LOCAL_AGENT",
                     ticket.OutputMode, ticket.Orientation,
-                    PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind);
+                    PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind,
+                    PagesPerSheet: ticket.PagesPerSheet);
 
                 // DPAPI-protect the document on this paired Windows computer before
                 // acknowledging the relay. Replaying the same ticket is idempotent.

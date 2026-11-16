@@ -1,6 +1,8 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Printing;
+using System.Printing.Interop;
 using PDFiumCore;
 using SkiaSharp;
 
@@ -754,6 +756,9 @@ public sealed class WindowsPrintExecutor
             if (DocumentPropertiesW(IntPtr.Zero, printer, queueName, pointer, pointer, 10) != 1)
                 throw new PrintExecutionBlockedException("PRINTER_SETTINGS_REJECTED", "The printer driver rejected the requested print settings.");
 
+            if (entry.PagesPerSheet > 1)
+                ApplyDriverPagesPerSheet(printer, queueName, pointer, size, entry.PagesPerSheet);
+
             var validated = Marshal.PtrToStructure<DevModeW>(pointer);
             if ((validated.Fields & DmPaperSize) == 0 || validated.PaperSize != paper)
                 throw new PrintExecutionBlockedException("PAPER_SIZE_REJECTED", "The printer driver did not accept the requested paper size.");
@@ -771,6 +776,89 @@ public sealed class WindowsPrintExecutor
         {
             Marshal.FreeHGlobal(pointer);
             throw;
+        }
+    }
+
+    private static void ApplyDriverPagesPerSheet(
+        IntPtr printer,
+        string queueName,
+        IntPtr devMode,
+        int devModeSize,
+        int requestedPagesPerSheet)
+    {
+        try
+        {
+            using var server = new LocalPrintServer();
+            using var queue = server.GetPrintQueue(queueName);
+            queue.Refresh();
+
+            var supported = queue.GetPrintCapabilities().PagesPerSheetCapability;
+            if (!supported.Contains(requestedPagesPerSheet))
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_UNSUPPORTED",
+                    $"The selected printer driver does not support {requestedPagesPerSheet} pages per sheet.");
+            }
+
+            var sourceDevMode = new byte[devModeSize];
+            Marshal.Copy(devMode, sourceDevMode, 0, devModeSize);
+            using var converter = new PrintTicketConverter(queueName, 1);
+            var currentTicket = converter.ConvertDevModeToPrintTicket(sourceDevMode);
+            var requestedTicket = new PrintTicket
+            {
+                PagesPerSheet = requestedPagesPerSheet
+            };
+
+            // Merge against the current ticket so paper size, orientation, colour and
+            // duplex settings remain intact. The driver is the authority on viable options.
+            var validation = queue.MergeAndValidatePrintTicket(currentTicket, requestedTicket);
+            var validatedTicket = validation.ValidatedPrintTicket;
+            if (validatedTicket.PagesPerSheet != requestedPagesPerSheet)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_REJECTED",
+                    "The printer driver changed the requested pages-per-sheet setting during validation. No pages were submitted.");
+            }
+
+            var convertedDevMode = converter.ConvertPrintTicketToDevMode(
+                validatedTicket, BaseDevModeType.UserDefault);
+            if (convertedDevMode.Length != devModeSize)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_DEVMODE_INVALID",
+                    "The driver returned an unexpected DEVMODE size for the selected N-up setting.");
+            }
+
+            Marshal.Copy(convertedDevMode, 0, devMode, convertedDevMode.Length);
+            if (DocumentPropertiesW(IntPtr.Zero, printer, queueName, devMode, devMode, 10) != 1)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_DRIVER_VALIDATION_FAILED",
+                    "Windows could not validate the driver's N-up settings. No pages were submitted.");
+            }
+
+            var finalDevMode = new byte[devModeSize];
+            Marshal.Copy(devMode, finalDevMode, 0, devModeSize);
+            var finalTicket = converter.ConvertDevModeToPrintTicket(finalDevMode);
+            if (finalTicket.PagesPerSheet != requestedPagesPerSheet)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_NOT_APPLIED",
+                    "The selected printer driver did not retain the requested N-up setting. No pages were submitted.");
+            }
+        }
+        catch (PrintExecutionBlockedException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is PrintQueueException or InvalidOperationException or
+                ArgumentException or ExternalException or UnauthorizedAccessException)
+        {
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_DRIVER_CONFIGURATION_FAILED",
+                "SmartPrint could not configure and verify N-up through the selected Windows printer driver. No pages were submitted.",
+                exception);
         }
     }
 
