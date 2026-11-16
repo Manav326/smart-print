@@ -22,15 +22,37 @@ public static class Qsp2DocumentFormat
 
     private const byte CurrentVersion = 2;
     private const byte Aes256GcmCipherSuite = 1;
-    private const int SaltOffset = 32;
-    private const int SaltSize = 32;
-    private const int NoncePrefixOffset = 64;
+    internal const int SaltOffset = 32;
+    internal const int SaltSize = 32;
+    internal const int NoncePrefixOffset = 64;
     private const int TenantIdOffset = 68;
     private const int DocumentIdOffset = 84;
-    private const int FooterCoreSizeBytes = 52;
+    internal const int FooterCoreSizeBytes = 52;
 
-    private static readonly byte[] HeaderKeyInfo = "SmartPrint.QSP2.HeaderKey.v1"u8.ToArray();
-    private static readonly byte[] RecordKeyInfo = "SmartPrint.QSP2.RecordKey.v1"u8.ToArray();
+    internal static readonly byte[] HeaderKeyInfo = "SmartPrint.QSP2.HeaderKey.v1"u8.ToArray();
+    internal static readonly byte[] RecordKeyInfo = "SmartPrint.QSP2.RecordKey.v1"u8.ToArray();
+
+    /// <summary>
+    /// Opens a seekable authenticated reader over a QSP2 encrypted object. Only the
+    /// requested records are decrypted, with a one-record cache for random-access
+    /// document parsers. The caller owns the input stream unless leaveOpen is false.
+    /// </summary>
+    public static Qsp2DocumentReadStream OpenRead(
+        Stream encryptedInput,
+        ReadOnlyMemory<byte> dataKey,
+        Guid expectedTenantId,
+        Guid expectedDocumentId,
+        long maximumPlaintextLength,
+        string? expectedSha256 = null,
+        bool leaveOpen = true) =>
+        new(
+            encryptedInput,
+            dataKey,
+            expectedTenantId,
+            expectedDocumentId,
+            maximumPlaintextLength,
+            expectedSha256,
+            leaveOpen);
 
     /// <summary>
     /// Encrypts an exact-length source stream into QSP2 using bounded, pooled buffers.
@@ -319,7 +341,7 @@ public static class Qsp2DocumentFormat
         return header;
     }
 
-    private static void ValidateHeader(
+    internal static void ValidateHeader(
         byte[] header,
         Guid expectedTenantId,
         Guid expectedDocumentId,
@@ -356,7 +378,7 @@ public static class Qsp2DocumentFormat
         return footer;
     }
 
-    private static void ValidateFooterCore(byte[] footer, ulong recordCount, long plaintextLength)
+    internal static void ValidateFooterCore(byte[] footer, ulong recordCount, long plaintextLength)
     {
         if (!footer.AsSpan(0, 4).SequenceEqual("QEND"u8) ||
             BinaryPrimitives.ReadUInt64BigEndian(footer.AsSpan(4, 8)) != recordCount ||
@@ -364,7 +386,7 @@ public static class Qsp2DocumentFormat
             throw new InvalidDataException("The QSP2 final record does not match the document header.");
     }
 
-    private static byte[] BuildRecordAad(byte[] headerHash, ulong recordIndex, int recordLength)
+    internal static byte[] BuildRecordAad(byte[] headerHash, ulong recordIndex, int recordLength)
     {
         var aad = new byte[headerHash.Length + 1 + sizeof(ulong) + sizeof(uint)];
         headerHash.CopyTo(aad, 0);
@@ -374,7 +396,7 @@ public static class Qsp2DocumentFormat
         return aad;
     }
 
-    private static byte[] BuildFooterAad(byte[] headerHash, byte[] footerCore)
+    internal static byte[] BuildFooterAad(byte[] headerHash, byte[] footerCore)
     {
         var aad = new byte[headerHash.Length + 1 + footerCore.Length];
         headerHash.CopyTo(aad, 0);
@@ -383,7 +405,7 @@ public static class Qsp2DocumentFormat
         return aad;
     }
 
-    private static byte[] BuildNonce(ReadOnlySpan<byte> noncePrefix, ulong recordIndex)
+    internal static byte[] BuildNonce(ReadOnlySpan<byte> noncePrefix, ulong recordIndex)
     {
         var nonce = new byte[12];
         noncePrefix.CopyTo(nonce);
@@ -391,7 +413,7 @@ public static class Qsp2DocumentFormat
         return nonce;
     }
 
-    private static byte[] DeriveKey(
+    internal static byte[] DeriveKey(
         ReadOnlySpan<byte> dataKey,
         ReadOnlySpan<byte> salt,
         ReadOnlySpan<byte> info)
@@ -418,7 +440,7 @@ public static class Qsp2DocumentFormat
         }
     }
 
-    private static int GetExpectedRecordLength(
+    internal static int GetExpectedRecordLength(
         long plaintextLength,
         int recordSizeBytes,
         ulong recordIndex,
