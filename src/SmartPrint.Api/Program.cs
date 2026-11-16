@@ -2687,6 +2687,8 @@ shop.MapPost("/photo-jobs", async (
     var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
     StoredDocument? stored = null;
 
+    Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = null;
+
     async Task CleanupUncommittedStorageAsync()
     {
         if (stored is null) return;
@@ -2741,7 +2743,7 @@ shop.MapPost("/photo-jobs", async (
 
         // Transfer, encrypt and validate before taking database locks. The
         // transaction below covers only idempotency, pricing, quota and job commit.
-        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        transaction = await db.Database.BeginTransactionAsync(ct);
 
         var existingJob = await db.PrintJobs.AsNoTracking()
             .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IdempotencyKey == idempotencyKey, ct);
@@ -2985,7 +2987,12 @@ shop.MapPost("/photo-jobs", async (
     }
     catch (DbUpdateException)
     {
-        await transaction.RollbackAsync(ct);
+        if (transaction is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            await transaction.DisposeAsync();
+            transaction = null;
+        }
         await CleanupUncommittedStorageAsync();
 
         // A concurrent request may have won the unique (TenantId, IdempotencyKey)
@@ -3002,9 +3009,19 @@ shop.MapPost("/photo-jobs", async (
     }
     catch
     {
-        await transaction.RollbackAsync(ct);
+        if (transaction is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            await transaction.DisposeAsync();
+            transaction = null;
+        }
         await CleanupUncommittedStorageAsync();
         throw;
+    }
+    finally
+    {
+        if (transaction is not null)
+            await transaction.DisposeAsync();
     }
 })
 .WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
