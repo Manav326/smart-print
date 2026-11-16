@@ -4071,6 +4071,7 @@ function isSmartPrintPhotoDocument(file:File):boolean {
 }
 type NativeCustomerPdfPreview = {
   token:string; requestedPageIndex:number; pageIndex:number; pageCount:number;
+  pagesPerSheet:number; firstSourcePage:number; lastSourcePage:number;
   image:string; thumbnails:Array<{index:number;image:string}>; loading:boolean;
 };
 function customerStatusTone(status:string):"green"|"red"|"amber"|"blue"|"slate" {
@@ -4121,26 +4122,24 @@ function postSmartPrintNativeMessage(message:string):boolean {
   catch {return false;}
 }
 
-function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onPage:(page:number)=>void}) {
+function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onPage:(sheet:number)=>void}) {
   const current=preview?.token===token?preview:null;
   return <div className="customer-native-pdf-preview">
     {current?.image
-      ? <img className="customer-native-pdf-page" src={"data:image/jpeg;base64,"+current.image} alt={"PDF page "+(current.pageIndex+1)+" of "+current.pageCount}/>
+      ? <img className="customer-native-pdf-page" src={"data:image/jpeg;base64,"+current.image} alt={"Print sheet "+(current.pageIndex+1)+" of "+current.pageCount+", containing PDF pages "+current.firstSourcePage+" to "+current.lastSourcePage}/>
       : <div className="customer-native-pdf-empty">
           {current===null||current.loading
-            ? <><span className="button-spinner"/><span>Preparing document preview…</span></>
-            : <><FileText size={22}/><strong>Preview unavailable</strong><span>The PDF could not be rendered on this device. You can still upload it.</span></>}
+            ? <><span className="button-spinner"/><span>Preparing print layout preview…</span></>
+            : <><FileText size={22}/><strong>Preview unavailable</strong><span>The print layout could not be previewed on this device. You can still upload the original PDF.</span></>}
         </div>}
-    {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
-      <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous</button>
-      <span>Page {current.pageIndex+1} of {current.pageCount}</span>
-      <button type="button" disabled={current.loading||current.pageIndex>=current.pageCount-1} onClick={()=>onPage(current.pageIndex+1)}>Next</button>
+    {current?.image&&<div className="customer-native-pdf-layout-note">
+      <strong>{current.pagesPerSheet}-up print layout</strong>
+      <span>PDF pages {current.firstSourcePage}–{current.lastSourcePage} appear on this output sheet. The original PDF is sent to the printer driver unchanged.</span>
     </div>}
-    {current&&current.thumbnails.length>1&&<div className="customer-native-pdf-thumbnails" aria-label="PDF page thumbnails">
-      {current.thumbnails.map(page=><button type="button" key={page.index} aria-current={current.pageIndex===page.index?"page":undefined} onClick={()=>onPage(page.index)} disabled={current.loading}>
-        <img src={"data:image/jpeg;base64,"+page.image} alt={"Page "+(page.index+1)}/>
-        <span>{page.index+1}</span>
-      </button>)}
+    {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
+      <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous sheet</button>
+      <span>Sheet {current.pageIndex+1} of {current.pageCount}</span>
+      <button type="button" disabled={current.loading||current.pageIndex>=current.pageCount-1} onClick={()=>onPage(current.pageIndex+1)}>Next sheet</button>
     </div>}
   </div>;
 }
@@ -4536,7 +4535,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       if(message.startsWith("CUSTOMER_PDF_PREVIEW|")){
         try{
           const payload=JSON.parse(message.slice("CUSTOMER_PDF_PREVIEW|".length)) as {
-            token:string;pageIndex:number;pageCount:number;image:string;
+            token:string;pageIndex:number;pageCount:number;pagesPerSheet:number;
+            firstSourcePage:number;lastSourcePage:number;image:string;
             thumbnails:Array<{index:number;image:string}>;
           };
           setNativePdfPreview(current=>current&&current.token===payload.token&&current.requestedPageIndex===payload.pageIndex
@@ -4572,8 +4572,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   useEffect(()=>{
     if(!nativeAppMode||!file||!isCustomerPdf(file))return;
     if(photoSettingsByFileFingerprint[customerFileFingerprint(file)])return;
+    // Re-render the sheet preview whenever pages-per-sheet, paper or orientation changes.
     openCustomerPdfPreview(file);
-  },[file,nativeAppMode,photoSettingsByFileFingerprint]);
+  },[file,nativeAppMode,photoSettingsByFileFingerprint,groupSettings,fileSettings]);
 
   useEffect(()=>{
     if(!nativeAppMode)return;
@@ -5024,6 +5025,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     setPhotoStudioSourceFingerprint(fingerprint);
     setError("");
   }
+  function postCustomerPdfPreviewRequest(token:string,sheetIndex:number,candidate:File):boolean {
+    const settings=settingsForFile(candidate);
+    const pagesPerSheet=settings.pagesPerSheet??1;
+    return postSmartPrintNativeMessage(
+      "previewCustomerPdf|"+token+"|"+sheetIndex+"|"+pagesPerSheet+"|"+settings.paperSize+"|"+settings.orientation
+    );
+  }
   function openCustomerPdfPreview(candidate:File) {
     const token=smartPrintNativePdfPreviewTokens.get(candidate);
     if(!token){
@@ -5031,23 +5039,31 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setError("The PDF preview is unavailable. You can still upload the document.");
       return;
     }
-    setNativePdfPreview({token,requestedPageIndex:0,pageIndex:0,pageCount:0,image:"",thumbnails:[],loading:true});
-    if(!postSmartPrintNativeMessage("previewCustomerPdf|"+token+"|0")){
-      setNativePdfPreview({token,requestedPageIndex:0,pageIndex:0,pageCount:0,image:"",thumbnails:[],loading:false});
+    const settings=settingsForFile(candidate);
+    const pagesPerSheet=settings.pagesPerSheet??1;
+    setNativePdfPreview({
+      token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+      firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:true
+    });
+    if(!postCustomerPdfPreviewRequest(token,0,candidate)){
+      setNativePdfPreview({
+        token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+        firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:false
+      });
       setError("The PDF preview is unavailable. You can still upload the document.");
       return;
     }
     setError("");
   }
-  function requestCustomerPdfPreviewPage(token:string,pageIndex:number) {
+  function requestCustomerPdfPreviewPage(token:string,sheetIndex:number) {
     const current=nativePdfPreview;
-    if(!current||current.token!==token||current.loading)return;
-    const target=Math.max(0,Math.min(current.pageCount-1,pageIndex));
+    if(!current||current.token!==token||current.loading||!file)return;
+    const target=Math.max(0,Math.min(current.pageCount-1,sheetIndex));
     if(target===current.pageIndex)return;
     setNativePdfPreview({...current,requestedPageIndex:target,loading:true});
-    if(!postSmartPrintNativeMessage("previewCustomerPdf|"+token+"|"+target)){
+    if(!postCustomerPdfPreviewRequest(token,target,file)){
       setNativePdfPreview({...current,loading:false});
-      setError("The PDF page could not be opened.");
+      setError("The print layout sheet could not be opened.");
     }
   }
   async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
