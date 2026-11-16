@@ -171,6 +171,84 @@ public sealed class Qsp2DocumentFormatTests
             Qsp2DocumentFormat.DecryptAsync(encrypted, plaintext, dataKey, tenantId, documentId, sourceBytes.Length - 1));
     }
 
+    [Fact]
+    public async Task RandomAccessReaderAuthenticatesOnlyRequestedRecordsAndSupportsSeeking()
+    {
+        var tenantId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var dataKey = RandomNumberGenerator.GetBytes(32);
+        var sourceBytes = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DefaultRecordSizeBytes * 2 + 73);
+        await using var source = new MemoryStream(sourceBytes, writable: false);
+        await using var encrypted = new MemoryStream();
+        var written = await Qsp2DocumentFormat.EncryptAsync(
+            source, encrypted, tenantId, documentId, sourceBytes.LongLength, dataKey);
+
+        encrypted.Position = 0;
+        using var reader = Qsp2DocumentFormat.OpenRead(
+            encrypted, dataKey, tenantId, documentId, 50L * 1024 * 1024, written.Sha256);
+
+        Assert.True(reader.CanSeek);
+        Assert.Equal(sourceBytes.LongLength, reader.Length);
+        Assert.Equal(written.Sha256, reader.Sha256);
+
+        var middleOffset = Qsp2DocumentFormat.DefaultRecordSizeBytes + 17L;
+        reader.Position = middleOffset;
+        var expected = sourceBytes.AsSpan((int)middleOffset, 4096).ToArray();
+        var actual = new byte[expected.Length];
+        var read = reader.Read(actual, 0, actual.Length);
+
+        Assert.Equal(expected.Length, read);
+        Assert.Equal(expected, actual);
+        Assert.Equal(middleOffset + expected.Length, reader.Position);
+    }
+
+    [Fact]
+    public async Task RandomAccessReaderRejectsTamperedRecordWhenThatRecordIsRead()
+    {
+        var tenantId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var dataKey = RandomNumberGenerator.GetBytes(32);
+        var sourceBytes = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DefaultRecordSizeBytes + 100);
+        await using var source = new MemoryStream(sourceBytes, writable: false);
+        await using var encrypted = new MemoryStream();
+        await Qsp2DocumentFormat.EncryptAsync(
+            source, encrypted, tenantId, documentId, sourceBytes.LongLength, dataKey);
+
+        var tampered = encrypted.ToArray();
+        var secondRecordOffset = Qsp2DocumentFormat.HeaderSizeBytes +
+            Qsp2DocumentFormat.HeaderMacSizeBytes +
+            (sizeof(uint) + Qsp2DocumentFormat.DefaultRecordSizeBytes + Qsp2DocumentFormat.AuthenticationTagSizeBytes);
+        tampered[checked((int)secondRecordOffset + sizeof(uint) + 7)] ^= 0x20;
+
+        await using var tamperedInput = new MemoryStream(tampered);
+        using var reader = Qsp2DocumentFormat.OpenRead(
+            tamperedInput, dataKey, tenantId, documentId, 50L * 1024 * 1024);
+
+        reader.Position = Qsp2DocumentFormat.DefaultRecordSizeBytes;
+        var buffer = new byte[128];
+        Assert.Throws<InvalidDataException>(() => reader.Read(buffer, 0, buffer.Length));
+    }
+
+    [Fact]
+    public async Task RandomAccessReaderRejectsFooterDigestThatDiffersFromStoredMetadata()
+    {
+        var tenantId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var dataKey = RandomNumberGenerator.GetBytes(32);
+        var sourceBytes = RandomNumberGenerator.GetBytes(128 * 1024);
+        await using var source = new MemoryStream(sourceBytes, writable: false);
+        await using var encrypted = new MemoryStream();
+        var written = await Qsp2DocumentFormat.EncryptAsync(
+            source, encrypted, tenantId, documentId, sourceBytes.LongLength, dataKey);
+
+        encrypted.Position = 0;
+        Assert.Throws<InvalidDataException>(() =>
+        {
+            using var reader = Qsp2DocumentFormat.OpenRead(
+                encrypted, dataKey, tenantId, documentId, 50L * 1024 * 1024, new string('0', 64));
+        });
+    }
+
     private sealed class FragmentedReadStream(byte[] bytes, int maximumReadSize) : MemoryStream(bytes, writable: false)
     {
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
