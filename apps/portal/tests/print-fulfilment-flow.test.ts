@@ -764,5 +764,5 @@ test("browser customer N-up preview is visual-only and leaves the original uploa
  const nativePreviewStart=android.indexOf("private fun renderCustomerPdfSheet(");
  const nativePreviewEnd=android.indexOf("private fun renderCustomerPdfPage(",nativePreviewStart);
  assert.ok(nativePreviewStart>=0 && nativePreviewEnd>nativePreviewStart);
- assert.match(android.slice(nativePreviewStart,nativePreviewEnd),/drawText\("SmartPrint by QuantaEdge"/);
+ assert.match(android.slice(nativePreviewStart,nativePreviewEnd),/canvas\.drawText\([\s\S]*?"SmartPrint by QuantaEdge"/);
 });
