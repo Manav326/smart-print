@@ -592,7 +592,7 @@ async function installPrivatePrintingApiHarness(context, page) {
   page.on("pageerror", error => unhandledApi.push({ method: "PAGEERROR", path: error.message }));
   return {
     tickets, ticketRequests, relayUploads, allApiRequests, unhandledApi,
-    maximumConcurrentPrivateRelayTransfers
+    get maximumConcurrentPrivateRelayTransfers() { return maximumConcurrentPrivateRelayTransfers; }
   };
 }
 
