@@ -507,6 +507,8 @@ try {
     $fixtureProjectXml | Set-Content -LiteralPath (Join-Path $fixtureProject "SmartPrintLifecycleFixture.csproj") -Encoding utf8
 
     @'
+using System.ComponentModel;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -520,6 +522,13 @@ var mode = args.FirstOrDefault() ?? "verify";
 var credentialStore = new AgentCredentialStore();
 var queueStore = new AgentLocalQueueStore();
 var networkPreferenceStore = new LocalNetworkPreferenceStore();
+var lifecycleDataDirectory = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+    "QRtoPrint", "Lifecycle");
+var keyFingerprintPath = Path.Combine(lifecycleDataDirectory, "document-key.sha256");
+var documentKeyPath = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+    "QRtoPrint", "LocalQueue", "document-encryption-key.dpapi");
 
 if (mode == "seed")
 {
@@ -530,7 +539,16 @@ if (mode == "seed")
         DateTimeOffset.UtcNow));
     networkPreferenceStore.SetPreferredNetworkId(expectedNetworkId);
     await queueStore.InitializeAsync(CancellationToken.None);
-    _ = new AgentDocumentEncryptionKeyStore().GetOrCreatePublicKey();
+    Directory.CreateDirectory(lifecycleDataDirectory);
+    var originalPublicKey = new AgentDocumentEncryptionKeyStore().GetOrCreatePublicKey();
+    var originalKeyBytes = Convert.FromBase64String(originalPublicKey);
+    try
+    {
+        var originalFingerprint = SHA256.HashData(originalKeyBytes);
+        try { await File.WriteAllTextAsync(keyFingerprintPath, Convert.ToHexString(originalFingerprint)); }
+        finally { CryptographicOperations.ZeroMemory(originalFingerprint); }
+    }
+    finally { CryptographicOperations.ZeroMemory(originalKeyBytes); }
     var bytes = Encoding.UTF8.GetBytes(expectedDocument);
     var job = new AgentClaimedJob(
         Guid.Parse(expectedJobId),
@@ -564,9 +582,32 @@ else if (mode == "verify")
         throw new InvalidOperationException("The synthetic Agent API address changed.");
     if (networkPreferenceStore.GetPreferredNetworkId() != expectedNetworkId)
         throw new InvalidOperationException("The shop's saved local-network selection changed or was removed.");
+    // Never use GetOrCreate as the only preservation assertion: it can silently
+    // generate a replacement key when the original file has been lost.
+    if (!File.Exists(documentKeyPath))
+        throw new InvalidOperationException("The original Agent document-encryption key file is missing.");
+    if (!File.Exists(keyFingerprintPath))
+        throw new InvalidOperationException("The original Agent document-encryption key fingerprint fixture is missing.");
+    var expectedKeyFingerprint = Convert.FromHexString((await File.ReadAllTextAsync(keyFingerprintPath)).Trim());
+    if (expectedKeyFingerprint.Length != 32)
+        throw new InvalidDataException("The original Agent document-encryption key fingerprint is invalid.");
     var publicKey = new AgentDocumentEncryptionKeyStore().GetOrCreatePublicKey();
-    if (string.IsNullOrWhiteSpace(publicKey))
-        throw new InvalidOperationException("The Agent document-encryption key was not readable under LocalService.");
+    var currentKeyBytes = Convert.FromBase64String(publicKey);
+    try
+    {
+        var currentFingerprint = SHA256.HashData(currentKeyBytes);
+        try
+        {
+            if (!CryptographicOperations.FixedTimeEquals(expectedKeyFingerprint, currentFingerprint))
+                throw new InvalidOperationException("The Agent document-encryption key changed; queued uploads may no longer be decryptable.");
+        }
+        finally { CryptographicOperations.ZeroMemory(currentFingerprint); }
+    }
+    finally
+    {
+        CryptographicOperations.ZeroMemory(currentKeyBytes);
+        CryptographicOperations.ZeroMemory(expectedKeyFingerprint);
+    }
 
     // Exercise the same DPAPI identity Save/Load path used during Agent pairing
     // while running under LocalService, without overwriting the preserved fixture.
@@ -622,18 +663,50 @@ else if (mode == "verify-service-identity")
     await File.WriteAllTextAsync(args[1], "LOCAL_SERVICE_NON_ADMIN");
     Console.WriteLine("Verified the Windows LocalService SID and confirmed it is not a local administrator.");
 }
-else if (mode == "release-retained-job-access")
+else if (mode == "release-retained-job")
 {
-    if (args.Length < 3)
-        throw new ArgumentException("release-retained-job-access requires an output path and expected queue name.");
+    if (args.Length < 4)
+        throw new ArgumentException("release-retained-job requires a result path, queue name and PDF output path.");
     var queueName = args[2];
-    const int absentJobId = int.MaxValue;
+    var outputPath = args[3];
+    Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+    if (File.Exists(outputPath)) File.Delete(outputPath);
+
+    // Create a real GDI spooler job as LocalService and mark it retained before
+    // completing it. This proves that ordinary Print access can release a job
+    // actually owned by the Agent, not merely tolerate an absent job ID.
+    var jobId = RetainedSpoolerJobProbe.SubmitRetainedJob(queueName, outputPath);
     var executor = new WindowsPrintExecutor();
-    executor.ReleaseRetainedJob(queueName, absentJobId);
-    if (executor.GetJob(queueName, absentJobId) is not null)
-        throw new InvalidOperationException("The retained-job cleanup probe unexpectedly found the deliberately absent spooler job.");
-    await File.WriteAllTextAsync(args[1], "PRINT_ACCESS_OK");
-    Console.WriteLine($"LocalService opened '{queueName}' and exercised idempotent retained-job cleanup with standard Print access.");
+    var deadline = DateTime.UtcNow.AddSeconds(30);
+    WindowsSpoolerJob? retainedJob = null;
+    while (DateTime.UtcNow < deadline)
+    {
+        retainedJob = executor.GetJob(queueName, jobId);
+        if (retainedJob?.Status == "RETAINED") break;
+        await Task.Delay(250);
+    }
+    if (retainedJob?.Status != "RETAINED")
+        throw new InvalidOperationException($"The test print job {jobId} was not retained by the Windows spooler (observed '{retainedJob?.Status ?? "missing"}').");
+
+    executor.ReleaseRetainedJob(queueName, jobId);
+    deadline = DateTime.UtcNow.AddSeconds(30);
+    while (DateTime.UtcNow < deadline && executor.GetJob(queueName, jobId) is not null)
+        await Task.Delay(250);
+    if (executor.GetJob(queueName, jobId) is not null)
+        throw new InvalidOperationException($"The retained Windows spooler job {jobId} remained in the queue after release.");
+
+    var pdf = await File.ReadAllBytesAsync(outputPath);
+    try
+    {
+        if (pdf.Length <= 1000 ||
+            !pdf.AsSpan(0, 5).SequenceEqual("%PDF-"u8) ||
+            !Encoding.ASCII.GetString(pdf).Contains("%%EOF", StringComparison.Ordinal))
+            throw new InvalidOperationException("The retained-job print did not produce a complete PDF.");
+    }
+    finally { CryptographicOperations.ZeroMemory(pdf); }
+
+    await File.WriteAllTextAsync(args[1], "RELEASED");
+    Console.WriteLine($"LocalService retained and released actual Windows spooler job {jobId} using standard Print access.");
 }
 else if (mode == "discover-printer")
 {
@@ -704,6 +777,94 @@ else if (mode == "print-printer")
 else
 {
     throw new ArgumentException($"Unknown fixture mode: {mode}");
+}
+
+internal static class RetainedSpoolerJobProbe
+{
+    private const uint JobControlRetain = 8;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DocInfoW
+    {
+        public int Size;
+        [MarshalAs(UnmanagedType.LPWStr)] public string DocumentName;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? OutputFile;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? DataType;
+        public uint Type;
+    }
+
+    public static int SubmitRetainedJob(string queueName, string outputPath)
+    {
+        var dc = CreateDCW("WINSPOOL", queueName, null, IntPtr.Zero);
+        if (dc == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not create a GDI device context for '{queueName}'.");
+
+        var documentStarted = false;
+        try
+        {
+            var info = new DocInfoW
+            {
+                Size = Marshal.SizeOf<DocInfoW>(),
+                DocumentName = "SmartPrint-LocalService-Retained-Job-Probe",
+                OutputFile = outputPath,
+                DataType = null,
+                Type = 0
+            };
+            var jobId = StartDocW(dc, ref info);
+            if (jobId <= 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "The Windows spooler did not accept the retained-job test document.");
+            documentStarted = true;
+
+            if (!OpenPrinterW(queueName, out var printer, IntPtr.Zero))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not open '{queueName}' to retain the test print job.");
+            try
+            {
+                if (!SetJobW(printer, jobId, 0, IntPtr.Zero, JobControlRetain))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), $"The spooler refused to retain test job {jobId}.");
+            }
+            finally { _ = ClosePrinter(printer); }
+
+            if (StartPage(dc) <= 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not start the retained-job test page.");
+            const string sample = "SmartPrint LocalService retained-job test";
+            if (!TextOutW(dc, 120, 120, sample, sample.Length))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not render the retained-job test page.");
+            if (EndPage(dc) <= 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not finish the retained-job test page.");
+            if (EndDoc(dc) <= 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not submit the retained-job test document.");
+            documentStarted = false;
+            return jobId;
+        }
+        finally
+        {
+            if (documentStarted) _ = AbortDoc(dc);
+            _ = DeleteDC(dc);
+        }
+    }
+
+    [DllImport("winspool.drv", EntryPoint = "OpenPrinterW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool OpenPrinterW(string name, out IntPtr printer, IntPtr defaults);
+    [DllImport("winspool.drv", EntryPoint = "ClosePrinter", SetLastError = true)]
+    private static extern bool ClosePrinter(IntPtr printer);
+    [DllImport("winspool.drv", EntryPoint = "SetJobW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool SetJobW(IntPtr printer, int jobId, uint level, IntPtr job, uint command);
+    [DllImport("gdi32.dll", EntryPoint = "CreateDCW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateDCW(string driver, string device, string? output, IntPtr devMode);
+    [DllImport("gdi32.dll", EntryPoint = "DeleteDC", SetLastError = true)]
+    private static extern bool DeleteDC(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "StartDocW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int StartDocW(IntPtr dc, ref DocInfoW info);
+    [DllImport("gdi32.dll", EntryPoint = "StartPage", SetLastError = true)]
+    private static extern int StartPage(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "EndPage", SetLastError = true)]
+    private static extern int EndPage(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "EndDoc", SetLastError = true)]
+    private static extern int EndDoc(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "AbortDoc", SetLastError = true)]
+    private static extern int AbortDoc(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "TextOutW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool TextOutW(IntPtr dc, int x, int y, string text, int length);
 }
 '@ | Set-Content -LiteralPath (Join-Path $fixtureProject "Program.cs") -Encoding utf8
 
