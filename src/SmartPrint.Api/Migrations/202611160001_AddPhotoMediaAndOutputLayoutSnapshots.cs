@@ -12,7 +12,7 @@ public sealed class AddPhotoMediaAndOutputLayoutSnapshots : Migration
     {
         migrationBuilder.Sql("""
             ALTER TABLE "PrintJobs"
-                ADD COLUMN "PhotoPaperFinish" varchar(12) NOT NULL DEFAULT 'GLOSSY',
+                ADD COLUMN "PhotoPaperFinish" varchar(12) NOT NULL DEFAULT 'PLAIN',
                 ADD COLUMN "PhotoOutputLayout" varchar(24) NOT NULL DEFAULT 'A4_SHEET';
 
             ALTER TABLE "LocalPrintUploadTickets"
@@ -22,7 +22,7 @@ public sealed class AddPhotoMediaAndOutputLayoutSnapshots : Migration
             ALTER TABLE "PrintJobs"
                 ADD CONSTRAINT "CK_PrintJobs_PhotoOutputOptions"
                 CHECK (
-                    "PhotoPaperFinish" IN ('GLOSSY', 'MATTE') AND
+                    "PhotoPaperFinish" IN ('PLAIN', 'GLOSSY', 'MATTE') AND
                     "PhotoOutputLayout" IN ('A4_SHEET', 'STANDALONE_4X6')
                 );
         """);
