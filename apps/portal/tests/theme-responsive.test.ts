@@ -445,7 +445,9 @@ test("customer N-up choices come only from the assigned printer driver while oth
   assert.ok(flow.includes("const privateQueueReady = localAgent?.printerStatus === \"Ready\""));
   assert.ok(flow.includes("const supportedPagesPerSheet=hasAssignedPrinter"));
   assert.ok(flow.includes("parseCustomerPagesPerSheetCapabilities(printerCapabilitiesJson)"));
-  assert.ok(flow.includes("const nupOptions=supportedPagesPerSheet.filter(value=>value>1)"));
+  assert.ok(flow.includes("const pagesPerSheetDirection=hasAssignedPrinter"));
+  assert.ok(flow.includes("const nupOptions=pagesPerSheetDirection"));
+  assert.ok(flow.includes("nupOptions.includes(selected.pagesPerSheet??1)"));
   assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
   // The output-density choice is opt-in and available only for reported PDF options.
   assert.ok(flow.includes("pagesPerSheet:selected.advancedEnabled&&isCustomerPdf(candidate)"));
