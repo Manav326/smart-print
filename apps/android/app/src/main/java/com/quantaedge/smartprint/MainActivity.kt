@@ -7078,6 +7078,7 @@ class MainActivity : AppCompatActivity() {
                         (rows - 1 - (slot / columns))
                     "TopLeft" -> (columns - 1 - (slot / rows)) to
                         (rows - 1 - (slot % rows))
+                    "RightBottom" -> (slot % columns) to (slot / columns)
                     else -> (slot % columns) to (slot / columns)
                 }
                 val left = margin + column * (cellWidth + gap)
