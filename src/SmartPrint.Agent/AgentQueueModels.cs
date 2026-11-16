@@ -41,6 +41,14 @@ public sealed record AgentClaimedJob(
     string PhotoOutputLayout = "A4_SHEET",
     string? PhotoSizeCode = null);
 
+public sealed record AgentQueueStorageSnapshot(
+    long DocumentCount,
+    long LogicalDocumentBytes,
+    long QueueDiskBytes,
+    long OutputFileCount,
+    long OutputFileBytes,
+    DateTimeOffset MeasuredUtc);
+
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
     DateTimeOffset ClaimedUtc);
