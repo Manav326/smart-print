@@ -2685,7 +2685,6 @@ shop.MapPost("/photo-jobs", async (
     }
 
     var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
     StoredDocument? stored = null;
 
     async Task CleanupUncommittedStorageAsync()
@@ -2725,7 +2724,6 @@ shop.MapPost("/photo-jobs", async (
         }
         catch (DocumentValidationException exception)
         {
-            await transaction.RollbackAsync(ct);
             return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
         }
 
@@ -2734,13 +2732,16 @@ shop.MapPost("/photo-jobs", async (
         {
             await storage.DeleteAsync(stored.StorageKey);
             stored = null;
-            await transaction.RollbackAsync(ct);
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
                 message = $"The prepared file must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page 2480 × 3508 raster. Check the sheet preview and prepare it again."
             });
         }
+
+        // Transfer, encrypt and validate before taking database locks. The
+        // transaction below covers only idempotency, pricing, quota and job commit.
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
 
         var existingJob = await db.PrintJobs.AsNoTracking()
             .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IdempotencyKey == idempotencyKey, ct);
