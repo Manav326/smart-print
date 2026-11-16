@@ -76,7 +76,8 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 
 - Local authorised jobs should continue during temporary internet outages.
 - Current limitation: direct LAN document upload and local Agent status/preview communication use private-network HTTP. CORS, one-use grants, ownership checks and hashes do not encrypt the document bytes in transit. Until end-to-end local payload encryption or trusted HTTPS is implemented and tested, treat the shop LAN as a trusted, segmented network and do not use this path on guest/public Wi-Fi.
-- Current limitation: the Windows Agent installer does not yet configure a dedicated least-privilege service identity. Validate the service account and printer permissions before production deployment.
+- The Windows Agent installer configures the service as the built-in `NT AUTHORITY\LocalService` account instead of `LocalSystem`. Its machine-data directory is restricted to LocalService, LocalSystem and built-in Administrators. The Windows lifecycle suite must verify the service SID, absence of Administrators membership, preserved DPAPI identity/queue data, machine-wide printer discovery and a real GDI spooler output as LocalService.
+- LocalService can print only to queues whose Windows security descriptor grants it standard Print permission. Per-user-only queues and network-shared queues that depend on a logged-in user's credentials may not be available to the service; validate and explicitly grant access where supported. CI validation through Microsoft Print to PDF does not certify every physical printer/driver combination.
 - Local queue and event journal must be durable across process and machine restart.
 - Define recovery and reconciliation for interrupted uploads, conversion, payment, spooler submission and sync.
 - Provide encrypted backup/restore for local configuration and metadata; document customer document retention separately.
