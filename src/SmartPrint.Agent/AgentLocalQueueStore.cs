@@ -20,6 +20,8 @@ public sealed class AgentLocalQueueStore
     private readonly bool applyWindowsAcl;
     private readonly SemaphoreSlim stagedUploadLeaseGate = new(1, 1);
     private readonly SemaphoreSlim privateSpoolerCleanupGate = new(1, 1);
+    private readonly object queueIndexSync = new();
+    private Dictionary<Guid, AgentLocalQueueEntry>? queueIndex;
 
     public AgentLocalQueueStore(string? rootOverride = null)
     {
@@ -162,26 +164,52 @@ public sealed class AgentLocalQueueStore
 
     public AgentLocalQueueEntry? Find(Guid jobId)
     {
-        var manifestPath = GetManifestPath(jobId);
-        if (!File.Exists(manifestPath))
-        {
-            return null;
-        }
-
-        var json = File.ReadAllText(manifestPath, Encoding.UTF8);
-        return JsonSerializer.Deserialize<AgentLocalQueueEntry>(json, JsonOptions)
-            ?? throw new InvalidDataException("A local print queue manifest is invalid.");
+        EnsureQueueIndexLoaded();
+        lock (queueIndexSync)
+            return queueIndex!.TryGetValue(jobId, out var entry) ? entry : null;
     }
 
     private IReadOnlyList<AgentLocalQueueEntry> ReadEntries()
     {
-        var result = new List<AgentLocalQueueEntry>();
-        foreach (var path in Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly))
+        EnsureQueueIndexLoaded();
+        lock (queueIndexSync)
+            return queueIndex!.Values.OrderBy(entry => entry.ReceivedUtc).ToArray();
+    }
+
+    /// <summary>
+    /// Loads small queue manifests once. Payload files are never opened while this
+    /// index is built. Mutations update it after the durable manifest is committed;
+    /// startup reconstruction remains the recovery source of truth.
+    /// </summary>
+    private void EnsureQueueIndexLoaded()
+    {
+        lock (queueIndexSync)
         {
-            var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions);
-            if (entry is not null) result.Add(entry);
+            if (queueIndex is not null) return;
+
+            var index = new Dictionary<Guid, AgentLocalQueueEntry>();
+            if (Directory.Exists(queueRoot))
+            {
+                foreach (var path in Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly))
+                {
+                    var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(
+                        File.ReadAllText(path, Encoding.UTF8), JsonOptions);
+                    if (entry is not null)
+                        index[entry.JobId] = entry;
+                }
+            }
+
+            queueIndex = index;
         }
-        return result.OrderBy(x => x.ReceivedUtc).ToArray();
+    }
+
+    private void RemoveManifest(Guid jobId, string manifestPath)
+    {
+        if (File.Exists(manifestPath))
+            File.Delete(manifestPath);
+
+        lock (queueIndexSync)
+            queueIndex?.Remove(jobId);
     }
 
     public IReadOnlyList<AgentLocalQueueEntry> GetAcknowledgedJobs() =>
@@ -294,21 +322,8 @@ public sealed class AgentLocalQueueStore
     public IReadOnlyList<AgentLocalQueueEntry> GetPendingPaymentLocalUploads() =>
         ReadEntries().Where(entry => entry.State == "LOCAL_UPLOAD_PENDING_PAYMENT").ToArray();
 
-    public IReadOnlyList<AgentLocalQueueEntry> GetPendingAcknowledgements()
-    {
-        var entries = new List<AgentLocalQueueEntry>();
-        foreach (var path in Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly))
-        {
-            var json = File.ReadAllText(path, Encoding.UTF8);
-            var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(json, JsonOptions);
-            if (entry is not null && entry.State == "ACK_PENDING")
-            {
-                entries.Add(entry);
-            }
-        }
-
-        return entries.OrderBy(entry => entry.ReceivedUtc).ToArray();
-    }
+    public IReadOnlyList<AgentLocalQueueEntry> GetPendingAcknowledgements() =>
+        ReadEntries().Where(entry => entry.State == "ACK_PENDING").ToArray();
 
     public Task<AgentLocalQueueEntry> EnqueueAsync(
         AgentClaimedJob job,
@@ -896,7 +911,7 @@ public sealed class AgentLocalQueueStore
                 throw new InvalidDataException("The retained photo source path is outside the protected queue.");
             await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
             await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, cancellationToken);
-            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+            RemoveManifest(jobId, manifestPath);
             return true;
         }
         finally
@@ -999,7 +1014,7 @@ public sealed class AgentLocalQueueStore
                     await EraseProtectedQueueFileAsync(outputPath, queuePrefix, comparison, cancellationToken);
                 }
                 var privateManifestPath = GetManifestPath(entry.JobId);
-                if (File.Exists(privateManifestPath)) File.Delete(privateManifestPath);
+                RemoveManifest(entry.JobId, privateManifestPath);
                 removed++;
                 continue;
             }
@@ -1017,7 +1032,7 @@ public sealed class AgentLocalQueueStore
                 // private job needs no local reconciliation manifest. This also
                 // cleans sanitized manifests left by earlier Agent versions.
                 var sanitizedManifestPath = GetManifestPath(entry.JobId);
-                if (File.Exists(sanitizedManifestPath)) File.Delete(sanitizedManifestPath);
+                RemoveManifest(entry.JobId, sanitizedManifestPath);
                 removed++;
                 continue;
             }
@@ -1754,6 +1769,10 @@ public sealed class AgentLocalQueueStore
         {
             File.Move(temporaryPath, manifestPath);
         }
+
+        // Publish to the in-memory queue index only after the durable manifest swap.
+        lock (queueIndexSync)
+            queueIndex?[entry.JobId] = entry;
     }
 
     private string GetPrivateSpoolerCleanupDirectory() => Path.Combine(queueRoot, "SpoolerCleanup");
