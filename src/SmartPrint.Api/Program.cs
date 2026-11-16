@@ -3815,7 +3815,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
         });
     if (job.Status == "COMPLETED" && job.OutputConfirmedUtc != null)
         return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc, DuplicateRequest = true });
-    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus))
+    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerPagesPrinted, job.SpoolerTotalPages))
     {
         if (SpoolerOutputConfirmationPolicy.IsRetained(job.SpoolerStatus))
             return Results.Conflict(new
@@ -7085,6 +7085,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-accepted", async (Guid jobId, Agent
     var previous = job.Status;
     job.Status = "SPOOLER_ACCEPTED";
     job.SpoolerJobId = request.SpoolerJobId;
+    job.SpoolerPagesPrinted = 0;
+    job.SpoolerTotalPages = 0;
     job.SpoolerSubmittedUtc = now;
     job.SpoolerObservedUtc = now;
     job.SpoolerStatus = request.SpoolerStatus;
@@ -7217,6 +7219,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     // A transient Agent query failure is not proof that a previously retained Windows job has cleared.
     if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownRetainedStatus(job.SpoolerStatus, request.SpoolerStatus))
         job.SpoolerStatus = request.SpoolerStatus;
+    job.SpoolerPagesPrinted = request.PagesPrinted;
+    job.SpoolerTotalPages = request.TotalPages;
     job.SpoolerObservedUtc = now;
     job.UpdatedUtc = now;
 
