@@ -343,7 +343,7 @@ function Assert-QueueUntouched {
     $rules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
     if ($rules.Count -gt 0) {
         $unsupportedProfiles = @($rules | Where-Object {
-            $profiles = ([string]$_.Profile) -split ",\\s*"
+            $profiles = ([string]$_.Profile) -split ",\s*"
             @($profiles | Where-Object { $_ -notin @("Private", "Domain") }).Count -gt 0
         })
         Assert-True ($unsupportedProfiles.Count -eq 0) "The SmartPrint Agent firewall rule must be limited to trusted Private and Domain network profiles."
