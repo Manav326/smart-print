@@ -6984,6 +6984,8 @@ class MainActivity : AppCompatActivity() {
                             .put("pageIndex", sheetIndex)
                             .put("pageCount", sheetCount)
                             .put("pagesPerSheet", pagesPerSheet)
+                            .put("paperSize", paperSize)
+                            .put("orientation", orientation)
                             .put("firstSourcePage", firstSourcePage + 1)
                             .put("lastSourcePage", lastSourcePage)
                             .put("image", previewImage)
