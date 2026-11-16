@@ -125,9 +125,11 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("qr-session", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    // A 20-file Private Printing batch reserves one ticket and posts one encrypted
+    // relay per file. Keep the per-session abuse limit, but allow the complete batch.
     options.AddPolicy("document-upload", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetSessionRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = UploadLimits.MaxBatchFiles * 3, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
     .Get<string[]>()?
