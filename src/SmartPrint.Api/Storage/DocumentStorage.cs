@@ -61,6 +61,201 @@ public sealed class DocumentStorage : IDisposable
         return new StoredDocument(storageKey, sha, bytes.LongLength, analysis);
     }
 
+    /// <summary>
+    /// Receives, encrypts, validates and atomically publishes a document without
+    /// materialising the complete source or ciphertext in managed memory.
+    /// </summary>
+    public async Task<StoredDocument> ValidateAndStoreStreamingAsync(
+        Guid tenantId,
+        Guid documentId,
+        string originalFileName,
+        Stream input,
+        long declaredLength,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty || documentId == Guid.Empty)
+            throw new ArgumentException("A tenant and document identity are required.");
+        ArgumentNullException.ThrowIfNull(input);
+        if (declaredLength is <= 0 or > UploadLimits.MaxFileBytes)
+            throw new DocumentValidationException("File size must be within the upload size limit.");
+
+        var tenantDirectory = Path.Combine(ResolveStorageRoot(), tenantId.ToString("N"));
+        Directory.CreateDirectory(tenantDirectory);
+        var temporaryPath = Path.Combine(
+            tenantDirectory,
+            $".{documentId:N}.{Guid.NewGuid():N}.upload.tmp");
+        var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+        var envelope = CreateQsp2StorageEnvelope(tenantId, documentId, dataKey);
+
+        try
+        {
+            Qsp2DocumentMetadata encryptedMetadata;
+            await using (var output = new FileStream(
+                temporaryPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                bufferSize: 64 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                await output.WriteAsync(envelope, cancellationToken);
+                encryptedMetadata = await Qsp2DocumentFormat.EncryptAsync(
+                    input,
+                    output,
+                    tenantId,
+                    documentId,
+                    declaredLength,
+                    dataKey,
+                    cancellationToken: cancellationToken);
+                await output.FlushAsync(cancellationToken);
+                output.Flush(flushToDisk: true);
+            }
+
+            DocumentAnalysis analysis;
+            using (var encryptedFile = new FileStream(
+                temporaryPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.Read,
+                bufferSize: 64 * 1024,
+                FileOptions.RandomAccess))
+            using (var content = new OffsetReadStream(encryptedFile, Qsp2StorageEnvelopeSize, leaveOpen: true))
+            using (var document = Qsp2DocumentFormat.OpenRead(
+                content,
+                dataKey,
+                tenantId,
+                documentId,
+                UploadLimits.MaxFileBytes,
+                encryptedMetadata.Sha256,
+                leaveOpen: true))
+            {
+                analysis = DocumentAnalyzer.Analyse(
+                    document,
+                    Path.GetExtension(originalFileName).ToLowerInvariant());
+            }
+
+            var storageKey = $"{tenantId:N}/{documentId:N}{analysis.Extension}";
+            var fullPath = ResolveStoragePath(storageKey);
+            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+
+            // The staging file is in the target tenant directory, so this same-volume
+            // rename publishes the authenticated object as one atomic filesystem entry.
+            File.Move(temporaryPath, fullPath);
+            return new StoredDocument(storageKey, encryptedMetadata.Sha256, declaredLength, analysis);
+        }
+        catch
+        {
+            if (File.Exists(temporaryPath))
+                File.Delete(temporaryPath);
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dataKey);
+            CryptographicOperations.ZeroMemory(envelope);
+        }
+    }
+
+    /// <summary>
+    /// Opens QSE2/QSP2 documents as authenticated seekable streams. Legacy QSP1
+    /// objects remain readable through the existing compatibility reader.
+    /// </summary>
+    public Stream OpenReadStream(
+        string storageKey,
+        Guid tenantId,
+        Guid documentId,
+        string expectedSha256)
+    {
+        if (tenantId == Guid.Empty || documentId == Guid.Empty)
+            throw new ArgumentException("A tenant and document identity are required.");
+
+        FileStream? input = new(
+            ResolveStoragePath(storageKey),
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 64 * 1024,
+            FileOptions.RandomAccess);
+        byte[]? envelope = null;
+        byte[]? dataKey = null;
+
+        try
+        {
+            Span<byte> magic = stackalloc byte[4];
+            ReadExactly(input, magic);
+            input.Position = 0;
+
+            if (magic.SequenceEqual("QSP1"u8))
+            {
+                input.Dispose();
+                input = null;
+                var legacy = OpenRead(storageKey);
+                try
+                {
+                    if (!string.IsNullOrWhiteSpace(expectedSha256))
+                    {
+                        var actualDigest = SHA256.HashData(legacy);
+                        try
+                        {
+                            var expectedDigest = Convert.FromHexString(expectedSha256);
+                            try
+                            {
+                                if (!CryptographicOperations.FixedTimeEquals(actualDigest, expectedDigest))
+                                    throw new InvalidDataException("The legacy document SHA-256 does not match its stored metadata.");
+                            }
+                            finally
+                            {
+                                CryptographicOperations.ZeroMemory(expectedDigest);
+                            }
+                        }
+                        catch (FormatException exception)
+                        {
+                            throw new InvalidDataException("The stored document SHA-256 metadata is invalid.", exception);
+                        }
+                        finally
+                        {
+                            CryptographicOperations.ZeroMemory(actualDigest);
+                        }
+                        legacy.Position = 0;
+                    }
+                    return legacy;
+                }
+                catch
+                {
+                    legacy.Dispose();
+                    throw;
+                }
+            }
+
+            if (!magic.SequenceEqual("QSE2"u8))
+                throw new InvalidDataException("The stored document has an unsupported encrypted format.");
+
+            envelope = new byte[Qsp2StorageEnvelopeSize];
+            ReadExactly(input, envelope);
+            dataKey = UnwrapQsp2StorageEnvelope(envelope, tenantId, documentId);
+            var contentOffset = new OffsetReadStream(input, Qsp2StorageEnvelopeSize, leaveOpen: false);
+            input = null; // The offset stream now owns the file stream.
+            return Qsp2DocumentFormat.OpenRead(
+                contentOffset,
+                dataKey,
+                tenantId,
+                documentId,
+                UploadLimits.MaxFileBytes,
+                expectedSha256,
+                leaveOpen: false);
+        }
+        catch
+        {
+            input?.Dispose();
+            throw;
+        }
+        finally
+        {
+            if (envelope is not null) CryptographicOperations.ZeroMemory(envelope);
+            if (dataKey is not null) CryptographicOperations.ZeroMemory(dataKey);
+        }
+    }
+
     // Stores already-encrypted Private Printing payloads as opaque bytes. This method
     // deliberately does not inspect, analyse, or decrypt the customer's document.
     public async Task<string> StoreOpaquePrivateRelayAsync(
@@ -169,6 +364,187 @@ public sealed class DocumentStorage : IDisposable
     }
 
     public void Dispose() => CryptographicOperations.ZeroMemory(encryptionKey);
+
+    private const int Qsp2StorageEnvelopeSize = 4 + 1 + 12 + 32 + 16;
+
+    private byte[] CreateQsp2StorageEnvelope(Guid tenantId, Guid documentId, ReadOnlySpan<byte> dataKey)
+    {
+        var envelope = new byte[Qsp2StorageEnvelopeSize];
+        "QSE2"u8.CopyTo(envelope);
+        envelope[4] = 1;
+        var aad = CreateQsp2StorageEnvelopeAad(tenantId, documentId);
+        try
+        {
+            RandomNumberGenerator.Fill(envelope.AsSpan(5, 12));
+            using var aes = new AesGcm(encryptionKey, 16);
+            aes.Encrypt(
+                envelope.AsSpan(5, 12),
+                dataKey,
+                envelope.AsSpan(17, 32),
+                envelope.AsSpan(49, 16),
+                aad);
+            return envelope;
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(envelope);
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(aad);
+        }
+    }
+
+    private byte[] UnwrapQsp2StorageEnvelope(byte[] envelope, Guid tenantId, Guid documentId)
+    {
+        if (envelope.Length != Qsp2StorageEnvelopeSize ||
+            !envelope.AsSpan(0, 4).SequenceEqual("QSE2"u8) ||
+            envelope[4] != 1)
+            throw new InvalidDataException("The QSP2 cloud key envelope is invalid or unsupported.");
+
+        var dataKey = new byte[Qsp2DocumentFormat.DataKeySizeBytes];
+        var aad = CreateQsp2StorageEnvelopeAad(tenantId, documentId);
+        try
+        {
+            using var aes = new AesGcm(encryptionKey, 16);
+            aes.Decrypt(
+                envelope.AsSpan(5, 12),
+                envelope.AsSpan(17, 32),
+                envelope.AsSpan(49, 16),
+                dataKey,
+                aad);
+            return dataKey;
+        }
+        catch (CryptographicException exception)
+        {
+            CryptographicOperations.ZeroMemory(dataKey);
+            throw new InvalidDataException("The QSP2 cloud data key could not be authenticated or unwrapped.", exception);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(aad);
+        }
+    }
+
+    private static byte[] CreateQsp2StorageEnvelopeAad(Guid tenantId, Guid documentId)
+    {
+        var aad = new byte[4 + 1 + 16 + 16];
+        "QSE2"u8.CopyTo(aad);
+        aad[4] = 1;
+        if (!tenantId.TryWriteBytes(aad.AsSpan(5, 16), bigEndian: true, out _) ||
+            !documentId.TryWriteBytes(aad.AsSpan(21, 16), bigEndian: true, out _))
+        {
+            CryptographicOperations.ZeroMemory(aad);
+            throw new InvalidOperationException("The QSP2 cloud storage identity could not be encoded.");
+        }
+        return aad;
+    }
+
+    private static void ReadExactly(Stream stream, Span<byte> destination)
+    {
+        var offset = 0;
+        while (offset < destination.Length)
+        {
+            var read = stream.Read(destination[offset..]);
+            if (read == 0)
+                throw new EndOfStreamException("The encrypted document ended before its envelope was complete.");
+            offset += read;
+        }
+    }
+
+    /// <summary>
+    /// Presents a file region as a seekable stream without copying it. The wrapper
+    /// maps positions relative to the QSE2 envelope and can own the base file stream.
+    /// </summary>
+    private sealed class OffsetReadStream(Stream inner, long offset, bool leaveOpen) : Stream
+    {
+        private bool disposed;
+
+        public override bool CanRead => !disposed && inner.CanRead;
+        public override bool CanSeek => !disposed && inner.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return inner.Length - offset;
+            }
+        }
+        public override long Position
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return inner.Position - offset;
+            }
+            set
+            {
+                ThrowIfDisposed();
+                if (value < 0) throw new ArgumentOutOfRangeException(nameof(value));
+                inner.Position = checked(offset + value);
+            }
+        }
+
+        public override int Read(byte[] buffer, int bufferOffset, int count)
+        {
+            ArgumentNullException.ThrowIfNull(buffer);
+            ArgumentOutOfRangeException.ThrowIfNegative(bufferOffset);
+            ArgumentOutOfRangeException.ThrowIfNegative(count);
+            if (bufferOffset > buffer.Length - count)
+                throw new ArgumentException("The offset and count exceed the destination buffer.");
+            ThrowIfDisposed();
+            return inner.Read(buffer, bufferOffset, count);
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            ThrowIfDisposed();
+            return inner.Read(buffer);
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            return inner.ReadAsync(buffer, cancellationToken);
+        }
+
+        public override long Seek(long seekOffset, SeekOrigin origin)
+        {
+            ThrowIfDisposed();
+            var target = origin switch
+            {
+                SeekOrigin.Begin => seekOffset,
+                SeekOrigin.Current => checked(Position + seekOffset),
+                SeekOrigin.End => checked(Length + seekOffset),
+                _ => throw new ArgumentOutOfRangeException(nameof(origin))
+            };
+            if (target < 0) throw new IOException("Cannot seek before the beginning of the encrypted document body.");
+            Position = target;
+            return target;
+        }
+
+        public override void Flush() { }
+        public override void SetLength(long value) => throw new NotSupportedException("The encrypted document stream is read-only.");
+        public override void Write(byte[] buffer, int bufferOffset, int count) => throw new NotSupportedException("The encrypted document stream is read-only.");
+
+        protected override void Dispose(bool disposing)
+        {
+            if (!disposed)
+            {
+                disposed = true;
+                if (disposing && !leaveOpen)
+                    inner.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        private void ThrowIfDisposed()
+        {
+            if (disposed) throw new ObjectDisposedException(nameof(OffsetReadStream));
+        }
+    }
 
     private static byte[] LoadEncryptionKey(IConfiguration configuration, IWebHostEnvironment environment)
     {
