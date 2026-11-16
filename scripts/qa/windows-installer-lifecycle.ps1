@@ -226,9 +226,23 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     $taskName = "SmartPrintLifecycleLocalServicePrinterProbe"
     $fixtureDataDirectory = Join-Path $programDataRoot "Lifecycle"
     New-Item -ItemType Directory -Force -Path $fixtureDataDirectory | Out-Null
-    $resultPath = Join-Path $fixtureDataDirectory "smartprint-localservice-fixture-$Mode.txt"
     $buildOutputDirectory = Join-Path $fixtureProject "bin\Release\net10.0-windows"
     $serviceFixtureDirectory = Join-Path $fixtureDataDirectory "Fixture"
+    # The first LocalService probe runs before legacy ACL migration. Do not rely
+    # on whatever inherited DACL the interactive seed happened to leave behind:
+    # make the isolated lifecycle directory explicitly writable by the service
+    # identity before either the task or its result file is created.
+    $fixtureDataAcl = @(
+        "*S-1-5-18:(OI)(CI)F",
+        "*S-1-5-32-544:(OI)(CI)F",
+        "*S-1-5-19:(OI)(CI)F"
+    )
+    $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
+    & $icaclsPath $fixtureDataDirectory /inheritance:r /grant:r @fixtureDataAcl /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not grant the LocalService lifecycle harness access to its isolated data directory."
+    }
+    $resultPath = Join-Path $serviceFixtureDirectory "smartprint-localservice-fixture-$Mode.txt"
     $buildAssemblyPath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.dll"
     $buildExecutablePath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.exe"
     $fixtureExecutablePath = Join-Path $serviceFixtureDirectory "SmartPrintLifecycleFixture.exe"
@@ -241,13 +255,9 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     if (-not $script:localServiceFixtureStaged) {
         New-Item -ItemType Directory -Force -Path $serviceFixtureDirectory | Out-Null
         Copy-Item -Path (Join-Path $buildOutputDirectory "*") -Destination $serviceFixtureDirectory -Recurse -Force
-        $fixtureAcl = @(
-            "*S-1-5-18:(OI)(CI)F",
-            "*S-1-5-32-544:(OI)(CI)F",
-            "*S-1-5-19:(OI)(CI)F"
-        )
-        $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
-        & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureAcl /T /C /Q | Out-Null
+        # The fixture executable and its managed dependencies are protected
+        # independently from the data/result directory.
+        & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureDataAcl /T /C /Q | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Could not grant the LocalService lifecycle fixture access to its test-only binaries."
         }
