@@ -1005,6 +1005,85 @@ public sealed class LocalAgentApiHostedService(
                 }
                 else
                 {
+                    var isQsp2 = claim.PrivatePrinting &&
+                        string.Equals(context.Request.Headers["X-Print-Encrypted-Format"].FirstOrDefault(), "QSP2", StringComparison.Ordinal);
+                    if (isQsp2)
+                    {
+                        byte[]? dataKey = null;
+                        MemoryStream? plaintextStream = null;
+                        try
+                        {
+                            var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
+                            var expectedEncryptedSize = Qsp2DocumentFormat.GetEncryptedLength(claim.SizeBytes);
+                            if (string.IsNullOrWhiteSpace(wrappedKey) ||
+                                !string.Equals(context.Request.ContentType?.Split(';', 2)[0].Trim(),
+                                    "application/vnd.smartprint.qsp2", StringComparison.OrdinalIgnoreCase) ||
+                                !long.TryParse(context.Request.Headers["X-Print-Encrypted-Size"].FirstOrDefault(), out var encryptedSize) ||
+                                encryptedSize != expectedEncryptedSize || context.Request.ContentLength != expectedEncryptedSize)
+                                return Results.BadRequest(new { code = "private_document_envelope_invalid", message = "The QSP2 encrypted stream does not match its authorised upload." });
+
+                            dataKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
+                            plaintextStream = new MemoryStream(checked((int)claim.SizeBytes));
+                            var metadata = await Qsp2DocumentFormat.DecryptAsync(
+                                context.Request.Body,
+                                plaintextStream,
+                                dataKey,
+                                credentials.AgentDeviceId,
+                                claim.PrintJobId,
+                                UploadLimits.MaxFileBytes,
+                                ct);
+                            if (metadata.PlaintextLength != claim.SizeBytes ||
+                                !string.Equals(metadata.Sha256, claim.Sha256, StringComparison.OrdinalIgnoreCase))
+                                throw new InvalidDataException("The QSP2 document SHA-256 does not match the authorised upload.");
+
+                            plaintextStream.Position = 0;
+                            try
+                            {
+                                analysis = DocumentAnalyzer.Analyse(plaintextStream, claim.FileExtension);
+                            }
+                            catch (DocumentValidationException exception)
+                            {
+                                await ReportPrivateValidationFailureAsync("document_not_supported",
+                                    exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
+                                return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
+                            }
+
+                            if (!MatchesClaimedContent(analysis))
+                            {
+                                const string message = "The document content does not match the detected upload format. Select the original file again.";
+                                await ReportPrivateValidationFailureAsync("document_content_type_mismatch", message);
+                                return Results.UnprocessableEntity(new { code = "document_content_type_mismatch", message });
+                            }
+
+                            plaintextStream.Position = 0;
+                            await localQueueStore.EnqueueLocalUploadStreamingAsync(
+                                CreateStagedJob(analysis), credentials.AgentDeviceId, plaintextStream, ct);
+                        }
+                        catch (CryptographicException)
+                        {
+                            await ReportPrivateValidationFailureAsync("private_document_decryption_failed",
+                                "The private document did not pass its authenticated QSP2 encryption check.");
+                            return Results.UnprocessableEntity(new { code = "private_document_decryption_failed", message = "The private document did not pass its authenticated QSP2 encryption check." });
+                        }
+                        catch (InvalidDataException exception)
+                        {
+                            await ReportPrivateValidationFailureAsync("private_document_integrity_failed",
+                                "The file did not pass its authenticated integrity check.");
+                            return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = exception.Message });
+                        }
+                        finally
+                        {
+                            if (plaintextStream is not null)
+                            {
+                                if (plaintextStream.TryGetBuffer(out var buffer))
+                                    CryptographicOperations.ZeroMemory(buffer.AsSpan());
+                                await plaintextStream.DisposeAsync();
+                            }
+                            if (dataKey is not null) CryptographicOperations.ZeroMemory(dataKey);
+                        }
+                    }
+                    else
+                    {
                     if (!context.Request.HasFormContentType)
                     {
                         return Results.BadRequest(new { code = "multipart_form_required", message = "Send the document as multipart/form-data." });
@@ -1175,6 +1254,7 @@ public sealed class LocalAgentApiHostedService(
                                 message = "The document hash does not match the authorised upload."
                             });
                         }
+                    }
                     }
                 }
 
