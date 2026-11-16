@@ -218,6 +218,7 @@ public sealed class AgentCredentialStore
     private void SecurePermissions(string directory)
     {
         var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var localServiceSid = new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null);
         var administratorsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
 
         var directorySecurity = new DirectorySecurity();
@@ -225,6 +226,12 @@ public sealed class AgentCredentialStore
         directorySecurity.SetOwner(administratorsSid);
         directorySecurity.AddAccessRule(new FileSystemAccessRule(
             systemSid,
+            FileSystemRights.FullControl,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        directorySecurity.AddAccessRule(new FileSystemAccessRule(
+            localServiceSid,
             FileSystemRights.FullControl,
             InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
             PropagationFlags.None,
@@ -243,6 +250,7 @@ public sealed class AgentCredentialStore
             fileSecurity.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
             fileSecurity.SetOwner(administratorsSid);
             fileSecurity.AddAccessRule(new FileSystemAccessRule(systemSid, FileSystemRights.FullControl, AccessControlType.Allow));
+            fileSecurity.AddAccessRule(new FileSystemAccessRule(localServiceSid, FileSystemRights.FullControl, AccessControlType.Allow));
             fileSecurity.AddAccessRule(new FileSystemAccessRule(administratorsSid, FileSystemRights.FullControl, AccessControlType.Allow));
             new FileInfo(identityPath).SetAccessControl(fileSecurity);
         }
