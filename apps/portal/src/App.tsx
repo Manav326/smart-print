@@ -5266,7 +5266,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       :normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind),
     pageCount:entry.quote!.pageCount,
     copies:entry.quote!.copies,
-    colourMode:entry.quote!.colourMode,
+    colourMode:entry.quote!.colourMode==="Colour"?"Colour":"Mono",
     photoCount:entry.quote!.photoCount??0,
     quotedAmountMinor:entry.quote!.quotedAmountMinor
   })));
