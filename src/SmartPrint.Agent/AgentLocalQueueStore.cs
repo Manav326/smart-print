@@ -22,6 +22,7 @@ public sealed class AgentLocalQueueStore
     private readonly SemaphoreSlim privateSpoolerCleanupGate = new(1, 1);
     private readonly object queueIndexSync = new();
     private Dictionary<Guid, AgentLocalQueueEntry>? queueIndex;
+    private readonly Dictionary<Guid, ManifestStamp> queueManifestStamps = new();
 
     public AgentLocalQueueStore(string? rootOverride = null)
     {
@@ -165,6 +166,7 @@ public sealed class AgentLocalQueueStore
     public AgentLocalQueueEntry? Find(Guid jobId)
     {
         EnsureQueueIndexLoaded();
+        RefreshManifestFromDisk(jobId);
         lock (queueIndexSync)
             return queueIndex!.TryGetValue(jobId, out var entry) ? entry : null;
     }
@@ -172,9 +174,65 @@ public sealed class AgentLocalQueueStore
     private IReadOnlyList<AgentLocalQueueEntry> ReadEntries()
     {
         EnsureQueueIndexLoaded();
+        RefreshQueueIndexFromDisk();
         lock (queueIndexSync)
             return queueIndex!.Values.OrderBy(entry => entry.ReceivedUtc).ToArray();
     }
+
+    private void RefreshQueueIndexFromDisk()
+    {
+        Guid[] jobIds;
+        lock (queueIndexSync)
+            jobIds = queueIndex!.Keys.ToArray();
+
+        foreach (var jobId in jobIds)
+            RefreshManifestFromDisk(jobId);
+    }
+
+    /// <summary>
+    /// Checks the requested manifest's cheap filesystem stamp before using cached
+    /// JSON. A file edited or replaced outside this process is reloaded; deletion
+    /// removes it from the index. Normal writes still update the index directly.
+    /// </summary>
+    private void RefreshManifestFromDisk(Guid jobId)
+    {
+        var path = GetManifestPath(jobId);
+        var info = new FileInfo(path);
+        lock (queueIndexSync)
+        {
+            if (!info.Exists)
+            {
+                queueIndex!.Remove(jobId);
+                queueManifestStamps.Remove(jobId);
+                return;
+            }
+
+            var stamp = new ManifestStamp(info.Length, info.LastWriteTimeUtc.Ticks);
+            if (queueManifestStamps.TryGetValue(jobId, out var currentStamp) &&
+                currentStamp == stamp)
+                return;
+
+            AgentLocalQueueEntry entry;
+            try
+            {
+                entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(
+                    File.ReadAllText(path, Encoding.UTF8), JsonOptions)
+                    ?? throw new InvalidDataException("A local print queue manifest is invalid.");
+            }
+            catch (JsonException exception)
+            {
+                throw new InvalidDataException("A local print queue manifest is invalid.", exception);
+            }
+
+            if (entry.JobId != jobId)
+                throw new InvalidDataException("A local print queue manifest does not match its filename.");
+
+            queueIndex[jobId] = entry;
+            queueManifestStamps[jobId] = stamp;
+        }
+    }
+
+    private readonly record struct ManifestStamp(long Length, long LastWriteUtcTicks);
 
     /// <summary>
     /// Loads small queue manifests once. Payload files are never opened while this
@@ -195,7 +253,19 @@ public sealed class AgentLocalQueueStore
                     var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(
                         File.ReadAllText(path, Encoding.UTF8), JsonOptions);
                     if (entry is not null)
-                        index[entry.JobId] = entry;
+                    {
+                        var jobId = entry.JobId;
+                        var expectedPath = GetManifestPath(jobId);
+                        if (!string.Equals(
+                            Path.GetFullPath(expectedPath),
+                            Path.GetFullPath(path),
+                            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                            throw new InvalidDataException("A local print queue manifest does not match its filename.");
+
+                        index[jobId] = entry;
+                        var file = new FileInfo(path);
+                        queueManifestStamps[jobId] = new ManifestStamp(file.Length, file.LastWriteTimeUtc.Ticks);
+                    }
                 }
             }
 
@@ -209,7 +279,10 @@ public sealed class AgentLocalQueueStore
             File.Delete(manifestPath);
 
         lock (queueIndexSync)
+        {
             queueIndex?.Remove(jobId);
+            queueManifestStamps.Remove(jobId);
+        }
     }
 
     public IReadOnlyList<AgentLocalQueueEntry> GetAcknowledgedJobs() =>
@@ -1771,8 +1844,14 @@ public sealed class AgentLocalQueueStore
         }
 
         // Publish to the in-memory queue index only after the durable manifest swap.
+        var committedInfo = new FileInfo(manifestPath);
+        var committedStamp = new ManifestStamp(committedInfo.Length, committedInfo.LastWriteTimeUtc.Ticks);
         lock (queueIndexSync)
-            if (queueIndex is not null) queueIndex[entry.JobId] = entry;
+        {
+            if (queueIndex is not null)
+                queueIndex[entry.JobId] = entry;
+            queueManifestStamps[entry.JobId] = committedStamp;
+        }
     }
 
     private string GetPrivateSpoolerCleanupDirectory() => Path.Combine(queueRoot, "SpoolerCleanup");
