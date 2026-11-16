@@ -3815,14 +3815,16 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
         });
     if (job.Status == "COMPLETED" && job.OutputConfirmedUtc != null)
         return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc, DuplicateRequest = true });
-    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.SpoolerStatus))
-        return Results.Conflict(new
-        {
-            code = "windows_spooler_job_retained",
-            message = "Windows is still holding this print job. Confirmation is available after the Agent verifies that the held spooler entry has cleared."
-        });
-    if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED"))
+    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus))
+    {
+        if (SpoolerOutputConfirmationPolicy.IsRetained(job.SpoolerStatus))
+            return Results.Conflict(new
+            {
+                code = "windows_spooler_job_retained",
+                message = "Windows is still holding this print job. Confirmation is available after the Agent verifies that the held spooler entry has cleared."
+            });
         return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
+    }
 
     if (job.PrivatePrinting && (job.OutputType != "PHYSICAL" || job.ClaimedByAgentDeviceId is null))
         return Results.Conflict(new

@@ -9,8 +9,11 @@ public static class SpoolerOutputConfirmationPolicy
     public static bool IsRetained(string? spoolerStatus) =>
         string.Equals(spoolerStatus?.Trim(), "RETAINED", StringComparison.OrdinalIgnoreCase);
 
-    public static bool CanConfirmPhysicalOutput(string? spoolerStatus) =>
-        !IsRetained(spoolerStatus);
+    public static bool IsPhysicalOutputConfirmationStatus(string? jobStatus) =>
+        jobStatus?.Trim().ToUpperInvariant() is "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED";
+
+    public static bool CanConfirmPhysicalOutput(string? jobStatus, string? spoolerStatus) =>
+        IsPhysicalOutputConfirmationStatus(jobStatus) && !IsRetained(spoolerStatus);
 
     public static bool ShouldPreserveLastKnownRetainedStatus(string? currentStatus, string? incomingStatus) =>
         IsRetained(currentStatus) &&
