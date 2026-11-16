@@ -320,6 +320,75 @@ public sealed class DocumentStorage : IDisposable
         return storageKey;
     }
 
+    // QSP2 relays are already authenticated ciphertext. Persist their raw stream so
+    // uploads and Agent delivery stay bounded-memory; the paired Agent owns the key.
+    public async Task<string> StoreOpaquePrivateQsp2RelayAsync(
+        Guid tenantId,
+        Guid ticketId,
+        Stream input,
+        long declaredLength,
+        long plaintextLength,
+        CancellationToken cancellationToken)
+    {
+        if (tenantId == Guid.Empty || ticketId == Guid.Empty ||
+            declaredLength != Qsp2DocumentFormat.GetEncryptedLength(plaintextLength))
+            throw new InvalidDataException("The QSP2 private relay size or identity is invalid.");
+
+        var storageKey = $"private-relay/{tenantId:N}/{ticketId:N}/{Guid.NewGuid():N}.relay";
+        var fullPath = ResolveStoragePath(storageKey);
+        var temporaryPath = fullPath + ".tmp";
+        Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+        var buffer = new byte[64 * 1024];
+        long total = 0;
+        try
+        {
+            await using (var output = new FileStream(
+                temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                bufferSize: 64 * 1024,
+                FileOptions.Asynchronous | FileOptions.WriteThrough))
+            {
+                while (true)
+                {
+                    var remaining = declaredLength - total;
+                    var read = await input.ReadAsync(
+                        buffer.AsMemory(0, checked((int)Math.Min(buffer.Length, remaining + 1))),
+                        cancellationToken);
+                    if (read == 0) break;
+                    total = checked(total + read);
+                    if (total > declaredLength)
+                        throw new InvalidDataException("The QSP2 private relay contains more bytes than its declared size.");
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                }
+                if (total != declaredLength)
+                    throw new InvalidDataException("The QSP2 private relay payload is incomplete.");
+                await output.FlushAsync(cancellationToken);
+                output.Flush(flushToDisk: true);
+            }
+
+            File.Move(temporaryPath, fullPath);
+            return storageKey;
+        }
+        catch
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            if (File.Exists(fullPath)) File.Delete(fullPath);
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(buffer);
+        }
+    }
+
+    public Stream OpenOpaquePrivateQsp2RelayReadStream(string storageKey) =>
+        new FileStream(
+            ResolveStoragePath(storageKey),
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            bufferSize: 64 * 1024,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+
     /// <summary>
     /// Lists only old, canonical private-relay objects. Callers must compare these
     /// keys with durable ticket references before deleting them. The age grace
