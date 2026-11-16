@@ -280,7 +280,7 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
         if (-not (Test-Path -LiteralPath $resultPath)) {
             $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
             $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-            $lastResult = if ($taskInfo) { "0x{0:X8}" -f ([uint32]$taskInfo.LastTaskResult) } else { "unavailable" }
+            $lastResult = if ($taskInfo) { "0x{0:X8}" -f ([long]$taskInfo.LastTaskResult -band 0xFFFFFFFFL) } else { "unavailable" }
             $taskState = if ($task) { [string]$task.State } else { "unavailable" }
             $taskAction = if ($task) { ($task.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join "; " } else { "unavailable" }
             $eventDetails = @()
@@ -395,7 +395,7 @@ function Assert-LocalServiceIdentityIsNotElevated {
 }
 
 function Assert-LocalServiceCanOpenQueueForRetainedCleanup {
-    $outputPath = Join-Path $programDataRoot "Lifecyclelocalservice-retained-spooler-output.pdf"
+    $outputPath = Join-Path $programDataRoot "Lifecycle\localservice-retained-spooler-output.pdf"
     Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
     Write-Host "[QA-ACTION] Submit, retain and release a real LocalService-owned Windows spooler job using standard Print access." -ForegroundColor Cyan
     try {
