@@ -8802,12 +8802,14 @@ publicApi.MapPost("/sessions/current/jobs", async (
     originalName = originalName[..Math.Min(originalName.Length, 255)];
 
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault();
+    var photoOutputLayout = form["photoOutputLayout"].FirstOrDefault() ?? "A4_SHEET";
+    var photoPaperFinish = form["photoPaperFinish"].FirstOrDefault() ?? "PLAIN";
     var photoCountText = form["photoCount"].FirstOrDefault();
     var photosPerPageText = form["photosPerPage"].FirstOrDefault();
     var hasPhotoMetadata =
         !string.IsNullOrWhiteSpace(photoSizeCode) ||
         !string.IsNullOrWhiteSpace(photoCountText) ||
-        !string.IsNullOrWhiteSpace(photosPerPageText);
+        !string.IsNullOrWhiteSpace(photosPerPageText) || photoOutputLayout != "A4_SHEET" || photoPaperFinish != "PLAIN";
     int? photoCount = int.TryParse(photoCountText, out var parsedPhotoCount) ? parsedPhotoCount : null;
     int? photosPerPage = int.TryParse(photosPerPageText, out var parsedPhotosPerPage) ? parsedPhotosPerPage : null;
     var validPhotoMetadata =
@@ -8817,7 +8819,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
         photoCount is >= 1 and <= UploadLimits.MaxPhotoCount &&
         photosPerPage is int requestedPhotosPerPage &&
         requestedPhotosPerPage >= 1 &&
-        requestedPhotosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(supportedPhotoSizeCode);
+        requestedPhotosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(supportedPhotoSizeCode) &&
+        PhotoSheetPdfRules.IsValidPhotoOutputOptions(photoOutputLayout, photoPaperFinish, requestedPhotosPerPage);
     var isPhotoUpload = requestedPrintKind == "PHOTO";
     var invalidPhotoUpload =
         isPhotoUpload &&
@@ -8850,7 +8853,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId,
             job.JobNumber, job.Status, job.PageCount, job.Copies, job.ColourMode,
             job.PaperSize, job.IsDuplex, job.Orientation, job.PrintKind,
-            job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PricingVersion,
+            job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PhotoOutputLayout, job.PhotoPaperFinish, job.PricingVersion,
             job.Currency, job.QuotedAmountMinor, job.CreatedUtc
         })
         .SingleOrDefaultAsync(ct);
@@ -8887,6 +8890,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
             existing.PhotoSizeCode != photoSizeCode ||
             existing.PhotoCount != (photoCount ?? 0) ||
             existing.PhotosPerPage != photosPerPage ||
+            existing.PhotoOutputLayout != photoOutputLayout ||
+            existing.PhotoPaperFinish != photoPaperFinish ||
             (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
             existingDocument.OriginalFileName != originalName ||
             existingDocument.SizeBytes != file.Length ||
@@ -8970,7 +8975,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             photoCount ?? 0, photoSizeCode ?? string.Empty, photosPerPage ?? 0);
         if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
             stored.Analysis.PageCount != photoPageCount ||
-            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, photoPageCount))
+            !PhotoSheetPdfRules.HasExactlyPhotoPages(stored.Analysis.PageSizesJson, photoPageCount, photoOutputLayout, photoSizeCode))
         {
             await storage.DeleteAsync(stored.StorageKey);
             return Results.UnprocessableEntity(new
@@ -9003,6 +9008,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
         PhotoSizeCode = photoSizeCode,
         PhotoCount = photoCount ?? 0,
         PhotosPerPage = photosPerPage,
+        PhotoOutputLayout = photoOutputLayout,
+        PhotoPaperFinish = photoPaperFinish,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
