@@ -327,45 +327,59 @@ public sealed class Qsp2DocumentReadStream : Stream
         var recordOffset = checked(recordsOffset +
             checked((long)recordIndex *
             (sizeof(uint) + (long)recordSizeBytes + Qsp2DocumentFormat.AuthenticationTagSizeBytes)));
-        encryptedInput.Position = recordOffset;
+
+        // Invalidate the previous cache before touching untrusted bytes. A short
+        // read or invalid length must not leave old plaintext eligible for reuse.
+        cachedRecordIndex = ulong.MaxValue;
+        cachedRecordLength = 0;
+        CryptographicOperations.ZeroMemory(ciphertextBuffer);
+        CryptographicOperations.ZeroMemory(plaintextBuffer);
 
         Span<byte> lengthBytes = stackalloc byte[sizeof(uint)];
         Span<byte> tag = stackalloc byte[Qsp2DocumentFormat.AuthenticationTagSizeBytes];
-        ReadExactly(encryptedInput, lengthBytes);
-        var actualLength = checked((int)BinaryPrimitives.ReadUInt32BigEndian(lengthBytes));
-        if (actualLength != expectedRecordLength)
-            throw new InvalidDataException($"QSP2 record {recordIndex} has an unexpected length.");
-
-        CryptographicOperations.ZeroMemory(plaintextBuffer);
-        ReadExactly(encryptedInput, ciphertextBuffer.AsSpan(0, actualLength));
-        ReadExactly(encryptedInput, tag);
-
-        var nonce = Qsp2DocumentFormat.BuildNonce(noncePrefix, recordIndex);
-        var aad = Qsp2DocumentFormat.BuildRecordAad(headerHash, recordIndex, actualLength);
+        byte[]? nonce = null;
+        byte[]? aad = null;
+        var authenticated = false;
         try
         {
-            (aes ?? throw new ObjectDisposedException(nameof(Qsp2DocumentReadStream))).Decrypt(
-                nonce,
-                ciphertextBuffer.AsSpan(0, actualLength),
-                tag,
-                plaintextBuffer.AsSpan(0, actualLength),
-                aad);
-        }
-        catch (CryptographicException exception)
-        {
-            CryptographicOperations.ZeroMemory(plaintextBuffer);
-            throw new InvalidDataException($"QSP2 record {recordIndex} failed authentication.", exception);
+            encryptedInput.Position = recordOffset;
+            ReadExactly(encryptedInput, lengthBytes);
+            var actualLength = checked((int)BinaryPrimitives.ReadUInt32BigEndian(lengthBytes));
+            if (actualLength != expectedRecordLength)
+                throw new InvalidDataException($"QSP2 record {recordIndex} has an unexpected length.");
+
+            ReadExactly(encryptedInput, ciphertextBuffer.AsSpan(0, actualLength));
+            ReadExactly(encryptedInput, tag);
+
+            nonce = Qsp2DocumentFormat.BuildNonce(noncePrefix, recordIndex);
+            aad = Qsp2DocumentFormat.BuildRecordAad(headerHash, recordIndex, actualLength);
+            try
+            {
+                (aes ?? throw new ObjectDisposedException(nameof(Qsp2DocumentReadStream))).Decrypt(
+                    nonce,
+                    ciphertextBuffer.AsSpan(0, actualLength),
+                    tag,
+                    plaintextBuffer.AsSpan(0, actualLength),
+                    aad);
+            }
+            catch (CryptographicException exception)
+            {
+                throw new InvalidDataException($"QSP2 record {recordIndex} failed authentication.", exception);
+            }
+
+            authenticated = true;
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(ciphertextBuffer.AsSpan(0, actualLength));
+            CryptographicOperations.ZeroMemory(ciphertextBuffer);
             CryptographicOperations.ZeroMemory(tag);
-            CryptographicOperations.ZeroMemory(nonce);
-            CryptographicOperations.ZeroMemory(aad);
+            if (nonce is not null) CryptographicOperations.ZeroMemory(nonce);
+            if (aad is not null) CryptographicOperations.ZeroMemory(aad);
+            if (!authenticated) CryptographicOperations.ZeroMemory(plaintextBuffer);
         }
 
         cachedRecordIndex = recordIndex;
-        cachedRecordLength = actualLength;
+        cachedRecordLength = expectedRecordLength;
     }
 
     private static void ReadExactly(Stream stream, Span<byte> destination)
