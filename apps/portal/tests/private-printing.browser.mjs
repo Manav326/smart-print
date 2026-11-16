@@ -17,6 +17,11 @@ const AGENT_ID = "11111111-1111-4111-8111-111111111111";
 const STATION_CODE = "PRIVATE-QA";
 const SESSION_TOKEN = "private-printing-browser-qa-session-token";
 
+function qsp2EncryptedLength(plaintextLength) {
+  const recordCount = Math.ceil(plaintextLength / (1024 * 1024));
+  return 100 + 32 + plaintextLength + recordCount * (4 + 16) + 68;
+}
+
 function startServer() {
   const packageManager = process.env.SMARTPRINT_PNPM_COMMAND ?? "pnpm";
   const args = ["--filter", "@smart-print/portal", "dev", "--host", "127.0.0.1", "--port", "4174", "--strictPort"];
@@ -439,8 +444,8 @@ async function installPrivatePrintingApiHarness(context, page) {
             "Decrypted bytes must match the original upload hash.");
           assert.ok(plaintext.subarray(0, 5).equals(Buffer.from("%PDF-", "ascii")),
             "Every prepared document must be PDF content.");
-          assert.equal(envelope.ciphertext.length, plaintext.length + 16,
-            "AES-GCM ciphertext must include its authentication tag.");
+          assert.equal(envelope.ciphertext.length, qsp2EncryptedLength(plaintext.length),
+            "QSP2 wire length must include the header, per-record authentication tags and authenticated footer.");
           ticket.uploadResult = makeUploadedJob(ticket, ticket.ticketRequest, plaintext);
           ticket.relayAccepted = true;
           relayUploads.push({
@@ -633,7 +638,7 @@ async function runScenario(browser) {
     "All five Photo Studio sheets must preserve their two-page layout.");
   assert.equal(harness.relayUploads.find(item => item.printKind === "DOCUMENT")?.pageCount, 4,
     "The ordinary multipage PDF must remain four pages.");
-  assert.ok(harness.relayUploads.every(item => item.encryptedBytes === item.plaintextBytes + 16),
+  assert.ok(harness.relayUploads.every(item => item.encryptedBytes === qsp2EncryptedLength(item.plaintextBytes)),
     "AES-GCM ciphertext must include its authentication tag.");
   assert.equal(harness.allApiRequests.some(item => item.path.includes("/cloud-recovery")), false,
     "Private uploads must never use cloud recovery.");
