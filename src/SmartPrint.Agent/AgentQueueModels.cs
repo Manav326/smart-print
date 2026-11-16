@@ -161,8 +161,8 @@ public sealed record LocalAgentPhotoRevisionRequest(
     long? ExpectedQuotedAmountMinor = null,
     int? ExpectedPricingVersion = null,
     string? EditorSettingsJson = null,
-    string PhotoPaperFinish = "GLOSSY",
-    string PhotoOutputLayout = "A4_SHEET");
+    string PhotoOutputLayout = "A4_SHEET",
+    string PhotoPaperFinish = "PLAIN");
 
 public sealed record LocalAgentPhotoRevisionAuthorizationResponse(
     Guid Id,
@@ -176,7 +176,9 @@ public sealed record LocalAgentPhotoRevisionAuthorizationResponse(
     int PhotosPerPage,
     long PhotoUnitPriceMinor,
     long QuotedAmountMinor,
-    int PricingVersion);
+    int PricingVersion,
+    string PhotoOutputLayout = "A4_SHEET",
+    string PhotoPaperFinish = "PLAIN");
 public static class AgentLocalQueueBatchSelector
 {
     public static IReadOnlyList<T> SelectNext<T>(
