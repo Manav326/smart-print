@@ -317,6 +317,8 @@ public sealed class PrintJob
     public int? SpoolerJobId { get; set; }
     public string? SpoolerJobName { get; set; }
     public string? SpoolerStatus { get; set; }
+    public int SpoolerPagesPrinted { get; set; }
+    public int SpoolerTotalPages { get; set; }
     public DateTimeOffset? SpoolerSubmittedUtc { get; set; }
     public DateTimeOffset? SpoolerObservedUtc { get; set; }
     public DateTimeOffset? OutputConfirmedUtc { get; set; }
