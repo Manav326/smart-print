@@ -10103,7 +10103,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
                     "application/vnd.smartprint.qsp2", StringComparison.OrdinalIgnoreCase) ||
                 !long.TryParse(context.Request.Headers["X-Print-Encrypted-Size"].FirstOrDefault(), out var encryptedSize) ||
                 encryptedSize != Qsp2DocumentFormat.GetEncryptedLength(ticket.SizeBytes) ||
-                context.Request.ContentLength != encryptedSize)
+                (context.Request.ContentLength is long contentLength && contentLength != encryptedSize))
                 return Results.UnprocessableEntity(new
                 {
                     code = "private_relay_size_mismatch",
