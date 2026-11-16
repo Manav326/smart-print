@@ -31,9 +31,9 @@ test("Private Printing relays only the encrypted print document and required quo
   const upload = api.slice(uploadStart);
   assert.match(upload, /preparePrivateQsp2Upload\(file,\s*\{/);
   assert.match(upload, /privateUpload\.createAttempt\(\)/);
-  assert.match(upload, /"X-Print-Encrypted-Format": "QSP2"/);
-  assert.match(upload, /"Content-Type": "application\/vnd\.smartprint\.qsp2"/);
-  assert.match(upload, /body: attempt\.body/);
+  assert.match(upload, /requestHeaders\["X-Print-Encrypted-Format"\] = "QSP2"/);
+  assert.match(upload, /requestHeaders\["Content-Type"\] = "application\/vnd\.smartprint\.qsp2"/);
+  assert.match(upload, /requestBody = attempt\.body/);
   assert.doesNotMatch(upload, /file\.arrayBuffer\(\)|crypto\.subtle\.encrypt\(\{ name: "AES-GCM"/);
   const relayStart = upload.indexOf("if (privatePrinting) {", upload.indexOf("if (ticket.agentDeviceId === localAgent.agentDeviceId"));
   const relayEnd = upload.indexOf("// A LAN response can be lost", relayStart);
