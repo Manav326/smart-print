@@ -125,7 +125,7 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     int? PhotoCount = null,
     int? PhotosPerPage = null,
     string? DetectedFileExtension = null,
-    string PhotoPaperFinish = "GLOSSY",
+    string PhotoPaperFinish = "PLAIN",
     string PhotoOutputLayout = "A4_SHEET");
 
 public sealed record RecordPrintRefundRequest(
