@@ -819,24 +819,36 @@ public sealed class WindowsPrintExecutor
                     $"The selected printer driver does not report support for {requestedPagesPerSheet} pages per sheet.");
             }
 
+            var presentationDirection = WindowsPrinterCapabilityDiscovery.ResolvePagesPerSheetDirection(
+                queue,
+                schemaCapabilities);
+            if (presentationDirection is null)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_DIRECTION_UNSUPPORTED",
+                    "The selected printer driver does not report a standard page-presentation direction for N-up. No pages were submitted.");
+            }
+
             var sourceDevMode = new byte[devModeSize];
             Marshal.Copy(devMode, sourceDevMode, 0, devModeSize);
             using var converter = new PrintTicketConverter(queueName, 1);
             var currentTicket = converter.ConvertDevModeToPrintTicket(sourceDevMode);
             var requestedTicket = new PrintTicket
             {
-                PagesPerSheet = requestedPagesPerSheet
+                PagesPerSheet = requestedPagesPerSheet,
+                PagesPerSheetDirection = presentationDirection
             };
 
             // Merge against the current ticket so paper size, orientation, colour and
             // duplex settings remain intact. The driver is the authority on viable options.
             var validation = queue.MergeAndValidatePrintTicket(currentTicket, requestedTicket);
             var validatedTicket = validation.ValidatedPrintTicket;
-            if (validatedTicket.PagesPerSheet != requestedPagesPerSheet)
+            if (validatedTicket.PagesPerSheet != requestedPagesPerSheet ||
+                validatedTicket.PagesPerSheetDirection != presentationDirection)
             {
                 throw new PrintExecutionBlockedException(
                     "PAGES_PER_SHEET_REJECTED",
-                    "The printer driver changed the requested pages-per-sheet setting during validation. No pages were submitted.");
+                    "The printer driver changed the requested N-up page count or presentation direction during validation. No pages were submitted.");
             }
 
             var convertedDevMode = converter.ConvertPrintTicketToDevMode(
@@ -859,11 +871,12 @@ public sealed class WindowsPrintExecutor
             var finalDevMode = new byte[devModeSize];
             Marshal.Copy(devMode, finalDevMode, 0, devModeSize);
             var finalTicket = converter.ConvertDevModeToPrintTicket(finalDevMode);
-            if (finalTicket.PagesPerSheet != requestedPagesPerSheet)
+            if (finalTicket.PagesPerSheet != requestedPagesPerSheet ||
+                finalTicket.PagesPerSheetDirection != presentationDirection)
             {
                 throw new PrintExecutionBlockedException(
                     "PAGES_PER_SHEET_NOT_APPLIED",
-                    "The selected printer driver did not retain the requested N-up setting. No pages were submitted.");
+                    "The selected printer driver did not retain the requested N-up page count and presentation direction. No pages were submitted.");
             }
         }
         catch (PrintExecutionBlockedException)
