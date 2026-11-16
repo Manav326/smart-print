@@ -312,6 +312,10 @@ function Set-LegacyAgentDataAclFixture {
         "*S-1-5-18:(OI)(CI)F",      # LocalSystem
         "*S-1-5-32-544:(OI)(CI)F" # Built-in Administrators
     )
+    & $icaclsPath $programDataRoot /reset /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not reset the SmartPrint tree before creating the legacy ACL fixture."
+    }
     & $icaclsPath $programDataRoot /inheritance:r /grant:r @legacyRootAcl /T /C /Q | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Could not create the legacy SmartPrint root ACL fixture."
