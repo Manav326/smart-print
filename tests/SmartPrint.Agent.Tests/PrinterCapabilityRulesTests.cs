@@ -36,6 +36,15 @@ public sealed class PrinterCapabilityRulesTests
 
     
     [Fact]
+    public void NupCapabilitiesAlwaysAllowOneUpAndOnlyReportedValuesAboveOne()
+    {
+        Assert.True(PrinterCapabilityRules.SupportsPagesPerSheet([1, 2, 4, 16], 1));
+        Assert.True(PrinterCapabilityRules.SupportsPagesPerSheet([1, 2, 4, 16], 4));
+        Assert.False(PrinterCapabilityRules.SupportsPagesPerSheet([1, 2, 4, 16], 8));
+        Assert.False(PrinterCapabilityRules.SupportsPagesPerSheet([1, 2, 4, 16], 64));
+    }
+
+    [Fact]
     public void OrientationMustBeConfirmedExactlyBeforePrinting()
     {
         Assert.True(PrinterCapabilityRules.IsRequestedOrientationAccepted(true, 2, 2));

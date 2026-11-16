@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using System.Printing;
 
 namespace SmartPrint.Agent;
 
@@ -16,6 +17,7 @@ public static class WindowsPrinterCapabilityDiscovery
     private const short DcPaperNames = 16;
     private const short DcOrientation = 17;
     private const short DcColorDevice = 32;
+    private const short DcNup = 33;
     private const short DcMediaTypes = 34;
     private const short DcMediaTypeNames = 35;
     private const int MaximumReportedItems = 128;
@@ -37,6 +39,8 @@ public static class WindowsPrinterCapabilityDiscovery
                 duplex = ReadBoolean(queueName, DcDuplex),
                 orientation = ReadOrientation(queueName),
                 paperSizes = ReadPaperSizes(queueName),
+                pagesPerSheet = ReadPagesPerSheet(queueName),
+                pagesPerSheetDirection = ReadPagesPerSheetDirection(queueName),
                 mediaTypes = ReadMediaTypes(queueName),
                 resolutions = ReadResolutions(queueName)
             };
@@ -117,6 +121,100 @@ public static class WindowsPrinterCapabilityDiscovery
             Marshal.FreeHGlobal(codeBuffer);
             Marshal.FreeHGlobal(sizeBuffer);
             Marshal.FreeHGlobal(nameBuffer);
+        }
+    }
+
+    private static string? ReadPagesPerSheetDirection(string queueName)
+    {
+        try
+        {
+            using var server = new LocalPrintServer();
+            using var queue = server.GetPrintQueue(queueName);
+            queue.Refresh();
+            var capabilities = queue.GetPrintCapabilities();
+            return ResolvePagesPerSheetDirection(queue, capabilities)?.ToString();
+        }
+        catch (Exception exception) when (
+            exception is PrintQueueException or InvalidOperationException or
+                ExternalException or ArgumentException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves one deterministic, driver-supported N-up order. The same rule is
+    /// used for capability publication and final PrintTicket configuration so
+    /// the customer preview and physical driver use the same page sequence.
+    /// </summary>
+    internal static PagesPerSheetDirection? ResolvePagesPerSheetDirection(
+        PrintQueue queue,
+        PrintCapabilities capabilities)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
+        ArgumentNullException.ThrowIfNull(capabilities);
+        var supported = capabilities.PagesPerSheetDirectionCapability;
+        if (supported is null || supported.Count == 0)
+            return null;
+
+        var current = queue.DefaultPrintTicket.PagesPerSheetDirection;
+        if (current.HasValue && supported.Contains(current.Value))
+            return current.Value;
+
+        if (supported.Contains(PagesPerSheetDirection.RightBottom))
+            return PagesPerSheetDirection.RightBottom;
+
+        return supported[0];
+    }
+
+    private static IReadOnlyList<int> ReadPagesPerSheet(string queueName)
+    {
+        // Print Schema capabilities represent the standard JobNUpAllDocumentsContiguously
+        // feature. If a legacy driver does not expose Print Schema, query DC_NUP instead.
+        try
+        {
+            using var server = new LocalPrintServer();
+            using var queue = server.GetPrintQueue(queueName);
+            queue.Refresh();
+            var schemaOptions = queue.GetPrintCapabilities().PagesPerSheetCapability
+                .Where(value => value > 1 && value <= 500)
+                .Distinct()
+                .OrderBy(value => value)
+                .ToArray();
+            if (schemaOptions.Length > 0)
+                return new[] { 1 }.Concat(schemaOptions).ToArray();
+        }
+        catch (Exception exception) when (
+            exception is PrintQueueException or InvalidOperationException or
+                ExternalException or ArgumentException or UnauthorizedAccessException)
+        {
+            // Fall back to the Win32 capability query below.
+        }
+
+        var count = DeviceCapabilitiesW(queueName, null, DcNup, IntPtr.Zero, IntPtr.Zero);
+        if (count is <= 0 or > MaximumReportedItems)
+            return [1];
+
+        // DC_NUP returns a DWORD array, unlike DC_PAPERS which returns WORD values.
+        var buffer = Marshal.AllocHGlobal(checked(count * sizeof(uint)));
+        try
+        {
+            var actual = DeviceCapabilitiesW(queueName, null, DcNup, buffer, IntPtr.Zero);
+            if (actual <= 0 || actual > count)
+                return [1];
+
+            var values = new SortedSet<int> { 1 };
+            for (var index = 0; index < actual; index++)
+            {
+                var pagesPerSheet = Marshal.ReadInt32(buffer, checked(index * sizeof(uint)));
+                if (pagesPerSheet is > 1 and <= 500)
+                    values.Add(pagesPerSheet);
+            }
+            return values.ToArray();
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
         }
     }
 

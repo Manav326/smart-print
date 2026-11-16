@@ -6,17 +6,18 @@ export function calculateBatchQuoteBreakdown(entries) {
     items.reduce((total, item) => total + selector(item), 0);
 
   const normalDocumentSourcePages = sum(normalDocuments, (entry) => entry.pageCount);
-  const normalDocumentOutputPages = sum(
-    normalDocuments,
-    (entry) => entry.pageCount * entry.copies
-  );
+  // Price and report actual output sides after driver-backed N-up and copies.
+  // The original PDF source-page count remains a separate metric for clarity.
+  const outputSides = (entry) =>
+    Math.ceil(entry.pageCount / Math.max(1, entry.pagesPerSheet ?? 1)) * entry.copies;
+  const normalDocumentOutputPages = sum(normalDocuments, outputSides);
   const normalDocumentMonoOutputPages = sum(
     normalDocuments.filter((entry) => entry.colourMode === "Mono"),
-    (entry) => entry.pageCount * entry.copies
+    outputSides
   );
   const normalDocumentColourOutputPages = sum(
     normalDocuments.filter((entry) => entry.colourMode === "Colour"),
-    (entry) => entry.pageCount * entry.copies
+    outputSides
   );
   const normalDocumentMonoAmountMinor = sum(
     normalDocuments.filter((entry) => entry.colourMode === "Mono"),

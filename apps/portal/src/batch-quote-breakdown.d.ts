@@ -4,6 +4,7 @@ export interface BatchQuoteBreakdownEntry {
   printKind: BatchQuotePrintKind;
   pageCount: number;
   copies: number;
+  pagesPerSheet?: number;
   colourMode: "Mono" | "Colour";
   photoCount?: number | null;
   quotedAmountMinor: number;

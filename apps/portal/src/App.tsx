@@ -2786,7 +2786,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)} · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
@@ -2889,9 +2889,9 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   const quoteRefreshRequiredCount=acceptedJobs.filter(quoteExpired).length;
   const acceptedTotal=acceptedJobs.filter(job=>!quoteExpired(job))
     .reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
-  const acceptedRequestedPages=acceptedJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
-  const acceptedMonoPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
-  const acceptedColourPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
+  const acceptedRequestedPages=acceptedJobs.reduce((sum,job)=>sum+printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies),0);
+  const acceptedMonoPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
+  const acceptedColourPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
   const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
   return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Files start accepted. Uncheck a file to exclude it; recheck it to restore it."} onClose={onClose}>
     <div className="batch-review-list">{folders.map(folderName=><section className="batch-review-folder" key={folderName}>
@@ -2917,7 +2917,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         <span>{hasIdDocument?"Unavailable for ID card sheets":pdfBrandingEnabled?"On for this batch":"Off · default"}</span>
       </label>
     </div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedRequestedPages}</strong> pages requested</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value with valid quotes</span>{quoteRefreshRequiredCount>0&&<span><strong>{quoteRefreshRequiredCount}</strong> need a fresh quote</span>}<small>Page count = source pages × copies. Refresh expired quotes before checkout. Reject files before checkout; after payment starts, use the file-level refund action.</small></div>
+    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedRequestedPages}</strong> output sides requested</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value with valid quotes</span>{quoteRefreshRequiredCount>0&&<span><strong>{quoteRefreshRequiredCount}</strong> need a fresh quote</span>}<small>Original PDF pages remain available for page review. Billable output sides = ceil(source pages ÷ pages per sheet) × copies. Duplex sheets group two output sides. Refresh expired quotes before checkout.</small></div>
     <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled&&!hasIdDocument)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
   </Modal>;
 }
@@ -2947,7 +2947,7 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,isSavedOutp
     ? "Final PDF export saved by this shop. This is the actual output file; the uploaded original remains separate and unchanged."
     : job.printKind==="PHOTO"
       ? `${job.photoCount??0} ${photoDimensions[job.photoSizeCode??""]??job.photoSizeCode??""} photos · ${job.photosPerPage??"Layout density not recorded"} per A4 page · ${job.pageCount} A4 PDF page(s). Preview displays the complete prepared file.`
-      : `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
+      : `${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)}. Preview displays the uploaded original once; the assigned printer driver applies the N-up layout at print time.`;
   const subtitle = isSavedOutput ? "Saved PDF output · Read-only preview" : readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary;
   return <Modal title={name} subtitle={subtitle} onClose={onClose}>
     <ShopDocumentPreviewSurface name={name} url={url} mediaType={mediaType} printKind={job.printKind}/>
@@ -3998,6 +3998,7 @@ type CustomerGroupSettings = {
   advancedEnabled: boolean;
   paperSize: CustomerPrintRequestSettings["paperSize"];
   orientation: CustomerPrintRequestSettings["orientation"];
+  pagesPerSheet: number;
 };
 type CustomerFileSettings = CustomerGroupSettings & { custom: boolean };
 
@@ -4017,6 +4018,24 @@ function customerPhotoSizeLabel(sizeCode?:string|null):string {
     case "4x6": return "4 × 6 in";
     default: return "photo";
   }
+}
+
+function printJobOutputSides(pageCount:number,pagesPerSheet=1,copies=1):number {
+  const density=Number.isInteger(pagesPerSheet)&&pagesPerSheet>1?pagesPerSheet:1;
+  return Math.ceil(pageCount/density)*copies;
+}
+
+function customerDocumentOutputSummary(
+  pageCount:number,
+  copies:number,
+  pagesPerSheet=1,
+  isDuplex=false
+):string {
+  const density=Number.isInteger(pagesPerSheet)&&pagesPerSheet>1?pagesPerSheet:1;
+  const outputSidesPerCopy=Math.ceil(pageCount/density);
+  if(density===1)return `${pageCount} pages × ${copies} copies = ${pageCount*copies} pages requested`;
+  const outputSheetsPerCopy=isDuplex?Math.ceil(outputSidesPerCopy/2):outputSidesPerCopy;
+  return `${pageCount} PDF pages · ${density} per sheet = ${outputSidesPerCopy} output sides per copy · ${outputSidesPerCopy*copies} output sides total${isDuplex?` · ${outputSheetsPerCopy} duplex sheets per copy`:""}`;
 }
 
 type StoredCustomerDraft = {
@@ -4080,9 +4099,25 @@ function isSmartPrintIdDocument(file:File):boolean {
 function isSmartPrintPhotoDocument(file:File):boolean {
   return (file as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="PHOTO";
 }
+type CustomerNupDirection =
+  | "RightBottom" | "BottomRight" | "LeftBottom" | "BottomLeft"
+  | "RightTop" | "TopRight" | "LeftTop" | "TopLeft";
 type NativeCustomerPdfPreview = {
   token:string; requestedPageIndex:number; pageIndex:number; pageCount:number;
+  pagesPerSheet:number; pagesPerSheetDirection:CustomerNupDirection; paperSize:string; orientation:string;
+  firstSourcePage:number; lastSourcePage:number;
   image:string; thumbnails:Array<{index:number;image:string}>; loading:boolean;
+};
+type BrowserCustomerNupPreview = {
+  url:string;
+  sheetIndex:number;
+  sheetCount:number;
+  pagesPerSheet:number;
+  pagesPerSheetDirection:CustomerNupDirection;
+  firstSourcePage:number;
+  lastSourcePage:number;
+  loading:boolean;
+  failed:boolean;
 };
 function customerStatusTone(status:string):"green"|"red"|"amber"|"blue"|"slate" {
   if(["COMPLETED","PDF_EXPORTED","PAID_AUTHORISED","REFUNDED"].includes(status))return "green";
@@ -4103,6 +4138,35 @@ function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSetting
     Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum;
 }
 
+function parseCustomerPagesPerSheetDirection(
+  capabilitiesJson?:string|null
+):CustomerNupDirection|null {
+  if(!capabilitiesJson)return null;
+  try {
+    const capabilities=JSON.parse(capabilitiesJson) as {pagesPerSheetDirection?:unknown};
+    const direction=capabilities.pagesPerSheetDirection;
+    return direction==="RightBottom"||direction==="BottomRight"||direction==="LeftBottom"||
+      direction==="BottomLeft"||direction==="RightTop"||direction==="TopRight"||
+      direction==="LeftTop"||direction==="TopLeft"
+      ?direction:null;
+  } catch {
+    return null;
+  }
+}
+
+function parseCustomerPagesPerSheetCapabilities(capabilitiesJson?:string|null):number[] {
+  if(!capabilitiesJson)return [1];
+  try {
+    const capabilities=JSON.parse(capabilitiesJson) as {pagesPerSheet?:unknown};
+    const values=Array.isArray(capabilities.pagesPerSheet)?capabilities.pagesPerSheet:[];
+    const supported=values.filter((value):value is number=>
+      typeof value==="number"&&Number.isInteger(value)&&value>1&&value<=500);
+    return [1,...new Set(supported)].sort((left,right)=>left-right);
+  } catch {
+    return [1];
+  }
+}
+
 const identifiedCustomerDocumentTypes=new WeakMap<File,SupportedDocumentType>();
 function isCustomerPdf(file:File):boolean {
   const identified=identifiedCustomerDocumentTypes.get(file);
@@ -4119,26 +4183,24 @@ function postSmartPrintNativeMessage(message:string):boolean {
   catch {return false;}
 }
 
-function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onPage:(page:number)=>void}) {
+function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onPage:(sheet:number)=>void}) {
   const current=preview?.token===token?preview:null;
   return <div className="customer-native-pdf-preview">
     {current?.image
-      ? <img className="customer-native-pdf-page" src={"data:image/jpeg;base64,"+current.image} alt={"PDF page "+(current.pageIndex+1)+" of "+current.pageCount}/>
+      ? <img className="customer-native-pdf-page" src={"data:image/jpeg;base64,"+current.image} alt={"Print sheet "+(current.pageIndex+1)+" of "+current.pageCount+", containing PDF pages "+current.firstSourcePage+" to "+current.lastSourcePage}/>
       : <div className="customer-native-pdf-empty">
           {current===null||current.loading
-            ? <><span className="button-spinner"/><span>Preparing document preview…</span></>
-            : <><FileText size={22}/><strong>Preview unavailable</strong><span>The PDF could not be rendered on this device. You can still upload it.</span></>}
+            ? <><span className="button-spinner"/><span>Preparing print layout preview…</span></>
+            : <><FileText size={22}/><strong>Preview unavailable</strong><span>The print layout could not be previewed on this device. You can still upload the original PDF.</span></>}
         </div>}
-    {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
-      <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous</button>
-      <span>Page {current.pageIndex+1} of {current.pageCount}</span>
-      <button type="button" disabled={current.loading||current.pageIndex>=current.pageCount-1} onClick={()=>onPage(current.pageIndex+1)}>Next</button>
+    {current?.image&&<div className="customer-native-pdf-layout-note">
+      <strong>{current.pagesPerSheet}-up print layout · {current.pagesPerSheetDirection}</strong>
+      <span>PDF pages {current.firstSourcePage}–{current.lastSourcePage} appear on this output sheet. Page order follows the selected driver direction; final margins and page fitting are controlled by the printer driver. The original PDF is sent to the printer driver unchanged.</span>
     </div>}
-    {current&&current.thumbnails.length>1&&<div className="customer-native-pdf-thumbnails" aria-label="PDF page thumbnails">
-      {current.thumbnails.map(page=><button type="button" key={page.index} aria-current={current.pageIndex===page.index?"page":undefined} onClick={()=>onPage(page.index)} disabled={current.loading}>
-        <img src={"data:image/jpeg;base64,"+page.image} alt={"Page "+(page.index+1)}/>
-        <span>{page.index+1}</span>
-      </button>)}
+    {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
+      <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous sheet</button>
+      <span>Sheet {current.pageIndex+1} of {current.pageCount}</span>
+      <button type="button" disabled={current.loading||current.pageIndex>=current.pageCount-1} onClick={()=>onPage(current.pageIndex+1)}>Next sheet</button>
     </div>}
   </div>;
 }
@@ -4222,7 +4284,17 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   // Private Printing is available only with a live paired Agent/key and a ready
   // physical queue, or an explicitly approved non-production virtual test queue.
-  void printerCapabilitiesJson;
+  const supportedPagesPerSheet=hasAssignedPrinter
+    ?parseCustomerPagesPerSheetCapabilities(printerCapabilitiesJson)
+    :[1];
+  const pagesPerSheetDirection=hasAssignedPrinter
+    ?parseCustomerPagesPerSheetDirection(printerCapabilitiesJson)
+    :null;
+  // A direction must be reported too, otherwise a customer preview could
+  // show a different page reading order from the eventual physical output.
+  const nupOptions=pagesPerSheetDirection
+    ?supportedPagesPerSheet.filter(value=>value>1)
+    :[];
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
@@ -4232,6 +4304,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const file=files[selectedFileIndex]??null;
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
   const [nativePdfPreview,setNativePdfPreview]=useState<NativeCustomerPdfPreview|null>(null);
+  const [browserNupPreview,setBrowserNupPreview]=useState<BrowserCustomerNupPreview|null>(null);
+  const [browserNupPreviewSheetIndex,setBrowserNupPreviewSheetIndex]=useState(0);
   const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>initialDraft?.uploaded??initialDraft?.uploadedBatch?.[0]??null);
   const [uploadedBatch,setUploadedBatch]=useState<UploadedPrintJob[]>(()=>initialDraft?.uploadedBatch??(initialDraft?.uploaded?[initialDraft.uploaded]:[]));
   const [uploadedFileFingerprints,setUploadedFileFingerprints]=useState<string[]>(()=>initialDraft?.uploadedFileFingerprints??[]);
@@ -4442,7 +4516,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const groupNameForFile=(candidate:File)=>fileGroupNames[customerFileFingerprint(candidate)]??customerBatchGroupName(candidate);
   const defaultsForGroup=(name:string):CustomerGroupSettings=>{
     const baseline:CustomerGroupSettings={
-      copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"
+      copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1
     };
     return {...baseline,...(groupSettings[name]??{})};
   };
@@ -4450,14 +4524,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(isSmartPrintIdDocument(candidate)) {
       const defaults=defaultsForGroup(groupNameForFile(candidate));
       return {
-        copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",advancedEnabled:false
+        copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",pagesPerSheet:1,advancedEnabled:false
       };
     }
     const fingerprint=customerFileFingerprint(candidate);
     const defaults=defaultsForGroup(groupNameForFile(candidate));
     const own=fileSettings[fingerprint];
     if(photoSettingsByFileFingerprint[fingerprint])return {
-      copies:1,colourMode:"Colour",paperSize:"A4",isDuplex:false,orientation:"AUTO",advancedEnabled:false
+      copies:1,colourMode:"Colour",paperSize:"A4",isDuplex:false,orientation:"AUTO",pagesPerSheet:1,advancedEnabled:false
     };
     const selected=own?.custom?{...defaults,...own}:defaults;
     return {
@@ -4466,6 +4540,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       isDuplex:selected.isDuplex,
       paperSize:selected.advancedEnabled?selected.paperSize:"A4",
       orientation:selected.advancedEnabled?selected.orientation:"AUTO",
+      pagesPerSheet:selected.advancedEnabled&&isCustomerPdf(candidate)&&!isSmartPrintPhotoDocument(candidate)&&
+        nupOptions.includes(selected.pagesPerSheet??1)
+        ?(selected.pagesPerSheet??1):1,
       advancedEnabled:selected.advancedEnabled
     };
   };
@@ -4529,10 +4606,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       if(message.startsWith("CUSTOMER_PDF_PREVIEW|")){
         try{
           const payload=JSON.parse(message.slice("CUSTOMER_PDF_PREVIEW|".length)) as {
-            token:string;pageIndex:number;pageCount:number;image:string;
+            token:string;pageIndex:number;pageCount:number;pagesPerSheet:number;
+            pagesPerSheetDirection:CustomerNupDirection;
+            paperSize:string;orientation:string;firstSourcePage:number;lastSourcePage:number;image:string;
             thumbnails:Array<{index:number;image:string}>;
           };
-          setNativePdfPreview(current=>current&&current.token===payload.token&&current.requestedPageIndex===payload.pageIndex
+          setNativePdfPreview(current=>current&&current.token===payload.token&&
+            current.requestedPageIndex===payload.pageIndex&&current.pagesPerSheet===payload.pagesPerSheet&&
+            current.pagesPerSheetDirection===payload.pagesPerSheetDirection&&
+            current.paperSize===payload.paperSize&&current.orientation===payload.orientation
             ?{...payload,requestedPageIndex:payload.pageIndex,loading:false}:current);
         }catch{
           setError("The PDF preview could not be displayed. You can still upload the document.");
@@ -4565,8 +4647,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   useEffect(()=>{
     if(!nativeAppMode||!file||!isCustomerPdf(file))return;
     if(photoSettingsByFileFingerprint[customerFileFingerprint(file)])return;
+    // Re-render the sheet preview whenever pages-per-sheet, paper or orientation changes.
     openCustomerPdfPreview(file);
-  },[file,nativeAppMode,photoSettingsByFileFingerprint]);
+  },[file,nativeAppMode,photoSettingsByFileFingerprint,groupSettings,fileSettings]);
 
   useEffect(()=>{
     if(!nativeAppMode)return;
@@ -4603,6 +4686,90 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     setPreviewUrl(url);
     return ()=>URL.revokeObjectURL(url);
   },[file]);
+
+  useEffect(()=>{
+    setBrowserNupPreviewSheetIndex(0);
+  },[file,groupSettings,fileSettings]);
+
+  useEffect(()=>{
+    if(nativeAppMode||!file||!isCustomerPdf(file)){
+      setBrowserNupPreview(null);
+      return;
+    }
+
+    const settings=settingsForFile(file);
+    const pagesPerSheet=settings.pagesPerSheet??1;
+    if(pagesPerSheet<=1||!pagesPerSheetDirection||photoSettingsByFileFingerprint[customerFileFingerprint(file)]){
+      setBrowserNupPreview(null);
+      return;
+    }
+
+    let cancelled=false;
+    let generatedUrl:string|null=null;
+    const sheetIndex=Math.max(0,browserNupPreviewSheetIndex);
+    setBrowserNupPreview({
+      url:"",
+      sheetIndex,
+      sheetCount:0,
+      pagesPerSheet,
+      pagesPerSheetDirection,
+      firstSourcePage:sheetIndex*pagesPerSheet+1,
+      lastSourcePage:(sheetIndex+1)*pagesPerSheet,
+      loading:true,
+      failed:false
+    });
+
+    void (async()=>{
+      const {createCustomerNupPreview}=await import("./customer-nup-preview");
+      const sourceBytes=new Uint8Array(await file.arrayBuffer());
+      const preview=await createCustomerNupPreview(sourceBytes,{
+        pagesPerSheet,
+        paperSize:settings.paperSize,
+        orientation:settings.orientation,
+        pagesPerSheetDirection,
+        sheetIndex
+      });
+      const outputBuffer=preview.bytes.buffer.slice(
+        preview.bytes.byteOffset,
+        preview.bytes.byteOffset+preview.bytes.byteLength
+      ) as ArrayBuffer;
+      generatedUrl=URL.createObjectURL(new Blob([outputBuffer],{type:"application/pdf"}));
+      if(cancelled){
+        URL.revokeObjectURL(generatedUrl);
+        return;
+      }
+      setBrowserNupPreview({
+        url:generatedUrl,
+        sheetIndex:preview.sheetIndex,
+        sheetCount:preview.sheetCount,
+        pagesPerSheet,
+        pagesPerSheetDirection,
+        firstSourcePage:preview.firstSourcePage,
+        lastSourcePage:preview.lastSourcePage,
+        loading:false,
+        failed:false
+      });
+    })().catch(()=>{
+      if(!cancelled){
+        setBrowserNupPreview({
+          url:"",
+          sheetIndex,
+          sheetCount:0,
+          pagesPerSheet,
+          pagesPerSheetDirection,
+          firstSourcePage:sheetIndex*pagesPerSheet+1,
+          lastSourcePage:(sheetIndex+1)*pagesPerSheet,
+          loading:false,
+          failed:true
+        });
+      }
+    });
+
+    return ()=>{
+      cancelled=true;
+      if(generatedUrl)URL.revokeObjectURL(generatedUrl);
+    };
+  },[file,nativeAppMode,groupSettings,fileSettings,photoSettingsByFileFingerprint,browserNupPreviewSheetIndex]);
 
   async function upload() {
     if(batchLockedForPayment){
@@ -4781,6 +4948,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           isDuplex:requestedSettings?.isDuplex??false,
           paperSize:requestedSettings?.paperSize??"A4",
           orientation:requestedSettings?.orientation??"AUTO",
+          pagesPerSheet:requestedSettings?.pagesPerSheet??1,
           advancedEnabled:requestedSettings?.advancedEnabled??false
         };
         const photoSettings=photoSettingsOverride?.[item.job.id]??photoSettingsByJobId[item.job.id];
@@ -4792,6 +4960,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             isDuplex:photoSettings||idDocument?false:settings.isDuplex,
             copies:photoSettings?1:idDocument?1:settings.copies,
             orientation:photoSettings?"AUTO":idDocument?"PORTRAIT":settings.orientation,
+            pagesPerSheet:photoSettings||idDocument?1:(settings.pagesPerSheet??1),
             ...(photoSettings
               ?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount}
               :idDocument?{printKind:"ID_DOCUMENT" as const}:{printKind:"DOCUMENT" as const})
@@ -4986,7 +5155,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];delete previews[photoStudioSourceFingerprint];
     for(const sheet of sheets){
       const fp=customerFileFingerprint(sheet.file);groups[fp]=group;
-      settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
+      settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1};
       photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage};
       const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
       if(urls.length)previews[fp]=urls;
@@ -5015,6 +5184,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     setPhotoStudioSourceFingerprint(fingerprint);
     setError("");
   }
+  function postCustomerPdfPreviewRequest(token:string,sheetIndex:number,candidate:File):boolean {
+    const settings=settingsForFile(candidate);
+    const pagesPerSheet=settings.pagesPerSheet??1;
+    return postSmartPrintNativeMessage(
+      "previewCustomerPdf|"+token+"|"+sheetIndex+"|"+pagesPerSheet+"|"+settings.paperSize+"|"+settings.orientation+"|"+(pagesPerSheetDirection??"RightBottom")
+    );
+  }
   function openCustomerPdfPreview(candidate:File) {
     const token=smartPrintNativePdfPreviewTokens.get(candidate);
     if(!token){
@@ -5022,23 +5198,35 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setError("The PDF preview is unavailable. You can still upload the document.");
       return;
     }
-    setNativePdfPreview({token,requestedPageIndex:0,pageIndex:0,pageCount:0,image:"",thumbnails:[],loading:true});
-    if(!postSmartPrintNativeMessage("previewCustomerPdf|"+token+"|0")){
-      setNativePdfPreview({token,requestedPageIndex:0,pageIndex:0,pageCount:0,image:"",thumbnails:[],loading:false});
+    const settings=settingsForFile(candidate);
+    const pagesPerSheet=settings.pagesPerSheet??1;
+    setNativePdfPreview({
+      token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+      pagesPerSheetDirection:pagesPerSheetDirection??"RightBottom",
+      paperSize:settings.paperSize,orientation:settings.orientation,
+      firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:true
+    });
+    if(!postCustomerPdfPreviewRequest(token,0,candidate)){
+      setNativePdfPreview({
+        token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+        pagesPerSheetDirection:pagesPerSheetDirection??"RightBottom",
+        paperSize:settings.paperSize,orientation:settings.orientation,
+        firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:false
+      });
       setError("The PDF preview is unavailable. You can still upload the document.");
       return;
     }
     setError("");
   }
-  function requestCustomerPdfPreviewPage(token:string,pageIndex:number) {
+  function requestCustomerPdfPreviewPage(token:string,sheetIndex:number) {
     const current=nativePdfPreview;
-    if(!current||current.token!==token||current.loading)return;
-    const target=Math.max(0,Math.min(current.pageCount-1,pageIndex));
+    if(!current||current.token!==token||current.loading||!file)return;
+    const target=Math.max(0,Math.min(current.pageCount-1,sheetIndex));
     if(target===current.pageIndex)return;
     setNativePdfPreview({...current,requestedPageIndex:target,loading:true});
-    if(!postSmartPrintNativeMessage("previewCustomerPdf|"+token+"|"+target)){
+    if(!postCustomerPdfPreviewRequest(token,target,file)){
       setNativePdfPreview({...current,loading:false});
-      setError("The PDF page could not be opened.");
+      setError("The print layout sheet could not be opened.");
     }
   }
   async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
@@ -5148,7 +5336,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       for(const candidate of supported) {
         const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
         const group=nativeGroup||customerBatchGroupName(candidate);
-        if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
+        if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1};
       }
       return updated;
     });
@@ -5280,6 +5468,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     copies:entry.quote!.copies,
     colourMode:entry.quote!.colourMode==="Colour"?"Colour":"Mono",
     photoCount:entry.quote!.photoCount??0,
+    pagesPerSheet:entry.quote!.pagesPerSheet??1,
     quotedAmountMinor:entry.quote!.quotedAmountMinor
   })));
   const quoteEligibleItems=quoteItems.filter(item=>!["REJECTED","REFUNDED"].includes(statusForBatchItem(item)));
@@ -5400,6 +5589,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                }}>
                 <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
               </select></label>
+              {nupOptions.length>0&&group.files.some(candidate=>
+                isCustomerPdf(candidate)&&!isSmartPrintIdDocument(candidate)&&!isSmartPrintPhotoDocument(candidate)
+              )&&<label><span>Pages per sheet</span><select value={defaults.pagesPerSheet??1} onChange={event=>{
+                 const pagesPerSheet=Number(event.currentTarget.value)||1;
+                 setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),pagesPerSheet}}));
+               }}>
+                <option value={1}>1 page per sheet</option>
+                {nupOptions.map(value=><option key={value} value={value}>{value} pages per sheet</option>)}
+              </select></label>}
             </div>}
           </div>
           <div className="customer-folder-file-list">{group.files.map(selected=>{
@@ -5409,7 +5607,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
-              {!isSmartPrintIdDocument(selected)&&<button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
+              {!isSmartPrintIdDocument(selected)&&<button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation,pagesPerSheet:defaults.pagesPerSheet}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&!isSmartPrintIdDocument(selected)&&<div className="customer-file-overrides">
                 <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
@@ -5447,6 +5645,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                    }}>
                     <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
                   </select></label>
+                  {nupOptions.length>0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<label><span>Pages per sheet</span><select value={own.pagesPerSheet??1} onChange={event=>{
+                     const pagesPerSheet=Number(event.currentTarget.value)||1;
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,pagesPerSheet}}));
+                   }}>
+                    <option value={1}>1 page per sheet</option>
+                    {nupOptions.map(value=><option key={value} value={value}>{value} pages per sheet</option>)}
+                  </select></label>}
                 </div>}
               </div>}
             </div>;
@@ -5463,7 +5668,24 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   />
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply. <InfoTooltip label="Folder settings"><span>Settings apply to every file in this folder. Use Custom on a file to change its settings.</span></InfoTooltip></small>}
-    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
+    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<>
+  <iframe src={browserNupPreview?.url||previewUrl} title={browserNupPreview?.url?file.name+" N-up print preview":file.name+" preview"}/>
+  {browserNupPreview&&<div className="customer-nup-browser-preview" role="region" aria-label="Pages per sheet preview">
+    {browserNupPreview.loading
+      ? <span>Preparing {browserNupPreview.pagesPerSheet}-up sheet preview…</span>
+      : browserNupPreview.failed
+        ? <span>The N-up layout preview could not be prepared. Your original PDF remains available and will still be sent to the selected printer driver.</span>
+        : <>
+            <strong>{browserNupPreview.pagesPerSheet}-up preview · Output sheet {browserNupPreview.sheetIndex+1} of {browserNupPreview.sheetCount}</strong>
+            <span>PDF pages {browserNupPreview.firstSourcePage}–{browserNupPreview.lastSourcePage} appear on this output sheet.</span>
+            {browserNupPreview.sheetCount>1&&<div className="customer-nup-browser-preview-controls">
+              <button type="button" disabled={browserNupPreview.sheetIndex<=0} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.max(0,index-1))}>Previous sheet</button>
+              <button type="button" disabled={browserNupPreview.sheetIndex>=browserNupPreview.sheetCount-1} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.min(browserNupPreview.sheetCount-1,index+1))}>Next sheet</button>
+            </div>}
+            <small>Page order follows {browserNupPreview.pagesPerSheetDirection}. This visual preview does not replace driver-specific margins or page fitting. The original PDF is uploaded unchanged; the selected Windows printer driver applies the physical N-up layout.</small>
+          </>}
+  </div>}
+</>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div>{!nativeAppMode&&<small>Updates after each file.</small>}</div>}
     {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?<>Local transfer is not encrypted. <InfoTooltip label="Local transfer security"><span>Shop Wi-Fi uses local HTTP. Choose Cloud-assisted for encrypted HTTPS transfer.</span></InfoTooltip></>:<>Check shop Wi-Fi first. <InfoTooltip label="Shop Wi-Fi access"><span>In a browser, tap Check shop Wi-Fi above to grant local network access.</span></InfoTooltip></>}</small>}
@@ -5476,7 +5698,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
-            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??batchStatuses[item.job.id]?.printKind??item.job.printKind)}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${item.job.pageCount} pages × ${printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies = ${item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} pages requested · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
+            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??batchStatuses[item.job.id]?.printKind??item.job.printKind)}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(item.job.pageCount,printSettingsByJobId[item.job.id]?.copies??item.job.copies,printSettingsByJobId[item.job.id]?.pagesPerSheet??item.job.pagesPerSheet??1,printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)} · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":customerStatusLabel(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
               tone={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"amber":customerStatusTone(statusForBatchItem(item))}
@@ -5484,7 +5706,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           </button>)}
         </section>)}
       </div>}
-      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><div className="uploaded-document-title"><strong>{resolveCustomerDocumentName(uploaded,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[uploaded.job.id]??batchStatuses[uploaded.job.id]?.printKind??uploaded.job.printKind)}/></div><span>{(photoSettingsByJobId[uploaded.job.id]||batchStatuses[uploaded.job.id]?.printKind==="PHOTO"||uploaded.job.printKind==="PHOTO")?`${photoSettingsByJobId[uploaded.job.id]?.photoCount??batchStatuses[uploaded.job.id]?.photoCount??uploaded.job.photoCount??0} photos · ${photoSettingsByJobId[uploaded.job.id]?.sizeCode??batchStatuses[uploaded.job.id]?.photoSizeCode??uploaded.job.photoSizeCode??""} · ${uploaded.job.pageCount} A4 pages`:`${uploaded.job.pageCount} ${uploaded.job.pageCount===1?"page":"pages"}`} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={customerStatusLabel(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={customerStatusTone(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")}/></div>
+      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><div className="uploaded-document-title"><strong>{resolveCustomerDocumentName(uploaded,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[uploaded.job.id]??batchStatuses[uploaded.job.id]?.printKind??uploaded.job.printKind)}/></div><span>{(photoSettingsByJobId[uploaded.job.id]||batchStatuses[uploaded.job.id]?.printKind==="PHOTO"||uploaded.job.printKind==="PHOTO")?`${photoSettingsByJobId[uploaded.job.id]?.photoCount??batchStatuses[uploaded.job.id]?.photoCount??uploaded.job.photoCount??0} photos · ${photoSettingsByJobId[uploaded.job.id]?.sizeCode??batchStatuses[uploaded.job.id]?.photoSizeCode??uploaded.job.photoSizeCode??""} · ${uploaded.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(uploaded.job.pageCount,printSettingsByJobId[uploaded.job.id]?.copies??uploaded.job.copies,printSettingsByJobId[uploaded.job.id]?.pagesPerSheet??uploaded.job.pagesPerSheet??1,printSettingsByJobId[uploaded.job.id]?.isDuplex??uploaded.job.isDuplex??false)}`} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={customerStatusLabel(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={customerStatusTone(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")}/></div>
       {batchId&&hasLegacyIndividualPayment&&<p className="customer-payment-warning">A file in this batch already has a separate individual payment. Complete or resolve that attempt before starting another payment for this batch. A second collection path is blocked to prevent duplicate charges.</p>}
       {canCalculateBatch&&<div className="customer-batch-quote-action">
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Review batch settings</h2></div><small>{quoteItems.length} files</small></div>
@@ -5495,14 +5717,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
       <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{acceptedQuoteEntries.length} accepted file(s) · {batchQuoteBreakdown.idCardCount} ID-card file(s) · {batchQuoteBreakdown.idCardSheets} ID-card A4 sheet(s) · {batchQuoteBreakdown.photoPages} photo A4 page(s) · {batchQuoteBreakdown.normalDocumentSourcePages} normal document page(s) · {batchQuoteBreakdown.totalOutputPagesAndSheets} total output page sides / prepared sheets</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[entry.item.job.id]??entry.quote!.printKind??entry.item.job.printKind)}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.printKind==="ID_DOCUMENT"?entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
+      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[entry.item.job.id]??entry.quote!.printKind??entry.item.job.printKind)}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.printKind==="ID_DOCUMENT"?entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided":customerDocumentOutputSummary(entry.quote!.pageCount,entry.quote!.copies,entry.quote!.pagesPerSheet??1,entry.quote!.isDuplex)+" · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
       <div className="customer-batch-print-breakdown">
-        <div><span>Normal documents · {batchQuoteBreakdown.normalDocumentFileCount} file(s) · {batchQuoteBreakdown.normalDocumentSourcePages} original page(s) × copies = {batchQuoteBreakdown.normalDocumentOutputPages} output page sides</span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,quoteEntries[0].quote!.currency)}</strong><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,quoteEntries[0].quote!.currency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,quoteEntries[0].quote!.currency)}</small></div>
+        <div><span>Normal documents · {batchQuoteBreakdown.normalDocumentFileCount} file(s) · {batchQuoteBreakdown.normalDocumentSourcePages} original PDF page(s) = {batchQuoteBreakdown.normalDocumentOutputPages} output page sides after N-up and copies</span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,quoteEntries[0].quote!.currency)}</strong><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,quoteEntries[0].quote!.currency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,quoteEntries[0].quote!.currency)}</small></div>
         <div><span>ID cards · {batchQuoteBreakdown.idCardCount} prepared ID-card file(s) · {batchQuoteBreakdown.idCardSheets} A4 sheet(s)</span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
         <div><span>Photo printing · {batchQuoteBreakdown.photoPages} A4 page(s) · {batchQuoteBreakdown.finishedPhotos} finished photo(s)</span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
         <div className="customer-batch-print-total"><span>Total output page sides / prepared A4 sheets</span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
       </div>
-      <p className="customer-payment-model-note customer-quote-explanation">Pricing varies by document type and print settings. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages before copies are applied. Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted separately as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing shows both finished photo quantity and the A4 PDF pages they occupy; pricing remains per finished photo.</span><span>Normal-document output counts page sides after copies. With duplex printing, two page sides may share one physical sheet.</span><span>Rejected files are excluded. Pay once for all accepted files after review.</span></InfoTooltip></p>
+      <p className="customer-payment-model-note customer-quote-explanation">Pricing varies by document type and print settings. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For driver-backed N-up, the selected pages-per-sheet value groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted separately as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing shows both finished photo quantity and the A4 PDF pages they occupy; pricing remains per finished photo.</span><span>Normal-document output counts page sides after copies. With duplex printing, two page sides may share one physical sheet.</span><span>Rejected files are excluded. Pay once for all accepted files after review.</span></InfoTooltip></p>
     </div>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}

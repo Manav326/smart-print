@@ -1,3 +1,5 @@
+using System.Net.Http;
+using System.IO;
 using SmartPrint.Agent;
 
 if (args.Any(argument => argument.Equals("--check-pairing", StringComparison.OrdinalIgnoreCase)))

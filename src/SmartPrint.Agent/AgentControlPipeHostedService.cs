@@ -1,3 +1,5 @@
+using System.Net.Http;
+using System.IO;
 using System.ComponentModel;
 using System.IO.Pipes;
 using System.Net.NetworkInformation;

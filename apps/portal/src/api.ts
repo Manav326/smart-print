@@ -1157,6 +1157,7 @@ export interface ShopPrintJob {
   paperSize: string;
   isDuplex: boolean;
   orientation?: string;
+  pagesPerSheet?: number;
   pdfBrandingEnabled?: boolean;
   privatePrinting?: boolean;
   pricingVersion?: number;
@@ -1212,6 +1213,7 @@ export interface UploadedPrintJob {
     paperSize?: string;
     isDuplex?: boolean;
     orientation?: string;
+    pagesPerSheet?: number;
     pricingVersion?: number;
     currency: string;
     quotedAmountMinor: number;
@@ -1241,6 +1243,8 @@ export interface PrintQuoteResult {
   paperSize: string;
   isDuplex: boolean;
   orientation?: string;
+  pagesPerSheet?: number;
+  outputSidesPerCopy?: number;
   printKind?: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT";
   photoSizeCode?: string | null;
   photoCount?: number;
@@ -1296,6 +1300,7 @@ export interface CustomerPrintRequestSettings {
   paperSize: "A4" | "A3" | "A5" | "LETTER" | "LEGAL";
   isDuplex: boolean;
   orientation: "AUTO" | "PORTRAIT" | "LANDSCAPE";
+  pagesPerSheet?: number;
 }
 
 type CustomerLocalUploadTicket = {
@@ -1360,6 +1365,7 @@ async function requestCustomerLocalUploadTicket(
       isDuplex: settings.isDuplex,
       copies: settings.copies,
       orientation: settings.orientation,
+      pagesPerSheet: settings.pagesPerSheet ?? 1,
       privatePrinting,
       printKind,
       photoSizeCode: photoSettings?.sizeCode ?? null,
@@ -1438,6 +1444,7 @@ export async function uploadCustomerDocument(
   form.append("isDuplex", String(settings.isDuplex));
   form.append("copies", String(settings.copies));
   form.append("orientation", settings.orientation);
+  form.append("pagesPerSheet", String(settings.pagesPerSheet ?? 1));
   form.append("printKind", printKind);
   if (printKind === "PHOTO" && photoSettings) {
     form.append("photoSizeCode", photoSettings.sizeCode);
@@ -1907,6 +1914,7 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
   photoSizeCode?: string;
   photoCount?: number;
   photosPerPage?: number;
+  pagesPerSheet?: number;
 }) {
   return apiRequest<PrintQuoteResult>(`/api/v1/public/jobs/${jobId}/quote`, {
     method: "POST",
@@ -1925,6 +1933,7 @@ export interface CustomerJobStatus {
   paperSize: string;
   isDuplex: boolean;
   orientation?: string;
+  pagesPerSheet?: number;
   pricingVersion?: number;
   // Photo quotes retain the configured per-photo rate used at quote time.
   printKind?: string;

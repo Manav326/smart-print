@@ -1,4 +1,6 @@
+using System.IO;
 using System.Net;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -1094,7 +1096,8 @@ public sealed class LocalAgentApiHostedService(
                             OutputMode: claim.OutputMode,
                             Orientation: claim.Orientation,
                             PrivatePrinting: claim.PrivatePrinting,
-                            PrintKind: claim.PrintKind);
+                            PrintKind: claim.PrintKind,
+                            PagesPerSheet: claim.PagesPerSheet);
                         await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
                     }
 
@@ -1200,7 +1203,8 @@ public sealed class LocalAgentApiHostedService(
         DateTimeOffset ExpiresUtc,
         LocalUploadedPrintResult? UploadResult,
         string PrintKind = "DOCUMENT",
-        string OutputMode = "PHYSICAL");
+        string OutputMode = "PHYSICAL",
+        int PagesPerSheet = 1);
 
     private sealed record LocalUploadCompletionResponse(
         bool AlreadyCompleted,

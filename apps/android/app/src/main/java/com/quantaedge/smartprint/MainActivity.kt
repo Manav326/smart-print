@@ -4109,16 +4109,37 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }
                             }
-                            parts.size == 3 && parts[0] == "previewCustomerPdf" &&
+                            parts.size in 3..7 && parts[0] == "previewCustomerPdf" &&
                                 isCustomerUploadPdfPreviewToken(parts[1]) && parts[2].toIntOrNull() != null -> {
                                 val token = parts[1]
-                                val pageIndex = parts[2].toInt()
-                                runOnUiThread {
-                                    if (!isFinishing && !isDestroyed) {
-                                        customerUploadPdfPreviewOpen = true
-                                        customerUploadPdfPreviewSensitive = token in customerUploadPdfPreviewSensitiveTokens
-                                        applySensitiveWindowProtection()
-                                        renderCustomerPdfPreview(token, pageIndex, replyProxy)
+                                // The requested index now identifies an output sheet, not a source PDF page.
+                                val sheetIndex = parts[2].toInt()
+                                val pagesPerSheet = parts.getOrNull(3)?.toIntOrNull() ?: 1
+                                val paperSize = parts.getOrNull(4)?.takeIf {
+                                    it in setOf("A4", "A3", "A5", "LETTER", "LEGAL")
+                                } ?: "A4"
+                                val orientation = parts.getOrNull(5)?.takeIf {
+                                    it in setOf("AUTO", "PORTRAIT", "LANDSCAPE")
+                                } ?: "AUTO"
+                                val pagesPerSheetDirection = parts.getOrNull(6)?.takeIf {
+                                    it in setOf(
+                                        "RightBottom", "BottomRight", "LeftBottom", "BottomLeft",
+                                        "RightTop", "TopRight", "LeftTop", "TopLeft"
+                                    )
+                                } ?: "RightBottom"
+                                if (pagesPerSheet !in 1..500) {
+                                    replyProxy.postMessage("CUSTOMER_PDF_PREVIEW_FAILED|$token|Invalid pages-per-sheet value.")
+                                } else {
+                                    runOnUiThread {
+                                        if (!isFinishing && !isDestroyed) {
+                                            customerUploadPdfPreviewOpen = true
+                                            customerUploadPdfPreviewSensitive = token in customerUploadPdfPreviewSensitiveTokens
+                                            applySensitiveWindowProtection()
+                                            renderCustomerPdfPreview(
+                                                token, sheetIndex, pagesPerSheet, paperSize, orientation,
+                                                pagesPerSheetDirection, replyProxy
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -6939,7 +6960,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun renderCustomerPdfPreview(
         token: String,
-        requestedPage: Int,
+        requestedSheet: Int,
+        pagesPerSheet: Int,
+        paperSize: String,
+        orientation: String,
+        pagesPerSheetDirection: String,
         replyProxy: JavaScriptReplyProxy
     ) {
         Thread {
@@ -6950,21 +6975,31 @@ class MainActivity : AppCompatActivity() {
                 ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                     PdfRenderer(descriptor).use { renderer ->
                         require(renderer.pageCount > 0) { "This PDF has no pages to preview." }
-                        val pageIndex = requestedPage.coerceIn(0, renderer.pageCount - 1)
-                        val thumbnails = JSONArray()
-                        val first = maxOf(0, pageIndex - 2)
-                        val last = minOf(renderer.pageCount - 1, pageIndex + 2)
-                        for (index in first..last) {
-                            thumbnails.put(JSONObject()
-                                .put("index", index)
-                                .put("image", renderCustomerPdfPage(renderer, index, 112, 68)))
-                        }
+                        val sheetCount = (renderer.pageCount + pagesPerSheet - 1) / pagesPerSheet
+                        val sheetIndex = requestedSheet.coerceIn(0, sheetCount - 1)
+                        val firstSourcePage = sheetIndex * pagesPerSheet
+                        val lastSourcePage = minOf(renderer.pageCount, firstSourcePage + pagesPerSheet)
+                        val previewImage = renderCustomerPdfSheet(
+                            renderer,
+                            firstSourcePage,
+                            lastSourcePage,
+                            pagesPerSheet,
+                            paperSize,
+                            orientation,
+                            pagesPerSheetDirection
+                        )
                         JSONObject()
                             .put("token", token)
-                            .put("pageIndex", pageIndex)
-                            .put("pageCount", renderer.pageCount)
-                            .put("image", renderCustomerPdfPage(renderer, pageIndex, 1100, 82))
-                            .put("thumbnails", thumbnails)
+                            .put("pageIndex", sheetIndex)
+                            .put("pageCount", sheetCount)
+                            .put("pagesPerSheet", pagesPerSheet)
+                            .put("pagesPerSheetDirection", pagesPerSheetDirection)
+                            .put("paperSize", paperSize)
+                            .put("orientation", orientation)
+                            .put("firstSourcePage", firstSourcePage + 1)
+                            .put("lastSourcePage", lastSourcePage)
+                            .put("image", previewImage)
+                            .put("thumbnails", JSONArray())
                             .let { "CUSTOMER_PDF_PREVIEW|" + it.toString() }
                     }
                 }
@@ -6975,6 +7010,151 @@ class MainActivity : AppCompatActivity() {
                 if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
             }
         }.start()
+    }
+
+    /**
+     * Builds a visual-only sheet preview. Printing still sends the untouched source PDF
+     * to Windows, where the selected printer driver performs the real N-up operation.
+     */
+    private fun renderCustomerPdfSheet(
+        renderer: PdfRenderer,
+        firstSourcePage: Int,
+        lastSourcePageExclusive: Int,
+        pagesPerSheet: Int,
+        paperSize: String,
+        orientation: String,
+        pagesPerSheetDirection: String
+    ): String {
+        val firstPage = renderer.openPage(firstSourcePage)
+        val firstPageLandscape = firstPage.width > firstPage.height
+        firstPage.close()
+
+        val (shortSideMm, longSideMm) = when (paperSize) {
+            "A3" -> 297f to 420f
+            "A5" -> 148f to 210f
+            "LETTER" -> 215.9f to 279.4f
+            "LEGAL" -> 215.9f to 355.6f
+            else -> 210f to 297f
+        }
+        val landscape = when (orientation) {
+            "LANDSCAPE" -> true
+            "PORTRAIT" -> false
+            else -> firstPageLandscape
+        }
+        val sheetWidth = if (landscape) 1500 else (1500f * shortSideMm / longSideMm).toInt().coerceAtLeast(1)
+        val sheetHeight = if (landscape) (1500f * shortSideMm / longSideMm).toInt().coerceAtLeast(1) else 1500
+        val bitmap = Bitmap.createBitmap(sheetWidth, sheetHeight, Bitmap.Config.ARGB_8888)
+        try {
+            val canvas = android.graphics.Canvas(bitmap)
+            canvas.drawColor(android.graphics.Color.WHITE)
+
+            val margin = sheetWidth * 0.045f
+            val gap = sheetWidth * 0.012f
+            val columns = kotlin.math.ceil(kotlin.math.sqrt(pagesPerSheet.toDouble())).toInt().coerceAtLeast(1)
+            val rows = kotlin.math.ceil(pagesPerSheet.toDouble() / columns).toInt().coerceAtLeast(1)
+            val contentWidth = sheetWidth - margin * 2 - gap * (columns - 1)
+            val contentHeight = sheetHeight - margin * 2 - gap * (rows - 1)
+            val cellWidth = contentWidth / columns
+            val cellHeight = contentHeight / rows
+            val maximumPageEdge = maxOf(120, minOf(420, maxOf(cellWidth, cellHeight).toInt()))
+            val imagePaint = android.graphics.Paint(
+                android.graphics.Paint.ANTI_ALIAS_FLAG or android.graphics.Paint.FILTER_BITMAP_FLAG
+            )
+            val borderPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.LTGRAY
+                style = android.graphics.Paint.Style.STROKE
+                strokeWidth = 2f
+            }
+
+            for (sourcePage in firstSourcePage until lastSourcePageExclusive) {
+                val slot = sourcePage - firstSourcePage
+                val (column, row) = when (pagesPerSheetDirection) {
+                    "BottomRight" -> (slot / rows) to (slot % rows)
+                    "LeftBottom" -> (columns - 1 - (slot % columns)) to (slot / columns)
+                    "BottomLeft" -> (columns - 1 - (slot / rows)) to (slot % rows)
+                    "RightTop" -> (slot % columns) to (rows - 1 - (slot / columns))
+                    "TopRight" -> (slot / rows) to (rows - 1 - (slot % rows))
+                    "LeftTop" -> (columns - 1 - (slot % columns)) to
+                        (rows - 1 - (slot / columns))
+                    "TopLeft" -> (columns - 1 - (slot / rows)) to
+                        (rows - 1 - (slot % rows))
+                    "RightBottom" -> (slot % columns) to (slot / columns)
+                    else -> (slot % columns) to (slot / columns)
+                }
+                val left = margin + column * (cellWidth + gap)
+                val top = margin + row * (cellHeight + gap)
+                val cell = android.graphics.RectF(left, top, left + cellWidth, top + cellHeight)
+                val page = renderer.openPage(sourcePage)
+                var pageBitmap: Bitmap? = null
+                try {
+                    val pageScale = minOf(
+                        1f,
+                        maximumPageEdge.toFloat() / maxOf(page.width, page.height).toFloat()
+                    )
+                    val pageWidth = maxOf(1, (page.width * pageScale).toInt())
+                    val pageHeight = maxOf(1, (page.height * pageScale).toInt())
+                    pageBitmap = Bitmap.createBitmap(pageWidth, pageHeight, Bitmap.Config.ARGB_8888)
+                    pageBitmap.eraseColor(android.graphics.Color.WHITE)
+                    val matrix = android.graphics.Matrix().apply { setScale(pageScale, pageScale) }
+                    page.render(
+                        pageBitmap,
+                        null,
+                        matrix,
+                        PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY
+                    )
+
+                    val inset = minOf(cellWidth, cellHeight) * 0.035f
+                    val availableWidth = maxOf(1f, cellWidth - inset * 2)
+                    val availableHeight = maxOf(1f, cellHeight - inset * 2)
+                    val fit = minOf(
+                        availableWidth / pageBitmap.width,
+                        availableHeight / pageBitmap.height
+                    )
+                    val drawWidth = pageBitmap.width * fit
+                    val drawHeight = pageBitmap.height * fit
+                    val destination = android.graphics.RectF(
+                        left + (cellWidth - drawWidth) / 2f,
+                        top + (cellHeight - drawHeight) / 2f,
+                        left + (cellWidth + drawWidth) / 2f,
+                        top + (cellHeight + drawHeight) / 2f
+                    )
+                    canvas.drawBitmap(pageBitmap, null, destination, imagePaint)
+                    canvas.drawRect(cell, borderPaint)
+                } finally {
+                    pageBitmap?.recycle()
+                    page.close()
+                }
+            }
+
+            // Keep the customer-visible native preview branded consistently with the browser
+            // preview. This is preview-only; the source PDF sent to the Agent is unchanged.
+            val watermarkPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.LTGRAY
+                alpha = 100
+                textSize = minOf(sheetWidth, sheetHeight) * 0.045f
+                textAlign = android.graphics.Paint.Align.CENTER
+                typeface = android.graphics.Typeface.create(
+                    "sans-serif",
+                    android.graphics.Typeface.BOLD
+                )
+            }
+            canvas.save()
+            canvas.rotate(-28f, sheetWidth / 2f, sheetHeight / 2f)
+            canvas.drawText(
+                "SmartPrint by QuantaEdge",
+                sheetWidth / 2f,
+                sheetHeight / 2f,
+                watermarkPaint
+            )
+            canvas.restore()
+
+            return ByteArrayOutputStream().use { output ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)
+                android.util.Base64.encodeToString(output.toByteArray(), android.util.Base64.NO_WRAP)
+            }
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     private fun renderCustomerPdfPage(

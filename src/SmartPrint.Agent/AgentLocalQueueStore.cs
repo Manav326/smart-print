@@ -1,3 +1,5 @@
+using System.Net.Http;
+using System.IO;
 using System.Security.AccessControl;
 using System.Security.Cryptography;
 using System.Security.Principal;
@@ -409,7 +411,8 @@ public sealed class AgentLocalQueueStore
             Orientation: job.Orientation,
             PdfBrandingEnabled: job.PdfBrandingEnabled,
             PrivatePrinting: job.PrivatePrinting,
-            PrintKind: job.PrintKind);
+            PrintKind: job.PrintKind,
+            PagesPerSheet: job.PagesPerSheet);
 
         try
         {
