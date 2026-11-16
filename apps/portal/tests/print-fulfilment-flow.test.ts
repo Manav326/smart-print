@@ -403,7 +403,8 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.ok(route.indexOf("var documentSnapshot =") < route.indexOf("await using var transaction"));
  assert.ok(route.indexOf("await using var transaction") < route.indexOf("var document = await db.PrintDocuments"));
  assert.match(route,/photoSourceMediaType is not \("image\/jpeg" or "image\/png"\)/);
- assert.match(route,/if \(jobPreflight\.PrivatePrinting\)/);\n assert.match(route,/if \(job\.PrivatePrinting \|\|/);
+ assert.match(route,/if \(jobPreflight\.PrivatePrinting\)/);
+ assert.match(route,/if \(job\.PrivatePrinting \|\|/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
  assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
  assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
