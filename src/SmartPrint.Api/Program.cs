@@ -6052,6 +6052,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.PaperSize,
             candidate.IsDuplex,
             candidate.Orientation,
+            candidate.PagesPerSheet,
             candidate.PdfBrandingEnabled,
             candidate.PrivatePrinting,
             candidate.PrintKind,
