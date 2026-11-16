@@ -4539,7 +4539,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             firstSourcePage:number;lastSourcePage:number;image:string;
             thumbnails:Array<{index:number;image:string}>;
           };
-          setNativePdfPreview(current=>current&&current.token===payload.token&&current.requestedPageIndex===payload.pageIndex
+          setNativePdfPreview(current=>current&&current.token===payload.token&&
+            current.requestedPageIndex===payload.pageIndex&&current.pagesPerSheet===payload.pagesPerSheet
             ?{...payload,requestedPageIndex:payload.pageIndex,loading:false}:current);
         }catch{
           setError("The PDF preview could not be displayed. You can still upload the document.");
