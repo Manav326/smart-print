@@ -11,6 +11,7 @@ import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } 
 import PrivatePhotoStudioEntry from "./PrivatePhotoStudioEntry";
 import { isSupportedPhotoSource, resolvePhotoSourceMimeType } from "./photo-source-policy";
 import CustomerUpiQr from "./CustomerUpiQr";
+import ShopDocumentPreviewSurface from "./ShopDocumentPreviewSurface";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
 import { shouldBlockBatchCheckoutForExpiredQuote, shouldBlockQuoteRefreshForStatus } from "./batch-checkout-state";
@@ -41,6 +42,7 @@ import {
   enrollLocalAgent, getLocalAgentStatus, getLocalNetworkSnapshot, selectLocalNetwork, startLocalPhoneTest,
   isDesktopApp, setDesktopContentProtection, type DesktopAgentStatus, type DesktopLocalNetworkSnapshot, type DesktopLocalPhoneTest
 } from "./desktop-bridge";
+import { identifyDocumentPreviewMediaType } from "./document-preview";
 import { verifiedPdfExportPath } from "./print-output";
 import { isRetainedSpoolerJob } from "./spooler-output-confirmation";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
@@ -1203,14 +1205,13 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     try {
       const blob = await downloadShopDocument(tokens.accessToken, job.id, variant);
       const isSavedOutput = variant === "output";
-      const supportedTypes = new Set(["application/pdf", "image/jpeg", "image/png"]);
-      const storedType=(job.document.mediaType||"").split(";")[0].trim().toLowerCase();
-      const responseType = (blob.type || "").split(";")[0].trim().toLowerCase();
-      const extension = job.document.originalFileName.toLowerCase().split(".").pop();
-      const extensionType = extension === "pdf" ? "application/pdf" : extension === "jpg" || extension === "jpeg" ? "image/jpeg" : extension === "png" ? "image/png" : "";
-      // Trust the persisted MIME type, then response headers, then the validated file extension.
-      const mediaType = isSavedOutput ? "application/pdf" : supportedTypes.has(storedType) ? storedType : supportedTypes.has(responseType) ? responseType : extensionType;
-      const previewBlob = mediaType && blob.type !== mediaType ? new Blob([blob], { type: mediaType }) : blob;
+      // Classify the actual file bytes. A stale MIME header or a misleading
+      // extension must never make an unsupported file appear previewable.
+      const detectedMediaType = await identifyDocumentPreviewMediaType(blob);
+      const mediaType = isSavedOutput
+        ? detectedMediaType === "application/pdf" ? detectedMediaType : ""
+        : detectedMediaType ?? "";
+      const previewBlob = mediaType ? new Blob([blob], { type: mediaType }) : blob;
       const url = URL.createObjectURL(previewBlob);
       setPreview({
         name: isSavedOutput ? job.outputFileName || `${job.jobNumber}_SmartPrint.pdf` : job.document.originalFileName,
@@ -2917,7 +2918,6 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,isSavedOutp
   name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;isSavedOutput?:boolean;focusEditOnMount?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;onEditPhoto?:()=>void;
 }) {
   const editPhotoButtonRef=useRef<HTMLButtonElement|null>(null);
-  const isPdf=mediaType==="application/pdf";
   const isImage=mediaType==="image/jpeg"||mediaType==="image/png";
   useEffect(()=>{
     if(focusEditOnMount)editPhotoButtonRef.current?.focus();
@@ -2935,9 +2935,7 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,isSavedOutp
       : `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
   const subtitle = isSavedOutput ? "Saved PDF output · Read-only preview" : readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary;
   return <Modal title={name} subtitle={subtitle} onClose={onClose}>
-    <div className="shop-document-preview" onContextMenu={event=>{if(isImage||job.printKind==="PHOTO")event.preventDefault();}} onDragStart={event=>{if(isImage||job.printKind==="PHOTO")event.preventDefault();}}>
-      {isPdf&&job.printKind==="PHOTO"?<><iframe src={url} title={name}/><span className="shop-photo-preview-watermark" aria-hidden="true">SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW</span></>:isPdf?<iframe src={url} title={name}/>:isImage?<><img src={url} alt={name} draggable={false}/><span className="shop-photo-preview-watermark" aria-hidden="true">SMARTPRINT · PRIVATE SHOP PREVIEW</span></>:<div className="shop-document-preview-unavailable">Preview format is not supported. <a href={url} download={name}>Download the original file</a></div>}
-    </div>
+    <ShopDocumentPreviewSurface name={name} url={url} mediaType={mediaType} printKind={job.printKind}/>
     {onEditPhoto&&<div className="file-review-note"><ImageIcon size={16}/><span>Open the same Photo Studio used by customers to crop, improve the background, add form details and prepare this photo for shop printing.</span><button ref={editPhotoButtonRef} className="secondary-button" onClick={onEditPhoto}>Enhance photo for printing</button></div>}
     {!readOnly&&isImage&&job.status==="AWAITING_SHOP_APPROVAL"&&job.storageMode==="LOCAL_AGENT"&&<div className="file-review-note"><ShieldCheck size={16}/><span>This original is stored only on the paired shop computer. It remains local; this version does not copy it to cloud storage for editing.</span></div>}
     {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
