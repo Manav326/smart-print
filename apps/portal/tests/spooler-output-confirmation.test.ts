@@ -78,7 +78,7 @@ test("the API endpoint applies the server guard before completion or private-sou
   const routeEnd = program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/events"', routeStart);
   assert.ok(routeStart >= 0 && routeEnd > routeStart, "The physical output-confirmation endpoint must exist.");
   const route = program.slice(routeStart, routeEnd);
-  const guard = route.search(/SpoolerOutputConfirmationPolicy\\.CanConfirmPhysicalOutput\\(job\\.Status,\\s*job\\.SpoolerStatus,\\s*job\\.SpoolerObservedUtc,\\s*printerStatus\\)/);
+  const guard = route.indexOf("SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerObservedUtc, printerStatus)");
   const completed = route.indexOf('job.Status = "COMPLETED"');
   const purge = route.indexOf("PrivateDocumentPurgeRequestedUtc");
   assert.ok(route.includes("HasVerifiedAgentSpoolerObservation(job.SpoolerStatus, job.SpoolerObservedUtc)"));
