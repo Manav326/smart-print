@@ -744,6 +744,8 @@ test("Android customer PDF previews render automatically and receive native brid
   assert.match(preview, /The original PDF is sent to the printer driver unchanged/);
   assert.match(app, /previewCustomerPdf\|\"\+token\+\"\|\"\+sheetIndex\+\"\|\"\+pagesPerSheet/);
   assert.match(app, /current\.pagesPerSheet===payload\.pagesPerSheet/);
+  assert.match(app, /pagesPerSheetDirection/);
+  assert.match(app, /current\.pagesPerSheetDirection===payload\.pagesPerSheetDirection/);
   assert.match(app, /bridge\.addEventListener\("message",onNativePdfPreview\)/);
   assert.match(app, /bridge\.removeEventListener!\("message",onNativePdfPreview\)/);
   assert.doesNotMatch(app, /window\.addEventListener\("message",onNativePdfPreview\)/);
@@ -759,10 +761,17 @@ test("browser customer N-up preview is visual-only and leaves the original uploa
  assert.match(app,/Previous sheet/);
  assert.match(app,/Next sheet/);
  assert.match(preview,/embedPages/);
+ assert.match(preview,/pagesPerSheetDirection/);
+ assert.match(preview,/resolveGridPosition/);
+ for(const direction of ["RightBottom","BottomRight","LeftBottom","BottomLeft","RightTop","TopRight","LeftTop","TopLeft"])
+   assert.ok(preview.includes(`case "${direction}"`),`Missing browser mapping for ${direction}`);
  assert.match(preview,/SmartPrint by QuantaEdge/);
  const android=read("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
  const nativePreviewStart=android.indexOf("private fun renderCustomerPdfSheet(");
  const nativePreviewEnd=android.indexOf("private fun renderCustomerPdfPage(",nativePreviewStart);
  assert.ok(nativePreviewStart>=0 && nativePreviewEnd>nativePreviewStart);
  assert.match(android.slice(nativePreviewStart,nativePreviewEnd),/canvas\.drawText\([\s\S]*?"SmartPrint by QuantaEdge"/);
+ assert.match(android.slice(nativePreviewStart,nativePreviewEnd),/when \(pagesPerSheetDirection\)/);
+ for(const direction of ["RightBottom","BottomRight","LeftBottom","BottomLeft","RightTop","TopRight","LeftTop","TopLeft"])
+   assert.ok(android.slice(nativePreviewStart,nativePreviewEnd).includes(`"${direction}"`),`Missing Android mapping for ${direction}`);
 });
