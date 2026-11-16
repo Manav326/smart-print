@@ -4195,7 +4195,7 @@ function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:N
         </div>}
     {current?.image&&<div className="customer-native-pdf-layout-note">
       <strong>{current.pagesPerSheet}-up print layout · {current.pagesPerSheetDirection}</strong>
-      <span>PDF pages {current.firstSourcePage}–{current.lastSourcePage} appear on this output sheet. Page order follows the selected driver direction; final margins and page fitting are controlled by the printer driver. The original PDF is sent unchanged.</span>
+      <span>PDF pages {current.firstSourcePage}–{current.lastSourcePage} appear on this output sheet. Page order follows the selected driver direction; final margins and page fitting are controlled by the printer driver. The original PDF is sent to the printer driver unchanged.</span>
     </div>}
     {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
       <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous sheet</button>
