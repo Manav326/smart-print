@@ -6,7 +6,7 @@ concurrency:
 
 on:
   push:
-    branches: [main, "feature/**", "feat/**"]
+    branches: [main, "feature/**", "feat/**", "refactor/**"]
   pull_request:
     branches: [main, "feature/**", "feat/**"]
 
