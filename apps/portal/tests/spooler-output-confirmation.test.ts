@@ -90,7 +90,7 @@ test("printer warnings still block routine confirmation, but verified queue abse
 test("Order Journey and Print Queue use the same physical-output eligibility and manual-reconciliation helpers", () => {
   const orderJourney = read("../src/OrderJourneyPage.tsx");
   const printQueue = read("../src/App.tsx");
-  const expected = /canConfirmPhysicalOutput\(\s*job\.status,\s*job\.spoolerStatus,\s*job\.spoolerSubmittedUtc,\s*job\.spoolerObservedUtc,\s*job\.printerStatus,\s*job\.failureCode,\s*job\.spoolerJobId\)/;
+  const expected = /canConfirmPhysicalOutput\(\s*job\.status,\s*job\.spoolerStatus,\s*job\.spoolerSubmittedUtc,\s*job\.spoolerObservedUtc,\s*job\.printerStatus,\s*job\.failureCode,\s*job\.spoolerJobId\s*\)/;
   for (const source of [orderJourney, printQueue]) {
     assert.match(source, /isPhysicalOutputConfirmationStatus\(job\.status\)/);
     assert.match(source, expected);
