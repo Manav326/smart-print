@@ -385,6 +385,152 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
     }
 }
 
+public sealed class WindowsPrinterNupIntegrationTests
+{
+    [Fact]
+    public async Task DriverBackedFourUpTurnsThirtyThreePdfPagesIntoNineOutputSheets()
+    {
+        // CI provides a dedicated clone of its virtual PDF queue. The test runs only
+        // when the installed driver actually reports 4-up; it never sends paper to
+        // a physical printer and never substitutes a software-imposed PDF.
+        if (!OperatingSystem.IsWindows() ||
+            !string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        var queueName = Environment.GetEnvironmentVariable("SMARTPRINT_NUP_TEST_QUEUE");
+        if (string.IsNullOrWhiteSpace(queueName))
+            return;
+
+        using (var capabilities = System.Text.Json.JsonDocument.Parse(
+                   WindowsPrinterCapabilityDiscovery.DiscoverJson(queueName)))
+        {
+            var supportsFourUp = capabilities.RootElement.TryGetProperty("pagesPerSheet", out var values) &&
+                                 values.ValueKind == System.Text.Json.JsonValueKind.Array &&
+                                 values.EnumerateArray().Any(value =>
+                                     value.ValueKind == System.Text.Json.JsonValueKind.Number &&
+                                     value.TryGetInt32(out var pagesPerSheet) &&
+                                     pagesPerSheet == 4);
+            if (!supportsFourUp)
+            {
+                Console.WriteLine(
+                    $"N-up integration skipped: Windows driver for '{queueName}' does not report 4 pages per sheet.");
+                return;
+            }
+        }
+
+        using var source = new MemoryStream();
+        using (var pdf = SkiaSharp.SKDocument.CreatePdf(source))
+        {
+            using var typeface = SkiaSharp.SKTypeface.FromFamilyName(
+                "Arial",
+                SkiaSharp.SKFontStyle.Normal);
+            using var font = new SkiaSharp.SKFont(typeface, 14);
+            using var paint = new SkiaSharp.SKPaint
+            {
+                Color = SkiaSharp.SKColors.Black,
+                IsAntialias = true
+            };
+
+            for (var pageNumber = 1; pageNumber <= 33; pageNumber++)
+            {
+                var canvas = pdf.BeginPage(595.276f, 841.89f);
+                canvas.DrawText(
+                    $"SOURCE PAGE {pageNumber:D2}",
+                    48,
+                    72,
+                    SkiaSharp.SKTextAlign.Left,
+                    font,
+                    paint);
+                pdf.EndPage();
+            }
+
+            pdf.Close();
+        }
+
+        var bytes = source.ToArray();
+        var outputDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "smartprint-nup-spooler-" + Guid.NewGuid().ToString("N"));
+        var outputPath = Path.Combine(outputDirectory, "33-pages-four-up.pdf");
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(),
+            "SP-DRIVER-NUP-33-TO-9",
+            Guid.NewGuid(),
+            queueName,
+            queueName,
+            "thirty-three-pages.pdf",
+            "application/pdf",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            bytes.LongLength,
+            33,
+            1,
+            "Mono",
+            "A4",
+            false,
+            "INR",
+            900,
+            "SmartPrint-Nup-Driver-Integration",
+            "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddMinutes(3),
+            Orientation: "PORTRAIT",
+            PrintKind: "DOCUMENT",
+            PagesPerSheet: 4);
+
+        try
+        {
+            var receipt = new WindowsPrintExecutor().PrintToFile(
+                entry,
+                bytes,
+                outputPath,
+                CancellationToken.None);
+            Assert.True(receipt.JobId > 0, "Windows did not accept the N-up spooler job.");
+
+            var deadline = DateTime.UtcNow.AddSeconds(45);
+            var outputReady = false;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (File.Exists(outputPath))
+                {
+                    try
+                    {
+                        var candidate = await File.ReadAllBytesAsync(outputPath);
+                        if (candidate.Length > 1000 &&
+                            candidate.AsSpan(0, 5).SequenceEqual("%PDF-"u8) &&
+                            System.Text.Encoding.ASCII.GetString(candidate)
+                                .Contains("%%EOF", StringComparison.Ordinal))
+                        {
+                            outputReady = true;
+                            break;
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        // The virtual print processor may still be finalising the output.
+                    }
+                }
+
+                await Task.Delay(500);
+            }
+
+            Assert.True(outputReady, "The configured virtual printer did not complete its PDF output.");
+            using var rendered = UglyToad.PdfPig.PdfDocument.Open(outputPath);
+            Assert.Equal(
+                9,
+                rendered.NumberOfPages);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+}
+
 public sealed class WindowsPrintToPdfFallbackTests
 {
     [Fact]
