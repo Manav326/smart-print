@@ -37,7 +37,8 @@ public sealed record AgentClaimedJob(
     bool PrivatePrinting = false,
     string PrintKind = "DOCUMENT",
     string PhotoPaperFinish = "GLOSSY",
-    string PhotoOutputLayout = "A4_SHEET");
+    string PhotoOutputLayout = "A4_SHEET",
+    string? PhotoSizeCode = null);
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
@@ -51,7 +52,8 @@ public sealed record AgentPrivateRelayItem(
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
     string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL",
-    string PhotoPaperFinish = "GLOSSY", string PhotoOutputLayout = "A4_SHEET");
+    string PhotoPaperFinish = "GLOSSY", string PhotoOutputLayout = "A4_SHEET",
+    string? PhotoSizeCode = null);
 
 public sealed record AgentPrivateTestOutputRequest(string FileName, long SizeBytes, string Sha256);
 
@@ -113,7 +115,8 @@ public sealed record AgentLocalQueueEntry(
     long? PhotoSourceSizeBytes = null,
     bool PrivateSpoolerCleanupCompleted = false,
     string PhotoPaperFinish = "GLOSSY",
-    string PhotoOutputLayout = "A4_SHEET");
+    string PhotoOutputLayout = "A4_SHEET",
+    string? PhotoSizeCode = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
