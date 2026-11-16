@@ -229,9 +229,11 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     $buildOutputDirectory = Join-Path $fixtureProject "bin\Release\net10.0-windows"
     $serviceFixtureDirectory = Join-Path $fixtureDataDirectory "Fixture"
     $buildAssemblyPath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.dll"
+    $buildExecutablePath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.exe"
     $assemblyPath = Join-Path $serviceFixtureDirectory "SmartPrintLifecycleFixture.dll"
-    $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
+    $fixtureExecutablePath = Join-Path $serviceFixtureDirectory "SmartPrintLifecycleFixture.exe"
     Assert-True (Test-Path -LiteralPath $buildAssemblyPath) "The Agent lifecycle fixture assembly was not built."
+    Assert-True (Test-Path -LiteralPath $buildExecutablePath) "The Agent lifecycle fixture apphost was not built."
 
     # The scheduled task runs as LocalService, not the interactive CI runner.
     # Stage the complete fixture output in the test-owned ProgramData folder and
@@ -251,24 +253,49 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
 
     Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
     $extraArguments = @($AdditionalArguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
-    $arguments = '"' + $assemblyPath + '" ' + $Mode + ' "' + $resultPath + '"'
+    $arguments = $Mode + ' "' + $resultPath + '"'
     if ($extraArguments.Count -gt 0) { $arguments += ' ' + ($extraArguments -join ' ') }
-    $action = New-ScheduledTaskAction -Execute $dotnetPath -Argument $arguments
+    # Run the staged apphost directly. Invoking dotnet.exe from a scheduled
+    # service-account task depends on the interactive runner's runtime lookup
+    # environment and can fail without exposing a useful task exit code.
+    $action = New-ScheduledTaskAction -Execute $fixtureExecutablePath -Argument $arguments -WorkingDirectory $serviceFixtureDirectory
     $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\LocalService" -LogonType ServiceAccount -RunLevel Limited
     try {
+        Copy-Item -LiteralPath $buildExecutablePath -Destination $fixtureExecutablePath -Force
         Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
         $script:ownsTask = $true
+        $taskStartedAt = Get-Date
         Start-ScheduledTask -TaskName $taskName
-        $deadline = (Get-Date).AddSeconds(45)
+        $deadline = $taskStartedAt.AddSeconds(45)
         $poll = 0
         while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
             $poll++
+            $taskState = (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State
+            if ($taskState -and $taskState -ne "Running" -and $poll -gt 2) { break }
             if ($poll -eq 1 -or $poll % 10 -eq 0) {
-                Write-Host "[QA-PROGRESS] LocalService fixture | mode=$Mode | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
+                Write-Host "[QA-PROGRESS] LocalService fixture | mode=$Mode | state=$taskState | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
             }
             Start-Sleep -Milliseconds 500
         }
-        Assert-True (Test-Path -LiteralPath $resultPath) "The LocalService lifecycle fixture '$Mode' did not produce a result."
+        if (-not (Test-Path -LiteralPath $resultPath)) {
+            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+            $lastResult = if ($taskInfo) { "0x{0:X8}" -f ([uint32]$taskInfo.LastTaskResult) } else { "unavailable" }
+            $taskState = if ($task) { [string]$task.State } else { "unavailable" }
+            $taskAction = if ($task) { ($task.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join "; " } else { "unavailable" }
+            $eventDetails = @()
+            try {
+                $eventDetails = @(Get-WinEvent -FilterHashtable @{
+                    LogName = "Microsoft-Windows-TaskScheduler/Operational"
+                    StartTime = $taskStartedAt
+                } -MaxEvents 30 -ErrorAction Stop |
+                    Where-Object { $_.Message -like "*$taskName*" } |
+                    Select-Object -First 5 -ExpandProperty Message)
+            }
+            catch { }
+            $eventSummary = if ($eventDetails.Count -gt 0) { ($eventDetails -join " | ") } else { "no matching Task Scheduler events were available" }
+            throw "LocalService lifecycle fixture '$Mode' produced no result. TaskState=$taskState; LastTaskResult=$lastResult; Action=$taskAction; Events=$eventSummary"
+        }
         return (Get-Content -LiteralPath $resultPath -Raw).Trim()
     }
     finally {
