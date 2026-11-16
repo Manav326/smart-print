@@ -4,6 +4,19 @@ export const A4_WIDTH_PX = 2480;
 export const A4_HEIGHT_PX = 3508;
 export const A4_WIDTH_POINTS = 595.275590551;
 export const A4_HEIGHT_POINTS = 841.88976378;
+export type PhotoOutputLayout = "A4_SHEET" | "PHOTO_PAPER";
+export type PhotoPaperFinish = "PLAIN" | "GLOSSY" | "MATTE";
+export type PhotoPaperPageGeometry = { widthMm: number; heightMm: number; widthPx: number; heightPx: number; widthPoints: number; heightPoints: number };
+export function getPhotoPaperPageGeometry(size: PhotoSheetSize): PhotoPaperPageGeometry {
+  return {
+    widthMm: size.widthMm,
+    heightMm: size.heightMm,
+    widthPx: Math.max(1, Math.round(size.widthMm / 25.4 * 300)),
+    heightPx: Math.max(1, Math.round(size.heightMm / 25.4 * 300)),
+    widthPoints: size.widthMm * 72 / 25.4,
+    heightPoints: size.heightMm * 72 / 25.4
+  };
+}
 export const PHOTO_SHEET_MARGIN_MM = 8;
 export const PHOTO_SHEET_GUTTER_MM = 3;
 
@@ -103,8 +116,17 @@ export function hasSufficientPhotoResolution(
 }
 
 /** One exact-A4 multi-page PDF: one upload/job, with the requested number of photos. */
-export function buildPhotoPdf(jpegPages: readonly Uint8Array[]): Uint8Array {
+export function buildPhotoPdf(
+  jpegPages: readonly Uint8Array[],
+  layout: PhotoOutputLayout = "A4_SHEET",
+  photoPaperSize?: PhotoSheetSize
+): Uint8Array {
   if (!jpegPages.length) throw new Error("At least one prepared photo page is required.");
+  if (layout === "PHOTO_PAPER" && !photoPaperSize)
+    throw new Error("The physical photo-paper page requires its selected photo dimensions.");
+  const pageGeometry = layout === "PHOTO_PAPER"
+    ? getPhotoPaperPageGeometry(photoPaperSize!)
+    : { widthPoints: A4_WIDTH_POINTS, heightPoints: A4_HEIGHT_POINTS, widthPx: A4_WIDTH_PX, heightPx: A4_HEIGHT_PX };
   for (const [index, page] of jpegPages.entries()) {
     if (page.length < 4 || page[0] !== 0xff || page[1] !== 0xd8 ||
         page[page.length - 2] !== 0xff || page[page.length - 1] !== 0xd9) {
@@ -126,12 +148,12 @@ export function buildPhotoPdf(jpegPages: readonly Uint8Array[]): Uint8Array {
   jpegPages.forEach((jpeg,index)=>{
     const page=3+index*3,image=page+1,content=page+2;
     begin(page);
-    writeText(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${A4_WIDTH_POINTS} ${A4_HEIGHT_POINTS}] /Resources << /XObject << /Im0 ${image} 0 R >> >> /Contents ${content} 0 R >>`);
+    writeText(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageGeometry.widthPoints} ${pageGeometry.heightPoints}] /Resources << /XObject << /Im0 ${image} 0 R >> >> /Contents ${content} 0 R >>`);
     end();
     begin(image);
-    writeText(`<< /Type /XObject /Subtype /Image /Width ${A4_WIDTH_PX} /Height ${A4_HEIGHT_PX} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`);
+    writeText(`<< /Type /XObject /Subtype /Image /Width ${pageGeometry.widthPx} /Height ${pageGeometry.heightPx} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`);
     writeBytes(jpeg);writeText("\nendstream");end();
-    const stream=encoder.encode(`q\n${A4_WIDTH_POINTS} 0 0 ${A4_HEIGHT_POINTS} 0 0 cm\n/Im0 Do\nQ\n`);
+    const stream=encoder.encode(`q\n${pageGeometry.widthPoints} 0 0 ${pageGeometry.heightPoints} 0 0 cm\n/Im0 Do\nQ\n`);
     begin(content);writeText(`<< /Length ${stream.length} >>\nstream\n`);writeBytes(stream);writeText("endstream");end();
   });
   const xref=byteLength;
