@@ -226,9 +226,28 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     $fixtureDataDirectory = Join-Path $programDataRoot "Lifecycle"
     New-Item -ItemType Directory -Force -Path $fixtureDataDirectory | Out-Null
     $resultPath = Join-Path $fixtureDataDirectory "smartprint-localservice-fixture-$Mode.txt"
-    $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
+    $buildOutputDirectory = Join-Path $fixtureProject "bin\Release\net10.0-windows"
+    $serviceFixtureDirectory = Join-Path $fixtureDataDirectory "Fixture"
+    $buildAssemblyPath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.dll"
+    $assemblyPath = Join-Path $serviceFixtureDirectory "SmartPrintLifecycleFixture.dll"
     $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
-    Assert-True (Test-Path -LiteralPath $assemblyPath) "The Agent lifecycle fixture assembly was not built."
+    Assert-True (Test-Path -LiteralPath $buildAssemblyPath) "The Agent lifecycle fixture assembly was not built."
+
+    # The scheduled task runs as LocalService, not the interactive CI runner.
+    # Stage the complete fixture output in the test-owned ProgramData folder and
+    # grant only LocalService, SYSTEM and Administrators read/execute access.
+    New-Item -ItemType Directory -Force -Path $serviceFixtureDirectory | Out-Null
+    Copy-Item -Path (Join-Path $buildOutputDirectory "*") -Destination $serviceFixtureDirectory -Recurse -Force
+    $fixtureAcl = @(
+        "*S-1-5-18:(OI)(CI)F",
+        "*S-1-5-32-544:(OI)(CI)F",
+        "*S-1-5-19:(OI)(CI)F"
+    )
+    $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
+    & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureAcl /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not grant the LocalService lifecycle fixture access to its test-only binaries."
+    }
 
     Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
     $extraArguments = @($AdditionalArguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
