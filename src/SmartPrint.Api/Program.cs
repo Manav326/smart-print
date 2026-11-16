@@ -10019,22 +10019,25 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
     var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
     var ivText = context.Request.Headers["X-Print-Encrypted-Iv"].FirstOrDefault();
+    var encryptedFormat = context.Request.Headers["X-Print-Encrypted-Format"].FirstOrDefault();
+    var isQsp2 = string.Equals(encryptedFormat, "QSP2", StringComparison.Ordinal);
     if (string.IsNullOrWhiteSpace(rawToken) || string.IsNullOrWhiteSpace(rawGrant) ||
         rawGrant.Length is < 40 or > 128 || string.IsNullOrWhiteSpace(wrappedKey) ||
-        wrappedKey.Length > 2048 || string.IsNullOrWhiteSpace(ivText) || ivText.Length > 64)
+        wrappedKey.Length > 2048 || (!isQsp2 && (string.IsNullOrWhiteSpace(ivText) || ivText.Length > 64)))
         return Results.Unauthorized();
 
     byte[] keyBytes;
-    byte[] ivBytes;
+    byte[]? ivBytes = null;
     try
     {
         keyBytes = Convert.FromBase64String(wrappedKey);
-        ivBytes = Convert.FromBase64String(ivText);
+        if (!isQsp2) ivBytes = Convert.FromBase64String(ivText!);
     }
     catch (FormatException) { return Results.BadRequest(new { code = "private_relay_envelope_invalid" }); }
-    var envelopeValid = keyBytes.Length is >= 256 and <= 512 && ivBytes.Length == 12;
+    var envelopeValid = keyBytes.Length is >= 256 and <= 512 &&
+        (isQsp2 ? string.IsNullOrWhiteSpace(ivText) : ivBytes?.Length == 12);
     CryptographicOperations.ZeroMemory(keyBytes);
-    CryptographicOperations.ZeroMemory(ivBytes);
+    if (ivBytes is not null) CryptographicOperations.ZeroMemory(ivBytes);
     if (!envelopeValid)
         return Results.BadRequest(new { code = "private_relay_envelope_invalid" });
 
@@ -10079,21 +10082,40 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey) && ticket.PrivateRelayUploadedUtc is not null)
         return Results.Ok(new { Accepted = true, DuplicateRequest = true, ticket.PrintJobId, ticket.JobNumber });
 
-    if (!context.Request.HasFormContentType)
-        return Results.BadRequest(new { code = "private_relay_form_required" });
-    var form = await context.Request.ReadFormAsync(ct);
-    if (form.Files.Count != 1)
-        return Results.BadRequest(new { code = "private_relay_file_required" });
-    var file = form.Files[0];
-    if (file.Length != ticket.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes || file.Length > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
-        return Results.UnprocessableEntity(new { code = "private_relay_size_mismatch", message = "The encrypted file size does not match its original upload ticket." });
-
     string storageKey;
     try
     {
-        await using var input = file.OpenReadStream();
-        storageKey = await storage.StoreOpaquePrivateRelayAsync(
-            ticket.TenantId, ticket.Id, input, file.Length, ct);
+        if (isQsp2)
+        {
+            if (!string.Equals(context.Request.ContentType?.Split(';', 2)[0].Trim(),
+                    "application/vnd.smartprint.qsp2", StringComparison.OrdinalIgnoreCase) ||
+                !long.TryParse(context.Request.Headers["X-Print-Encrypted-Size"].FirstOrDefault(), out var encryptedSize) ||
+                encryptedSize != Qsp2DocumentFormat.GetEncryptedLength(ticket.SizeBytes) ||
+                context.Request.ContentLength != encryptedSize)
+                return Results.UnprocessableEntity(new
+                {
+                    code = "private_relay_size_mismatch",
+                    message = "The QSP2 encrypted stream size does not match its original upload ticket."
+                });
+
+            storageKey = await storage.StoreOpaquePrivateQsp2RelayAsync(
+                ticket.TenantId, ticket.Id, context.Request.Body, encryptedSize, ticket.SizeBytes, ct);
+        }
+        else
+        {
+            if (!context.Request.HasFormContentType)
+                return Results.BadRequest(new { code = "private_relay_form_required" });
+            var form = await context.Request.ReadFormAsync(ct);
+            if (form.Files.Count != 1)
+                return Results.BadRequest(new { code = "private_relay_file_required" });
+            var file = form.Files[0];
+            if (file.Length != ticket.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes ||
+                file.Length > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
+                return Results.UnprocessableEntity(new { code = "private_relay_size_mismatch", message = "The encrypted file size does not match its original upload ticket." });
+            await using var input = file.OpenReadStream();
+            storageKey = await storage.StoreOpaquePrivateRelayAsync(
+                ticket.TenantId, ticket.Id, input, file.Length, ct);
+        }
     }
     catch (InvalidDataException exception)
     {
@@ -10119,7 +10141,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
 
         locked.PrivateRelayStorageKey = storageKey;
         locked.PrivateRelayWrappedKey = wrappedKey;
-        locked.PrivateRelayIv = ivText;
+        locked.PrivateRelayIv = isQsp2 ? null : ivText;
         locked.PrivateRelayUploadedUtc = now;
         locked.ExpiresUtc = now.AddHours(24);
         await db.SaveChangesAsync(ct);
