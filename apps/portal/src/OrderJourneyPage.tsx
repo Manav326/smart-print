@@ -69,7 +69,7 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
   const canConfirmOutput=canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId);
   const confirmationBlockedMessage=!canConfirmOutput
     ?spoolerRetained?"Windows still holds this job. Confirmation will be enabled after the Agent verifies that it has left the queue."
-    :!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerObservedUtc)?"Waiting for the Agent to verify the Windows spooler state before confirmation."
+    :!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for the Agent to verify the Windows spooler state before confirmation."
     :"Resolve the printer or Windows queue warning before confirming output."
     :undefined;
   return <div className={styles.fileActionPanel}>

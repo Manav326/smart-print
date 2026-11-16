@@ -3835,7 +3835,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
                 code = "windows_spooler_job_retained",
                 message = "Windows is still holding this print job. Confirmation is available after the Agent reports a verified state that makes output eligible."
             });
-        if (!SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(job.SpoolerStatus, job.SpoolerObservedUtc))
+        if (!SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(job.SpoolerStatus, job.SpoolerObservedUtc, job.FailureCode, job.SpoolerJobId))
             return Results.Conflict(new
             {
                 code = "spooler_state_not_verified",

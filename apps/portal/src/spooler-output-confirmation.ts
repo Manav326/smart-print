@@ -45,11 +45,16 @@ export function isRetainedSpoolerJob(status?: string | null): boolean {
 
 export function hasVerifiedAgentSpoolerObservation(
   spoolerStatus?: string | null,
-  spoolerObservedUtc?: string | null
+  spoolerObservedUtc?: string | null,
+  failureCode?: string | null,
+  spoolerJobId?: number | null
 ): boolean {
+  const normalizedSpoolerStatus = normalizeStatus(spoolerStatus);
   return !!spoolerObservedUtc &&
     Number.isFinite(Date.parse(spoolerObservedUtc)) &&
-    verifiedAgentSpoolerStatuses.has(normalizeStatus(spoolerStatus));
+    verifiedAgentSpoolerStatuses.has(normalizedSpoolerStatus) &&
+    (normalizedSpoolerStatus !== "OUTPUT_UNCONFIRMED" ||
+      isVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId));
 }
 
 export function isVerifiedSpoolerAbsenceReport(
@@ -73,10 +78,8 @@ export function canConfirmPhysicalOutput(
   const normalizedSpoolerStatus = normalizeStatus(spoolerStatus);
 
   if (!isPhysicalOutputConfirmationStatus(normalizedJobStatus) ||
-      !hasVerifiedAgentSpoolerObservation(normalizedSpoolerStatus, spoolerObservedUtc) ||
-      normalizedSpoolerStatus === "RETAINED" ||
-      (normalizedSpoolerStatus === "OUTPUT_UNCONFIRMED" &&
-        !isVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId))) {
+      !hasVerifiedAgentSpoolerObservation(normalizedSpoolerStatus, spoolerObservedUtc, failureCode, spoolerJobId) ||
+      normalizedSpoolerStatus === "RETAINED") {
     return false;
   }
 

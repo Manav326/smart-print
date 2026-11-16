@@ -29,7 +29,8 @@ test("only submitted, printing and output-unconfirmed physical jobs are confirma
 
 test("confirmation requires a recognized Agent spooler observation and its timestamp", () => {
   assert.equal(hasVerifiedAgentSpoolerObservation("QUEUED", observedUtc), true);
-  assert.equal(hasVerifiedAgentSpoolerObservation("OUTPUT_UNCONFIRMED", observedUtc), true);
+  assert.equal(hasVerifiedAgentSpoolerObservation("OUTPUT_UNCONFIRMED", observedUtc, "SPOOLER_JOB_NO_LONGER_VISIBLE", 17), true);
+  assert.equal(hasVerifiedAgentSpoolerObservation("OUTPUT_UNCONFIRMED", observedUtc, "UNEXPECTED_PRINT_EXECUTION_ERROR", 17), false);
   assert.equal(hasVerifiedAgentSpoolerObservation("PRINTER_UNAVAILABLE", observedUtc), false);
   assert.equal(hasVerifiedAgentSpoolerObservation("UNKNOWN", observedUtc), false);
   assert.equal(hasVerifiedAgentSpoolerObservation("QUEUED", null), false);
@@ -92,7 +93,7 @@ test("the Agent only clears a retained spooler report after a verified absence r
   assert.equal(guardedBlocks.length, 2, "Both first and duplicate Agent reports must gate spooler-state refresh.");
   for (const block of guardedBlocks) {
     assert.match(block, /job\.SpoolerStatus = "OUTPUT_UNCONFIRMED"/);
-    assert.match(block, /job\.SpoolerObservedUtc = now/);
+    assert.match(block, /job\.SpoolerObservedUtc = (?:now|verifiedAtUtc)/);
   }
   assert.equal((route.match(/job\.SpoolerStatus = "OUTPUT_UNCONFIRMED"/g) ?? []).length, 2,
     "No unverified output-uncertain reason may manufacture a verified spooler observation.");
@@ -107,7 +108,7 @@ test("the API endpoint applies the server guard before completion or private-sou
   const guard = route.indexOf("SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerObservedUtc, printerStatus, job.FailureCode, job.SpoolerJobId)");
   const completed = route.indexOf('job.Status = "COMPLETED"');
   const purge = route.indexOf("PrivateDocumentPurgeRequestedUtc");
-  assert.ok(route.includes("HasVerifiedAgentSpoolerObservation(job.SpoolerStatus, job.SpoolerObservedUtc)"));
+  assert.ok(route.includes("HasVerifiedAgentSpoolerObservation(job.SpoolerStatus, job.SpoolerObservedUtc, job.FailureCode, job.SpoolerJobId)"));
   assert.ok(guard >= 0 && completed > guard && purge > guard,
     "The server must reject retained or unverified jobs before completion or private-source purge.");
 });

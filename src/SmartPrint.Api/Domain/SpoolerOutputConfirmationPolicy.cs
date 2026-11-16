@@ -42,9 +42,18 @@ public static class SpoolerOutputConfirmationPolicy
     public static bool IsPhysicalOutputConfirmationStatus(string? jobStatus) =>
         jobStatus?.Trim().ToUpperInvariant() is "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED";
 
-    public static bool HasVerifiedAgentSpoolerObservation(string? spoolerStatus, DateTimeOffset? spoolerObservedUtc) =>
-        spoolerObservedUtc is not null &&
-        VerifiedAgentSpoolerStatuses.Contains(spoolerStatus?.Trim() ?? string.Empty);
+    public static bool HasVerifiedAgentSpoolerObservation(
+        string? spoolerStatus,
+        DateTimeOffset? spoolerObservedUtc,
+        string? failureCode = null,
+        int? spoolerJobId = null)
+    {
+        var normalizedSpoolerStatus = spoolerStatus?.Trim() ?? string.Empty;
+        return spoolerObservedUtc is not null &&
+            VerifiedAgentSpoolerStatuses.Contains(normalizedSpoolerStatus) &&
+            (!string.Equals(normalizedSpoolerStatus, "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase) ||
+                IsVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId));
+    }
 
     public static bool CanConfirmPhysicalOutput(
         string? jobStatus,
@@ -58,10 +67,8 @@ public static class SpoolerOutputConfirmationPolicy
         var normalizedSpoolerStatus = spoolerStatus?.Trim() ?? string.Empty;
 
         if (!IsPhysicalOutputConfirmationStatus(normalizedJobStatus) ||
-            !HasVerifiedAgentSpoolerObservation(normalizedSpoolerStatus, spoolerObservedUtc) ||
-            IsRetained(normalizedSpoolerStatus) ||
-            (string.Equals(normalizedSpoolerStatus, "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase) &&
-                !IsVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId)))
+            !HasVerifiedAgentSpoolerObservation(normalizedSpoolerStatus, spoolerObservedUtc, failureCode, spoolerJobId) ||
+            IsRetained(normalizedSpoolerStatus))
             return false;
 
         // OUTPUT_UNCONFIRMED is the deliberate manual-resolution path: the shop

@@ -34,6 +34,17 @@ public sealed class SpoolerOutputConfirmationPolicyTests
     }
 
     [Fact]
+    public void OutputUnconfirmedSpoolerObservationRequiresVerifiedAbsenceReason()
+    {
+        Assert.True(SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(
+            "OUTPUT_UNCONFIRMED", ObservedUtc, "SPOOLER_JOB_NO_LONGER_VISIBLE", 17));
+        Assert.False(SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(
+            "OUTPUT_UNCONFIRMED", ObservedUtc, "UNEXPECTED_PRINT_EXECUTION_ERROR", 17));
+        Assert.False(SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(
+            "OUTPUT_UNCONFIRMED", ObservedUtc, null, 17));
+    }
+
+    [Fact]
     public void LegacyOutputUnconfirmedObservationWithoutVerifiedAbsenceReasonCannotBeConfirmed()
     {
         Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
