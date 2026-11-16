@@ -5636,8 +5636,7 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
         })
         .SingleOrDefaultAsync(ct);
     if (relay is null || string.IsNullOrWhiteSpace(relay.PrivateRelayStorageKey) ||
-        string.IsNullOrWhiteSpace(relay.PrivateRelayWrappedKey) ||
-        string.IsNullOrWhiteSpace(relay.PrivateRelayIv))
+        string.IsNullOrWhiteSpace(relay.PrivateRelayWrappedKey))
         return Results.NotFound();
     if (!await IsPrivatePrintingOutputQueueReadyAsync(
             db, environment, device.TenantId, device.Id, relay.PrinterDeviceId, ct))
@@ -5647,14 +5646,27 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
             message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document could be delivered. No payload was downloaded."
         });
 
-    MemoryStream ciphertext;
-    try { ciphertext = storage.OpenRead(relay.PrivateRelayStorageKey); }
+    Stream ciphertext;
+    try
+    {
+        // New QSP2 objects are already end-to-end encrypted and are sent directly
+        // from disk. Older v1 relay objects retain their server-wrapped reader.
+        if (string.IsNullOrWhiteSpace(relay.PrivateRelayIv))
+        {
+            ciphertext = storage.OpenOpaquePrivateQsp2RelayReadStream(relay.PrivateRelayStorageKey);
+            context.Response.Headers["X-Print-Encrypted-Format"] = "QSP2";
+        }
+        else
+        {
+            ciphertext = storage.OpenRead(relay.PrivateRelayStorageKey);
+            context.Response.Headers["X-Print-Encrypted-Iv"] = relay.PrivateRelayIv;
+        }
+    }
     catch (IOException) { return Results.NotFound(); }
     context.Response.Headers.CacheControl = "private, no-store";
     context.Response.Headers.Pragma = "no-cache";
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Print-Encrypted-Key"] = relay.PrivateRelayWrappedKey;
-    context.Response.Headers["X-Print-Encrypted-Iv"] = relay.PrivateRelayIv;
     return Results.File(ciphertext, "application/octet-stream", enableRangeProcessing: false);
 });
 
