@@ -4,7 +4,7 @@ import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./ap
 import { formatIstDateTime } from "./date-time";
 import { buildShopOrderJourneys, filterShopOrderJourneys, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
 import styles from "./OrderJourney.module.css";
-import { canConfirmPhysicalOutput, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
+import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
 
 type ShopDestination = "Print Queue" | "Payments" | "Print Agent";
 interface Props {
@@ -66,11 +66,18 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
   const assignable=["PAID_AUTHORISED","LOCAL_QUEUE_READY"].includes(job.status);
   const confirmable=isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT");
   const spoolerRetained=isRetainedSpoolerJob(job.spoolerStatus);
-  const canConfirmOutput=canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId);
+  const manualQueueReconciliationAvailable=canManuallyReconcileUncertainOutput(
+    job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName
+  );
+  const canConfirmOutput=canConfirmPhysicalOutput(
+    job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,
+    job.printerStatus,job.failureCode,job.spoolerJobId
+  )||manualQueueReconciliationAvailable;
   const confirmationBlockedMessage=!canConfirmOutput
-    ?spoolerRetained?"Windows still holds this job. Confirmation will be enabled after the Agent verifies that it has left the queue."
-    :!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for the Agent to verify the Windows spooler state before confirmation."
-    :"Resolve the printer or Windows queue warning before confirming output."
+    ?spoolerRetained?"Windows still holds this job. Confirmation remains blocked until the Agent verifies that it has cleared."
+    :!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for a fresh Agent observation from after submission before confirmation."
+    :["QUEUED","SPOOLING","PRINTING"].includes((job.spoolerStatus??"").toUpperCase())?"Windows still reports this job queued or printing. Wait for a terminal state."
+    :"Confirm output only after Windows reports printed output or verified queue absence."
     :undefined;
   return <div className={styles.fileActionPanel}>
     {!job.privatePrinting&&<button type="button" className={styles.miniAction} onClick={()=>onPreview(job)}><Eye size={12}/> Preview</button>}
@@ -85,7 +92,8 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
       </select>
     </label>}
     {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
-    {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canConfirmOutput} title={confirmationBlockedMessage} onClick={()=>onConfirmOutput(job)}><Check size={12}/> Confirm output</button>}
+    {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canConfirmOutput} title={manualQueueReconciliationAvailable?"The Agent restarted before Windows returned a spooler ID. Check the exact job in the selected Windows queue and inspect the paper output before confirming.":confirmationBlockedMessage} onClick={()=>onConfirmOutput(job)}><Check size={12}/> {manualQueueReconciliationAvailable?"Reconcile & confirm":"Confirm output"}</button>}
+    {confirmable&&manualQueueReconciliationAvailable&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>The Agent could not identify this Windows job. Manually check the {job.queueName} queue for {job.spoolerJobName}, then inspect every printed page before reconciling.</span></div>}
     {confirmable&&spoolerRetained&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>Windows is still holding this print job. SmartPrint will enable confirmation after the Agent verifies that the held entry has cleared.</span></div>}
     {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onRetryPdfExport(job)}><RotateCcw size={12}/> Save PDF again</button>}
     {canRefund&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onRefund(job)}><Wallet size={12}/> Refund</button>}

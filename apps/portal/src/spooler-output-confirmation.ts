@@ -5,31 +5,11 @@ const physicalOutputConfirmationStatuses = new Set([
 ]);
 
 const verifiedAgentSpoolerStatuses = new Set([
-  "RETAINED",
-  "OFFLINE",
-  "PAPEROUT",
-  "PAUSED",
-  "ERROR",
-  "USERINTERVENTION",
-  "PRINTING",
-  "SPOOLING",
-  "PRINTED",
-  "QUEUED",
-  "OUTPUT_UNCONFIRMED"
+  "RETAINED", "OFFLINE", "PAPEROUT", "PAUSED", "ERROR", "USERINTERVENTION",
+  "PRINTING", "SPOOLING", "PRINTED", "QUEUED", "OUTPUT_UNCONFIRMED"
 ]);
-
-const spoolerWarningStatuses = new Set([
-  "OFFLINE",
-  "PAPEROUT",
-  "PAUSED",
-  "ERROR",
-  "USERINTERVENTION"
-]);
-
-const printerWarningStatuses = new Set([
-  "OFFLINE",
-  "PAUSED"
-]);
+const printerWarningStatuses = new Set(["OFFLINE", "PAUSED"]);
+const maximumSpoolerObservationAgeMs = 10 * 60 * 1000;
 
 function normalizeStatus(status?: string | null): string {
   return (status ?? "").trim().toUpperCase();
@@ -43,15 +23,29 @@ export function isRetainedSpoolerJob(status?: string | null): boolean {
   return normalizeStatus(status) === "RETAINED";
 }
 
+export function isFreshSpoolerObservation(
+  spoolerSubmittedUtc?: string | null,
+  spoolerObservedUtc?: string | null,
+  nowUtcMs = Date.now()
+): boolean {
+  if (!spoolerSubmittedUtc || !spoolerObservedUtc) return false;
+  const submitted = Date.parse(spoolerSubmittedUtc);
+  const observed = Date.parse(spoolerObservedUtc);
+  return Number.isFinite(submitted) && Number.isFinite(observed) &&
+    observed >= submitted && observed <= nowUtcMs &&
+    nowUtcMs - observed <= maximumSpoolerObservationAgeMs;
+}
+
 export function hasVerifiedAgentSpoolerObservation(
   spoolerStatus?: string | null,
+  spoolerSubmittedUtc?: string | null,
   spoolerObservedUtc?: string | null,
   failureCode?: string | null,
-  spoolerJobId?: number | null
+  spoolerJobId?: number | null,
+  nowUtcMs = Date.now()
 ): boolean {
   const normalizedSpoolerStatus = normalizeStatus(spoolerStatus);
-  return !!spoolerObservedUtc &&
-    Number.isFinite(Date.parse(spoolerObservedUtc)) &&
+  return isFreshSpoolerObservation(spoolerSubmittedUtc, spoolerObservedUtc, nowUtcMs) &&
     verifiedAgentSpoolerStatuses.has(normalizedSpoolerStatus) &&
     (normalizedSpoolerStatus !== "OUTPUT_UNCONFIRMED" ||
       isVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId));
@@ -61,32 +55,47 @@ export function isVerifiedSpoolerAbsenceReport(
   reasonCode?: string | null,
   spoolerJobId?: number | null
 ): boolean {
-  const normalizedReason = normalizeStatus(reasonCode);
-  return (typeof spoolerJobId === "number" && spoolerJobId > 0 && normalizedReason === "SPOOLER_JOB_NO_LONGER_VISIBLE") ||
-    (spoolerJobId == null && normalizedReason === "AGENT_RESTART_DURING_PRINT_SUBMISSION");
+  return typeof spoolerJobId === "number" && spoolerJobId > 0 &&
+    normalizeStatus(reasonCode) === "SPOOLER_JOB_NO_LONGER_VISIBLE";
+}
+
+export function canManuallyReconcileUncertainOutput(
+  jobStatus?: string | null,
+  spoolerStatus?: string | null,
+  failureCode?: string | null,
+  spoolerJobId?: number | null,
+  queueName?: string | null,
+  spoolerJobName?: string | null
+): boolean {
+  return normalizeStatus(jobStatus) === "OUTPUT_UNCONFIRMED" &&
+    !isRetainedSpoolerJob(spoolerStatus) &&
+    normalizeStatus(spoolerStatus) !== "PRINTED" &&
+    normalizeStatus(failureCode) === "AGENT_RESTART_DURING_PRINT_SUBMISSION" &&
+    spoolerJobId == null && !!queueName?.trim() && !!spoolerJobName?.trim();
 }
 
 export function canConfirmPhysicalOutput(
   jobStatus?: string | null,
   spoolerStatus?: string | null,
+  spoolerSubmittedUtc?: string | null,
   spoolerObservedUtc?: string | null,
   printerStatus?: string | null,
   failureCode?: string | null,
-  spoolerJobId?: number | null
+  spoolerJobId?: number | null,
+  nowUtcMs = Date.now()
 ): boolean {
   const normalizedJobStatus = normalizeStatus(jobStatus);
   const normalizedSpoolerStatus = normalizeStatus(spoolerStatus);
-
   if (!isPhysicalOutputConfirmationStatus(normalizedJobStatus) ||
-      !hasVerifiedAgentSpoolerObservation(normalizedSpoolerStatus, spoolerObservedUtc, failureCode, spoolerJobId) ||
-      normalizedSpoolerStatus === "RETAINED") {
-    return false;
+      !hasVerifiedAgentSpoolerObservation(
+        normalizedSpoolerStatus, spoolerSubmittedUtc, spoolerObservedUtc,
+        failureCode, spoolerJobId, nowUtcMs
+      ) || normalizedSpoolerStatus === "RETAINED") return false;
+
+  if (normalizedSpoolerStatus === "OUTPUT_UNCONFIRMED") {
+    return normalizedJobStatus === "OUTPUT_UNCONFIRMED" &&
+      isVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId);
   }
-
-  // OUTPUT_UNCONFIRMED is the deliberate manual-resolution path: the shop
-  // checks the actual pages even when Windows reported a queue warning.
-  if (normalizedJobStatus === "OUTPUT_UNCONFIRMED") return true;
-
-  return !spoolerWarningStatuses.has(normalizedSpoolerStatus) &&
-    !printerWarningStatuses.has(normalizeStatus(printerStatus));
+  if (normalizedSpoolerStatus !== "PRINTED") return false;
+  return !printerWarningStatuses.has(normalizeStatus(printerStatus));
 }

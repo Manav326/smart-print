@@ -2485,7 +2485,7 @@ shop.MapGet("/print-jobs", async (
             OutputConfirmedByName = db.PrintJobEvents.AsNoTracking()
                 .Where(item => item.TenantId == tenantId &&
                                item.PrintJobId == job.Id &&
-                               item.ReasonCode == "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT")
+                               (item.ReasonCode == "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT" || item.ReasonCode == "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT_AFTER_QUEUE_RECONCILIATION"))
                 .OrderByDescending(item => item.CreatedUtc)
                 .Select(item => db.Users
                     .Where(user => user.TenantId == tenantId &&
@@ -3804,11 +3804,28 @@ shop.MapPost("/print-jobs/{jobId:guid}/retry-private-test-output", async (
     });
 });
 
-shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, ClaimsPrincipal principal, HttpRequest httpRequest, SmartPrintDbContext db, CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == tenantId, ct);
     if (job is null) return Results.NotFound();
+
+    var manualQueueReconciliationConfirmed = false;
+    if (httpRequest.ContentLength is > 0 ||
+        httpRequest.ContentType?.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) == true)
+    {
+        try
+        {
+            using var confirmationPayload = await JsonDocument.ParseAsync(httpRequest.Body, cancellationToken: ct);
+            manualQueueReconciliationConfirmed =
+                confirmationPayload.RootElement.TryGetProperty("manualQueueReconciliationConfirmed", out var manualValue) &&
+                manualValue.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return Results.BadRequest(new { code = "invalid_output_confirmation_request", message = "The output confirmation request was invalid." });
+        }
+    }
     if (job.OutputType is "PDF_EXPORT" or "TEST_VIRTUAL")
         return Results.Conflict(new
         {
@@ -3819,13 +3836,23 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
         });
     if (job.Status == "COMPLETED" && job.OutputConfirmedUtc != null)
         return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc, DuplicateRequest = true });
-    var printerStatus = job.PrinterDeviceId is Guid printerDeviceId
+
+    var now = DateTimeOffset.UtcNow;
+    var printerSnapshot = job.PrinterDeviceId is Guid printerDeviceId
         ? await db.PrinterDevices.AsNoTracking()
             .Where(printer => printer.Id == printerDeviceId && printer.TenantId == tenantId)
-            .Select(printer => printer.Status)
+            .Select(printer => new { printer.Status, printer.QueueName })
             .FirstOrDefaultAsync(ct)
         : null;
-    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerObservedUtc, printerStatus, job.FailureCode, job.SpoolerJobId))
+    var printerStatus = printerSnapshot?.Status;
+    var canConfirmFromAgent = SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
+        job.Status, job.SpoolerStatus, job.SpoolerSubmittedUtc, job.SpoolerObservedUtc,
+        now, printerStatus, job.FailureCode, job.SpoolerJobId);
+    var canManuallyReconcile = SpoolerOutputConfirmationPolicy.CanManuallyReconcileUncertainOutput(
+        job.Status, job.SpoolerStatus, job.FailureCode, job.SpoolerJobId,
+        job.PrinterQueueNameSnapshot ?? printerSnapshot?.QueueName, job.SpoolerJobName);
+
+    if (!canConfirmFromAgent && !(canManuallyReconcile && manualQueueReconciliationConfirmed))
     {
         if (!SpoolerOutputConfirmationPolicy.IsPhysicalOutputConfirmationStatus(job.Status))
             return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
@@ -3833,13 +3860,27 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
             return Results.Conflict(new
             {
                 code = "windows_spooler_job_retained",
-                message = "Windows is still holding this print job. Confirmation is available after the Agent reports a verified state that makes output eligible."
+                message = "Windows is still holding this print job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared."
             });
-        if (!SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(job.SpoolerStatus, job.SpoolerObservedUtc, job.FailureCode, job.SpoolerJobId))
+        if (canManuallyReconcile && !manualQueueReconciliationConfirmed)
+            return Results.Conflict(new
+            {
+                code = "manual_queue_reconciliation_required",
+                message = "The Agent restarted before receiving a Windows spooler ID. Check the named Windows queue for this exact job and inspect the paper output, then explicitly confirm the manual reconciliation."
+            });
+        if (!SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(
+                job.SpoolerStatus, job.SpoolerSubmittedUtc, job.SpoolerObservedUtc,
+                now, job.FailureCode, job.SpoolerJobId))
             return Results.Conflict(new
             {
                 code = "spooler_state_not_verified",
-                message = "The Agent has not yet verified an eligible Windows spooler state. Refresh after the shop computer reports its queue status."
+                message = "The Agent must report a recognized, fresh Windows spooler observation from after submission (within the last ten minutes) before output can be confirmed."
+            });
+        if (job.SpoolerStatus?.Trim().ToUpperInvariant() is "QUEUED" or "SPOOLING" or "PRINTING")
+            return Results.Conflict(new
+            {
+                code = "windows_spooler_job_active",
+                message = "Windows still reports this job queued or printing. Wait until it is printed or reconcile the interrupted submission before confirming output."
             });
         return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Resolve the Windows spooler or printer warning before confirming physical output." });
     }
@@ -3851,7 +3892,6 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
             message = "Private Printing can be completed only after confirmed physical output from its assigned shop computer."
         });
 
-    var now = DateTimeOffset.UtcNow;
     var previous = job.Status;
     job.Status = "COMPLETED";
     job.OutputConfirmedUtc = now;
@@ -3864,7 +3904,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
     {
         TenantId = tenantId, PrintJobId = job.Id, PreviousStatus = previous, NewStatus = job.Status,
         ActorType = "ShopUser", ActorId = GetActorId(principal),
-        ReasonCode = "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT", CreatedUtc = now
+        ReasonCode = manualQueueReconciliationConfirmed ? "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT_AFTER_QUEUE_RECONCILIATION" : "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT", CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc });
