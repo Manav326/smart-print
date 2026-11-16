@@ -163,3 +163,13 @@
   .canvasWorkspace{grid-template-rows:27px minmax(0,1fr) 20px}
   .footer{min-height:42px;padding:3px 6px}
 }
+
+.photoOutputChoices{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.photoOutputChoice,.photoOutputChoiceActive{display:grid;gap:5px;min-width:0;padding:10px;border:1px solid #dce4ee;border-radius:9px;background:#fff;color:#34455e;text-align:left;cursor:pointer}
+.photoOutputChoice strong,.photoOutputChoiceActive strong{font-size:10px;font-weight:800}
+.photoOutputChoice span,.photoOutputChoiceActive span{color:#748198;font-size:9px;line-height:1.4}
+.photoOutputChoiceActive{border-color:#9887ed;background:#f5f2ff;box-shadow:0 0 0 2px #9887ed1c}
+.photoOutputChoice:focus-visible,.photoOutputChoiceActive:focus-visible{outline:2px solid #9b8bed;outline-offset:2px}
+.dark .photoOutputChoice,.dark .photoOutputChoiceActive{border-color:#48566a;background:#202c3d;color:#e4ebf6}
+.dark .photoOutputChoice span,.dark .photoOutputChoiceActive span{color:#aab8cc}
+.dark .photoOutputChoiceActive{border-color:#a394ed;background:#36314f}
