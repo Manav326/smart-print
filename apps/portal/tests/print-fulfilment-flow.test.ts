@@ -300,11 +300,12 @@ test("customer local transfer remains visible with a clear unavailable state whe
  assert.match(app,/customer-upload-mode-unavailable/);
 });
 
-test("owner preview selects the persisted supported MIME type before the blob response type",()=>{
+test("owner preview identifies actual supported file content instead of trusting MIME headers",()=>{
  const app=read("../src/App.tsx");
- assert.match(app,/const storedType=\(job\.document\.mediaType\|\|""\)/);
- assert.match(app,/supportedTypes\.has\(storedType\)[\s\S]*?supportedTypes\.has\(responseType\)/);
- assert.match(app,/Preview format is not supported/);
+ const mediaPreview=read("../src/ShopDocumentPreviewSurface.tsx");
+ assert.match(app,/identifyDocumentPreviewMediaType\(blob\)/);
+ assert.match(mediaPreview,/<strong>Preview unavailable<\/strong>/);
+ assert.doesNotMatch(app,/const storedType=\(job\.document\.mediaType\|\|""\)/);
 });
 
 test("customer web upload accepts drag and drop and contains no JavaScript browser alert dialogs",()=>{
