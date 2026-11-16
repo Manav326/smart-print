@@ -678,13 +678,32 @@ test("customer-facing print choices explain privacy versus connection without ch
  assert.match(app,/Encrypted online transfer · print when ready/);
  assert.match(app,/customerStatusLabel\(status:string\):string/);
  assert.match(app,/Waiting for shop review/);
- assert.match(app,/\{quoteEntries\.length\} files\{batchDocumentSourcePages>0/);
- assert.match(app,/\{batchPrintedPages\} print pages\/sheets/);
+ assert.match(app,/calculateBatchQuoteBreakdown\(acceptedQuoteEntries\.map/);
+ assert.match(app,/batchQuoteBreakdown\.idCardSheets/);
+ assert.match(app,/batchQuoteBreakdown\.photoPages/);
+ assert.match(app,/batchQuoteBreakdown\.normalDocumentSourcePages/);
+ assert.match(app,/batchQuoteBreakdown\.totalOutputPagesAndSheets/);
+ assert.match(app,/className="customer-batch-quote-lines"/);
+ assert.match(app,/Normal documents ·/);
+ assert.match(app,/ID cards ·/);
+ assert.match(app,/Photo printing ·/);
  assert.match(app,/UPI transaction ID \(UTR\)/);
  assert.match(app,/Find it in your UPI app under payment details or transaction history/);
- assert.ok(app.includes("Document pages are the original pages in uploaded documents, before copies are applied."));
- assert.ok(app.includes("Print pages/sheets count output pages after copies."));
- assert.ok(app.includes("two output pages may share one physical sheet."));
+ assert.ok(app.includes("Normal PDF/document pages are original pages before copies are applied."));
+ assert.ok(app.includes("Normal-document output counts page sides after copies."));
+ assert.ok(app.includes("With duplex printing, two page sides may share one physical sheet."));
+});
+
+
+
+test("customer status keeps ticket-only ID cards out of the normal document category",()=>{
+ const app=read("../src/App.tsx");
+ const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const rules=read("../../../src/SmartPrint.Api/Domain/PrivateRelayPrintKindRules.cs");
+ assert.match(app,/printKindsByJobId\[entry\.item\.job\.id\]==="ID_DOCUMENT"/);
+ assert.match(program,/HasIdDocumentTicket = db\.LocalPrintUploadTickets\.AsNoTracking\(\)\.Any\(ticket =>[\s\S]*?ticket\.PrintKind == "ID_DOCUMENT"/);
+ assert.match(program,/ResolveCustomerStatusPrintKind\([\s\S]*?storedJob\.HasIdDocumentTicket/);
+ assert.match(rules,/hasIdDocumentTicket \? "ID_DOCUMENT" : storedPrintKind \?\? "DOCUMENT"/);
 });
 
 test("offline Photo Studio explains one-photo editing, friendly sizes, and shop print handoff",()=>{
