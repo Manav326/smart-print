@@ -30,7 +30,25 @@ public sealed class AgentLocalQueueStore
         applyWindowsAcl = rootOverride is null;
     }
 
+    private readonly SemaphoreSlim initializationGate = new(1, 1);
+    private bool initialized;
+
     public async Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        await initializationGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (initialized) return;
+            await InitializeCoreAsync(cancellationToken);
+            initialized = true;
+        }
+        finally
+        {
+            initializationGate.Release();
+        }
+    }
+
+    private async Task InitializeCoreAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(queueRoot);
@@ -424,7 +442,7 @@ public sealed class AgentLocalQueueStore
                 CryptographicOperations.ZeroMemory(protectedKey);
         }
 
-        var entry = CreateQueueEntry(job, documentPath, initialState);
+        var entry = CreateQueueEntry(job, documentPath, initialState, agentScopeId);
         try
         {
             await SaveManifestAsync(entry, cancellationToken);
@@ -441,7 +459,8 @@ public sealed class AgentLocalQueueStore
     private static AgentLocalQueueEntry CreateQueueEntry(
         AgentClaimedJob job,
         string documentPath,
-        string initialState) =>
+        string initialState,
+        Guid agentScopeId) =>
         new(
             job.Id,
             job.JobNumber,
@@ -467,7 +486,8 @@ public sealed class AgentLocalQueueStore
             Orientation: job.Orientation,
             PdfBrandingEnabled: job.PdfBrandingEnabled,
             PrivatePrinting: job.PrivatePrinting,
-            PrintKind: job.PrintKind);
+            PrintKind: job.PrintKind,
+            DocumentScopeId: agentScopeId);
 
     private const byte Qsp2QueueVersion = 1;
     private const int Qsp2QueueHeaderSize = 4 + 1 + sizeof(uint);
@@ -1686,7 +1706,9 @@ public sealed class AgentLocalQueueStore
                 // Compatibility API for callers that still require a byte array.
                 // New print and processing paths should use OpenDocumentReadStream.
                 var manifest = entry;
-                using var document = OpenDocumentReadStream(jobId, GetQsp2ScopeIdFromHeader(path));
+                var scopeId = entry.DocumentScopeId
+                    ?? throw new InvalidDataException("The QSP2 local queue manifest is missing its Agent scope identity.");
+                using var document = OpenDocumentReadStream(jobId, scopeId);
                 using var output = new MemoryStream(checked((int)manifest.SizeBytes));
                 document.CopyTo(output);
                 var bytes = output.ToArray();
@@ -1703,20 +1725,6 @@ public sealed class AgentLocalQueueStore
         }
 
         return ReadLegacyDocument(entry);
-    }
-
-    private static Guid GetQsp2ScopeIdFromHeader(string path)
-    {
-        using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        Span<byte> queueHeader = stackalloc byte[Qsp2QueueHeaderSize];
-        ReadExactly(file, queueHeader);
-        var keyLength = checked((int)BinaryPrimitives.ReadUInt32BigEndian(queueHeader.Slice(5, sizeof(uint))));
-        if (keyLength is <= 0 or > MaximumProtectedQueueKeyBytes)
-            throw new InvalidDataException("The protected local queue key envelope is invalid.");
-        file.Position = Qsp2QueueHeaderSize + keyLength;
-        Span<byte> qspHeader = stackalloc byte[Qsp2DocumentFormat.HeaderSizeBytes];
-        ReadExactly(file, qspHeader);
-        return new Guid(qspHeader.AsSpan(68, 16), bigEndian: true);
     }
 
     private async Task SaveManifestAsync(AgentLocalQueueEntry entry, CancellationToken cancellationToken)
