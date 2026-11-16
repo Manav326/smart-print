@@ -13,5 +13,6 @@ export function isRetainedSpoolerJob(status?: string | null): boolean {
 }
 
 export function canConfirmPhysicalOutput(jobStatus?: string | null, spoolerStatus?: string | null): boolean {
-  return isPhysicalOutputConfirmationStatus(jobStatus) && !isRetainedSpoolerJob(spoolerStatus);
+  return isPhysicalOutputConfirmationStatus(jobStatus) &&
+    (spoolerStatus ?? "").trim().toUpperCase() === "PRINTED";
 }
