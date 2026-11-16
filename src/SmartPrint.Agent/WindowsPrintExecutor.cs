@@ -37,6 +37,7 @@ public sealed class WindowsPrintExecutor
     private const int DcDuplex = 7;
     private const int DcOrientation = 17;
     private const int DcColorDevice = 32;
+    private const int DcNup = 33;
     private const uint PrinterAccessAdminister = 0x00000004;
     private const uint JobStatusPrinting = 0x00000010;
     private const uint JobStatusSpooling = 0x00000008;
@@ -792,12 +793,15 @@ public sealed class WindowsPrintExecutor
             using var queue = server.GetPrintQueue(queueName);
             queue.Refresh();
 
-            var supported = queue.GetPrintCapabilities().PagesPerSheetCapability;
-            if (!supported.Contains(requestedPagesPerSheet))
+            var schemaCapabilities = queue.GetPrintCapabilities();
+            var printSchemaSupportsNup = schemaCapabilities.PagesPerSheetCapability
+                .Contains(requestedPagesPerSheet);
+            var driverSupportsNup = IsReportedByDcNup(queueName, devMode, requestedPagesPerSheet);
+            if (!printSchemaSupportsNup && !driverSupportsNup)
             {
                 throw new PrintExecutionBlockedException(
                     "PAGES_PER_SHEET_UNSUPPORTED",
-                    $"The selected printer driver does not support {requestedPagesPerSheet} pages per sheet.");
+                    $"The selected printer driver does not report support for {requestedPagesPerSheet} pages per sheet.");
             }
 
             var sourceDevMode = new byte[devModeSize];
@@ -859,6 +863,33 @@ public sealed class WindowsPrintExecutor
                 "PAGES_PER_SHEET_DRIVER_CONFIGURATION_FAILED",
                 "SmartPrint could not configure and verify N-up through the selected Windows printer driver. No pages were submitted.",
                 exception);
+        }
+    }
+
+    private static bool IsReportedByDcNup(string queueName, IntPtr devMode, int requestedPagesPerSheet)
+    {
+        var count = DeviceCapabilitiesW(queueName, null, DcNup, IntPtr.Zero, devMode);
+        if (count is <= 0 or > 128)
+            return false;
+
+        // DC_NUP supplies a DWORD array. Never reinterpret it as a WORD list.
+        var buffer = Marshal.AllocHGlobal(checked(count * sizeof(uint)));
+        try
+        {
+            var actual = DeviceCapabilitiesW(queueName, null, DcNup, buffer, devMode);
+            if (actual <= 0 || actual > count)
+                return false;
+
+            for (var index = 0; index < actual; index++)
+            {
+                if (Marshal.ReadInt32(buffer, checked(index * sizeof(uint))) == requestedPagesPerSheet)
+                    return true;
+            }
+            return false;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
         }
     }
 
