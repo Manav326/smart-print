@@ -276,6 +276,62 @@ public sealed class AgentLocalQueueStore
     public IReadOnlyList<AgentLocalQueueEntry> GetPendingPaymentLocalUploads() =>
         ReadEntries().Where(entry => entry.State == "LOCAL_UPLOAD_PENDING_PAYMENT").ToArray();
 
+    public AgentQueueStorageSnapshot GetStorageSnapshot(string pdfExportDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(pdfExportDirectory) || !Path.IsPathFullyQualified(pdfExportDirectory))
+            throw new ArgumentException("A fully qualified PDF export directory is required.", nameof(pdfExportDirectory));
+
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var outputRootFull = Path.GetFullPath(pdfExportDirectory);
+        var outputPrefix = outputRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            + Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        long queueDiskBytes = 0;
+        foreach (var path in Directory.EnumerateFiles(queueRootFull, "*", SearchOption.TopDirectoryOnly))
+            queueDiskBytes = checked(queueDiskBytes + new FileInfo(path).Length);
+
+        var entries = ReadEntries();
+        long logicalDocumentBytes = 0;
+        long documentCount = 0;
+        foreach (var entry in entries)
+        {
+            var documentPath = Path.GetFullPath(entry.DocumentPath);
+            if (!documentPath.StartsWith(queuePrefix, comparison) || !File.Exists(documentPath))
+                continue;
+            documentCount++;
+            logicalDocumentBytes = checked(logicalDocumentBytes + entry.SizeBytes);
+        }
+
+        long outputFileCount = 0;
+        long outputFileBytes = 0;
+        var countedOutputs = new HashSet<string>(comparison == StringComparison.OrdinalIgnoreCase
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal);
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.OutputFilePath))
+                continue;
+            var outputPath = Path.GetFullPath(entry.OutputFilePath);
+            if (!outputPath.StartsWith(outputPrefix, comparison) ||
+                !countedOutputs.Add(outputPath) ||
+                !File.Exists(outputPath))
+                continue;
+            outputFileCount++;
+            outputFileBytes = checked(outputFileBytes + new FileInfo(outputPath).Length);
+        }
+
+        return new AgentQueueStorageSnapshot(
+            documentCount,
+            logicalDocumentBytes,
+            queueDiskBytes,
+            outputFileCount,
+            outputFileBytes,
+            DateTimeOffset.UtcNow);
+    }
+
     public IReadOnlyList<AgentLocalQueueEntry> GetPendingAcknowledgements()
     {
         var entries = new List<AgentLocalQueueEntry>();
