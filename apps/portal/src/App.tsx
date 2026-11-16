@@ -1,4 +1,6 @@
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
+import { validateCustomerUploadBatchLimits } from "./upload-batch-policy";
+import { CUSTOMER_UPLOAD_CONCURRENCY, mapConcurrentSettled } from "./upload-concurrency";
 import { identifySupportedDocument, type SupportedDocumentType } from "./document-content-policy";
 import { calculateBatchQuoteBreakdown } from "./batch-quote-breakdown.js";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
@@ -4251,7 +4253,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [photoSettingsByJobId,setPhotoSettingsByJobId]=useState<Record<string,CustomerPhotoSettings>>(()=>initialDraft?.photoSettingsByJobId??{});
   const [photoStudioSource,setPhotoStudioSource]=useState<File|null>(null);
   const [photoStudioSourceFingerprint,setPhotoStudioSourceFingerprint]=useState<string|null>(null);
-  const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number;currentFile:string|null}|null>(null);
+  const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number;activeFiles:string[]}|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
   const [batchStatuses,setBatchStatuses]=useState<Record<string,CustomerJobStatus>>({});
@@ -4643,53 +4645,77 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
     if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
-    setBusy(true);setError("");setNotice(null);setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,currentFile:pending[0]?.name??null});
+    const currentBatchBytes=results.reduce((sum,item)=>sum+item.document.sizeBytes,0);
+    const uploadCapacityError=validateCustomerUploadBatchLimits(results.length,currentBatchBytes,pending.map(candidate=>candidate.size));
+    if(uploadCapacityError){setError(uploadCapacityError.code==="FILE_SIZE"?"One selected file exceeds the 50 MB per-file upload limit.":uploadCapacityError.code==="FILE_COUNT"?"A print batch can contain up to 20 files.":"A print batch can contain up to 500 MB in total.");return;}
+    setBusy(true);setError("");setNotice(null);setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,activeFiles:pending.slice(0,CUSTOMER_UPLOAD_CONCURRENCY).map(candidate=>candidate.name)});
     try {
-      for(let index=0;index<pending.length;index++){
-        const candidate=pending[index];
-        setUploadProgress({completed:index,total:pending.length,currentFile:candidate.name});
-        const fingerprint=customerFileFingerprint(candidate);
-        const batchGroupName=groupNameForFile(candidate);
-        const settings=settingsForFile(candidate);
-        const idDocument=isSmartPrintIdDocument(candidate);
-        const photoSettings=photoSettingsByFileFingerprint[fingerprint];
-        const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
-        // ID Studio sheets remain Private Printing only. Saved Photo Studio sheets
-        // follow the customer's selected batch privacy mode (Private by default).
-        if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards must use Private Printing. No normal cloud upload is allowed.",409);
-        const uploadedItem=effectiveUploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)
-          : idDocument
-            ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded or sent to cloud storage.",409);})()
-            : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings,printKind,photoSettings);
-        // Keep private filenames only in this customer's local draft. The upload
-        // request and server-side PrintDocument continue using an anonymized label.
-        const created=effectivePrivatePrinting
-          ? {...uploadedItem,document:{...uploadedItem.document,originalFileName:candidate.name}}
-          : uploadedItem;
-        if(created.job.batchId&&created.job.batchId!==currentBatchId) {
-          if(results.length>0) {
+      const initialResults=[...results];
+      const resultsByPendingIndex=new Map<number,UploadedPrintJob>();
+      const outcomes=await mapConcurrentSettled(
+        pending,
+        CUSTOMER_UPLOAD_CONCURRENCY,
+        async candidate=>{
+          const fingerprint=customerFileFingerprint(candidate);
+          const batchGroupName=groupNameForFile(candidate);
+          const settings=settingsForFile(candidate);
+          const idDocument=isSmartPrintIdDocument(candidate);
+          const photoSettings=photoSettingsByFileFingerprint[fingerprint];
+          const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
+          if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards must use Private Printing. No normal cloud upload is allowed.",409);
+          const uploadedItem=effectiveUploadMode==="LOCAL"&&localAgent
+            ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)
+            : idDocument
+              ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded or sent to cloud storage.",409);})()
+              : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings,printKind,photoSettings);
+          const created=effectivePrivatePrinting
+            ? {...uploadedItem,document:{...uploadedItem.document,originalFileName:candidate.name}}
+            : uploadedItem;
+          if(created.job.batchId&&created.job.batchId!==currentBatchId) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
           }
-          currentBatchId=created.job.batchId;
-          setBatchId(currentBatchId);
+          if(created.job.batchName)currentBatchName=created.job.batchName;
+          return created;
+        },
+        progress=>{
+          setUploadProgress({
+            completed:progress.completed,
+            total:pending.length,
+            activeFiles:progress.activeIndices.map(index=>pending[index]?.name).filter((name):name is string=>Boolean(name))
+          });
+        },
+        (index,outcome)=>{
+          if(outcome.status!=="fulfilled")return;
+          const candidate=pending[index];
+          const created=outcome.value;
+          const fingerprint=customerFileFingerprint(candidate);
+          resultsByPendingIndex.set(index,created);
+          if(effectivePrivatePrinting)savedPrivateFileNames[created.job.id]=candidate.name;
+          savedSettings[created.job.id]=settingsForFile(candidate);
+          const photoSettings=photoSettingsByFileFingerprint[fingerprint];
+          if(photoSettings)savedPhotoSettings[created.job.id]=photoSettings;
+          savedPrintKinds[created.job.id]=isSmartPrintIdDocument(candidate)?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
+          completedFingerprints.add(fingerprint);
+
+          const orderedResults=[
+            ...initialResults,
+            ...pending.flatMap((_,pendingIndex)=>{
+              const result=resultsByPendingIndex.get(pendingIndex);
+              return result?[result]:[];
+            })
+          ];
+          results.splice(0,results.length,...orderedResults);
+          setPrivateFileNamesByJobId({...savedPrivateFileNames});
+          setPrintSettingsByJobId({...savedSettings});
+          setPhotoSettingsByJobId({...savedPhotoSettings});
+          setPrintKindsByJobId({...savedPrintKinds});
+          setUploadedBatch(orderedResults);
+          setUploaded(orderedResults[0]??null);
+          setUploadedFileFingerprints([...completedFingerprints]);
         }
-        if(created.job.batchName) {
-          currentBatchName=created.job.batchName;
-          setBatchName(currentBatchName);
-        }
-        if(!results.some(item=>item.job.id===created.job.id))results.push(created);
-        if(effectivePrivatePrinting)savedPrivateFileNames[created.job.id]=candidate.name;
-        setPrivateFileNamesByJobId({...savedPrivateFileNames});
-        savedSettings[created.job.id]=settings;
-        if(photoSettings)savedPhotoSettings[created.job.id]=photoSettings;
-        savedPrintKinds[created.job.id]=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
-        setPrintKindsByJobId({...savedPrintKinds});
-        completedFingerprints.add(fingerprint);
-        setUploadedBatch([...results]);
-        setUploadedFileFingerprints([...completedFingerprints]);
-        setUploadProgress({completed:index+1,total:pending.length,currentFile:pending[index+1]?.name??null});
-      }
+      );
+      const firstFailure=outcomes.find(outcome=>outcome.status==="rejected");
+      if(firstFailure?.status==="rejected")throw firstFailure.reason;
       setPrintSettingsByJobId(savedSettings);
       setPhotoSettingsByJobId(savedPhotoSettings);
       setPrintKindsByJobId(savedPrintKinds);
@@ -4980,8 +5006,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(index<0){setError("The source photo is no longer in this batch. Select it again.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const generated=sheets.map(sheet=>sheet.file),nextFiles=[...files.slice(0,index),...generated,...files.slice(index+1)];
     const pending=nextFiles.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate)));
-    const bytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,file)=>sum+file.size,0);
-    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||bytes>UPLOAD_LIMITS.maxBatchBytes){setError("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
+    const existingBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0);
+    const capacityError=validateCustomerUploadBatchLimits(uploadedBatch.length,existingBytes,pending.map(candidate=>candidate.size));
+    if(capacityError){setError("Prepared photo sheets exceed the 50 MB per-file, 20-file or 500 MB batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint},previews={...photoPreviewPagesByFingerprint};
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];delete previews[photoStudioSourceFingerprint];
     for(const sheet of sheets){
@@ -5123,16 +5150,22 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return ext!==detected.extension&&!(detected.extension===".jpg"&&ext===".jpeg");
     });
     if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
-    const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
-    if(oversized){setError(`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file limit.`);return;}
     const merged=new Map(selectedFilesRef.current.map(candidate=>[customerFileFingerprint(candidate),candidate]));
     for(const candidate of supported)merged.set(customerFileFingerprint(candidate),candidate);
     const selected=Array.from(merged.values());
     const alreadyUploaded=new Set(uploadedFileFingerprints);
     const pending=selected.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
-    const totalBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,candidate)=>sum+candidate.size,0);
-    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||totalBytes>UPLOAD_LIMITS.maxBatchBytes){
-      setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchFiles} files · ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB max.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchFiles} files and ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB in total.`);
+    const existingBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0);
+    const capacityError=validateCustomerUploadBatchLimits(uploadedBatch.length,existingBytes,pending.map(candidate=>candidate.size));
+    if(capacityError){
+      if(capacityError.code==="FILE_SIZE"){
+        const oversized=pending[capacityError.fileIndex]??supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
+        setError(oversized?`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file limit.`:"Choose a valid, non-empty file.");
+      } else if(capacityError.code==="FILE_COUNT"){
+        setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchFiles} files maximum.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchFiles} files.`);
+      } else {
+        setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB batch limit.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB in total.`);
+      }
       return;
     }
     setFileGroupNames(current=>{
@@ -5465,7 +5498,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply. <InfoTooltip label="Folder settings"><span>Settings apply to every file in this folder. Use Custom on a file to change its settings.</span></InfoTooltip></small>}
     {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
-    {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div>{!nativeAppMode&&<small>Updates after each file.</small>}</div>}
+    {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.activeFiles.length?`Uploading ${uploadProgress.activeFiles.length} file(s) in parallel: ${uploadProgress.activeFiles.join(", ")}`:`${uploadProgress.completed} of ${uploadProgress.total} file transfers complete`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.activeFiles.length>0&&<b aria-hidden="true"/>}</div>{!nativeAppMode&&<small>Up to ${CUSTOMER_UPLOAD_CONCURRENCY} encrypted or secure transfers run at a time. Completed files are retained if another file fails.</small>}</div>}
     {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?<>Local transfer is not encrypted. <InfoTooltip label="Local transfer security"><span>Shop Wi-Fi uses local HTTP. Choose Cloud-assisted for encrypted HTTPS transfer.</span></InfoTooltip></>:<>Check shop Wi-Fi first. <InfoTooltip label="Shop Wi-Fi access"><span>In a browser, tap Check shop Wi-Fi above to grant local network access.</span></InfoTooltip></>}</small>}
     {files.length>0&&uploadMode==="CLOUD"&&<small className="customer-upload-local-note">Encrypted HTTPS upload. <InfoTooltip label="Secure upload details"><span>Files are encrypted in transit and stored in the existing print queue until the shop computer is ready.</span></InfoTooltip></small>}
     {uploaded&&<>
