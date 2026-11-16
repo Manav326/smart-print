@@ -36,7 +36,10 @@ public sealed record AgentClaimedJob(
     bool PdfBrandingEnabled = false,
     bool PrivatePrinting = false,
     string PrintKind = "DOCUMENT",
-    int PagesPerSheet = 1);
+    int PagesPerSheet = 1,
+    string PhotoPaperFinish = "PLAIN",
+    string PhotoOutputLayout = "A4_SHEET",
+    string? PhotoSizeCode = null);
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
