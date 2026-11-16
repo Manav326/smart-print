@@ -1,5 +1,6 @@
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { identifySupportedDocument, type SupportedDocumentType } from "./document-content-policy";
+import { calculateBatchQuoteBreakdown } from "./batch-quote-breakdown.js";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
@@ -5259,29 +5260,16 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   );
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
-  const acceptedDocumentEntries=acceptedQuoteEntries.filter(entry=>
-    entry.quote?.printKind!=="PHOTO"&&entry.quote?.printKind!=="ID_DOCUMENT");
-  const acceptedIdDocumentEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="ID_DOCUMENT");
-  const acceptedPhotoEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="PHOTO");
-  const acceptedPaperEntries=[...acceptedDocumentEntries,...acceptedIdDocumentEntries];
-  const batchDocumentSourcePages=acceptedDocumentEntries.reduce((total,entry)=>
-    total+(entry.quote?.pageCount??entry.item.job.pageCount),0);
-  const batchIdDocumentSheets=acceptedIdDocumentEntries.reduce((total,entry)=>
-    total+(entry.quote?.pageCount??0),0);
-  const batchIdDocumentAmount=acceptedIdDocumentEntries.reduce((total,entry)=>
-    total+(entry.quote?.quotedAmountMinor??0),0);
-  const batchPhotoCount=acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.photoCount??0),0);
-  const batchPhotoAmount=acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.quotedAmountMinor??0),0);
-  const batchMonoPrintedPages=acceptedPaperEntries.reduce((total,entry)=>
-    total+(entry.quote?.colourMode==="Mono"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
-  const batchColourPrintedPages=acceptedPaperEntries.reduce((total,entry)=>
-    total+(entry.quote?.colourMode==="Colour"?(entry.quote!.pageCount*entry.quote!.copies):0),0);
-  const batchPrintedPages=batchMonoPrintedPages+batchColourPrintedPages+
-    acceptedPhotoEntries.reduce((total,entry)=>total+(entry.quote?.pageCount??0),0);
-  const batchMonoAmount=acceptedDocumentEntries.reduce((total,entry)=>
-    total+(entry.quote?.colourMode==="Mono"?(entry.quote!.quotedAmountMinor??0):0),0);
-  const batchColourAmount=acceptedDocumentEntries.reduce((total,entry)=>
-    total+(entry.quote?.colourMode==="Colour"?(entry.quote!.quotedAmountMinor??0):0),0);
+  const batchQuoteBreakdown=calculateBatchQuoteBreakdown(acceptedQuoteEntries.map(entry=>({
+    printKind:printKindsByJobId[entry.item.job.id]==="ID_DOCUMENT"
+      ?"ID_DOCUMENT"
+      :normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind),
+    pageCount:entry.quote!.pageCount,
+    copies:entry.quote!.copies,
+    colourMode:entry.quote!.colourMode==="Colour"?"Colour":"Mono",
+    photoCount:entry.quote!.photoCount??0,
+    quotedAmountMinor:entry.quote!.quotedAmountMinor
+  })));
   const quoteEligibleItems=quoteItems.filter(item=>!["REJECTED","REFUNDED"].includes(statusForBatchItem(item)));
   const canSendBatch=quoteEligibleItems.length>0&&
     acceptedQuoteEntries.length===quoteEligibleItems.length&&
@@ -5494,16 +5482,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {notice&&<div className={"customer-upload-notice "+notice.kind} role={notice.kind==="warning"?"alert":"status"}>{notice.message}</div>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{quoteEntries.length} files{batchDocumentSourcePages>0?` · ${batchDocumentSourcePages} document pages`:""} · {batchPrintedPages} print pages/sheets</small></div>
+      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{acceptedQuoteEntries.length} accepted file(s) · {batchQuoteBreakdown.idCardCount} ID-card file(s) · {batchQuoteBreakdown.idCardSheets} ID-card A4 sheet(s) · {batchQuoteBreakdown.photoPages} photo A4 page(s) · {batchQuoteBreakdown.normalDocumentSourcePages} normal document page(s) · {batchQuoteBreakdown.totalOutputPagesAndSheets} total output page sides / prepared sheets</small></div>
       <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[entry.item.job.id]??entry.quote!.printKind??entry.item.job.printKind)}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.printKind==="ID_DOCUMENT"?entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
       <div className="customer-batch-print-breakdown">
-        {batchMonoPrintedPages>0&&<div><span>B&W · {batchMonoPrintedPages} output pages/sheets</span><strong>{formatMoney(batchMonoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
-        {batchColourPrintedPages>0&&<div><span>Colour · {batchColourPrintedPages} output pages/sheets</span><strong>{formatMoney(batchColourAmount,quoteEntries[0].quote!.currency)}</strong></div>}
-        {batchIdDocumentSheets>0&&<div><span>ID card printing · {batchIdDocumentSheets} A4 portrait {batchIdDocumentSheets===1?"sheet":"sheets"}</span><strong>{formatMoney(batchIdDocumentAmount,quoteEntries[0].quote!.currency)}</strong></div>}
-        {batchPhotoCount>0&&<div><span>Photo printing · {batchPhotoCount} finished photos</span><strong>{formatMoney(batchPhotoAmount,quoteEntries[0].quote!.currency)}</strong></div>}
-        <div className="customer-batch-print-total"><span>Total output pages/sheets</span><strong>{batchPrintedPages}</strong></div>
+        <div><span>Normal documents · {batchQuoteBreakdown.normalDocumentFileCount} file(s) · {batchQuoteBreakdown.normalDocumentSourcePages} original page(s) × copies = {batchQuoteBreakdown.normalDocumentOutputPages} output page sides</span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,quoteEntries[0].quote!.currency)}</strong><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,quoteEntries[0].quote!.currency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,quoteEntries[0].quote!.currency)}</small></div>
+        <div><span>ID cards · {batchQuoteBreakdown.idCardCount} prepared ID-card file(s) · {batchQuoteBreakdown.idCardSheets} A4 sheet(s)</span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
+        <div><span>Photo printing · {batchQuoteBreakdown.photoPages} A4 page(s) · {batchQuoteBreakdown.finishedPhotos} finished photo(s)</span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
+        <div className="customer-batch-print-total"><span>Total output page sides / prepared A4 sheets</span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
       </div>
-      <p className="customer-payment-model-note customer-quote-explanation">Pricing varies by document type and print settings. <InfoTooltip label="How your quote is calculated"><span>Document pages are the original pages in uploaded documents, before copies are applied.</span><span>Print pages/sheets count output pages after copies. With duplex printing, two output pages may share one physical sheet.</span><span>Prepared ID cards use the configured ID-card rate and print as normal A4 documents.</span><span>Photo orders count finished photos and A4 output pages, using the saved per-photo rate for the selected size.</span><span>Rejected files are excluded. Pay once for all accepted files after review.</span></InfoTooltip></p>
+      <p className="customer-payment-model-note customer-quote-explanation">Pricing varies by document type and print settings. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages before copies are applied. Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted separately as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing shows both finished photo quantity and the A4 PDF pages they occupy; pricing remains per finished photo.</span><span>Normal-document output counts page sides after copies. With duplex printing, two page sides may share one physical sheet.</span><span>Rejected files are excluded. Pay once for all accepted files after review.</span></InfoTooltip></p>
     </div>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}

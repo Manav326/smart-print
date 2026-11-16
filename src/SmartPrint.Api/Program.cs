@@ -11694,7 +11694,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         return Results.Unauthorized();
     }
 
-    var job = await db.PrintJobs.AsNoTracking()
+    var storedJob = await db.PrintJobs.AsNoTracking()
         .Where(item => item.Id == jobId && item.TenantId == session.TenantId &&
                        item.CustomerSessionId == session.Id)
         .Select(item => new
@@ -11711,6 +11711,11 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.Orientation,
             item.PricingVersion,
             item.PrintKind,
+            HasIdDocumentTicket = db.LocalPrintUploadTickets.AsNoTracking().Any(ticket =>
+                ticket.TenantId == item.TenantId &&
+                ticket.PrintJobId == item.Id &&
+                ticket.PrivatePrinting &&
+                ticket.PrintKind == "ID_DOCUMENT"),
             item.PhotoSizeCode,
             item.PhotoCount,
             item.PhotosPerPage,
@@ -11726,10 +11731,43 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.UpdatedUtc
         })
         .SingleOrDefaultAsync(ct);
-    if (job is null)
+    if (storedJob is null)
     {
         return Results.NotFound();
     }
+
+    // ID_DOCUMENT is intentionally ticket-only. Restore that discriminator for
+    // the customer status contract so refreshing a quote cannot turn an ID card
+    // into an ordinary DOCUMENT in the batch summary.
+    var job = new
+    {
+        storedJob.Id,
+        storedJob.PrivatePrinting,
+        storedJob.JobNumber,
+        storedJob.Status,
+        storedJob.PageCount,
+        storedJob.Copies,
+        storedJob.ColourMode,
+        storedJob.PaperSize,
+        storedJob.IsDuplex,
+        storedJob.Orientation,
+        storedJob.PricingVersion,
+        PrintKind = PrivateRelayPrintKindRules.ResolveCustomerStatusPrintKind(
+            storedJob.PrintKind, storedJob.HasIdDocumentTicket),
+        storedJob.PhotoSizeCode,
+        storedJob.PhotoCount,
+        storedJob.PhotosPerPage,
+        storedJob.PhotoUnitPriceMinorSnapshot,
+        storedJob.Currency,
+        storedJob.QuotedAmountMinor,
+        storedJob.QuoteExpiresUtc,
+        storedJob.RejectedPageNumbersJson,
+        storedJob.PdfBrandingEnabled,
+        storedJob.OutputType,
+        storedJob.OutputCompletedUtc,
+        storedJob.PrivateDocumentPurgedUtc,
+        storedJob.UpdatedUtc
+    };
 
     var timeline = await db.PrintJobEvents.AsNoTracking()
         .Where(item => item.TenantId == session.TenantId && item.PrintJobId == jobId)
