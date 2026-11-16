@@ -2455,6 +2455,10 @@ shop.MapGet("/print-jobs", async (
                 .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
                 .Select(printer => printer.DisplayName)
                 .FirstOrDefault(),
+            PrinterStatus = db.PrinterDevices.AsNoTracking()
+                .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
+                .Select(printer => printer.Status)
+                .FirstOrDefault(),
             QueueName = job.PrinterQueueNameSnapshot ?? db.PrinterDevices
                 .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
                 .Select(printer => printer.QueueName)
@@ -3815,15 +3819,27 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
         });
     if (job.Status == "COMPLETED" && job.OutputConfirmedUtc != null)
         return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc, DuplicateRequest = true });
-    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus))
+    var printerStatus = job.PrinterDeviceId is Guid printerDeviceId
+        ? await db.PrinterDevices.AsNoTracking()
+            .Where(printer => printer.Id == printerDeviceId && printer.TenantId == tenantId)
+            .Select(printer => printer.Status)
+            .FirstOrDefaultAsync(ct)
+        : null;
+    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerObservedUtc, printerStatus))
     {
         if (SpoolerOutputConfirmationPolicy.IsRetained(job.SpoolerStatus))
             return Results.Conflict(new
             {
                 code = "windows_spooler_job_retained",
-                message = "Windows is still holding this print job. Confirmation is available after the Agent verifies that the held spooler entry has cleared."
+                message = "Windows is still holding this print job. Confirmation is available after the Agent reports a verified state that makes output eligible."
             });
-        return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
+        if (!SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(job.SpoolerStatus, job.SpoolerObservedUtc))
+            return Results.Conflict(new
+            {
+                code = "spooler_state_not_verified",
+                message = "The Agent has not yet verified an eligible Windows spooler state. Refresh after the shop computer reports its queue status."
+            });
+        return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Resolve the Windows spooler or printer warning before confirming physical output." });
     }
 
     if (job.PrivatePrinting && (job.OutputType != "PHYSICAL" || job.ClaimedByAgentDeviceId is null))
