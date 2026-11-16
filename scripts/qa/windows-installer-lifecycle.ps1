@@ -342,7 +342,11 @@ function Assert-QueueUntouched {
     Assert-True ([uint32]$spooler.ProcessId -eq $originalSpoolerProcessId) "SmartPrint restarted the Windows Print Spooler."
     $rules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
     if ($rules.Count -gt 0) {
-        Assert-True (($rules | Where-Object { $_.Profile -ne "Private" }).Count -eq 0) "The SmartPrint Agent firewall rule must be limited to the Private network profile."
+        $unsupportedProfiles = @($rules | Where-Object {
+            $profiles = ([string]$_.Profile) -split ",\\s*"
+            @($profiles | Where-Object { $_ -notin @("Private", "Domain") }).Count -gt 0
+        })
+        Assert-True ($unsupportedProfiles.Count -eq 0) "The SmartPrint Agent firewall rule must be limited to trusted Private and Domain network profiles."
     }
 }
 
