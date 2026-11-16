@@ -178,25 +178,34 @@ public sealed class Worker(
                 if (string.Equals(encryptedFormat, "QSP2", StringComparison.Ordinal))
                 {
                     byte[]? qsp2Key = null;
-                    await using var qsp2Plaintext = new MemoryStream(checked((int)ticket.SizeBytes));
+                    string? stagingPath = null;
                     try
                     {
                         qsp2Key = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
-                        await using var encryptedStream = await contentResponse.Content.ReadAsStreamAsync(cancellationToken);
-                        var metadata = await Qsp2DocumentFormat.DecryptAsync(
-                            encryptedStream,
-                            qsp2Plaintext,
-                            qsp2Key,
-                            credentials.AgentDeviceId,
-                            ticket.PrintJobId,
-                            UploadLimits.MaxFileBytes,
-                            cancellationToken);
-                        if (metadata.PlaintextLength != ticket.SizeBytes ||
-                            !string.Equals(metadata.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
-                            throw new InvalidDataException("The QSP2 private document failed its authorised size or SHA-256 check.");
+                        stagingPath = await localQueueStore.CreatePrivateUploadStagingPathAsync(cancellationToken);
+                        await using (var encryptedStream = await contentResponse.Content.ReadAsStreamAsync(cancellationToken))
+                        await using (var decryptedOutput = new FileStream(
+                            stagingPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                            64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                        {
+                            var metadata = await Qsp2DocumentFormat.DecryptAsync(
+                                encryptedStream,
+                                decryptedOutput,
+                                qsp2Key,
+                                credentials.AgentDeviceId,
+                                ticket.PrintJobId,
+                                UploadLimits.MaxFileBytes,
+                                cancellationToken);
+                            if (metadata.PlaintextLength != ticket.SizeBytes ||
+                                !string.Equals(metadata.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+                                throw new InvalidDataException("The QSP2 private document failed its authorised size or SHA-256 check.");
+                            await decryptedOutput.FlushAsync(cancellationToken);
+                        }
 
+                        await using var qsp2Plaintext = new FileStream(
+                            stagingPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                            64 * 1024, FileOptions.RandomAccess);
                         DocumentAnalysis qsp2Analysis;
-                        qsp2Plaintext.Position = 0;
                         try
                         {
                             qsp2Analysis = DocumentAnalyzer.Analyse(qsp2Plaintext, ticket.FileExtension);
@@ -246,9 +255,9 @@ public sealed class Worker(
                     }
                     finally
                     {
+                        if (stagingPath is not null)
+                            await localQueueStore.ErasePrivateUploadStagingFileAsync(stagingPath);
                         if (qsp2Key is not null) CryptographicOperations.ZeroMemory(qsp2Key);
-                        if (qsp2Plaintext.TryGetBuffer(out var plaintextBuffer))
-                            CryptographicOperations.ZeroMemory(plaintextBuffer.AsSpan());
                     }
                     continue;
                 }
