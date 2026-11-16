@@ -4194,8 +4194,8 @@ function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:N
             : <><FileText size={22}/><strong>Preview unavailable</strong><span>The print layout could not be previewed on this device. You can still upload the original PDF.</span></>}
         </div>}
     {current?.image&&<div className="customer-native-pdf-layout-note">
-      <strong>{current.pagesPerSheet}-up print layout</strong>
-      <span>PDF pages {current.firstSourcePage}–{current.lastSourcePage} appear on this output sheet. The original PDF is sent to the printer driver unchanged.</span>
+      <strong>{current.pagesPerSheet}-up print layout · {current.pagesPerSheetDirection}</strong>
+      <span>PDF pages {current.firstSourcePage}–{current.lastSourcePage} appear on this output sheet. Page order follows the selected driver direction; final margins and page fitting are controlled by the printer driver. The original PDF is sent unchanged.</span>
     </div>}
     {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
       <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous sheet</button>
@@ -5682,7 +5682,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
               <button type="button" disabled={browserNupPreview.sheetIndex<=0} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.max(0,index-1))}>Previous sheet</button>
               <button type="button" disabled={browserNupPreview.sheetIndex>=browserNupPreview.sheetCount-1} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.min(browserNupPreview.sheetCount-1,index+1))}>Next sheet</button>
             </div>}
-            <small>Preview only. The original PDF is uploaded unchanged; the selected Windows printer driver applies the physical N-up layout.</small>
+            <small>Page order follows {browserNupPreview.pagesPerSheetDirection}. This visual preview does not replace driver-specific margins or page fitting. The original PDF is uploaded unchanged; the selected Windows printer driver applies the physical N-up layout.</small>
           </>}
   </div>}
 </>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
