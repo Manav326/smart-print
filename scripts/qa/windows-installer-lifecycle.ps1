@@ -278,6 +278,12 @@ function Add-QueueFixture {
     $script:fixturePrinter = Get-Printer -Name $testPrinterName -ErrorAction Stop
 }
 
+function Assert-LocalServiceIdentityIsNotElevated {
+    Write-Host "[QA-ACTION] Verify LocalService identity and absence of local Administrators membership." -ForegroundColor Cyan
+    $result = Invoke-FixtureAsLocalService "verify-service-identity"
+    Assert-True ($result -eq "LOCAL_SERVICE_NON_ADMIN") "The Agent service identity is not the expected non-administrative LocalService account: $result"
+}
+
 function Assert-LocalServiceCanDiscoverFixturePrinter {
     Write-Host "[QA-ACTION] Verify Agent printer discovery as LocalService using the temporary lifecycle queue." -ForegroundColor Cyan
     $result = Invoke-FixtureAsLocalService "discover-printer" @($testPrinterName)
@@ -446,6 +452,18 @@ else if (mode == "verify")
     if (args.Length > 1)
         await File.WriteAllTextAsync(args[1], "VERIFIED");
 }
+else if (mode == "verify-service-identity")
+{
+    using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+    if (!string.Equals(identity.User?.Value, "S-1-5-19", StringComparison.Ordinal))
+        throw new InvalidOperationException($"Expected LocalService SID S-1-5-19, but the current SID is '{identity.User?.Value}'.");
+    var principal = new System.Security.Principal.WindowsPrincipal(identity);
+    var administratorsSid = new System.Security.Principal.SecurityIdentifier("S-1-5-32-544");
+    if (principal.IsInRole(administratorsSid))
+        throw new InvalidOperationException("The LocalService Agent unexpectedly has local Administrators membership.");
+    await File.WriteAllTextAsync(args[1], "LOCAL_SERVICE_NON_ADMIN");
+    Console.WriteLine("Verified the Windows LocalService SID and confirmed it is not a local administrator.");
+}
 else if (mode == "discover-printer")
 {
     if (args.Length < 3)
@@ -524,6 +542,7 @@ else
         $script:identityHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
         Assert-True (Test-Path -LiteralPath $queueManifest) "The staged queue manifest was not created."
         Add-QueueFixture
+        Assert-LocalServiceIdentityIsNotElevated
         Assert-LocalServiceCanDiscoverFixturePrinter
         Assert-LocalServiceCanPrintFixture
     }
