@@ -131,6 +131,18 @@ public static class PhotoSheetPdfRules
             pixelHeight);
     }
 
+    public static bool IsValidPhotoOutputOptions(string? outputLayout, string? paperFinish, int photosPerPage)
+    {
+        if (string.Equals(outputLayout, "A4_SHEET", StringComparison.OrdinalIgnoreCase))
+            return string.Equals(paperFinish, "PLAIN", StringComparison.OrdinalIgnoreCase) && photosPerPage >= 1;
+        if (string.Equals(outputLayout, "PHOTO_PAPER", StringComparison.OrdinalIgnoreCase))
+            return paperFinish is not null &&
+                (string.Equals(paperFinish, "GLOSSY", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(paperFinish, "MATTE", StringComparison.OrdinalIgnoreCase)) &&
+                photosPerPage == 1;
+        return false;
+    }
+
     public static bool TryGetPhotoSize(string? photoSizeCode, out double widthMm, out double heightMm)
     {
         (double Width, double Height)? dimensions = photoSizeCode?.Trim().ToLowerInvariant() switch
