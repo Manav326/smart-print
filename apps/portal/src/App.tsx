@@ -45,7 +45,7 @@ import {
 } from "./desktop-bridge";
 import { identifyDocumentPreviewMediaType } from "./document-preview";
 import { verifiedPdfExportPath } from "./print-output";
-import { canConfirmPhysicalOutput, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
+import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
@@ -1057,12 +1057,24 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   }
 
   async function confirmPrintedOutput(job: ShopPrintJob) {
-    const ok = await confirmInApp(`Have you physically checked all requested pages for ${job.jobNumber}? Only confirm after checking the actual paper output.`, "Confirm paper output", "Confirm output");
+    const manualQueueReconciliation=canManuallyReconcileUncertainOutput(
+      job.status, job.spoolerStatus, job.failureCode, job.spoolerJobId, job.queueName, job.spoolerJobName
+    );
+    const queueCheck=manualQueueReconciliation
+      ? `The Agent restarted before Windows returned a spooler ID. Open the ${job.queueName} Windows queue and verify that the exact job "${job.spoolerJobName}" is not queued or printing. Then physically inspect every requested paper page. Only continue after both checks are complete.`
+      : `Have you physically checked all requested pages for ${job.jobNumber}? Only confirm after checking the actual paper output.`;
+    const ok = await confirmInApp(
+      queueCheck,
+      manualQueueReconciliation ? "Manually reconcile print output" : "Confirm paper output",
+      manualQueueReconciliation ? "I checked the queue and paper" : "Confirm output"
+    );
     if (!ok) return;
     setBusyJobId(job.id); setError("");
     try {
-      await confirmShopPrintOutput(tokens.accessToken, job.id);
-      setToast("Physical output confirmed by the shop operator.");
+      await confirmShopPrintOutput(tokens.accessToken, job.id, manualQueueReconciliation);
+      setToast(manualQueueReconciliation
+        ? "Output manually reconciled after checking the Windows queue and physical pages."
+        : "Physical output confirmed by the shop operator.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not confirm physical output.");
@@ -2817,7 +2829,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>{job.status==="REJECTED"?"Refund rejected file":"Review pages / refund"}</button>}
                 {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.privatePrinting&&job.outputMode==="PDF_EXPORT"?"Create test PDF":job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
                 {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>{job.privatePrinting&&job.outputType==="TEST_VIRTUAL"?"Retry test PDF":"Save PDF again"}</button>}
-                {isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT")&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||!canConfirmPhysicalOutput(job.status,job.spoolerStatus)||(job.status!=="OUTPUT_UNCONFIRMED"&&!!spoolerStatusWarning(job.spoolerStatus,job.printerStatus))} title={isRetainedSpoolerJob(job.spoolerStatus)?"Windows still holds this job. Confirmation will be enabled after the Agent verifies that it has left the queue.":undefined} onClick={()=>onConfirmOutput(job)}>Confirm output</button>}
+                {isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT")&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||!(canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId)||canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName))} title={canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"The Agent restarted before Windows returned a spooler ID. Check the selected Windows queue for this exact job name and physically inspect all paper output before continuing.":!canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId)?(isRetainedSpoolerJob(job.spoolerStatus)?"Windows still holds this job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared.":!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for a fresh Agent observation from after submission before confirming output.":(["QUEUED","SPOOLING","PRINTING"].includes((job.spoolerStatus??"").toUpperCase())?"Windows still reports this job in its queue or printing. Wait for a terminal state before confirming output.":spoolerStatusWarning(job.spoolerStatus,job.printerStatus)||"Confirm output only after Windows reports that the job printed or its queue entry was verified absent.")):undefined} onClick={()=>onConfirmOutput(job)}>{canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"Reconcile & confirm":"Confirm output"}</button>}
               </div>
               {editingSettingsJobId===job.id&&editingPrintSettings&&<div className="queue-settings-editor">
                 <div><strong>Review print options</strong><small>The revised quote must be approved by the customer before payment or printing.</small></div>

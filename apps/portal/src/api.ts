@@ -2048,9 +2048,16 @@ export function retryShopPrivateTestOutput(token: string, jobId: string) {
   );
 }
 
-export function confirmShopPrintOutput(token: string, jobId: string) {
+export function confirmShopPrintOutput(
+  token: string,
+  jobId: string,
+  manualQueueReconciliationConfirmed = false
+) {
   return apiRequest<{ id: string; status: string; outputConfirmedUtc: string }>(
-    `/api/v1/shop/print-jobs/${jobId}/confirm-output`, { method: "POST" }, token);
+    `/api/v1/shop/print-jobs/${jobId}/confirm-output`,
+    { method: "POST", body: JSON.stringify({ manualQueueReconciliationConfirmed }) },
+    token
+  );
 }
 
 export function getShopPrinters(token: string) {
