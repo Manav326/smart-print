@@ -40,6 +40,7 @@ public static class WindowsPrinterCapabilityDiscovery
                 orientation = ReadOrientation(queueName),
                 paperSizes = ReadPaperSizes(queueName),
                 pagesPerSheet = ReadPagesPerSheet(queueName),
+                pagesPerSheetDirection = ReadPagesPerSheetDirection(queueName),
                 mediaTypes = ReadMediaTypes(queueName),
                 resolutions = ReadResolutions(queueName)
             };
@@ -121,6 +122,49 @@ public static class WindowsPrinterCapabilityDiscovery
             Marshal.FreeHGlobal(sizeBuffer);
             Marshal.FreeHGlobal(nameBuffer);
         }
+    }
+
+    private static string? ReadPagesPerSheetDirection(string queueName)
+    {
+        try
+        {
+            using var server = new LocalPrintServer();
+            using var queue = server.GetPrintQueue(queueName);
+            queue.Refresh();
+            var capabilities = queue.GetPrintCapabilities();
+            return ResolvePagesPerSheetDirection(queue, capabilities)?.ToString();
+        }
+        catch (Exception exception) when (
+            exception is PrintQueueException or InvalidOperationException or
+                ExternalException or ArgumentException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resolves one deterministic, driver-supported N-up order. The same rule is
+    /// used for capability publication and final PrintTicket configuration so
+    /// the customer preview and physical driver use the same page sequence.
+    /// </summary>
+    internal static PagesPerSheetDirection? ResolvePagesPerSheetDirection(
+        PrintQueue queue,
+        PrintCapabilities capabilities)
+    {
+        ArgumentNullException.ThrowIfNull(queue);
+        ArgumentNullException.ThrowIfNull(capabilities);
+        var supported = capabilities.PagesPerSheetDirectionCapability;
+        if (supported is null || supported.Count == 0)
+            return null;
+
+        var current = queue.DefaultPrintTicket.PagesPerSheetDirection;
+        if (current.HasValue && supported.Contains(current.Value))
+            return current.Value;
+
+        if (supported.Contains(PagesPerSheetDirection.RightBottom))
+            return PagesPerSheetDirection.RightBottom;
+
+        return supported[0];
     }
 
     private static IReadOnlyList<int> ReadPagesPerSheet(string queueName)
