@@ -335,7 +335,8 @@ function Assert-PrivateQueueAcl {
         )
         Assert-True ($allowedSids -contains "S-1-5-18") "SYSTEM access is missing from private queue item: $queueItem"
         Assert-True ($allowedSids -contains "S-1-5-19") "LocalService access is missing from private queue item: $queueItem"
-        Assert-True (-not ($allowedSids -contains "S-1-5-32-544")) "Administrators has an allow ACE on private queue item: $queueItem"
+        $unexpectedAllowedSids = @($allowedSids | Where-Object { $_ -notin @("S-1-5-18", "S-1-5-19") })
+        Assert-True ($unexpectedAllowedSids.Count -eq 0) "An unexpected principal has allow access to private queue item '$queueItem': $($unexpectedAllowedSids -join ', ')"
     }
 
     $keyPath = Join-Path $queueRoot "document-encryption-key.dpapi"
