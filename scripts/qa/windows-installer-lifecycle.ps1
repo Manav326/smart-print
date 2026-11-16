@@ -319,6 +319,18 @@ function Assert-PrivateQueueAcl {
     Assert-True ($allowedSids -contains "S-1-5-18") "The encrypted SmartPrint queue must retain SYSTEM access."
     Assert-True ($allowedSids -contains "S-1-5-19") "The encrypted SmartPrint queue must grant LocalService access."
     Assert-True (-not ($allowedSids -contains "S-1-5-32-544")) "The encrypted SmartPrint queue must not grant normal Administrators access."
+
+    $keyPath = Join-Path $queueRoot "document-encryption-key.dpapi"
+    Assert-True (Test-Path -LiteralPath $keyPath -PathType Leaf) "The Agent document-encryption key file is missing."
+    $keySecurity = Get-Acl -LiteralPath $keyPath
+    $keyAllowedSids = @(
+        $keySecurity.Access |
+            Where-Object { $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow } |
+            ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }
+    )
+    Assert-True ($keyAllowedSids -contains "S-1-5-18") "The document-encryption key must retain SYSTEM access."
+    Assert-True ($keyAllowedSids -contains "S-1-5-19") "The document-encryption key must grant LocalService access."
+    Assert-True (-not ($keyAllowedSids -contains "S-1-5-32-544")) "The document-encryption key must not grant normal Administrators access."
 }
 
 function Assert-PreservedFixtures {
