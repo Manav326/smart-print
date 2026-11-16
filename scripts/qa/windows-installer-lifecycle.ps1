@@ -395,9 +395,17 @@ function Assert-LocalServiceIdentityIsNotElevated {
 }
 
 function Assert-LocalServiceCanOpenQueueForRetainedCleanup {
-    Write-Host "[QA-ACTION] Verify LocalService can open its printer queue for idempotent retained-job cleanup with standard Print access." -ForegroundColor Cyan
-    $result = Invoke-FixtureAsLocalService "release-retained-job-access" @($testPrinterName)
-    Assert-True ($result -eq "PRINT_ACCESS_OK") "LocalService could not open its printer queue for retained-job cleanup using standard Print access: $result"
+    $outputPath = Join-Path $programDataRoot "Lifecyclelocalservice-retained-spooler-output.pdf"
+    Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+    Write-Host "[QA-ACTION] Submit, retain and release a real LocalService-owned Windows spooler job using standard Print access." -ForegroundColor Cyan
+    try {
+        $result = Invoke-FixtureAsLocalService "release-retained-job" @($testPrinterName, $outputPath)
+        Assert-True ($result -eq "RELEASED") "LocalService could not release its real retained spooler job using standard Print access: $result"
+        Assert-True (Test-Path -LiteralPath $outputPath -PathType Leaf) "The real retained-job test did not produce its PDF output."
+    }
+    finally {
+        Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Assert-LocalServiceCanDiscoverFixturePrinter {
