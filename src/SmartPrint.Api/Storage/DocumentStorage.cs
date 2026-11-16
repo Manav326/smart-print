@@ -457,9 +457,26 @@ public sealed class DocumentStorage : IDisposable
     /// Presents a file region as a seekable stream without copying it. The wrapper
     /// maps positions relative to the QSE2 envelope and can own the base file stream.
     /// </summary>
-    private sealed class OffsetReadStream(Stream inner, long offset, bool leaveOpen) : Stream
+    private sealed class OffsetReadStream : Stream
     {
+        private readonly Stream inner;
+        private readonly long offset;
+        private readonly bool leaveOpen;
         private bool disposed;
+
+        public OffsetReadStream(Stream inner, long offset, bool leaveOpen)
+        {
+            ArgumentNullException.ThrowIfNull(inner);
+            if (!inner.CanRead || !inner.CanSeek)
+                throw new ArgumentException("The encrypted object source must be readable and seekable.", nameof(inner));
+            if (offset < 0 || offset > inner.Length)
+                throw new ArgumentOutOfRangeException(nameof(offset));
+
+            this.inner = inner;
+            this.offset = offset;
+            this.leaveOpen = leaveOpen;
+            inner.Position = offset;
+        }
 
         public override bool CanRead => !disposed && inner.CanRead;
         public override bool CanSeek => !disposed && inner.CanSeek;
