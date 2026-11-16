@@ -163,6 +163,26 @@ public sealed class AgentLocalQueueStore
         }
     }
 
+    /// <summary>
+    /// Creates a unique staging path inside the Agent's SYSTEM-protected queue directory.
+    /// Plaintext QSP2 decrypt staging must never use the shared OS temp directory.
+    /// </summary>
+    public async Task<string> CreatePrivateUploadStagingPathAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+        return Path.Combine(queueRoot, "private-qsp2-" + Guid.NewGuid().ToString("N") + ".tmp");
+    }
+
+    /// <summary>Securely overwrites and removes a temporary plaintext upload inside the protected queue.</summary>
+    public Task ErasePrivateUploadStagingFileAsync(string path)
+    {
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
+            Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return EraseProtectedQueueFileAsync(path, queuePrefix, comparison, CancellationToken.None);
+    }
+
     public AgentLocalQueueEntry? Find(Guid jobId)
     {
         EnsureQueueIndexLoaded();
