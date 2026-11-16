@@ -1010,7 +1010,7 @@ public sealed class LocalAgentApiHostedService(
                     if (isQsp2)
                     {
                         byte[]? dataKey = null;
-                        MemoryStream? plaintextStream = null;
+                        string? stagingPath = null;
                         try
                         {
                             var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
@@ -1023,20 +1023,28 @@ public sealed class LocalAgentApiHostedService(
                                 return Results.BadRequest(new { code = "private_document_envelope_invalid", message = "The QSP2 encrypted stream does not match its authorised upload." });
 
                             dataKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
-                            plaintextStream = new MemoryStream(checked((int)claim.SizeBytes));
-                            var metadata = await Qsp2DocumentFormat.DecryptAsync(
-                                context.Request.Body,
-                                plaintextStream,
-                                dataKey,
-                                credentials.AgentDeviceId,
-                                claim.PrintJobId,
-                                UploadLimits.MaxFileBytes,
-                                ct);
-                            if (metadata.PlaintextLength != claim.SizeBytes ||
-                                !string.Equals(metadata.Sha256, claim.Sha256, StringComparison.OrdinalIgnoreCase))
-                                throw new InvalidDataException("The QSP2 document SHA-256 does not match the authorised upload.");
+                            stagingPath = await localQueueStore.CreatePrivateUploadStagingPathAsync(ct);
+                            await using (var decryptedOutput = new FileStream(
+                                stagingPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                                64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                            {
+                                var metadata = await Qsp2DocumentFormat.DecryptAsync(
+                                    context.Request.Body,
+                                    decryptedOutput,
+                                    dataKey,
+                                    credentials.AgentDeviceId,
+                                    claim.PrintJobId,
+                                    UploadLimits.MaxFileBytes,
+                                    ct);
+                                if (metadata.PlaintextLength != claim.SizeBytes ||
+                                    !string.Equals(metadata.Sha256, claim.Sha256, StringComparison.OrdinalIgnoreCase))
+                                    throw new InvalidDataException("The QSP2 document SHA-256 does not match the authorised upload.");
+                                await decryptedOutput.FlushAsync(ct);
+                            }
 
-                            plaintextStream.Position = 0;
+                            await using var plaintextStream = new FileStream(
+                                stagingPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                                64 * 1024, FileOptions.RandomAccess);
                             try
                             {
                                 analysis = DocumentAnalyzer.Analyse(plaintextStream, claim.FileExtension);
@@ -1073,12 +1081,8 @@ public sealed class LocalAgentApiHostedService(
                         }
                         finally
                         {
-                            if (plaintextStream is not null)
-                            {
-                                if (plaintextStream.TryGetBuffer(out var buffer))
-                                    CryptographicOperations.ZeroMemory(buffer.AsSpan());
-                                await plaintextStream.DisposeAsync();
-                            }
+                            if (stagingPath is not null)
+                                await localQueueStore.ErasePrivateUploadStagingFileAsync(stagingPath);
                             if (dataKey is not null) CryptographicOperations.ZeroMemory(dataKey);
                         }
                     }
