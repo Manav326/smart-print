@@ -31,6 +31,7 @@ public sealed class WindowsPrintExecutor
     private const int DmPaperSize = 0x00000002;
     private const int DmColor = 0x00000800;
     private const int DmDuplex = 0x00001000;
+    private const int DmMediaType = unchecked((int)0x02000000);
     private const int DcPapers = 2;
     private const int DcDuplex = 7;
     private const int DcOrientation = 17;
@@ -710,13 +711,34 @@ public sealed class WindowsPrintExecutor
                 throw new PrintExecutionBlockedException("PRINTER_DEVMODE_READ_FAILED", "The default printer settings could not be read.");
 
             var mode = Marshal.PtrToStructure<DevModeW>(pointer);
-            var paper = PaperCode(entry.PaperSize);
             var isIdDocument = string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase);
+            var isPhoto = string.Equals(entry.PrintKind, "PHOTO", StringComparison.OrdinalIgnoreCase);
+            var isStandaloneFourBySix = isPhoto && string.Equals(entry.PhotoOutputLayout, "STANDALONE_4X6", StringComparison.OrdinalIgnoreCase);
+            if (isPhoto && entry.PhotoOutputLayout is not ("A4_SHEET" or "STANDALONE_4X6"))
+                throw new PrintExecutionBlockedException("PHOTO_OUTPUT_LAYOUT_INVALID", "The requested photo output layout is not supported.");
+            if (isStandaloneFourBySix && !string.Equals(entry.PhotoSizeCode, "4x6", StringComparison.OrdinalIgnoreCase))
+                throw new PrintExecutionBlockedException("PHOTO_SIZE_LAYOUT_MISMATCH", "Standalone output is available only for 4 × 6 inch photo jobs.");
+            var paper = isStandaloneFourBySix
+                ? WindowsPrinterCapabilityDiscovery.ResolveFourBySixPaperCode(queueName, pointer)
+                    ?? throw new PrintExecutionBlockedException("PHOTO_4X6_PAPER_UNSUPPORTED", "The selected printer driver does not report one unambiguous 4 × 6 inch paper size. No pages were sent.")
+                : PaperCode(entry.PaperSize);
             if (SupportsPaper(queueName, pointer, paper) is false && !isIdDocument)
                 throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
             // For ID sheets, a negative capability-list result is advisory. Ask
             // DocumentProperties to apply A4 and verify its response below rather
             // than refusing the job solely from a possibly stale capability list.
+
+            short? photoMediaType = null;
+            if (isPhoto)
+            {
+                photoMediaType = WindowsPrinterCapabilityDiscovery.ResolvePhotoMediaTypeCode(queueName, pointer, entry.PhotoPaperFinish);
+                if (photoMediaType is null)
+                    throw new PrintExecutionBlockedException(
+                        "PHOTO_MEDIA_TYPE_UNSUPPORTED",
+                        $"The selected printer driver does not expose one unambiguous {entry.PhotoPaperFinish.ToLowerInvariant()} photo media type. Choose a printer that supports it or change the requested finish. No pages were sent.");
+                mode.MediaType = unchecked((ushort)photoMediaType.Value);
+                mode.Fields |= DmMediaType;
+            }
 
             var orientationCapability = DeviceCapabilitiesW(queueName, null, DcOrientation, IntPtr.Zero, pointer);
             if (landscape && orientationCapability == 0)
@@ -765,6 +787,14 @@ public sealed class WindowsPrintExecutor
                 throw new PrintExecutionBlockedException("DUPLEX_REJECTED", "The driver did not accept duplex mode.");
             if (entry.ColourMode == "Colour" && ((validated.Fields & DmColor) == 0 || validated.Color != 2))
                 throw new PrintExecutionBlockedException("COLOUR_REJECTED", "The driver did not accept colour mode.");
+            if (photoMediaType is short requestedMediaType &&
+                !PrinterCapabilityRules.IsRequestedPhotoMediaTypeAccepted(
+                    (validated.Fields & DmMediaType) != 0,
+                    validated.MediaType,
+                    requestedMediaType))
+                throw new PrintExecutionBlockedException(
+                    "PHOTO_MEDIA_TYPE_REJECTED",
+                    "The printer driver did not retain the requested photo paper finish. No pages were sent.");
             return pointer;
         }
         catch
