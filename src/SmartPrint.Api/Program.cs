@@ -4049,100 +4049,76 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
         return Results.Forbid();
 
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
-        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
-        .ToListAsync(ct);
-    var job = lockedJobs.SingleOrDefault();
-    if (job is null)
-    {
-        await transaction.RollbackAsync(ct);
+    // Read-only preflight before receiving the replacement. No transaction or row
+    // lock remains open while the customer/shop owner transfers a multi-megabyte PDF.
+    var jobPreflight = await db.PrintJobs.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == tenantId, ct);
+    if (jobPreflight is null)
         return Results.NotFound();
-    }
-    if (job.PrivatePrinting)
-    {
-        await transaction.RollbackAsync(ct);
+    if (jobPreflight.PrivatePrinting)
         return Results.Conflict(new
         {
             code = "private_printing_source_locked",
             message = "Private Printing never transfers the original photo or editor settings to the shop. Ask the customer to submit a new document if a change is needed."
         });
-    }
 
-    if (job.Status != "AWAITING_SHOP_APPROVAL" ||
-        job.LocalQueueReceivedUtc is not null ||
-        job.ClaimedByAgentDeviceId is not null)
-    {
-        await transaction.RollbackAsync(ct);
+    if (jobPreflight.Status != "AWAITING_SHOP_APPROVAL" ||
+        jobPreflight.LocalQueueReceivedUtc is not null ||
+        jobPreflight.ClaimedByAgentDeviceId is not null)
         return Results.Conflict(new
         {
             code = "photo_revision_not_allowed",
             message = "Photo enhancements can only be saved while this job is awaiting shop review and before any payment or printer handoff."
         });
-    }
 
-    var document = await db.PrintDocuments.SingleOrDefaultAsync(
-        item => item.TenantId == tenantId && item.PrintJobId == jobId, ct);
-    if (document is null || document.PurgedUtc is not null)
-    {
-        await transaction.RollbackAsync(ct);
+    var documentSnapshot = await db.PrintDocuments.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.PrintJobId == jobId, ct);
+    if (documentSnapshot is null || documentSnapshot.PurgedUtc is not null)
         return Results.NotFound();
-    }
 
-    if (!string.Equals(document.StorageMode, "CLOUD", StringComparison.Ordinal))
-    {
-        await transaction.RollbackAsync(ct);
+    if (!string.Equals(documentSnapshot.StorageMode, "CLOUD", StringComparison.Ordinal))
         return Results.Conflict(new
         {
             code = "photo_revision_local_storage",
             message = "This original is stored only on the paired shop computer. It has not been copied to cloud storage; local-only photo editing is not available in this release."
         });
-    }
 
-    var photoSourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+    var photoSourceMediaType = documentSnapshot.PhotoSourceMediaType ?? documentSnapshot.MediaType;
     if (photoSourceMediaType is not ("image/jpeg" or "image/png"))
-    {
-        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "photo_revision_source_not_image",
             message = "The shop editor can enhance an original JPG or PNG photo. This job has no retained editable photo source."
         });
-    }
 
-    var hasPayment = await db.PrintPayments.AnyAsync(item =>
+    var preflightHasPayment = await db.PrintPayments.AnyAsync(item =>
         item.TenantId == tenantId && item.PrintJobId == jobId &&
         item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
-    var hasBatchPayment = job.BatchId is Guid batchId && await db.PrintBatchPayments.AnyAsync(item =>
-        item.TenantId == tenantId && item.BatchId == batchId &&
-        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
-    if (hasPayment || hasBatchPayment)
-    {
-        await transaction.RollbackAsync(ct);
+    var preflightHasBatchPayment = jobPreflight.BatchId is Guid preflightBatchId &&
+        await db.PrintBatchPayments.AnyAsync(item =>
+            item.TenantId == tenantId && item.BatchId == preflightBatchId &&
+            item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    if (preflightHasPayment || preflightHasBatchPayment)
         return Results.Conflict(new
         {
             code = "photo_revision_payment_started",
             message = "This file or its batch already has a payment attempt. The original is locked against editing; use the existing refund/review workflow."
         });
-    }
 
     if (!context.Request.HasFormContentType)
     {
-        await transaction.RollbackAsync(ct);
         return Results.BadRequest(new { code = "photo_revision_form_required", message = "Send the prepared photo sheet as a multipart file." });
     }
 
     var form = await context.Request.ReadFormAsync(ct);
     if (form.Files.Count != 1)
     {
-        await transaction.RollbackAsync(ct);
         return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Save exactly one prepared photo-sheet PDF." });
     }
 
     var file = form.Files[0];
     if (file.Length is <= 0 or > UploadLimits.MaxFileBytes)
     {
-        await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_invalid",
@@ -4157,7 +4133,6 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
         photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
     {
-        await transaction.RollbackAsync(ct);
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
             ["photoDetails"] = [$"Choose a supported ID photo size and a quantity from 1 to {UploadLimits.MaxPhotoCount}."]
@@ -4168,7 +4143,6 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(
             form["editorSettingsJson"].FirstOrDefault(), out var editorSettingsJson))
     {
-        await transaction.RollbackAsync(ct);
         return Results.BadRequest(new
         {
             code = "photo_editor_settings_invalid",
@@ -4176,29 +4150,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         });
     }
 
-    var pricing = await db.ShopPricingProfiles.AsNoTracking()
-        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
-    if (pricing is null)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure photo prices before saving an enhanced photo job." });
-    }
-
-    long amount;
-    long unitPrice;
-    try
-    {
-        unitPrice = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
-        amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
-    }
-    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
-    }
-
     var newDocumentId = Guid.NewGuid();
-    var outputName = $"photo-sheet-{job.JobNumber}.pdf";
+    var outputName = $"photo-sheet-{jobPreflight.JobNumber}.pdf";
     StoredDocument stored;
     try
     {
@@ -4224,7 +4177,87 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         });
     }
 
+    // The replacement is now fully encrypted, hashed and layout-validated.
+    // Only now acquire the business-row lock and recheck all mutable eligibility.
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+    async Task<IResult> RejectStagedRevisionAsync(IResult response)
+    {
+        await transaction.RollbackAsync(ct);
+        await storage.DeleteAsync(stored.StorageKey);
+        return response;
+    }
+
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM ""PrintJobs"" WHERE ""Id"" = {jobId} AND ""TenantId"" = {tenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
+    if (job is null)
+        return await RejectStagedRevisionAsync(Results.NotFound());
+    if (job.PrivatePrinting ||
+        job.Status != "AWAITING_SHOP_APPROVAL" ||
+        job.LocalQueueReceivedUtc is not null ||
+        job.ClaimedByAgentDeviceId is not null)
+        return await RejectStagedRevisionAsync(Results.Conflict(new
+        {
+            code = "photo_revision_not_allowed",
+            message = "The job changed while the replacement was uploading. Refresh the queue and confirm the job is still awaiting shop review."
+        }));
+
+    var document = await db.PrintDocuments.SingleOrDefaultAsync(
+        item => item.TenantId == tenantId && item.PrintJobId == jobId, ct);
+    if (document is null || document.PurgedUtc is not null)
+        return await RejectStagedRevisionAsync(Results.NotFound());
+    if (!string.Equals(document.StorageMode, "CLOUD", StringComparison.Ordinal) ||
+        !string.Equals(document.StorageKey, documentSnapshot.StorageKey, StringComparison.Ordinal) ||
+        !string.Equals(document.Sha256, documentSnapshot.Sha256, StringComparison.OrdinalIgnoreCase))
+        return await RejectStagedRevisionAsync(Results.Conflict(new
+        {
+            code = "photo_revision_source_changed",
+            message = "The source document was changed while the replacement uploaded. Refresh the editor before trying again."
+        }));
+
+    var hasPayment = await db.PrintPayments.AnyAsync(item =>
+        item.TenantId == tenantId && item.PrintJobId == jobId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    var hasBatchPayment = job.BatchId is Guid batchId &&
+        await db.PrintBatchPayments.AnyAsync(item =>
+            item.TenantId == tenantId && item.BatchId == batchId &&
+            item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    if (hasPayment || hasBatchPayment)
+        return await RejectStagedRevisionAsync(Results.Conflict(new
+        {
+            code = "photo_revision_payment_started",
+            message = "A payment attempt started while the replacement uploaded. The original document remains unchanged."
+        }));
+
+    var pricing = await db.ShopPricingProfiles.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
+    if (pricing is null)
+        return await RejectStagedRevisionAsync(Results.Conflict(new
+        {
+            code = "shop_pricing_not_configured",
+            message = "Configure photo prices before saving an enhanced photo job."
+        }));
+
+    long amount;
+    long unitPrice;
+    try
+    {
+        unitPrice = PricingCalculator.PhotoUnitRate(photoSizeCode, pricing);
+        amount = PricingCalculator.CalculatePhoto(photoCount, photoSizeCode, pricing);
+    }
+    catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
+    {
+        return await RejectStagedRevisionAsync(Results.Conflict(new
+        {
+            code = "photo_pricing_unavailable",
+            message = exception.Message
+        }));
+    }
+
     var previousStorageKey = document.StorageKey;
+
     var now = DateTimeOffset.UtcNow;
     if (document.PhotoSourceOriginalFileName is null)
     {
