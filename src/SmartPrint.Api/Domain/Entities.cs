@@ -301,7 +301,7 @@ public sealed class PrintJob
     // The selected sheet density is part of the immutable photo quote/layout snapshot.
     // Nullable for legacy PHOTO jobs created before this column existed.
     public int? PhotosPerPage { get; set; }
-    public string PhotoPaperFinish { get; set; } = "GLOSSY";
+    public string PhotoPaperFinish { get; set; } = "PLAIN";
     public string PhotoOutputLayout { get; set; } = "A4_SHEET";
     public long PhotoUnitPriceMinorSnapshot { get; set; }
     public int? PricingVersion { get; set; }
