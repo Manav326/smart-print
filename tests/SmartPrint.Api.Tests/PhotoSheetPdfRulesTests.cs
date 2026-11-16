@@ -99,6 +99,61 @@ public sealed class PhotoSheetPdfRulesTests
             Pages(1, A4WidthPoints, A4HeightPoints), pageCount));
     }
 
+
+    [Theory]
+    [InlineData("35x45", 35, 45, 413, 531)]
+    [InlineData("25x35", 25, 35, 295, 413)]
+    [InlineData("2x2", 50.8, 50.8, 600, 600)]
+    [InlineData("4x6", 101.6, 152.4, 1200, 1800)]
+    public void AcceptsPhysicalPhotoPaperPagesForEverySupportedSize(
+        string sizeCode, double widthMm, double heightMm, int pixelWidth, int pixelHeight)
+    {
+        var widthPoints = widthMm * 72d / 25.4d;
+        var heightPoints = heightMm * 72d / 25.4d;
+        var image = FullPageImage(widthPoints, heightPoints, pixelWidth, pixelHeight);
+        var json = PagesWithImages(widthPoints, heightPoints, "[" + image + "]");
+
+        Assert.True(PhotoSheetPdfRules.HasExactlyPhotoPages(json, 1, "PHOTO_PAPER", sizeCode));
+    }
+
+    [Theory]
+    [InlineData("35x45", 35, 45, 413, 531)]
+    [InlineData("25x35", 25, 35, 295, 413)]
+    [InlineData("2x2", 50.8, 50.8, 600, 600)]
+    [InlineData("4x6", 101.6, 152.4, 1200, 1800)]
+    public void PhotoPaperPageCannotUseAnotherSizesGeometry(
+        string sizeCode, double widthMm, double heightMm, int pixelWidth, int pixelHeight)
+    {
+        var wrongWidth = widthMm * 72d / 25.4d + 10;
+        var heightPoints = heightMm * 72d / 25.4d;
+        var image = FullPageImage(wrongWidth, heightPoints, pixelWidth, pixelHeight);
+        var json = PagesWithImages(wrongWidth, heightPoints, "[" + image + "]");
+
+        Assert.False(PhotoSheetPdfRules.HasExactlyPhotoPages(json, 1, "PHOTO_PAPER", sizeCode));
+    }
+
+    [Fact]
+    public void IndividualPhotoPaperRequiresOnePhysicalPrintPerPage()
+    {
+        var widthPoints = 35d * 72d / 25.4d;
+        var heightPoints = 45d * 72d / 25.4d;
+        var page = Page(widthPoints, heightPoints, "[" + FullPageImage(widthPoints, heightPoints, 413, 531) + "]");
+        var twoPages = "[" + page + "," + page + "]";
+
+        Assert.True(PhotoSheetPdfRules.HasExactlyPhotoPages(twoPages, 2, "PHOTO_PAPER", "35x45"));
+        Assert.False(PhotoSheetPdfRules.HasExactlyPhotoPages(twoPages, 1, "PHOTO_PAPER", "35x45"));
+    }
+
+    [Fact]
+    public void A4SheetLayoutContinuesToRequireA4RegardlessOfPhotoSize()
+    {
+        var widthPoints = 35d * 72d / 25.4d;
+        var heightPoints = 45d * 72d / 25.4d;
+        var photoPage = PagesWithImages(widthPoints, heightPoints, "[" + FullPageImage(widthPoints, heightPoints, 413, 531) + "]");
+
+        Assert.False(PhotoSheetPdfRules.HasExactlyPhotoPages(photoPage, 1, "A4_SHEET", "35x45"));
+    }
+
     private static string Pages(int count, double width, double height)
     {
         var page = Page(width, height, "[" + FullPageImage(width, height) + "]");
