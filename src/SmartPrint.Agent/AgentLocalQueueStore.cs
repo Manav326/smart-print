@@ -198,28 +198,25 @@ public sealed class AgentLocalQueueStore
 
         lock (queueIndexSync)
         {
-            foreach (var staleId in queueIndex!.Keys.Where(jobId => !presentJobIds.Contains(jobId)).ToArray())
+            var index = queueIndex ?? throw new InvalidOperationException("The queue index must be loaded before it can be refreshed.");
+            foreach (var staleId in index.Keys.Where(jobId => !presentJobIds.Contains(jobId)).ToArray())
             {
-                queueIndex.Remove(staleId);
+                index.Remove(staleId);
                 queueManifestStamps.Remove(staleId);
             }
         }
     }
 
-    /// <summary>
-    /// Checks the requested manifest's cheap filesystem stamp before using cached
-    /// JSON. A file edited or replaced outside this process is reloaded; deletion
-    /// removes it from the index. Normal writes still update the index directly.
-    /// </summary>
     private void RefreshManifestFromDisk(Guid jobId, bool forceReload = false)
     {
         var path = GetManifestPath(jobId);
         var info = new FileInfo(path);
         lock (queueIndexSync)
         {
+            var index = queueIndex ?? throw new InvalidOperationException("The queue index must be loaded before a manifest can be refreshed.");
             if (!info.Exists)
             {
-                queueIndex!.Remove(jobId);
+                index.Remove(jobId);
                 queueManifestStamps.Remove(jobId);
                 return;
             }
@@ -245,7 +242,7 @@ public sealed class AgentLocalQueueStore
             if (entry.JobId != jobId)
                 throw new InvalidDataException("A local print queue manifest does not match its filename.");
 
-            queueIndex[jobId] = entry;
+            index[jobId] = entry;
             queueManifestStamps[jobId] = stamp;
         }
     }
