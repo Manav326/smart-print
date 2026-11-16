@@ -141,7 +141,7 @@ async function createJpeg(page, background) {
 function extractEncryptedFile(request) {
   const headers = request.headers();
   const contentType = headers["content-type"] ?? "";
-  assert.match(contentType, /^application\\/vnd\\.smartprint\\.qsp2(?:;|$)/i,
+  assert.match(contentType, /^application\/vnd\.smartprint\.qsp2(?:;|$)/i,
     "Private relay must stream the QSP2 document, not wrap it in multipart form data.");
   assert.equal(headers["x-print-encrypted-format"], "QSP2");
   assert.ok(headers["x-print-encrypted-key"], "QSP2 must wrap its one-time data key for the paired Agent.");
