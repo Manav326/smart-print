@@ -203,6 +203,8 @@ function Wait-LocalApiReady([int]$TimeoutSeconds = 45) {
 
 function Assert-ServiceVersion([string]$ExpectedVersion) {
     Wait-Service "Running"
+    $serviceIdentity = (Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'").StartName
+    Assert-True ($serviceIdentity -match 'LocalService$') "SmartPrint Agent must run as NT AUTHORITY\LocalService, not $serviceIdentity."
     $path = Get-ServiceBinaryPath
     Assert-True (-not [string]::IsNullOrWhiteSpace($path)) "Windows service registration is missing."
     Assert-True ($path -match [regex]::Escape("\agent\$ExpectedVersion-")) "Service points to the wrong Agent payload: $path"
@@ -216,10 +218,12 @@ function Invoke-Fixture([string]$Mode) {
     if ($LASTEXITCODE -ne 0) { throw "Lifecycle fixture '$Mode' failed with exit code $LASTEXITCODE." }
 }
 
-function Invoke-FixtureAsSystem([string]$Mode, [string[]]$AdditionalArguments = @()) {
-    Write-Host "[QA-ACTION] Run protected Agent data-preservation fixture as LocalSystem: mode=$Mode" -ForegroundColor Cyan
-    $taskName = "SmartPrintLifecycleSystemPrinterProbe"
-    $resultPath = Join-Path $env:RUNNER_TEMP "smartprint-system-fixture-$Mode.txt"
+function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArguments = @()) {
+    Write-Host "[QA-ACTION] Run protected Agent data-preservation fixture as LocalService: mode=$Mode" -ForegroundColor Cyan
+    $taskName = "SmartPrintLifecycleLocalServicePrinterProbe"
+    $fixtureDataDirectory = Join-Path $programDataRoot "Lifecycle"
+    New-Item -ItemType Directory -Force -Path $fixtureDataDirectory | Out-Null
+    $resultPath = Join-Path $fixtureDataDirectory "smartprint-localservice-fixture-$Mode.txt"
     $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
     $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
     Assert-True (Test-Path -LiteralPath $assemblyPath) "The Agent lifecycle fixture assembly was not built."
@@ -229,7 +233,7 @@ function Invoke-FixtureAsSystem([string]$Mode, [string[]]$AdditionalArguments = 
     $arguments = '"' + $assemblyPath + '" ' + $Mode + ' "' + $resultPath + '"'
     if ($extraArguments.Count -gt 0) { $arguments += ' ' + ($extraArguments -join ' ') }
     $action = New-ScheduledTaskAction -Execute $dotnetPath -Argument $arguments
-    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+    $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\LocalService" -LogonType ServiceAccount -RunLevel Limited
     try {
         Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
         $script:ownsTask = $true
@@ -239,7 +243,7 @@ function Invoke-FixtureAsSystem([string]$Mode, [string[]]$AdditionalArguments = 
         while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
             $poll++
             if ($poll -eq 1 -or $poll % 10 -eq 0) {
-                Write-Host "[QA-PROGRESS] LocalSystem fixture | mode=$Mode | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
+                Write-Host "[QA-PROGRESS] LocalService fixture | mode=$Mode | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
             }
             Start-Sleep -Milliseconds 500
         }
@@ -260,7 +264,7 @@ function Assert-PreservedFixtures {
     $currentHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
     Assert-True ($currentHash -eq $identityHash) "The machine Agent identity changed during install/uninstall."
     Assert-True (Test-Path -LiteralPath $networkPreferencePath -PathType Leaf) "The shop's saved local-network selection was removed."
-    $fixtureResult = Invoke-FixtureAsSystem "verify"
+    $fixtureResult = Invoke-FixtureAsLocalService "verify"
     Assert-True ($fixtureResult -eq "VERIFIED") "The protected queue fixture verification returned an unexpected result: $fixtureResult"
 }
 
@@ -274,10 +278,29 @@ function Add-QueueFixture {
     $script:fixturePrinter = Get-Printer -Name $testPrinterName -ErrorAction Stop
 }
 
-function Assert-SystemCanDiscoverFixturePrinter {
-    Write-Host "[QA-ACTION] Verify Agent printer discovery as LocalSystem using the temporary lifecycle queue." -ForegroundColor Cyan
-    $result = Invoke-FixtureAsSystem "discover-printer" @($testPrinterName)
-    Assert-True ($result -eq "FOUND") "The Agent's LocalSystem printer-discovery result was unexpected: $result"
+function Assert-LocalServiceCanDiscoverFixturePrinter {
+    Write-Host "[QA-ACTION] Verify Agent printer discovery as LocalService using the temporary lifecycle queue." -ForegroundColor Cyan
+    $result = Invoke-FixtureAsLocalService "discover-printer" @($testPrinterName)
+    Assert-True ($result -eq "FOUND") "The Agent's LocalService printer-discovery result was unexpected: $result"
+}
+
+function Assert-LocalServiceCanPrintFixture {
+    $outputPath = Join-Path $programDataRoot "Lifecycle\localservice-spooler-output.pdf"
+    Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+    Write-Host "[QA-ACTION] Submit a synthetic GDI document to the temporary Microsoft Print to PDF queue as LocalService." -ForegroundColor Cyan
+    $result = Invoke-FixtureAsLocalService "print-printer" @($testPrinterName, $outputPath)
+    Assert-True ($result -eq "PRINTED") "LocalService could not produce a verified PDF through the selected Windows printer queue: $result"
+    Assert-True (Test-Path -LiteralPath $outputPath -PathType Leaf) "The LocalService spooler test did not create its PDF output."
+    $pdfBytes = [System.IO.File]::ReadAllBytes($outputPath)
+    try {
+        Assert-True ($pdfBytes.Length -gt 1000) "The LocalService spooler output PDF is empty or truncated."
+        Assert-True ([System.Text.Encoding]::ASCII.GetString($pdfBytes, 0, 5) -eq "%PDF-") "The LocalService spooler output is not a PDF."
+        Assert-True ([System.Text.Encoding]::ASCII.GetString($pdfBytes).Contains("%%EOF")) "The LocalService spooler output PDF is incomplete."
+    }
+    finally {
+        [System.Security.Cryptography.CryptographicOperations]::ZeroMemory($pdfBytes)
+    }
+    Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
 }
 
 function Assert-QueueUntouched {
@@ -288,6 +311,10 @@ function Assert-QueueUntouched {
     $default = Get-CimInstance Win32_Printer | Where-Object { $_.Default } | Select-Object -First 1
     $currentDefault = if ($default) { $default.Name } else { $null }
     Assert-True ($currentDefault -eq $originalDefaultPrinter) "SmartPrint changed the Windows default printer."
+    $rules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
+    if ($rules.Count -gt 0) {
+        Assert-True (($rules | Where-Object { $_.Profile -ne "Private" }).Count -eq 0) "The SmartPrint Agent firewall rule must be limited to the Private network profile."
+    }
 }
 
 function Write-StepSummary {
@@ -314,7 +341,7 @@ try {
     Assert-True (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) "Refusing to test on a runner that already has the SmartPrint Agent service."
     Assert-True (-not (Test-Path -LiteralPath $installRoot)) "Refusing to test on a runner that already has a SmartPrint installation directory."
     Assert-True (-not (Get-Printer -Name $testPrinterName -ErrorAction SilentlyContinue)) "Refusing to overwrite an existing printer queue named '$testPrinterName'."
-    Assert-True (-not (Get-ScheduledTask -TaskName "SmartPrintLifecycleSystemPrinterProbe" -ErrorAction SilentlyContinue)) "Refusing to replace an existing lifecycle printer-probe task."
+    Assert-True (-not (Get-ScheduledTask -TaskName "SmartPrintLifecycleLocalServicePrinterProbe" -ErrorAction SilentlyContinue)) "Refusing to replace an existing lifecycle printer-probe task."
     $existingRules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
     Assert-True ($existingRules.Count -eq 0) "Refusing to alter existing SmartPrint firewall rules."
     Assert-True (-not (Test-Path -LiteralPath $identityPath)) "Refusing to overwrite an existing machine Agent identity fixture."
@@ -425,12 +452,65 @@ else if (mode == "discover-printer")
         throw new ArgumentException("discover-printer requires an output path and expected queue name.");
     var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
     if (!discovery.TryDiscover(out var printers))
-        throw new InvalidOperationException("The Agent's Windows WMI printer discovery failed under LocalSystem.");
+        throw new InvalidOperationException("The Agent's Windows WMI printer discovery failed under LocalService.");
     var expectedQueue = args[2];
     if (!printers.Any(printer => string.Equals(printer.QueueName, expectedQueue, StringComparison.OrdinalIgnoreCase)))
-        throw new InvalidOperationException($"The Agent's LocalSystem discovery did not find machine-wide printer queue '{expectedQueue}'.");
+        throw new InvalidOperationException($"The Agent's LocalService discovery did not find machine-wide printer queue '{expectedQueue}'.");
     await File.WriteAllTextAsync(args[1], "FOUND");
-    Console.WriteLine($"LocalSystem Agent discovery found '{expectedQueue}'.");
+    Console.WriteLine($"LocalService Agent discovery found '{expectedQueue}'.");
+}
+else if (mode == "print-printer")
+{
+    if (args.Length < 4)
+        throw new ArgumentException("print-printer requires a result path, queue name and PDF output path.");
+    var expectedQueue = args[2];
+    var outputPath = args[3];
+    using var bitmap = new SkiaSharp.SKBitmap(180, 240);
+    bitmap.Erase(SkiaSharp.SKColors.White);
+    using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+    using (var paint = new SkiaSharp.SKPaint { Color = new SkiaSharp.SKColor(32, 96, 180), IsAntialias = true })
+        canvas.DrawRect(new SkiaSharp.SKRect(18, 18, 162, 222), paint);
+    using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+    using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+    var bytes = encoded.ToArray();
+    var entry = new AgentLocalQueueEntry(
+        Guid.NewGuid(), "SP-LOCAL-SERVICE-PRINT", Guid.NewGuid(), expectedQueue, expectedQueue,
+        "localservice-printer-probe.png", "image/png",
+        Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+        1, 1, "Colour", "A4", false, "INR", 100,
+        "SmartPrint-LocalService-Printer-Probe", "ACKNOWLEDGED",
+        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3));
+    try
+    {
+        var receipt = new WindowsPrintExecutor().PrintToFile(
+            entry, bytes, outputPath, CancellationToken.None);
+        var deadline = DateTime.UtcNow.AddSeconds(45);
+        var outputVerified = false;
+        while (DateTime.UtcNow < deadline && !outputVerified)
+        {
+            if (File.Exists(outputPath))
+            {
+                try
+                {
+                    var pdf = await File.ReadAllBytesAsync(outputPath);
+                    try
+                    {
+                        outputVerified = pdf.Length > 1000 &&
+                            pdf.AsSpan(0, 5).SequenceEqual("%PDF-"u8) &&
+                            System.Text.Encoding.ASCII.GetString(pdf).Contains("%%EOF", StringComparison.Ordinal);
+                    }
+                    finally { CryptographicOperations.ZeroMemory(pdf); }
+                }
+                catch (IOException) { /* The Windows print processor may still be writing. */ }
+            }
+            if (!outputVerified) await Task.Delay(500);
+        }
+        if (!outputVerified)
+            throw new InvalidOperationException("The LocalService Windows printer did not produce a complete PDF.");
+        await File.WriteAllTextAsync(args[1], "PRINTED");
+        Console.WriteLine($"LocalService submitted spooler job {receipt.JobId} and verified its PDF output.");
+    }
+    finally { CryptographicOperations.ZeroMemory(bytes); }
 }
 else
 {
@@ -444,7 +524,8 @@ else
         $script:identityHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
         Assert-True (Test-Path -LiteralPath $queueManifest) "The staged queue manifest was not created."
         Add-QueueFixture
-        Assert-SystemCanDiscoverFixturePrinter
+        Assert-LocalServiceCanDiscoverFixturePrinter
+        Assert-LocalServiceCanPrintFixture
     }
 
     if ($seedOk) {
@@ -566,7 +647,7 @@ finally {
         try { Invoke-Uninstall } catch { Write-Warning "Final uninstall cleanup: $($_.Exception.Message)" }
     }
     if ($ownsTask) {
-        Unregister-ScheduledTask -TaskName "SmartPrintLifecycleSystemPrinterProbe" -Confirm:$false -ErrorAction SilentlyContinue
+        Unregister-ScheduledTask -TaskName "SmartPrintLifecycleLocalServicePrinterProbe" -Confirm:$false -ErrorAction SilentlyContinue
         $script:ownsTask = $false
     }
     if ($ownsPrinter) {
