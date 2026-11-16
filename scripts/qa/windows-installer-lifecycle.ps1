@@ -280,7 +280,22 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     }
 }
 
+function Assert-PrivateQueueAcl {
+    $queueRoot = Join-Path $programDataRoot "LocalQueue"
+    $queueSecurity = Get-Acl -LiteralPath $queueRoot
+    Assert-True ($queueSecurity.AreAccessRulesProtected) "The encrypted SmartPrint queue must have a protected, non-inheriting ACL."
+    $allowedSids = @(
+        $queueSecurity.Access |
+            Where-Object { $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow } |
+            ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }
+    )
+    Assert-True ($allowedSids -contains "S-1-5-18") "The encrypted SmartPrint queue must retain SYSTEM access."
+    Assert-True ($allowedSids -contains "S-1-5-19") "The encrypted SmartPrint queue must grant LocalService access."
+    Assert-True (-not ($allowedSids -contains "S-1-5-32-544")) "The encrypted SmartPrint queue must not grant normal Administrators access."
+}
+
 function Assert-PreservedFixtures {
+    Assert-PrivateQueueAcl
     Assert-True (Test-Path -LiteralPath $identityPath -PathType Leaf) "The machine Agent identity was removed."
     $currentHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
     Assert-True ($currentHash -eq $identityHash) "The machine Agent identity changed during install/uninstall."
