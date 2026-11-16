@@ -49,7 +49,8 @@ public sealed record AgentPrivateRelayItem(
     string PrinterName, string QueueName, string FileExtension, string MediaType,
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
-    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL", int PagesPerSheet = 1);
+    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL", int PagesPerSheet = 1,
+    string PhotoPaperFinish = "PLAIN", string PhotoOutputLayout = "A4_SHEET", string? PhotoSizeCode = null);
 
 public sealed record AgentPrivateTestOutputRequest(string FileName, long SizeBytes, string Sha256);
 
@@ -110,7 +111,10 @@ public sealed record AgentLocalQueueEntry(
     string? PhotoSourceSha256 = null,
     long? PhotoSourceSizeBytes = null,
     bool PrivateSpoolerCleanupCompleted = false,
-    int PagesPerSheet = 1);
+    int PagesPerSheet = 1,
+    string PhotoPaperFinish = "PLAIN",
+    string PhotoOutputLayout = "A4_SHEET",
+    string? PhotoSizeCode = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
@@ -154,7 +158,9 @@ public sealed record LocalAgentPhotoRevisionRequest(
     int PhotosPerPage,
     long? ExpectedQuotedAmountMinor = null,
     int? ExpectedPricingVersion = null,
-    string? EditorSettingsJson = null);
+    string? EditorSettingsJson = null,
+    string PhotoOutputLayout = "A4_SHEET",
+    string PhotoPaperFinish = "PLAIN");
 
 public sealed record LocalAgentPhotoRevisionAuthorizationResponse(
     Guid Id,
@@ -168,7 +174,9 @@ public sealed record LocalAgentPhotoRevisionAuthorizationResponse(
     int PhotosPerPage,
     long PhotoUnitPriceMinor,
     long QuotedAmountMinor,
-    int PricingVersion);
+    int PricingVersion,
+    string PhotoOutputLayout = "A4_SHEET",
+    string PhotoPaperFinish = "PLAIN");
 public static class AgentLocalQueueBatchSelector
 {
     public static IReadOnlyList<T> SelectNext<T>(
