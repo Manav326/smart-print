@@ -337,8 +337,6 @@ packages:
     cpu: [x64]
     os: [linux]
 
-  '@noble/hashes@2.4.0': {}
-
   '@rollup/rollup-android-arm-eabi@4.67.3':
     resolution: {integrity: sha512-o4kGHKu2YRn/jegh1XMs6+1/3SuX6AfWaACGEWavFvN5D6YZd9OrMEBqcIMj0uTeKZr6nTXPhlpkc0IXC6DMXQ==}
     cpu: [arm]
@@ -971,6 +969,8 @@ snapshots:
 
   '@napi-rs/lzma-linux-x64-gnu@1.5.1':
     optional: true
+
+  '@noble/hashes@2.4.0': {}
 
   '@rollup/rollup-android-arm-eabi@4.67.3':
     optional: true
