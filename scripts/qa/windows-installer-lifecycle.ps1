@@ -312,6 +312,25 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     }
 }
 
+function Assert-AllowSidSet([string]$Path, [string[]]$ExpectedSids, [string]$Label) {
+    $security = Get-Acl -LiteralPath $Path
+    $actualSids = @(
+        $security.Access |
+            Where-Object { $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow } |
+            ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } |
+            Sort-Object -Unique
+    )
+    $expected = @($ExpectedSids | Sort-Object -Unique)
+    Assert-True (($actualSids -join ",") -eq ($expected -join ",")) "$Label has unexpected allow principals. Expected '$($expected -join ', ')'; actual '$($actualSids -join ', ')'."
+}
+
+function Assert-MachineDataAcl {
+    $expectedMachineDataSids = @("S-1-5-18", "S-1-5-19", "S-1-5-32-544")
+    Assert-AllowSidSet $programDataRoot $expectedMachineDataSids "SmartPrint machine-data root"
+    Assert-AllowSidSet $identityPath $expectedMachineDataSids "SmartPrint machine identity"
+    Assert-AllowSidSet $networkPreferencePath $expectedMachineDataSids "SmartPrint local-network preference"
+}
+
 function Assert-PrivateQueueAcl {
     $queueRoot = Join-Path $programDataRoot "LocalQueue"
     Assert-True (Test-Path -LiteralPath $queueRoot -PathType Container) "The encrypted SmartPrint queue directory is missing."
@@ -344,6 +363,7 @@ function Assert-PrivateQueueAcl {
 }
 
 function Assert-PreservedFixtures {
+    Assert-MachineDataAcl
     Assert-PrivateQueueAcl
     Assert-True (Test-Path -LiteralPath $identityPath -PathType Leaf) "The machine Agent identity was removed."
     $currentHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
