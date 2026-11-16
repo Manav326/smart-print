@@ -108,6 +108,19 @@ public sealed class WindowsPrintExecutor
             !CryptographicOperations.FixedTimeEquals(SHA256.HashData(bytes), Convert.FromHexString(entry.Sha256)))
             throw new PrintExecutionBlockedException("LOCAL_DOCUMENT_INTEGRITY_MISMATCH", "The local document does not match the verified upload.");
 
+        // Defense in depth: public API validation is not a substitute for validating
+        // persisted or locally replayed queue metadata at the final print boundary.
+        if (entry.PagesPerSheet is < 1 or > 500)
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_INVALID",
+                "Pages per sheet must be between 1 and 500.");
+        if (entry.PagesPerSheet > 1 &&
+            (!string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(entry.PrintKind, "DOCUMENT", StringComparison.OrdinalIgnoreCase)))
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_PDF_REQUIRED",
+                "Driver-backed N-up is available only for unprepared PDF documents.");
+
         using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
