@@ -29,8 +29,12 @@ test("Private Printing relays only the encrypted print document and required quo
 
   const uploadStart = api.indexOf("export async function uploadCustomerDocumentLocally(");
   const upload = api.slice(uploadStart);
-  assert.match(upload, /crypto\.subtle\.encrypt\(\{ name: "AES-GCM"/);
-  assert.match(upload, /form\.append\("file", new Blob\(\[ciphertext\].*private-document\.bin/);
+  assert.match(upload, /preparePrivateQsp2Upload\(file,\s*\{/);
+  assert.match(upload, /privateUpload\.createAttempt\(\)/);
+  assert.match(upload, /"X-Print-Encrypted-Format": "QSP2"/);
+  assert.match(upload, /"Content-Type": "application\/vnd\.smartprint\.qsp2"/);
+  assert.match(upload, /body: attempt\.body/);
+  assert.doesNotMatch(upload, /file\.arrayBuffer\(\)|crypto\.subtle\.encrypt\(\{ name: "AES-GCM"/);
   const relayStart = upload.indexOf("if (privatePrinting) {", upload.indexOf("if (ticket.agentDeviceId === localAgent.agentDeviceId"));
   const relayEnd = upload.indexOf("// A LAN response can be lost", relayStart);
   assert.ok(relayStart >= 0 && relayEnd > relayStart);
@@ -399,7 +403,7 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.ok(route.indexOf("var documentSnapshot =") < route.indexOf("await using var transaction"));
  assert.ok(route.indexOf("await using var transaction") < route.indexOf("var document = await db.PrintDocuments"));
  assert.match(route,/photoSourceMediaType is not \("image\/jpeg" or "image\/png"\)/);
- assert.match(route,/if \(job\.PrivatePrinting\)/);
+ assert.match(route,/if \(jobPreflight\.PrivatePrinting\)/);\n assert.match(route,/if \(job\.PrivatePrinting \|\|/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
  assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
  assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
