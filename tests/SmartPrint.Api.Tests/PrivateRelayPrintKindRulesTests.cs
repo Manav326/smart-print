@@ -18,6 +18,20 @@ public sealed class PrivateRelayPrintKindRulesTests
     }
 
     [Theory]
+    [InlineData("DOCUMENT", true, "ID_DOCUMENT")]
+    [InlineData("DOCUMENT", false, "DOCUMENT")]
+    [InlineData("PHOTO", false, "PHOTO")]
+    [InlineData(null, false, "DOCUMENT")]
+    public void CustomerStatusRestoresTicketOnlyIdDocumentKind(
+        string? storedPrintKind, bool hasIdDocumentTicket, string expected)
+    {
+        Assert.Equal(
+            expected,
+            PrivateRelayPrintKindRules.ResolveCustomerStatusPrintKind(
+                storedPrintKind, hasIdDocumentTicket));
+    }
+
+    [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("UNKNOWN")]
