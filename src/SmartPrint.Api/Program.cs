@@ -3827,6 +3827,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
         : null;
     if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerObservedUtc, printerStatus))
     {
+        if (!SpoolerOutputConfirmationPolicy.IsPhysicalOutputConfirmationStatus(job.Status))
+            return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
         if (SpoolerOutputConfirmationPolicy.IsRetained(job.SpoolerStatus))
             return Results.Conflict(new
             {
