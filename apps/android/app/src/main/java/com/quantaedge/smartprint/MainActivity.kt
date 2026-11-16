@@ -4109,7 +4109,7 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }
                             }
-                            parts.size in 3..6 && parts[0] == "previewCustomerPdf" &&
+                            parts.size in 3..7 && parts[0] == "previewCustomerPdf" &&
                                 isCustomerUploadPdfPreviewToken(parts[1]) && parts[2].toIntOrNull() != null -> {
                                 val token = parts[1]
                                 // The requested index now identifies an output sheet, not a source PDF page.
@@ -4121,6 +4121,12 @@ class MainActivity : AppCompatActivity() {
                                 val orientation = parts.getOrNull(5)?.takeIf {
                                     it in setOf("AUTO", "PORTRAIT", "LANDSCAPE")
                                 } ?: "AUTO"
+                                val pagesPerSheetDirection = parts.getOrNull(6)?.takeIf {
+                                    it in setOf(
+                                        "RightBottom", "BottomRight", "LeftBottom", "BottomLeft",
+                                        "RightTop", "TopRight", "LeftTop", "TopLeft"
+                                    )
+                                } ?: "RightBottom"
                                 if (pagesPerSheet !in 1..500) {
                                     replyProxy.postMessage("CUSTOMER_PDF_PREVIEW_FAILED|$token|Invalid pages-per-sheet value.")
                                 } else {
@@ -4130,7 +4136,8 @@ class MainActivity : AppCompatActivity() {
                                             customerUploadPdfPreviewSensitive = token in customerUploadPdfPreviewSensitiveTokens
                                             applySensitiveWindowProtection()
                                             renderCustomerPdfPreview(
-                                                token, sheetIndex, pagesPerSheet, paperSize, orientation, replyProxy
+                                                token, sheetIndex, pagesPerSheet, paperSize, orientation,
+                                                pagesPerSheetDirection, replyProxy
                                             )
                                         }
                                     }
@@ -6957,6 +6964,7 @@ class MainActivity : AppCompatActivity() {
         pagesPerSheet: Int,
         paperSize: String,
         orientation: String,
+        pagesPerSheetDirection: String,
         replyProxy: JavaScriptReplyProxy
     ) {
         Thread {
@@ -6977,13 +6985,15 @@ class MainActivity : AppCompatActivity() {
                             lastSourcePage,
                             pagesPerSheet,
                             paperSize,
-                            orientation
+                            orientation,
+                            pagesPerSheetDirection
                         )
                         JSONObject()
                             .put("token", token)
                             .put("pageIndex", sheetIndex)
                             .put("pageCount", sheetCount)
                             .put("pagesPerSheet", pagesPerSheet)
+                            .put("pagesPerSheetDirection", pagesPerSheetDirection)
                             .put("paperSize", paperSize)
                             .put("orientation", orientation)
                             .put("firstSourcePage", firstSourcePage + 1)
@@ -7012,7 +7022,8 @@ class MainActivity : AppCompatActivity() {
         lastSourcePageExclusive: Int,
         pagesPerSheet: Int,
         paperSize: String,
-        orientation: String
+        orientation: String,
+        pagesPerSheetDirection: String
     ): String {
         val firstPage = renderer.openPage(firstSourcePage)
         val firstPageLandscape = firstPage.width > firstPage.height
@@ -7057,8 +7068,18 @@ class MainActivity : AppCompatActivity() {
 
             for (sourcePage in firstSourcePage until lastSourcePageExclusive) {
                 val slot = sourcePage - firstSourcePage
-                val column = slot % columns
-                val row = slot / columns
+                val (column, row) = when (pagesPerSheetDirection) {
+                    "BottomRight" -> (slot / rows) to (slot % rows)
+                    "LeftBottom" -> (columns - 1 - (slot % columns)) to (slot / columns)
+                    "BottomLeft" -> (columns - 1 - (slot / rows)) to (slot % rows)
+                    "RightTop" -> (slot % columns) to (rows - 1 - (slot / columns))
+                    "TopRight" -> (slot / rows) to (rows - 1 - (slot % rows))
+                    "LeftTop" -> (columns - 1 - (slot % columns)) to
+                        (rows - 1 - (slot / columns))
+                    "TopLeft" -> (columns - 1 - (slot / rows)) to
+                        (rows - 1 - (slot % rows))
+                    else -> (slot % columns) to (slot / columns)
+                }
                 val left = margin + column * (cellWidth + gap)
                 val top = margin + row * (cellHeight + gap)
                 val cell = android.graphics.RectF(left, top, left + cellWidth, top + cellHeight)
