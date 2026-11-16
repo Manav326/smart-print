@@ -124,7 +124,9 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     string? PhotoSizeCode = null,
     int? PhotoCount = null,
     int? PhotosPerPage = null,
-    string? DetectedFileExtension = null);
+    string? DetectedFileExtension = null,
+    string PhotoPaperFinish = "GLOSSY",
+    string PhotoOutputLayout = "A4_SHEET");
 
 public sealed record RecordPrintRefundRequest(
     string RefundMethod,
@@ -163,7 +165,8 @@ public sealed record AgentPrivateRelayItem(
     string PrinterName, string QueueName, string FileExtension, string MediaType,
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
-    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL");
+    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL",
+    string PhotoPaperFinish = "GLOSSY", string PhotoOutputLayout = "A4_SHEET");
 
 public sealed record AgentPrivateTestOutputRequest(string FileName, long SizeBytes, string Sha256);
 
