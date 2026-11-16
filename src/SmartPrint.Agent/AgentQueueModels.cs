@@ -35,7 +35,9 @@ public sealed record AgentClaimedJob(
     string Orientation = "AUTO",
     bool PdfBrandingEnabled = false,
     bool PrivatePrinting = false,
-    string PrintKind = "DOCUMENT");
+    string PrintKind = "DOCUMENT",
+    string PhotoPaperFinish = "GLOSSY",
+    string PhotoOutputLayout = "A4_SHEET");
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
@@ -48,7 +50,8 @@ public sealed record AgentPrivateRelayItem(
     string PrinterName, string QueueName, string FileExtension, string MediaType,
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
-    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL");
+    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL",
+    string PhotoPaperFinish = "GLOSSY", string PhotoOutputLayout = "A4_SHEET");
 
 public sealed record AgentPrivateTestOutputRequest(string FileName, long SizeBytes, string Sha256);
 
@@ -108,7 +111,9 @@ public sealed record AgentLocalQueueEntry(
     string? PhotoSourceMediaType = null,
     string? PhotoSourceSha256 = null,
     long? PhotoSourceSizeBytes = null,
-    bool PrivateSpoolerCleanupCompleted = false);
+    bool PrivateSpoolerCleanupCompleted = false,
+    string PhotoPaperFinish = "GLOSSY",
+    string PhotoOutputLayout = "A4_SHEET");
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
@@ -152,7 +157,9 @@ public sealed record LocalAgentPhotoRevisionRequest(
     int PhotosPerPage,
     long? ExpectedQuotedAmountMinor = null,
     int? ExpectedPricingVersion = null,
-    string? EditorSettingsJson = null);
+    string? EditorSettingsJson = null,
+    string PhotoPaperFinish = "GLOSSY",
+    string PhotoOutputLayout = "A4_SHEET");
 
 public sealed record LocalAgentPhotoRevisionAuthorizationResponse(
     Guid Id,
