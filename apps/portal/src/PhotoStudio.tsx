@@ -864,7 +864,7 @@ export default function PhotoStudio({
               <div><span>{isPhotoPaperLayout ? "Individual photo prints" : "A4 pages in this job"}</span><strong>{isPhotoPaperLayout ? copies : sheetCount}</strong></div>
               <div><span>Preview page</span><strong>{previewPageIndex+1} of {sheetCount}</strong></div>
               {!isPhotoPaperLayout && copies>photosPerPage&&copies%photosPerPage!==0&&<small>Final A4 page: {copies%photosPerPage} photos, with the remaining sheet area left blank.</small>}
-              <small>Output: {isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm each · ${photoPaperFinish.toLowerCase()} photo paper` : "regular A4 paper"}</small>
+              <small>Output: {outputDescription}</small>
               {mode !== "private-library"&&<small>Shop rate: {formatPhotoRate(photoPrices[size.id] ?? 0)} per photo. The server confirms the final total in your quote.</small>}
             </div>
           </>}
