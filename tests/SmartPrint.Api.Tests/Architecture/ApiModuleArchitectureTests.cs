@@ -100,8 +100,10 @@ public sealed class ApiModuleArchitectureTests
         {
             var source = RemoveComments(File.ReadAllText(file.Path));
             var references = UsingDirective.Matches(source)
+                .Cast<Match>()
                 .Select(match => match.Groups["namespace"].Value)
                 .Concat(ModuleReference.Matches(source)
+                    .Cast<Match>()
                     .Select(match => match.Value.TrimStart()))
                 .Where(value => value.StartsWith(ModuleNamespacePrefix, StringComparison.Ordinal));
 
@@ -138,8 +140,9 @@ public sealed class ApiModuleArchitectureTests
         {
             var source = RemoveComments(File.ReadAllText(file.Path));
             var references = UsingDirective.Matches(source)
+                .Cast<Match>()
                 .Select(match => match.Groups["namespace"].Value)
-                .Concat(ModuleReference.Matches(source).Select(match => match.Value))
+                .Concat(ModuleReference.Matches(source).Cast<Match>().Select(match => match.Value))
                 .ToArray();
 
             IEnumerable<string> forbiddenPrefixes = file.Layer switch
@@ -222,7 +225,7 @@ public sealed class ApiModuleArchitectureTests
 
         var references = UsingDirective.Matches(source)
             .Select(match => match.Groups["namespace"].Value)
-            .Concat(ModuleReference.Matches(source).Select(match => match.Value))
+            .Concat(ModuleReference.Matches(source).Cast<Match>().Select(match => match.Value))
             .Where(reference => reference.StartsWith(ModuleNamespacePrefix, StringComparison.Ordinal));
 
         foreach (var reference in references.Distinct(StringComparer.Ordinal))
