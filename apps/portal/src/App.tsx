@@ -3986,6 +3986,7 @@ type CustomerGroupSettings = {
   advancedEnabled: boolean;
   paperSize: CustomerPrintRequestSettings["paperSize"];
   orientation: CustomerPrintRequestSettings["orientation"];
+  pagesPerSheet: number;
 };
 type CustomerFileSettings = CustomerGroupSettings & { custom: boolean };
 
@@ -4089,6 +4090,19 @@ function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSetting
   const maximum=maximumBySize[settings.sizeCode];
   return maximum!==undefined&&Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
     Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum;
+}
+
+function parseCustomerPagesPerSheetCapabilities(capabilitiesJson?:string|null):number[] {
+  if(!capabilitiesJson)return [1];
+  try {
+    const capabilities=JSON.parse(capabilitiesJson) as {pagesPerSheet?:unknown};
+    const values=Array.isArray(capabilities.pagesPerSheet)?capabilities.pagesPerSheet:[];
+    const supported=values.filter((value):value is number=>
+      typeof value==="number"&&Number.isInteger(value)&&value>1&&value<=500);
+    return [1,...new Set(supported)].sort((left,right)=>left-right);
+  } catch {
+    return [1];
+  }
 }
 
 const identifiedCustomerDocumentTypes=new WeakMap<File,SupportedDocumentType>();
@@ -4210,7 +4224,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   // Private Printing is available only with a live paired Agent/key and a ready
   // physical queue, or an explicitly approved non-production virtual test queue.
-  void printerCapabilitiesJson;
+  const supportedPagesPerSheet=hasAssignedPrinter
+    ?parseCustomerPagesPerSheetCapabilities(printerCapabilitiesJson)
+    :[1];
+  const nupOptions=supportedPagesPerSheet.filter(value=>value>1);
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
@@ -4430,7 +4447,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const groupNameForFile=(candidate:File)=>fileGroupNames[customerFileFingerprint(candidate)]??customerBatchGroupName(candidate);
   const defaultsForGroup=(name:string):CustomerGroupSettings=>{
     const baseline:CustomerGroupSettings={
-      copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"
+      copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1
     };
     return {...baseline,...(groupSettings[name]??{})};
   };
@@ -4438,14 +4455,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(isSmartPrintIdDocument(candidate)) {
       const defaults=defaultsForGroup(groupNameForFile(candidate));
       return {
-        copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",advancedEnabled:false
+        copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",pagesPerSheet:1,advancedEnabled:false
       };
     }
     const fingerprint=customerFileFingerprint(candidate);
     const defaults=defaultsForGroup(groupNameForFile(candidate));
     const own=fileSettings[fingerprint];
     if(photoSettingsByFileFingerprint[fingerprint])return {
-      copies:1,colourMode:"Colour",paperSize:"A4",isDuplex:false,orientation:"AUTO",advancedEnabled:false
+      copies:1,colourMode:"Colour",paperSize:"A4",isDuplex:false,orientation:"AUTO",pagesPerSheet:1,advancedEnabled:false
     };
     const selected=own?.custom?{...defaults,...own}:defaults;
     return {
@@ -4454,6 +4471,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       isDuplex:selected.isDuplex,
       paperSize:selected.advancedEnabled?selected.paperSize:"A4",
       orientation:selected.advancedEnabled?selected.orientation:"AUTO",
+      pagesPerSheet:selected.advancedEnabled&&isCustomerPdf(candidate)&&!isSmartPrintPhotoDocument(candidate)
+        ?(selected.pagesPerSheet??1):1,
       advancedEnabled:selected.advancedEnabled
     };
   };
@@ -4769,6 +4788,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           isDuplex:requestedSettings?.isDuplex??false,
           paperSize:requestedSettings?.paperSize??"A4",
           orientation:requestedSettings?.orientation??"AUTO",
+          pagesPerSheet:requestedSettings?.pagesPerSheet??1,
           advancedEnabled:requestedSettings?.advancedEnabled??false
         };
         const photoSettings=photoSettingsOverride?.[item.job.id]??photoSettingsByJobId[item.job.id];
@@ -4780,6 +4800,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             isDuplex:photoSettings||idDocument?false:settings.isDuplex,
             copies:photoSettings?1:idDocument?1:settings.copies,
             orientation:photoSettings?"AUTO":idDocument?"PORTRAIT":settings.orientation,
+            pagesPerSheet:photoSettings||idDocument?1:(settings.pagesPerSheet??1),
             ...(photoSettings
               ?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount}
               :idDocument?{printKind:"ID_DOCUMENT" as const}:{printKind:"DOCUMENT" as const})
@@ -5388,6 +5409,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                }}>
                 <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
               </select></label>
+              {nupOptions.length>0&&group.files.some(candidate=>
+                isCustomerPdf(candidate)&&!isSmartPrintIdDocument(candidate)&&!isSmartPrintPhotoDocument(candidate)
+              )&&<label><span>Pages per sheet</span><select value={defaults.pagesPerSheet??1} onChange={event=>{
+                 const pagesPerSheet=Number(event.currentTarget.value)||1;
+                 setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),pagesPerSheet}}));
+               }}>
+                <option value={1}>1 page per sheet</option>
+                {nupOptions.map(value=><option key={value} value={value}>{value} pages per sheet</option>)}
+              </select></label>}
             </div>}
           </div>
           <div className="customer-folder-file-list">{group.files.map(selected=>{
@@ -5397,7 +5427,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
-              {!isSmartPrintIdDocument(selected)&&<button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
+              {!isSmartPrintIdDocument(selected)&&<button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation,pagesPerSheet:defaults.pagesPerSheet}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&!isSmartPrintIdDocument(selected)&&<div className="customer-file-overrides">
                 <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
@@ -5435,6 +5465,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                    }}>
                     <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
                   </select></label>
+                  {nupOptions.length>0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<label><span>Pages per sheet</span><select value={own.pagesPerSheet??1} onChange={event=>{
+                     const pagesPerSheet=Number(event.currentTarget.value)||1;
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,pagesPerSheet}}));
+                   }}>
+                    <option value={1}>1 page per sheet</option>
+                    {nupOptions.map(value=><option key={value} value={value}>{value} pages per sheet</option>)}
+                  </select></label>}
                 </div>}
               </div>}
             </div>;
