@@ -433,12 +433,23 @@ async function installPrivatePrintingApiHarness(context, page) {
         return json({ state: "READY", uploadResult: ticket.uploadResult });
       }
       if (path.endsWith("/private-relay") && method === "POST") {
-        assert.equal(request.headers()["x-print-session"], SESSION_TOKEN);
-        const grant = request.headers()["x-print-upload-grant"];
-        assert.ok(grant && grant.length >= 40, "Private relay must use its opaque upload grant.");
-        const envelope = extractEncryptedFile(request);
-        const plaintext = await decryptPrivateRelay(ticket, envelope, keyPair.privateKey);
+        const relayHeaders = request.headers();
+        let diagnosticStage = "session-and-grant";
+        let encryptedBodyBytes = null;
+        let plaintext = null;
         try {
+          assert.equal(relayHeaders["x-print-session"], SESSION_TOKEN);
+          const grant = relayHeaders["x-print-upload-grant"];
+          assert.ok(grant && grant.length >= 40, "Private relay must use its opaque upload grant.");
+
+          diagnosticStage = "capture-qsp2-stream";
+          const envelope = extractEncryptedFile(request);
+          encryptedBodyBytes = envelope.ciphertext.length;
+
+          diagnosticStage = "authenticate-qsp2-header-records-and-footer";
+          plaintext = await decryptPrivateRelay(ticket, envelope, keyPair.privateKey);
+
+          diagnosticStage = "verify-decrypted-document";
           assert.equal(plaintext.length, ticket.sizeBytes, "Decrypted size must match the upload ticket.");
           assert.equal(createHash("sha256").update(plaintext).digest("hex"), ticket.sha256,
             "Decrypted bytes must match the original upload hash.");
@@ -446,6 +457,8 @@ async function installPrivatePrintingApiHarness(context, page) {
             "Every prepared document must be PDF content.");
           assert.equal(envelope.ciphertext.length, qsp2EncryptedLength(plaintext.length),
             "QSP2 wire length must include the header, per-record authentication tags and authenticated footer.");
+
+          diagnosticStage = "accept-relay";
           ticket.uploadResult = makeUploadedJob(ticket, ticket.ticketRequest, plaintext);
           ticket.relayAccepted = true;
           relayUploads.push({
@@ -460,10 +473,22 @@ async function installPrivatePrintingApiHarness(context, page) {
             photosPerPage: ticket.ticketRequest.photosPerPage ?? null,
             pageCount: ticket.uploadResult.job.pageCount
           });
+          return json({ accepted: true, duplicateRequest: false });
+        } catch (error) {
+          writeFileSync(join(artifactDirectory, "private-relay-failure.json"), JSON.stringify({
+            jobNumber: ticket.jobNumber,
+            stage: diagnosticStage,
+            message: error instanceof Error ? error.message : String(error),
+            contentType: relayHeaders["content-type"] ?? null,
+            encryptedFormat: relayHeaders["x-print-encrypted-format"] ?? null,
+            encryptedSizeBytes: relayHeaders["x-print-encrypted-size"] ?? null,
+            bodyBytes: encryptedBodyBytes,
+            ticketBytes: ticket.sizeBytes
+          }, null, 2));
+          throw error;
         } finally {
-          plaintext.fill(0);
+          if (plaintext) plaintext.fill(0);
         }
-        return json({ accepted: true, duplicateRequest: false });
       }
     }
 
