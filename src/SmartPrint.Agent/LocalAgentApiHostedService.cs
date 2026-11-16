@@ -930,8 +930,39 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Conflict(new { code = "local_upload_ticket_invalid", message = "The cloud API returned invalid local upload metadata." });
                 }
 
-                byte[] bytes;
                 var existing = localQueueStore.Find(claim.PrintJobId);
+                DocumentAnalysis analysis;
+
+                AgentClaimedJob CreateStagedJob(DocumentAnalysis detected) =>
+                    new(
+                        claim.PrintJobId,
+                        claim.JobNumber,
+                        "LOCAL_UPLOAD_STAGED",
+                        detected.PageCount,
+                        claim.Copies,
+                        claim.ColourMode,
+                        claim.PaperSize,
+                        claim.IsDuplex,
+                        "INR",
+                        0,
+                        claim.PrinterDeviceId,
+                        claim.PrinterName,
+                        claim.QueueName,
+                        claim.OriginalFileName,
+                        detected.MediaType,
+                        claim.SizeBytes,
+                        claim.Sha256,
+                        claim.ExpiresUtc,
+                        "LOCAL_AGENT",
+                        OutputMode: claim.OutputMode,
+                        Orientation: claim.Orientation,
+                        PrivatePrinting: claim.PrivatePrinting,
+                        PrintKind: claim.PrintKind);
+
+                bool MatchesClaimedContent(DocumentAnalysis detected) =>
+                    string.Equals(detected.Extension, claim.FileExtension, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(detected.MediaType, claim.MediaType, StringComparison.OrdinalIgnoreCase);
+
                 if (existing is not null)
                 {
                     if (!string.Equals(existing.Sha256, claim.Sha256, StringComparison.OrdinalIgnoreCase) ||
@@ -943,13 +974,34 @@ public sealed class LocalAgentApiHostedService(
 
                     if (existing.State == "LOCAL_UPLOAD_STAGED")
                     {
-                        // A retried ticket may have received a new LAN lease.
-                        // Refresh the staged manifest before the periodic expiry
-                        // sweep can remove the same original protected document.
+                        // Refresh the original staged lease before the expiry sweep.
                         await localQueueStore.RefreshStagedLocalUploadLeaseAsync(
                             claim.PrintJobId, claim.Sha256, claim.SizeBytes, claim.ExpiresUtc, ct);
                     }
-                    bytes = localQueueStore.ReadDocument(claim.PrintJobId);
+
+                    try
+                    {
+                        using var stagedDocument = localQueueStore.OpenDocumentReadStream(
+                            claim.PrintJobId, credentials.AgentDeviceId);
+                        analysis = DocumentAnalyzer.Analyse(stagedDocument, claim.FileExtension);
+                    }
+                    catch (DocumentValidationException exception)
+                    {
+                        await ReportPrivateValidationFailureAsync("document_not_supported", exception.Message);
+                        return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
+                    }
+                    catch (Exception exception) when (exception is IOException or InvalidDataException or CryptographicException)
+                    {
+                        logger.LogError(exception, "The existing protected local upload {TicketId} could not be authenticated.", ticketId);
+                        return Results.Conflict(new { code = "local_upload_integrity_failed", message = "The staged document failed its local integrity check. Start a new upload." });
+                    }
+
+                    if (!MatchesClaimedContent(analysis))
+                    {
+                        const string message = "The document content does not match the detected upload format. Select the original file again.";
+                        await ReportPrivateValidationFailureAsync("document_content_type_mismatch", message);
+                        return Results.UnprocessableEntity(new { code = "document_content_type_mismatch", message });
+                    }
                 }
                 else
                 {
@@ -959,73 +1011,123 @@ public sealed class LocalAgentApiHostedService(
                     }
 
                     var form = await context.Request.ReadFormAsync(ct);
-                    var expectedWireSize = claim.PrivatePrinting ? checked(claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes) : claim.SizeBytes;
-                    if (form.Files.Count != 1 || form.Files[0].Length != expectedWireSize || expectedWireSize > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
+                    var expectedWireSize = claim.PrivatePrinting
+                        ? checked(claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
+                        : claim.SizeBytes;
+                    if (form.Files.Count != 1 ||
+                        form.Files[0].Length != expectedWireSize ||
+                        expectedWireSize > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
                     {
-                        return Results.Problem(statusCode: StatusCodes.Status413PayloadTooLarge, title: "The received document size does not match the authorised upload.");
+                        return Results.Problem(
+                            statusCode: StatusCodes.Status413PayloadTooLarge,
+                            title: "The received document size does not match the authorised upload.");
                     }
 
-                    await using var memory = new MemoryStream(checked((int)expectedWireSize));
-                    await using (var input = form.Files[0].OpenReadStream())
-                    {
-                        await input.CopyToAsync(memory, ct);
-                    }
-                    if (memory.Length != expectedWireSize)
-                    {
-                        return Results.BadRequest(new { code = "local_upload_incomplete", message = "The document transfer was incomplete. Retry the upload." });
-                    }
-                    var receivedBytes = memory.ToArray();
-                    CryptographicOperations.ZeroMemory(memory.GetBuffer().AsSpan(0, (int)memory.Length));
+                    await using var input = form.Files[0].OpenReadStream();
                     if (claim.PrivatePrinting)
                     {
-                        var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
-                        var ivText = context.Request.Headers["X-Print-Encrypted-Iv"].FirstOrDefault();
-                        if (string.IsNullOrWhiteSpace(wrappedKey) || string.IsNullOrWhiteSpace(ivText))
-                        {
-                            CryptographicOperations.ZeroMemory(receivedBytes);
-                            return Results.BadRequest(new { code = "private_document_encryption_required", message = "Private Printing requires the document encryption key and nonce." });
-                        }
+                        // Compatibility path for the current v1 single-message private
+                        // AES-GCM browser protocol. The new private QSP2 protocol will
+                        // remove this full-file decrypt buffer in a coordinated upgrade.
+                        await using var encryptedMemory = new MemoryStream(checked((int)expectedWireSize));
+                        await input.CopyToAsync(encryptedMemory, ct);
+                        if (encryptedMemory.Length != expectedWireSize)
+                            return Results.BadRequest(new { code = "local_upload_incomplete", message = "The document transfer was incomplete. Retry the upload." });
+
+                        var receivedBytes = encryptedMemory.ToArray();
+                        CryptographicOperations.ZeroMemory(encryptedMemory.GetBuffer().AsSpan(0, checked((int)encryptedMemory.Length)));
                         byte[]? aesKey = null;
                         byte[]? iv = null;
                         byte[] aad = Array.Empty<byte>();
+                        byte[]? plaintext = null;
                         try
                         {
-                            aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
-                            iv = Convert.FromBase64String(ivText);
-                        }
-                        catch (Exception exception) when (exception is CryptographicException or FormatException)
-                        {
-                            CryptographicOperations.ZeroMemory(receivedBytes);
-                            if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
-                            if (iv is not null) CryptographicOperations.ZeroMemory(iv);
-                            await ReportPrivateValidationFailureAsync(
-                                "private_document_decryption_failed",
-                                "The shop computer could not securely open this file. Please select the document again.");
-                            return Results.UnprocessableEntity(new { code = "private_document_key_invalid", message = "The private document could not be decrypted by this paired shop computer." });
-                        }
-                        try
-                        {
-                            if (aesKey!.Length != 32 || iv!.Length != 12 || receivedBytes.LongLength != claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
+                            var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
+                            var ivText = context.Request.Headers["X-Print-Encrypted-Iv"].FirstOrDefault();
+                            if (string.IsNullOrWhiteSpace(wrappedKey) || string.IsNullOrWhiteSpace(ivText))
+                            {
+                                await ReportPrivateValidationFailureAsync(
+                                    "private_document_encryption_required",
+                                    "Private Printing requires authenticated encryption metadata.");
+                                return Results.BadRequest(new { code = "private_document_encryption_required", message = "Private Printing requires the document encryption key and nonce." });
+                            }
+
+                            try
+                            {
+                                aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
+                                iv = Convert.FromBase64String(ivText);
+                            }
+                            catch (Exception exception) when (exception is CryptographicException or FormatException)
+                            {
+                                await ReportPrivateValidationFailureAsync(
+                                    "private_document_decryption_failed",
+                                    "The shop computer could not securely open this file. Please select the document again.");
+                                return Results.UnprocessableEntity(new { code = "private_document_key_invalid", message = "The private document could not be decrypted by this paired shop computer." });
+                            }
+
+                            if (aesKey.Length != 32 || iv.Length != 12 ||
+                                receivedBytes.LongLength != claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
                                 throw new CryptographicException("The private document encryption envelope is invalid.");
-                            bytes = new byte[checked((int)claim.SizeBytes)];
-                            aad = Encoding.UTF8.GetBytes($"SmartPrint.PrivatePrinting.v1|{claim.Id}|{claim.PrintJobId}|{claim.SizeBytes}|{claim.Sha256}");
-                            using var aes = new AesGcm(aesKey, checked((int)UploadLimits.PrivateRelayEncryptionOverheadBytes));
-                            aes.Decrypt(iv, receivedBytes.AsSpan(0, checked((int)claim.SizeBytes)),
-                                receivedBytes.AsSpan(checked((int)claim.SizeBytes), checked((int)UploadLimits.PrivateRelayEncryptionOverheadBytes)), bytes, aad);
+
+                            plaintext = new byte[checked((int)claim.SizeBytes)];
+                            aad = Encoding.UTF8.GetBytes(
+                                $"SmartPrint.PrivatePrinting.v1|{claim.Id}|{claim.PrintJobId}|{claim.SizeBytes}|{claim.Sha256}");
+                            using (var aes = new AesGcm(aesKey, checked((int)UploadLimits.PrivateRelayEncryptionOverheadBytes)))
+                            {
+                                aes.Decrypt(
+                                    iv,
+                                    receivedBytes.AsSpan(0, checked((int)claim.SizeBytes)),
+                                    receivedBytes.AsSpan(checked((int)claim.SizeBytes), checked((int)UploadLimits.PrivateRelayEncryptionOverheadBytes)),
+                                    plaintext,
+                                    aad);
+                            }
+
+                            using var plaintextStream = new MemoryStream(plaintext, writable: false);
+                            try
+                            {
+                                analysis = DocumentAnalyzer.Analyse(plaintextStream, claim.FileExtension);
+                            }
+                            catch (DocumentValidationException exception)
+                            {
+                                await ReportPrivateValidationFailureAsync(
+                                    "document_not_supported",
+                                    exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
+                                return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
+                            }
+
+                            if (!MatchesClaimedContent(analysis))
+                            {
+                                const string message = "The document content does not match the detected upload format. Select the original file again.";
+                                await ReportPrivateValidationFailureAsync("document_content_type_mismatch", message);
+                                return Results.UnprocessableEntity(new { code = "document_content_type_mismatch", message });
+                            }
+
+                            plaintextStream.Position = 0;
+                            await localQueueStore.EnqueueLocalUploadStreamingAsync(
+                                CreateStagedJob(analysis),
+                                credentials.AgentDeviceId,
+                                plaintextStream,
+                                ct);
                         }
                         catch (CryptographicException)
                         {
-                            CryptographicOperations.ZeroMemory(receivedBytes);
-                            CryptographicOperations.ZeroMemory(aesKey);
-                            CryptographicOperations.ZeroMemory(iv);
                             await ReportPrivateValidationFailureAsync(
                                 "private_document_decryption_failed",
                                 "The private document did not pass its authenticated encryption check. Please select it again.");
                             return Results.UnprocessableEntity(new { code = "private_document_decryption_failed", message = "The private document did not pass its authenticated encryption check." });
                         }
+                        catch (InvalidDataException exception) when (
+                            exception.Message.Contains("SHA-256", StringComparison.OrdinalIgnoreCase))
+                        {
+                            await ReportPrivateValidationFailureAsync(
+                                "private_document_integrity_failed",
+                                "The file did not pass its integrity check. Please select it again.");
+                            return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the authorised upload." });
+                        }
                         finally
                         {
                             CryptographicOperations.ZeroMemory(receivedBytes);
+                            if (plaintext is not null) CryptographicOperations.ZeroMemory(plaintext);
                             if (aesKey is not null) CryptographicOperations.ZeroMemory(aesKey);
                             if (iv is not null) CryptographicOperations.ZeroMemory(iv);
                             CryptographicOperations.ZeroMemory(aad);
@@ -1033,70 +1135,36 @@ public sealed class LocalAgentApiHostedService(
                     }
                     else
                     {
-                        bytes = receivedBytes;
+                        if (!input.CanSeek)
+                        {
+                            return Results.Problem(
+                                statusCode: StatusCodes.Status400BadRequest,
+                                title: "The local upload stream is not seekable. Retry using the secure upload recovery route.");
+                        }
+
+                        try
+                        {
+                            analysis = DocumentAnalyzer.Analyse(input, claim.FileExtension);
+                        }
+                        catch (DocumentValidationException exception)
+                        {
+                            return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
+                        }
+
+                        if (!MatchesClaimedContent(analysis))
+                        {
+                            const string message = "The document content does not match the detected upload format. Select the original file again.";
+                            return Results.UnprocessableEntity(new { code = "document_content_type_mismatch", message });
+                        }
+
+                        input.Position = 0;
+                        await localQueueStore.EnqueueLocalUploadStreamingAsync(
+                            CreateStagedJob(analysis),
+                            credentials.AgentDeviceId,
+                            input,
+                            ct);
                     }
                 }
-
-                try
-                {
-                    var actualHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-                    if (!string.Equals(actualHash, claim.Sha256, StringComparison.OrdinalIgnoreCase))
-                    {
-                        await ReportPrivateValidationFailureAsync(
-                            "private_document_integrity_failed",
-                            "The file did not pass its integrity check. Please select it again.");
-                        return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = "The document hash does not match the authorised upload." });
-                    }
-
-                    DocumentAnalysis analysis;
-                    try
-                    {
-                        analysis = DocumentAnalyzer.Analyse(bytes, claim.FileExtension);
-                    }
-                    catch (DocumentValidationException exception)
-                    {
-                        await ReportPrivateValidationFailureAsync(
-                            "document_not_supported",
-                            exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
-                        return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
-                    }
-
-                    if (!string.Equals(analysis.Extension, claim.FileExtension, StringComparison.OrdinalIgnoreCase) ||
-                        !string.Equals(analysis.MediaType, claim.MediaType, StringComparison.OrdinalIgnoreCase))
-                    {
-                        const string message = "The document content does not match the detected upload format. Select the original file again.";
-                        await ReportPrivateValidationFailureAsync("document_content_type_mismatch", message);
-                        return Results.UnprocessableEntity(new { code = "document_content_type_mismatch", message });
-                    }
-
-                    if (existing is null)
-                    {
-                        var stagedJob = new AgentClaimedJob(
-                            claim.PrintJobId,
-                            claim.JobNumber,
-                            "LOCAL_UPLOAD_STAGED",
-                            analysis.PageCount,
-                            claim.Copies,
-                            claim.ColourMode,
-                            claim.PaperSize,
-                            claim.IsDuplex,
-                            "INR",
-                            0,
-                            claim.PrinterDeviceId,
-                            claim.PrinterName,
-                            claim.QueueName,
-                            claim.OriginalFileName,
-                            analysis.MediaType,
-                            claim.SizeBytes,
-                            claim.Sha256,
-                            claim.ExpiresUtc,
-                            "LOCAL_AGENT",
-                            OutputMode: claim.OutputMode,
-                            Orientation: claim.Orientation,
-                            PrivatePrinting: claim.PrivatePrinting,
-                            PrintKind: claim.PrintKind);
-                        await localQueueStore.EnqueueLocalUploadAsync(stagedJob, bytes, ct);
-                    }
 
                     using var completionRequest = new HttpRequestMessage(
                         HttpMethod.Post,
