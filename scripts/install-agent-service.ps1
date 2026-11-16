@@ -162,6 +162,17 @@ function Set-AgentDataPermissions {
         if ($LASTEXITCODE -ne 0) {
             throw "Could not restrict the encrypted SmartPrint queue to SYSTEM and LocalService."
         }
+
+        # The parent migration first grants Administrators on the whole tree.
+        # /grant:r replaces only the named principals' explicit grants; it does
+        # not remove a different principal's existing ACE. Remove Administrators
+        # explicitly from every queue descendant so an old file ACL cannot keep
+        # broader access after the queue root has been tightened.
+        & $icaclsPath $privateQueueRoot /remove:g "*S-1-5-32-544" /T /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not remove the Administrators allow ACE from every encrypted SmartPrint queue item."
+        }
+
         & $icaclsPath $privateQueueRoot /setowner "*S-1-5-19" /T /C /Q | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Could not set the encrypted SmartPrint queue owner to LocalService."
