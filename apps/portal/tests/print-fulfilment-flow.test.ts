@@ -709,3 +709,18 @@ test("UPI amount copy is numeric and QR save feedback distinguishes success from
  assert.match(css,/\.customer-upi-download-status\.success/);
  assert.match(css,/\.customer-upi-download-status\.info/);
 });
+
+test("Android customer PDF previews render automatically and receive native bridge replies", () => {
+  const app = read("../src/App.tsx");
+  const componentStart = app.indexOf("function CustomerNativePdfPreview");
+  const componentEnd = app.indexOf("\nfunction consumeSmartPrintNativePrintKinds", componentStart);
+  assert.ok(componentStart >= 0 && componentEnd > componentStart);
+  const preview = app.slice(componentStart, componentEnd);
+  assert.doesNotMatch(preview, /Preview PDF/);
+  assert.match(preview, /Preparing document preview/);
+  assert.match(preview, /Preview unavailable/);
+  assert.match(app, /bridge\.addEventListener\("message",onNativePdfPreview\)/);
+  assert.match(app, /bridge\.removeEventListener!\("message",onNativePdfPreview\)/);
+  assert.doesNotMatch(app, /window\.addEventListener\("message",onNativePdfPreview\)/);
+  assert.match(app, /openCustomerPdfPreview\(file\);\n  \},\[file,nativeAppMode,photoSettingsByFileFingerprint\]\)/);
+});
