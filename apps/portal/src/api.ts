@@ -1,4 +1,5 @@
 import { sha256Blob } from "./streaming-file-hash";
+import { preparePrivateQsp2Upload, type PrivateQsp2UploadFactory } from "./private-qsp2-upload";
 import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { identifySupportedDocument } from "./document-content-policy";
@@ -1506,8 +1507,7 @@ async function uploadCustomerPrivateRelay(
   file: File,
   ticket: CustomerLocalUploadTicket,
   grantToken: string,
-  encryptedForm: FormData,
-  encryptedHeaders: Record<string, string>
+  privateUpload: PrivateQsp2UploadFactory
 ): Promise<UploadedPrintJob> {
   // A direct LAN request may have completed even if its response was lost.
   // Check the canonical ticket before attempting a second transport.
@@ -1526,17 +1526,22 @@ async function uploadCustomerPrivateRelay(
   }
 
   try {
+    const attempt = await privateUpload.createAttempt();
     await apiRequest<{ accepted: boolean; duplicateRequest?: boolean }>(
       `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/private-relay`,
       {
         method: "POST",
         headers: {
+          "Content-Type": "application/vnd.smartprint.qsp2",
           "X-Print-Session": sessionToken,
           "X-Print-Upload-Grant": grantToken,
-          ...encryptedHeaders
+          "X-Print-Encrypted-Format": "QSP2",
+          "X-Print-Encrypted-Key": attempt.wrappedKey,
+          "X-Print-Encrypted-Size": String(attempt.encryptedSizeBytes)
         },
-        body: encryptedForm
-      }
+        body: attempt.body,
+        duplex: "half"
+      } as RequestInit & { duplex: "half" }
     );
   } catch (exception) {
     // A lost HTTP response does not prove that the ciphertext was not stored.
@@ -1760,45 +1765,18 @@ export async function uploadCustomerDocumentLocally(
     }
   }
 
-  const form = new FormData();
-  let encryptedHeaders: Record<string, string> = {};
+  const form = privatePrinting ? null : new FormData();
+  let privateUpload: PrivateQsp2UploadFactory | null = null;
   if (privatePrinting && !ticket.completed) {
     if (!localAgent.documentEncryptionPublicKey) {
       throw new LocalUploadPreflightError("This shop has not enabled its private document-encryption key yet. No document was uploaded.", 409, "private_printing_unavailable");
     }
-    const aesKeyBytes = crypto.getRandomValues(new Uint8Array(32));
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const publicKeyBytes = Uint8Array.from(atob(localAgent.documentEncryptionPublicKey), character => character.charCodeAt(0));
-    try {
-      const rsaKey = await crypto.subtle.importKey("spki", publicKeyBytes, { name: "RSA-OAEP", hash: "SHA-256" }, false, ["encrypt"]);
-      const wrappedKey = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, rsaKey, aesKeyBytes);
-      const aesKey = await crypto.subtle.importKey("raw", aesKeyBytes, { name: "AES-GCM" }, false, ["encrypt"]);
-      const aad = new TextEncoder().encode(`SmartPrint.PrivatePrinting.v1|${ticket.id}|${ticket.printJobId}|${file.size}|${ticket.sha256 ?? ""}`);
-      const plaintext = await file.arrayBuffer();
-      let ciphertext: ArrayBuffer;
-      try {
-        ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad, tagLength: 128 }, aesKey, plaintext);
-      } finally {
-        new Uint8Array(plaintext).fill(0);
-        aad.fill(0);
-      }
-      const bytesToBase64 = (bytes: Uint8Array) => {
-        let binary = "";
-        for (let offset = 0; offset < bytes.length; offset += 0x8000)
-          binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)));
-        return btoa(binary);
-      };
-      encryptedHeaders = {
-        "X-Print-Encrypted-Key": bytesToBase64(new Uint8Array(wrappedKey)),
-        "X-Print-Encrypted-Iv": bytesToBase64(iv)
-      };
-      form.append("file", new Blob([ciphertext], { type: "application/octet-stream" }), "private-document.bin");
-    } finally {
-      aesKeyBytes.fill(0);
-      iv.fill(0);
-      publicKeyBytes.fill(0);
-    }
-  } else if (!ticket.completed) {
+    privateUpload = await preparePrivateQsp2Upload(file, {
+      agentDeviceId: ticket.agentDeviceId,
+      printJobId: ticket.printJobId,
+      encryptionPublicKey: localAgent.documentEncryptionPublicKey
+    });
+  } else if (!ticket.completed && form) {
     form.append("file", file, file.name);
   }
   if (ticket.agentDeviceId === localAgent.agentDeviceId && (!privatePrinting || localNetworkReady)) {
@@ -1806,18 +1784,36 @@ export async function uploadCustomerDocumentLocally(
     const endpoint = isPrivateLocalAgentEndpoint(value);
     if (!endpoint) continue;
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), privatePrinting ? 3_500 : 90_000);
+    const timeout = window.setTimeout(() => controller.abort(), 90_000);
     try {
+      const requestHeaders: Record<string, string> = {
+        "X-Print-Upload-Grant": grantToken
+      };
+      let requestBody: BodyInit | null = form;
+      let requestDuplex: "half" | undefined;
+      if (privatePrinting) {
+        if (!privateUpload)
+          throw new LocalUploadPreflightError("The Private Printing encryption stream is unavailable.", 409, "private_printing_unavailable");
+        const attempt = await privateUpload.createAttempt();
+        requestHeaders["Content-Type"] = "application/vnd.smartprint.qsp2";
+        requestHeaders["X-Print-Encrypted-Format"] = "QSP2";
+        requestHeaders["X-Print-Encrypted-Key"] = attempt.wrappedKey;
+        requestHeaders["X-Print-Encrypted-Size"] = String(attempt.encryptedSizeBytes);
+        requestBody = attempt.body;
+        requestDuplex = "half";
+      }
+
       const response = await fetch(`${endpoint.origin}/api/v1/local/uploads/${encodeURIComponent(ticket.id)}`, {
         method: "POST",
         mode: "cors",
         cache: "no-store",
         credentials: "omit",
-        headers: { "X-Print-Upload-Grant": grantToken, ...encryptedHeaders },
-        body: form,
+        headers: requestHeaders,
+        body: requestBody,
         signal: controller.signal,
-        targetAddressSpace: "local"
-      } as RequestInit & { targetAddressSpace: "local" });
+        targetAddressSpace: "local",
+        ...(requestDuplex ? { duplex: requestDuplex } : {})
+      } as RequestInit & { targetAddressSpace: "local"; duplex?: "half" });
 
       const raw = await response.text();
       let payload: unknown = null;
@@ -1855,8 +1851,10 @@ export async function uploadCustomerDocumentLocally(
   }
 
   if (privatePrinting) {
+    if (!privateUpload)
+      throw new LocalUploadOutcomeUnknownError("Private Printing is waiting for its encrypted upload to be prepared. Retry this same file.");
     return uploadCustomerPrivateRelay(
-      sessionToken, file, ticket, grantToken, form, encryptedHeaders
+      sessionToken, file, ticket, grantToken, privateUpload
     );
   }
 
