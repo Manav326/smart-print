@@ -396,9 +396,26 @@ public static class Qsp2DocumentFormat
         ReadOnlySpan<byte> salt,
         ReadOnlySpan<byte> info)
     {
-        var derivedKey = new byte[DataKeySizeBytes];
-        HKDF.DeriveKey(HashAlgorithmName.SHA256, dataKey, salt, derivedKey, info);
-        return derivedKey;
+        // The .NET HKDF convenience overload accepts arrays. Keep these copies
+        // limited to the small key-derivation inputs and clear them immediately.
+        var inputKey = dataKey.ToArray();
+        var saltBytes = salt.ToArray();
+        var infoBytes = info.ToArray();
+        try
+        {
+            return HKDF.DeriveKey(
+                HashAlgorithmName.SHA256,
+                inputKey,
+                DataKeySizeBytes,
+                saltBytes,
+                infoBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(inputKey);
+            CryptographicOperations.ZeroMemory(saltBytes);
+            CryptographicOperations.ZeroMemory(infoBytes);
+        }
     }
 
     private static int GetExpectedRecordLength(
