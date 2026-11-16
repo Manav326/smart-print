@@ -367,6 +367,12 @@ function Assert-LocalServiceIdentityIsNotElevated {
     Assert-True ($result -eq "LOCAL_SERVICE_NON_ADMIN") "The Agent service identity is not the expected non-administrative LocalService account: $result"
 }
 
+function Assert-LocalServiceCanOpenQueueForRetainedCleanup {
+    Write-Host "[QA-ACTION] Verify LocalService can open its printer queue for idempotent retained-job cleanup with standard Print access." -ForegroundColor Cyan
+    $result = Invoke-FixtureAsLocalService "release-retained-job-access" @($testPrinterName)
+    Assert-True ($result -eq "PRINT_ACCESS_OK") "LocalService could not open its printer queue for retained-job cleanup using standard Print access: $result"
+}
+
 function Assert-LocalServiceCanDiscoverFixturePrinter {
     Write-Host "[QA-ACTION] Verify Agent printer discovery as LocalService using the temporary lifecycle queue." -ForegroundColor Cyan
     $result = Invoke-FixtureAsLocalService "discover-printer" @($testPrinterName)
@@ -589,6 +595,19 @@ else if (mode == "verify-service-identity")
     await File.WriteAllTextAsync(args[1], "LOCAL_SERVICE_NON_ADMIN");
     Console.WriteLine("Verified the Windows LocalService SID and confirmed it is not a local administrator.");
 }
+else if (mode == "release-retained-job-access")
+{
+    if (args.Length < 3)
+        throw new ArgumentException("release-retained-job-access requires an output path and expected queue name.");
+    var queueName = args[2];
+    const int absentJobId = int.MaxValue;
+    var executor = new WindowsPrintExecutor();
+    executor.ReleaseRetainedJob(queueName, absentJobId);
+    if (executor.GetJob(queueName, absentJobId) is not null)
+        throw new InvalidOperationException("The retained-job cleanup probe unexpectedly found the deliberately absent spooler job.");
+    await File.WriteAllTextAsync(args[1], "PRINT_ACCESS_OK");
+    Console.WriteLine($"LocalService opened '{queueName}' and exercised idempotent retained-job cleanup with standard Print access.");
+}
 else if (mode == "discover-printer")
 {
     if (args.Length < 3)
@@ -668,6 +687,7 @@ else
         Assert-True (Test-Path -LiteralPath $queueManifest) "The staged queue manifest was not created."
         Add-QueueFixture
         Assert-LocalServiceIdentityIsNotElevated
+        Assert-LocalServiceCanOpenQueueForRetainedCleanup
         Assert-LocalServiceCanDiscoverFixturePrinter
         Assert-LocalServiceCanPrintFixture
     }
