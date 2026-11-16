@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash, randomUUID, webcrypto } from "node:crypto";
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
@@ -333,129 +332,6 @@ async function installPrivatePrintingApiHarness(context, page) {
   const unhandledApi = [];
   let nextJobNumber = 1;
 
-  // Playwright does not expose request.postDataBuffer() for Fetch ReadableStream
-  // bodies. Forward the one raw QSP2 endpoint to this local HTTP receiver so the
-  // acceptance test consumes the exact bytes emitted by the browser stream.
-  const relayServer = createServer(async (incoming, outgoing) => {
-    const relayPath = (incoming.url ?? "").split("?", 1)[0];
-    writePrivateRelayTrace({
-      event: "node-request-arrived",
-      method: incoming.method ?? null,
-      path: relayPath,
-      contentType: incoming.headers["content-type"] ?? null,
-      encryptedFormat: incoming.headers["x-print-encrypted-format"] ?? null,
-      encryptedSizeBytes: incoming.headers["x-print-encrypted-size"] ?? null
-    });
-    const relayTicketId = relayPath.split("/").filter(Boolean).at(-1);
-    const ticket = relayPath.startsWith("/private-relay/") ? tickets.get(relayTicketId) : null;
-    if (!ticket) {
-      outgoing.writeHead(404, { "content-type": "application/json" });
-      outgoing.end(JSON.stringify({ message: "Unknown private upload ticket." }));
-      return;
-    }
-
-    const bodyParts = [];
-    try {
-      for await (const part of incoming) bodyParts.push(Buffer.from(part));
-      const body = Buffer.concat(bodyParts);
-      writePrivateRelayTrace({
-        event: "node-body-consumed",
-        jobNumber: ticket.jobNumber,
-        bodyBytes: body.length
-      });
-      const relayHeaders = incoming.headers;
-      let diagnosticStage = "session-and-grant";
-      let plaintext = null;
-      try {
-        assert.equal(relayHeaders["x-print-session"], SESSION_TOKEN);
-        const grant = relayHeaders["x-print-upload-grant"];
-        assert.ok(grant && grant.length >= 40, "Private relay must use its opaque upload grant.");
-
-        diagnosticStage = "capture-qsp2-stream";
-        const envelope = extractEncryptedFile(relayHeaders, body);
-
-        diagnosticStage = "authenticate-qsp2-header-records-and-footer";
-        plaintext = await decryptPrivateRelay(ticket, envelope, keyPair.privateKey);
-
-        diagnosticStage = "verify-decrypted-document";
-        assert.equal(plaintext.length, ticket.sizeBytes, "Decrypted size must match the upload ticket.");
-        assert.equal(createHash("sha256").update(plaintext).digest("hex"), ticket.sha256,
-          "Decrypted bytes must match the original upload hash.");
-        assert.ok(plaintext.subarray(0, 5).equals(Buffer.from("%PDF-", "ascii")),
-          "Every prepared document must be PDF content.");
-        assert.equal(envelope.ciphertext.length, qsp2EncryptedLength(plaintext.length),
-          "QSP2 wire length must include the header, per-record authentication tags and authenticated footer.");
-
-        diagnosticStage = "accept-relay";
-        ticket.uploadResult = makeUploadedJob(ticket, ticket.ticketRequest, plaintext);
-        ticket.relayAccepted = true;
-        writePrivateRelayTrace({
-          event: "qsp2-accepted",
-          jobNumber: ticket.jobNumber,
-          plaintextBytes: plaintext.length,
-          encryptedBytes: envelope.ciphertext.length
-        });
-        relayUploads.push({
-          ticketId: ticket.id,
-          printJobId: ticket.printJobId,
-          sha256: ticket.sha256,
-          plaintextBytes: plaintext.length,
-          encryptedBytes: envelope.ciphertext.length,
-          printKind: ticket.ticketRequest.printKind ?? "DOCUMENT",
-          photoSizeCode: ticket.ticketRequest.photoSizeCode ?? null,
-          photoCount: ticket.ticketRequest.photoCount ?? null,
-          photosPerPage: ticket.ticketRequest.photosPerPage ?? null,
-          pageCount: ticket.uploadResult.job.pageCount
-        });
-        outgoing.writeHead(200, { "content-type": "application/json" });
-        outgoing.end(JSON.stringify({ accepted: true, duplicateRequest: false }));
-      } catch (error) {
-        writeFileSync(join(artifactDirectory, "private-relay-failure.json"), JSON.stringify({
-          jobNumber: ticket.jobNumber,
-          stage: diagnosticStage,
-          message: error instanceof Error ? error.message : String(error),
-          contentType: relayHeaders["content-type"] ?? null,
-          encryptedFormat: relayHeaders["x-print-encrypted-format"] ?? null,
-          encryptedSizeBytes: relayHeaders["x-print-encrypted-size"] ?? null,
-          bodyBytes: body.length,
-          ticketBytes: ticket.sizeBytes
-        }, null, 2));
-        outgoing.writeHead(400, { "content-type": "application/json" });
-        outgoing.end(JSON.stringify({
-          code: "private_relay_test_failed",
-          message: error instanceof Error ? error.message : String(error)
-        }));
-      } finally {
-        if (plaintext) plaintext.fill(0);
-        body.fill(0);
-      }
-    } catch (error) {
-      outgoing.writeHead(400, { "content-type": "application/json" });
-      outgoing.end(JSON.stringify({
-        code: "private_relay_stream_read_failed",
-        message: error instanceof Error ? error.message : String(error)
-      }));
-    }
-  });
-  const relayServerPort = await new Promise((resolve, reject) => {
-    relayServer.once("error", reject);
-    relayServer.listen(0, "127.0.0.1", () => {
-      const address = relayServer.address();
-      if (!address || typeof address === "string") {
-        reject(new Error("The Private Printing relay test server did not bind to a TCP port."));
-        return;
-      }
-      resolve(address.port);
-    });
-  });
-  writePrivateRelayTrace({ event: "node-server-listening", relayServerPort });
-  relayServer.on("connection", () => writePrivateRelayTrace({ event: "node-socket-open" }));
-  relayServer.on("clientError", error => writePrivateRelayTrace({
-    event: "node-client-error",
-    message: error.message
-  }));
-  context.on("close", () => relayServer.close());
-
   const sessionResponse = {
     id: randomUUID(),
     status: "Active",
@@ -488,6 +364,34 @@ async function installPrivatePrintingApiHarness(context, page) {
     privatePrintingVirtualOutputEnabled: true,
     cloudAssistedPrintingEnabled: false
   };
+
+  // Capture a tee'd copy of streamed QSP2 bytes for assertions while the
+  // browser's original stream remains the actual fetch request body.
+  await context.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init = {}) => {
+      const url = typeof input === "string" ? input :
+        input instanceof URL ? input.href :
+        input instanceof Request ? input.url : "";
+      const method = (init.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const body = init.body ?? (input instanceof Request ? input.body : null);
+      if (method === "POST" && url.includes("/private-relay") && body instanceof ReadableStream) {
+        const [networkBody, captureBody] = body.tee();
+        window.__smartPrintPrivateRelayCapturePromise = new Response(captureBody).arrayBuffer().then(buffer => {
+          const bytes = new Uint8Array(buffer);
+          let binary = "";
+          for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+            binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + 0x8000)));
+          }
+          const encoded = btoa(binary);
+          bytes.fill(0);
+          return encoded;
+        });
+        return originalFetch(input, { ...init, body: networkBody });
+      }
+      return originalFetch(input, init);
+    };
+  });
 
   await context.route("**/api/v1/**", async route => {
     const request = route.request();
@@ -562,28 +466,65 @@ async function installPrivatePrintingApiHarness(context, page) {
         return json({ state: "READY", uploadResult: ticket.uploadResult });
       }
       if (path.endsWith("/private-relay") && method === "POST") {
-        // Preserve the browser's original ReadableStream body. The local Node
-        // receiver consumes it from the socket; Playwright's postDataBuffer()
-        // cannot expose streaming Fetch request bodies.
-        writePrivateRelayTrace({
-          event: "playwright-route-forwarding",
-          jobNumber: ticket.jobNumber,
-          contentType: request.headers()["content-type"] ?? null,
-          encryptedFormat: request.headers()["x-print-encrypted-format"] ?? null,
-          encryptedSizeBytes: request.headers()["x-print-encrypted-size"] ?? null,
-          relayServerPort
-        });
+        const relayHeaders = request.headers();
+        let diagnosticStage = "capture-tee-stream";
+        let plaintext = null;
+        let encryptedBodyBytes = null;
         try {
-          return await route.continue({
-            url: `http://127.0.0.1:${relayServerPort}/private-relay/${ticket.id}`
+          const encodedBody = await page.evaluate(async () => {
+            const pending = window.__smartPrintPrivateRelayCapturePromise;
+            return pending ? await pending : null;
           });
+          assert.ok(encodedBody, "The QSP2 fetch stream was not available to the acceptance harness.");
+          const body = Buffer.from(encodedBody, "base64");
+
+          diagnosticStage = "validate-qsp2-envelope";
+          const envelope = extractEncryptedFile(relayHeaders, body);
+          encryptedBodyBytes = envelope.ciphertext.length;
+
+          diagnosticStage = "authenticate-qsp2-header-records-and-footer";
+          plaintext = await decryptPrivateRelay(ticket, envelope, keyPair.privateKey);
+
+          diagnosticStage = "verify-decrypted-document";
+          assert.equal(plaintext.length, ticket.sizeBytes, "Decrypted size must match the upload ticket.");
+          assert.equal(createHash("sha256").update(plaintext).digest("hex"), ticket.sha256,
+            "Decrypted bytes must match the original upload hash.");
+          assert.ok(plaintext.subarray(0, 5).equals(Buffer.from("%PDF-", "ascii")),
+            "Every prepared document must be PDF content.");
+          assert.equal(envelope.ciphertext.length, qsp2EncryptedLength(plaintext.length),
+            "QSP2 wire length must include the header, per-record authentication tags and authenticated footer.");
+
+          diagnosticStage = "accept-relay";
+          ticket.uploadResult = makeUploadedJob(ticket, ticket.ticketRequest, plaintext);
+          ticket.relayAccepted = true;
+          relayUploads.push({
+            ticketId: ticket.id,
+            printJobId: ticket.printJobId,
+            sha256: ticket.sha256,
+            plaintextBytes: plaintext.length,
+            encryptedBytes: envelope.ciphertext.length,
+            printKind: ticket.ticketRequest.printKind ?? "DOCUMENT",
+            photoSizeCode: ticket.ticketRequest.photoSizeCode ?? null,
+            photoCount: ticket.ticketRequest.photoCount ?? null,
+            photosPerPage: ticket.ticketRequest.photosPerPage ?? null,
+            pageCount: ticket.uploadResult.job.pageCount
+          });
+          body.fill(0);
+          return json({ accepted: true, duplicateRequest: false });
         } catch (error) {
-          writePrivateRelayTrace({
-            event: "playwright-route-forward-failed",
+          writeFileSync(join(artifactDirectory, "private-relay-failure.json"), JSON.stringify({
             jobNumber: ticket.jobNumber,
-            message: error instanceof Error ? error.message : String(error)
-          });
+            stage: diagnosticStage,
+            message: error instanceof Error ? error.message : String(error),
+            contentType: relayHeaders["content-type"] ?? null,
+            encryptedFormat: relayHeaders["x-print-encrypted-format"] ?? null,
+            encryptedSizeBytes: relayHeaders["x-print-encrypted-size"] ?? null,
+            bodyBytes: encryptedBodyBytes,
+            ticketBytes: ticket.sizeBytes
+          }, null, 2));
           throw error;
+        } finally {
+          if (plaintext) plaintext.fill(0);
         }
       }
     }
