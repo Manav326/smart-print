@@ -98,6 +98,28 @@ function Set-AgentServiceAccount {
     }
 }
 
+# Keep the old executable and firewall rule untouched until the new service has
+# started and the replacement firewall rule has been created successfully.
+$previousService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+$previousController = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+$previousWasRunning = $null -ne $previousController -and $previousController.Status -eq "Running"
+$previousServiceAccount = "LocalSystem"
+if ($previousService -and -not $previousController) {
+    throw "Windows returned an Agent service configuration but could not open its service controller. Refusing to modify the existing installation."
+}
+if ($previousService) {
+    $previousStartName = ([string]$previousService.StartName).Trim()
+    if ($previousStartName -match '^(LocalSystem|NT AUTHORITY\\LocalSystem)$') {
+        $previousServiceAccount = "LocalSystem"
+    }
+    elseif ($previousStartName -match '^(LocalService|NT AUTHORITY\\LocalService)$') {
+        $previousServiceAccount = "LocalService"
+    }
+    else {
+        throw "The existing SmartPrint Agent uses unsupported service identity '$previousStartName'. Refusing to replace a service account that this installer cannot safely restore."
+    }
+}
+
 # SmartPrint stores only its own machine identity, encrypted queue and network
 # preference below this product-specific directory. Give the built-in LocalService
 # identity access while keeping the data private to SYSTEM, Administrators and
@@ -114,24 +136,6 @@ if ($LASTEXITCODE -ne 0) {
     throw "Could not restrict SmartPrint machine data to SYSTEM, Administrators and LocalService."
 }
 
-# Keep the old executable and firewall rule untouched until the new service has
-# started and the replacement firewall rule has been created successfully.
-$previousService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
-$previousController = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
-$previousWasRunning = $null -ne $previousController -and $previousController.Status -eq "Running"
-$previousServiceAccount = "LocalSystem"
-if ($previousService) {
-    $previousStartName = ([string]$previousService.StartName).Trim()
-    if ($previousStartName -match '^(LocalSystem|NT AUTHORITY\\LocalSystem)$') {
-        $previousServiceAccount = "LocalSystem"
-    }
-    elseif ($previousStartName -match '^(LocalService|NT AUTHORITY\\LocalService)$') {
-        $previousServiceAccount = "LocalService"
-    }
-    else {
-        throw "The existing SmartPrint Agent uses unsupported service identity '$previousStartName'. Refusing to replace a service account that this installer cannot safely restore."
-    }
-}
 $createdService = $false
 $newFirewallRule = $null
 
