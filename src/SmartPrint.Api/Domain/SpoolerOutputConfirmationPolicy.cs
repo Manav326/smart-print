@@ -50,14 +50,18 @@ public static class SpoolerOutputConfirmationPolicy
         string? jobStatus,
         string? spoolerStatus,
         DateTimeOffset? spoolerObservedUtc,
-        string? printerStatus)
+        string? printerStatus,
+        string? failureCode = null,
+        int? spoolerJobId = null)
     {
         var normalizedJobStatus = jobStatus?.Trim() ?? string.Empty;
         var normalizedSpoolerStatus = spoolerStatus?.Trim() ?? string.Empty;
 
         if (!IsPhysicalOutputConfirmationStatus(normalizedJobStatus) ||
             !HasVerifiedAgentSpoolerObservation(normalizedSpoolerStatus, spoolerObservedUtc) ||
-            IsRetained(normalizedSpoolerStatus))
+            IsRetained(normalizedSpoolerStatus) ||
+            (string.Equals(normalizedSpoolerStatus, "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase) &&
+                !IsVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId)))
             return false;
 
         // OUTPUT_UNCONFIRMED is the deliberate manual-resolution path: the shop

@@ -3825,7 +3825,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
             .Select(printer => printer.Status)
             .FirstOrDefaultAsync(ct)
         : null;
-    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerObservedUtc, printerStatus))
+    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerObservedUtc, printerStatus, job.FailureCode, job.SpoolerJobId))
     {
         if (!SpoolerOutputConfirmationPolicy.IsPhysicalOutputConfirmationStatus(job.Status))
             return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
@@ -7178,6 +7178,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
                 var now = DateTimeOffset.UtcNow;
                 job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
                 job.SpoolerObservedUtc = now;
+                job.FailureCode = reason;
                 job.UpdatedUtc = now;
                 updated = true;
             }

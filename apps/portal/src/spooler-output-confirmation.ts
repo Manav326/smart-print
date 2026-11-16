@@ -52,18 +52,31 @@ export function hasVerifiedAgentSpoolerObservation(
     verifiedAgentSpoolerStatuses.has(normalizeStatus(spoolerStatus));
 }
 
+export function isVerifiedSpoolerAbsenceReport(
+  reasonCode?: string | null,
+  spoolerJobId?: number | null
+): boolean {
+  const normalizedReason = normalizeStatus(reasonCode);
+  return (typeof spoolerJobId === "number" && spoolerJobId > 0 && normalizedReason === "SPOOLER_JOB_NO_LONGER_VISIBLE") ||
+    (spoolerJobId == null && normalizedReason === "AGENT_RESTART_DURING_PRINT_SUBMISSION");
+}
+
 export function canConfirmPhysicalOutput(
   jobStatus?: string | null,
   spoolerStatus?: string | null,
   spoolerObservedUtc?: string | null,
-  printerStatus?: string | null
+  printerStatus?: string | null,
+  failureCode?: string | null,
+  spoolerJobId?: number | null
 ): boolean {
   const normalizedJobStatus = normalizeStatus(jobStatus);
   const normalizedSpoolerStatus = normalizeStatus(spoolerStatus);
 
   if (!isPhysicalOutputConfirmationStatus(normalizedJobStatus) ||
       !hasVerifiedAgentSpoolerObservation(normalizedSpoolerStatus, spoolerObservedUtc) ||
-      normalizedSpoolerStatus === "RETAINED") {
+      normalizedSpoolerStatus === "RETAINED" ||
+      (normalizedSpoolerStatus === "OUTPUT_UNCONFIRMED" &&
+        !isVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId))) {
     return false;
   }
 

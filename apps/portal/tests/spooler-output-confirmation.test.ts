@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   canConfirmPhysicalOutput,
   hasVerifiedAgentSpoolerObservation,
+  isVerifiedSpoolerAbsenceReport,
   isPhysicalOutputConfirmationStatus,
   isRetainedSpoolerJob
 } from "../src/spooler-output-confirmation.ts";
@@ -42,8 +43,16 @@ test("RETAINED blocks confirmation in every physical-output state, including OUT
 });
 
 test("a fresh non-retained Agent observation clears an obsolete RETAINED block", () => {
-  assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", observedUtc, "Ready"), true);
+  assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", observedUtc, "Ready", "SPOOLER_JOB_NO_LONGER_VISIBLE", 17), true);
   assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "PRINTED", observedUtc, "Ready"), true);
+});
+
+test("legacy OUTPUT_UNCONFIRMED status is not trusted without a verified absence reason", () => {
+  assert.equal(isVerifiedSpoolerAbsenceReport("SPOOLER_JOB_NO_LONGER_VISIBLE", 17), true);
+  assert.equal(isVerifiedSpoolerAbsenceReport("AGENT_RESTART_DURING_PRINT_SUBMISSION", null), true);
+  assert.equal(isVerifiedSpoolerAbsenceReport("UNEXPECTED_PRINT_EXECUTION_ERROR", 17), false);
+  assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", observedUtc, "Ready", "UNEXPECTED_PRINT_EXECUTION_ERROR", 17), false);
+  assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", observedUtc, "Ready", "SPOOLER_JOB_NO_LONGER_VISIBLE", 17), true);
 });
 
 test("routine confirmation remains blocked by Windows and printer warnings", () => {
@@ -64,7 +73,7 @@ test("OUTPUT_UNCONFIRMED remains the manual physical-output resolution path afte
 test("Order Journey and Print Queue use the same physical-output eligibility helper", () => {
   const orderJourney = read("../src/OrderJourneyPage.tsx");
   const printQueue = read("../src/App.tsx");
-  const expected = /canConfirmPhysicalOutput\(job\.status,\s*job\.spoolerStatus,\s*job\.spoolerObservedUtc,\s*job\.printerStatus\)/;
+  const expected = /canConfirmPhysicalOutput\(job\.status,\s*job\.spoolerStatus,\s*job\.spoolerObservedUtc,\s*job\.printerStatus,\s*job\.failureCode,\s*job\.spoolerJobId\)/;
   for (const source of [orderJourney, printQueue]) {
     assert.match(source, /isPhysicalOutputConfirmationStatus\(job\.status\)/);
     assert.match(source, expected);
@@ -95,7 +104,7 @@ test("the API endpoint applies the server guard before completion or private-sou
   const routeEnd = program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/events"', routeStart);
   assert.ok(routeStart >= 0 && routeEnd > routeStart, "The physical output-confirmation endpoint must exist.");
   const route = program.slice(routeStart, routeEnd);
-  const guard = route.indexOf("SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerObservedUtc, printerStatus)");
+  const guard = route.indexOf("SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus, job.SpoolerObservedUtc, printerStatus, job.FailureCode, job.SpoolerJobId)");
   const completed = route.indexOf('job.Status = "COMPLETED"');
   const purge = route.indexOf("PrivateDocumentPurgeRequestedUtc");
   assert.ok(route.includes("HasVerifiedAgentSpoolerObservation(job.SpoolerStatus, job.SpoolerObservedUtc)"));

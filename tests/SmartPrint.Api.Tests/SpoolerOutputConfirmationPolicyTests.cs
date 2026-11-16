@@ -18,11 +18,29 @@ public sealed class SpoolerOutputConfirmationPolicyTests
     [Theory]
     [InlineData("SPOOLER_ACCEPTED", "PRINTED")]
     [InlineData("PRINTING", "QUEUED")]
-    [InlineData("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED")]
     [InlineData("OUTPUT_UNCONFIRMED", "PRINTED")]
     public void FreshNonRetainedAgentObservationAllowsPhysicalOutputConfirmation(string jobStatus, string spoolerStatus)
     {
         Assert.True(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(jobStatus, spoolerStatus, ObservedUtc, "Ready"));
+    }
+
+    [Theory]
+    [InlineData("SPOOLER_JOB_NO_LONGER_VISIBLE", 17)]
+    [InlineData("AGENT_RESTART_DURING_PRINT_SUBMISSION", null)]
+    public void VerifiedSpoolerAbsenceAllowsOutputUnconfirmedManualResolution(string reasonCode, int? spoolerJobId)
+    {
+        Assert.True(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
+            "OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", ObservedUtc, "Ready", reasonCode, spoolerJobId));
+    }
+
+    [Fact]
+    public void LegacyOutputUnconfirmedObservationWithoutVerifiedAbsenceReasonCannotBeConfirmed()
+    {
+        Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
+            "OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", ObservedUtc, "Ready",
+            "UNEXPECTED_PRINT_EXECUTION_ERROR", 17));
+        Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
+            "OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", ObservedUtc, "Ready", null, 17));
     }
 
     [Theory]
@@ -67,7 +85,7 @@ public sealed class SpoolerOutputConfirmationPolicyTests
         Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
             "PRINTING", "QUEUED", ObservedUtc, printerStatus));
         Assert.True(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
-            "OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", ObservedUtc, printerStatus));
+            "OUTPUT_UNCONFIRMED", "PRINTED", ObservedUtc, printerStatus));
     }
 
     [Theory]

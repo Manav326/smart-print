@@ -66,7 +66,7 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
   const assignable=["PAID_AUTHORISED","LOCAL_QUEUE_READY"].includes(job.status);
   const confirmable=isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT");
   const spoolerRetained=isRetainedSpoolerJob(job.spoolerStatus);
-  const canConfirmOutput=canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerObservedUtc,job.printerStatus);
+  const canConfirmOutput=canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId);
   const confirmationBlockedMessage=!canConfirmOutput
     ?spoolerRetained?"Windows still holds this job. Confirmation will be enabled after the Agent verifies that it has left the queue."
     :!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerObservedUtc)?"Waiting for the Agent to verify the Windows spooler state before confirmation."
