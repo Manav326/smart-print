@@ -689,7 +689,8 @@ test("customer-facing print choices explain privacy versus connection without ch
  assert.match(app,/Photo printing ·/);
  assert.match(app,/UPI transaction ID \(UTR\)/);
  assert.match(app,/Find it in your UPI app under payment details or transaction history/);
- assert.ok(app.includes("Normal PDF/document pages are original pages before copies are applied."));
+ assert.ok(app.includes("Normal PDF/document pages are original pages."));
+ assert.ok(app.includes("For driver-backed N-up, the selected pages-per-sheet value groups source pages onto output sides;"));
  assert.ok(app.includes("Normal-document output counts page sides after copies."));
  assert.ok(app.includes("With duplex printing, two page sides may share one physical sheet."));
 });
