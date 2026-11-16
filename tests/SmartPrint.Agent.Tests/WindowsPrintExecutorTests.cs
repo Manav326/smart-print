@@ -388,7 +388,7 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
 public sealed class WindowsPrinterNupIntegrationTests
 {
     [Fact]
-    public async Task DriverBackedFourUpTurnsThirtyThreePdfPagesIntoNineOutputSheets()
+    public async Task DriverBackedFourUpProducesNineSheetsOrBlocksBeforeSubmissionWhenUnsupported()
     {
         // CI provides a dedicated clone of its virtual PDF queue. The test runs only
         // when the installed driver actually reports 4-up; it never sends paper to
@@ -404,21 +404,16 @@ public sealed class WindowsPrinterNupIntegrationTests
         if (string.IsNullOrWhiteSpace(queueName))
             return;
 
+        bool supportsFourUp;
         using (var capabilities = System.Text.Json.JsonDocument.Parse(
                    WindowsPrinterCapabilityDiscovery.DiscoverJson(queueName)))
         {
-            var supportsFourUp = capabilities.RootElement.TryGetProperty("pagesPerSheet", out var values) &&
-                                 values.ValueKind == System.Text.Json.JsonValueKind.Array &&
-                                 values.EnumerateArray().Any(value =>
-                                     value.ValueKind == System.Text.Json.JsonValueKind.Number &&
-                                     value.TryGetInt32(out var pagesPerSheet) &&
-                                     pagesPerSheet == 4);
-            if (!supportsFourUp)
-            {
-                Console.WriteLine(
-                    $"N-up integration skipped: Windows driver for '{queueName}' does not report 4 pages per sheet.");
-                return;
-            }
+            supportsFourUp = capabilities.RootElement.TryGetProperty("pagesPerSheet", out var values) &&
+                             values.ValueKind == System.Text.Json.JsonValueKind.Array &&
+                             values.EnumerateArray().Any(value =>
+                                 value.ValueKind == System.Text.Json.JsonValueKind.Number &&
+                                 value.TryGetInt32(out var pagesPerSheet) &&
+                                 pagesPerSheet == 4);
         }
 
         using var source = new MemoryStream();
@@ -482,7 +477,21 @@ public sealed class WindowsPrinterNupIntegrationTests
 
         try
         {
-            var receipt = new WindowsPrintExecutor().PrintToFile(
+            var executor = new WindowsPrintExecutor();
+            if (!supportsFourUp)
+            {
+                var blocked = Assert.Throws<PrintExecutionBlockedException>(() =>
+                    executor.PrintToFile(entry, bytes, outputPath, CancellationToken.None));
+                Assert.Equal("PAGES_PER_SHEET_UNSUPPORTED", blocked.ReasonCode);
+                Assert.False(
+                    File.Exists(outputPath),
+                    "An unsupported N-up request must be rejected before Windows receives a spooler job.");
+                Console.WriteLine(
+                    $"N-up integration verified fail-closed behavior: '{queueName}' does not advertise 4-up and no spooler output was created.");
+                return;
+            }
+
+            var receipt = executor.PrintToFile(
                 entry,
                 bytes,
                 outputPath,
