@@ -2455,6 +2455,10 @@ shop.MapGet("/print-jobs", async (
                 .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
                 .Select(printer => printer.DisplayName)
                 .FirstOrDefault(),
+            PrinterStatus = db.PrinterDevices.AsNoTracking()
+                .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
+                .Select(printer => printer.Status)
+                .FirstOrDefault(),
             QueueName = job.PrinterQueueNameSnapshot ?? db.PrinterDevices
                 .Where(printer => printer.TenantId == tenantId && printer.Id == job.PrinterDeviceId)
                 .Select(printer => printer.QueueName)
@@ -2481,7 +2485,7 @@ shop.MapGet("/print-jobs", async (
             OutputConfirmedByName = db.PrintJobEvents.AsNoTracking()
                 .Where(item => item.TenantId == tenantId &&
                                item.PrintJobId == job.Id &&
-                               item.ReasonCode == "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT")
+                               (item.ReasonCode == "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT" || item.ReasonCode == "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT_AFTER_QUEUE_RECONCILIATION"))
                 .OrderByDescending(item => item.CreatedUtc)
                 .Select(item => db.Users
                     .Where(user => user.TenantId == tenantId &&
@@ -3800,11 +3804,30 @@ shop.MapPost("/print-jobs/{jobId:guid}/retry-private-test-output", async (
     });
 });
 
-shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, ClaimsPrincipal principal, HttpRequest httpRequest, SmartPrintDbContext db, CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == tenantId, ct);
     if (job is null) return Results.NotFound();
+
+    var manualQueueReconciliationConfirmed = false;
+    if (httpRequest.ContentLength is > 0 ||
+        httpRequest.ContentType?.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) == true)
+    {
+        try
+        {
+            using var confirmationPayload = await JsonDocument.ParseAsync(httpRequest.Body, cancellationToken: ct);
+            if (confirmationPayload.RootElement.ValueKind != JsonValueKind.Object)
+                return Results.BadRequest(new { code = "invalid_output_confirmation_request", message = "The output confirmation request must be a JSON object." });
+            manualQueueReconciliationConfirmed =
+                confirmationPayload.RootElement.TryGetProperty("manualQueueReconciliationConfirmed", out var manualValue) &&
+                manualValue.ValueKind == JsonValueKind.True;
+        }
+        catch (JsonException)
+        {
+            return Results.BadRequest(new { code = "invalid_output_confirmation_request", message = "The output confirmation request was invalid." });
+        }
+    }
     if (job.OutputType is "PDF_EXPORT" or "TEST_VIRTUAL")
         return Results.Conflict(new
         {
@@ -3815,15 +3838,53 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
         });
     if (job.Status == "COMPLETED" && job.OutputConfirmedUtc != null)
         return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc, DuplicateRequest = true });
-    if (!SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(job.Status, job.SpoolerStatus))
+
+    var now = DateTimeOffset.UtcNow;
+    var printerSnapshot = job.PrinterDeviceId is Guid printerDeviceId
+        ? await db.PrinterDevices.AsNoTracking()
+            .Where(printer => printer.Id == printerDeviceId && printer.TenantId == tenantId)
+            .Select(printer => new { printer.Status, printer.QueueName })
+            .FirstOrDefaultAsync(ct)
+        : null;
+    var printerStatus = printerSnapshot?.Status;
+    var canConfirmFromAgent = SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
+        job.Status, job.SpoolerStatus, job.SpoolerSubmittedUtc, job.SpoolerObservedUtc,
+        now, printerStatus, job.FailureCode, job.SpoolerJobId);
+    var canManuallyReconcile = SpoolerOutputConfirmationPolicy.CanManuallyReconcileUncertainOutput(
+        job.Status, job.SpoolerStatus, job.FailureCode, job.SpoolerJobId,
+        job.PrinterQueueNameSnapshot ?? printerSnapshot?.QueueName, job.SpoolerJobName);
+
+    if (!canConfirmFromAgent && !(canManuallyReconcile && manualQueueReconciliationConfirmed))
     {
+        if (!SpoolerOutputConfirmationPolicy.IsPhysicalOutputConfirmationStatus(job.Status))
+            return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
         if (SpoolerOutputConfirmationPolicy.IsRetained(job.SpoolerStatus))
             return Results.Conflict(new
             {
                 code = "windows_spooler_job_retained",
-                message = "Windows is still holding this print job. Confirmation is available after the Agent verifies that the held spooler entry has cleared."
+                message = "Windows is still holding this print job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared."
             });
-        return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Only a submitted or output-unconfirmed job can be completed after checking the physical pages." });
+        if (canManuallyReconcile && !manualQueueReconciliationConfirmed)
+            return Results.Conflict(new
+            {
+                code = "manual_queue_reconciliation_required",
+                message = "The Agent restarted before receiving a Windows spooler ID. Check the named Windows queue for this exact job and inspect the paper output, then explicitly confirm the manual reconciliation."
+            });
+        if (!SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(
+                job.SpoolerStatus, job.SpoolerSubmittedUtc, job.SpoolerObservedUtc,
+                now, job.FailureCode, job.SpoolerJobId))
+            return Results.Conflict(new
+            {
+                code = "spooler_state_not_verified",
+                message = "The Agent must report a recognized, fresh Windows spooler observation from after submission (within the last ten minutes) before output can be confirmed."
+            });
+        if (job.SpoolerStatus?.Trim().ToUpperInvariant() is "QUEUED" or "SPOOLING" or "PRINTING")
+            return Results.Conflict(new
+            {
+                code = "windows_spooler_job_active",
+                message = "Windows still reports this job queued or printing. Wait until it is printed or reconcile the interrupted submission before confirming output."
+            });
+        return Results.Conflict(new { code = "output_not_ready_for_confirmation", message = "Resolve the Windows spooler or printer warning before confirming physical output." });
     }
 
     if (job.PrivatePrinting && (job.OutputType != "PHYSICAL" || job.ClaimedByAgentDeviceId is null))
@@ -3833,7 +3894,6 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
             message = "Private Printing can be completed only after confirmed physical output from its assigned shop computer."
         });
 
-    var now = DateTimeOffset.UtcNow;
     var previous = job.Status;
     job.Status = "COMPLETED";
     job.OutputConfirmedUtc = now;
@@ -3846,7 +3906,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
     {
         TenantId = tenantId, PrintJobId = job.Id, PreviousStatus = previous, NewStatus = job.Status,
         ActorType = "ShopUser", ActorId = GetActorId(principal),
-        ReasonCode = "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT", CreatedUtc = now
+        ReasonCode = manualQueueReconciliationConfirmed ? "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT_AFTER_QUEUE_RECONCILIATION" : "SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT", CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { job.Id, job.Status, job.OutputConfirmedUtc });
@@ -7087,7 +7147,10 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-accepted", async (Guid jobId, Agent
     job.SpoolerJobId = request.SpoolerJobId;
     job.SpoolerSubmittedUtc = now;
     job.SpoolerObservedUtc = now;
-    job.SpoolerStatus = request.SpoolerStatus;
+    // This receipt may be retried from the Agent's local manifest after a network
+    // interruption. It proves the job ID/name, but its cached status must never
+    // be promoted to terminal PRINTED; MonitorSpoolerJobsAsync supplies live proof.
+    job.SpoolerStatus = SpoolerOutputConfirmationPolicy.NormalizeInitialSpoolerAcceptanceStatus(request.SpoolerStatus);
     job.PrintDispatchLeaseExpiresUtc = null;
     job.FailureCode = null;
     job.UpdatedUtc = now;
@@ -7147,18 +7210,21 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
     if (string.IsNullOrWhiteSpace(reason) || reason.Length > 80) return Results.BadRequest();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
+    var verifiedSpoolerAbsence = SpoolerOutputConfirmationPolicy.IsVerifiedSpoolerAbsenceReport(reason, job.SpoolerJobId);
     if (job.Status is "OUTPUT_UNCONFIRMED" or "COMPLETED")
     {
         if (job.Status == "OUTPUT_UNCONFIRMED" && job.ClaimedByAgentDeviceId == device.Id)
         {
             var updated = false;
-            if (job.SpoolerJobId is > 0)
+            if (verifiedSpoolerAbsence)
             {
-                // The authenticated Agent has just verified that Windows no longer lists this spooler ID.
-                // Refresh stale RETAINED state so an old report cannot block the shop forever.
+                // Only an Agent lookup that proves the submitted spooler entry is absent
+                // may replace a last-known RETAINED observation.
+                var verifiedAtUtc = DateTimeOffset.UtcNow;
                 job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
-                job.SpoolerObservedUtc = DateTimeOffset.UtcNow;
-                job.UpdatedUtc = DateTimeOffset.UtcNow;
+                job.SpoolerObservedUtc = verifiedAtUtc;
+                job.FailureCode = reason;
+                job.UpdatedUtc = verifiedAtUtc;
                 updated = true;
             }
             if (job.PrinterDeviceId is Guid existingPrinterId &&
@@ -7177,6 +7243,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
         return Results.Conflict(new { code = "job_not_reconcilable" });
 
     var previous = job.Status;
+    var now = DateTimeOffset.UtcNow;
     if (job.PrinterDeviceId is Guid assignedOutputId &&
         await db.PrinterDevices.AnyAsync(printer =>
             printer.Id == assignedOutputId && printer.TenantId == device.TenantId &&
@@ -7184,14 +7251,17 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
         job.OutputType = "PDF_EXPORT";
     job.Status = "OUTPUT_UNCONFIRMED";
     job.FailureCode = reason;
-    job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
-    job.SpoolerObservedUtc = DateTimeOffset.UtcNow;
+    if (verifiedSpoolerAbsence)
+    {
+        job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
+        job.SpoolerObservedUtc = now;
+    }
     job.PrintDispatchLeaseExpiresUtc = null;
-    job.UpdatedUtc = DateTimeOffset.UtcNow;
+    job.UpdatedUtc = now;
     db.PrintJobEvents.Add(new PrintJobEvent
     {
         TenantId = device.TenantId, PrintJobId = job.Id, PreviousStatus = previous, NewStatus = job.Status,
-        ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = reason, CreatedUtc = DateTimeOffset.UtcNow
+        ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = reason, CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { job.Id, job.Status, job.FailureCode });
