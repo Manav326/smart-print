@@ -2721,7 +2721,7 @@ shop.MapPost("/photo-jobs", async (
         try
         {
             await using var input = upload.OpenReadStream();
-            stored = await storage.ValidateAndStoreAsync(tenantId, documentId, outputName, input, upload.Length, ct);
+            stored = await storage.ValidateAndStoreStreamingAsync(tenantId, documentId, outputName, input, upload.Length, ct);
         }
         catch (DocumentValidationException exception)
         {
@@ -4185,7 +4185,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     try
     {
         await using var input = file.OpenReadStream();
-        stored = await storage.ValidateAndStoreAsync(tenantId, newDocumentId, outputName, input, file.Length, ct);
+        stored = await storage.ValidateAndStoreStreamingAsync(tenantId, newDocumentId, outputName, input, file.Length, ct);
     }
     catch (DocumentValidationException exception)
     {
@@ -4526,12 +4526,16 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
             return Results.Conflict(new { code = "photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
     }
 
-    MemoryStream content;
+    var expectedDocumentSha256 = document.Sha256;
+    if (photoSourcePreview)
+        expectedDocumentSha256 = document.PhotoSourceSha256 ?? document.Sha256;
+
+    Stream content;
     try
     {
-        content = storage.OpenRead(storageKey);
+        content = storage.OpenReadStream(storageKey, tenantId, expectedDocumentSha256);
     }
-    catch (IOException)
+    catch (Exception exception) when (exception is IOException or InvalidDataException or CryptographicException)
     {
         return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "The stored document could not be opened.");
     }
@@ -6138,12 +6142,12 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
         });
     }
 
-    MemoryStream content;
+    Stream content;
     try
     {
-        content = storage.OpenRead(document.StorageKey);
+        content = storage.OpenReadStream(document.StorageKey, device.TenantId, document.Sha256);
     }
-    catch (IOException)
+    catch (Exception exception) when (exception is IOException or InvalidDataException or CryptographicException)
     {
         return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "The stored document could not be opened.");
     }
@@ -9015,7 +9019,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
     try
     {
         await using var input = file.OpenReadStream();
-        stored = await storage.ValidateAndStoreAsync(
+        stored = await storage.ValidateAndStoreStreamingAsync(
             session.TenantId, documentId, originalName, input, file.Length, ct);
     }
     catch (DocumentValidationException exception)
@@ -10266,7 +10270,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     try
     {
         await using var input = file.OpenReadStream();
-        stored = await storage.ValidateAndStoreAsync(
+        stored = await storage.ValidateAndStoreStreamingAsync(
             preflightTicket.TenantId, documentId, preflightTicket.OriginalFileName, input, preflightTicket.SizeBytes, ct);
     }
     catch (DocumentValidationException exception)

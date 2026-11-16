@@ -160,6 +160,24 @@ public sealed class DocumentStorage : IDisposable
     /// Opens QSE2/QSP2 documents as authenticated seekable streams. Legacy QSP1
     /// objects remain readable through the existing compatibility reader.
     /// </summary>
+    /// <summary>
+    /// Opens a canonical tenant/document storage key. The document identity is
+    /// recovered from the validated storage-key shape so retained photo-source
+    /// objects can be opened even when their key differs from the current revision.
+    /// </summary>
+    public Stream OpenReadStream(string storageKey, Guid tenantId, string expectedSha256)
+    {
+        var normalized = storageKey.Replace('\\', '/');
+        var segments = normalized.Split('/');
+        if (segments.Length != 2 ||
+            !Guid.TryParseExact(segments[0], "N", out var keyTenantId) ||
+            keyTenantId != tenantId ||
+            !Guid.TryParseExact(Path.GetFileNameWithoutExtension(segments[1]), "N", out var documentId))
+            throw new InvalidDataException("The document storage key does not match the authorised tenant/document identity.");
+
+        return OpenReadStream(storageKey, tenantId, documentId, expectedSha256);
+    }
+
     public Stream OpenReadStream(
         string storageKey,
         Guid tenantId,
