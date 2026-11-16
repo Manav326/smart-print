@@ -1238,6 +1238,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     try{
       const result=await createShopPhotoJob(tokens.accessToken,sheet.file,{
         photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,
+        photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish,
         recipientType:draft.recipientType,customerUserId:draft.customerUserId,
         recipientName:draft.recipientName,recipientPhone:draft.recipientPhone,
         paymentMethod:draft.paymentMethod,idempotencyKey:draft.idempotencyKey
@@ -1328,9 +1329,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setToast("");
     try{
       if(editor.job.storageMode==="LOCAL_AGENT") {
-        await replaceShopPhotoDocumentLocally(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}));
+        await replaceShopPhotoDocumentLocally(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}),sheet.photoOutputLayout,sheet.photoPaperFinish);
       } else {
-        await replaceShopPhotoDocument(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}));
+        await replaceShopPhotoDocument(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}),sheet.photoOutputLayout,sheet.photoPaperFinish);
       }
     }catch(exception){
       setError(exception instanceof Error?exception.message:"Could not save the enhanced photo sheet.");
@@ -1339,14 +1340,14 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
     setShopPhotoStudio(null);
     setFocusShopPhotoEdit(false);
-    setToast("The enhanced multi-page A4 photo PDF is saved to the same print job and its photo price has been recalculated.");
+    setToast(sheet.photoOutputLayout==="PHOTO_PAPER"?"The individual photo-paper prints are saved to the same job. Printer compatibility will be checked before dispatch.":"The A4 photo sheet is saved to the same print job and its photo price has been recalculated.");
     try{
       await reload();
       const blob=await downloadShopDocument(tokens.accessToken,editor.job.id,"original");
       const detectedMediaType=await identifyDocumentPreviewMediaType(blob);
       const mediaType=detectedMediaType==="application/pdf"?detectedMediaType:"";
       const previewBlob=mediaType?new Blob([blob],{type:mediaType}):blob;
-      const savedJob:ShopPrintJob={...editor.job,photoEditorSettingsJson:JSON.stringify(sheet.editorSettings??{}),printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
+      const savedJob:ShopPrintJob={...editor.job,photoEditorSettingsJson:JSON.stringify(sheet.editorSettings??{}),printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish,document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
       setPreview({name:sheet.file.name,url:URL.createObjectURL(previewBlob),blob:previewBlob,mediaType,job:savedJob,readOnly:true});
     }catch{
       setError("The A4 photo PDF was saved to the existing print job, but the queue could not refresh its preview. Refresh the queue before approving or printing.");
