@@ -249,9 +249,15 @@ public sealed class Worker(
                     ticket.OutputMode, ticket.Orientation,
                     PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind);
 
-                // DPAPI-protect the document on this paired Windows computer before
-                // acknowledging the relay. Replaying the same ticket is idempotent.
-                await localQueueStore.EnqueueLocalUploadAsync(job, plaintext, cancellationToken);
+                // Re-encrypt the authenticated private plaintext into the new
+                // DPAPI-key-wrapped QSP2 queue format before acknowledging the relay.
+                // The v1 relay itself remains whole-file until the browser/relay protocol
+                // is upgraded together; local queue persistence is now bounded-memory.
+                await using (var plaintextStream = new MemoryStream(plaintext, writable: false))
+                {
+                    await localQueueStore.EnqueueLocalUploadStreamingAsync(
+                        job, credentials.AgentDeviceId, plaintextStream, cancellationToken);
+                }
                 using var completion = await SendAgentRequestAsync(
                     client, credentials,
                     $"api/v1/agent/private-relays/{ticket.TicketId:D}/complete",
@@ -790,15 +796,12 @@ public sealed class Worker(
                         throw new InvalidDataException("The document response headers do not match the claimed job metadata.");
                     }
 
-                    var bytes = await documentResponse.Content.ReadAsByteArrayAsync(cancellationToken);
-                    try
-                    {
-                        await localQueueStore.EnqueueAsync(job, bytes, cancellationToken);
-                    }
-                    finally
-                    {
-                        CryptographicOperations.ZeroMemory(bytes);
-                    }
+                    await using var documentStream = await documentResponse.Content.ReadAsStreamAsync(cancellationToken);
+                    await localQueueStore.EnqueueStreamingAsync(
+                        job,
+                        credentials.AgentDeviceId,
+                        documentStream,
+                        cancellationToken);
                 }
 
                 await AcknowledgeLocalQueueReceiptAsync(
