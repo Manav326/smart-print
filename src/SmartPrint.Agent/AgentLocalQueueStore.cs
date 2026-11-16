@@ -412,7 +412,10 @@ public sealed class AgentLocalQueueStore
             PdfBrandingEnabled: job.PdfBrandingEnabled,
             PrivatePrinting: job.PrivatePrinting,
             PrintKind: job.PrintKind,
-            PagesPerSheet: job.PagesPerSheet);
+            PagesPerSheet: job.PagesPerSheet,
+            PhotoPaperFinish: job.PhotoPaperFinish,
+            PhotoOutputLayout: job.PhotoOutputLayout,
+            PhotoSizeCode: job.PhotoSizeCode);
 
         try
         {
