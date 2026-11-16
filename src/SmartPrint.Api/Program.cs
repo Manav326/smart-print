@@ -2440,6 +2440,7 @@ shop.MapGet("/print-jobs", async (
             job.PaperSize,
             job.IsDuplex,
             job.Orientation,
+            job.PagesPerSheet,
             job.PricingVersion,
             job.PrintKind,
             job.PhotoSizeCode,
