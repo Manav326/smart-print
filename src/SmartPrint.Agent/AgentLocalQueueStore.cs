@@ -948,7 +948,7 @@ public sealed class AgentLocalQueueStore
             throw new InvalidDataException("The retained photo source path is outside the protected queue.");
         await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
         await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, cancellationToken);
-        if (File.Exists(manifestPath)) File.Delete(manifestPath);
+        RemoveManifest(jobId, manifestPath);
     }
 
     public string EnsurePrivateTestOutputDirectory()
@@ -1072,7 +1072,7 @@ public sealed class AgentLocalQueueStore
             var manifestPath = GetManifestPath(entry.JobId);
             if (File.Exists(documentPath)) File.Delete(documentPath);
             if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
-            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+            RemoveManifest(entry.JobId, manifestPath);
             removed++;
         }
 
@@ -1772,7 +1772,7 @@ public sealed class AgentLocalQueueStore
 
         // Publish to the in-memory queue index only after the durable manifest swap.
         lock (queueIndexSync)
-            queueIndex?[entry.JobId] = entry;
+            if (queueIndex is not null) queueIndex[entry.JobId] = entry;
     }
 
     private string GetPrivateSpoolerCleanupDirectory() => Path.Combine(queueRoot, "SpoolerCleanup");
