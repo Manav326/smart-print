@@ -4106,13 +4106,15 @@ function postSmartPrintNativeMessage(message:string):boolean {
   catch {return false;}
 }
 
-function CustomerNativePdfPreview({token,preview,onOpen,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onOpen:()=>void;onPage:(page:number)=>void}) {
+function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onPage:(page:number)=>void}) {
   const current=preview?.token===token?preview:null;
   return <div className="customer-native-pdf-preview">
     {current?.image
       ? <img className="customer-native-pdf-page" src={"data:image/jpeg;base64,"+current.image} alt={"PDF page "+(current.pageIndex+1)+" of "+current.pageCount}/>
       : <div className="customer-native-pdf-empty">
-          {current?.loading?<><span className="button-spinner"/><span>Preparing document preview…</span></>:<><FileText size={22}/><span>Preview this PDF without leaving the upload page.</span><button type="button" className="customer-file-studio-button" onClick={onOpen}>Preview PDF</button></>}
+          {current===null||current.loading
+            ? <><span className="button-spinner"/><span>Preparing document preview…</span></>
+            : <><FileText size={22}/><strong>Preview unavailable</strong><span>The PDF could not be rendered on this device. You can still upload it.</span></>}
         </div>}
     {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
       <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous</button>
@@ -4524,12 +4526,21 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         }
       }else if(message.startsWith("CUSTOMER_PDF_PREVIEW_FAILED|")){
         const token=message.slice("CUSTOMER_PDF_PREVIEW_FAILED|".length).split("|",1)[0];
-        setNativePdfPreview(current=>current?.token===token?null:current);
+        setNativePdfPreview(current=>current?.token===token
+          ?{...current,pageCount:0,image:"",thumbnails:[],loading:false}
+          :current);
         setError("The PDF preview could not be prepared. You can still upload the document.");
       }
     };
-    window.addEventListener("message",onNativePdfPreview);
-    return ()=>window.removeEventListener("message",onNativePdfPreview);
+    const bridge=(window as Window & {
+      SmartPrintNative?:{
+        addEventListener?:(type:string,listener:(event:MessageEvent)=>void)=>void;
+        removeEventListener?:(type:string,listener:(event:MessageEvent)=>void)=>void;
+      };
+    }).SmartPrintNative;
+    if(!bridge?.addEventListener||!bridge.removeEventListener)return;
+    bridge.addEventListener("message",onNativePdfPreview);
+    return ()=>bridge.removeEventListener!("message",onNativePdfPreview);
   },[nativeAppMode]);
 
   useEffect(()=>{
@@ -4537,6 +4548,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     setNativePdfPreview(null);
     return ()=>{postSmartPrintNativeMessage("closeCustomerPdfPreview");};
   },[file,nativeAppMode]);
+
+  useEffect(()=>{
+    if(!nativeAppMode||!file||!isCustomerPdf(file))return;
+    if(photoSettingsByFileFingerprint[customerFileFingerprint(file)])return;
+    openCustomerPdfPreview(file);
+  },[file,nativeAppMode,photoSettingsByFileFingerprint]);
 
   useEffect(()=>{
     if(!nativeAppMode)return;
@@ -4988,12 +5005,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   function openCustomerPdfPreview(candidate:File) {
     const token=smartPrintNativePdfPreviewTokens.get(candidate);
     if(!token){
-      setError("Please select this PDF again before opening its preview.");
+      setNativePdfPreview(null);
+      setError("The PDF preview is unavailable. You can still upload the document.");
       return;
     }
     setNativePdfPreview({token,requestedPageIndex:0,pageIndex:0,pageCount:0,image:"",thumbnails:[],loading:true});
     if(!postSmartPrintNativeMessage("previewCustomerPdf|"+token+"|0")){
-      setNativePdfPreview(null);
+      setNativePdfPreview({token,requestedPageIndex:0,pageIndex:0,pageCount:0,image:"",thumbnails:[],loading:false});
       setError("The PDF preview is unavailable. You can still upload the document.");
       return;
     }
@@ -5445,7 +5463,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   />
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply. <InfoTooltip label="Folder settings"><span>Settings apply to every file in this folder. Use Custom on a file to change its settings.</span></InfoTooltip></small>}
-    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onOpen={()=>openCustomerPdfPreview(file)} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
+    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div>{!nativeAppMode&&<small>Updates after each file.</small>}</div>}
     {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?<>Local transfer is not encrypted. <InfoTooltip label="Local transfer security"><span>Shop Wi-Fi uses local HTTP. Choose Cloud-assisted for encrypted HTTPS transfer.</span></InfoTooltip></>:<>Check shop Wi-Fi first. <InfoTooltip label="Shop Wi-Fi access"><span>In a browser, tap Check shop Wi-Fi above to grant local network access.</span></InfoTooltip></>}</small>}
