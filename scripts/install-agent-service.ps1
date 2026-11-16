@@ -76,12 +76,99 @@ $serviceName = "QRtoPrintSmartPrintAgent"
 $binaryPath = '"' + $resolvedExe + '"'
 $firewallRulePrefix = "QRtoPrint Smart Print Agent Local API"
 $firewallRuleName = "$firewallRulePrefix - $AgentVersion"
+$agentDataRoot = Join-Path $env:ProgramData "QRtoPrint"
+$localServiceAccount = "NT AUTHORITY\LocalService"
+
+function Set-AgentServiceAccount {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("LocalSystem", "LocalService")]
+        [string]$Account
+    )
+
+    if ($Account -eq "LocalService") {
+        & sc.exe config $serviceName obj= $localServiceAccount password= "" | Out-Null
+    }
+    else {
+        & sc.exe config $serviceName obj= "LocalSystem" | Out-Null
+    }
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not configure the SmartPrint Agent service identity as $Account."
+    }
+}
 
 # Keep the old executable and firewall rule untouched until the new service has
 # started and the replacement firewall rule has been created successfully.
 $previousService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
 $previousController = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
 $previousWasRunning = $null -ne $previousController -and $previousController.Status -eq "Running"
+$previousServiceAccount = "LocalSystem"
+if ($previousService -and -not $previousController) {
+    throw "Windows returned an Agent service configuration but could not open its service controller. Refusing to modify the existing installation."
+}
+if ($previousService) {
+    $previousStartName = ([string]$previousService.StartName).Trim()
+    if ($previousStartName -match '^(LocalSystem|NT AUTHORITY\\LocalSystem)$') {
+        $previousServiceAccount = "LocalSystem"
+    }
+    elseif ($previousStartName -match '^(LocalService|NT AUTHORITY\\LocalService)$') {
+        $previousServiceAccount = "LocalService"
+    }
+    else {
+        throw "The existing SmartPrint Agent uses unsupported service identity '$previousStartName'. Refusing to replace a service account that this installer cannot safely restore."
+    }
+}
+
+# SmartPrint stores only its own machine identity, encrypted queue and network
+# preference below this product-specific directory. Migrate the old SYSTEM-only
+# tree while the Agent is stopped, then grant only SYSTEM, Administrators and
+# LocalService. No printer, driver, port, default-printer or Spooler state is changed.
+function Set-AgentDataPermissions {
+    New-Item -ItemType Directory -Force -Path $agentDataRoot | Out-Null
+    $takeownPath = Join-Path $env:SystemRoot "System32\takeown.exe"
+    $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
+    & $takeownPath /F $agentDataRoot /R /D Y /A | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not take administrative ownership of the existing SmartPrint machine-data tree for ACL migration."
+    }
+
+    # Reset any protected, old SYSTEM-only child ACLs to the parent baseline,
+    # then replace inherited access with the exact SmartPrint principals.
+    & $icaclsPath $agentDataRoot /reset /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not reset the SmartPrint machine-data ACLs for migration."
+    }
+    $agentDataAcl = @(
+        "*S-1-5-18:(OI)(CI)F",      # LocalSystem
+        "*S-1-5-32-544:(OI)(CI)F", # Built-in Administrators
+        "*S-1-5-19:(OI)(CI)F"      # LocalService
+    )
+    & $icaclsPath $agentDataRoot /inheritance:r /grant:r @agentDataAcl /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not restrict SmartPrint machine data to SYSTEM, Administrators and LocalService."
+    }
+
+    # The encrypted document queue is more sensitive than pairing metadata.
+    # Keep it private to SYSTEM and the LocalService Agent, excluding even the
+    # Administrators group from its normal DACL.
+    $privateQueueRoot = Join-Path $agentDataRoot "LocalQueue"
+    if (Test-Path -LiteralPath $privateQueueRoot -PathType Container) {
+        $privateQueueAcl = @(
+            "*S-1-5-18:(OI)(CI)F", # LocalSystem
+            "*S-1-5-19:(OI)(CI)F"  # LocalService
+        )
+        & $icaclsPath $privateQueueRoot /inheritance:r /grant:r @privateQueueAcl /T /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not restrict the encrypted SmartPrint queue to SYSTEM and LocalService."
+        }
+        & $icaclsPath $privateQueueRoot /setowner "*S-1-5-19" /T /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not set the encrypted SmartPrint queue owner to LocalService."
+        }
+    }
+}
+
 $createdService = $false
 $newFirewallRule = $null
 
@@ -92,14 +179,21 @@ try {
             (Get-Service -Name $serviceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(30))
         }
 
+        Set-AgentDataPermissions
+
         & sc.exe config $serviceName binPath= $binaryPath start= auto | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not update the existing QRtoPrint service executable path." }
         Set-Service -Name $serviceName -StartupType Automatic
     }
     else {
+        Set-AgentDataPermissions
         New-Service -Name $serviceName -BinaryPathName $binaryPath -DisplayName "QRtoPrint Smart Print Agent" -Description "Secure local printer inventory and cloud heartbeat service for QRtoPrint." -StartupType Automatic | Out-Null
         $createdService = $true
     }
+
+    # Use the built-in least-privilege identity. It can access machine-wide
+    # printer queues that grant standard Print permission but has no admin token.
+    Set-AgentServiceAccount -Account "LocalService"
 
     # Recover automatically from an unexpected process/service failure.
     & sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
@@ -112,8 +206,12 @@ try {
     if ((Get-Service -Name $serviceName).Status -ne "Running") {
         throw "Windows did not confirm that the new QRtoPrint service is running."
     }
+    $installedService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'"
+    if ($installedService.StartName -notmatch 'LocalService$') {
+        throw "The SmartPrint Agent did not start under the required LocalService identity."
+    }
 
-    $newFirewallRule = New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Any -RemoteAddress LocalSubnet -Description "Allows same-local-subnet devices to reach the QRtoPrint local agent status and upload endpoints."
+    $newFirewallRule = New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Private,Domain -RemoteAddress LocalSubnet -Description "Allows same-local-subnet devices on a Windows Private network to reach the SmartPrint Agent endpoints."
 
     # The new version is running and reachable. Old version-specific rules are
     # now safe to remove; any cleanup failure must not roll back a healthy Agent.
@@ -176,6 +274,7 @@ catch {
 
             & sc.exe config $serviceName binPath= $previousService.PathName start= $previousStart | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "The previous QRtoPrint service executable path could not be restored." }
+            Set-AgentServiceAccount -Account $previousServiceAccount
             Set-Service -Name $serviceName -StartupType $previousPowerShellStart
 
             if ($previousWasRunning) {
