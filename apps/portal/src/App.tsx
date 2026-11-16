@@ -5261,7 +5261,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
   const batchQuoteBreakdown=calculateBatchQuoteBreakdown(acceptedQuoteEntries.map(entry=>({
-    printKind:normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind),
+    printKind:printKindsByJobId[entry.item.job.id]==="ID_DOCUMENT"
+      ?"ID_DOCUMENT"
+      :normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind),
     pageCount:entry.quote!.pageCount,
     copies:entry.quote!.copies,
     colourMode:entry.quote!.colourMode,
