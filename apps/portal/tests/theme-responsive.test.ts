@@ -433,7 +433,7 @@ test("native customer UI follows explicit SmartPrint theme and marks selected up
 });
 
 
-test("customer print settings are preserved independently of printer capability reports", () => {
+test("customer N-up choices come only from the assigned printer driver while other settings remain independent", () => {
   const app = read("../src/App.tsx");
   const flowStart = app.indexOf("function CustomerPrintFlow(");
   const flowEnd = app.indexOf("function UploadIcon()", flowStart);
@@ -443,16 +443,16 @@ test("customer print settings are preserved independently of printer capability 
 
   assert.ok(flow.includes("Private Printing is available only with a live paired Agent/key and a ready"));
   assert.ok(flow.includes("const privateQueueReady = localAgent?.printerStatus === \"Ready\""));
-  assert.ok(flow.includes("void printerCapabilitiesJson;"));
+  assert.ok(flow.includes("const supportedPagesPerSheet=hasAssignedPrinter"));
+  assert.ok(flow.includes("parseCustomerPagesPerSheetCapabilities(printerCapabilitiesJson)"));
+  assert.ok(flow.includes("const nupOptions=supportedPagesPerSheet.filter(value=>value>1)"));
   assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
-  // Settings are derived from the selected file/group defaults. ID Studio keeps
-  // A4 portrait, one copy and single-sided output while preserving the chosen B&W/Colour mode.
-  assert.ok(flow.includes("colourMode:selected.colourMode"));
-  assert.ok(flow.includes("isDuplex:selected.isDuplex"));
-  assert.ok(flow.includes('paperSize:selected.advancedEnabled?selected.paperSize:"A4"'));
-  assert.ok(flow.includes('orientation:selected.advancedEnabled?selected.orientation:"AUTO"'));
+  // The output-density choice is opt-in and available only for reported PDF options.
+  assert.ok(flow.includes("pagesPerSheet:selected.advancedEnabled&&isCustomerPdf(candidate)"));
+  assert.ok(flow.includes("pagesPerSheet:1"));
+  // ID Studio keeps A4 portrait, one copy and single-sided output.
   assert.ok(flow.includes("if(isSmartPrintIdDocument(candidate)) {"));
-  assert.ok(flow.includes("copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:\"A4\",orientation:\"PORTRAIT\""));
+  assert.ok(flow.includes("copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:\"A4\",orientation:\"PORTRAIT\",pagesPerSheet:1"));
 });
 
 test("folder defaults inherit to files and advanced paper options are opt-in", () => {
