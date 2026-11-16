@@ -422,6 +422,7 @@ if (mode == "seed")
         DateTimeOffset.UtcNow));
     networkPreferenceStore.SetPreferredNetworkId(expectedNetworkId);
     await queueStore.InitializeAsync(CancellationToken.None);
+    _ = new AgentDocumentEncryptionKeyStore().GetOrCreatePublicKey();
     var bytes = Encoding.UTF8.GetBytes(expectedDocument);
     var job = new AgentClaimedJob(
         Guid.Parse(expectedJobId),
@@ -455,6 +456,9 @@ else if (mode == "verify")
         throw new InvalidOperationException("The synthetic Agent API address changed.");
     if (networkPreferenceStore.GetPreferredNetworkId() != expectedNetworkId)
         throw new InvalidOperationException("The shop's saved local-network selection changed or was removed.");
+    var publicKey = new AgentDocumentEncryptionKeyStore().GetOrCreatePublicKey();
+    if (string.IsNullOrWhiteSpace(publicKey))
+        throw new InvalidOperationException("The Agent document-encryption key was not readable under LocalService.");
 
     var entry = queueStore.Find(Guid.Parse(expectedJobId))
         ?? throw new InvalidOperationException("The staged local queue manifest is missing.");
