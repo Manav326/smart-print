@@ -405,6 +405,7 @@ public sealed class WindowsPrinterNupIntegrationTests
             return;
 
         bool supportsFourUp;
+        bool supportsStandardDirection;
         using (var capabilities = System.Text.Json.JsonDocument.Parse(
                    WindowsPrinterCapabilityDiscovery.DiscoverJson(queueName)))
         {
@@ -414,6 +415,12 @@ public sealed class WindowsPrinterNupIntegrationTests
                                  value.ValueKind == System.Text.Json.JsonValueKind.Number &&
                                  value.TryGetInt32(out var pagesPerSheet) &&
                                  pagesPerSheet == 4);
+            supportsStandardDirection =
+                capabilities.RootElement.TryGetProperty("pagesPerSheetDirection", out var directionValue) &&
+                directionValue.ValueKind == System.Text.Json.JsonValueKind.String &&
+                directionValue.GetString() is
+                    "RightBottom" or "BottomRight" or "LeftBottom" or "BottomLeft" or
+                    "RightTop" or "TopRight" or "LeftTop" or "TopLeft";
         }
 
         using var source = new MemoryStream();
@@ -478,16 +485,19 @@ public sealed class WindowsPrinterNupIntegrationTests
         try
         {
             var executor = new WindowsPrintExecutor();
-            if (!supportsFourUp)
+            if (!supportsFourUp || !supportsStandardDirection)
             {
                 var blocked = Assert.Throws<PrintExecutionBlockedException>(() =>
                     executor.PrintToFile(entry, bytes, outputPath, CancellationToken.None));
-                Assert.Equal("PAGES_PER_SHEET_UNSUPPORTED", blocked.ReasonCode);
+                var expectedReason = supportsFourUp
+                    ? "PAGES_PER_SHEET_DIRECTION_UNSUPPORTED"
+                    : "PAGES_PER_SHEET_UNSUPPORTED";
+                Assert.Equal(expectedReason, blocked.ReasonCode);
                 Assert.False(
                     File.Exists(outputPath),
-                    "An unsupported N-up request must be rejected before Windows receives a spooler job.");
+                    "An N-up request without both a supported page count and presentation direction must be rejected before Windows receives a spooler job.");
                 Console.WriteLine(
-                    $"N-up integration verified fail-closed behavior: '{queueName}' does not advertise 4-up and no spooler output was created.");
+                    $"N-up integration verified fail-closed behavior: '{queueName}' does not advertise the complete 4-up Print Schema capability and no spooler output was created.");
                 return;
             }
 
