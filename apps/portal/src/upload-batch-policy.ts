@@ -1,4 +1,4 @@
-import { UPLOAD_LIMITS } from "./upload-limits.generated";
+import { UPLOAD_LIMITS } from "./upload-limits.generated.ts";
 
 export type CustomerUploadLimitFailure =
   | { code: "FILE_SIZE"; fileIndex: number }
