@@ -18,12 +18,12 @@ public sealed class Qsp2DocumentReadStream : Stream
     private readonly int recordSizeBytes;
     private readonly ulong recordCount;
     private readonly long recordsOffset;
-    private readonly byte[] headerHash;
-    private readonly byte[] noncePrefix;
-    private readonly byte[] recordKey;
-    private readonly byte[] ciphertextBuffer;
-    private readonly byte[] plaintextBuffer;
-    private readonly AesGcm aes;
+    private readonly byte[] headerHash = Array.Empty<byte>();
+    private readonly byte[] noncePrefix = Array.Empty<byte>();
+    private readonly byte[] recordKey = Array.Empty<byte>();
+    private readonly byte[] ciphertextBuffer = Array.Empty<byte>();
+    private readonly byte[] plaintextBuffer = Array.Empty<byte>();
+    private AesGcm? aes;
     private long position;
     private ulong cachedRecordIndex = ulong.MaxValue;
     private int cachedRecordLength;
@@ -57,10 +57,10 @@ public sealed class Qsp2DocumentReadStream : Stream
         byte[]? localRecordKey = null;
         byte[]? localHeaderHash = null;
         byte[]? localNoncePrefix = null;
+        var header = new byte[Qsp2DocumentFormat.HeaderSizeBytes];
+        var suppliedHeaderMac = new byte[Qsp2DocumentFormat.HeaderMacSizeBytes];
         try
         {
-            var header = new byte[Qsp2DocumentFormat.HeaderSizeBytes];
-            var suppliedHeaderMac = new byte[Qsp2DocumentFormat.HeaderMacSizeBytes];
             ReadExactly(encryptedInput, header);
             ReadExactly(encryptedInput, suppliedHeaderMac);
 
@@ -109,8 +109,10 @@ public sealed class Qsp2DocumentReadStream : Stream
             encryptedInput.Position = footerOffset;
             var footerCore = new byte[Qsp2DocumentFormat.FooterCoreSizeBytes];
             var footerTag = new byte[Qsp2DocumentFormat.AuthenticationTagSizeBytes];
-            ReadExactly(encryptedInput, footerCore);
-            ReadExactly(encryptedInput, footerTag);
+            try
+            {
+                ReadExactly(encryptedInput, footerCore);
+                ReadExactly(encryptedInput, footerTag);
             Qsp2DocumentFormat.ValidateFooterCore(footerCore, recordCount, plaintextLength);
 
             var footerNonce = Qsp2DocumentFormat.BuildNonce(localNoncePrefix, recordCount);
@@ -138,8 +140,8 @@ public sealed class Qsp2DocumentReadStream : Stream
                 CryptographicOperations.ZeroMemory(footerTag);
             }
 
-            var footerDigest = footerCore.AsSpan(20, 32);
-            if (!string.IsNullOrWhiteSpace(expectedSha256))
+                var footerDigest = footerCore.AsSpan(20, 32);
+                if (!string.IsNullOrWhiteSpace(expectedSha256))
             {
                 byte[] expectedDigest;
                 try
@@ -164,10 +166,7 @@ public sealed class Qsp2DocumentReadStream : Stream
                 }
             }
 
-            Sha256 = Convert.ToHexString(footerDigest).ToLowerInvariant();
-            CryptographicOperations.ZeroMemory(header);
-            CryptographicOperations.ZeroMemory(suppliedHeaderMac);
-            CryptographicOperations.ZeroMemory(footerCore);
+                Sha256 = Convert.ToHexString(footerDigest).ToLowerInvariant();
 
             // Ownership of these key-derived values transfers to the stream.
             headerHash = localHeaderHash;
@@ -180,7 +179,13 @@ public sealed class Qsp2DocumentReadStream : Stream
             ciphertextBuffer = ArrayPool<byte>.Shared.Rent(recordSizeBytes);
             plaintextBuffer = ArrayPool<byte>.Shared.Rent(recordSizeBytes);
             aes = new AesGcm(recordKey, Qsp2DocumentFormat.AuthenticationTagSizeBytes);
-            encryptedInput.Position = recordsOffset;
+                encryptedInput.Position = recordsOffset;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(footerCore);
+                CryptographicOperations.ZeroMemory(footerTag);
+            }
         }
         catch
         {
@@ -189,6 +194,8 @@ public sealed class Qsp2DocumentReadStream : Stream
         }
         finally
         {
+            CryptographicOperations.ZeroMemory(header);
+            CryptographicOperations.ZeroMemory(suppliedHeaderMac);
             if (localHeaderMacKey is not null) CryptographicOperations.ZeroMemory(localHeaderMacKey);
             if (localRecordKey is not null) CryptographicOperations.ZeroMemory(localRecordKey);
             if (localHeaderHash is not null) CryptographicOperations.ZeroMemory(localHeaderHash);
@@ -287,14 +294,20 @@ public sealed class Qsp2DocumentReadStream : Stream
             }
 
             disposed = true;
-            aes.Dispose();
+            aes?.Dispose();
             CryptographicOperations.ZeroMemory(recordKey);
             CryptographicOperations.ZeroMemory(headerHash);
             CryptographicOperations.ZeroMemory(noncePrefix);
-            CryptographicOperations.ZeroMemory(ciphertextBuffer);
-            CryptographicOperations.ZeroMemory(plaintextBuffer);
-            ArrayPool<byte>.Shared.Return(ciphertextBuffer);
-            ArrayPool<byte>.Shared.Return(plaintextBuffer);
+            if (ciphertextBuffer.Length > 0)
+            {
+                CryptographicOperations.ZeroMemory(ciphertextBuffer);
+                ArrayPool<byte>.Shared.Return(ciphertextBuffer);
+            }
+            if (plaintextBuffer.Length > 0)
+            {
+                CryptographicOperations.ZeroMemory(plaintextBuffer);
+                ArrayPool<byte>.Shared.Return(plaintextBuffer);
+            }
             cachedRecordIndex = ulong.MaxValue;
             cachedRecordLength = 0;
             if (disposing && !leaveOpen)
@@ -331,7 +344,7 @@ public sealed class Qsp2DocumentReadStream : Stream
         var aad = Qsp2DocumentFormat.BuildRecordAad(headerHash, recordIndex, actualLength);
         try
         {
-            aes.Decrypt(
+            (aes ?? throw new ObjectDisposedException(nameof(Qsp2DocumentReadStream))).Decrypt(
                 nonce,
                 ciphertextBuffer.AsSpan(0, actualLength),
                 tag,
