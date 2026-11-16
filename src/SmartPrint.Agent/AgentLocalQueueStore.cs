@@ -1498,16 +1498,16 @@ public sealed class AgentLocalQueueStore
     private static void SecureDirectory(string directory)
     {
         var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var localServiceSid = new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null);
         using var identity = WindowsIdentity.GetCurrent();
         var ownerSid = identity.User
             ?? throw new InvalidOperationException("The current Windows identity has no user SID.");
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         security.SetOwner(ownerSid);
-        // The production Agent service runs as LocalSystem, so its queue remains
-        // SYSTEM-owned and SYSTEM-only. Interactive diagnostics and the installer
-        // lifecycle fixture run under their own account; grant only that current
-        // identity access rather than making the directory writable by Administrators.
+        // The production Agent runs as LocalService. Keep the queue private to
+        // that service identity and SYSTEM; retain the current owner only for
+        // controlled lifecycle fixtures and diagnostics.
         security.AddAccessRule(new FileSystemAccessRule(
             systemSid,
             FileSystemRights.FullControl,
@@ -1518,6 +1518,15 @@ public sealed class AgentLocalQueueStore
         {
             security.AddAccessRule(new FileSystemAccessRule(
                 ownerSid,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+        }
+        if (!ownerSid.Equals(localServiceSid))
+        {
+            security.AddAccessRule(new FileSystemAccessRule(
+                localServiceSid,
                 FileSystemRights.FullControl,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None,
