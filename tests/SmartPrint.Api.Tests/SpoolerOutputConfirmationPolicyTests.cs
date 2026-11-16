@@ -71,6 +71,21 @@ public sealed class SpoolerOutputConfirmationPolicyTests
     }
 
     [Theory]
+    [InlineData("SPOOLER_JOB_NO_LONGER_VISIBLE", 17, true)]
+    [InlineData(" spooler_job_no_longer_visible ", 17, true)]
+    [InlineData("SPOOLER_JOB_NO_LONGER_VISIBLE", null, false)]
+    [InlineData("SPOOLER_JOB_NO_LONGER_VISIBLE", 0, false)]
+    [InlineData("AGENT_RESTART_DURING_PRINT_SUBMISSION", null, true)]
+    [InlineData("AGENT_RESTART_DURING_PRINT_SUBMISSION", 17, false)]
+    [InlineData("LOCAL_QUEUE_PROOF_MISMATCH", 17, false)]
+    [InlineData("AGENT_STOPPED_DURING_OUTPUT", 17, false)]
+    public void OnlyVerifiedAgentAbsenceReportsMayClearRetainedSpoolerState(
+        string reasonCode, int? spoolerJobId, bool expected)
+    {
+        Assert.Equal(expected, SpoolerOutputConfirmationPolicy.IsVerifiedSpoolerAbsenceReport(reasonCode, spoolerJobId));
+    }
+
+    [Theory]
     [InlineData("RETAINED")]
     [InlineData("retained")]
     [InlineData(" Retained ")]

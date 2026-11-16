@@ -69,6 +69,15 @@ public static class SpoolerOutputConfirmationPolicy
             !PrinterWarningStatuses.Contains(printerStatus?.Trim() ?? string.Empty);
     }
 
+    public static bool IsVerifiedSpoolerAbsenceReport(string? reasonCode, int? spoolerJobId)
+    {
+        var normalizedReason = reasonCode?.Trim();
+        return (spoolerJobId is > 0 &&
+                string.Equals(normalizedReason, "SPOOLER_JOB_NO_LONGER_VISIBLE", StringComparison.OrdinalIgnoreCase)) ||
+            (spoolerJobId is null &&
+                string.Equals(normalizedReason, "AGENT_RESTART_DURING_PRINT_SUBMISSION", StringComparison.OrdinalIgnoreCase));
+    }
+
     public static bool ShouldPreserveLastKnownRetainedStatus(string? currentStatus, string? incomingStatus) =>
         IsRetained(currentStatus) &&
         string.Equals(incomingStatus?.Trim(), "PRINTER_UNAVAILABLE", StringComparison.OrdinalIgnoreCase);

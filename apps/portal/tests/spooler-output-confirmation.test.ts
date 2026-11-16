@@ -72,6 +72,23 @@ test("Order Journey and Print Queue use the same physical-output eligibility hel
   assert.doesNotMatch(printQueue, /job\.status!==\"OUTPUT_UNCONFIRMED\"&&!!spoolerStatusWarning/);
 });
 
+test("the Agent only clears a retained spooler report after a verified absence report", () => {
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const routeStart = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed"');
+  const routeEnd = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/spooler-status"', routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart, "The Agent output-reconciliation endpoint must exist.");
+  const route = program.slice(routeStart, routeEnd);
+  assert.match(route, /IsVerifiedSpoolerAbsenceReport\(reason,\s*job\.SpoolerJobId\)/);
+  const guardedBlocks = [...route.matchAll(/if \(verifiedSpoolerAbsence\)\s*\{([\s\S]*?)\}/g)].map(match => match[1]);
+  assert.equal(guardedBlocks.length, 2, "Both first and duplicate Agent reports must gate spooler-state refresh.");
+  for (const block of guardedBlocks) {
+    assert.match(block, /job\.SpoolerStatus = "OUTPUT_UNCONFIRMED"/);
+    assert.match(block, /job\.SpoolerObservedUtc = now/);
+  }
+  assert.equal((route.match(/job\.SpoolerStatus = "OUTPUT_UNCONFIRMED"/g) ?? []).length, 2,
+    "No unverified output-uncertain reason may manufacture a verified spooler observation.");
+});
+
 test("the API endpoint applies the server guard before completion or private-source purge", () => {
   const program = read("../../../src/SmartPrint.Api/Program.cs");
   const routeStart = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/confirm-output"');

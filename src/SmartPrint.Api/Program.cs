@@ -7165,18 +7165,20 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
     if (string.IsNullOrWhiteSpace(reason) || reason.Length > 80) return Results.BadRequest();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
+    var verifiedSpoolerAbsence = SpoolerOutputConfirmationPolicy.IsVerifiedSpoolerAbsenceReport(reason, job.SpoolerJobId);
     if (job.Status is "OUTPUT_UNCONFIRMED" or "COMPLETED")
     {
         if (job.Status == "OUTPUT_UNCONFIRMED" && job.ClaimedByAgentDeviceId == device.Id)
         {
             var updated = false;
-            if (job.SpoolerJobId is > 0)
+            if (verifiedSpoolerAbsence)
             {
-                // The authenticated Agent has just verified that Windows no longer lists this spooler ID.
-                // Refresh stale RETAINED state so an old report cannot block the shop forever.
+                // Only an Agent lookup that proves the submitted spooler entry is absent
+                // may replace a last-known RETAINED observation.
+                var now = DateTimeOffset.UtcNow;
                 job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
-                job.SpoolerObservedUtc = DateTimeOffset.UtcNow;
-                job.UpdatedUtc = DateTimeOffset.UtcNow;
+                job.SpoolerObservedUtc = now;
+                job.UpdatedUtc = now;
                 updated = true;
             }
             if (job.PrinterDeviceId is Guid existingPrinterId &&
@@ -7195,6 +7197,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
         return Results.Conflict(new { code = "job_not_reconcilable" });
 
     var previous = job.Status;
+    var now = DateTimeOffset.UtcNow;
     if (job.PrinterDeviceId is Guid assignedOutputId &&
         await db.PrinterDevices.AnyAsync(printer =>
             printer.Id == assignedOutputId && printer.TenantId == device.TenantId &&
@@ -7202,14 +7205,17 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
         job.OutputType = "PDF_EXPORT";
     job.Status = "OUTPUT_UNCONFIRMED";
     job.FailureCode = reason;
-    job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
-    job.SpoolerObservedUtc = DateTimeOffset.UtcNow;
+    if (verifiedSpoolerAbsence)
+    {
+        job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
+        job.SpoolerObservedUtc = now;
+    }
     job.PrintDispatchLeaseExpiresUtc = null;
-    job.UpdatedUtc = DateTimeOffset.UtcNow;
+    job.UpdatedUtc = now;
     db.PrintJobEvents.Add(new PrintJobEvent
     {
         TenantId = device.TenantId, PrintJobId = job.Id, PreviousStatus = previous, NewStatus = job.Status,
-        ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = reason, CreatedUtc = DateTimeOffset.UtcNow
+        ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = reason, CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
     return Results.Ok(new { job.Id, job.Status, job.FailureCode });
