@@ -5260,10 +5260,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   );
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
-  const acceptedDocumentEntries=acceptedQuoteEntries.filter(entry=>
-    entry.quote?.printKind!=="PHOTO"&&entry.quote?.printKind!=="ID_DOCUMENT");
-  const acceptedIdDocumentEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="ID_DOCUMENT");
-  const acceptedPhotoEntries=acceptedQuoteEntries.filter(entry=>entry.quote?.printKind==="PHOTO");
   const batchQuoteBreakdown=calculateBatchQuoteBreakdown(acceptedQuoteEntries.map(entry=>({
     printKind:normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind),
     pageCount:entry.quote!.pageCount,
@@ -5484,10 +5480,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {notice&&<div className={"customer-upload-notice "+notice.kind} role={notice.kind==="warning"?"alert":"status"}>{notice.message}</div>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{acceptedQuoteEntries.length} accepted file(s) · {batchQuoteBreakdown.idCardSheets} ID-card A4 sheet(s) · {batchQuoteBreakdown.photoPages} photo A4 page(s) · {batchQuoteBreakdown.normalDocumentSourcePages} normal document page(s) · {batchQuoteBreakdown.totalOutputPagesAndSheets} total output page sides / prepared sheets</small></div>
+      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{acceptedQuoteEntries.length} accepted file(s) · {batchQuoteBreakdown.idCardCount} ID-card file(s) · {batchQuoteBreakdown.idCardSheets} ID-card A4 sheet(s) · {batchQuoteBreakdown.photoPages} photo A4 page(s) · {batchQuoteBreakdown.normalDocumentSourcePages} normal document page(s) · {batchQuoteBreakdown.totalOutputPagesAndSheets} total output page sides / prepared sheets</small></div>
       <div className="customer-batch-print-breakdown">
         <div><span>Normal documents · {batchQuoteBreakdown.normalDocumentFileCount} file(s) · {batchQuoteBreakdown.normalDocumentSourcePages} original page(s) × copies = {batchQuoteBreakdown.normalDocumentOutputPages} output page sides</span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,quoteEntries[0].quote!.currency)}</strong><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,quoteEntries[0].quote!.currency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,quoteEntries[0].quote!.currency)}</small></div>
-        <div><span>ID cards · {batchQuoteBreakdown.idCardSheets} prepared A4 sheet(s)</span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
+        <div><span>ID cards · {batchQuoteBreakdown.idCardCount} prepared ID-card file(s) · {batchQuoteBreakdown.idCardSheets} A4 sheet(s)</span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
         <div><span>Photo printing · {batchQuoteBreakdown.photoPages} A4 page(s) · {batchQuoteBreakdown.finishedPhotos} finished photo(s)</span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
         <div className="customer-batch-print-total"><span>Total output page sides / prepared A4 sheets</span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
       </div>
