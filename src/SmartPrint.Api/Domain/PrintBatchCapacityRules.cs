@@ -12,7 +12,7 @@ public static class PrintBatchCapacityRules
         if (incomingBytes <= 0) throw new ArgumentOutOfRangeException(nameof(incomingBytes));
 
         return existingFileCount < MaximumFiles &&
-            incomingBytes <= MaximumTotalBytes &&
+            incomingBytes <= UploadLimits.MaxFileBytes &&
             existingBytes <= MaximumTotalBytes - incomingBytes;
     }
 }

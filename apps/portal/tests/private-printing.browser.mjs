@@ -325,6 +325,8 @@ async function installPrivatePrintingApiHarness(context, page) {
   const allApiRequests = [];
   const unhandledApi = [];
   let nextJobNumber = 1;
+  let activePrivateRelayTransfers = 0;
+  let maximumConcurrentPrivateRelayTransfers = 0;
 
   const sessionResponse = {
     id: randomUUID(),
@@ -359,19 +361,23 @@ async function installPrivatePrintingApiHarness(context, page) {
     cloudAssistedPrintingEnabled: false
   };
 
-  // Capture a tee'd copy of streamed QSP2 bytes for assertions while the
-  // browser's original stream remains the actual fetch request body.
+  // Capture a tee'd copy of each streamed QSP2 body by ticket ID. This keeps
+  // parallel uploads independent while each original stream remains the fetch body.
   await context.addInitScript(() => {
     const originalFetch = window.fetch.bind(window);
+    const captures = new Map();
+    window.__smartPrintPrivateRelayCapturePromises = captures;
     window.fetch = (input, init = {}) => {
       const url = typeof input === "string" ? input :
         input instanceof URL ? input.href :
         input instanceof Request ? input.url : "";
       const method = (init.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
       const body = init.body ?? (input instanceof Request ? input.body : null);
-      if (method === "POST" && url.includes("/private-relay") && body instanceof ReadableStream) {
+      const pathname = new URL(url, window.location.href).pathname;
+      const match = pathname.match(/\/local-upload-tickets\/([0-9a-f-]+)\/private-relay$/i);
+      if (method === "POST" && match && body instanceof ReadableStream) {
         const [networkBody, captureBody] = body.tee();
-        window.__smartPrintPrivateRelayCapturePromise = new Response(captureBody).arrayBuffer().then(buffer => {
+        const capture = new Response(captureBody).arrayBuffer().then(buffer => {
           const bytes = new Uint8Array(buffer);
           let binary = "";
           for (let offset = 0; offset < bytes.length; offset += 0x8000) {
@@ -381,6 +387,7 @@ async function installPrivatePrintingApiHarness(context, page) {
           bytes.fill(0);
           return encoded;
         });
+        captures.set(match[1], capture);
         return originalFetch(input, { ...init, body: networkBody });
       }
       return originalFetch(input, init);
@@ -461,15 +468,22 @@ async function installPrivatePrintingApiHarness(context, page) {
       }
       if (path.endsWith("/private-relay") && method === "POST") {
         const relayHeaders = request.headers();
+        activePrivateRelayTransfers += 1;
+        maximumConcurrentPrivateRelayTransfers = Math.max(
+          maximumConcurrentPrivateRelayTransfers, activePrivateRelayTransfers
+        );
         let diagnosticStage = "capture-tee-stream";
         let plaintext = null;
         let encryptedBodyBytes = null;
         try {
-          const encodedBody = await page.evaluate(async () => {
-            const pending = window.__smartPrintPrivateRelayCapturePromise;
-            return pending ? await pending : null;
-          });
-          assert.ok(encodedBody, "The QSP2 fetch stream was not available to the acceptance harness.");
+          const encodedBody = await page.evaluate(async ticketId => {
+            const captures = window.__smartPrintPrivateRelayCapturePromises;
+            const pending = captures?.get(ticketId);
+            if (!pending) return null;
+            try { return await pending; }
+            finally { captures.delete(ticketId); }
+          }, ticket.id);
+          assert.ok(encodedBody, "The QSP2 fetch stream for this ticket was not available to the acceptance harness.");
           const body = Buffer.from(encodedBody, "base64");
 
           diagnosticStage = "validate-qsp2-envelope";
@@ -519,6 +533,7 @@ async function installPrivatePrintingApiHarness(context, page) {
           throw error;
         } finally {
           if (plaintext) plaintext.fill(0);
+          activePrivateRelayTransfers = Math.max(0, activePrivateRelayTransfers - 1);
         }
       }
     }
@@ -575,7 +590,10 @@ async function installPrivatePrintingApiHarness(context, page) {
   });
 
   page.on("pageerror", error => unhandledApi.push({ method: "PAGEERROR", path: error.message }));
-  return { tickets, ticketRequests, relayUploads, allApiRequests, unhandledApi };
+  return {
+    tickets, ticketRequests, relayUploads, allApiRequests, unhandledApi,
+    maximumConcurrentPrivateRelayTransfers
+  };
 }
 
 async function selectFile(page, name) {
@@ -674,6 +692,8 @@ async function runScenario(browser) {
 
   assert.equal(harness.ticketRequests.length, 8, "The eight-file selection must produce exactly eight upload tickets.");
   assert.equal(harness.relayUploads.length, 8, "Every file must complete through the encrypted private relay.");
+  assert.equal(harness.maximumConcurrentPrivateRelayTransfers, 3,
+    "Private Printing must transfer up to three independently encrypted files concurrently.");
   assert.equal(new Set(harness.ticketRequests.map(item => item.batchId)).size, 1,
     "All eight files must remain in one batch.");
   assert.ok(harness.ticketRequests.every(item => item.privatePrinting === true),

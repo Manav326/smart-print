@@ -1,3 +1,4 @@
+using SmartPrint.Api.Domain;
 using System.Security.Cryptography;
 using SmartPrint.Documents;
 
@@ -5,6 +6,15 @@ namespace SmartPrint.Api.Tests;
 
 public sealed class Qsp2DocumentFormatTests
 {
+    [Fact]
+    public void MaximumFiftyMegabytePrivateUploadFitsTheEncryptedRequestLimit()
+    {
+        var encryptedLength = Qsp2DocumentFormat.GetEncryptedLength(UploadLimits.MaxFileBytes);
+
+        Assert.True(encryptedLength > UploadLimits.MaxFileBytes);
+        Assert.True(encryptedLength <= UploadLimits.MaxMultipartRequestBytes);
+    }
+
     [Fact]
     public async Task EncryptsAndDecryptsMultipleRecordsUsingShortReads()
     {
