@@ -684,7 +684,7 @@ public sealed class WindowsPrintExecutor
     public void ReleaseRetainedJob(string queueName, int jobId)
     {
         if (jobId <= 0) throw new ArgumentOutOfRangeException(nameof(jobId));
-        using var handle = OpenQueueForJobAdministration(queueName);
+        using var handle = OpenQueueForRetainedJobCleanup(queueName);
         if (SetJobW(handle.Value, jobId, 0, IntPtr.Zero, JobControlRelease)) return;
 
         var error = Marshal.GetLastWin32Error();
@@ -914,7 +914,7 @@ public sealed class WindowsPrintExecutor
         return new SafePrinterHandle(handle);
     }
 
-    private static SafePrinterHandle OpenQueueForJobAdministration(string queueName)
+    private static SafePrinterHandle OpenQueueForRetainedJobCleanup(string queueName)
     {
         // The Agent releases only jobs submitted under its own LocalService
         // identity. Request ordinary print-use access instead of administrative
