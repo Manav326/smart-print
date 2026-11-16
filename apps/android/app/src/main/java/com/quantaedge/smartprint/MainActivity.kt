@@ -7104,6 +7104,28 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            // Keep the customer-visible native preview branded consistently with the browser
+            // preview. This is preview-only; the source PDF sent to the Agent is unchanged.
+            val watermarkPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                color = android.graphics.Color.LTGRAY
+                alpha = 100
+                textSize = minOf(sheetWidth, sheetHeight) * 0.045f
+                textAlign = android.graphics.Paint.Align.CENTER
+                typeface = android.graphics.Typeface.create(
+                    "sans-serif",
+                    android.graphics.Typeface.BOLD
+                )
+            }
+            canvas.save()
+            canvas.rotate(-28f, sheetWidth / 2f, sheetHeight / 2f)
+            canvas.drawText(
+                "SmartPrint by QuantaEdge",
+                sheetWidth / 2f,
+                sheetHeight / 2f,
+                watermarkPaint
+            )
+            canvas.restore()
+
             return ByteArrayOutputStream().use { output ->
                 bitmap.compress(Bitmap.CompressFormat.JPEG, 88, output)
                 android.util.Base64.encodeToString(output.toByteArray(), android.util.Base64.NO_WRAP)
