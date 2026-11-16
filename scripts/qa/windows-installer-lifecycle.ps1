@@ -460,6 +460,24 @@ else if (mode == "verify")
     if (string.IsNullOrWhiteSpace(publicKey))
         throw new InvalidOperationException("The Agent document-encryption key was not readable under LocalService.");
 
+    // Exercise the same DPAPI identity Save/Load path used during Agent pairing
+    // while running under LocalService, without overwriting the preserved fixture.
+    var roundTripPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "QRtoPrint", "Lifecycle", "LocalServiceCredentialProbe", "agent.identity");
+    var roundTripCredentials = new AgentCredentials(
+        "https://127.0.0.1:1",
+        Guid.Parse("33333333-3333-4333-8333-333333333333"),
+        "localservice-lifecycle-only-secret",
+        DateTimeOffset.UtcNow);
+    var roundTripStore = new AgentCredentialStore(roundTripPath);
+    roundTripStore.Save(roundTripCredentials);
+    var roundTripLoaded = roundTripStore.Load();
+    if (roundTripLoaded?.AgentDeviceId != roundTripCredentials.AgentDeviceId ||
+        roundTripLoaded.AgentSecret != roundTripCredentials.AgentSecret)
+        throw new InvalidOperationException("The LocalService DPAPI identity save/read round-trip failed.");
+    roundTripStore.Delete();
+
     var entry = queueStore.Find(Guid.Parse(expectedJobId))
         ?? throw new InvalidOperationException("The staged local queue manifest is missing.");
     if (!File.Exists(entry.DocumentPath))
