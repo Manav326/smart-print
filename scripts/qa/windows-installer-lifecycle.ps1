@@ -83,6 +83,7 @@ $installRoot = Join-Path $env:ProgramFiles "SmartPrint"
 $ownsInstall = $false
 $ownsPrinter = $false
 $ownsTask = $false
+$script:localServiceFixtureStaged = $false
 
 $script:caseNumber = 0
 function Add-Result([string]$Name, [string]$Status, [string]$Detail) {
@@ -230,25 +231,27 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     $serviceFixtureDirectory = Join-Path $fixtureDataDirectory "Fixture"
     $buildAssemblyPath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.dll"
     $buildExecutablePath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.exe"
-    $assemblyPath = Join-Path $serviceFixtureDirectory "SmartPrintLifecycleFixture.dll"
     $fixtureExecutablePath = Join-Path $serviceFixtureDirectory "SmartPrintLifecycleFixture.exe"
     Assert-True (Test-Path -LiteralPath $buildAssemblyPath) "The Agent lifecycle fixture assembly was not built."
     Assert-True (Test-Path -LiteralPath $buildExecutablePath) "The Agent lifecycle fixture apphost was not built."
 
     # The scheduled task runs as LocalService, not the interactive CI runner.
-    # Stage the complete fixture output in the test-owned ProgramData folder and
-    # grant only LocalService, SYSTEM and Administrators read/execute access.
-    New-Item -ItemType Directory -Force -Path $serviceFixtureDirectory | Out-Null
-    Copy-Item -Path (Join-Path $buildOutputDirectory "*") -Destination $serviceFixtureDirectory -Recurse -Force
-    $fixtureAcl = @(
-        "*S-1-5-18:(OI)(CI)F",
-        "*S-1-5-32-544:(OI)(CI)F",
-        "*S-1-5-19:(OI)(CI)F"
-    )
-    $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
-    & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureAcl /T /C /Q | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not grant the LocalService lifecycle fixture access to its test-only binaries."
+    # Stage and secure the fixture binaries once; every subsequent mode reuses
+    # the same immutable output instead of recopying the full .NET dependency set.
+    if (-not $script:localServiceFixtureStaged) {
+        New-Item -ItemType Directory -Force -Path $serviceFixtureDirectory | Out-Null
+        Copy-Item -Path (Join-Path $buildOutputDirectory "*") -Destination $serviceFixtureDirectory -Recurse -Force
+        $fixtureAcl = @(
+            "*S-1-5-18:(OI)(CI)F",
+            "*S-1-5-32-544:(OI)(CI)F",
+            "*S-1-5-19:(OI)(CI)F"
+        )
+        $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
+        & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureAcl /T /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not grant the LocalService lifecycle fixture access to its test-only binaries."
+        }
+        $script:localServiceFixtureStaged = $true
     }
 
     Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
@@ -270,8 +273,11 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
         $poll = 0
         while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
             $poll++
-            $taskState = (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State
-            if ($taskState -and $taskState -ne "Running" -and $poll -gt 2) { break }
+            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+            $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+            $taskState = if ($task) { [string]$task.State } else { "unavailable" }
+            $taskHasExecuted = $taskInfo -and $taskInfo.LastRunTime -ge $taskStartedAt.AddSeconds(-2)
+            if ($taskHasExecuted -and $taskState -ne "Running") { break }
             if ($poll -eq 1 -or $poll % 10 -eq 0) {
                 Write-Host "[QA-PROGRESS] LocalService fixture | mode=$Mode | state=$taskState | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
             }
