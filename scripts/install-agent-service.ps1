@@ -144,7 +144,10 @@ function Set-AgentDataPermissions {
         "*S-1-5-32-544:(OI)(CI)F", # Built-in Administrators
         "*S-1-5-19:(OI)(CI)F"      # LocalService
     )
-    & $icaclsPath $agentDataRoot /inheritance:r /grant:r @agentDataAcl /T /C /Q | Out-Null
+    # The recursive reset above re-enables parent inheritance on every existing
+    # child. Apply the protected baseline only at the product root; NTFS then
+    # propagates these inheritable ACEs without rewriting every file's DACL.
+    & $icaclsPath $agentDataRoot /inheritance:r /grant:r @agentDataAcl /C /Q | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Could not restrict SmartPrint machine data to SYSTEM, Administrators and LocalService."
     }
@@ -158,19 +161,11 @@ function Set-AgentDataPermissions {
             "*S-1-5-18:(OI)(CI)F", # LocalSystem
             "*S-1-5-19:(OI)(CI)F"  # LocalService
         )
-        & $icaclsPath $privateQueueRoot /inheritance:r /grant:r @privateQueueAcl /T /C /Q | Out-Null
+        # The queue is a narrower security boundary. Protect only its root and
+        # let all reset descendants inherit this SYSTEM/LocalService-only DACL.
+        & $icaclsPath $privateQueueRoot /inheritance:r /grant:r @privateQueueAcl /C /Q | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Could not restrict the encrypted SmartPrint queue to SYSTEM and LocalService."
-        }
-
-        # The parent migration first grants Administrators on the whole tree.
-        # /grant:r replaces only the named principals' explicit grants; it does
-        # not remove a different principal's existing ACE. Remove Administrators
-        # explicitly from every queue descendant so an old file ACL cannot keep
-        # broader access after the queue root has been tightened.
-        & $icaclsPath $privateQueueRoot /remove:g "*S-1-5-32-544" /T /C /Q | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Could not remove the Administrators allow ACE from every encrypted SmartPrint queue item."
         }
 
         & $icaclsPath $privateQueueRoot /setowner "*S-1-5-19" /T /C /Q | Out-Null
