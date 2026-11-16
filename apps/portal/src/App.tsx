@@ -4089,7 +4089,8 @@ function isSmartPrintPhotoDocument(file:File):boolean {
 }
 type NativeCustomerPdfPreview = {
   token:string; requestedPageIndex:number; pageIndex:number; pageCount:number;
-  pagesPerSheet:number; firstSourcePage:number; lastSourcePage:number;
+  pagesPerSheet:number; paperSize:string; orientation:string;
+  firstSourcePage:number; lastSourcePage:number;
   image:string; thumbnails:Array<{index:number;image:string}>; loading:boolean;
 };
 function customerStatusTone(status:string):"green"|"red"|"amber"|"blue"|"slate" {
@@ -4554,11 +4555,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         try{
           const payload=JSON.parse(message.slice("CUSTOMER_PDF_PREVIEW|".length)) as {
             token:string;pageIndex:number;pageCount:number;pagesPerSheet:number;
-            firstSourcePage:number;lastSourcePage:number;image:string;
+            paperSize:string;orientation:string;firstSourcePage:number;lastSourcePage:number;image:string;
             thumbnails:Array<{index:number;image:string}>;
           };
           setNativePdfPreview(current=>current&&current.token===payload.token&&
-            current.requestedPageIndex===payload.pageIndex&&current.pagesPerSheet===payload.pagesPerSheet
+            current.requestedPageIndex===payload.pageIndex&&current.pagesPerSheet===payload.pagesPerSheet&&
+            current.paperSize===payload.paperSize&&current.orientation===payload.orientation
             ?{...payload,requestedPageIndex:payload.pageIndex,loading:false}:current);
         }catch{
           setError("The PDF preview could not be displayed. You can still upload the document.");
@@ -5062,11 +5064,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const pagesPerSheet=settings.pagesPerSheet??1;
     setNativePdfPreview({
       token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+      paperSize:settings.paperSize,orientation:settings.orientation,
       firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:true
     });
     if(!postCustomerPdfPreviewRequest(token,0,candidate)){
       setNativePdfPreview({
         token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+        paperSize:settings.paperSize,orientation:settings.orientation,
         firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:false
       });
       setError("The PDF preview is unavailable. You can still upload the document.");
