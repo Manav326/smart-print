@@ -4,15 +4,18 @@ namespace SmartPrint.Api.Pricing;
 
 public static class PricingCalculator
 {
-    public static long Calculate(int pageCount, int copies, string colourMode, bool isDuplex, ShopPricingProfile pricing)
+    public static long Calculate(int pageCount, int copies, string colourMode, bool isDuplex, ShopPricingProfile pricing, int pagesPerSheet = 1)
     {
         ArgumentNullException.ThrowIfNull(pricing);
         if (pageCount is < 1 or > 500) throw new ArgumentOutOfRangeException(nameof(pageCount), "Page count must be between 1 and 500.");
         if (copies is < 1 or > 100) throw new ArgumentOutOfRangeException(nameof(copies), "Copies must be between 1 and 100.");
         if (colourMode is not ("Mono" or "Colour")) throw new ArgumentException("Colour mode must be Mono or Colour.", nameof(colourMode));
+        if (pagesPerSheet is < 1 or > 500) throw new ArgumentOutOfRangeException(nameof(pagesPerSheet), "Pages per sheet must be between 1 and 500.");
         if (!pricing.IsConfigured) throw new InvalidOperationException("Shop pricing is not configured.");
 
-        var pages = (long)pageCount;
+        // The driver lays logical PDF pages onto physical sides. Price the resulting
+        // output sides, not the source PDF pages.
+        var pages = ((long)pageCount + pagesPerSheet - 1) / pagesPerSheet;
         var copyCount = (long)copies;
         long amount;
 
@@ -118,11 +121,14 @@ public static class PricingCalculator
         return allocations;
     }
 
-    public static long[] CalculatePageRefundAllocations(int pageCount, int copies, string colourMode, bool isDuplex, ShopPricingProfile pricing)
+    public static long[] CalculatePageRefundAllocations(int pageCount, int copies, string colourMode, bool isDuplex, ShopPricingProfile pricing, int pagesPerSheet = 1)
     {
-        var total = Calculate(pageCount, copies, colourMode, isDuplex, pricing);
+        var total = Calculate(pageCount, copies, colourMode, isDuplex, pricing, pagesPerSheet);
+        // Keep the historical per-source-page weighted allocation for one-up jobs.
+        // N-up refunds are calculated from the remaining physical output sheets because
+        // removing one logical page can leave the output-side count unchanged.
         var weights = Enumerable.Repeat(1L, pageCount).ToArray();
-        if (isDuplex && pageCount % 2 == 1) weights[^1] = 2;
+        if (pagesPerSheet == 1 && isDuplex && pageCount % 2 == 1) weights[^1] = 2;
 
         var totalWeight = weights.Aggregate(0L, (sum, weight) => checked(sum + weight));
         var allocations = new long[pageCount];
