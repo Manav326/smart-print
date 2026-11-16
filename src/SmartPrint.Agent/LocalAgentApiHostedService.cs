@@ -1209,11 +1209,6 @@ public sealed class LocalAgentApiHostedService(
 
                     await localQueueStore.MarkLocalUploadFinalizedAsync(claim.PrintJobId, ct);
                     return Results.Ok(completed.UploadResult);
-                }
-                finally
-                {
-                    CryptographicOperations.ZeroMemory(bytes);
-                }
             })
             .WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
             .RequireCors("CustomerPortal");
