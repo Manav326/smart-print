@@ -7147,7 +7147,10 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-accepted", async (Guid jobId, Agent
     job.SpoolerJobId = request.SpoolerJobId;
     job.SpoolerSubmittedUtc = now;
     job.SpoolerObservedUtc = now;
-    job.SpoolerStatus = request.SpoolerStatus;
+    // This receipt may be retried from the Agent's local manifest after a network
+    // interruption. It proves the job ID/name, but its cached status must never
+    // be promoted to terminal PRINTED; MonitorSpoolerJobsAsync supplies live proof.
+    job.SpoolerStatus = SpoolerOutputConfirmationPolicy.NormalizeInitialSpoolerAcceptanceStatus(request.SpoolerStatus);
     job.PrintDispatchLeaseExpiresUtc = null;
     job.FailureCode = null;
     job.UpdatedUtc = now;

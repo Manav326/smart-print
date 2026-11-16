@@ -98,6 +98,24 @@ test("Order Journey and Print Queue use the same physical-output eligibility and
   }
 });
 
+test("initial Agent acceptance receipts cannot supply terminal PRINTED proof", () => {
+  const program = read("../../../src/SmartPrint.Api/Program.cs");
+  const routeStart = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/spooler-accepted"');
+  const routeEnd = program.indexOf('agentApi.MapPost("/jobs/{jobId:guid}/print-blocked"', routeStart);
+  assert.ok(routeStart >= 0 && routeEnd > routeStart);
+  const route = program.slice(routeStart, routeEnd);
+  assert.match(route, /NormalizeInitialSpoolerAcceptanceStatus\\(request\\.SpoolerStatus\\)/);
+  assert.doesNotMatch(route, /job\\.SpoolerStatus\\s*=\\s*request\\.SpoolerStatus/);
+
+  const monitor = read("../../../src/SmartPrint.Agent/Worker.cs");
+  const monitorStart = monitor.indexOf("private async Task MonitorSpoolerJobsAsync");
+  const monitorEnd = monitor.indexOf("private async Task RunPrivateSpoolerCleanupLoopAsync", monitorStart);
+  assert.ok(monitorStart >= 0 && monitorEnd > monitorStart);
+  const polling = monitor.slice(monitorStart, monitorEnd);
+  assert.ok(polling.indexOf("printExecutor.GetJob(") < polling.indexOf("ReportSpoolerStatusAsync("),
+    "Only a fresh Windows GetJob poll may submit the terminal spooler state.");
+});
+
 test("the API gates completion and private-source purge on fresh output proof or an explicit queue reconciliation", () => {
   const program = read("../../../src/SmartPrint.Api/Program.cs");
   const routeStart = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/confirm-output"');

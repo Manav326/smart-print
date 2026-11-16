@@ -31,6 +31,18 @@ public sealed class SpoolerOutputConfirmationPolicyTests
         Assert.True(CanConfirm(jobStatus, "PRINTED"));
 
     [Theory]
+    [InlineData("QUEUED", "QUEUED")]
+    [InlineData("SPOOLING", "SPOOLING")]
+    [InlineData("PRINTING", "PRINTING")]
+    [InlineData("PRINTED", "QUEUED")]
+    [InlineData("RETAINED", "QUEUED")]
+    [InlineData("OUTPUT_UNCONFIRMED", "QUEUED")]
+    [InlineData("PRINTER_UNAVAILABLE", "QUEUED")]
+    [InlineData("unknown", "QUEUED")]
+    public void InitialAcceptanceReceiptCannotMintTerminalOrAbsenceProof(string? reportedStatus, string expected) =>
+        Assert.Equal(expected, SpoolerOutputConfirmationPolicy.NormalizeInitialSpoolerAcceptanceStatus(reportedStatus));
+
+    [Theory]
     [InlineData("QUEUED")]
     [InlineData("SPOOLING")]
     [InlineData("PRINTING")]

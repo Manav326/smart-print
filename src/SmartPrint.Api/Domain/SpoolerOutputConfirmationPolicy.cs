@@ -30,6 +30,17 @@ public static class SpoolerOutputConfirmationPolicy
     public static bool IsPhysicalOutputConfirmationStatus(string? jobStatus) =>
         Normalize(jobStatus).ToUpperInvariant() is "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED";
 
+    /// <summary>
+    /// The initial acceptance receipt establishes the Windows job identity, not
+    /// terminal physical output. A cached retry may carry a previously observed
+    /// PRINTED state, so only the separate spooler polling endpoint may report PRINTED.
+    /// </summary>
+    public static string NormalizeInitialSpoolerAcceptanceStatus(string? reportedStatus)
+    {
+        var normalized = Normalize(reportedStatus).ToUpperInvariant();
+        return normalized is "SPOOLING" or "PRINTING" ? normalized : "QUEUED";
+    }
+
     public static bool IsFreshSpoolerObservation(
         DateTimeOffset? spoolerSubmittedUtc,
         DateTimeOffset? spoolerObservedUtc,
