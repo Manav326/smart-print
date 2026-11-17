@@ -217,6 +217,22 @@ function formatDownloadBytes(value: number): string {
   return `${size.toFixed(size >= 10 ? 1 : 2)} ${units[index]}`;
 }
 
+function formatDownloadSpeed(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "Measuring speed…";
+  if (value < 1000) return `${Math.round(value)} B/s`;
+  if (value < 1_000_000) return `${(value / 1000).toFixed(1)} KB/s`;
+  return `${(value / 1_000_000).toFixed(2)} MB/s`;
+}
+
+function formatDownloadRemaining(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) return "Time remaining unavailable";
+  const total = Math.ceil(seconds);
+  if (total < 60) return `About ${total}s remaining`;
+  const minutes = Math.floor(total / 60);
+  const remainingSeconds = total % 60;
+  return remainingSeconds > 0 ? `About ${minutes}m ${remainingSeconds}s remaining` : `About ${minutes}m remaining`;
+}
+
 function DownloadAction({
   platform,
   label,
@@ -237,6 +253,9 @@ function DownloadAction({
   const resolvedDownloadUrl = downloadUrl;
   const percent = download.totalBytes && download.totalBytes > 0
     ? Math.min(100, Math.floor((download.bytesReceived / download.totalBytes) * 100))
+    : null;
+  const remainingSeconds = download.totalBytes !== null && download.bytesPerSecond > 0
+    ? Math.max(0, (download.totalBytes - download.bytesReceived) / download.bytesPerSecond)
     : null;
 
   if (!available || !resolvedDownloadUrl) {
@@ -259,6 +278,10 @@ function DownloadAction({
         <div className="sp-download-progress-details">
           <span>{formatDownloadBytes(download.bytesReceived)} downloaded</span>
           <span>{download.totalBytes ? `of ${formatDownloadBytes(download.totalBytes)}` : "Total size unavailable"}</span>
+        </div>
+        <div className="sp-download-speed-details" aria-live="polite">
+          <span>{formatDownloadSpeed(download.bytesPerSecond)}</span>
+          <span>{formatDownloadRemaining(remainingSeconds)}</span>
         </div>
         <button className="sp-download-cancel" type="button" onClick={cancel}><X size={14}/> Cancel download</button>
       </div>
