@@ -68,7 +68,10 @@
         React.createElement("h2", null, item.name),
         React.createElement(ShopDocumentPreviewSurface, {
           name: item.name,
-          url: item.id === "broken" ? "data:image/png;base64,bm90LWEtcG5n" : URL.createObjectURL(item.blob),
+          // Use a real Blob URL for the intentionally malformed PNG so the
+          // browser's image decoder emits its normal error event (data: URLs
+          // with invalid base64 are handled inconsistently in headless Chromium).
+          url: URL.createObjectURL(item.blob),
           mediaType: item.type ?? "application/octet-stream",
           printKind: item.id === "jpeg" || item.id === "png" ? "PHOTO" : "DOCUMENT"
         })
