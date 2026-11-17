@@ -507,6 +507,7 @@ jobs:
           import json
           import os
           import subprocess
+          import tempfile
           from pathlib import Path
 
           bucket = os.environ["CLOUDFLARE_R2_BUCKET"]
@@ -517,25 +518,43 @@ jobs:
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
               files.append("SmartPrint-Android.apk")
 
-          for filename in files:
-              path = artifacts / filename
-              digest = hashlib.sha256(path.read_bytes()).hexdigest()
-              result = subprocess.run([
-                  "aws", "s3api", "head-object",
-                  "--bucket", bucket,
-                  "--key", f"{prefix}/{filename}",
-                  "--endpoint-url", endpoint,
-                  "--region", "auto",
-                  "--output", "json",
-              ], check=True, capture_output=True, text=True)
-              metadata = json.loads(result.stdout)
-              if metadata.get("ContentLength") != path.stat().st_size:
-                  raise SystemExit(f"R2 object size mismatch for {filename}.")
-              if metadata.get("Metadata", {}).get("sha256") != digest:
-                  raise SystemExit(f"R2 object SHA-256 metadata mismatch for {filename}.")
-              cache_control = metadata.get("CacheControl", "")
-              if "immutable" not in cache_control or "31536000" not in cache_control:
-                  raise SystemExit(f"R2 object cache policy is incorrect for {filename}.")
+          def sha256_file(path: Path) -> str:
+              with path.open("rb") as stream:
+                  return hashlib.file_digest(stream, "sha256").hexdigest()
+
+          with tempfile.TemporaryDirectory(prefix="smartprint-r2-verify-") as temporary:
+              for filename in files:
+                  source = artifacts / filename
+                  digest = sha256_file(source)
+                  result = subprocess.run([
+                      "aws", "s3api", "head-object",
+                      "--bucket", bucket,
+                      "--key", f"{prefix}/{filename}",
+                      "--endpoint-url", endpoint,
+                      "--region", "auto",
+                      "--output", "json",
+                  ], check=True, capture_output=True, text=True)
+                  metadata = json.loads(result.stdout)
+                  if metadata.get("ContentLength") != source.stat().st_size:
+                      raise SystemExit(f"R2 object size mismatch for {filename}.")
+                  if metadata.get("Metadata", {}).get("sha256") != digest:
+                      raise SystemExit(f"R2 object SHA-256 metadata mismatch for {filename}.")
+                  cache_control = metadata.get("CacheControl", "")
+                  if "immutable" not in cache_control or "31536000" not in cache_control:
+                      raise SystemExit(f"R2 object cache policy is incorrect for {filename}.")
+
+                  # Verify the stored object bytes, not just the user metadata.
+                  downloaded = Path(temporary) / filename
+                  subprocess.run([
+                      "aws", "s3", "cp",
+                      f"s3://{bucket}/{prefix}/{filename}",
+                      str(downloaded),
+                      "--endpoint-url", endpoint,
+                      "--region", "auto",
+                      "--only-show-errors",
+                  ], check=True)
+                  if downloaded.stat().st_size != source.stat().st_size or sha256_file(downloaded) != digest:
+                      raise SystemExit(f"R2 stored object SHA-256 verification failed for {filename}.")
           PY
 
           # Probe the actual public custom domain, including byte ranges and CORS.
