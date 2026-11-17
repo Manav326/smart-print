@@ -10,9 +10,10 @@ namespace SmartPrint.Api.Services;
 public sealed record PublicDownloadStatus(string? Version, bool WindowsAvailable, bool AndroidAvailable, string? DownloadBaseUrl);
 
 /// <summary>
-/// Resolves stable release assets on the server and streams them through the
-/// public application origin. GitHub asset redirects are followed server-side;
-/// no GitHub URL or redirect is returned to a customer browser.
+/// Resolves stable release assets on the server and retains the same-origin
+/// streaming proxy as a fallback. When configured, the portal can use an
+/// immutable public R2 custom domain directly; no GitHub URL or redirect is
+/// returned to a customer browser.
 /// </summary>
 public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration configuration, IMemoryCache cache)
 {
@@ -52,6 +53,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
             uri.Scheme != Uri.UriSchemeHttps ||
             !uri.IsDefaultPort ||
             !string.IsNullOrEmpty(uri.UserInfo) ||
+            uri.IdnHost.EndsWith(".r2.dev", StringComparison.OrdinalIgnoreCase) ||
             (uri.AbsolutePath != "/" && !string.IsNullOrEmpty(uri.AbsolutePath)) ||
             !string.IsNullOrEmpty(uri.Query) ||
             !string.IsNullOrEmpty(uri.Fragment))
