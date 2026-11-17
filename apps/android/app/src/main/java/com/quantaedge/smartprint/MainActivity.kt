@@ -3908,7 +3908,14 @@ class MainActivity : AppCompatActivity() {
             primary = true
         ) {
             dialog.dismiss()
-            saveRotatedPdfChanges(source, rotations, replaceOriginal = false, afterExit = afterExit)
+            val (progressDialog, progressText) = showPdfSaveProgressSheet(
+                "Saving a separate PDF copy",
+                "Creating a high-quality copy. The original remains unchanged."
+            )
+            saveRotatedPdfChanges(
+                source, rotations, replaceOriginal = false, afterExit = afterExit,
+                progressDialog = progressDialog, progressText = progressText
+            )
         }
         addChoice(
             "Update original PDF",
@@ -3922,7 +3929,14 @@ class MainActivity : AppCompatActivity() {
                 "Replace original",
                 destructive = true
             ) {
-                saveRotatedPdfChanges(source, rotations, replaceOriginal = true, afterExit = afterExit)
+                val (progressDialog, progressText) = showPdfSaveProgressSheet(
+                    "Updating the original PDF",
+                    "Applying page rotations without rasterizing document content."
+                )
+                saveRotatedPdfChanges(
+                    source, rotations, replaceOriginal = true, afterExit = afterExit,
+                    progressDialog = progressDialog, progressText = progressText
+                )
             }
         }
         addChoice(
@@ -3940,6 +3954,27 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
+    private fun showPdfSaveProgressSheet(title: String, detail: String): Pair<BottomSheetDialog, TextView> {
+        val (dialog, root) = sheetRoot(title, detail)
+        val progress = ProgressBar(this).apply {
+            isIndeterminate = true
+        }
+        root.addView(progress, LinearLayout.LayoutParams(dp(34), dp(34)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+            topMargin = dp(7)
+            bottomMargin = dp(5)
+        })
+        val status = text("Preparing document…", 11, R.color.qp_muted, false).apply {
+            gravity = Gravity.CENTER
+            setPadding(0, dp(3), 0, 0)
+        }
+        root.addView(status, linearParams())
+        dialog.setCancelable(false)
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.show()
+        return dialog to status
+    }
+
     /**
      * PDFBox performs a disk-backed metadata rewrite. Existing PDF page streams,
      * fonts and embedded images are not rendered into bitmaps or recompressed.
@@ -3949,10 +3984,11 @@ class MainActivity : AppCompatActivity() {
         source: File,
         rotations: Map<Int, Int>,
         replaceOriginal: Boolean,
-        afterExit: () -> Unit
+        afterExit: () -> Unit,
+        progressDialog: BottomSheetDialog,
+        progressText: TextView
     ) {
         val output = File(cacheDir, "smartprint-rotated-${UUID.randomUUID()}.pdf")
-        toast(if (replaceOriginal) "Preparing the updated original PDF…" else "Preparing a high-quality PDF copy…")
         Thread({
             try {
                 val pageCount = DocumentBatchComposer.rotatePages(this, source, rotations, output)
@@ -3964,7 +4000,6 @@ class MainActivity : AppCompatActivity() {
                     // Keep the reader and pending edits available if validation, disk-space
                     // checks or the atomic replacement fail. Exit only after the swap succeeds.
                     store.replacePdfContents(source, output)
-                    runOnUiThreadAndWait { afterExit() }
                     source
                 } else {
                     val destination = source.parentFile?.let(store::pathOf).orEmpty()
@@ -3975,7 +4010,8 @@ class MainActivity : AppCompatActivity() {
 
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
-                        if (!replaceOriginal) afterExit()
+                        progressDialog.dismiss()
+                        afterExit()
                         showFiles()
                         toast(
                             if (replaceOriginal) {
@@ -3989,7 +4025,9 @@ class MainActivity : AppCompatActivity() {
             } catch (error: Exception) {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
-                        toast("Could not save PDF rotations: ${message(error)}. The original was not intentionally changed.")
+                        progressDialog.dismiss()
+                        progressText.text = "Save failed. Your PDF viewer and pending rotations are still open."
+                        toast("Could not save PDF rotations: ${message(error)}. The original remains recoverable.")
                     }
                 }
             } finally {
