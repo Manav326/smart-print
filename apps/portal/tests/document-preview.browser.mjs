@@ -563,7 +563,7 @@ async function runExactCapacitySelection(browser) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
   await page.goto(baseUrl + "/s/" + stationCode, { waitUntil: "domcontentloaded" });
-  await page.getByRole("heading", { name: /Standard Batch QA Shop/ }).waitFor({ state: "visible", timeout: 30000 });
+  await page.getByRole("heading", { name: /500 MiB Cloud Batch QA Shop/ }).waitFor({ state: "visible", timeout: 30000 });
 
   // Create 20 browser File objects directly; each contains a PDF signature and
   // exactly 25 MiB. This verifies the customer picker accepts the full 500 MiB
