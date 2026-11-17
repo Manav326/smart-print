@@ -7,17 +7,20 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace SmartPrint.Api.Services;
 
-public sealed record PublicDownloadStatus(string? Version, bool WindowsAvailable, bool AndroidAvailable);
+public sealed record PublicDownloadStatus(string? Version, bool WindowsAvailable, bool AndroidAvailable, string? DownloadBaseUrl);
 
 /// <summary>
-/// Resolves stable release assets on the server and streams them through the
-/// public application origin. GitHub asset redirects are followed server-side;
-/// no GitHub URL or redirect is returned to a customer browser.
+/// Resolves stable release assets on the server and retains the same-origin
+/// streaming proxy as a fallback. When configured, the portal can use an
+/// immutable public R2 custom domain directly; no GitHub URL or redirect is
+/// returned to a customer browser.
 /// </summary>
 public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration configuration, IMemoryCache cache)
 {
     private const int MaximumRedirects = 5;
     private static readonly TimeSpan ReleaseCacheDuration = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan VersionedReleaseCacheDuration = TimeSpan.FromDays(1);
+    private const int StreamCopyBufferSize = 128 * 1024;
 
     private static readonly IReadOnlyDictionary<string, string> PlatformAssets =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -27,6 +30,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         };
 
     private readonly string _repository = configuration["PublicDownloads:GitHubRepository"]?.Trim() ?? "";
+    private readonly string _downloadBaseUrl = configuration["PublicDownloads:PublicBaseUrl"]?.Trim() ?? "";
 
     public async Task<PublicDownloadStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
@@ -34,18 +38,84 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         return new PublicDownloadStatus(
             release?.TagName,
             release?.Assets.ContainsKey(PlatformAssets["windows"]) == true,
-            release?.Assets.ContainsKey(PlatformAssets["android"]) == true);
+            release?.Assets.ContainsKey(PlatformAssets["android"]) == true,
+            GetValidatedDownloadBaseUrl());
     }
 
-    public async Task StreamDownloadAsync(string platform, HttpContext context, CancellationToken cancellationToken)
+    private string? GetValidatedDownloadBaseUrl()
     {
-        if (!PlatformAssets.TryGetValue(platform, out var assetName))
+        if (string.IsNullOrWhiteSpace(_downloadBaseUrl))
         {
-            context.Response.StatusCode = StatusCodes.Status404NotFound;
-            return;
+            return null;
         }
 
-        var release = await GetLatestReleaseAsync(cancellationToken);
+        if (!Uri.TryCreate(_downloadBaseUrl, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps ||
+            !uri.IsDefaultPort ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            uri.IdnHost.EndsWith(".r2.dev", StringComparison.OrdinalIgnoreCase) ||
+            (uri.AbsolutePath != "/" && !string.IsNullOrEmpty(uri.AbsolutePath)) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment))
+        {
+            // This setting is an optional acceleration path. Invalid values must
+            // disable R2 selection, not take download availability offline.
+            return null;
+        }
+
+        return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
+    }
+
+    public Task StreamDownloadAsync(string platform, HttpContext context, CancellationToken cancellationToken) =>
+        StreamDownloadCoreAsync(platform, null, context, cancellationToken);
+
+    /// <summary>
+    /// Streams an immutable, explicitly versioned release asset. The browser-facing
+    /// response remains private/no-store; Cloudflare receives a separate one-year
+    /// cache directive because both URL path components identify immutable bytes.
+    /// </summary>
+    public Task StreamVersionedDownloadAsync(
+        string version,
+        string assetName,
+        HttpContext context,
+        CancellationToken cancellationToken) =>
+        StreamDownloadCoreAsync(assetName, version, context, cancellationToken);
+
+    private async Task StreamDownloadCoreAsync(
+        string platformOrAssetName,
+        string? version,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        string assetName;
+        ReleaseInfo? release;
+        if (version is null)
+        {
+            if (!PlatformAssets.TryGetValue(platformOrAssetName, out assetName!))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                context.Response.Headers["Cache-Control"] = "no-store";
+                return;
+            }
+
+            release = await GetLatestReleaseAsync(cancellationToken);
+        }
+        else
+        {
+            // Only exact known artifact names and stable semantic versions are
+            // accepted. This prevents arbitrary GitHub paths from entering the proxy.
+            if (!Regex.IsMatch(version, @"^v[0-9]+\.[0-9]+\.[0-9]+$") ||
+                !PlatformAssets.Values.Contains(platformOrAssetName, StringComparer.Ordinal))
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                context.Response.Headers["Cache-Control"] = "no-store";
+                return;
+            }
+
+            assetName = platformOrAssetName;
+            release = await GetReleaseByTagAsync(version, cancellationToken);
+        }
+
         if (release is null || !release.Assets.TryGetValue(assetName, out var assetUri))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -91,7 +161,15 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
             FileName = assetName,
             FileNameStar = assetName
         }.ToString();
+
+        // Prevent browser and intermediary storage while allowing Cloudflare's
+        // edge cache to retain only the version-pinned public release artifact.
         context.Response.Headers["Cache-Control"] = "private, no-store";
+        if (version is not null)
+        {
+            context.Response.Headers["Cloudflare-CDN-Cache-Control"] = "public, max-age=31536000, immutable";
+        }
+
         context.Response.Headers["X-Content-Type-Options"] = "nosniff";
         context.Response.Headers["Accept-Ranges"] =
             upstreamResponse.Headers.AcceptRanges.FirstOrDefault() ?? "bytes";
@@ -114,10 +192,31 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         }
 
         await using var upstreamStream = await upstreamResponse.Content.ReadAsStreamAsync(cancellationToken);
-        await upstreamStream.CopyToAsync(context.Response.Body, 128 * 1024, cancellationToken);
+        await upstreamStream.CopyToAsync(context.Response.Body, StreamCopyBufferSize, cancellationToken);
     }
 
-    private async Task<ReleaseInfo?> GetLatestReleaseAsync(CancellationToken cancellationToken)
+    private Task<ReleaseInfo?> GetLatestReleaseAsync(CancellationToken cancellationToken) =>
+        GetReleaseMetadataAsync(
+            "latest",
+            $"public-download-release:{_repository}:latest",
+            ReleaseCacheDuration,
+            expectedTagName: null,
+            cancellationToken);
+
+    private Task<ReleaseInfo?> GetReleaseByTagAsync(string version, CancellationToken cancellationToken) =>
+        GetReleaseMetadataAsync(
+            $"tags/{Uri.EscapeDataString(version)}",
+            $"public-download-release:{_repository}:{version}",
+            VersionedReleaseCacheDuration,
+            expectedTagName: version,
+            cancellationToken);
+
+    private async Task<ReleaseInfo?> GetReleaseMetadataAsync(
+        string releaseSelector,
+        string cacheKey,
+        TimeSpan cacheDuration,
+        string? expectedTagName,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_repository))
         {
@@ -130,20 +229,19 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
                 "PublicDownloads:GitHubRepository must use the owner/repository format.");
         }
 
-        var cacheKey = $"public-download-release:{_repository}";
         if (cache.TryGetValue<CachedRelease>(cacheKey, out var cached))
         {
             return cached?.Release;
         }
 
-        var apiUri = new Uri($"https://api.github.com/repos/{_repository}/releases/latest");
+        var apiUri = new Uri($"https://api.github.com/repos/{_repository}/releases/{releaseSelector}");
         using var metadataTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         metadataTimeout.CancelAfter(TimeSpan.FromSeconds(15));
         using var response = await SendReleaseMetadataRequestAsync(apiUri, metadataTimeout.Token);
 
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
-            cache.Set(cacheKey, new CachedRelease(null), ReleaseCacheDuration);
+            cache.Set(cacheKey, new CachedRelease(null), cacheDuration);
             return null;
         }
 
@@ -161,9 +259,10 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
             ? tagProperty.GetString()
             : null;
         if (string.IsNullOrWhiteSpace(tagName) ||
-            !Regex.IsMatch(tagName, @"^v[0-9]+\.[0-9]+\.[0-9]+$"))
+            !Regex.IsMatch(tagName, @"^v[0-9]+\.[0-9]+\.[0-9]+$") ||
+            (expectedTagName is not null && !string.Equals(tagName, expectedTagName, StringComparison.Ordinal)))
         {
-            cache.Set(cacheKey, new CachedRelease(null), ReleaseCacheDuration);
+            cache.Set(cacheKey, new CachedRelease(null), cacheDuration);
             return null;
         }
 
@@ -199,7 +298,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         }
 
         var release = new ReleaseInfo(tagName, assets);
-        cache.Set(cacheKey, new CachedRelease(release), ReleaseCacheDuration);
+        cache.Set(cacheKey, new CachedRelease(release), cacheDuration);
         return release;
     }
 
@@ -258,7 +357,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         string.IsNullOrEmpty(uri.UserInfo) &&
         string.IsNullOrEmpty(uri.Query) &&
         string.IsNullOrEmpty(uri.Fragment) &&
-        Regex.IsMatch(uri.AbsolutePath, @"^/repositories/[0-9]+/releases/latest$", RegexOptions.CultureInvariant);
+        Regex.IsMatch(uri.AbsolutePath, @"^/repositories/[0-9]+/releases/(?:latest|tags/v[0-9]+\.[0-9]+\.[0-9]+)$", RegexOptions.CultureInvariant);
 
     private static string GetReleaseRepository(JsonElement root, string fallback)
     {
