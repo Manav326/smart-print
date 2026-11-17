@@ -82,6 +82,7 @@ export function useFileDownload(fileName: string): {
       let bytesReceived = 0;
       const chunks: BlobPart[] = [];
       const reader = response.body?.getReader();
+      let lastProgressUpdate = 0;
 
       if (reader) {
         while (true) {
@@ -89,14 +90,20 @@ export function useFileDownload(fileName: string): {
           if (result.done) break;
           const chunk = result.value;
           bytesReceived += chunk.byteLength;
-          chunks.push(chunk.slice().buffer as ArrayBuffer);
+          // Retain the immutable stream chunk view. Blob snapshots each view once
+          // at final assembly; slice().buffer here would make an extra full chunk copy.
+          chunks.push(chunk as unknown as BlobPart);
 
-          setDownload({
-            status: "downloading",
-            bytesReceived,
-            totalBytes,
-            errorMessage: null
-          });
+          const now = performance.now();
+          if (now - lastProgressUpdate >= 200) {
+            setDownload({
+              status: "downloading",
+              bytesReceived,
+              totalBytes,
+              errorMessage: null
+            });
+            lastProgressUpdate = now;
+          }
         }
       } else {
         const blob = await response.blob();
@@ -110,6 +117,15 @@ export function useFileDownload(fileName: string): {
           errorMessage: null
         });
       }
+
+      // Publish the exact final byte count even when the last read arrived inside
+      // the progress-throttle window.
+      setDownload({
+        status: "downloading",
+        bytesReceived,
+        totalBytes: totalBytes ?? bytesReceived,
+        errorMessage: null
+      });
 
       if (bytesReceived <= 0) {
         throw new Error("The download server returned an empty file. Please retry.");
