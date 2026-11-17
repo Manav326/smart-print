@@ -233,7 +233,8 @@ public sealed class Worker(
                             ticket.QueueName, "Private document", qsp2Analysis.MediaType, ticket.SizeBytes,
                             ticket.Sha256, ticket.ExpiresUtc, "LOCAL_AGENT",
                             ticket.OutputMode, ticket.Orientation,
-                            PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind);
+                            PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind,
+                            PagesPerSheet: ticket.PagesPerSheet);
 
                         qsp2Plaintext.Position = 0;
                         await localQueueStore.EnqueueLocalUploadStreamingAsync(

@@ -123,6 +123,20 @@ public sealed class WindowsPrintExecutor
             !MatchesDocumentHash(documentStream, entry.Sha256))
             throw new PrintExecutionBlockedException("LOCAL_DOCUMENT_INTEGRITY_MISMATCH", "The local document does not match the verified upload.");
 
+        // Reject invalid N-up metadata before parsing the payload or opening any
+        // printer handle. This also protects replayed/local queue entries that did
+        // not originate from the current cloud validation path.
+        if (entry.PagesPerSheet is < 1 or > 500)
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_INVALID",
+                "Pages per sheet must be between 1 and 500.");
+        if (entry.PagesPerSheet > 1 &&
+            (!string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(entry.PrintKind, "DOCUMENT", StringComparison.OrdinalIgnoreCase)))
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_PDF_REQUIRED",
+                "Driver-backed N-up is available only for unprepared PDF documents.");
+
         documentStream.Position = 0;
         using var raster = OpenDocument(documentStream, entry.MediaType, entry.ColourMode == "Mono");
         if (raster.PageCount is <= 0 or > 500)
