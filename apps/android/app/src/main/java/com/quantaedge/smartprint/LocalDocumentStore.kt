@@ -39,29 +39,53 @@ class LocalDocumentStore(filesDir: File) {
         return target
     }
 
-    fun importFile(input: InputStream, name: String, destinationPath: String): File {
+    fun importFile(input: InputStream, name: String, destinationPath: String): File =
+        importFileInternal(input, name, destinationPath, DocumentNamePolicy.MAX_IMPORT_BYTES, requirePdf = false)
+
+    /**
+     * Imports a derived, losslessly edited PDF. This is deliberately not subject
+     * to the 50 MB batch-combine limit or the 100 MB original-import limit;
+     * available disk space and the device safety reserve bound the write instead.
+     */
+    fun importDerivedPdf(input: InputStream, name: String, destinationPath: String): File =
+        importFileInternal(input, name, destinationPath, Long.MAX_VALUE, requirePdf = true)
+
+    private fun importFileInternal(
+        input: InputStream,
+        name: String,
+        destinationPath: String,
+        maxBytes: Long,
+        requirePdf: Boolean
+    ): File {
         val parent = folder(destinationPath)
         val target = uniqueFile(parent, DocumentNamePolicy.safeName(name))
         var total = 0L
         try {
             require(parent.usableSpace > MIN_FREE_SPACE_RESERVE) {
-                "There is not enough free storage to import this document. Free up space and try again."
+                "There is not enough free storage to save this document. Free up space and try again."
             }
             FileOutputStream(target).use { output ->
-                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                val buffer = ByteArray(64 * 1024)
                 while (true) {
                     val n = input.read(buffer)
                     if (n < 0) break
                     total += n
-                    require(total <= DocumentNamePolicy.MAX_IMPORT_BYTES) { "Imported files must be 100 MB or smaller." }
+                    require(total <= maxBytes) {
+                        "The document exceeds the supported size limit."
+                    }
                     require(parent.usableSpace > MIN_FREE_SPACE_RESERVE + n) {
-                        "Device storage is almost full. The import was stopped before the phone ran out of space."
+                        "Device storage is almost full. The save was stopped before the phone ran out of space."
                     }
                     output.write(buffer, 0, n)
                 }
                 output.fd.sync()
             }
             require(total > 0) { "The selected file is empty." }
+            if (requirePdf) {
+                require(DocumentNamePolicy.isPdf(target)) {
+                    "The edited document does not contain valid PDF content."
+                }
+            }
             return target
         } catch (e: Exception) {
             target.delete()
@@ -190,8 +214,8 @@ class LocalDocumentStore(filesDir: File) {
         require(source.isFile && source.path != target.path && DocumentNamePolicy.isPdf(source)) {
             "The replacement must be a valid PDF file."
         }
-        require(source.length() in 1..DocumentNamePolicy.MAX_IMPORT_BYTES) {
-            "The updated PDF must be 100 MB or smaller."
+        require(source.length() > 0L) {
+            "The replacement PDF is empty."
         }
 
         val parent = target.parentFile ?: error("The original PDF has no parent folder.")
@@ -206,8 +230,8 @@ class LocalDocumentStore(filesDir: File) {
                         val count = input.read(buffer)
                         if (count < 0) break
                         total += count
-                        require(total <= DocumentNamePolicy.MAX_IMPORT_BYTES) {
-                            "The updated PDF must be 100 MB or smaller."
+                        require(parent.usableSpace > MIN_FREE_SPACE_RESERVE + count) {
+                            "There is not enough free space to safely replace the original PDF."
                         }
                         output.write(buffer, 0, count)
                     }
