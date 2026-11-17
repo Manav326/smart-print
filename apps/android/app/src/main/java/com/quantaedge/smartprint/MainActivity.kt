@@ -4070,7 +4070,7 @@ class MainActivity : AppCompatActivity() {
                             else runCatching { replyProxy.postMessage("localNetworkAccess:denied") }
                         }
                     } else {
-                        val parts = data.split("|", limit = 3)
+                        val parts = data.split("|", limit = 7)
                         val photoStudioLibraryCommand =
                             data == "listPhotoStudioDocuments" ||
                             data.startsWith("savePhotoStudioDocument|") ||
