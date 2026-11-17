@@ -7,6 +7,7 @@ using System.Printing;
 using System.Printing.Interop;
 using PDFiumCore;
 using SkiaSharp;
+using SmartPrint.Documents;
 
 namespace SmartPrint.Agent;
 
