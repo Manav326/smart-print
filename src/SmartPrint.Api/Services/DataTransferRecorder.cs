@@ -52,6 +52,35 @@ public static class DataTransferRecorder
         }
     }
 
+    public static async Task TryDiscardAttemptAsync(
+        SmartPrintDbContext db,
+        ILogger logger,
+        Guid transferId,
+        int attemptNumber,
+        string channel)
+    {
+        try
+        {
+            // A local Agent may already hold the exact protected upload. In that
+            // case the claim was renewed but no new customer bytes crossed the LAN.
+            // Remove only that unused STARTED row, not an earlier completed attempt.
+            var deleted = await db.DataTransferEvents
+                .Where(item => item.TransferId == transferId &&
+                               item.AttemptNumber == attemptNumber &&
+                               item.Status == "STARTED")
+                .ExecuteDeleteAsync(CancellationToken.None);
+            if (deleted > 0) MarkWriteSuccess();
+        }
+        catch (Exception exception)
+        {
+            MarkWriteFailure();
+            logger.LogWarning(
+                exception,
+                "Unused data-transfer attempt could not be discarded for channel {Channel}; the customer operation remains successful.",
+                channel);
+        }
+    }
+
     public static async Task TryCompleteAttemptAsync(
         SmartPrintDbContext db,
         ILogger logger,
