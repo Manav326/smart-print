@@ -250,6 +250,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                 var name = $"batch-{index + 1:D2}.pdf";
                 var file = new FileInfo(Path.Combine(root, name));
                 await WritePaddedPdfAsync(file.FullName, perFileBytes);
+                file.Refresh();
                 using var source = File.OpenRead(file.FullName);
                 var sha256 = Convert.ToHexString(await SHA256.HashDataAsync(source)).ToLowerInvariant();
                 fixtures[Guid.NewGuid()] = new BatchUploadFixture(
@@ -280,7 +281,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                         alreadyCompleted = false,
                         id = fixture!.TicketId,
                         printJobId = fixture.JobId,
-                        jobNumber = "SP-BATCH-" + fixture.Name[..2],
+                        jobNumber = "SP-BATCH-" + fixture.Name[6..8],
                         agentDeviceId = agentId,
                         printerDeviceId,
                         printerName = "SmartPrint QA Printer",
