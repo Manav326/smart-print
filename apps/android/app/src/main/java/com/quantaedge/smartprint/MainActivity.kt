@@ -346,8 +346,8 @@ class MainActivity : AppCompatActivity() {
                     restoredDocument,
                     savedInstanceState?.getInt("viewerPosition", 0) ?: 0
                 )
-                val pendingPages = savedInstanceState?.getIntArray("viewerPendingRotationPages").orEmpty()
-                val pendingDegrees = savedInstanceState?.getIntArray("viewerPendingRotationDegrees").orEmpty()
+                val pendingPages = savedInstanceState?.getIntArray("viewerPendingRotationPages") ?: intArrayOf()
+                val pendingDegrees = savedInstanceState?.getIntArray("viewerPendingRotationDegrees") ?: intArrayOf()
                 if (pendingPages.size == pendingDegrees.size && pendingPages.isNotEmpty()) {
                     documentViewer?.restorePendingRotations(
                         pendingPages.indices.associate { pendingPages[it] to pendingDegrees[it] }
