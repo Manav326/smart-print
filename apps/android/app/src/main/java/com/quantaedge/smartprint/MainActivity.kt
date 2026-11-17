@@ -6684,6 +6684,7 @@ class MainActivity : AppCompatActivity() {
         previewTokens.forEach {
             customerUploadPdfPreviews.remove(it)
             customerUploadPdfPreviewUris.remove(it)
+            customerUploadPdfPreviewSensitiveTokens.remove(it)
         }
         idTemps.forEach(idStudioStore::releaseTransientFile)
         photoTemps.forEach(photoStudioStore::releaseTransientFile)
@@ -6999,7 +7000,10 @@ class MainActivity : AppCompatActivity() {
             cancelCustomerPdfPreviewRender()
         }
         customerUploadPdfPreviewUris.keys.toList().forEach { token ->
-            if (token !in retained) customerUploadPdfPreviewUris.remove(token)
+            if (token !in retained) {
+                customerUploadPdfPreviewUris.remove(token)
+                customerUploadPdfPreviewSensitiveTokens.remove(token)
+            }
         }
         val previewDirectory = File(cacheDir, "customer-upload-pdf-preview").canonicalFile
         customerUploadPdfPreviews.entries.toList().forEach { entry ->
