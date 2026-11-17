@@ -714,7 +714,7 @@ class DocumentViewerInstrumentedTest {
         when (format.lowercase()) {
             "gif" -> {
                 // Valid 1x1 GIF89a image; Android's image viewer displays frame one.
-                file.writeBytes(Base64.decode("R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", Base64.DEFAULT))
+                file.writeBytes(Base64.decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7", Base64.DEFAULT))
             }
             "bmp" -> {
                 // A valid 1x1, 24-bit BMP with a padded four-byte pixel row.
