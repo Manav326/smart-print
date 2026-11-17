@@ -119,7 +119,7 @@ public sealed class WindowsPrintExecutor
         Qsp2DocumentReadStream documentStream,
         CancellationToken cancellationToken)
     {
-        EnsureWindowsPrintTarget(entry);
+        ValidatePrintOptions(entry);
         if (documentStream.Length != entry.SizeBytes ||
             !Sha256Matches(entry.Sha256, documentStream.Sha256))
             throw new PrintExecutionBlockedException(
@@ -136,7 +136,7 @@ public sealed class WindowsPrintExecutor
         CancellationToken cancellationToken,
         string? outputFilePath)
     {
-        EnsureWindowsPrintTarget(entry);
+        ValidatePrintOptions(entry);
         if (bytes.LongLength != entry.SizeBytes || !Sha256Matches(entry.Sha256, Convert.ToHexString(SHA256.HashData(bytes))))
             throw new PrintExecutionBlockedException(
                 "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
@@ -144,6 +144,23 @@ public sealed class WindowsPrintExecutor
 
         using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
         return PrintCore(entry, raster, cancellationToken, outputFilePath);
+    }
+
+    private static void ValidatePrintOptions(AgentLocalQueueEntry entry)
+    {
+        EnsureWindowsPrintTarget(entry);
+        // Reject unsupported persisted/replayed settings before document parsing or
+        // any printer handle is opened. This keeps invalid N-up requests fail-fast.
+        if (entry.PagesPerSheet is < 1 or > 500)
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_INVALID",
+                "Pages per sheet must be between 1 and 500.");
+        if (entry.PagesPerSheet > 1 &&
+            (!string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(entry.PrintKind, "DOCUMENT", StringComparison.OrdinalIgnoreCase)))
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_PDF_REQUIRED",
+                "Driver-backed N-up is available only for unprepared PDF documents.");
     }
 
     private static void EnsureWindowsPrintTarget(AgentLocalQueueEntry entry)
@@ -208,23 +225,7 @@ public sealed class WindowsPrintExecutor
         CancellationToken cancellationToken,
         string? outputFilePath)
     {
-        if (!OperatingSystem.IsWindows())
-            throw new PrintExecutionBlockedException("WINDOWS_REQUIRED", "Physical printing is available only on the Windows Print Agent.");
-        if (string.IsNullOrWhiteSpace(entry.QueueName))
-            throw new PrintExecutionBlockedException("PRINTER_QUEUE_MISSING", "The assigned Windows printer queue name is missing.");
-        // Defense in depth: public API validation is not a substitute for validating
-        // persisted or locally replayed queue metadata at the final print boundary.
-        if (entry.PagesPerSheet is < 1 or > 500)
-            throw new PrintExecutionBlockedException(
-                "PAGES_PER_SHEET_INVALID",
-                "Pages per sheet must be between 1 and 500.");
-        if (entry.PagesPerSheet > 1 &&
-            (!string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
-             !string.Equals(entry.PrintKind, "DOCUMENT", StringComparison.OrdinalIgnoreCase)))
-            throw new PrintExecutionBlockedException(
-                "PAGES_PER_SHEET_PDF_REQUIRED",
-                "Driver-backed N-up is available only for unprepared PDF documents.");
-
+        ValidatePrintOptions(entry);
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
         if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase) &&
