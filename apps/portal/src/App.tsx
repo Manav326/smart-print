@@ -4317,7 +4317,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   // This avoids rereading and reparsing a large PDF on every N-up sheet navigation.
   const browserNupSourceCacheRef=useRef<{
     file:File;
-    document:Promise<import("pdf-lib").PDFDocument>|null;
+    document:Promise<import("./customer-nup-preview").CustomerNupPreviewSource>|null;
   }|null>(null);
   const browserNupRenderQueueRef=useRef<Promise<void>>(Promise.resolve());
   const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>initialDraft?.uploaded??initialDraft?.uploadedBatch?.[0]??null);
