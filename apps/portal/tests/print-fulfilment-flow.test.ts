@@ -668,8 +668,8 @@ test("customer uploader keeps its batch example, inline Android PDF preview and 
 test("Android customer PDF preview stays inline and UPI QR downloads through the Android Save As picker",()=>{
  const activity=read("../../android/app/src/main/java/com/quantaedge/smartprint/MainActivity.kt");
  const qr=read("../src/CustomerUpiQr.tsx");
- assert.match(activity,/val parts = data\.split\("\\|", limit = 3\)[\\s\\S]*val previewParts = if \(data\.startsWith\("previewCustomerPdf\\\|"\)\)[\\s\\S]*data\.split\("\\|", limit = 7\)/);
- assert.match(activity,/previewParts\[0\] == "previewCustomerPdf"[\\s\\S]*?renderCustomerPdfPreview/);
+ assert.match(activity,/val parts = data\.split\("\|", limit = 3\)[\s\S]*val previewParts = if \(data\.startsWith\("previewCustomerPdf\|"\)\)[\s\S]*data\.split\("\|", limit = 7\)/);
+ assert.match(activity,/previewParts\[0\] == "previewCustomerPdf"[\s\S]*?renderCustomerPdfPreview/);
  assert.match(activity,/PdfRenderer\(descriptor\)/);
  assert.match(activity,/customerUploadPdfPreviewSensitiveTokens/);
  assert.match(activity,/ActivityResultContracts\.CreateDocument\("image\/png"\)/);
