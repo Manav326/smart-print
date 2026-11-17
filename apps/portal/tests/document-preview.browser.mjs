@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
+import { createServer } from "node:http";
 
 const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
 if (!moduleDirectory) throw new Error("PLAYWRIGHT_MODULE_DIR must point to the installed Playwright package directory.");
@@ -19,7 +20,12 @@ const sessionToken = "batch-upload-browser-qa-session-token";
 function startServer() {
   const packageManager = process.env.SMARTPRINT_PNPM_COMMAND ?? "pnpm";
   const args = ["--filter", "@smart-print/portal", "dev", "--host", "127.0.0.1", "--port", "4175", "--strictPort"];
-  const options = { stdio: "inherit", env: process.env, windowsHide: true, detached: process.platform !== "win32" };
+  const options = {
+    stdio: "inherit",
+    env: { ...process.env, VITE_API_BASE_URL: "http://127.0.0.1:4176" },
+    windowsHide: true,
+    detached: process.platform !== "win32"
+  };
   if (process.platform === "win32") {
     const child = spawn(process.env.ComSpec ?? "cmd.exe", ["/d", "/c", [packageManager, ...args].join(" ")], options);
     child.spawnError = null;
@@ -333,10 +339,173 @@ async function runCustomerBatchFlow(browser) {
   };
 }
 
+function startBatchApiServer() {
+  const metrics = {
+    requests: [],
+    attempts: new Map(),
+    jobsByIdempotencyKey: new Map(),
+    active: 0,
+    maximumActive: 0
+  };
+  const now = new Date().toISOString();
+  const session = {
+    id: randomUUID(),
+    status: "Active",
+    expiresUtc: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    sessionToken,
+    shop: { displayName: "500 MiB Cloud Batch QA Shop", accentColor: "#2563eb", currency: "INR" },
+    printer: {
+      displayName: "SmartPrint QA Printer",
+      manufacturer: "QA",
+      model: "Virtual printer",
+      status: "Ready",
+      capabilitiesJson: "{}",
+      outputMode: "PHYSICAL"
+    },
+    paymentOptions: { upiEnabled: false, cashEnabled: true, instantPaymentEnabled: false },
+    localAgent: {
+      agentDeviceId: "33333333-3333-4333-8333-333333333333",
+      endpoints: [],
+      printerOutputMode: "PHYSICAL",
+      printerStatus: "Ready",
+      printerLastSeenUtc: now
+    },
+    cloudAssistedPrintingEnabled: false,
+    privatePrintingVirtualOutputEnabled: false
+  };
+
+  const server = createServer(async (request, response) => {
+    const origin = request.headers.origin ?? "*";
+    response.setHeader("Access-Control-Allow-Origin", origin);
+    response.setHeader("Vary", "Origin");
+    response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    response.setHeader("Access-Control-Allow-Headers", "Content-Type, X-Print-Session, Idempotency-Key, X-Print-Batch-Id");
+    response.setHeader("Access-Control-Max-Age", "600");
+    if (request.method === "OPTIONS") {
+      response.writeHead(204);
+      response.end();
+      return;
+    }
+    const path = new URL(request.url ?? "/", "http://127.0.0.1:4176").pathname;
+    const sendJson = (status, value) => {
+      response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+      response.end(JSON.stringify(value));
+    };
+
+    if (request.method === "POST" && path === "/api/v1/public/stations/" + stationCode + "/sessions") {
+      sendJson(200, session);
+      return;
+    }
+    if (request.method === "POST" && path === "/api/v1/public/sessions/current/resume") {
+      sendJson(200, session);
+      return;
+    }
+    if (request.method !== "POST" || path !== "/api/v1/public/sessions/current/jobs") {
+      sendJson(404, { message: "Unexpected API request: " + request.method + " " + path });
+      return;
+    }
+
+    const contentType = request.headers["content-type"] ?? "";
+    const boundary = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i)?.slice(1).find(Boolean);
+    if (!contentType.toLowerCase().startsWith("multipart/form-data") || !boundary) {
+      sendJson(415, { message: "Expected one multipart file upload." });
+      request.resume();
+      return;
+    }
+    const batchId = request.headers["x-print-batch-id"];
+    const idempotencyKey = request.headers["idempotency-key"];
+    const chunks = [];
+    let prefix = Buffer.alloc(0);
+    let tail = Buffer.alloc(0);
+    let bodyBytes = 0;
+    metrics.active += 1;
+    metrics.maximumActive = Math.max(metrics.maximumActive, metrics.active);
+    request.on("data", chunk => {
+      bodyBytes += chunk.length;
+      if (prefix.length < 32 * 1024) prefix = Buffer.concat([prefix, chunk.subarray(0, Math.min(chunk.length, 32 * 1024 - prefix.length))]);
+      tail = Buffer.concat([tail, chunk]).subarray(-4096);
+    });
+    request.on("error", error => {
+      metrics.active = Math.max(0, metrics.active - 1);
+      if (!response.headersSent) sendJson(400, { message: error.message });
+    });
+    request.on("end", () => {
+      try {
+        const prefixText = prefix.toString("latin1");
+        const fileHeader = prefixText.match(/filename="([^"]+)"/i);
+        assert.ok(fileHeader, "The standard cloud route must stream a file part.");
+        const name = fileHeader[1];
+        const filenameAt = prefixText.indexOf(fileHeader[0]);
+        const headerEnd = prefixText.indexOf("\r\n\r\n", filenameAt);
+        assert.ok(headerEnd >= 0, "The multipart file header must terminate before its content.");
+        const footer = Buffer.from("\r\n--" + boundary + "--\r\n", "latin1");
+        assert.ok(tail.subarray(-footer.length).equals(footer), "The final multipart boundary must be complete.");
+        const fileBytes = bodyBytes - (headerEnd + 4) - footer.length;
+        assert.equal(prefix.subarray(headerEnd + 4, headerEnd + 9).toString("ascii"), "%PDF-",
+          "Each streamed file must retain its original PDF bytes.");
+        assert.equal(fileBytes, 25 * 1024 * 1024, "Every file must transfer its full 25 MiB payload.");
+        assert.ok(batchId && idempotencyKey, "Batch and idempotency headers are required.");
+        const attempt = (metrics.attempts.get(name) ?? 0) + 1;
+        metrics.attempts.set(name, attempt);
+        metrics.requests.push({ name, attempt, batchId, idempotencyKey, fileBytes, bodyBytes });
+        metrics.active = Math.max(0, metrics.active - 1);
+
+        if (name === "capacity-07.pdf" && attempt === 1) {
+          sendJson(503, { message: "Synthetic one-file cloud transfer failure." });
+          return;
+        }
+        let result = metrics.jobsByIdempotencyKey.get(idempotencyKey);
+        if (!result) {
+          result = {
+            job: {
+              id: randomUUID(),
+              batchId,
+              batchGroupName: "Documents",
+              batchName: "500 MiB cloud batch",
+              jobNumber: "SP-CAPACITY-" + String(metrics.jobsByIdempotencyKey.size + 1).padStart(3, "0"),
+              status: "AWAITING_CONFIGURATION",
+              pageCount: 1,
+              copies: 1,
+              colourMode: "Mono",
+              paperSize: "A4",
+              isDuplex: false,
+              orientation: "AUTO",
+              privatePrinting: false,
+              printKind: "DOCUMENT",
+              photoCount: 0,
+              currency: "INR",
+              quotedAmountMinor: 0,
+              createdUtc: now,
+              outputMode: "PHYSICAL"
+            },
+            document: {
+              id: randomUUID(),
+              originalFileName: name,
+              mediaType: "application/pdf",
+              sizeBytes: fileBytes,
+              pageSizesJson: "[]",
+              storageMode: "CLOUD"
+            },
+            duplicateRequest: false
+          };
+          metrics.jobsByIdempotencyKey.set(idempotencyKey, result);
+        } else {
+          result = { ...result, duplicateRequest: true };
+        }
+        sendJson(200, result);
+      } catch (error) {
+        metrics.active = Math.max(0, metrics.active - 1);
+        sendJson(400, { message: error instanceof Error ? error.message : String(error) });
+      }
+    });
+  });
+  server.listen(4176, "127.0.0.1");
+  return { server, metrics };
+}
+
 async function runExactCapacitySelection(browser) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
-  await installCloudBatchHarness(context);
   await page.goto(baseUrl + "/s/" + stationCode, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: /Standard Batch QA Shop/ }).waitFor({ state: "visible", timeout: 30000 });
 
@@ -363,13 +532,42 @@ async function runExactCapacitySelection(browser) {
   const uploadButton = page.getByRole("button", { name: /Upload 20 file\(s\)/i });
   await uploadButton.waitFor({ state: "visible", timeout: 15000 });
   assert.equal(await uploadButton.isDisabled(), false);
+  await uploadButton.click();
+  await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 19, null, { timeout: 180000 });
+  assert.equal(apiMetrics.metrics.requests.length, 20,
+    "The browser must stream all 20 file bodies to the local cloud API before retry.");
+  assert.equal(apiMetrics.metrics.maximumActive, 3,
+    "The full-size 500 MiB batch must keep concurrency bounded at three.");
+  const failedFile = page.getByRole("button", { name: /Upload 1 file\\(s\\)/i });
+  await failedFile.waitFor({ state: "visible", timeout: 30000 });
+  await failedFile.click();
+  await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 20, null, { timeout: 60000 });
+  assert.equal(apiMetrics.metrics.requests.length, 21);
+  assert.equal(apiMetrics.metrics.attempts.get("capacity-07.pdf"), 2);
+  assert.equal(apiMetrics.metrics.jobsByIdempotencyKey.size, 20,
+    "The retry must materialise one canonical job for the failed 25 MiB file.");
+  assert.equal(new Set(apiMetrics.metrics.requests.map(item => item.batchId)).size, 1);
+  assert.equal(new Set(apiMetrics.metrics.requests.map(item => item.idempotencyKey)).size, 20);
+  assert.ok(apiMetrics.metrics.requests.every(item => item.fileBytes === 25 * 1024 * 1024));
   await context.close();
-  return { files: 20, totalBytes: 500 * 1024 * 1024, selectionAccepted: true, uploadStarted: false };
+  return {
+    files: 20,
+    totalBytes: 500 * 1024 * 1024,
+    selectionAccepted: true,
+    cloudTransferBytes: apiMetrics.metrics.requests.reduce((sum, item) => sum + item.fileBytes, 0),
+    peakConcurrency: apiMetrics.metrics.maximumActive,
+    retryTransfers: 1,
+    uniqueJobs: apiMetrics.metrics.jobsByIdempotencyKey.size
+  };
 }
 
 let server = null;
+let batchApiServer = null;
 let browser = null;
+let apiMetrics = null;
 try {
+  batchApiServer = startBatchApiServer();
+  apiMetrics = batchApiServer;
   if (!process.env.SMARTPRINT_DOCUMENT_PREVIEW_BASE_URL) {
     server = startServer();
     await waitForServer(server);
@@ -390,4 +588,5 @@ try {
 } finally {
   if (browser) await browser.close();
   stopServer(server);
+  if (batchApiServer?.server) await new Promise(resolve => batchApiServer.server.close(resolve));
 }
