@@ -3986,7 +3986,7 @@ class MainActivity : AppCompatActivity() {
         afterExit: () -> Unit,
         progressDialog: BottomSheetDialog
     ) {
-        val output = File(cacheDir, "smartprint-rotated-${UUID.randomUUID()}.pdf")
+        val output = store.createDerivedPdfTempFile()
         Thread({
             try {
                 val pageCount = DocumentBatchComposer.rotatePages(this, source, rotations, output)
@@ -4001,9 +4001,11 @@ class MainActivity : AppCompatActivity() {
                     source
                 } else {
                     val destination = source.parentFile?.let(store::pathOf).orEmpty()
-                    FileInputStream(output).use {
-                        store.importDerivedPdf(it, "${source.nameWithoutExtension}_rotated.pdf", destination)
-                    }
+                    store.finalizeDerivedPdf(
+                        output,
+                        "${source.nameWithoutExtension}_rotated.pdf",
+                        destination
+                    )
                 }
 
                 runOnUiThread {
