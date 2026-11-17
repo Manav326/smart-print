@@ -72,7 +72,6 @@ class SmartPrintDocumentViewer(
     private var thumbnailGeneration = 0
     private val thumbnailViews = mutableMapOf<Int, ImageView>()
     private val thumbnailFrames = mutableMapOf<Int, View>()
-    private val requestedPdfThumbnails = mutableSetOf<Int>()
     private val cachedPdfThumbnails = LinkedHashMap<Int, Bitmap>(32, 0.75f, true)
     private val stage = FrameLayout(context)
     private val breadcrumbScroller = HorizontalScrollView(context).apply {
@@ -284,6 +283,9 @@ class SmartPrintDocumentViewer(
         val file = currentFile
         val requestedPage = currentPage
         val requestedRotation = rotationDegrees
+        // Never leave a previous page visible beneath a new page's loading state.
+        clearDisplayedBitmaps(clearThumbnails = false)
+        pageImage.contentDescription = "Rendering PDF page ${requestedPage + 1} preview"
         showLoading("Rendering page ${requestedPage + 1} of $pageCount…")
         submitLatestRender {
             try {
@@ -404,7 +406,6 @@ class SmartPrintDocumentViewer(
 
         val generation = ++thumbnailGeneration
         thumbnailBatchTask?.cancel(true)
-        requestedPdfThumbnails.clear()
         requestedPdfThumbnails.addAll(pending)
         val file = currentFile
         thumbnailBatchTask = try {
@@ -429,8 +430,7 @@ class SmartPrintDocumentViewer(
                         rendered.forEach { (_, bitmap) -> if (!bitmap.isRecycled) bitmap.recycle() }
                         return@runOnUiThread
                     }
-                    requestedPdfThumbnails.clear()
-                    rendered.forEach { (index, bitmap) ->
+                            rendered.forEach { (index, bitmap) ->
                         cachedPdfThumbnails[index] = bitmap
                         thumbnailViews[index]?.setImageBitmap(bitmap)
                         trimPdfThumbnailCache()
