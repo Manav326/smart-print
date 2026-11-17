@@ -230,18 +230,25 @@ class DocumentViewerInstrumentedTest {
     }
 
     @Test
-    fun extensionlessPdfRendersFromContentUriWithoutCopyingTheOriginal() {
+    fun extensionlessPdfCompletesPhonePickerHandoffAndRendersInNativeWebView() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val code = "P".repeat(32)
-        val source = File(context.filesDir, "documents/CI-customer-upload-extensionless-${System.currentTimeMillis()}")
+        val source = File(context.filesDir, "documents/CI-phone-picker-extensionless-${System.currentTimeMillis()}")
         source.parentFile?.mkdirs()
         createPdf(source, pageCount = 2)
-        val responseReceived = java.util.concurrent.CountDownLatch(1)
-        val response = java.util.concurrent.atomic.AtomicReference<String?>()
         val previewDirectory = File(context.cacheDir, "customer-upload-pdf-preview")
+        val ready = java.util.concurrent.CountDownLatch(1)
+        val callbackReceived = java.util.concurrent.CountDownLatch(1)
+        val tokenReceived = java.util.concurrent.CountDownLatch(1)
+        val renderedReceived = java.util.concurrent.CountDownLatch(1)
+        val selectedUris = java.util.concurrent.atomic.AtomicReference<Array<Uri>?>()
+        val previewToken = java.util.concurrent.atomic.AtomicReference<String?>()
+        val renderResponse = java.util.concurrent.atomic.AtomicReference<String?>()
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                lateinit var webView: android.webkit.WebView
+                lateinit var sourceUri: Uri
                 scenario.onActivity { activity ->
                     val origin = BuildConfig.SERVICE_BASE_URL.trimEnd('/')
                     MainActivity::class.java.getDeclaredField("portalUrl").apply {
@@ -257,35 +264,91 @@ class DocumentViewerInstrumentedTest {
                         invoke(activity)
                     }
 
-                    val sourceUri = androidx.core.content.FileProvider.getUriForFile(
+                    webView = MainActivity::class.java.getDeclaredField("webView")
+                        .apply { isAccessible = true }
+                        .get(activity) as android.webkit.WebView
+                    sourceUri = androidx.core.content.FileProvider.getUriForFile(
                         context,
                         "${context.packageName}.documents",
                         source
                     )
                     assertEquals("content", sourceUri.scheme)
-                    val token = MainActivity::class.java.getDeclaredMethod(
-                        "createCustomerUploadPdfPreview",
-                        Uri::class.java
-                    ).apply { isAccessible = true }.invoke(activity, sourceUri) as? String
-                    assertNotNull(
-                        "A valid extensionless PDF must get a native preview token from the content URI.",
-                        token
+
+                    // Prime a real trusted-origin WebView page before the native
+                    // document-picker result handler injects its preview metadata.
+                    webView.loadDataWithBaseURL(
+                        "$origin/s/$code",
+                        "<!doctype html><html><body><script>window.__pickerHandoffReady=true;</script></body></html>",
+                        "text/html",
+                        "UTF-8",
+                        null
                     )
+                    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                    var readyAttempts = 0
+                    fun pollReady() {
+                        webView.evaluateJavascript("document.readyState==='complete' && window.__pickerHandoffReady===true") { value ->
+                            if (value == "true") {
+                                ready.countDown()
+                            } else if (readyAttempts++ < 100) {
+                                handler.postDelayed({ pollReady() }, 50)
+                            } else {
+                                ready.countDown()
+                            }
+                        }
+                    }
+                    handler.postDelayed({ pollReady() }, 50)
+                }
+
+                assertTrue("The trusted Android WebView fixture did not become ready.", ready.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                scenario.onActivity { activity ->
+                    MainActivity::class.java.getDeclaredField("fileChooserAllowsMultiple").apply {
+                        isAccessible = true
+                        setBoolean(activity, true)
+                    }
+                    MainActivity::class.java.getDeclaredField("fileCallback").apply {
+                        isAccessible = true
+                        set(activity, android.webkit.ValueCallback<Array<Uri>> { uris ->
+                            selectedUris.set(uris)
+                            callbackReceived.countDown()
+                        })
+                    }
+
+                    // Exercise the same Android result handler used after the phone
+                    // document picker returns, not the token helper in isolation.
+                    MainActivity::class.java.getDeclaredMethod(
+                        "deliverPhoneDocuments",
+                        List::class.java
+                    ).apply { isAccessible = true }.invoke(activity, listOf(sourceUri))
+
+                    webView.evaluateJavascript("window.__smartPrintNativePdfPreviews?.[0] ?? null") { encoded ->
+                        previewToken.set(
+                            runCatching {
+                                org.json.JSONTokener(encoded).nextValue() as? String
+                            }.getOrNull()
+                        )
+                        tokenReceived.countDown()
+                    }
+                }
+
+                assertTrue("The native picker result was not returned to WebView.", callbackReceived.await(10, java.util.concurrent.TimeUnit.SECONDS))
+                assertEquals(listOf(sourceUri), selectedUris.get()?.toList())
+                assertTrue("The native preview token was not injected into the selected-file WebView.", tokenReceived.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                val token = previewToken.get()
+                assertNotNull("The extensionless PDF must receive a preview token through the complete picker handoff.", token)
+
+                scenario.onActivity { activity ->
                     @Suppress("UNCHECKED_CAST")
                     val uriPreviews = MainActivity::class.java.getDeclaredField("customerUploadPdfPreviewUris")
                         .apply { isAccessible = true }
                         .get(activity) as MutableMap<String, Uri>
-                    assertEquals("The token should retain the original content URI.", sourceUri, uriPreviews[token])
+                    assertEquals("The preview token must refer to the original provider URI.", sourceUri, uriPreviews[token])
                     @Suppress("UNCHECKED_CAST")
                     val filePreviews = MainActivity::class.java.getDeclaredField("customerUploadPdfPreviews")
                         .apply { isAccessible = true }
                         .get(activity) as MutableMap<String, File>
-                    assertTrue("Default upload preview must not create another full PDF copy.", token !in filePreviews)
+                    assertTrue("A seekable phone PDF must not be duplicated for inline preview.", token !in filePreviews)
                     assertTrue("The original selected PDF remains unchanged.", source.isFile)
 
-                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
-                        isAccessible = true
-                    }.invoke(activity) as android.webkit.WebView
                     val html = """
                         <!doctype html><html><head><title>Waiting</title></head><body><script>
                         const bridge = window.SmartPrintNative;
@@ -300,7 +363,7 @@ class DocumentViewerInstrumentedTest {
                         </script></body></html>
                     """.trimIndent()
                     webView.loadDataWithBaseURL(
-                        "$origin/s/$code",
+                        "${BuildConfig.SERVICE_BASE_URL.trimEnd('/')}/s/$code",
                         html,
                         "text/html",
                         "UTF-8",
@@ -314,10 +377,9 @@ class DocumentViewerInstrumentedTest {
                             val title = runCatching {
                                 org.json.JSONTokener(encodedTitle).nextValue() as? String
                             }.getOrNull().orEmpty()
-                            if (title.startsWith("CUSTOMER_PDF_PREVIEW|") ||
-                                title.startsWith("CUSTOMER_PDF_PREVIEW_FAILED|")) {
-                                response.set(title)
-                                responseReceived.countDown()
+                            if (title.startsWith("CUSTOMER_PDF_PREVIEW|") || title.startsWith("CUSTOMER_PDF_PREVIEW_FAILED|")) {
+                                renderResponse.set(title)
+                                renderedReceived.countDown()
                             } else if (attempts++ < 150) {
                                 handler.postDelayed({ pollForPreview() }, 100)
                             }
@@ -326,22 +388,16 @@ class DocumentViewerInstrumentedTest {
                     handler.postDelayed({ pollForPreview() }, 100)
                 }
 
-                assertTrue(
-                    "The Android customer upload preview bridge did not return a rendered sheet.",
-                    responseReceived.await(20, java.util.concurrent.TimeUnit.SECONDS)
-                )
-                val rendered = response.get().orEmpty()
-                assertTrue(
-                    "An extensionless PDF must render from its content URI: $rendered",
-                    rendered.startsWith("CUSTOMER_PDF_PREVIEW|")
-                )
+                assertTrue("The Android native preview bridge did not render the picker-selected extensionless PDF.", renderedReceived.await(20, java.util.concurrent.TimeUnit.SECONDS))
+                val rendered = renderResponse.get().orEmpty()
+                assertTrue("The picker-selected extensionless PDF must render in the native WebView: $rendered", rendered.startsWith("CUSTOMER_PDF_PREVIEW|"))
                 val payload = org.json.JSONObject(rendered.removePrefix("CUSTOMER_PDF_PREVIEW|"))
                 assertEquals(0, payload.getInt("pageIndex"))
                 assertEquals(1, payload.getInt("pageCount"))
                 assertEquals(2, payload.getInt("pagesPerSheet"))
                 assertEquals("LANDSCAPE", payload.getString("orientation"))
                 assertEquals("TopLeft", payload.getString("pagesPerSheetDirection"))
-                assertTrue("The upload preview must contain a rendered image.", payload.getString("image").length > 100)
+                assertTrue("The native upload preview must include a rendered image.", payload.getString("image").length > 100)
             }
         } finally {
             source.delete()
