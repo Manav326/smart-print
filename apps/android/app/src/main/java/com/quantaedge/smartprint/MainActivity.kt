@@ -7001,7 +7001,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             val response = try {
                 val file = customerUploadPdfPreviews[token]
-                    ?.takeIf { it.isFile && itDocumentNamePolicy.isPdf(it) }
+                    ?.takeIf { it.isFile && DocumentNamePolicy.isPdf(it) }
                     ?: error("Please select this PDF again before previewing it.")
                 ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                     PdfRenderer(descriptor).use { renderer ->
@@ -7217,7 +7217,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showCustomerUploadPdfPreview(token: String) {
         val file = customerUploadPdfPreviews[token]
-            ?.takeIf { it.isFile && itDocumentNamePolicy.isPdf(it) }
+            ?.takeIf { it.isFile && DocumentNamePolicy.isPdf(it) }
         if (file == null) {
             toast("Please select this PDF again before previewing it.")
             return
