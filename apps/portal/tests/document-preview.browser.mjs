@@ -205,7 +205,7 @@ async function installCloudBatchHarness(context) {
       }
     }
 
-    const statusMatch = path.match(/^\\/api\\/v1\\/public\\/jobs\\/([0-9a-f-]+)\\/status$/i);
+    const statusMatch = path.match(/^\/api\\/v1\\/public\\/jobs\\/([0-9a-f-]+)\\/status$/i);
     if (method === "GET" && statusMatch) {
       const job = jobsById.get(statusMatch[1]);
       if (!job) return json(route, { message: "Unknown QA print job." }, 404);
