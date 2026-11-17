@@ -669,7 +669,7 @@ async function runScenario(browser) {
     { name: "saved-photo-sheet-one.pdf", mimeType: "application/pdf", buffer: savedPhotoOne },
     { name: "saved-photo-sheet-two.pdf", mimeType: "application/pdf", buffer: savedPhotoTwo },
     { name: "saved-photo-sheet-three.pdf", mimeType: "application/pdf", buffer: savedPhotoThree },
-    { name: "college-document-multipage.pdf", mimeType: "application/pdf", buffer: multipageDocument },
+    { name: "college-document-multipage", mimeType: "application/pdf", buffer: multipageDocument },
     { name: "new-photo-one.jpg", mimeType: "image/jpeg", buffer: newPhotoOne },
     { name: "new-photo-two.jpg", mimeType: "image/jpeg", buffer: newPhotoTwo }
   ]);
@@ -731,7 +731,7 @@ async function runScenario(browser) {
   const originalCustomerFileNames = [
     "id-card-one.pdf", "id-card-two.pdf",
     "saved-photo-sheet-one.pdf", "saved-photo-sheet-two.pdf", "saved-photo-sheet-three.pdf",
-    "college-document-multipage.pdf", "new-photo-one-4x6-photos.pdf", "new-photo-two-4x6-photos.pdf"
+    "college-document-multipage", "new-photo-one-4x6-photos.pdf", "new-photo-two-4x6-photos.pdf"
   ];
   assert.ok(originalCustomerFileNames.every(name =>
     uploadedLabels.some(label => label.includes(name))),
