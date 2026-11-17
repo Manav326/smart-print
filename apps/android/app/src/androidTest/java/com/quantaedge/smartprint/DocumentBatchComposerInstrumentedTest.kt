@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.test.core.app.ApplicationProvider
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -178,16 +179,32 @@ class DocumentBatchComposerInstrumentedTest {
             )
             assertTrue("Rotation must create a separate PDF output.", output.isFile)
             assertTrue("Rotation output must be a valid PDF.", DocumentNamePolicy.isPdf(output))
+            assertTrue("Metadata-only rotation must not expand the derived file unnecessarily.",
+                output.length() in 1..source.length())
+
+            // A page's /Rotate value changes its display coordinate system.
+            // PDFTextStripper sorts text using the rotated crop box and can omit
+            // otherwise valid text near an edge. Verify the actual page content
+            // streams remain unchanged, then normalise /Rotate in memory only
+            // for the independent text-extraction assertion below.
+            assertArrayEquals("Page one content must be retained without rasterisation.",
+                readPageContent(source, 0), readPageContent(output, 0))
+            assertArrayEquals("Page two content must be retained without rasterisation.",
+                readPageContent(source, 1), readPageContent(output, 1))
 
             PDFBoxResourceLoader.init(context)
             PDDocument.load(output, com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()).use { document ->
                 assertEquals(2, document.numberOfPages)
                 assertEquals(90, document.getPage(0).rotation)
                 assertEquals(270, document.getPage(1).rotation)
-                val text = PDFTextStripper().getText(document)
-                assertTrue("Page one text must remain selectable after rotation.", text.contains("Source page 1"))
-                assertTrue("Page two text must remain selectable after rotation.", text.contains("Source page 2"))
+                document.getPage(0).rotation = 0
+                document.getPage(1).rotation = 0
+                val text = PDFTextStripper().getText(document).replace(Regex("\\s+"), " ")
+                assertTrue("Page one selectable text must survive rotation metadata.", text.contains("Source page 1"))
+                assertTrue("Page two selectable text must survive rotation metadata.", text.contains("Source page 2"))
             }
+            assertPageRendersInk(output, 0)
+            assertPageRendersInk(output, 1)
             assertTrue("The source remains unchanged.", source.length() > batchLimit)
         } finally {
             source.delete()
@@ -214,6 +231,39 @@ class DocumentBatchComposerInstrumentedTest {
                 }
             }
             document.save(file)
+        }
+    }
+
+    private fun readPageContent(file: File, pageIndex: Int): ByteArray {
+        PDFBoxResourceLoader.init(context)
+        return PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly()).use { document ->
+            (document.getPage(pageIndex).contents ?: error("Page content stream is missing.")).use { it.readBytes() }
+        }
+    }
+
+    private fun assertPageRendersInk(file: File, pageIndex: Int) {
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+            PdfRenderer(descriptor).use { renderer ->
+                renderer.openPage(pageIndex).use { page ->
+                    val bitmap = Bitmap.createBitmap(320, 450, Bitmap.Config.ARGB_8888)
+                    try {
+                        bitmap.eraseColor(Color.WHITE)
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        var hasInk = false
+                        loop@ for (y in 0 until bitmap.height) {
+                            for (x in 0 until bitmap.width) {
+                                if (bitmap.getPixel(x, y) != Color.WHITE) {
+                                    hasInk = true
+                                    break@loop
+                                }
+                            }
+                        }
+                        assertTrue("Rotated page ${pageIndex + 1} must render retained content.", hasInk)
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }
+            }
         }
     }
 
