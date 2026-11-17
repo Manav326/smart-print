@@ -86,7 +86,8 @@ export function useFileDownload(fileName: string): {
       let bytesReceived = 0;
       const chunks: BlobPart[] = [];
       const reader = response.body?.getReader();
-      let lastProgressUpdate = performance.now();
+      const receiveStartedAt = performance.now();
+      let lastProgressUpdate = receiveStartedAt;
       let lastProgressBytes = 0;
       let smoothedBytesPerSecond = 0;
 
@@ -133,6 +134,13 @@ export function useFileDownload(fileName: string): {
           bytesPerSecond: smoothedBytesPerSecond,
           errorMessage: null
         });
+      }
+
+      // For very small files and fast transfers, the stream may finish before the
+      // first 200 ms sample. Report the real average instead of showing 0 B/s.
+      const totalReceiveSeconds = (performance.now() - receiveStartedAt) / 1000;
+      if (smoothedBytesPerSecond <= 0 && totalReceiveSeconds > 0) {
+        smoothedBytesPerSecond = bytesReceived / totalReceiveSeconds;
       }
 
       // Publish the exact final byte count even when the last read arrived inside
