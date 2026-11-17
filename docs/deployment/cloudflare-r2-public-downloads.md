@@ -6,7 +6,7 @@ The existing same-origin API/GitHub release route remains the fallback. Do not p
 
 ## Cloudflare setup (one time)
 
-1. Create a dedicated R2 bucket, for example `smartprint-public-downloads`. Do not reuse a bucket containing unrelated or private objects: the release workflow applies the bucket's CORS policy for the public SmartPrint portal.
+1. Create a dedicated R2 bucket, for example `smartprint-public-downloads`. Do not reuse a bucket containing unrelated or private objects: the release workflow publishes public installer/APK binaries, and the CORS policy is dedicated to the SmartPrint portal.
 2. In the bucket's **Settings → Public access → Custom Domains**, connect a hostname such as `downloads.smartprint.example` from a zone in the same Cloudflare account. Wait until the custom domain is active. Do not use the `r2.dev` development URL; it does not provide Cloudflare cache, WAF or bot-management features.
 3. In the bucket's **Settings → CORS Policy**, add this one-time policy. Replace the example origin with the exact `SMARTPRINT_PUBLIC_BASE_URL` origin. The policy is intentionally restricted to browser reads from the SmartPrint portal:
    
