@@ -56,8 +56,9 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
             !string.IsNullOrEmpty(uri.Query) ||
             !string.IsNullOrEmpty(uri.Fragment))
         {
-            throw new InvalidOperationException(
-                "PublicDownloads:PublicBaseUrl must be an HTTPS origin without a path, query, fragment, or credentials.");
+            // This setting is an optional acceleration path. Invalid values must
+            // disable R2 selection, not take download availability offline.
+            return null;
         }
 
         return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
