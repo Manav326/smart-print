@@ -3961,10 +3961,10 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val result = if (replaceOriginal) {
-                    // Close the reader only after the new PDF has been fully generated;
-                    // the store stages and validates replacement bytes before the swap.
-                    runOnUiThreadAndWait { afterExit() }
+                    // Keep the reader and pending edits available if validation, disk-space
+                    // checks or the atomic replacement fail. Exit only after the swap succeeds.
                     store.replacePdfContents(source, output)
+                    runOnUiThreadAndWait { afterExit() }
                     source
                 } else {
                     val destination = source.parentFile?.let(store::pathOf).orEmpty()
