@@ -4313,6 +4313,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [nativePdfPreview,setNativePdfPreview]=useState<NativeCustomerPdfPreview|null>(null);
   const [browserNupPreview,setBrowserNupPreview]=useState<BrowserCustomerNupPreview|null>(null);
   const [browserNupPreviewSheetIndex,setBrowserNupPreviewSheetIndex]=useState(0);
+  // Retain only the currently selected PDF's parsed source and serialize sheet renders.
+  // This avoids rereading and reparsing a large PDF on every N-up sheet navigation.
+  const browserNupSourceCacheRef=useRef<{
+    file:File;
+    document:Promise<import("pdf-lib").PDFDocument>|null;
+  }|null>(null);
+  const browserNupRenderQueueRef=useRef<Promise<void>>(Promise.resolve());
   const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>initialDraft?.uploaded??initialDraft?.uploadedBatch?.[0]??null);
   const [uploadedBatch,setUploadedBatch]=useState<UploadedPrintJob[]>(()=>initialDraft?.uploadedBatch??(initialDraft?.uploaded?[initialDraft.uploaded]:[]));
   const [uploadedFileFingerprints,setUploadedFileFingerprints]=useState<string[]>(()=>initialDraft?.uploadedFileFingerprints??[]);
@@ -4700,6 +4707,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   useEffect(()=>{
     if(nativeAppMode||!file||!isCustomerPdf(file)){
+      if(browserNupSourceCacheRef.current?.file!==file)browserNupSourceCacheRef.current=null;
       setBrowserNupPreview(null);
       return;
     }
@@ -4707,6 +4715,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const settings=settingsForFile(file);
     const pagesPerSheet=settings.pagesPerSheet??1;
     if(pagesPerSheet<=1||!pagesPerSheetDirection||photoSettingsByFileFingerprint[customerFileFingerprint(file)]){
+      if(browserNupSourceCacheRef.current?.file===file)browserNupSourceCacheRef.current=null;
       setBrowserNupPreview(null);
       return;
     }
@@ -4726,25 +4735,37 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       failed:false
     });
 
-    void (async()=>{
-      const {createCustomerNupPreview}=await import("./customer-nup-preview");
-      const sourceBytes=new Uint8Array(await file.arrayBuffer());
-      const preview=await createCustomerNupPreview(sourceBytes,{
+    // Create/retain one parsed source per currently selected File. The promise is
+    // lazy so a superseded request does not read a PDF it will never render.
+    let sourceCache=browserNupSourceCacheRef.current;
+    if(!sourceCache||sourceCache.file!==file){
+      sourceCache={file,document:null};
+      browserNupSourceCacheRef.current=sourceCache;
+    }
+
+    const renderRequest=browserNupRenderQueueRef.current.catch(()=>undefined).then(async()=>{
+      if(cancelled)return;
+      const {loadCustomerNupPreviewSource,createCustomerNupPreviewFromDocument}=await import("./customer-nup-preview");
+      if(cancelled)return;
+      if(!sourceCache!.document){
+        sourceCache!.document=(async()=>{
+          const sourceBytes=new Uint8Array(await file.arrayBuffer());
+          if(cancelled)throw new Error("PDF preview superseded.");
+          return loadCustomerNupPreviewSource(sourceBytes);
+        })();
+      }
+      const sourceDocument=await sourceCache!.document;
+      if(cancelled)return;
+      const preview=await createCustomerNupPreviewFromDocument(sourceDocument,{
         pagesPerSheet,
         paperSize:settings.paperSize,
         orientation:settings.orientation,
         pagesPerSheetDirection,
         sheetIndex
       });
-      const outputBuffer=preview.bytes.buffer.slice(
-        preview.bytes.byteOffset,
-        preview.bytes.byteOffset+preview.bytes.byteLength
-      ) as ArrayBuffer;
-      generatedUrl=URL.createObjectURL(new Blob([outputBuffer],{type:"application/pdf"}));
-      if(cancelled){
-        URL.revokeObjectURL(generatedUrl);
-        return;
-      }
+      if(cancelled)return;
+      const outputBlob=new Blob([preview.bytes],{type:"application/pdf"});
+      generatedUrl=URL.createObjectURL(outputBlob);
       setBrowserNupPreview({
         url:generatedUrl,
         sheetIndex:preview.sheetIndex,
@@ -4756,7 +4777,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         loading:false,
         failed:false
       });
-    })().catch(()=>{
+    });
+    browserNupRenderQueueRef.current=renderRequest.then(()=>undefined,()=>undefined);
+    void renderRequest.catch(()=>{
       if(!cancelled){
         setBrowserNupPreview({
           url:"",
@@ -4775,6 +4798,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     return ()=>{
       cancelled=true;
       if(generatedUrl)URL.revokeObjectURL(generatedUrl);
+      // Release the parsed document when a different File becomes selected.
+      // Sheet/settings changes for the same File continue to reuse the cache.
+      if(browserNupSourceCacheRef.current?.file!==file)browserNupSourceCacheRef.current=null;
     };
   },[file,nativeAppMode,groupSettings,fileSettings,photoSettingsByFileFingerprint,browserNupPreviewSheetIndex]);
 
