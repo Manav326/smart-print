@@ -29,8 +29,17 @@ test("Private Printing relays only the encrypted print document and required quo
 
   const uploadStart = api.indexOf("export async function uploadCustomerDocumentLocally(");
   const upload = api.slice(uploadStart);
-  assert.match(upload, /crypto\.subtle\.encrypt\(\{ name: "AES-GCM"/);
-  assert.match(upload, /form\.append\("file", new Blob\(\[ciphertext\].*private-document\.bin/);
+  const qsp2 = read("../src/private-qsp2-upload.ts");
+  assert.match(api, /preparePrivateQsp2Upload.*from "\.\/private-qsp2-upload"/);
+  assert.match(upload, /privateUpload = await preparePrivateQsp2Upload\(file,\s*\{/);
+  assert.match(upload, /const attempt = await privateUpload\.createAttempt\(\)/);
+  assert.match(upload, /requestHeaders\["X-Print-Encrypted-Format"\] = "QSP2"/);
+  assert.match(upload, /requestHeaders\["X-Print-Encrypted-Key"\] = attempt\.wrappedKey/);
+  assert.match(upload, /requestBody = attempt\.body/);
+  assert.match(qsp2, /const QSP2_RECORD_BYTES = 1024 \* 1024/);
+  assert.match(qsp2, /name: "AES-GCM"/);
+  assert.match(qsp2, /return new ReadableStream<Uint8Array>/);
+  assert.match(qsp2, /name: "RSA-OAEP"/);
   const relayStart = upload.indexOf("if (privatePrinting) {", upload.indexOf("if (ticket.agentDeviceId === localAgent.agentDeviceId"));
   const relayEnd = upload.indexOf("// A LAN response can be lost", relayStart);
   assert.ok(relayStart >= 0 && relayEnd > relayStart);
