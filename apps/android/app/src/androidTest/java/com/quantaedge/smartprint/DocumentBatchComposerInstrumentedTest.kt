@@ -145,6 +145,44 @@ class DocumentBatchComposerInstrumentedTest {
         }
     }
 
+    @Test
+    fun rotatesPdfLargerThan50MiBWithoutRasterizingItsContent() {
+        val source = File(context.cacheDir, "rotate-over-50mb-source.pdf")
+        val output = File(context.cacheDir, "rotate-over-50mb-output.pdf")
+        try {
+            createPdf(source, pages = 2)
+            val batchLimit = 50L * 1024L * 1024L
+            padPdfWithWhitespace(source, batchLimit + 1024L * 1024L)
+            assertTrue("The rotation fixture must exceed the print-batch limit.", source.length() > batchLimit)
+
+            assertEquals(
+                2,
+                DocumentBatchComposer.rotatePages(
+                    context,
+                    source,
+                    mapOf(0 to 90, 1 to 270),
+                    output
+                )
+            )
+            assertTrue("Rotation must create a separate PDF output.", output.isFile)
+            assertTrue("Rotation output must be a valid PDF.", DocumentNamePolicy.isPdf(output))
+
+            PDFBoxResourceLoader.init(context)
+            PDDocument.load(output, com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()).use { document ->
+                assertEquals(2, document.numberOfPages)
+                assertEquals(90, document.getPage(0).rotation)
+                assertEquals(270, document.getPage(1).rotation)
+                val text = PDFTextStripper().getText(document)
+                assertTrue("Page one text must remain selectable after rotation.", text.contains("Source page 1"))
+                assertTrue("Page two text must remain selectable after rotation.", text.contains("Source page 2"))
+            }
+            assertTrue("The source remains unchanged.", source.length() > batchLimit)
+        } finally {
+            source.delete()
+            output.delete()
+        }
+    }
+
     private fun createPdf(file: File, pages: Int) {
         val document = PdfDocument()
         try {
