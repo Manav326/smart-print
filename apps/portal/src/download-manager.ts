@@ -4,6 +4,7 @@ export type FileDownloadState = {
   status: "idle" | "downloading" | "complete" | "cancelled" | "error";
   bytesReceived: number;
   totalBytes: number | null;
+  bytesPerSecond: number;
   errorMessage: string | null;
 };
 
@@ -11,6 +12,7 @@ const initialState: FileDownloadState = {
   status: "idle",
   bytesReceived: 0,
   totalBytes: null,
+  bytesPerSecond: 0,
   errorMessage: null
 };
 
@@ -59,6 +61,7 @@ export function useFileDownload(fileName: string): {
       status: "downloading",
       bytesReceived: 0,
       totalBytes: null,
+      bytesPerSecond: 0,
       errorMessage: null
     });
 
@@ -83,7 +86,9 @@ export function useFileDownload(fileName: string): {
       let bytesReceived = 0;
       const chunks: BlobPart[] = [];
       const reader = response.body?.getReader();
-      let lastProgressUpdate = 0;
+      let lastProgressUpdate = performance.now();
+      let lastProgressBytes = 0;
+      let smoothedBytesPerSecond = 0;
 
       if (reader) {
         while (true) {
@@ -96,14 +101,24 @@ export function useFileDownload(fileName: string): {
           chunks.push(chunk as unknown as BlobPart);
 
           const now = performance.now();
-          if (now - lastProgressUpdate >= 200) {
+          const elapsedSeconds = (now - lastProgressUpdate) / 1000;
+          if (elapsedSeconds >= 0.2) {
+            const intervalBytesPerSecond = (bytesReceived - lastProgressBytes) / elapsedSeconds;
+            // EWMA smooths bursty mobile/Wi-Fi packet delivery without hiding
+            // sustained slowdowns from the customer.
+            smoothedBytesPerSecond = smoothedBytesPerSecond > 0
+              ? (smoothedBytesPerSecond * 0.65) + (intervalBytesPerSecond * 0.35)
+              : intervalBytesPerSecond;
+
             setDownload({
               status: "downloading",
               bytesReceived,
               totalBytes,
+              bytesPerSecond: smoothedBytesPerSecond,
               errorMessage: null
             });
             lastProgressUpdate = now;
+            lastProgressBytes = bytesReceived;
           }
         }
       } else {
@@ -115,6 +130,7 @@ export function useFileDownload(fileName: string): {
           status: "downloading",
           bytesReceived,
           totalBytes: totalBytes ?? bytesReceived,
+          bytesPerSecond: smoothedBytesPerSecond,
           errorMessage: null
         });
       }
@@ -125,6 +141,7 @@ export function useFileDownload(fileName: string): {
         status: "downloading",
         bytesReceived,
         totalBytes: totalBytes ?? bytesReceived,
+        bytesPerSecond: smoothedBytesPerSecond,
         errorMessage: null
       });
 
@@ -151,6 +168,7 @@ export function useFileDownload(fileName: string): {
         status: "complete",
         bytesReceived,
         totalBytes: totalBytes ?? bytesReceived,
+        bytesPerSecond: smoothedBytesPerSecond,
         errorMessage: null
       });
     } catch (error) {
