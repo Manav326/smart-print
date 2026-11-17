@@ -440,35 +440,9 @@ jobs:
           endpoint="https://$CLOUDFLARE_R2_ACCOUNT_ID.r2.cloudflarestorage.com"
           object_prefix="$RELEASE_TAG"
 
-          # This bucket is dedicated to public SmartPrint release binaries.
-          # Scope browser reads to the one public portal origin and expose only
-          # the headers needed for progress, range support and integrity checks.
-          python - <<'PY' > "$RUNNER_TEMP/smartprint-r2-cors.json"
-          import json
-          import os
-          print(json.dumps({
-              "CORSRules": [{
-                  "AllowedOrigins": [os.environ["SMARTPRINT_PORTAL_ORIGIN"]],
-                  "AllowedMethods": ["GET", "HEAD"],
-                  "AllowedHeaders": ["Accept", "Range", "If-Range"],
-                  "ExposeHeaders": [
-                      "Accept-Ranges",
-                      "Content-Length",
-                      "Content-Range",
-                      "Content-Disposition",
-                      "ETag",
-                      "Last-Modified",
-                      "CF-Cache-Status",
-                  ],
-                  "MaxAgeSeconds": 86400,
-              }]
-          }))
-          PY
-          aws s3api put-bucket-cors \
-            --bucket "$CLOUDFLARE_R2_BUCKET" \
-            --cors-configuration "file://$RUNNER_TEMP/smartprint-r2-cors.json" \
-            --endpoint-url "$endpoint" \
-            --region auto
+          # CORS is configured once in the dedicated bucket's Cloudflare
+          # dashboard. The GitHub token intentionally has object-only scope;
+          # the public-domain probe below verifies the configured policy.
 
           upload_binary() {
             local filename="$1"
