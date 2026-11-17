@@ -33,7 +33,51 @@ public sealed class PublicDownloadServiceTests
         Assert.Equal("v1.2.3", status.Version);
         Assert.True(status.WindowsAvailable);
         Assert.False(status.AndroidAvailable);
+        Assert.Null(status.DownloadBaseUrl);
         Assert.Equal("https://api.github.com/repos/Manav326/QRtoPrint/releases/latest", handler.RequestedUris[0].AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task StatusExposesOnlyAValidatedHttpsDownloadOrigin()
+    {
+        var handler = new QueueMessageHandler(
+            _ => JsonResponse("""
+                {
+                  "tag_name": "v1.2.3",
+                  "assets": [
+                    {
+                      "name": "SmartPrint-Windows-Setup.exe",
+                      "browser_download_url": "https://github.com/Manav326/QRtoPrint/releases/download/v1.2.3/SmartPrint-Windows-Setup.exe"
+                    }
+                  ]
+                }
+                """));
+
+        var service = CreateService(handler, "https://downloads.smartprint.example");
+        var status = await service.GetStatusAsync(CancellationToken.None);
+
+        Assert.Equal("https://downloads.smartprint.example", status.DownloadBaseUrl);
+    }
+
+    [Theory]
+    [InlineData("http://downloads.smartprint.example")]
+    [InlineData("https://downloads.smartprint.example/path")]
+    [InlineData("https://user:password@downloads.smartprint.example")]
+    [InlineData("https://downloads.smartprint.example?token=secret")]
+    public async Task StatusRejectsUnsafeConfiguredDownloadOrigins(string downloadBaseUrl)
+    {
+        var handler = new QueueMessageHandler(
+            _ => JsonResponse("""
+                {
+                  "tag_name": "v1.2.3",
+                  "assets": []
+                }
+                """));
+
+        var service = CreateService(handler, downloadBaseUrl);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => service.GetStatusAsync(CancellationToken.None));
     }
 
     [Fact]
@@ -309,7 +353,9 @@ public sealed class PublicDownloadServiceTests
         Assert.True(string.IsNullOrEmpty(context.Response.Headers["Location"].ToString()));
     }
 
-    private static PublicDownloadService CreateService(QueueMessageHandler handler)
+    private static PublicDownloadService CreateService(
+        QueueMessageHandler handler,
+        string? downloadBaseUrl = null)
     {
         var client = new HttpClient(handler, disposeHandler: true)
         {
@@ -318,7 +364,8 @@ public sealed class PublicDownloadServiceTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["PublicDownloads:GitHubRepository"] = Repository
+                ["PublicDownloads:GitHubRepository"] = Repository,
+                ["PublicDownloads:PublicBaseUrl"] = downloadBaseUrl
             })
             .Build();
         return new PublicDownloadService(client, configuration, new MemoryCache(new MemoryCacheOptions()));
