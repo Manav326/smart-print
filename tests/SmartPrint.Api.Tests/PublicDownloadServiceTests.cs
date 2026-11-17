@@ -81,6 +81,23 @@ public sealed class PublicDownloadServiceTests
     }
 
     [Fact]
+    public async Task StatusDisablesThrottledR2DevelopmentDomain()
+    {
+        var handler = new QueueMessageHandler(
+            _ => JsonResponse("""
+                {
+                  "tag_name": "v1.2.3",
+                  "assets": []
+                }
+                """));
+
+        var service = CreateService(handler, "https://public-bucket.r2.dev");
+        var status = await service.GetStatusAsync(CancellationToken.None);
+
+        Assert.Null(status.DownloadBaseUrl);
+    }
+
+    [Fact]
     public async Task FollowsGithubPermanentRepositoryMoveAndValidatesAssetsAgainstCanonicalRepository()
     {
         var handler = new QueueMessageHandler(
