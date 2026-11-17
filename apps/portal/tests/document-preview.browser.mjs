@@ -538,7 +538,7 @@ async function runExactCapacitySelection(browser) {
     "The browser must stream all 20 file bodies to the local cloud API before retry.");
   assert.equal(apiMetrics.metrics.maximumActive, 3,
     "The full-size 500 MiB batch must keep concurrency bounded at three.");
-  const failedFile = page.getByRole("button", { name: /Upload 1 file\\(s\\)/i });
+  const failedFile = page.getByRole("button", { name: "Upload 1 file(s)" });
   await failedFile.waitFor({ state: "visible", timeout: 30000 });
   await failedFile.click();
   await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 20, null, { timeout: 60000 });
