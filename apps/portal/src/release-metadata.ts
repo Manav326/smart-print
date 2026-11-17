@@ -8,8 +8,10 @@ export type PublicRelease = {
 
 export type PublicReleaseState = "loading" | "ready" | "error";
 
-export function getPublicDownloadPath(platform: "windows" | "android"): string {
-  return `/downloads/${platform}`;
+export function getPublicDownloadPath(platform: "windows" | "android", version?: string | null): string {
+  if (!version) return `/downloads/${platform}`;
+  const assetName = platform === "windows" ? "SmartPrint-Windows-Setup.exe" : "SmartPrint-Android.apk";
+  return `/downloads/${encodeURIComponent(version)}/${assetName}`;
 }
 
 function isPublicRelease(value: unknown): value is PublicRelease {
