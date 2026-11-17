@@ -337,6 +337,13 @@ class MainActivity : AppCompatActivity() {
                     restoredDocument,
                     savedInstanceState?.getInt("viewerPosition", 0) ?: 0
                 )
+                val pendingPages = savedInstanceState?.getIntArray("viewerPendingRotationPages").orEmpty()
+                val pendingDegrees = savedInstanceState?.getIntArray("viewerPendingRotationDegrees").orEmpty()
+                if (pendingPages.size == pendingDegrees.size && pendingPages.isNotEmpty()) {
+                    documentViewer?.restorePendingRotations(
+                        pendingPages.indices.associate { pendingPages[it] to pendingDegrees[it] }
+                    )
+                }
             }
         } else if (savedInstanceState?.getBoolean("privatePhotoStudioPageOpen") == true) {
             showDedicatedPhotoStudio()
@@ -371,6 +378,9 @@ class MainActivity : AppCompatActivity() {
         outState.putInt("profileReturnDestination", profileReturnDestination)
         outState.putString("viewingDocumentPath", viewingDocument?.absolutePath?.takeUnless { customerUploadPdfPreviewOpen })
         outState.putInt("viewerPosition", documentViewer?.currentPosition() ?: 0)
+        val pendingRotations = documentViewer?.pendingRotationSnapshot().orEmpty()
+        outState.putIntArray("viewerPendingRotationPages", pendingRotations.keys.toIntArray())
+        outState.putIntArray("viewerPendingRotationDegrees", pendingRotations.values.toIntArray())
         outState.putString("portalUrl", portalUrl)
         outState.putString("portalHost", portalHost)
         outState.putBoolean("photoStudioOpen", photoStudioOpen)
@@ -803,7 +813,16 @@ class MainActivity : AppCompatActivity() {
                 setShowAsAction(android.view.MenuItem.SHOW_AS_ACTION_NEVER)
                 isVisible = false
                 setOnMenuItemClickListener {
-                    viewingDocument?.let(::openDocumentExternally)
+                    val file = viewingDocument
+                    val reader = documentViewer
+                    if (file != null && reader != null) {
+                        reader.requestExit {
+                            openDocumentExternally(file)
+                            finishCloseDocumentViewer(reader)
+                        }
+                    } else {
+                        file?.let(::openDocumentExternally)
+                    }
                     true
                 }
             }
