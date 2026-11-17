@@ -97,6 +97,74 @@ public sealed class DocumentAnalyzerTests
         Assert.Null(DocumentAnalyzer.IdentifyExtension(rejected));
     }
 
+    [Fact]
+    public void AnalysesPngFromSeekableStreamAndRestoresItsOriginalPosition()
+    {
+        var png = CreatePng(320, 240);
+        using var stream = new MemoryStream(png, writable: false);
+        stream.Position = 7;
+
+        var result = DocumentAnalyzer.Analyse(stream, ".png");
+
+        Assert.Equal(1, result.PageCount);
+        Assert.Equal("image/png", result.MediaType);
+        Assert.Equal(7, stream.Position);
+    }
+
+    [Fact]
+    public void AnalysesPdfFromFileBackedStream()
+    {
+        var builder = new PdfDocumentBuilder();
+        builder.AddPage(PageSize.A4);
+        var pdf = builder.Build();
+        var path = Path.Combine(Path.GetTempPath(), $"smartprint-{Guid.NewGuid():N}.pdf");
+        try
+        {
+            File.WriteAllBytes(path, pdf);
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            var result = DocumentAnalyzer.Analyse(stream, ".pdf");
+
+            Assert.Equal(1, result.PageCount);
+            Assert.Equal("application/pdf", result.MediaType);
+            Assert.Equal(".pdf", result.Extension);
+        }
+        finally
+        {
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void RejectsNonSeekableStreamInsteadOfCopyingItIntoMemory()
+    {
+        using var inner = new MemoryStream(CreatePng(4, 4), writable: false);
+        using var stream = new NonSeekableReadStream(inner);
+
+        var exception = Assert.Throws<ArgumentException>(() => DocumentAnalyzer.Analyse(stream, ".png"));
+
+        Assert.Contains("seekable", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed class NonSeekableReadStream(Stream inner) : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => inner.Read(buffer);
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) inner.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
     private static byte[] CreatePng(int width, int height)
     {
         using var output = new MemoryStream();

@@ -110,7 +110,8 @@ public sealed record AgentLocalQueueEntry(
     string? PhotoSourceSha256 = null,
     long? PhotoSourceSizeBytes = null,
     bool PrivateSpoolerCleanupCompleted = false,
-    int PagesPerSheet = 1);
+    int PagesPerSheet = 1,
+    Guid? DocumentScopeId = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);

@@ -17,6 +17,12 @@ const AGENT_ID = "11111111-1111-4111-8111-111111111111";
 const STATION_CODE = "PRIVATE-QA";
 const SESSION_TOKEN = "private-printing-browser-qa-session-token";
 
+
+function qsp2EncryptedLength(plaintextLength) {
+  const recordCount = Math.ceil(plaintextLength / (1024 * 1024));
+  return 100 + 32 + plaintextLength + recordCount * (4 + 16) + 68;
+}
+
 function startServer() {
   const packageManager = process.env.SMARTPRINT_PNPM_COMMAND ?? "pnpm";
   const args = ["--filter", "@smart-print/portal", "dev", "--host", "127.0.0.1", "--port", "4174", "--strictPort"];
@@ -138,50 +144,121 @@ async function createJpeg(page, background) {
   return Buffer.from(dataUrl.slice(dataUrl.indexOf(",") + 1), "base64");
 }
 
-function extractEncryptedFile(request) {
-  const headers = request.headers();
+function extractEncryptedFile(headers, body) {
   const contentType = headers["content-type"] ?? "";
-  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-  assert.ok(boundaryMatch, "Private relay upload must use a multipart boundary.");
-  const boundary = boundaryMatch[1] ?? boundaryMatch[2].trim();
-  const body = request.postDataBuffer();
-  assert.ok(body, "Private relay upload must include a multipart body.");
-  const marker = Buffer.from('name="file"; filename="private-document.bin"');
-  const markerOffset = body.indexOf(marker);
-  assert.ok(markerOffset >= 0, "Private relay must use the opaque private-document.bin file name.");
-  const headerEnd = body.indexOf(Buffer.from("\r\n\r\n"), markerOffset);
-  assert.ok(headerEnd >= 0, "Private relay multipart file headers are incomplete.");
-  const payloadStart = headerEnd + 4;
-  const payloadEnd = body.indexOf(Buffer.from("\r\n--" + boundary), payloadStart);
-  assert.ok(payloadEnd > payloadStart, "Private relay ciphertext part is missing.");
+  assert.match(contentType, /^application\/vnd\.smartprint\.qsp2(?:;|$)/i,
+    "Private relay must stream the QSP2 document, not wrap it in multipart form data.");
+  assert.equal(headers["x-print-encrypted-format"], "QSP2");
+  assert.ok(headers["x-print-encrypted-key"], "QSP2 must wrap its one-time data key for the paired Agent.");
+  assert.equal(headers["x-print-encrypted-iv"], undefined,
+    "QSP2 derives unique nonces per record and must not use the legacy single IV.");
+  assert.ok(Buffer.isBuffer(body) && body.length >= 200, "Private relay must include a complete QSP2 stream.");
+  assert.equal(body.subarray(0, 4).toString("ascii"), "QSP2");
+  assert.equal(Number(headers["x-print-encrypted-size"]), body.length);
   return {
-    ciphertext: body.subarray(payloadStart, payloadEnd),
+    ciphertext: body,
     encryptedKey: headers["x-print-encrypted-key"],
-    encryptedIv: headers["x-print-encrypted-iv"]
+    encryptedFormat: headers["x-print-encrypted-format"]
   };
 }
 
 async function decryptPrivateRelay(ticket, envelope, privateKey) {
   assert.ok(envelope.encryptedKey, "Private upload must wrap a fresh AES key for the paired Agent.");
-  assert.ok(envelope.encryptedIv, "Private upload must supply its AES-GCM nonce.");
-  const wrappedKey = Buffer.from(envelope.encryptedKey, "base64");
-  const iv = Buffer.from(envelope.encryptedIv, "base64");
-  assert.equal(iv.length, 12, "AES-GCM nonce must be 96 bits.");
-  const rawAesKey = Buffer.from(await webcrypto.subtle.decrypt({ name: "RSA-OAEP" }, privateKey, wrappedKey));
+  const wire = envelope.ciphertext;
+  const header = wire.subarray(0, 100);
+  assert.equal(header.toString("ascii", 0, 4), "QSP2");
+  assert.equal(header.readUInt8(4), 2);
+  assert.equal(header.readUInt8(5), 1);
+  assert.equal(header.readUInt32BE(8), 100);
+  const plaintextLength = Number(header.readBigInt64BE(12));
+  const recordSize = header.readUInt32BE(20);
+  const recordCount = Number(header.readBigUInt64BE(24));
+  assert.equal(plaintextLength, ticket.sizeBytes);
+  assert.equal(recordSize, 1024 * 1024);
+  assert.equal(recordCount, Math.ceil(plaintextLength / recordSize));
+  const agentIdBytes = Buffer.from(AGENT_ID.replaceAll("-", ""), "hex");
+  const documentIdBytes = Buffer.from(ticket.printJobId.replaceAll("-", ""), "hex");
+  assert.ok(header.subarray(68, 84).equals(agentIdBytes), "QSP2 header must bind this paired Agent.");
+  assert.ok(header.subarray(84, 100).equals(documentIdBytes), "QSP2 header must bind this print job.");
+
+  const rawKey = Buffer.from(await webcrypto.subtle.decrypt(
+    { name: "RSA-OAEP" },
+    privateKey,
+    Buffer.from(envelope.encryptedKey, "base64")
+  ));
   try {
-    const aesKey = await webcrypto.subtle.importKey("raw", rawAesKey, { name: "AES-GCM" }, false, ["decrypt"]);
-    const aad = Buffer.from(
-      "SmartPrint.PrivatePrinting.v1|" + ticket.id + "|" + ticket.printJobId + "|" +
-      ticket.sizeBytes + "|" + ticket.sha256,
-      "utf8"
+    assert.equal(rawKey.length, 32);
+    const baseKey = await webcrypto.subtle.importKey("raw", rawKey, "HKDF", false, ["deriveBits"]);
+    const salt = wire.subarray(32, 64);
+    const headerKeyBytes = new Uint8Array(await webcrypto.subtle.deriveBits({
+      name: "HKDF", hash: "SHA-256", salt,
+      info: new TextEncoder().encode("SmartPrint.QSP2.HeaderKey.v1")
+    }, baseKey, 256));
+    const headerKey = await webcrypto.subtle.importKey(
+      "raw", headerKeyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
     );
-    return Buffer.from(await webcrypto.subtle.decrypt(
-      { name: "AES-GCM", iv, additionalData: aad, tagLength: 128 },
-      aesKey,
-      envelope.ciphertext
-    ));
+    const expectedHeaderMac = Buffer.from(await webcrypto.subtle.sign("HMAC", headerKey, header));
+    assert.ok(expectedHeaderMac.equals(wire.subarray(100, 132)), "QSP2 header authentication must pass.");
+
+    const recordKeyBytes = new Uint8Array(await webcrypto.subtle.deriveBits({
+      name: "HKDF", hash: "SHA-256", salt,
+      info: new TextEncoder().encode("SmartPrint.QSP2.RecordKey.v1")
+    }, baseKey, 256));
+    const recordKey = await webcrypto.subtle.importKey(
+      "raw", recordKeyBytes, { name: "AES-GCM", length: 256 }, false, ["decrypt"]
+    );
+    const headerHash = new Uint8Array(await webcrypto.subtle.digest("SHA-256", header));
+    const noncePrefix = wire.subarray(64, 68);
+    const plaintextParts = [];
+    let offset = 132;
+    for (let index = 0; index < recordCount; index++) {
+      const length = wire.readUInt32BE(offset);
+      offset += 4;
+      assert.ok(length > 0 && length <= recordSize);
+      const encryptedRecord = wire.subarray(offset, offset + length + 16);
+      assert.equal(encryptedRecord.length, length + 16);
+      offset += length + 16;
+      const nonce = new Uint8Array(12);
+      nonce.set(noncePrefix, 0);
+      new DataView(nonce.buffer).setBigUint64(4, BigInt(index), false);
+      const aad = new Uint8Array(45);
+      aad.set(headerHash, 0);
+      aad[32] = 1;
+      new DataView(aad.buffer).setBigUint64(33, BigInt(index), false);
+      new DataView(aad.buffer).setUint32(41, length, false);
+      plaintextParts.push(Buffer.from(await webcrypto.subtle.decrypt(
+        { name: "AES-GCM", iv: nonce, additionalData: aad, tagLength: 128 },
+        recordKey,
+        encryptedRecord
+      )));
+    }
+
+    const footer = wire.subarray(offset);
+    assert.equal(footer.length, 68);
+    const footerCore = footer.subarray(0, 52);
+    assert.equal(footerCore.toString("ascii", 0, 4), "QEND");
+    assert.equal(Number(footerCore.readBigUInt64BE(4)), recordCount);
+    assert.equal(Number(footerCore.readBigInt64BE(12)), plaintextLength);
+    const footerNonce = new Uint8Array(12);
+    footerNonce.set(noncePrefix, 0);
+    new DataView(footerNonce.buffer).setBigUint64(4, BigInt(recordCount), false);
+    const footerAad = new Uint8Array(headerHash.length + 1 + footerCore.length);
+    footerAad.set(headerHash, 0);
+    footerAad[headerHash.length] = 2;
+    footerAad.set(footerCore, headerHash.length + 1);
+    await webcrypto.subtle.decrypt(
+      { name: "AES-GCM", iv: footerNonce, additionalData: footerAad, tagLength: 128 },
+      recordKey,
+      footer.subarray(52)
+    );
+
+    const plaintext = Buffer.concat(plaintextParts);
+    assert.equal(plaintext.length, plaintextLength);
+    assert.ok(createHash("sha256").update(plaintext).digest().equals(footerCore.subarray(20, 52)),
+      "QSP2 authenticated footer SHA-256 must match the plaintext.");
+    return plaintext;
   } finally {
-    rawAesKey.fill(0);
+    rawKey.fill(0);
   }
 }
 
@@ -248,6 +325,8 @@ async function installPrivatePrintingApiHarness(context, page) {
   const allApiRequests = [];
   const unhandledApi = [];
   let nextJobNumber = 1;
+  let activePrivateRelayTransfers = 0;
+  let maximumConcurrentPrivateRelayTransfers = 0;
 
   const sessionResponse = {
     id: randomUUID(),
@@ -281,6 +360,39 @@ async function installPrivatePrintingApiHarness(context, page) {
     privatePrintingVirtualOutputEnabled: true,
     cloudAssistedPrintingEnabled: false
   };
+
+  // Capture a tee'd copy of each streamed QSP2 body by ticket ID. This keeps
+  // parallel uploads independent while each original stream remains the fetch body.
+  await context.addInitScript(() => {
+    const originalFetch = window.fetch.bind(window);
+    const captures = new Map();
+    window.__smartPrintPrivateRelayCapturePromises = captures;
+    window.fetch = (input, init = {}) => {
+      const url = typeof input === "string" ? input :
+        input instanceof URL ? input.href :
+        input instanceof Request ? input.url : "";
+      const method = (init.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+      const body = init.body ?? (input instanceof Request ? input.body : null);
+      const pathname = new URL(url, window.location.href).pathname;
+      const match = pathname.match(/\/local-upload-tickets\/([0-9a-f-]+)\/private-relay$/i);
+      if (method === "POST" && match && body instanceof ReadableStream) {
+        const [networkBody, captureBody] = body.tee();
+        const capture = new Response(captureBody).arrayBuffer().then(buffer => {
+          const bytes = new Uint8Array(buffer);
+          let binary = "";
+          for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+            binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + 0x8000)));
+          }
+          const encoded = btoa(binary);
+          bytes.fill(0);
+          return encoded;
+        });
+        captures.set(match[1], capture);
+        return originalFetch(input, { ...init, body: networkBody });
+      }
+      return originalFetch(input, init);
+    };
+  });
 
   await context.route("**/api/v1/**", async route => {
     const request = route.request();
@@ -355,19 +467,42 @@ async function installPrivatePrintingApiHarness(context, page) {
         return json({ state: "READY", uploadResult: ticket.uploadResult });
       }
       if (path.endsWith("/private-relay") && method === "POST") {
-        assert.equal(request.headers()["x-print-session"], SESSION_TOKEN);
-        const grant = request.headers()["x-print-upload-grant"];
-        assert.ok(grant && grant.length >= 40, "Private relay must use its opaque upload grant.");
-        const envelope = extractEncryptedFile(request);
-        const plaintext = await decryptPrivateRelay(ticket, envelope, keyPair.privateKey);
+        const relayHeaders = request.headers();
+        activePrivateRelayTransfers += 1;
+        maximumConcurrentPrivateRelayTransfers = Math.max(
+          maximumConcurrentPrivateRelayTransfers, activePrivateRelayTransfers
+        );
+        let diagnosticStage = "capture-tee-stream";
+        let plaintext = null;
+        let encryptedBodyBytes = null;
         try {
+          const encodedBody = await page.evaluate(async ticketId => {
+            const captures = window.__smartPrintPrivateRelayCapturePromises;
+            const pending = captures?.get(ticketId);
+            if (!pending) return null;
+            try { return await pending; }
+            finally { captures.delete(ticketId); }
+          }, ticket.id);
+          assert.ok(encodedBody, "The QSP2 fetch stream for this ticket was not available to the acceptance harness.");
+          const body = Buffer.from(encodedBody, "base64");
+
+          diagnosticStage = "validate-qsp2-envelope";
+          const envelope = extractEncryptedFile(relayHeaders, body);
+          encryptedBodyBytes = envelope.ciphertext.length;
+
+          diagnosticStage = "authenticate-qsp2-header-records-and-footer";
+          plaintext = await decryptPrivateRelay(ticket, envelope, keyPair.privateKey);
+
+          diagnosticStage = "verify-decrypted-document";
           assert.equal(plaintext.length, ticket.sizeBytes, "Decrypted size must match the upload ticket.");
           assert.equal(createHash("sha256").update(plaintext).digest("hex"), ticket.sha256,
             "Decrypted bytes must match the original upload hash.");
           assert.ok(plaintext.subarray(0, 5).equals(Buffer.from("%PDF-", "ascii")),
             "Every prepared document must be PDF content.");
-          assert.equal(envelope.ciphertext.length, plaintext.length + 16,
-            "AES-GCM ciphertext must include its authentication tag.");
+          assert.equal(envelope.ciphertext.length, qsp2EncryptedLength(plaintext.length),
+            "QSP2 wire length must include the header, per-record authentication tags and authenticated footer.");
+
+          diagnosticStage = "accept-relay";
           ticket.uploadResult = makeUploadedJob(ticket, ticket.ticketRequest, plaintext);
           ticket.relayAccepted = true;
           relayUploads.push({
@@ -382,10 +517,24 @@ async function installPrivatePrintingApiHarness(context, page) {
             photosPerPage: ticket.ticketRequest.photosPerPage ?? null,
             pageCount: ticket.uploadResult.job.pageCount
           });
+          body.fill(0);
+          return json({ accepted: true, duplicateRequest: false });
+        } catch (error) {
+          writeFileSync(join(artifactDirectory, "private-relay-failure.json"), JSON.stringify({
+            jobNumber: ticket.jobNumber,
+            stage: diagnosticStage,
+            message: error instanceof Error ? error.message : String(error),
+            contentType: relayHeaders["content-type"] ?? null,
+            encryptedFormat: relayHeaders["x-print-encrypted-format"] ?? null,
+            encryptedSizeBytes: relayHeaders["x-print-encrypted-size"] ?? null,
+            bodyBytes: encryptedBodyBytes,
+            ticketBytes: ticket.sizeBytes
+          }, null, 2));
+          throw error;
         } finally {
-          plaintext.fill(0);
+          if (plaintext) plaintext.fill(0);
+          activePrivateRelayTransfers = Math.max(0, activePrivateRelayTransfers - 1);
         }
-        return json({ accepted: true, duplicateRequest: false });
       }
     }
 
@@ -441,7 +590,10 @@ async function installPrivatePrintingApiHarness(context, page) {
   });
 
   page.on("pageerror", error => unhandledApi.push({ method: "PAGEERROR", path: error.message }));
-  return { tickets, ticketRequests, relayUploads, allApiRequests, unhandledApi };
+  return {
+    tickets, ticketRequests, relayUploads, allApiRequests, unhandledApi,
+    get maximumConcurrentPrivateRelayTransfers() { return maximumConcurrentPrivateRelayTransfers; }
+  };
 }
 
 async function selectFile(page, name) {
@@ -540,6 +692,8 @@ async function runScenario(browser) {
 
   assert.equal(harness.ticketRequests.length, 8, "The eight-file selection must produce exactly eight upload tickets.");
   assert.equal(harness.relayUploads.length, 8, "Every file must complete through the encrypted private relay.");
+  assert.equal(harness.maximumConcurrentPrivateRelayTransfers, 3,
+    "Private Printing must transfer up to three independently encrypted files concurrently.");
   assert.equal(new Set(harness.ticketRequests.map(item => item.batchId)).size, 1,
     "All eight files must remain in one batch.");
   assert.ok(harness.ticketRequests.every(item => item.privatePrinting === true),
@@ -560,7 +714,7 @@ async function runScenario(browser) {
     "All five Photo Studio sheets must preserve their two-page layout.");
   assert.equal(harness.relayUploads.find(item => item.printKind === "DOCUMENT")?.pageCount, 4,
     "The ordinary multipage PDF must remain four pages.");
-  assert.ok(harness.relayUploads.every(item => item.encryptedBytes === item.plaintextBytes + 16),
+  assert.ok(harness.relayUploads.every(item => item.encryptedBytes === qsp2EncryptedLength(item.plaintextBytes)),
     "AES-GCM ciphertext must include its authentication tag.");
   assert.equal(harness.allApiRequests.some(item => item.path.includes("/cloud-recovery")), false,
     "Private uploads must never use cloud recovery.");

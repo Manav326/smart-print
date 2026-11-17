@@ -29,8 +29,12 @@ test("Private Printing relays only the encrypted print document and required quo
 
   const uploadStart = api.indexOf("export async function uploadCustomerDocumentLocally(");
   const upload = api.slice(uploadStart);
-  assert.match(upload, /crypto\.subtle\.encrypt\(\{ name: "AES-GCM"/);
-  assert.match(upload, /form\.append\("file", new Blob\(\[ciphertext\].*private-document\.bin/);
+  assert.match(upload, /preparePrivateQsp2Upload\(file,\s*\{/);
+  assert.match(upload, /privateUpload\.createAttempt\(\)/);
+  assert.match(upload, /requestHeaders\["X-Print-Encrypted-Format"\] = "QSP2"/);
+  assert.match(upload, /requestHeaders\["Content-Type"\] = "application\/vnd\.smartprint\.qsp2"/);
+  assert.match(upload, /requestBody = attempt\.body/);
+  assert.doesNotMatch(upload, /file\.arrayBuffer\(\)|crypto\.subtle\.encrypt\(\{ name: "AES-GCM"/);
   const relayStart = upload.indexOf("if (privatePrinting) {", upload.indexOf("if (ticket.agentDeviceId === localAgent.agentDeviceId"));
   const relayEnd = upload.indexOf("// A LAN response can be lost", relayStart);
   assert.ok(relayStart >= 0 && relayEnd > relayStart);
@@ -320,7 +324,8 @@ test("photo studio's selected photo quantity creates one multi-page file with on
  const studio=read("../src/PhotoStudio.tsx");
  assert.match(studio,/const pages=Math\.ceil\(parsedCopies\/photosPerPage\)/);
  assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage,captionHeightMm,resolutionDpi:300,editorSettings,previewPages:jpegPages\.map/);
- assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
+ assert.match(studio,/buildPhotoPdfBlob\(jpegPages\)/);
+ assert.match(studio,/const pdf=buildPhotoPdfBlob\(jpegPages\)/);
  assert.match(studio,/export type PreparedPhotoSheet = \{/);
  assert.match(studio,/resolutionDpi\?: number/);
  assert.match(studio,/editorSettings\?: PhotoStudioEditorSettings/);
@@ -392,9 +397,15 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.match(route,/IsShopOwner\(principal\)/);
  assert.match(route,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
  assert.match(route,/document\.StorageMode, "CLOUD"/);
- assert.match(route,/var photoSourceMediaType = document\.PhotoSourceMediaType \?\? document\.MediaType/);
+ assert.match(route,/var photoSourceMediaType = documentSnapshot\.PhotoSourceMediaType \?\? documentSnapshot\.MediaType/);
+ assert.match(route,/var documentSnapshot = await db\.PrintDocuments\.AsNoTracking\(\)/);
+ assert.match(route,/await using var transaction = await db\.Database\.BeginTransactionAsync\(ct\)/);
+ assert.match(route,/var document = await db\.PrintDocuments\.SingleOrDefaultAsync/);
+ assert.ok(route.indexOf("var documentSnapshot =") < route.indexOf("await using var transaction"));
+ assert.ok(route.indexOf("await using var transaction") < route.indexOf("var document = await db.PrintDocuments"));
  assert.match(route,/photoSourceMediaType is not \("image\/jpeg" or "image\/png"\)/);
- assert.match(route,/if \(job\.PrivatePrinting\)/);
+ assert.match(route,/if \(jobPreflight\.PrivatePrinting\)/);
+ assert.match(route,/if \(job\.PrivatePrinting \|\|/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
  assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
  assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);

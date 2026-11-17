@@ -1,5 +1,8 @@
 using System.Security.Cryptography;
 using SmartPrint.Agent;
+using SmartPrint.Documents;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Writer;
 
 namespace SmartPrint.Agent.Tests;
 
@@ -19,6 +22,66 @@ public sealed class WindowsPrintExecutorTests
             new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None));
 
         Assert.Equal("DOCUMENT_TYPE_UNSUPPORTED", exception.ReasonCode);
+    }
+
+    [Fact]
+    public async Task OpensQsp2PdfThroughPdfiumRandomAccessCallbacksWithoutDocumentByteArray()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var builder = new PdfDocumentBuilder();
+        builder.AddPage(PageSize.A4);
+        var pdfBytes = builder.Build();
+        var agentScopeId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+        try
+        {
+            await using var source = new MemoryStream(pdfBytes, writable: false);
+            await using var encrypted = new MemoryStream();
+            var metadata = await Qsp2DocumentFormat.EncryptAsync(
+                source, encrypted, agentScopeId, jobId, pdfBytes.LongLength, dataKey);
+
+            encrypted.Position = 0;
+            using var document = Qsp2DocumentFormat.OpenRead(
+                encrypted, dataKey, agentScopeId, jobId, 50L * 1024 * 1024, metadata.Sha256);
+
+            var now = DateTimeOffset.UtcNow;
+            var entry = new AgentLocalQueueEntry(
+                jobId,
+                "SP-QSP2-PDFIUM",
+                Guid.NewGuid(),
+                "Missing SmartPrint Test Queue",
+                "SmartPrint-QSP2-Random-Access-Queue-That-Does-Not-Exist",
+                "qsp2-test.pdf",
+                "application/pdf",
+                metadata.Sha256,
+                pdfBytes.LongLength,
+                1,
+                1,
+                "Mono",
+                "A4",
+                false,
+                "INR",
+                100,
+                "unused",
+                "ACKNOWLEDGED",
+                now,
+                now.AddMinutes(3));
+
+            var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+                new WindowsPrintExecutor().Print(entry, document, CancellationToken.None));
+
+            // Reaching the missing queue proves PDFium opened and read the QSP2
+            // stream successfully through FPDF_LoadCustomDocument first.
+            Assert.Equal("PRINTER_OPEN_FAILED", exception.ReasonCode);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dataKey);
+            CryptographicOperations.ZeroMemory(pdfBytes);
+        }
     }
 
     [Theory]

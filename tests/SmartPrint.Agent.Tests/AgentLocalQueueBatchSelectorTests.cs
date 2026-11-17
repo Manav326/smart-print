@@ -35,6 +35,18 @@ public sealed class AgentLocalQueueBatchSelectorTests
     }
 
     [Fact]
+    public void SelectNext_IncludesAllTwentyJobsFromAnAcceptedPrintBatch()
+    {
+        var jobs = Enumerable.Range(0, 20).Select(index => $"batch-job-{index}").ToArray();
+        var nextIndex = 0;
+
+        var selected = AgentLocalQueueBatchSelector.SelectNext(jobs, ref nextIndex, 100);
+
+        Assert.Equal(20, selected.Count);
+        Assert.Equal(jobs, selected);
+    }
+
+    [Fact]
     public void SelectNext_ResetsCursorWhenQueueIsEmptyAndRejectsInvalidBatchSize()
     {
         var nextIndex = 125;
