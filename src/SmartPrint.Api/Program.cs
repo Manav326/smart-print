@@ -6674,12 +6674,12 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                 DurationMilliseconds = request.DurationMilliseconds,
                 MeasurementSource = "PAIRED_AGENT_RECEIVED_DOCUMENT",
                 CreatedUtc = DateTimeOffset.UtcNow
-            }
+            });
+        }
         else
         {
             await DataTransferRecorder.TryDiscardAttemptAsync(
                 db, app.Logger, ticket.Id, transferAttemptNumber, "SHOP_LAN_CUSTOMER_UPLOAD");
-        });
         }
 
         if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
@@ -6991,12 +6991,12 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             DurationMilliseconds = request.DurationMilliseconds,
             MeasurementSource = "PAIRED_AGENT_RECEIVED_DOCUMENT",
             CreatedUtc = DateTimeOffset.UtcNow
-        }
+        });
+    }
     else
     {
         await DataTransferRecorder.TryDiscardAttemptAsync(
             db, app.Logger, ticket.Id, transferAttemptNumber, "SHOP_LAN_CUSTOMER_UPLOAD");
-    });
     }
 
     if (privateRelayClaim && !string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
