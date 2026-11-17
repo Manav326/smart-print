@@ -4,22 +4,33 @@ export type PublicRelease = {
   version: string | null;
   windowsAvailable: boolean;
   androidAvailable: boolean;
+  downloadBaseUrl?: string | null;
 };
 
 export type PublicReleaseState = "loading" | "ready" | "error";
 
-export function getPublicDownloadPath(platform: "windows" | "android", version?: string | null): string {
+export function getPublicDownloadPath(
+  platform: "windows" | "android",
+  version?: string | null,
+  downloadBaseUrl?: string | null
+): string {
   if (!version) return `/downloads/${platform}`;
   const assetName = platform === "windows" ? "SmartPrint-Windows-Setup.exe" : "SmartPrint-Android.apk";
+  const baseUrl = downloadBaseUrl?.trim().replace(/\\/+$/, "");
+  if (baseUrl) {
+    return `${baseUrl}/${encodeURIComponent(version)}/${encodeURIComponent(assetName)}`;
+  }
   return `/downloads/${encodeURIComponent(version)}/${assetName}`;
 }
 
 function isPublicRelease(value: unknown): value is PublicRelease {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Partial<PublicRelease>;
+  const downloadBaseUrl = candidate.downloadBaseUrl;
   return (candidate.version === null || typeof candidate.version === "string") &&
     typeof candidate.windowsAvailable === "boolean" &&
-    typeof candidate.androidAvailable === "boolean";
+    typeof candidate.androidAvailable === "boolean" &&
+    (downloadBaseUrl === undefined || downloadBaseUrl === null || typeof downloadBaseUrl === "string");
 }
 
 export function usePublicRelease(): {
