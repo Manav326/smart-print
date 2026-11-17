@@ -350,8 +350,8 @@ jobs:
           files: artifacts/*
       - name: Publish immutable release binaries to Cloudflare R2 when configured
         env:
-          AWS_ACCESS_KEY_ID: \${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: \${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
           AWS_EC2_METADATA_DISABLED: "true"
         shell: bash
@@ -380,8 +380,8 @@ jobs:
             AWS_ACCESS_KEY_ID
             AWS_SECRET_ACCESS_KEY
           )
-          for name in "\${required[@]}"; do
-            if [[ -z "\${!name:-}" ]]; then
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
               echo "::error::R2 publishing is partially configured; missing $name."
               exit 1
             fi
@@ -502,9 +502,6 @@ jobs:
 
           # Verify stored object size, cache policy and SHA-256 metadata before
           # publishing a stable release or exposing the version URL to customers.
-          for filename in SmartPrint-Windows-Setup.exe; do
-            :
-          done
           python - <<'PY'
           import hashlib
           import json
