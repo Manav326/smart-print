@@ -158,6 +158,9 @@ public sealed class PublicDownloadServiceTests
         Assert.Equal(fileBytes, output.ToArray());
         Assert.Equal(
             "https://api.github.com/repos/Manav326/QRtoPrint/releases/tags/v1.2.3",
+            handler.RequestedUris[0].AbsoluteUri);
+        Assert.Equal(
+            "https://api.github.com/repositories/1439868781/releases/tags/v1.2.3",
             handler.RequestedUris[1].AbsoluteUri);
         Assert.Equal(4, handler.RequestedUris.Count);
     }
