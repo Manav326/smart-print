@@ -406,7 +406,6 @@ class SmartPrintDocumentViewer(
 
         val generation = ++thumbnailGeneration
         thumbnailBatchTask?.cancel(true)
-        requestedPdfThumbnails.addAll(pending)
         val file = currentFile
         thumbnailBatchTask = try {
             thumbnailWorker.submit {
@@ -438,7 +437,6 @@ class SmartPrintDocumentViewer(
                 }
             }
         } catch (_: RejectedExecutionException) {
-            requestedPdfThumbnails.clear()
             null
         }
     }
@@ -475,7 +473,6 @@ class SmartPrintDocumentViewer(
         thumbnailGeneration++
         thumbnailBatchTask?.cancel(true)
         thumbnailBatchTask = null
-        requestedPdfThumbnails.clear()
         cachedPdfThumbnails.values.forEach { if (!it.isRecycled) it.recycle() }
         cachedPdfThumbnails.clear()
         thumbnailViews.clear()
