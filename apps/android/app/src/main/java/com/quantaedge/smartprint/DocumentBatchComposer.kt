@@ -177,6 +177,11 @@ object DocumentBatchComposer {
         output.parentFile?.let {
             check(it.exists() || it.mkdirs()) { "The rotated PDF output folder could not be created." }
         }
+        val outputDirectory = output.parentFile ?: error("The rotated PDF output folder is unavailable.")
+        val scratchEstimate = source.length().coerceAtMost(Long.MAX_VALUE / 2) * 2L
+        require(outputDirectory.usableSpace > scratchEstimate + 16L * 1024L * 1024L) {
+            "There is not enough free storage to create a high-quality rotated PDF. Free space and try again."
+        }
 
         try {
             PDDocument.load(source, MemoryUsageSetting.setupTempFileOnly()).use { document ->
