@@ -44,7 +44,8 @@ class SmartPrintDocumentViewer(
     documentMimeType: String = DocumentNamePolicy.mimeType(startFile),
     private val onNavigateImage: (File) -> Unit,
     private val folderBreadcrumbs: List<Pair<String, String>> = emptyList(),
-    private val onNavigateFolder: (String) -> Unit = {}
+    private val onNavigateFolder: (String) -> Unit = {},
+    private val onResolvePendingPdfChanges: ((File, Map<Int, Int>, () -> Unit) -> Unit)? = null
 ) : LinearLayout(context) {
     companion object {
         private const val MAX_PAGE_EDGE = 2200
@@ -121,8 +122,12 @@ class SmartPrintDocumentViewer(
 
     private var currentFile = startFile
     private var currentPage = startPosition?.coerceAtLeast(0) ?: 0
+    private var displayedPage: Int? = null
     private var pageCount = 0
     private var rotationDegrees = 0
+    // Page-indexed state prevents rotations from being lost when customers move
+    // through a multi-page PDF and rotate several pages in one editing session.
+    private val pendingPageRotations = linkedMapOf<Int, Int>()
     private var renderVersion = 0
     // The current file path is authoritative for images; list positions can change if
     // another photo is imported, renamed or removed while the viewer is closed.
@@ -147,8 +152,12 @@ class SmartPrintDocumentViewer(
             }
             previousPage.setOnClickListener { showPdfPage(currentPage - 1) }
             nextPage.setOnClickListener { showPdfPage(currentPage + 1) }
+            rotatePage.contentDescription = "Rotate page"
             rotatePage.setOnClickListener {
+                if (displayedPage != currentPage) return@setOnClickListener
                 rotationDegrees = (rotationDegrees + 90) % 360
+                if (rotationDegrees == 0) pendingPageRotations.remove(currentPage)
+                else pendingPageRotations[currentPage] = rotationDegrees
                 renderCurrentPdfPage()
             }
             pageControls.contentDescription = "Document navigation"
@@ -182,6 +191,19 @@ class SmartPrintDocumentViewer(
     }
 
     fun currentPosition(): Int = if (isPdf) currentPage else currentImageIndex
+
+    fun pendingRotationSnapshot(): Map<Int, Int> = pendingPageRotations.toMap()
+
+    /**
+     * Routes every user-initiated exit through the host's save/discard decision.
+     * The reader remains mounted until the customer chooses an action.
+     */
+    fun requestExit(afterExit: () -> Unit) {
+        val pending = pendingPageRotations.toMap()
+        val resolver = onResolvePendingPdfChanges
+        if (pending.isEmpty() || resolver == null) afterExit()
+        else resolver.invoke(currentFile, pending, afterExit)
+    }
 
     fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
@@ -222,13 +244,16 @@ class SmartPrintDocumentViewer(
         val target = index.coerceIn(0, pageCount - 1)
         if (target == currentPage) return
         currentPage = target
-        rotationDegrees = 0
+        rotationDegrees = pendingPageRotations[target] ?: 0
         updatePdfControls()
         renderCurrentPdfPage()
     }
 
     private fun updatePdfControls() {
-        pageCounter.text = "Page ${if (pageCount == 0) 1 else currentPage + 1} of ${max(1, pageCount)}"
+        pageCounter.text = displayedPage?.let { "Page ${it + 1} of ${max(1, pageCount)}" }
+            ?: if (pageCount > 0) "Rendering page ${currentPage + 1}…" else "Opening PDF…"
+        rotatePage.isEnabled = displayedPage == currentPage && pageCount > 0
+        rotatePage.alpha = if (rotatePage.isEnabled) 1f else 0.4f
         previousPage.isEnabled = currentPage > 0
         nextPage.isEnabled = pageCount > 0 && currentPage < pageCount - 1
         previousPage.alpha = if (previousPage.isEnabled) 1f else 0.32f
@@ -258,7 +283,7 @@ class SmartPrintDocumentViewer(
                 contentDescription = "Open folder $label"
                 isClickable = true
                 isFocusable = true
-                setOnClickListener { onNavigateFolder(path) }
+                setOnClickListener { requestExit { onNavigateFolder(path) } }
                 val selectable = android.util.TypedValue()
                 if (context.theme.resolveAttribute(android.R.attr.selectableItemBackground, selectable, true)) {
                     setBackgroundResource(selectable.resourceId)
@@ -285,6 +310,8 @@ class SmartPrintDocumentViewer(
         val requestedRotation = rotationDegrees
         // Never leave a previous page visible beneath a new page's loading state.
         clearDisplayedBitmaps(clearThumbnails = false)
+        displayedPage = null
+        updatePdfControls()
         pageImage.contentDescription = "Rendering PDF page ${requestedPage + 1} preview"
         showLoading("Rendering page ${requestedPage + 1} of $pageCount…")
         submitLatestRender {
@@ -298,6 +325,8 @@ class SmartPrintDocumentViewer(
                     clearDisplayedBitmaps(clearThumbnails = false)
                     pageCount = rendered.pageCount
                     currentPage = rendered.index
+                    displayedPage = rendered.index
+                    rotationDegrees = pendingPageRotations[rendered.index] ?: 0
                     displayedBitmaps.add(rendered.bitmap)
                     pageImage.setDocumentBitmap(rendered.bitmap)
                     pageImage.contentDescription = "PDF page ${rendered.index + 1} preview"
@@ -704,6 +733,8 @@ class SmartPrintDocumentViewer(
         host.runOnUiThread {
             if (disposed.get() || request != renderVersion) return@runOnUiThread
             clearDisplayedBitmaps()
+            displayedPage = null
+            updatePdfControls()
             feedback.text = "Could not open this document. Tap to try again."
             feedback.contentDescription = "Retry opening document"
             feedback.setOnClickListener {
