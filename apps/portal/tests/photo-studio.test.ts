@@ -600,7 +600,8 @@ test("one processed 300-DPI crop is reused across all copies and every A4 page",
 
  const exporter=studio.slice(saveStart);
  const tileCreate=exporter.indexOf("const sharedPhotoTile=createPhotoTile(");
- const pageLoop=exporter.indexOf("for(let page=0;page<pages;page++)");
+ const pageLoopMatch=/for\s*\(\s*let\s+page\s*=\s*0;\s*page\s*<\s*pages;\s*page\+\+\s*\)/.exec(exporter);
+ const pageLoop=pageLoopMatch?.index??-1;
  const pageDraw=exporter.indexOf("textLayers,sharedPhotoTile)",pageLoop);
  const tileDispose=exporter.indexOf("sharedPhotoTile.width=0",pageLoop);
  assert.ok(tileCreate>=0&&pageLoop>tileCreate&&pageDraw>pageLoop&&tileDispose>pageDraw,
