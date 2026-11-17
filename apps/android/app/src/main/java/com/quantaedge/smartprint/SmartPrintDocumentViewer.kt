@@ -23,10 +23,11 @@ import android.widget.TextView
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.max
@@ -65,8 +66,15 @@ class SmartPrintDocumentViewer(
     )
 
     private val host = context as? Activity ?: error("The document reader requires an Activity.")
-    private val worker: ExecutorService = Executors.newSingleThreadExecutor()
-    private val thumbnailWorker: ExecutorService = Executors.newSingleThreadExecutor()
+    // One active operation and at most one queued operation per renderer. A
+    // newer request removes its superseded FutureTask instead of allowing rapid
+    // page changes or filmstrip scrolling to grow an unbounded executor queue.
+    private val worker = ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1)
+    ) { task -> Thread(task, "SmartPrint-pdf-page").apply { isDaemon = true } }
+    private val thumbnailWorker = ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1)
+    ) { task -> Thread(task, "SmartPrint-pdf-thumbnails").apply { isDaemon = true } }
     private val disposed = AtomicBoolean(false)
     private var activeRenderTask: Future<*>? = null
     private var thumbnailBatchTask: Future<*>? = null
@@ -235,8 +243,14 @@ class SmartPrintDocumentViewer(
     fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
         renderVersion++
-        activeRenderTask?.cancel(true)
-        thumbnailBatchTask?.cancel(true)
+        activeRenderTask?.let { task ->
+            task.cancel(true)
+            (task as? Runnable)?.let(worker::remove)
+        }
+        thumbnailBatchTask?.let { task ->
+            task.cancel(true)
+            (task as? Runnable)?.let(thumbnailWorker::remove)
+        }
         // Close PdfRenderer and its descriptor on the worker that owns it, after
         // any interrupted render leaves its current page. No cross-thread close.
         runCatching { worker.execute { closePagePdfRenderer() } }
@@ -589,7 +603,10 @@ class SmartPrintDocumentViewer(
         if (pending.isEmpty()) return
 
         val generation = ++thumbnailGeneration
-        thumbnailBatchTask?.cancel(true)
+        thumbnailBatchTask?.let { task ->
+            task.cancel(true)
+            (task as? Runnable)?.let(thumbnailWorker::remove)
+        }
         val file = currentFile
         thumbnailBatchTask = try {
             thumbnailWorker.submit {
@@ -655,7 +672,10 @@ class SmartPrintDocumentViewer(
 
     private fun clearPdfThumbnailCache() {
         thumbnailGeneration++
-        thumbnailBatchTask?.cancel(true)
+        thumbnailBatchTask?.let { task ->
+            task.cancel(true)
+            (task as? Runnable)?.let(thumbnailWorker::remove)
+        }
         thumbnailBatchTask = null
         cachedPdfThumbnails.values.forEach { if (!it.isRecycled) it.recycle() }
         cachedPdfThumbnails.clear()
@@ -945,7 +965,10 @@ class SmartPrintDocumentViewer(
 
     private fun submitLatestRender(task: () -> Unit) {
         if (disposed.get()) return
-        activeRenderTask?.cancel(true)
+        activeRenderTask?.let { pending ->
+            pending.cancel(true)
+            (pending as? Runnable)?.let(worker::remove)
+        }
         activeRenderTask = try {
             worker.submit { if (!disposed.get()) task() }
         } catch (_: RejectedExecutionException) {
