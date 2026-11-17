@@ -320,7 +320,7 @@ object DocumentBatchComposer {
     }
 
     private fun formatMegabytes(bytes: Long): String =
-        String.format(Locale.ROOT, "%.1f MB", bytes.toDouble() / (1024d * 1024d))
+        String.format(Locale.ROOT, "%.1f MB", bytes.toDouble() / (1024.0 * 1024.0))
 
     private fun renderDimensions(width: Int, height: Int): Pair<Int, Int> {
         val scale = MAX_RENDER_EDGE.toFloat() / maxOf(width, height).coerceAtLeast(1)
