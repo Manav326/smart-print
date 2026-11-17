@@ -149,6 +149,60 @@ object DocumentBatchComposer {
     }
 
     /**
+     * Applies display rotation metadata to selected PDF pages without rasterizing
+     * page contents. Text, vector paths, fonts and embedded images remain intact.
+     */
+    fun rotatePages(
+        context: Context,
+        source: File,
+        rotations: Map<Int, Int>,
+        output: File
+    ): Int {
+        require(source.isFile && DocumentNamePolicy.isPdf(source)) {
+            "Choose a saved PDF document."
+        }
+        require(source.length() in 1..MAX_EDIT_SOURCE_BYTES) {
+            "The source PDF must be no larger than 100 MB."
+        }
+        require(rotations.isNotEmpty() && rotations.size <= MAX_PAGES) {
+            "Select at least one rotated page."
+        }
+        require(rotations.all { (index, degrees) ->
+            index >= 0 && degrees in setOf(90, 180, 270)
+        }) {
+            "A page rotation contains an invalid page or angle."
+        }
+
+        ensurePdfBoxInitialized(context)
+        output.parentFile?.let {
+            check(it.exists() || it.mkdirs()) { "The rotated PDF output folder could not be created." }
+        }
+
+        try {
+            PDDocument.load(source, MemoryUsageSetting.setupTempFileOnly()).use { document ->
+                require(document.numberOfPages in 1..MAX_PAGES) {
+                    "The PDF must contain between 1 and $MAX_PAGES pages."
+                }
+                require(rotations.keys.all { it in 0 until document.numberOfPages }) {
+                    "The PDF changed while it was being edited. Reopen it and try again."
+                }
+                rotations.forEach { (index, degrees) ->
+                    val page = document.getPage(index)
+                    page.rotation = ((page.rotation + degrees) % 360 + 360) % 360
+                }
+                document.save(output)
+                require(output.length() in 1..MAX_EDIT_SOURCE_BYTES) {
+                    "The updated PDF exceeds the 100 MB document limit."
+                }
+                return document.numberOfPages
+            }
+        } catch (error: Exception) {
+            output.delete()
+            throw error
+        }
+    }
+
+    /**
      * Applies page deletion, ordering and 90-degree rotation to a saved PDF.
      * Writes a new PDF; the source remains untouched.
      */
