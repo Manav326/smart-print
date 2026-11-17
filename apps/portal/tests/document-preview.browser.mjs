@@ -321,7 +321,9 @@ async function runCustomerBatchFlow(browser) {
   await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 19, null, { timeout: 90000 });
   assert.equal(harness.requestLog.length, 20, "All 20 files should receive one upload attempt before retry.");
   assert.equal(harness.maximumActive, 3, "The UI must never exceed three concurrent cloud uploads.");
-  assert.equal(await page.locator(".customer-flow-error[role='alert']").count(), 1);
+  const uploadFailureAlert = page.locator(".customer-flow-error[role='alert']");
+  await uploadFailureAlert.waitFor({ state: "visible", timeout: 15000 });
+  assert.equal(await uploadFailureAlert.count(), 1);
   const firstPassItems = await page.locator(".customer-uploaded-batch-item").allTextContents();
   assert.ok(expectedNames.filter(name => name !== "batch-07.pdf").every(name => firstPassItems.some(item => item.includes(name))),
     "Every successful upload must remain visible after one file fails.");
