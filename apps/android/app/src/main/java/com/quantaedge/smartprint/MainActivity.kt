@@ -4070,7 +4070,10 @@ class MainActivity : AppCompatActivity() {
                             else runCatching { replyProxy.postMessage("localNetworkAccess:denied") }
                         }
                     } else {
-                        val parts = data.split("|", limit = 7)
+                        val parts = data.split("|", limit = 3)
+                        val previewParts = if (data.startsWith("previewCustomerPdf|")) {
+                            data.split("|", limit = 7)
+                        } else emptyList()
                         val photoStudioLibraryCommand =
                             data == "listPhotoStudioDocuments" ||
                             data.startsWith("savePhotoStudioDocument|") ||
@@ -4116,11 +4119,11 @@ class MainActivity : AppCompatActivity() {
                                     }
                                 }
                             }
-                            parts.size in 3..7 && parts[0] == "previewCustomerPdf" &&
-                                isCustomerUploadPdfPreviewToken(parts[1]) && parts[2].toIntOrNull() != null -> {
-                                val token = parts[1]
+                            previewParts.size in 3..7 && previewParts[0] == "previewCustomerPdf" &&
+                                isCustomerUploadPdfPreviewToken(previewParts[1]) && previewParts[2].toIntOrNull() != null -> {
+                                val token = previewParts[1]
                                 // The requested index now identifies an output sheet, not a source PDF page.
-                                val sheetIndex = parts[2].toInt()
+                                val sheetIndex = previewParts[2].toInt()
                                 val pagesPerSheet = parts.getOrNull(3)?.toIntOrNull() ?: 1
                                 val paperSize = parts.getOrNull(4)?.takeIf {
                                     it in setOf("A4", "A3", "A5", "LETTER", "LEGAL")
