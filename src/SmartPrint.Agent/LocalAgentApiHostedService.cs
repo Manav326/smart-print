@@ -933,6 +933,8 @@ public sealed class LocalAgentApiHostedService(
                 }
 
                 byte[] bytes;
+                long receivedPayloadBytes = 0;
+                long uploadDurationMilliseconds = 0;
                 var existing = localQueueStore.Find(claim.PrintJobId);
                 if (existing is not null)
                 {
@@ -960,6 +962,7 @@ public sealed class LocalAgentApiHostedService(
                         return Results.BadRequest(new { code = "multipart_form_required", message = "Send the document as multipart/form-data." });
                     }
 
+                    var uploadStopwatch = System.Diagnostics.Stopwatch.StartNew();
                     var form = await context.Request.ReadFormAsync(ct);
                     var expectedWireSize = claim.PrivatePrinting ? checked(claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes) : claim.SizeBytes;
                     if (form.Files.Count != 1 || form.Files[0].Length != expectedWireSize || expectedWireSize > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
@@ -977,6 +980,8 @@ public sealed class LocalAgentApiHostedService(
                         return Results.BadRequest(new { code = "local_upload_incomplete", message = "The document transfer was incomplete. Retry the upload." });
                     }
                     var receivedBytes = memory.ToArray();
+                    receivedPayloadBytes = claim.SizeBytes;
+                    uploadDurationMilliseconds = Math.Max(0, uploadStopwatch.ElapsedMilliseconds);
                     CryptographicOperations.ZeroMemory(memory.GetBuffer().AsSpan(0, (int)memory.Length));
                     if (claim.PrivatePrinting)
                     {
@@ -1111,7 +1116,10 @@ public sealed class LocalAgentApiHostedService(
                             analysis.Extension,
                             analysis.MediaType,
                             claim.SizeBytes,
-                            claim.Sha256))
+                            claim.Sha256,
+                            receivedPayloadBytes,
+                            uploadDurationMilliseconds,
+                            claim.AttemptNumber))
                     };
                     AddAgentHeaders(completionRequest, credentials, uploadGrant);
                     using var completionResponse = await client.SendAsync(completionRequest, ct);
@@ -1204,7 +1212,8 @@ public sealed class LocalAgentApiHostedService(
         LocalUploadedPrintResult? UploadResult,
         string PrintKind = "DOCUMENT",
         string OutputMode = "PHYSICAL",
-        int PagesPerSheet = 1);
+        int PagesPerSheet = 1,
+        int AttemptNumber = 0);
 
     private sealed record LocalUploadCompletionResponse(
         bool AlreadyCompleted,
