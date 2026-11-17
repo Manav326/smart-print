@@ -328,13 +328,13 @@ test("photo studio's selected photo quantity creates one multi-page file with on
  const app=read("../src/App.tsx");
  const studio=read("../src/PhotoStudio.tsx");
  assert.match(studio,/const pages\s*=\s*Math\.ceil\(parsedCopies\s*\/\s*outputPhotosPerPage\)/);
- assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage,captionHeightMm,resolutionDpi:300,editorSettings,previewPages:jpegPages\.map/);
+ assert.match(studio,/onApply\(\[\{[\s\S]*?file:\s*output,[\s\S]*?photoCount:\s*parsedCopies,[\s\S]*?photoOutputLayout,[\s\S]*?photoPaperFinish:[\s\S]*?previewPages:\s*jpegPages\.map/);
  assert.match(studio,/buildPhotoPdfBlob\(jpegPages, photoOutputLayout, isPhotoPaperLayout \? size : undefined\)/);
  assert.match(studio,/export type PreparedPhotoSheet = \{/);
  assert.match(studio,/resolutionDpi\?: number/);
  assert.match(studio,/editorSettings\?: PhotoStudioEditorSettings/);
  assert.match(app,/const generated=sheets\.map\(sheet=>sheet\.file\)/);
- assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
+ assert.match(app,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage,photoOutputLayout:sheet\.photoOutputLayout,photoPaperFinish:sheet\.photoPaperFinish\}/);
 });
 
 
@@ -401,7 +401,7 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.match(route,/IsShopOwner\(principal\)/);
  assert.match(route,/job\.Status != "AWAITING_SHOP_APPROVAL"/);
  assert.match(route,/document\.StorageMode, "CLOUD"/);
- assert.match(route,/var photoSourceMediaType = document\.PhotoSourceMediaType \?\? document\.MediaType/);
+ assert.match(route,/var photoSourceMediaType = documentSnapshot\.PhotoSourceMediaType \?\? documentSnapshot\.MediaType/);
  assert.match(route,/photoSourceMediaType is not \("image\/jpeg" or "image\/png"\)/);
  assert.match(route,/if \(job\.PrivatePrinting\)/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
@@ -434,7 +434,7 @@ test("customer Photo Studio uploads the prepared PDF, not a second raw-photo cop
  const flow=app.slice(start,end);
  assert.match(flow,/const generated=sheets\.map\(sheet=>sheet\.file\),nextFiles=\[\.\.\.files\.slice\(0,index\),\.\.\.generated,\.\.\.files\.slice\(index\+1\)\]/);
  assert.match(flow,/delete photos\[photoStudioSourceFingerprint\]/);
- assert.match(flow,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage\}/);
+ assert.match(flow,/photos\[fp\]=\{sizeCode:sheet\.sizeCode,photoCount:sheet\.photoCount,photosPerPage:sheet\.photosPerPage,photoOutputLayout:sheet\.photoOutputLayout,photoPaperFinish:sheet\.photoPaperFinish\}/);
  assert.match(flow,/setPhotoStudioSource\(null\)/);
  assert.doesNotMatch(flow,/editorSettings|textLayers/);
 });
@@ -444,7 +444,7 @@ test("the exact same Photo Studio is opened from the shop image review",()=>{
  assert.match(app,/openShopPhotoStudioForJob\(preview\.job,preview\)/);
  assert.match(app,/setShopPhotoStudio\(\{source,job,initialSettings,returnPreview\}\)/);
  assert.match(app,/if\(editor\.job\.privatePrinting \|\| !editor\.job\.photoSourceAvailable\)/);
- assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage,JSON\.stringify\(sheet\.editorSettings\?\?\{\}\)\)/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage,JSON\.stringify\(sheet\.editorSettings\?\?\{\}\),sheet\.photoOutputLayout,sheet\.photoPaperFinish\)/);
  assert.match(app,/shopPhotoStudio && <PhotoStudio source=\{shopPhotoStudio\.source\}/);
  assert.match(app,/Enhance photo for printing/);
 });
@@ -468,7 +468,7 @@ test("shop owner can open the same editor for cloud and local Agent images",()=>
  const api=read("../src/api.ts");
  assert.match(app,/preview\.job\.storageMode==="CLOUD"\|\|preview\.job\.storageMode==="LOCAL_AGENT"/);
  assert.match(app,/editor\.job\.storageMode==="LOCAL_AGENT"[\s\S]*?replaceShopPhotoDocumentLocally/);
- assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage,JSON\.stringify\(sheet\.editorSettings\?\?\{\}\)\)/);
+ assert.match(app,/replaceShopPhotoDocument\(tokens\.accessToken,editor\.job\.id,sheet\.file,sheet\.sizeCode,sheet\.photoCount,sheet\.photosPerPage,JSON\.stringify\(sheet\.editorSettings\?\?\{\}\),sheet\.photoOutputLayout,sheet\.photoPaperFinish\)/);
  assert.match(api,/\/api\/v1\/shop\/print-jobs\/\$\{jobId\}\/photo-revision-grant/);
  assert.match(api,/\/api\/v1\/local\/documents\/\$\{encodeURIComponent\(jobId\)\}\/photo-revision/);
 });
@@ -587,7 +587,7 @@ test("local shop Photo Studio revision completion commits the exact authorized p
   assert.match(complete,/job\.PricingVersion == request\.ExpectedPricingVersion/);
 });
 
-test("local shop Photo Studio revision authorization and completion enforce the A4 raster contract",()=>{
+test("local shop Photo Studio revision authorization and completion enforce the selected photo raster contract",()=>{
   const program=read("../../../src/SmartPrint.Api/Program.cs");
   const authorizeStart=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize"');
   const authorizeEnd=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"',authorizeStart);
@@ -598,8 +598,8 @@ test("local shop Photo Studio revision authorization and completion enforce the 
   const authorize=program.slice(authorizeStart,authorizeEnd);
   const complete=program.slice(completeStart,completeEnd);
   assert.match(authorize,/request\.PageSizesJson\.Length > 64_000/);
-  assert.match(authorize,/PhotoSheetPdfRules\.HasExactlyPhotoPages\(request\.PageSizesJson, request\.PageCount\)/);
-  assert.match(complete,/PhotoSheetPdfRules\.HasExactlyPhotoPages\(request\.PageSizesJson, request\.PageCount\)/);
+  assert.match(authorize,/PhotoSheetPdfRules\.HasExactlyPhotoPages\(request\.PageSizesJson, request\.PageCount, request\.PhotoOutputLayout, request\.PhotoSizeCode\)/);
+  assert.match(complete,/PhotoSheetPdfRules\.HasExactlyPhotoPages\(request\.PageSizesJson, request\.PageCount, request\.PhotoOutputLayout, request\.PhotoSizeCode\)/);
   assert.match(authorize,/photo_sheet_layout_invalid/);
   assert.match(complete,/photo_sheet_layout_invalid/);
 });
@@ -616,7 +616,7 @@ test("cloud shop Photo Studio revisions validate complete A4 raster geometry bef
   assert.ok(validation>=0&&replacement>validation,
     "The new PDF's A4 pages and full-page photo raster must be verified before replacing the existing document.");
   assert.match(endpoint,/await storage\.DeleteAsync\(stored\.StorageKey\);[\s\S]*?await transaction\.RollbackAsync\(ct\)/);
-  assert.match(endpoint,/The replacement Photo Studio PDF must contain exactly/);
+  assert.match(endpoint,/The replacement Photo Studio PDF must match the selected photo-paper dimensions and output layout/);
 });
 
 test("shop-originated photo orders use their own tenant-owned job and the shared Photo Studio",()=>{
