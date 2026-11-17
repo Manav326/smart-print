@@ -4124,14 +4124,14 @@ class MainActivity : AppCompatActivity() {
                                 val token = previewParts[1]
                                 // The requested index now identifies an output sheet, not a source PDF page.
                                 val sheetIndex = previewParts[2].toInt()
-                                val pagesPerSheet = parts.getOrNull(3)?.toIntOrNull() ?: 1
-                                val paperSize = parts.getOrNull(4)?.takeIf {
+                                val pagesPerSheet = previewParts.getOrNull(3)?.toIntOrNull() ?: 1
+                                val paperSize = previewParts.getOrNull(4)?.takeIf {
                                     it in setOf("A4", "A3", "A5", "LETTER", "LEGAL")
                                 } ?: "A4"
-                                val orientation = parts.getOrNull(5)?.takeIf {
+                                val orientation = previewParts.getOrNull(5)?.takeIf {
                                     it in setOf("AUTO", "PORTRAIT", "LANDSCAPE")
                                 } ?: "AUTO"
-                                val pagesPerSheetDirection = parts.getOrNull(6)?.takeIf {
+                                val pagesPerSheetDirection = previewParts.getOrNull(6)?.takeIf {
                                     it in setOf(
                                         "RightBottom", "BottomRight", "LeftBottom", "BottomLeft",
                                         "RightTop", "TopRight", "LeftTop", "TopLeft"
