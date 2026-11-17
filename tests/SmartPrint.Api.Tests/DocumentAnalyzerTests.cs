@@ -56,6 +56,20 @@ public sealed class DocumentAnalyzerTests
     }
 
     [Fact]
+    public void AnalysesPdfWhenTheFilenameHasNoExtension()
+    {
+        var builder = new PdfDocumentBuilder();
+        builder.AddPage(PageSize.A4);
+        var pdf = builder.Build();
+
+        var result = DocumentAnalyzer.Analyse(pdf);
+
+        Assert.Equal(1, result.PageCount);
+        Assert.Equal("application/pdf", result.MediaType);
+        Assert.Equal(".pdf", result.Extension);
+    }
+
+    [Fact]
     public void FullyAnalyzesPdfWithHeaderAtLastAllowedOffset()
     {
         var builder = new PdfDocumentBuilder();
