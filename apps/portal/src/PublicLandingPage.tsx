@@ -279,7 +279,7 @@ function DownloadAction({
           <span>{formatDownloadBytes(download.bytesReceived)} downloaded</span>
           <span>{download.totalBytes ? `of ${formatDownloadBytes(download.totalBytes)}` : "Total size unavailable"}</span>
         </div>
-        <div className="sp-download-speed-details" aria-live="polite">
+        <div className="sp-download-speed-details">
           <span>{formatDownloadSpeed(download.bytesPerSecond)}</span>
           <span>{formatDownloadRemaining(remainingSeconds)}</span>
         </div>
