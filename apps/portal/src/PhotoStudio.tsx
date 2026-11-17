@@ -79,7 +79,7 @@ const PHOTO_SIZES: PhotoSize[] = [
   { id: "35x45", label: "35 × 45 mm", detail: "Portrait ID photo", widthMm: 35, heightMm: 45 },
   { id: "25x35", label: "25 × 35 mm", detail: "Compact ID photo", widthMm: 25, heightMm: 35 },
   { id: "2x2", label: "2 × 2 inch", detail: "Square photo", widthMm: 50.8, heightMm: 50.8 },
-  { id: "4x6", label: "4 × 6 inch · Portrait", detail: "Portrait photo", widthMm: 101.6, heightMm: 152.4 }
+  { id: "4x6", label: "4 × 6 inch · Portrait", detail: "Portrait tile on an A4 sheet", widthMm: 101.6, heightMm: 152.4 }
 ];
 
 const LOOKS: Array<{ id: LookPreset; label: string; note: string; adjustments: Adjustments }> = [
@@ -192,6 +192,22 @@ function drawPhotoSheetPage(
   context.restore();
 }
 
+function cropSource(image: HTMLImageElement, size: PhotoSize, zoom: number, focusX: number, focusY: number) {
+  const targetRatio = size.widthMm / size.heightMm;
+  let width = image.naturalWidth;
+  let height = image.naturalHeight;
+  if (width / height > targetRatio) {
+    width = height * targetRatio;
+  } else {
+    height = width / targetRatio;
+  }
+  width /= zoom;
+  height /= zoom;
+  const x = Math.max(0, (image.naturalWidth - width) * (focusX / 100));
+  const y = Math.max(0, (image.naturalHeight - height) * (focusY / 100));
+  return { x, y, width, height };
+}
+
 function drawPhotoPaperPage(
   context: CanvasRenderingContext2D,
   image: HTMLImageElement,
@@ -236,21 +252,6 @@ function drawPhotoPaperPage(
   context.restore();
 }
 
-function cropSource(image: HTMLImageElement, size: PhotoSize, zoom: number, focusX: number, focusY: number) {
-  const targetRatio = size.widthMm / size.heightMm;
-  let width = image.naturalWidth;
-  let height = image.naturalHeight;
-  if (width / height > targetRatio) {
-    width = height * targetRatio;
-  } else {
-    height = width / targetRatio;
-  }
-  width /= zoom;
-  height /= zoom;
-  const x = Math.max(0, (image.naturalWidth - width) * (focusX / 100));
-  const y = Math.max(0, (image.naturalHeight - height) * (focusY / 100));
-  return { x, y, width, height };
-}
 
 function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality?: number) {
   return new Promise<Blob>((resolve, reject) => {
@@ -615,7 +616,7 @@ export default function PhotoStudio({
     if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photos. The A4 page count is calculated automatically.");return;}
     busyRef.current=true;setBusy(true);setError("");
     try{
-      const pages = isPhotoPaperLayout ? parsedCopies : Math.ceil(parsedCopies / photosPerPage);
+      const pages=Math.ceil(parsedCopies/photosPerPage);
       const jpegPages: Uint8Array[] = [];
       let jpegByteLength=0;
       const pdfStructureAllowance=4096+pages*1024;
@@ -681,9 +682,8 @@ export default function PhotoStudio({
         captionHeightMm,
         photoOutputLayout,
         photoPaperFinish: isPhotoPaperLayout ? photoPaperFinish : "PLAIN",
-        resolutionDpi: 300,
-        editorSettings,
-        previewPages: jpegPages.map(jpeg => new Blob([jpeg], { type: "image/jpeg" }))
+        resolutionDpi:300,editorSettings,
+        previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))
       }]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
     finally{busyRef.current=false;setBusy(false);}
@@ -700,7 +700,8 @@ export default function PhotoStudio({
       : mode === "shop"
         ? "Replace the unpaid job photo PDF; approval and dispatch still apply."
         : "Prepared photo output replaces this upload; original stays untouched.";
-  const actionLabel = mode === "private-library" ? "Save photo output" : mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save photo output to this job" : "Prepare photo output";
+  const actionLabel = mode === "private-library" ? "Save private sheet" : mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
+  const outputActionLabel = isPhotoPaperLayout ? (mode === "private-library" ? "Save photo-paper prints" : mode === "shop" ? "Save photo-paper prints to this job" : "Prepare photo-paper prints") : actionLabel;
   const busyLabel = mode === "private-library" ? "Saving privately…" : mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your photo output…";
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
 
@@ -931,7 +932,7 @@ export default function PhotoStudio({
         <div className={styles.footerActions}>
           <button type="button" id="photo-studio-cancel" className={styles.cancelButton} onClick={onCancel} disabled={busy}>Cancel</button>
           <button type="button" id="photo-studio-apply" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !copiesInputValid}>
-            {busy ? busyLabel : actionLabel} <Check size={15}/>
+            {busy ? busyLabel : outputActionLabel} <Check size={15}/>
           </button>
         </div>
       </footer>
