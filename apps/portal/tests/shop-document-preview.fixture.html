@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SmartPrint document preview QA</title></head>
+<body>
+  <main id="preview-root"><p>Preparing preview fixtures…</p></main>
+  <script type="module">
+    import React from "react";
+    import { createRoot } from "react-dom/client";
+    import ShopDocumentPreviewSurface from "../src/ShopDocumentPreviewSurface";
+    import { identifyDocumentPreviewMediaType } from "../src/document-preview";
+
+    function makePdf() {
+      const stream = "BT /F1 28 Tf 60 760 Td (SmartPrint PDF preview) Tj ET\n";
+      const objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "<< /Type /Pages /Count 1 /Kids [3 0 R] >>",
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        "<< /Length " + new TextEncoder().encode(stream).length + " >>\nstream\n" + stream + "endstream",
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+      ];
+      let body = "%PDF-1.4\n";
+      const offsets = [0];
+      objects.forEach((object, index) => {
+        offsets.push(new TextEncoder().encode(body).length);
+        body += (index + 1) + " 0 obj\n" + object + "\nendobj\n";
+      });
+      const xref = new TextEncoder().encode(body).length;
+      body += "xref\n0 6\n0000000000 65535 f \n";
+      offsets.slice(1).forEach(offset => { body += String(offset).padStart(10, "0") + " 00000 n \n"; });
+      body += "trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF\n";
+      return new Blob([body], { type: "application/pdf" });
+    }
+
+    async function makeImage(type) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 96;
+      canvas.height = 128;
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Canvas is not available for preview fixtures.");
+      context.fillStyle = type === "image/jpeg" ? "#345eaa" : "#25845e";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#ffffff";
+      context.fillRect(18, 24, 60, 80);
+      const blob = await new Promise((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error("Image fixture encoding failed.")), type));
+      return blob;
+    }
+
+    const pdf = makePdf();
+    const jpeg = await makeImage("image/jpeg");
+    const png = await makeImage("image/png");
+    const pdfType = await identifyDocumentPreviewMediaType(pdf);
+    const jpegType = await identifyDocumentPreviewMediaType(jpeg);
+    const pngType = await identifyDocumentPreviewMediaType(png);
+    const root = createRoot(document.getElementById("preview-root"));
+    const rows = [
+      { id: "pdf", name: "PDF document", blob: pdf, type: pdfType },
+      { id: "jpeg", name: "JPEG photograph", blob: jpeg, type: jpegType },
+      { id: "png", name: "PNG scan", blob: png, type: pngType },
+      { id: "unsupported", name: "Unsupported document", blob: new Blob(["not printable"]), type: "application/octet-stream" },
+      { id: "broken", name: "Broken PNG", blob: new Blob(["not a PNG"]), type: "image/png" }
+    ];
+    root.render(React.createElement("div", null, rows.map(item =>
+      React.createElement("section", { key: item.id, id: item.id + "-case", "data-identified-type": item.type ?? "unsupported" },
+        React.createElement("h2", null, item.name),
+        React.createElement(ShopDocumentPreviewSurface, {
+          name: item.name,
+          url: item.id === "broken" ? "data:image/png;base64,bm90LWEtcG5n" : URL.createObjectURL(item.blob),
+          mediaType: item.type ?? "application/octet-stream",
+          printKind: item.id === "jpeg" || item.id === "png" ? "PHOTO" : "DOCUMENT"
+        })
+      )
+    )));
+    window.__smartPrintPreviewFixtureReady = true;
+  </script>
+</body>
+</html>
