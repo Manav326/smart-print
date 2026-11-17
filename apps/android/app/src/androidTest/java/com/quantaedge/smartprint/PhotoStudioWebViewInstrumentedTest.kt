@@ -238,8 +238,8 @@ class PhotoStudioWebViewInstrumentedTest {
               const canvas = document.getElementById('photo-studio-preview-canvas');
               if (!dialog || !(canvas instanceof HTMLCanvasElement) || !dialog.contains(canvas)) return null;
               const rect = canvas.getBoundingClientRect();
-              const xMm = Number(canvas.dataset.backgroundSampleXmm);
-              const yMm = Number(canvas.dataset.backgroundSampleYmm);
+              const xMm = Number(canvas.getAttribute('data-background-sample-x-mm'));
+              const yMm = Number(canvas.getAttribute('data-background-sample-y-mm'));
               if (!Number.isFinite(xMm) || !Number.isFinite(yMm)) return null;
               return JSON.stringify({
                 x: rect.left + rect.width * xMm / 210,
