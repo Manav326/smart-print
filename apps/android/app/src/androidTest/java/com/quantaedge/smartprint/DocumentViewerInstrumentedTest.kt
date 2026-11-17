@@ -738,7 +738,7 @@ class DocumentViewerInstrumentedTest {
                 bytes.put(0x30.toByte())
                 bytes.put(0x70.toByte())
                 bytes.put(0xd0.toByte())
-                bytes.put(0)
+                bytes.put(0.toByte())
                 file.writeBytes(bytes.array())
             }
             else -> {
