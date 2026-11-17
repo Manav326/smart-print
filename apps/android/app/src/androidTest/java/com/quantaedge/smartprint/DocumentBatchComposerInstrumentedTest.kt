@@ -11,8 +11,12 @@ import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import java.io.File
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 
 class DocumentBatchComposerInstrumentedTest {
     private val context: Context
@@ -20,7 +24,7 @@ class DocumentBatchComposerInstrumentedTest {
 
     @Test
     fun combinesMultiplePdfsAndImagesIntoOneOrderedPrintPdf() {
-        val sourcePdf = File(context.cacheDir, "batch-source.pdf")
+        val sourcePdf = File(context.cacheDir, "batch-source-without-extension")
         val image = File(context.cacheDir, "batch-photo.png")
         val output = File(context.cacheDir, "batch-output.pdf")
         try {
@@ -30,13 +34,45 @@ class DocumentBatchComposerInstrumentedTest {
             FileOutputStream(image).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
             bitmap.recycle()
 
-            assertEquals(3, DocumentBatchComposer.compose(listOf(sourcePdf, image), output))
+            assertEquals(3, DocumentBatchComposer.compose(context, listOf(sourcePdf, image), output))
             assertPdfPageCount(output, 3)
             assertPdfPageCount(sourcePdf, 2)
+            PDFBoxResourceLoader.init(context)
+            PDDocument.load(output).use { merged ->
+                val text = PDFTextStripper().getText(merged)
+                assertTrue("Vector PDF text must remain selectable after combining.", text.contains("Source page 1"))
+                assertTrue("The second source page must remain vector text.", text.contains("Source page 2"))
+            }
             assertTrue(image.isFile)
         } finally {
             sourcePdf.delete()
             image.delete()
+            output.delete()
+        }
+    }
+
+    @Test
+    fun rejectsCombinedSourcesOver50MiBBeforeStartingPdfWork() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val first = File(context.cacheDir, "batch-over-limit-first.pdf")
+        val second = File(context.cacheDir, "batch-over-limit-second.pdf")
+        val output = File(context.cacheDir, "batch-over-limit-output.pdf")
+        try {
+            first.writeBytes("%PDF-1.4\\n".toByteArray())
+            second.writeBytes("%PDF-1.4\\n".toByteArray())
+            RandomAccessFile(first, "rw").use { it.setLength(25L * 1024L * 1024L) }
+            RandomAccessFile(second, "rw").use { it.setLength(25L * 1024L * 1024L + 1L) }
+
+            val error = runCatching {
+                DocumentBatchComposer.compose(context, listOf(first, second), output)
+            }.exceptionOrNull()
+
+            assertTrue("The 50 MiB combined input limit must be explicit: ${error?.message}", error is IllegalArgumentException)
+            assertTrue(error?.message.orEmpty().contains("combined source limit is 50 MB"))
+            assertTrue("An over-limit batch must not leave a partial output.", !output.exists())
+        } finally {
+            first.delete()
+            second.delete()
             output.delete()
         }
     }
