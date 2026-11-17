@@ -206,15 +206,19 @@ app.MapGet("/downloads/status", async (
     }
 }).RequireRateLimiting("public-api");
 
-app.MapGet("/downloads/{platform}", async (
-    string platform,
+async Task HandlePublicDownloadAsync(
+    string platformOrAssetName,
+    string? version,
     PublicDownloadService downloads,
     HttpContext context,
-    CancellationToken cancellationToken) =>
+    CancellationToken cancellationToken)
 {
     try
     {
-        await downloads.StreamDownloadAsync(platform, context, cancellationToken);
+        if (version is null)
+            await downloads.StreamDownloadAsync(platformOrAssetName, context, cancellationToken);
+        else
+            await downloads.StreamVersionedDownloadAsync(version, platformOrAssetName, context, cancellationToken);
     }
     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
     {
@@ -222,7 +226,7 @@ app.MapGet("/downloads/{platform}", async (
     }
     catch (OperationCanceledException exception)
     {
-        app.Logger.LogWarning(exception, "Public release lookup timed out for platform {Platform}.", platform);
+        app.Logger.LogWarning(exception, "Public release lookup timed out for asset {Asset}.", platformOrAssetName);
         if (!context.Response.HasStarted)
         {
             context.Response.Clear();
@@ -237,7 +241,7 @@ app.MapGet("/downloads/{platform}", async (
     catch (Exception exception) when (
         exception is HttpRequestException or JsonException or InvalidOperationException)
     {
-        app.Logger.LogWarning(exception, "Public download for platform {Platform} failed.", platform);
+        app.Logger.LogWarning(exception, "Public download for asset {Asset} failed.", platformOrAssetName);
         if (!context.Response.HasStarted)
         {
             context.Response.Clear();
@@ -249,7 +253,27 @@ app.MapGet("/downloads/{platform}", async (
             context.Abort();
         }
     }
-}).RequireRateLimiting("public-api");
+}
+
+app.MapGet("/downloads/{platform}", async (
+    string platform,
+    PublicDownloadService downloads,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+    await HandlePublicDownloadAsync(platform, null, downloads, context, cancellationToken))
+    .RequireRateLimiting("public-api");
+
+// Versioned binary URLs end in .exe or .apk, which Cloudflare caches by default.
+// The path pins the exact immutable release, so an edge HIT can bypass GitHub
+// and the API origin for subsequent customers without caching any user documents.
+app.MapGet("/downloads/{version}/{assetName}", async (
+    string version,
+    string assetName,
+    PublicDownloadService downloads,
+    HttpContext context,
+    CancellationToken cancellationToken) =>
+    await HandlePublicDownloadAsync(assetName, version, downloads, context, cancellationToken))
+    .RequireRateLimiting("public-api");
 
 app.MapGet("/health/live", () => Results.Ok(new
 {

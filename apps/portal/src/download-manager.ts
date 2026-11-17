@@ -4,6 +4,7 @@ export type FileDownloadState = {
   status: "idle" | "downloading" | "complete" | "cancelled" | "error";
   bytesReceived: number;
   totalBytes: number | null;
+  bytesPerSecond: number;
   errorMessage: string | null;
 };
 
@@ -11,6 +12,7 @@ const initialState: FileDownloadState = {
   status: "idle",
   bytesReceived: 0,
   totalBytes: null,
+  bytesPerSecond: 0,
   errorMessage: null
 };
 
@@ -36,20 +38,20 @@ function saveBlob(blob: Blob, fileName: string): void {
 }
 
 /**
- * Downloads a same-origin release asset and measures bytes from the actual
- * response stream. The completed, size-checked Blob is handed to the browser
- * only after the response has finished, so an interrupted transfer cannot
- * leave an empty destination file behind or grant the site write access to it.
+ * Downloads an immutable public release asset from the R2 custom domain when
+ * configured, with the same-origin API route as a transparent fallback. Measures
+ * actual response bytes and only hands a complete, size-checked Blob to the
+ * browser, preserving the existing save-after-completion experience.
  */
 export function useFileDownload(fileName: string): {
   download: FileDownloadState;
-  start: (url: string) => Promise<void>;
+  start: (url: string, fallbackUrl?: string | null) => Promise<void>;
   cancel: () => void;
 } {
   const [download, setDownload] = useState<FileDownloadState>(initialState);
   const controllerRef = useRef<AbortController | null>(null);
 
-  const start = useCallback(async (url: string) => {
+  const start = useCallback(async (url: string, fallbackUrl?: string | null) => {
     if (controllerRef.current) return;
 
     const controller = new AbortController();
@@ -59,17 +61,39 @@ export function useFileDownload(fileName: string): {
       status: "downloading",
       bytesReceived: 0,
       totalBytes: null,
+      bytesPerSecond: 0,
       errorMessage: null
     });
 
     try {
-      const response = await fetch(url, {
+      const requestOptions: RequestInit = {
         method: "GET",
         headers: { Accept: "application/octet-stream" },
-        cache: "no-store",
-        credentials: "same-origin",
+        // The CDN object is immutable and public. Allow the browser HTTP cache
+        // to accelerate repeat downloads on the same device; the API fallback
+        // remains private/no-store and is not retained by the browser.
+        cache: "default",
+        credentials: "omit",
         signal: controller.signal
-      });
+      };
+
+      let response: Response;
+      try {
+        response = await fetch(url, requestOptions);
+      } catch (primaryError) {
+        if (!fallbackUrl || fallbackUrl === url || controller.signal.aborted) {
+          throw primaryError;
+        }
+        // CORS/network failures on the R2 custom domain transparently fall back
+        // to the established same-origin API route.
+        response = await fetch(fallbackUrl, requestOptions);
+      }
+
+      if (!response.ok && fallbackUrl && fallbackUrl !== url) {
+        // Also fall back when R2 has not received the immutable object yet.
+        await response.body?.cancel();
+        response = await fetch(fallbackUrl, requestOptions);
+      }
       if (!response.ok) {
         if (response.status === 404) {
           throw new Error("This release file is no longer available. Refresh the page and try again.");
@@ -82,6 +106,10 @@ export function useFileDownload(fileName: string): {
       let bytesReceived = 0;
       const chunks: BlobPart[] = [];
       const reader = response.body?.getReader();
+      const receiveStartedAt = performance.now();
+      let lastProgressUpdate = receiveStartedAt;
+      let lastProgressBytes = 0;
+      let smoothedBytesPerSecond = 0;
 
       if (reader) {
         while (true) {
@@ -89,14 +117,30 @@ export function useFileDownload(fileName: string): {
           if (result.done) break;
           const chunk = result.value;
           bytesReceived += chunk.byteLength;
-          chunks.push(chunk.slice().buffer as ArrayBuffer);
+          // Retain the immutable stream chunk view. Blob snapshots each view once
+          // at final assembly; slice().buffer here would make an extra full chunk copy.
+          chunks.push(chunk as unknown as BlobPart);
 
-          setDownload({
-            status: "downloading",
-            bytesReceived,
-            totalBytes,
-            errorMessage: null
-          });
+          const now = performance.now();
+          const elapsedSeconds = (now - lastProgressUpdate) / 1000;
+          if (elapsedSeconds >= 0.2) {
+            const intervalBytesPerSecond = (bytesReceived - lastProgressBytes) / elapsedSeconds;
+            // EWMA smooths bursty mobile/Wi-Fi packet delivery without hiding
+            // sustained slowdowns from the customer.
+            smoothedBytesPerSecond = smoothedBytesPerSecond > 0
+              ? (smoothedBytesPerSecond * 0.65) + (intervalBytesPerSecond * 0.35)
+              : intervalBytesPerSecond;
+
+            setDownload({
+              status: "downloading",
+              bytesReceived,
+              totalBytes,
+              bytesPerSecond: smoothedBytesPerSecond,
+              errorMessage: null
+            });
+            lastProgressUpdate = now;
+            lastProgressBytes = bytesReceived;
+          }
         }
       } else {
         const blob = await response.blob();
@@ -107,9 +151,27 @@ export function useFileDownload(fileName: string): {
           status: "downloading",
           bytesReceived,
           totalBytes: totalBytes ?? bytesReceived,
+          bytesPerSecond: smoothedBytesPerSecond,
           errorMessage: null
         });
       }
+
+      // For very small files and fast transfers, the stream may finish before the
+      // first 200 ms sample. Report the real average instead of showing 0 B/s.
+      const totalReceiveSeconds = (performance.now() - receiveStartedAt) / 1000;
+      if (smoothedBytesPerSecond <= 0 && totalReceiveSeconds > 0) {
+        smoothedBytesPerSecond = bytesReceived / totalReceiveSeconds;
+      }
+
+      // Publish the exact final byte count even when the last read arrived inside
+      // the progress-throttle window.
+      setDownload({
+        status: "downloading",
+        bytesReceived,
+        totalBytes: totalBytes ?? bytesReceived,
+        bytesPerSecond: smoothedBytesPerSecond,
+        errorMessage: null
+      });
 
       if (bytesReceived <= 0) {
         throw new Error("The download server returned an empty file. Please retry.");
@@ -134,6 +196,7 @@ export function useFileDownload(fileName: string): {
         status: "complete",
         bytesReceived,
         totalBytes: totalBytes ?? bytesReceived,
+        bytesPerSecond: smoothedBytesPerSecond,
         errorMessage: null
       });
     } catch (error) {
