@@ -216,13 +216,15 @@ class DocumentViewerInstrumentedTest {
     }
 
     @Test
-    fun extensionlessPdfRendersThroughCustomerUploadPreviewWebViewBridge() {
+    fun extensionlessPdfRendersFromContentUriWithoutCopyingTheOriginal() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val code = "P".repeat(32)
-        val source = File(context.cacheDir, "CI-customer-upload-extensionless-${System.currentTimeMillis()}")
+        val source = File(context.filesDir, "documents/CI-customer-upload-extensionless-${System.currentTimeMillis()}")
+        source.parentFile?.mkdirs()
         createPdf(source, pageCount = 2)
         val responseReceived = java.util.concurrent.CountDownLatch(1)
         val response = java.util.concurrent.atomic.AtomicReference<String?>()
+        val previewDirectory = File(context.cacheDir, "customer-upload-pdf-preview")
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
@@ -241,15 +243,31 @@ class DocumentViewerInstrumentedTest {
                         invoke(activity)
                     }
 
+                    val sourceUri = androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.documents",
+                        source
+                    )
+                    assertEquals("content", sourceUri.scheme)
                     val token = MainActivity::class.java.getDeclaredMethod(
                         "createCustomerUploadPdfPreview",
-                        File::class.java,
-                        File::class.java
-                    ).apply { isAccessible = true }.invoke(activity, source, null) as? String
+                        Uri::class.java
+                    ).apply { isAccessible = true }.invoke(activity, sourceUri) as? String
                     assertNotNull(
-                        "A valid PDF must receive a preview token even when its filename has no .pdf extension.",
+                        "A valid extensionless PDF must get a native preview token from the content URI.",
                         token
                     )
+                    @Suppress("UNCHECKED_CAST")
+                    val uriPreviews = MainActivity::class.java.getDeclaredField("customerUploadPdfPreviewUris")
+                        .apply { isAccessible = true }
+                        .get(activity) as MutableMap<String, Uri>
+                    assertEquals("The token should retain the original content URI.", sourceUri, uriPreviews[token])
+                    @Suppress("UNCHECKED_CAST")
+                    val filePreviews = MainActivity::class.java.getDeclaredField("customerUploadPdfPreviews")
+                        .apply { isAccessible = true }
+                        .get(activity) as MutableMap<String, File>
+                    assertTrue("Default upload preview must not create another full PDF copy.", token !in filePreviews)
+                    assertTrue("The original selected PDF remains unchanged.", source.isFile)
 
                     val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
                         isAccessible = true
@@ -300,7 +318,7 @@ class DocumentViewerInstrumentedTest {
                 )
                 val rendered = response.get().orEmpty()
                 assertTrue(
-                    "An extensionless PDF must not be rejected by the native renderer: $rendered",
+                    "An extensionless PDF must render from its content URI: $rendered",
                     rendered.startsWith("CUSTOMER_PDF_PREVIEW|")
                 )
                 val payload = org.json.JSONObject(rendered.removePrefix("CUSTOMER_PDF_PREVIEW|"))
@@ -313,8 +331,191 @@ class DocumentViewerInstrumentedTest {
             }
         } finally {
             source.delete()
+            previewDirectory.deleteRecursively()
         }
     }
+
+    @Test
+    fun multiplePageRotationsAreAskedOnlyWhenLeavingAndDiscardKeepsOriginal() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val source = File(context.filesDir, "documents/CI-reader-discard-${System.currentTimeMillis()}.pdf")
+        source.parentFile?.mkdirs()
+        createPdf(source, pageCount = 3)
+        val originalHash = sha256(source)
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                onView(org.hamcrest.Matchers.allOf(
+                    withContentDescription("My Files"),
+                    androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(android.widget.LinearLayout::class.java)
+                )).perform(click())
+                onView(withText(source.name)).perform(scrollTo(), click())
+                waitForView(withText("Page 1 of 3"))
+
+                onView(withContentDescription("Rotate page")).perform(click())
+                waitForView(withContentDescription("PDF page 1 preview"))
+                onView(withContentDescription("Next page")).perform(click())
+                waitForView(withText("Page 2 of 3"))
+                onView(withContentDescription("Rotate page")).perform(click())
+                waitForView(withContentDescription("PDF page 2 preview"))
+                onView(withContentDescription("Previous page")).perform(click())
+                waitForView(withText("Page 1 of 3"))
+
+                scenario.onActivity { activity ->
+                    val reader = MainActivity::class.java.getDeclaredField("documentViewer")
+                        .apply { isAccessible = true }
+                        .get(activity) as SmartPrintDocumentViewer
+                    assertEquals(mapOf(0 to 90, 1 to 90), reader.pendingRotationSnapshot())
+                }
+                onView(withText("Save PDF changes?")).check(
+                    org.hamcrest.Matchers.not(isDisplayed())
+                )
+
+                // Rotation is staged in memory; the decision is shown only on exit.
+                onView(withContentDescription("Back to My Files")).perform(click())
+                onView(withText("Save PDF changes?")).check(matches(isDisplayed()))
+                onView(withText("Continue editing")).perform(click())
+                waitForView(withText("Page 1 of 3"))
+
+                // Activity recreation must not discard pending per-page edits.
+                scenario.recreate()
+                waitForView(withText("Page 1 of 3"))
+                scenario.onActivity { activity ->
+                    val reader = MainActivity::class.java.getDeclaredField("documentViewer")
+                        .apply { isAccessible = true }
+                        .get(activity) as SmartPrintDocumentViewer
+                    assertEquals(mapOf(0 to 90, 1 to 90), reader.pendingRotationSnapshot())
+                }
+
+                onView(withContentDescription("Back to My Files")).perform(click())
+                onView(withText("Save PDF changes?")).check(matches(isDisplayed()))
+                onView(withText("Discard changes")).perform(click())
+                onView(withText(source.name)).check(matches(isDisplayed()))
+            }
+            assertTrue(
+                "Discard must leave the original PDF bytes unchanged.",
+                originalHash.contentEquals(sha256(source))
+            )
+            assertFalse(
+                "Discard must not create a rotated copy.",
+                File(source.parentFile, source.nameWithoutExtension + "_rotated.pdf").exists()
+            )
+        } finally {
+            source.delete()
+        }
+    }
+
+    @Test
+    fun savingAsCopyKeepsOriginalAndPreservesSelectablePdfContent() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val source = File(context.filesDir, "documents/CI-reader-copy-${System.currentTimeMillis()}.pdf")
+        source.parentFile?.mkdirs()
+        val output = File(source.parentFile, source.nameWithoutExtension + "_rotated.pdf")
+        createPdf(source, pageCount = 2)
+        output.delete()
+        val originalHash = sha256(source)
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                onView(org.hamcrest.Matchers.allOf(
+                    withContentDescription("My Files"),
+                    androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(android.widget.LinearLayout::class.java)
+                )).perform(click())
+                onView(withText(source.name)).perform(scrollTo(), click())
+                waitForView(withText("Page 1 of 2"))
+                onView(withContentDescription("Rotate page")).perform(click())
+                waitForView(withContentDescription("PDF page 1 preview"))
+                onView(withContentDescription("Next page")).perform(click())
+                waitForView(withText("Page 2 of 2"))
+                onView(withContentDescription("Rotate page")).perform(click())
+                waitForView(withContentDescription("PDF page 2 preview"))
+                onView(withContentDescription("Back to My Files")).perform(click())
+                onView(withText("Save as a copy")).check(matches(isDisplayed()))
+                onView(withText("Save as a copy")).perform(click())
+            }
+
+            val deadline = System.currentTimeMillis() + 20_000L
+            while (!output.isFile && System.currentTimeMillis() < deadline) {
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                SystemClock.sleep(100L)
+            }
+            assertTrue("Save as a copy must create a new PDF in the same folder.", output.isFile)
+            com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
+            com.tom_roush.pdfbox.pdmodel.PDDocument.load(
+                output,
+                com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()
+            ).use { document ->
+                assertEquals(2, document.numberOfPages)
+                assertEquals(90, document.getPage(0).rotation)
+                assertEquals(90, document.getPage(1).rotation)
+                val text = com.tom_roush.pdfbox.text.PDFTextStripper().getText(document)
+                assertTrue("Selectable source text must remain in the rotated copy.", text.contains("Reader page 1"))
+                assertTrue("Selectable text on later pages must be retained.", text.contains("Reader page 2"))
+            }
+            assertTrue("The original remains available.", source.isFile)
+            assertTrue("Save as a copy must not modify the original.", originalHash.contentEquals(sha256(source)))
+        } finally {
+            source.delete()
+            output.delete()
+        }
+    }
+
+    @Test
+    fun updatingOriginalRequiresExplicitConfirmationAndChangesOnlyChosenPages() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val source = File(context.filesDir, "documents/CI-reader-replace-${System.currentTimeMillis()}.pdf")
+        source.parentFile?.mkdirs()
+        createPdf(source, pageCount = 2)
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                onView(org.hamcrest.Matchers.allOf(
+                    withContentDescription("My Files"),
+                    androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(android.widget.LinearLayout::class.java)
+                )).perform(click())
+                onView(withText(source.name)).perform(scrollTo(), click())
+                waitForView(withText("Page 1 of 2"))
+                onView(withContentDescription("Next page")).perform(click())
+                waitForView(withText("Page 2 of 2"))
+                onView(withContentDescription("Rotate page")).perform(click())
+                waitForView(withContentDescription("PDF page 2 preview"))
+                onView(withContentDescription("Back to My Files")).perform(click())
+                onView(withText("Update original PDF")).perform(click())
+                onView(withText("Replace original PDF?")).check(matches(isDisplayed()))
+                onView(withText("Replace original")).perform(click())
+            }
+
+            val deadline = System.currentTimeMillis() + 20_000L
+            var saved = false
+            while (!saved && System.currentTimeMillis() < deadline) {
+                saved = runCatching {
+                    com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
+                    com.tom_roush.pdfbox.pdmodel.PDDocument.load(
+                        source,
+                        com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()
+                    ).use { document ->
+                        document.numberOfPages == 2 &&
+                            document.getPage(0).rotation == 0 &&
+                            document.getPage(1).rotation == 90
+                    }
+                }.getOrDefault(false)
+                if (!saved) {
+                    androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                    SystemClock.sleep(100L)
+                }
+            }
+            assertTrue("Updating original must apply the chosen rotation to that same file.", saved)
+            assertFalse(
+                "Updating original must not create an additional rotated copy.",
+                File(source.parentFile, source.nameWithoutExtension + "_rotated.pdf").exists()
+            )
+        } finally {
+            source.delete()
+        }
+    }
+
+    private fun sha256(file: File): ByteArray =
+        java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes())
 
     @Test
     fun opensTheTappedImageAndRestoresItsPositionAfterRecreation() {
