@@ -283,12 +283,11 @@ class SmartPrintDocumentViewer(
                 else -> "Opening PDF…"
             }
         rotatePage.isEnabled = displayedPage == currentPage && pageCount > 0
-        rotatePage.alpha = if (rotatePage.isEnabled) 1f else 0.4f
+        rotatePage.alpha = if (rotatePage.isEnabled) 1f else 0.32f
         previousPage.isEnabled = currentPage > 0
         nextPage.isEnabled = pageCount > 0 && currentPage < pageCount - 1
         previousPage.alpha = if (previousPage.isEnabled) 1f else 0.32f
         nextPage.alpha = if (nextPage.isEnabled) 1f else 0.32f
-        rotatePage.alpha = if (pageCount > 0) 1f else 0.32f
     }
 
     private fun updateBreadcrumbs() {
