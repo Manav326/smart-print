@@ -39,6 +39,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.util.concurrent.ThreadPoolExecutor
 import java.io.FileOutputStream
 
 @RunWith(AndroidJUnit4::class)
@@ -129,6 +130,21 @@ class DocumentViewerInstrumentedTest {
                     // Queue multiple page requests on the UI thread without waiting for
                     // intermediate rendering. The latest request must win.
                     for (pageIndex in 1..11) showPage.invoke(reader, pageIndex)
+
+                    val pageWorker = reader.javaClass.getDeclaredField("worker")
+                        .apply { isAccessible = true }
+                        .get(reader) as ThreadPoolExecutor
+                    val thumbnailWorker = reader.javaClass.getDeclaredField("thumbnailWorker")
+                        .apply { isAccessible = true }
+                        .get(reader) as ThreadPoolExecutor
+                    assertTrue(
+                        "Rapid page navigation must never queue more than one pending full-page render.",
+                        pageWorker.queue.size <= 1
+                    )
+                    assertTrue(
+                        "Rapid page navigation must never queue more than one pending thumbnail batch.",
+                        thumbnailWorker.queue.size <= 1
+                    )
                 }
 
                 waitForView(withText("Page 12 of 12"))
