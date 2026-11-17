@@ -18,6 +18,7 @@ import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.scrollTo
 import androidx.test.espresso.action.ViewActions.swipeLeft
 import androidx.test.espresso.action.ViewActions.swipeRight
+import androidx.test.espresso.assertion.ViewAssertions.doesNotExist
 import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
@@ -25,6 +26,7 @@ import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -162,30 +164,42 @@ class DocumentViewerInstrumentedTest {
     fun opensCustomerUploadPdfInTheNativeReaderAndReturnsToTheUploadPage() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val previewDirectory = File(context.cacheDir, "customer-upload-pdf-preview")
-        val source = File(context.cacheDir, "CI-customer-upload-preview-${System.currentTimeMillis()}.pdf")
+        val source = File(context.filesDir, "documents/CI-customer-upload-preview-${System.currentTimeMillis()}.pdf")
+        source.parentFile?.mkdirs()
         createPdf(source)
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
+                    val sourceUri = androidx.core.content.FileProvider.getUriForFile(
+                        context,
+                        "${context.packageName}.documents",
+                        source
+                    )
                     val previewToken = MainActivity::class.java.getDeclaredMethod(
                         "createCustomerUploadPdfPreview",
                         Uri::class.java
                     ).apply { isAccessible = true }
-                        .invoke(activity, Uri.fromFile(source)) as String
-                    assertNotNull("The Android document provider PDF is copied for preview", previewToken)
+                        .invoke(activity, sourceUri) as String
+                    assertNotNull("A provider-backed PDF receives a preview token without being copied.", previewToken)
+                    @Suppress("UNCHECKED_CAST")
+                    val uriPreviews = MainActivity::class.java.getDeclaredField("customerUploadPdfPreviewUris")
+                        .apply { isAccessible = true }
+                        .get(activity) as MutableMap<String, Uri>
+                    assertEquals(sourceUri, uriPreviews[previewToken])
                     @Suppress("UNCHECKED_CAST")
                     val previews = MainActivity::class.java.getDeclaredField("customerUploadPdfPreviews")
                         .apply { isAccessible = true }
                         .get(activity) as MutableMap<String, File>
-                    val cachedPdf = previews[previewToken]
-                    assertNotNull("The preview token resolves to a cached PDF", cachedPdf)
-                    assertTrue("The preview uses a separate bounded cache copy", cachedPdf!!.canonicalPath != source.canonicalPath)
-                    assertEquals(source.length(), cachedPdf.length())
+                    assertFalse("The upload picker must not duplicate a full PDF just to preview it.", previewToken in previews)
                     MainActivity::class.java.getDeclaredMethod(
                         "showCustomerUploadPdfPreview",
                         String::class.java
                     ).apply { isAccessible = true }.invoke(activity, previewToken)
+                    val materialized = previews[previewToken]
+                    assertNotNull("Only explicit full-screen preview materializes a cache file.", materialized)
+                    assertTrue(materialized!!.canonicalPath != source.canonicalPath)
+                    assertEquals(source.length(), materialized.length())
                 }
 
                 waitForView(withText("Page 1 of 2"))
@@ -367,9 +381,7 @@ class DocumentViewerInstrumentedTest {
                         .get(activity) as SmartPrintDocumentViewer
                     assertEquals(mapOf(0 to 90, 1 to 90), reader.pendingRotationSnapshot())
                 }
-                onView(withText("Save PDF changes?")).check(
-                    org.hamcrest.Matchers.not(isDisplayed())
-                )
+                onView(withText("Save PDF changes?")).check(doesNotExist())
 
                 // Rotation is staged in memory; the decision is shown only on exit.
                 onView(withContentDescription("Back to My Files")).perform(click())
