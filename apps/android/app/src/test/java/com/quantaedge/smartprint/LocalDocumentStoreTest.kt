@@ -2,7 +2,6 @@ package com.quantaedge.smartprint
 
 import java.io.ByteArrayInputStream
 import java.io.File
-import java.io.FileInputStream
 import java.io.RandomAccessFile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -82,31 +81,39 @@ class LocalDocumentStoreTest {
     }
 
     @Test
-    fun replacesOriginalPdfOnlyAfterValidatingTheCompleteReplacement() {
+    fun replacesOriginalPdfFromPrivateStagingAndPreservesItWhenReplacementIsInvalid() {
         val store = LocalDocumentStore(temporaryFolder.newFolder("private"))
         val original = store.importFile(
             ByteArrayInputStream("%PDF-1.4 original".toByteArray()),
             "report.pdf",
             ""
         )
-        val replacement = File(temporaryFolder.root, "replacement.pdf")
+        val replacement = store.createDerivedPdfTempFile()
         replacement.writeBytes("%PDF-1.7 rotated".toByteArray())
 
         val returned = store.replacePdfContents(original, replacement)
 
         assertEquals(original.canonicalPath, returned.canonicalPath)
+        assertFalse("Same-volume replacement must move, not copy, the staged PDF.", replacement.exists())
         assertEquals("%PDF-1.7 rotated", original.readText())
-        replacement.writeText("not a PDF")
+
+        val invalid = File(temporaryFolder.root, "invalid-replacement.pdf")
+        invalid.writeText("not a PDF")
         assertThrows(IllegalArgumentException::class.java) {
-            store.replacePdfContents(original, replacement)
+            store.replacePdfContents(original, invalid)
         }
-        assertEquals("A rejected replacement must not touch the saved original.", "%PDF-1.7 rotated", original.readText())
+        assertEquals(
+            "A rejected replacement must not touch the saved original.",
+            "%PDF-1.7 rotated",
+            original.readText()
+        )
+        invalid.delete()
     }
 
     @Test
     fun savesDerivedPdfLargerThanThePrintBatchLimit() {
         val store = LocalDocumentStore(temporaryFolder.newFolder("private"))
-        val source = File(temporaryFolder.root, "derived-source.pdf")
+        val source = store.createDerivedPdfTempFile()
         val targetSize = 52L * 1024L * 1024L
         source.writeBytes("%PDF-1.7\n".toByteArray())
         RandomAccessFile(source, "rw").use { random ->
@@ -122,13 +129,13 @@ class LocalDocumentStoreTest {
             }
         }
 
-        val saved = FileInputStream(source).use {
-            store.importDerivedPdf(it, "rotated-output.pdf", "")
-        }
+        val saved = store.finalizeDerivedPdf(source, "rotated-output.pdf", "")
 
+        assertFalse("Publishing a derived PDF must rename rather than duplicate its staging file.", source.exists())
         assertTrue("Derived PDF save must not inherit the 50 MB combine limit.", saved.length() > 50L * 1024L * 1024L)
         assertTrue("The derived document must still be detected by PDF content.", DocumentNamePolicy.isPdf(saved))
         assertEquals(targetSize, saved.length())
+        assertFalse("Internal staging must not be listed as a customer folder.", store.list(store.root).any { it.name == ".smartprint-staging" })
     }
 
     @Test
