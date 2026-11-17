@@ -4,8 +4,11 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.SystemClock
+import android.os.ParcelFileDescriptor
+import android.util.Base64
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -31,6 +34,7 @@ import androidx.test.espresso.matcher.ViewMatchers.withContentDescription
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -41,6 +45,8 @@ import org.junit.runner.RunWith
 import java.io.File
 import java.util.concurrent.ThreadPoolExecutor
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 @RunWith(AndroidJUnit4::class)
 class DocumentViewerInstrumentedTest {
@@ -504,6 +510,7 @@ class DocumentViewerInstrumentedTest {
         createPdf(source, pageCount = 2)
         output.delete()
         PDFBoxResourceLoader.init(context)
+        val originalPageContents = listOf(readPageContent(source, 0), readPageContent(source, 1))
         PDDocument.load(source, com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()).use { sourcePdf ->
             val sourceText = PDFTextStripper().getText(sourcePdf)
             assertTrue("The source fixture must contain selectable text before rotation.", sourceText.contains("Reader page 1"))
@@ -544,10 +551,20 @@ class DocumentViewerInstrumentedTest {
                 assertEquals(2, document.numberOfPages)
                 assertEquals(90, document.getPage(0).rotation)
                 assertEquals(90, document.getPage(1).rotation)
-                val text = com.tom_roush.pdfbox.text.PDFTextStripper().getText(document)
+                assertArrayEquals("Page one content stream must remain intact.",
+                    originalPageContents[0], readPageContent(document, 0))
+                assertArrayEquals("Page two content stream must remain intact.",
+                    originalPageContents[1], readPageContent(document, 1))
+                // Normalise rotation only in this in-memory assertion copy. The
+                // persisted PDF above is still verified to retain its 90° metadata.
+                document.getPage(0).rotation = 0
+                document.getPage(1).rotation = 0
+                val text = com.tom_roush.pdfbox.text.PDFTextStripper().getText(document).replace(Regex("\\s+"), " ")
                 assertTrue("Selectable source text must remain in the rotated copy.", text.contains("Reader page 1"))
                 assertTrue("Selectable text on later pages must be retained.", text.contains("Reader page 2"))
             }
+            assertPageRendersInk(output, 0)
+            assertPageRendersInk(output, 1)
             assertTrue("The original remains available.", source.isFile)
             assertTrue("Save as a copy must not modify the original.", originalHash.contentEquals(sha256(source)))
         } finally {
@@ -562,6 +579,7 @@ class DocumentViewerInstrumentedTest {
         val source = File(context.filesDir, "documents/CI-reader-replace-${System.currentTimeMillis()}.pdf")
         source.parentFile?.mkdirs()
         createPdf(source, pageCount = 2)
+        val originalPageContents = listOf(readPageContent(source, 0), readPageContent(source, 1))
 
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
@@ -601,6 +619,12 @@ class DocumentViewerInstrumentedTest {
                 }
             }
             assertTrue("Updating original must apply the chosen rotation to that same file.", saved)
+            assertArrayEquals("Updating rotation metadata must preserve page one content.",
+                originalPageContents[0], readPageContent(source, 0))
+            assertArrayEquals("Updating rotation metadata must preserve page two content.",
+                originalPageContents[1], readPageContent(source, 1))
+            assertPageRendersInk(source, 0)
+            assertPageRendersInk(source, 1)
             assertFalse(
                 "Updating original must not create an additional rotated copy.",
                 File(source.parentFile, source.nameWithoutExtension + "_rotated.pdf").exists()
@@ -610,8 +634,132 @@ class DocumentViewerInstrumentedTest {
         }
     }
 
+    private fun readPageContent(document: PDDocument, pageIndex: Int): ByteArray =
+        (document.getPage(pageIndex).contents ?: error("Page content stream is missing.")).use { it.readBytes() }
+
+    private fun readPageContent(file: File, pageIndex: Int): ByteArray {
+        PDFBoxResourceLoader.init(ApplicationProvider.getApplicationContext())
+        return PDDocument.load(file, com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()).use { document ->
+            readPageContent(document, pageIndex)
+        }
+    }
+
+    private fun assertPageRendersInk(file: File, pageIndex: Int) {
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+            PdfRenderer(descriptor).use { renderer ->
+                renderer.openPage(pageIndex).use { page ->
+                    val bitmap = Bitmap.createBitmap(320, 450, Bitmap.Config.ARGB_8888)
+                    try {
+                        bitmap.eraseColor(Color.WHITE)
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        var hasInk = false
+                        loop@ for (y in 0 until bitmap.height) {
+                            for (x in 0 until bitmap.width) {
+                                if (bitmap.getPixel(x, y) != Color.WHITE) {
+                                    hasInk = true
+                                    break@loop
+                                }
+                            }
+                        }
+                        assertTrue("PDF page ${pageIndex + 1} must render its retained content.", hasInk)
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }
+            }
+        }
+    }
+
     private fun sha256(file: File): ByteArray =
         java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes())
+
+
+    @Test
+    fun everySupportedAndroidImageFormatOpensAndRendersInMyFiles() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val directory = File(context.filesDir, "documents/CI-image-formats-${System.currentTimeMillis()}")
+        assertTrue(directory.mkdirs())
+        val imageNames = listOf("sample.jpg", "sample.png", "sample.webp", "sample.bmp", "sample.gif")
+        try {
+            imageNames.forEach { name ->
+                val image = File(directory, name)
+                writeImageFormatFixture(image, name.substringAfterLast('.'))
+                assertTrue("$name must be detected from its real file signature.",
+                    DocumentNamePolicy.isImage(image))
+                assertTrue("$name must be supported by the native image viewer.",
+                    DocumentNamePolicy.supportsInAppViewer(image))
+            }
+
+            ActivityScenario.launch(MainActivity::class.java).use {
+                onView(org.hamcrest.Matchers.allOf(
+                    withContentDescription("My Files"),
+                    androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(android.widget.LinearLayout::class.java)
+                )).perform(click())
+                onView(withText(directory.name)).perform(scrollTo(), click())
+
+                imageNames.forEach { name ->
+                    onView(withText(name)).perform(scrollTo(), click())
+                    waitForView(withContentDescription("Image preview"))
+                    onView(withContentDescription("Image preview")).check(matches(isDisplayed()))
+                    androidx.test.espresso.Espresso.pressBack()
+                    onView(withText(name)).check(matches(isDisplayed()))
+                }
+            }
+        } finally {
+            directory.deleteRecursively()
+        }
+    }
+
+    private fun writeImageFormatFixture(file: File, format: String) {
+        when (format.lowercase()) {
+            "gif" -> {
+                // Valid 1x1 GIF89a image; Android's image viewer displays frame one.
+                file.writeBytes(Base64.decode("R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=", Base64.DEFAULT))
+            }
+            "bmp" -> {
+                // A valid 1x1, 24-bit BMP with a padded four-byte pixel row.
+                val bytes = ByteBuffer.allocate(58).order(ByteOrder.LITTLE_ENDIAN)
+                bytes.put('B'.code.toByte())
+                bytes.put('M'.code.toByte())
+                bytes.putInt(58)
+                bytes.putInt(0)
+                bytes.putInt(54)
+                bytes.putInt(40)
+                bytes.putInt(1)
+                bytes.putInt(1)
+                bytes.putShort(1.toShort())
+                bytes.putShort(24.toShort())
+                bytes.putInt(0)
+                bytes.putInt(4)
+                bytes.putInt(2835)
+                bytes.putInt(2835)
+                bytes.putInt(0)
+                bytes.putInt(0)
+                bytes.put(0x30.toByte())
+                bytes.put(0x70.toByte())
+                bytes.put(0xd0.toByte())
+                bytes.put(0)
+                file.writeBytes(bytes.array())
+            }
+            else -> {
+                val bitmap = Bitmap.createBitmap(80, 100, Bitmap.Config.ARGB_8888)
+                try {
+                    bitmap.eraseColor(Color.rgb(30, 112, 208))
+                    FileOutputStream(file).use { output ->
+                        val compression = when (format.lowercase()) {
+                            "jpg", "jpeg" -> Bitmap.CompressFormat.JPEG
+                            "webp" -> Bitmap.CompressFormat.WEBP
+                            else -> Bitmap.CompressFormat.PNG
+                        }
+                        assertTrue("Could not encode $format image fixture.", bitmap.compress(compression, 86, output))
+                    }
+                } finally {
+                    bitmap.recycle()
+                }
+            }
+        }
+    }
+
 
     @Test
     fun opensTheTappedImageAndRestoresItsPositionAfterRecreation() {
