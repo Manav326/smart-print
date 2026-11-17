@@ -219,6 +219,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
             }
             finally
             {
+                host.Dispose();
                 Directory.Delete(root, recursive: true);
                 CryptographicOperations.ZeroMemory(pdf);
             }
