@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using SmartPrint.Agent;
 using SmartPrint.Documents;
+using UglyToad.PdfPig.Writer;
 
 namespace SmartPrint.Agent.Tests;
 
@@ -102,6 +103,53 @@ public sealed class AgentLocalQueueStoreTests
             using var document = store.OpenDocumentReadStream(job.Id, agentScopeId);
             var output = new byte[bytes.Length];
             Assert.Throws<InvalidDataException>(() => document.Read(output, 0, output.Length));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WindowsAgentStagesAnExtensionlessPdfAfterContentBasedValidation()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var builder = new PdfDocumentBuilder();
+            builder.AddPage(PageSize.A4);
+            var bytes = builder.Build();
+
+            // This is the same content analyzer used by the local upload HTTP route.
+            // The supplied filename has no extension; file content determines PDF.
+            var analysis = DocumentAnalyzer.Analyse(bytes);
+            Assert.Equal("application/pdf", analysis.MediaType);
+            Assert.Equal(".pdf", analysis.Extension);
+            Assert.Equal(1, analysis.PageCount);
+
+            var agentScopeId = Guid.NewGuid();
+            var upload = CreateJob(bytes) with
+            {
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT",
+                OriginalFileName = "certificate-without-extension",
+                ContentType = analysis.MediaType,
+                PageCount = analysis.PageCount
+            };
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            await using var input = new MemoryStream(bytes, writable: false);
+
+            var entry = await store.EnqueueLocalUploadStreamingAsync(
+                upload, agentScopeId, input, CancellationToken.None);
+
+            Assert.Equal("LOCAL_UPLOAD_STAGED", entry.State);
+            using var staged = store.OpenDocumentReadStream(upload.Id, agentScopeId);
+            var stagedAnalysis = DocumentAnalyzer.Analyse(staged, analysis.Extension);
+            Assert.Equal("application/pdf", stagedAnalysis.MediaType);
+            Assert.Equal(".pdf", stagedAnalysis.Extension);
+            Assert.Equal(1, stagedAnalysis.PageCount);
+            Assert.Equal(upload.Sha256, entry.Sha256);
         }
         finally
         {
