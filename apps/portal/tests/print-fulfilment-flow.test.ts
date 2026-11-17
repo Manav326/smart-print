@@ -403,7 +403,7 @@ test("cloud shop photo revisions require an unpaid review-stage image and valida
  assert.match(route,/document\.StorageMode, "CLOUD"/);
  assert.match(route,/var photoSourceMediaType = documentSnapshot\.PhotoSourceMediaType \?\? documentSnapshot\.MediaType/);
  assert.match(route,/photoSourceMediaType is not \("image\/jpeg" or "image\/png"\)/);
- assert.match(route,/if \(job\.PrivatePrinting\)/);
+ assert.match(route,/if \(jobPreflight\.PrivatePrinting\)/);
  assert.match(route,/hasPayment \|\| hasBatchPayment/);
  assert.match(route,/job\.LocalQueueReceivedUtc is not null/);
  assert.match(route,/job\.ClaimedByAgentDeviceId is not null/);
