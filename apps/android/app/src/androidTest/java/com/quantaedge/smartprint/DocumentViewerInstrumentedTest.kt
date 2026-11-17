@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.pdf.PdfDocument
 import android.net.Uri
 import android.os.SystemClock
 import android.view.View
@@ -13,6 +12,13 @@ import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+import com.tom_roush.pdfbox.text.PDFTextStripper
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.scrollTo
@@ -481,6 +487,12 @@ class DocumentViewerInstrumentedTest {
         val output = File(source.parentFile, source.nameWithoutExtension + "_rotated.pdf")
         createPdf(source, pageCount = 2)
         output.delete()
+        PDFBoxResourceLoader.init(context)
+        PDDocument.load(source, com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()).use { sourcePdf ->
+            val sourceText = PDFTextStripper().getText(sourcePdf)
+            assertTrue("The source fixture must contain selectable text before rotation.", sourceText.contains("Reader page 1"))
+            assertTrue("Later source-page text must be selectable before rotation.", sourceText.contains("Reader page 2"))
+        }
         val originalHash = sha256(source)
 
         try {
@@ -661,28 +673,26 @@ class DocumentViewerInstrumentedTest {
         }
     }
 
+    /**
+     * Use actual PDF text operators so selectable-text preservation assertions
+     * exercise rotation output rather than Android canvas glyph outlining.
+     */
     private fun createPdf(file: File, pageCount: Int = 2) {
-        val document = PdfDocument()
-        try {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        PDFBoxResourceLoader.init(context)
+        PDDocument().use { document ->
             repeat(pageCount) { index ->
-                val page = document.startPage(
-                    PdfDocument.PageInfo.Builder(420, 594, index + 1).create()
-                )
-                page.canvas.drawColor(Color.WHITE)
-                page.canvas.drawText(
-                    "Reader page ${index + 1}",
-                    36f,
-                    72f,
-                    Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        textSize = 28f
-                        color = Color.BLACK
-                    }
-                )
-                document.finishPage(page)
+                val page = PDPage(PDRectangle.A4)
+                document.addPage(page)
+                PDPageContentStream(document, page).use { content ->
+                    content.beginText()
+                    content.setFont(PDType1Font.HELVETICA, 28f)
+                    content.newLineAtOffset(36f, 760f)
+                    content.showText("Reader page ${index + 1}")
+                    content.endText()
+                }
             }
-            FileOutputStream(file).use(document::writeTo)
-        } finally {
-            document.close()
+            document.save(file)
         }
     }
 }
