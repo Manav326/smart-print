@@ -4,6 +4,10 @@
 <body>
   <main id="preview-root"><p>Preparing preview fixtures…</p></main>
   <script type="module">
+    // Headless Chromium does not always report its bundled PDF viewer as
+    // enabled. This fixture explicitly exercises the PDF-capable-browser path;
+    // supportsInlinePdfPreview has separate tests for the unavailable-browser path.
+    Object.defineProperty(navigator, "pdfViewerEnabled", { configurable: true, value: true });
     import React from "react";
     import { createRoot } from "react-dom/client";
     import ShopDocumentPreviewSurface from "../src/ShopDocumentPreviewSurface";
