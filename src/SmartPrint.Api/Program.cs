@@ -6451,43 +6451,9 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
             .SingleOrDefaultAsync(item => item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
         if (completedJob is null || completedDocument is null) return Results.Conflict();
 
-        var completedAttemptNumber = await db.Database.SqlQuery<int?>($"""
-            WITH updated AS (
-                UPDATE "LocalPrintUploadTickets"
-                SET "AgentUploadAttempts" = "AgentUploadAttempts" + 1
-                WHERE "Id" = {ticket.Id}
-                  AND "TenantId" = {device.TenantId}
-                  AND "AgentDeviceId" = {device.Id}
-                  AND "CompletedUtc" IS NOT NULL
-                RETURNING "AgentUploadAttempts"
-            )
-            SELECT "AgentUploadAttempts" AS "Value" FROM updated
-            """).SingleOrDefaultAsync(ct);
-        if (completedAttemptNumber is null) return Results.Conflict();
-        ticket.AgentUploadAttempts = completedAttemptNumber.Value;
-        await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
-        {
-            TransferId = ticket.Id,
-            AttemptNumber = ticket.AgentUploadAttempts,
-            TenantId = device.TenantId,
-            AgentDeviceId = device.Id,
-            PrinterDeviceId = ticket.PrinterDeviceId,
-            QrStationId = ticket.QrStationId,
-            PrintJobId = ticket.PrintJobId,
-            Channel = "SHOP_LAN_CUSTOMER_UPLOAD",
-            Direction = "LAN_INBOUND",
-            Status = "STARTED",
-            PayloadBytes = 0,
-            NetworkBytes = null,
-            DurationMilliseconds = 0,
-            MeasurementSource = "AGENT_UPLOAD_RETRY_CLAIM_STARTED",
-            CreatedUtc = DateTimeOffset.UtcNow
-        });
-
         return Results.Ok(new
         {
             AlreadyCompleted = true,
-            AttemptNumber = ticket.AgentUploadAttempts,
             PrivatePrinting = ticket.PrivatePrinting,
             UploadResult = new
             {
