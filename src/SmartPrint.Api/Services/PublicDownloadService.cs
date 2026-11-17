@@ -7,7 +7,7 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace SmartPrint.Api.Services;
 
-public sealed record PublicDownloadStatus(string? Version, bool WindowsAvailable, bool AndroidAvailable);
+public sealed record PublicDownloadStatus(string? Version, bool WindowsAvailable, bool AndroidAvailable, string? DownloadBaseUrl);
 
 /// <summary>
 /// Resolves stable release assets on the server and streams them through the
@@ -29,6 +29,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         };
 
     private readonly string _repository = configuration["PublicDownloads:GitHubRepository"]?.Trim() ?? "";
+    private readonly string _downloadBaseUrl = configuration["PublicDownloads:PublicBaseUrl"]?.Trim() ?? "";
 
     public async Task<PublicDownloadStatus> GetStatusAsync(CancellationToken cancellationToken)
     {
@@ -36,7 +37,30 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
         return new PublicDownloadStatus(
             release?.TagName,
             release?.Assets.ContainsKey(PlatformAssets["windows"]) == true,
-            release?.Assets.ContainsKey(PlatformAssets["android"]) == true);
+            release?.Assets.ContainsKey(PlatformAssets["android"]) == true,
+            GetValidatedDownloadBaseUrl());
+    }
+
+    private string? GetValidatedDownloadBaseUrl()
+    {
+        if (string.IsNullOrWhiteSpace(_downloadBaseUrl))
+        {
+            return null;
+        }
+
+        if (!Uri.TryCreate(_downloadBaseUrl, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps ||
+            !uri.IsDefaultPort ||
+            !string.IsNullOrEmpty(uri.UserInfo) ||
+            (uri.AbsolutePath != "/" && !string.IsNullOrEmpty(uri.AbsolutePath)) ||
+            !string.IsNullOrEmpty(uri.Query) ||
+            !string.IsNullOrEmpty(uri.Fragment))
+        {
+            throw new InvalidOperationException(
+                "PublicDownloads:PublicBaseUrl must be an HTTPS origin without a path, query, fragment, or credentials.");
+        }
+
+        return uri.GetLeftPart(UriPartial.Authority).TrimEnd('/');
     }
 
     public Task StreamDownloadAsync(string platform, HttpContext context, CancellationToken cancellationToken) =>
