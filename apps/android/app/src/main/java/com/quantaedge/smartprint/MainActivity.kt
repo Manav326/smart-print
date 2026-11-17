@@ -3986,7 +3986,13 @@ class MainActivity : AppCompatActivity() {
         afterExit: () -> Unit,
         progressDialog: BottomSheetDialog
     ) {
-        val output = store.createDerivedPdfTempFile()
+        val output = try {
+            store.createDerivedPdfTempFile()
+        } catch (error: Exception) {
+            progressDialog.dismiss()
+            toast("Could not prepare PDF storage: ${message(error)}")
+            return
+        }
         Thread({
             try {
                 val pageCount = DocumentBatchComposer.rotatePages(this, source, rotations, output)
