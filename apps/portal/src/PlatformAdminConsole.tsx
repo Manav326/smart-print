@@ -146,7 +146,7 @@ export default function PlatformAdminConsole({
       : section === "Subscriptions" ? "Manage trial and free-plan assignments with a permanent audit trail."
        : section === "Advertising" ? "Create, schedule and measure campaigns across customer and shop-owner placements."
        : section === "Data & Network" ? "Measure original-document movement, shop Wi-Fi transfers, and Agent storage across your platform."
-       : "Configure platform-wide print quotas, retention, cleanup schedules and suspended-shop recovery policy.";"
+       : "Configure platform-wide print quotas, retention, cleanup schedules and suspended-shop recovery policy.";
 
   return (
     <div className={`app-shell platform-admin-shell${dark ? "" : " light"}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
