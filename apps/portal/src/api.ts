@@ -53,6 +53,99 @@ export interface PlatformOverview {
   subscriptionsByStatus: { status: string; count: number }[];
 }
 
+export interface PlatformDataNetworkReport {
+  generatedUtc: string;
+  requestedFromUtc: string;
+  fromUtc: string;
+  measurementStartedUtc: string;
+  coverageComplete: boolean;
+  toUtc: string;
+  days: number;
+  measurementCoverageDays: number;
+  telemetryHealth: {
+    scope: string;
+    processStartedUtc: string;
+    successfulWriteCount: number;
+    failedWriteCount: number;
+    lastFailureUtc: string | null;
+  };
+  summary: {
+    uniqueDocumentCount: number;
+    uniqueDocumentBytes: number;
+    cloudIngressBytes: number;
+    cloudEgressBytes: number;
+    shopLanBytes: number;
+    measuredPayloadBytes: number;
+    transferAttemptCount: number;
+    partialTransferCount: number;
+    failedTransferCount: number;
+    startedTransferCount: number;
+    wireBytesMeasured: boolean;
+  };
+  channels: Array<{
+    channel: string;
+    direction: string;
+    status: string;
+    transferCount: number;
+    payloadBytes: number;
+    measuredNetworkBytes: number | null;
+    totalDurationMilliseconds: number;
+    durationSampleCount: number;
+  }>;
+  shops: Array<{
+    tenantId: string;
+    shopName: string;
+    shopStatus: string;
+    transferCount: number;
+    measuredPayloadBytes: number;
+    cloudIngressBytes: number;
+    cloudEgressBytes: number;
+    shopLanBytes: number;
+    partialTransferCount: number;
+    failedTransferCount: number;
+    startedTransferCount: number;
+    agentCount: number;
+    freshAgentCount: number;
+    staleAgentCount: number;
+    missingAgentSnapshotCount: number;
+    localQueueDiskBytes: number;
+    localOutputFileBytes: number;
+  }>;
+  storage: {
+    cloudLogicalDocumentCount: number;
+    cloudLogicalDocumentBytes: number;
+    agentCount: number;
+    freshAgentCount: number;
+    staleAgentCount: number;
+    missingAgentSnapshotCount: number;
+    localQueueDocumentCount: number;
+    localQueueLogicalBytes: number;
+    localQueueDiskBytes: number;
+    localOutputFileCount: number;
+    localOutputFileBytes: number;
+    snapshotFreshnessMinutes: number;
+    storageMeasurementComplete: boolean;
+    physicalDiskBytesMeasured: boolean;
+  };
+  retention: {
+    rawEventRetentionDays: number;
+    dailyAggregatesRetained: boolean;
+  };
+  measurementScope: {
+    payloadBytesOnly: boolean;
+    wireBytesMeasured: boolean;
+    unmeasuredPaths: string[];
+  };
+}
+
+export function getPlatformDataNetwork(token: string, days: 7 | 30 | 90) {
+  return apiRequest<PlatformDataNetworkReport>(
+    `/api/v1/platform/data-network?days=${days}`,
+    {},
+    token
+  );
+}
+
 export interface PlatformTenant {
   id: string;
   slug: string;
@@ -791,6 +884,8 @@ export interface ShopCustomerJob {
   photoSizeCode?: string | null;
   photoCount?: number;
   photosPerPage?: number | null;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -848,6 +943,8 @@ export interface ShopPhotoJobResult {
     photoSizeCode: string;
     photoCount: number;
     photosPerPage: number;
+    photoOutputLayout: "A4_SHEET" | "PHOTO_PAPER";
+    photoPaperFinish: "PLAIN" | "GLOSSY" | "MATTE";
     pageCount: number;
     photoUnitPriceMinorSnapshot: number;
     quotedAmountMinor: number;
@@ -879,6 +976,8 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   photoSizeCode: string;
   photoCount: number;
   photosPerPage: number;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
   recipientType: "EXISTING_CUSTOMER" | "WALK_IN";
   customerUserId?: string;
   recipientName?: string;
@@ -892,6 +991,8 @@ export async function createShopPhotoJob(token: string, file: File, values: {
   form.append("photoSizeCode", values.photoSizeCode);
   form.append("photoCount", String(values.photoCount));
   form.append("photosPerPage", String(values.photosPerPage));
+  form.append("photoOutputLayout", values.photoOutputLayout ?? "A4_SHEET");
+  form.append("photoPaperFinish", values.photoPaperFinish ?? "PLAIN");
   form.append("recipientType", values.recipientType);
   form.append("paymentMethod", values.paymentMethod);
   form.append("idempotencyKey", values.idempotencyKey);
@@ -1167,6 +1268,8 @@ export interface ShopPrintJob {
   photoSizeCode?: string | null;
   photoCount?: number;
   photosPerPage?: number | null;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -1320,6 +1423,8 @@ type CustomerLocalUploadTicket = {
   photoSizeCode?: string | null;
   photoCount?: number | null;
   photosPerPage?: number | null;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
   sha256: string;
 };
 
@@ -1334,7 +1439,7 @@ async function requestCustomerLocalUploadTicket(
   settings: CustomerPrintRequestSettings,
   privatePrinting = false,
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
-  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" }
 ): Promise<CustomerLocalUploadTicket> {
   const identified=await identifySupportedDocument(file);
   if(!identified)throw new ApiError("The file contents are not a supported PDF, JPEG or PNG. Choose a valid document.",415,"document_content_unsupported");
@@ -1368,6 +1473,8 @@ async function requestCustomerLocalUploadTicket(
       photoSizeCode: photoSettings?.sizeCode ?? null,
       photoCount: photoSettings?.photoCount ?? null,
       photosPerPage: photoSettings?.photosPerPage ?? null,
+      photoOutputLayout: photoSettings?.photoOutputLayout ?? "A4_SHEET",
+      photoPaperFinish: photoSettings?.photoPaperFinish ?? "PLAIN",
       detectedFileExtension: identified.extension
     })
   });
@@ -1403,7 +1510,7 @@ export async function uploadCustomerDocument(
   batchName?: string,
   settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" },
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
-  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" }
 ) {
   validateUploadFileSize(file);
   const identified=await identifySupportedDocument(file);
@@ -1447,6 +1554,8 @@ export async function uploadCustomerDocument(
     form.append("photoSizeCode", photoSettings.sizeCode);
     form.append("photoCount", String(photoSettings.photoCount));
     form.append("photosPerPage", String(photoSettings.photosPerPage ?? 1));
+    form.append("photoOutputLayout", photoSettings.photoOutputLayout ?? "A4_SHEET");
+    form.append("photoPaperFinish", photoSettings.photoPaperFinish ?? "PLAIN");
   }
   const uploaded = await apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
     method: "POST",
@@ -1625,7 +1734,7 @@ export async function uploadCustomerDocumentLocally(
   privatePrinting = false,
   localNetworkReady = true,
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
-  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number }
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" }
 ): Promise<UploadedPrintJob> {
   validateUploadFileSize(file);
   if (printKind === "ID_DOCUMENT" && !privatePrinting) {
@@ -1909,6 +2018,8 @@ export function calculateCustomerQuote(sessionToken: string, jobId: string, valu
   photoCount?: number;
   photosPerPage?: number;
   pagesPerSheet?: number;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
 }) {
   return apiRequest<PrintQuoteResult>(`/api/v1/public/jobs/${jobId}/quote`, {
     method: "POST",
@@ -1934,6 +2045,8 @@ export interface CustomerJobStatus {
   photoSizeCode?: string | null;
   photoCount?: number;
   photosPerPage?: number | null;
+  photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER";
+  photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE";
   photoUnitPriceMinorSnapshot?: number;
   currency: string;
   quotedAmountMinor: number;
@@ -2238,7 +2351,9 @@ export async function replaceShopPhotoDocumentLocally(
   photoSizeCode: string,
   photoCount: number,
   photosPerPage: number,
-  editorSettingsJson?: string
+  editorSettingsJson?: string,
+  photoOutputLayout: "A4_SHEET" | "PHOTO_PAPER" = "A4_SHEET",
+  photoPaperFinish: "PLAIN" | "GLOSSY" | "MATTE" = "PLAIN"
 ) {
   validateUploadFileSize(file);
   const grant = await apiRequest<{
@@ -2257,6 +2372,8 @@ export async function replaceShopPhotoDocumentLocally(
   form.append("photoSizeCode", photoSizeCode);
   form.append("photoCount", String(photoCount));
   form.append("photosPerPage", String(photosPerPage));
+  form.append("photoOutputLayout", photoOutputLayout);
+  form.append("photoPaperFinish", photoPaperFinish);
   if (editorSettingsJson) form.append("editorSettingsJson", editorSettingsJson);
 
   let lastError: Error | null = null;
@@ -2326,7 +2443,9 @@ export function replaceShopPhotoDocument(
   photoSizeCode: string,
   photoCount: number,
   photosPerPage: number,
-  editorSettingsJson?: string
+  editorSettingsJson?: string,
+  photoOutputLayout: "A4_SHEET" | "PHOTO_PAPER" = "A4_SHEET",
+  photoPaperFinish: "PLAIN" | "GLOSSY" | "MATTE" = "PLAIN"
 ) {
   validateUploadFileSize(file);
   const form = new FormData();
@@ -2334,6 +2453,8 @@ export function replaceShopPhotoDocument(
   form.append("photoSizeCode", photoSizeCode);
   form.append("photoCount", String(photoCount));
   form.append("photosPerPage", String(photosPerPage));
+  form.append("photoOutputLayout", photoOutputLayout);
+  form.append("photoPaperFinish", photoPaperFinish);
   if (editorSettingsJson) form.append("editorSettingsJson", editorSettingsJson);
   return apiRequest<{
     id: string;

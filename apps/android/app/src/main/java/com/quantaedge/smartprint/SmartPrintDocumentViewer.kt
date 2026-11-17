@@ -41,7 +41,9 @@ class SmartPrintDocumentViewer(
     private val imageSiblings: List<File>,
     startPosition: Int? = null,
     documentMimeType: String = DocumentNamePolicy.mimeType(startFile),
-    private val onNavigateImage: (File) -> Unit
+    private val onNavigateImage: (File) -> Unit,
+    private val folderBreadcrumbs: List<Pair<String, String>> = emptyList(),
+    private val onNavigateFolder: (String) -> Unit = {}
 ) : LinearLayout(context) {
     companion object {
         private const val MAX_PAGE_EDGE = 2200
@@ -62,6 +64,16 @@ class SmartPrintDocumentViewer(
     private val worker: ExecutorService = Executors.newSingleThreadExecutor()
     private val disposed = AtomicBoolean(false)
     private val stage = FrameLayout(context)
+    private val breadcrumbScroller = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        clipToPadding = false
+        overScrollMode = View.OVER_SCROLL_NEVER
+        setPadding(dp(12), dp(2), dp(12), dp(4))
+    }
+    private val breadcrumbRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
     private val pageImage = ZoomableDocumentImageView(context) { direction ->
         if (isPdf) showPdfPage(currentPage + direction)
         else navigateImage(currentImageIndex + direction)
@@ -112,6 +124,10 @@ class SmartPrintDocumentViewer(
         orientation = LinearLayout.VERTICAL
         background = SmartPrintGlass.backdrop(context)
         clipToPadding = false
+
+        updateBreadcrumbs()
+        breadcrumbScroller.addView(breadcrumbRow, FrameLayout.LayoutParams(-2, -1))
+        addView(breadcrumbScroller, LinearLayout.LayoutParams(-1, dp(35)))
 
         if (isPdf) {
             val pageControls = LinearLayout(context).apply {
@@ -204,6 +220,47 @@ class SmartPrintDocumentViewer(
         previousPage.alpha = if (previousPage.isEnabled) 1f else 0.32f
         nextPage.alpha = if (nextPage.isEnabled) 1f else 0.32f
         rotatePage.alpha = if (pageCount > 0) 1f else 0.32f
+    }
+
+    private fun updateBreadcrumbs() {
+        breadcrumbRow.removeAllViews()
+        fun separator() {
+            if (breadcrumbRow.childCount > 0) {
+                breadcrumbRow.addView(TextView(context).apply {
+                    text = "›"
+                    textSize = 13f
+                    setTextColor(getColor(R.color.qp_muted))
+                    setPadding(dp(7), 0, dp(7), 0)
+                }, LinearLayout.LayoutParams(-2, -2))
+            }
+        }
+        folderBreadcrumbs.forEach { (label, path) ->
+            separator()
+            breadcrumbRow.addView(TextView(context).apply {
+                text = label
+                textSize = 12f
+                setTextColor(getColor(R.color.qp_primary))
+                setPadding(dp(3), dp(6), dp(3), dp(6))
+                contentDescription = "Open folder $label"
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { onNavigateFolder(path) }
+                val selectable = android.util.TypedValue()
+                if (context.theme.resolveAttribute(android.R.attr.selectableItemBackground, selectable, true)) {
+                    setBackgroundResource(selectable.resourceId)
+                }
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
+        separator()
+        breadcrumbRow.addView(TextView(context).apply {
+            text = currentFile.name
+            textSize = 12f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(R.color.qp_text))
+            setPadding(dp(3), dp(6), dp(3), dp(6))
+            maxLines = 1
+        }, LinearLayout.LayoutParams(-2, -2))
+        breadcrumbScroller.post { breadcrumbScroller.fullScroll(View.FOCUS_RIGHT) }
     }
 
     private fun renderCurrentPdfPage() {
@@ -306,6 +363,7 @@ class SmartPrintDocumentViewer(
         if (imageSiblings.isEmpty() || index !in imageSiblings.indices || disposed.get()) return
         currentImageIndex = index
         currentFile = imageSiblings[index]
+        updateBreadcrumbs()
         val request = ++renderVersion
         if (imageSiblings.size > 1) pageCounter.text = "Photo ${index + 1} of ${imageSiblings.size}"
         showLoading("Opening image…")

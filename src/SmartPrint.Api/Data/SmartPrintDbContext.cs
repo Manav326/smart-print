@@ -38,6 +38,8 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<PrintDocument> PrintDocuments => Set<PrintDocument>();
     public DbSet<LocalPrintUploadTicket> LocalPrintUploadTickets => Set<LocalPrintUploadTicket>();
     public DbSet<PrintJobEvent> PrintJobEvents => Set<PrintJobEvent>();
+    public DbSet<DataTransferEvent> DataTransferEvents => Set<DataTransferEvent>();
+    public DbSet<DataTransferDailyAggregate> DataTransferDailyAggregates => Set<DataTransferDailyAggregate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -82,8 +84,11 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                     "\"CloudCompletedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"AgentCompletedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"AbandonedDocumentRetentionDays\" BETWEEN 1 AND 3650 AND \"PendingLocalUploadRetentionDays\" BETWEEN 1 AND 3650 AND \"ExpiredUploadTicketRetentionDays\" BETWEEN 1 AND 3650 AND \"EmptyCustomerSessionRetentionDays\" BETWEEN 1 AND 3650 AND \"StaleRefreshTokenRetentionDays\" BETWEEN 1 AND 3650");
                 table.HasCheckConstraint("CK_PlatformOperationalSettings_SweepHours",
                     "\"ApiRetentionSweepHours\" BETWEEN 1 AND 168 AND \"AgentRetentionSweepHours\" BETWEEN 1 AND 24");
+                table.HasCheckConstraint("CK_PlatformOperationalSettings_DataTransferRawRetentionDays",
+                    "\"DataTransferRawRetentionDays\" BETWEEN 30 AND 3650");
             });
             entity.Property(x => x.AllowPrivatePrintingVirtualOutput).HasDefaultValue(false);
+            entity.Property(x => x.DataTransferRawRetentionDays).HasDefaultValue(90);
             entity.HasKey(x => x.Id);
             entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.SetNull);
         });
@@ -169,7 +174,9 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
 
         modelBuilder.Entity<AgentDevice>(entity =>
         {
-            entity.ToTable("AgentDevices");
+            entity.ToTable("AgentDevices", table => table.HasCheckConstraint(
+                "CK_AgentDevices_LocalStorageMetrics",
+                "(\"LocalQueueDocumentCount\" IS NULL OR \"LocalQueueDocumentCount\" >= 0) AND (\"LocalQueueLogicalBytes\" IS NULL OR \"LocalQueueLogicalBytes\" >= 0) AND (\"LocalQueueDiskBytes\" IS NULL OR \"LocalQueueDiskBytes\" >= 0) AND (\"LocalOutputFileCount\" IS NULL OR \"LocalOutputFileCount\" >= 0) AND (\"LocalOutputFileBytes\" IS NULL OR \"LocalOutputFileBytes\" >= 0)"));
             entity.HasKey(x => x.Id);
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.Property(x => x.DeviceName).HasMaxLength(160).IsRequired();
@@ -397,6 +404,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.HasKey(x => x.Id);
             entity.Property(x => x.TokenHash).HasMaxLength(64).IsRequired();
             entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.CloudUploadAttemptCount).HasDefaultValue(0);
             entity.HasIndex(x => x.TokenHash).IsUnique();
             entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.HasIndex(x => new { x.TenantId, x.ExpiresUtc });
@@ -426,6 +434,10 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 table.HasCheckConstraint("CK_PrintJobs_PrintKind", "\"PrintKind\" IN ('DOCUMENT', 'PHOTO')");
                 table.HasCheckConstraint("CK_PrintJobs_PagesPerSheet", "\"PagesPerSheet\" BETWEEN 1 AND 500");
                 table.HasCheckConstraint("CK_PrintJobs_Origin", "\"Origin\" IN ('CUSTOMER_QR', 'SHOP_OWNER')");
+                table.HasCheckConstraint(
+                    "CK_PrintJobs_PhotoOutputOptions",
+                    "\"PhotoPaperFinish\" IN ('PLAIN', 'GLOSSY', 'MATTE') AND \"PhotoOutputLayout\" IN ('A4_SHEET', 'PHOTO_PAPER')");
+                table.HasCheckConstraint("CK_PrintJobs_AgentDocumentDownloadAttempts", "\"AgentDocumentDownloadAttempts\" >= 0");
                 table.HasCheckConstraint(
                     "CK_PrintJobs_PhotoQuoteSnapshot",
                     """
@@ -475,9 +487,12 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.PdfBrandingEnabled).HasDefaultValue(false);
             entity.Property(x => x.PrintKind).HasMaxLength(16).IsRequired();
             entity.Property(x => x.PhotoSizeCode).HasMaxLength(12);
+            entity.Property(x => x.PhotoPaperFinish).HasMaxLength(12).IsRequired();
+            entity.Property(x => x.PhotoOutputLayout).HasMaxLength(24).IsRequired();
             entity.Property(x => x.Currency).HasMaxLength(3).IsRequired();
             entity.Property(x => x.FailureCode).HasMaxLength(80);
             entity.Property(x => x.AgentDispatchAttempts).HasDefaultValue(0);
+            entity.Property(x => x.AgentDocumentDownloadAttempts).HasDefaultValue(0);
             entity.Property(x => x.PrintDispatchAttempts).HasDefaultValue(0);
             entity.Property(x => x.SpoolerJobName).HasMaxLength(180);
             entity.Property(x => x.SpoolerStatus).HasMaxLength(80);
@@ -649,8 +664,17 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
         });
         modelBuilder.Entity<LocalPrintUploadTicket>(entity =>
         {
-            entity.ToTable("LocalPrintUploadTickets", table => table.HasCheckConstraint("CK_LocalPrintUploadTickets_PagesPerSheet", "\"PagesPerSheet\" BETWEEN 1 AND 500"));
+            entity.ToTable("LocalPrintUploadTickets", table =>
+            {
+                table.HasCheckConstraint("CK_LocalPrintUploadTickets_PagesPerSheet", "\"PagesPerSheet\" BETWEEN 1 AND 500");
+                table.HasCheckConstraint("CK_LocalPrintUploadTickets_PhotoOutputOptions",
+                    "\"PhotoPaperFinish\" IN ('PLAIN', 'GLOSSY', 'MATTE') AND \"PhotoOutputLayout\" IN ('A4_SHEET', 'PHOTO_PAPER')");
+                table.HasCheckConstraint("CK_LocalPrintUploadTickets_AgentUploadAttempts", "\"AgentUploadAttempts\" >= 0");
+            });
             entity.HasKey(x => x.Id);
+            entity.Property(x => x.PhotoPaperFinish).HasMaxLength(12).IsRequired();
+            entity.Property(x => x.PhotoOutputLayout).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.AgentUploadAttempts).HasDefaultValue(0);
             entity.Property(x => x.JobNumber).HasMaxLength(32).IsRequired();
             entity.Property(x => x.BatchGroupName).HasMaxLength(PrintBatchGroupRules.MaximumNameLength);
             entity.Property(x => x.BatchName).HasMaxLength(PrintBatchNameRules.MaximumNameLength);
@@ -688,6 +712,39 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasForeignKey(x => new { x.TenantId, x.AgentDeviceId })
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<DataTransferEvent>(entity =>
+        {
+            entity.ToTable("DataTransferEvents", table => table.HasCheckConstraint(
+                "CK_DataTransferEvents_NonNegativeMetrics",
+                "\"AttemptNumber\" >= 1 AND \"PayloadBytes\" >= 0 AND (\"NetworkBytes\" IS NULL OR \"NetworkBytes\" >= 0) AND \"DurationMilliseconds\" >= 0"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Channel).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Direction).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.MeasurementSource).HasMaxLength(80).IsRequired();
+            entity.HasIndex(x => new { x.TransferId, x.AttemptNumber }).IsUnique();
+            entity.HasIndex(x => x.CreatedUtc);
+            entity.HasIndex(x => new { x.TenantId, x.CreatedUtc });
+            entity.HasIndex(x => new { x.Channel, x.CreatedUtc });
+            entity.HasIndex(x => new { x.TenantId, x.Channel, x.CreatedUtc });
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DataTransferDailyAggregate>(entity =>
+        {
+            entity.ToTable("DataTransferDailyAggregates", table => table.HasCheckConstraint(
+                "CK_DataTransferDailyAggregates_NonNegativeMetrics",
+                "\"TransferCount\" >= 0 AND \"PayloadBytes\" >= 0 AND (\"NetworkBytes\" IS NULL OR \"NetworkBytes\" >= 0) AND \"TotalDurationMilliseconds\" >= 0 AND \"DurationSampleCount\" >= 0"));
+            entity.HasKey(x => new { x.UtcDate, x.TenantId, x.Channel, x.Direction, x.Status });
+            entity.Property(x => x.UtcDate).HasColumnType("date");
+            entity.Property(x => x.Channel).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Direction).HasMaxLength(24).IsRequired();
+            entity.Property(x => x.Status).HasMaxLength(24).IsRequired();
+            entity.HasIndex(x => x.UtcDate);
+            entity.HasIndex(x => new { x.TenantId, x.UtcDate });
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

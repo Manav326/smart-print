@@ -6943,10 +6943,34 @@ class MainActivity : AppCompatActivity() {
             }.orEmpty()
             (if (siblings.any { sameDocument(it, documentFile) }) siblings else siblings + documentFile)
         }
-        val reader = SmartPrintDocumentViewer(this, documentFile, images, startPosition, documentMimeType) { current ->
-            viewingDocument = current
-            setToolbarPage(if (isPreparedId) "ID card preview" else current.name)
+        val documentFolderPath = if (isPreparedId) null else
+            documentFile.parentFile?.let { folder -> runCatching { store.pathOf(folder) }.getOrNull() }
+        val documentBreadcrumbs = mutableListOf<Pair<String, String>>()
+        if (documentFolderPath != null) documentBreadcrumbs += "My Files" to ""
+        var breadcrumbPath = ""
+        documentFolderPath?.split('/')?.filter { it.isNotBlank() }?.forEach { segment ->
+            breadcrumbPath = if (breadcrumbPath.isBlank()) segment else "$breadcrumbPath/$segment"
+            documentBreadcrumbs += segment to breadcrumbPath
         }
+        val reader = SmartPrintDocumentViewer(
+            context = this,
+            startFile = documentFile,
+            imageSiblings = images,
+            startPosition = startPosition,
+            documentMimeType = documentMimeType,
+            onNavigateImage = { current ->
+                viewingDocument = current
+                setToolbarPage(if (isPreparedId) "ID card preview" else current.name)
+            },
+            folderBreadcrumbs = documentBreadcrumbs,
+            onNavigateFolder = { destination ->
+                documentViewer?.dispose()
+                documentViewer = null
+                viewingDocument = null
+                this@MainActivity.folderPath = destination
+                showFiles()
+            }
+        )
         documentViewer = reader
         if (isPreparedId) {
             val previewFrame = FrameLayout(this)
@@ -7205,7 +7229,13 @@ class MainActivity : AppCompatActivity() {
         setBottomNavigationVisible(false)
         content.removeAllViews()
 
-        val reader = SmartPrintDocumentViewer(this, file, emptyList(), null) {}
+        val reader = SmartPrintDocumentViewer(
+            context = this,
+            startFile = file,
+            imageSiblings = emptyList(),
+            startPosition = null,
+            onNavigateImage = {}
+        )
         documentViewer = reader
         content.addView(reader, frameParams())
     }

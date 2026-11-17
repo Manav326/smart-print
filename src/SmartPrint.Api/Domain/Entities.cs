@@ -45,6 +45,8 @@ public sealed class PlatformOperationalSettings
     public int StaleRefreshTokenRetentionDays { get; set; } = 30;
     public int ApiRetentionSweepHours { get; set; } = 1;
     public int AgentRetentionSweepHours { get; set; } = 1;
+    public int DataTransferRawRetentionDays { get; set; } = 90;
+    public DateTimeOffset DataTransferMeasurementStartedUtc { get; set; } = DateTimeOffset.UtcNow;
     public bool AllowPaidJobClaimsWhenSuspended { get; set; } = true;
     public bool AllowPrivatePrintingVirtualOutput { get; set; }
     public Guid? UpdatedByUserId { get; set; }
@@ -246,6 +248,7 @@ public sealed class CustomerPrintSession
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset ExpiresUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(15);
     public DateTimeOffset? RevokedUtc { get; set; }
+    public int CloudUploadAttemptCount { get; set; }
 }
 
 public sealed class RefreshToken
@@ -302,6 +305,8 @@ public sealed class PrintJob
     // The selected sheet density is part of the immutable photo quote/layout snapshot.
     // Nullable for legacy PHOTO jobs created before this column existed.
     public int? PhotosPerPage { get; set; }
+    public string PhotoPaperFinish { get; set; } = "PLAIN";
+    public string PhotoOutputLayout { get; set; } = "A4_SHEET";
     public long PhotoUnitPriceMinorSnapshot { get; set; }
     public int? PricingVersion { get; set; }
     public DateTimeOffset? QuoteExpiresUtc { get; set; }
@@ -311,11 +316,14 @@ public sealed class PrintJob
     public DateTimeOffset? AgentClaimedUtc { get; set; }
     public DateTimeOffset? LocalQueueReceivedUtc { get; set; }
     public int AgentDispatchAttempts { get; set; }
+    public int AgentDocumentDownloadAttempts { get; set; }
     public DateTimeOffset? PrintDispatchLeaseExpiresUtc { get; set; }
     public int PrintDispatchAttempts { get; set; }
     public int? SpoolerJobId { get; set; }
     public string? SpoolerJobName { get; set; }
     public string? SpoolerStatus { get; set; }
+    public int SpoolerPagesPrinted { get; set; }
+    public int SpoolerTotalPages { get; set; }
     public DateTimeOffset? SpoolerSubmittedUtc { get; set; }
     public DateTimeOffset? SpoolerObservedUtc { get; set; }
     public DateTimeOffset? OutputConfirmedUtc { get; set; }
@@ -365,6 +373,8 @@ public sealed class LocalPrintUploadTicket
     public string? PhotoSizeCode { get; set; }
     public int? PhotoCount { get; set; }
     public int? PhotosPerPage { get; set; }
+    public string PhotoPaperFinish { get; set; } = "PLAIN";
+    public string PhotoOutputLayout { get; set; } = "A4_SHEET";
     public Guid TenantId { get; set; }
     public Guid CustomerSessionId { get; set; }
     public Guid? BatchId { get; set; }
@@ -393,6 +403,7 @@ public sealed class LocalPrintUploadTicket
     public DateTimeOffset? ClaimedUtc { get; set; }
     public DateTimeOffset? ClaimLeaseExpiresUtc { get; set; }
     public DateTimeOffset? CompletedUtc { get; set; }
+    public int AgentUploadAttempts { get; set; }
     public string? PrivateRelayStorageKey { get; set; }
     public string? PrivateRelayWrappedKey { get; set; }
     public string? PrivateRelayIv { get; set; }
@@ -402,6 +413,41 @@ public sealed class LocalPrintUploadTicket
     public string? PrivateRelayFailureMessage { get; set; }
 }
 
+
+public sealed class DataTransferEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TransferId { get; set; } = Guid.NewGuid();
+    public int AttemptNumber { get; set; } = 1;
+    public Guid TenantId { get; set; }
+    public Guid? AgentDeviceId { get; set; }
+    public Guid? PrinterDeviceId { get; set; }
+    public Guid? QrStationId { get; set; }
+    public Guid? PrintJobId { get; set; }
+    public Guid? PrintDocumentId { get; set; }
+    public string Channel { get; set; } = string.Empty;
+    public string Direction { get; set; } = string.Empty;
+    public string Status { get; set; } = "COMPLETED";
+    public long PayloadBytes { get; set; }
+    public long? NetworkBytes { get; set; }
+    public long DurationMilliseconds { get; set; }
+    public string MeasurementSource { get; set; } = string.Empty;
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class DataTransferDailyAggregate
+{
+    public DateOnly UtcDate { get; set; }
+    public Guid TenantId { get; set; }
+    public string Channel { get; set; } = string.Empty;
+    public string Direction { get; set; } = string.Empty;
+    public string Status { get; set; } = string.Empty;
+    public long TransferCount { get; set; }
+    public long PayloadBytes { get; set; }
+    public long? NetworkBytes { get; set; }
+    public long TotalDurationMilliseconds { get; set; }
+    public long DurationSampleCount { get; set; }
+}
 
 public sealed class PrintJobEvent
 {
@@ -427,6 +473,12 @@ public sealed class AgentDevice
     public string LocalEndpointsJson { get; set; } = "[]";
     public string? DocumentEncryptionPublicKey { get; set; }
     public string Status { get; set; } = "Online";
+    public long? LocalQueueDocumentCount { get; set; }
+    public long? LocalQueueLogicalBytes { get; set; }
+    public long? LocalQueueDiskBytes { get; set; }
+    public long? LocalOutputFileCount { get; set; }
+    public long? LocalOutputFileBytes { get; set; }
+    public DateTimeOffset? LocalStorageMeasuredUtc { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset? LastSeenUtc { get; set; }
     public DateTimeOffset? RevokedUtc { get; set; }

@@ -234,7 +234,10 @@ public sealed class Worker(
                             ticket.Sha256, ticket.ExpiresUtc, "LOCAL_AGENT",
                             ticket.OutputMode, ticket.Orientation,
                             PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind,
-                            PagesPerSheet: ticket.PagesPerSheet);
+                            PagesPerSheet: ticket.PagesPerSheet,
+                    PhotoPaperFinish: ticket.PhotoPaperFinish,
+                    PhotoOutputLayout: ticket.PhotoOutputLayout,
+                    PhotoSizeCode: ticket.PhotoSizeCode);
 
                         qsp2Plaintext.Position = 0;
                         await localQueueStore.EnqueueLocalUploadStreamingAsync(
@@ -339,7 +342,10 @@ public sealed class Worker(
                     ticket.Sha256, ticket.ExpiresUtc, "LOCAL_AGENT",
                     ticket.OutputMode, ticket.Orientation,
                     PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind,
-                    PagesPerSheet: ticket.PagesPerSheet);
+                    PagesPerSheet: ticket.PagesPerSheet,
+                    PhotoPaperFinish: ticket.PhotoPaperFinish,
+                    PhotoOutputLayout: ticket.PhotoOutputLayout,
+                    PhotoSizeCode: ticket.PhotoSizeCode);
 
                 // Re-encrypt the authenticated private plaintext into the new
                 // DPAPI-key-wrapped QSP2 queue format before acknowledging the relay.
@@ -483,6 +489,17 @@ public sealed class Worker(
 
         using var client = httpClientFactory.CreateClient("cloud");
         client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+        AgentQueueStorageSnapshot? storageSnapshot = null;
+        try
+        {
+            storageSnapshot = localQueueStore.GetStorageSnapshot(pdfExportDirectory);
+        }
+        catch (Exception exception) when (
+            exception is IOException or UnauthorizedAccessException or InvalidOperationException or OverflowException)
+        {
+            logger.LogWarning(exception, "Could not measure local Agent storage; the heartbeat will continue without a storage snapshot.");
+        }
+
         using var heartbeat = await SendAgentRequestAsync(
             client,
             credentials,
@@ -492,7 +509,8 @@ public sealed class Worker(
                 version = typeof(Worker).Assembly.GetName().Version?.ToString() ?? "1.0.0",
                 operatingSystem = Environment.OSVersion.VersionString,
                 localEndpoints = GetLocalEndpointsForHeartbeat(),
-                documentEncryptionPublicKey
+                documentEncryptionPublicKey,
+                storageSnapshot
             },
             cancellationToken);
 
@@ -1274,14 +1292,34 @@ public sealed class Worker(
 
                 await localQueueStore.MarkSubmissionStartedAsync(
                     job.Id, job.SpoolerJobName, ct, job.OutputMode);
-                using var documentStream = localQueueStore.OpenDocumentReadStream(
-                    job.Id, credentials.AgentDeviceId);
-                var spoolerReceipt = printExecutor.Print(entry with
+                var printEntry = entry with
                 {
                     OutputMode = job.OutputMode,
                     SpoolerJobName = job.SpoolerJobName,
                     RejectedPageNumbers = rejectedPages
-                }, documentStream, ct);
+                };
+                SpoolerPrintReceipt spoolerReceipt;
+                if (string.Equals(printEntry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Physical PDF jobs use the authenticated QSP2 random-access stream.
+                    // Legacy queue files are transparently handled by Print(Stream) with
+                    // the bounded compatibility buffer; current QSP2 jobs never materialise
+                    // the complete PDF in a byte array.
+                    using var documentStream = localQueueStore.OpenDocumentReadStream(job.Id, credentials.AgentDeviceId);
+                    spoolerReceipt = printExecutor.Print(printEntry, documentStream, ct);
+                }
+                else
+                {
+                    var bytes = localQueueStore.ReadDocument(job.Id);
+                    try
+                    {
+                        spoolerReceipt = printExecutor.Print(printEntry, bytes, ct);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(bytes);
+                    }
+                }
 
                 await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
                 await ReportSpoolerAcceptedAsync(client, credentials, job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, "QUEUED", ct);

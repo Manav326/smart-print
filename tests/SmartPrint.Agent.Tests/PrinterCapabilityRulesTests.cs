@@ -59,4 +59,72 @@ public sealed class PrinterCapabilityRulesTests
 
         Assert.Null(PrinterCapabilityRules.EvaluatePaperSupport(4, 2, partialPapers, 9));
     }
+    [Theory]
+    [InlineData("35x45", 350, 450)]
+    [InlineData("25x35", 250, 350)]
+    [InlineData("2x2", 508, 508)]
+    [InlineData("4x6", 1016, 1524)]
+    public void MapsSupportedPhysicalPhotoSizesToWindowsCustomMedia(
+        string sizeCode, short expectedWidth, short expectedHeight)
+    {
+        Assert.True(PrinterCapabilityRules.TryGetPhotoPaperDimensions(
+            sizeCode, out var width, out var height));
+        Assert.Equal(expectedWidth, width);
+        Assert.Equal(expectedHeight, height);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("passport")]
+    [InlineData("10x15")]
+    public void RejectsUnsupportedPhysicalPhotoSizes(string sizeCode)
+    {
+        Assert.False(PrinterCapabilityRules.TryGetPhotoPaperDimensions(sizeCode, out var width, out var height));
+        Assert.Equal((short)0, width);
+        Assert.Equal((short)0, height);
+    }
+
+    [Fact]
+    public void SelectsOnlyAnUnambiguousDriverPhotoMediaType()
+    {
+        (short Code, string Name)[] media =
+        [
+            (1, "Plain paper"),
+            (2, "Glossy Photo Paper"),
+            (3, "Matte Photo Paper")
+        ];
+
+        Assert.Equal((short)2, PrinterCapabilityRules.SelectPhotoMediaTypeCode(media, "GLOSSY"));
+        Assert.Equal((short)3, PrinterCapabilityRules.SelectPhotoMediaTypeCode(media, "MATTE"));
+        Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(media, "PLAIN"));
+    }
+
+    [Fact]
+    public void AmbiguousOrMissingDriverPhotoMediaTypesRemainUnsupported()
+    {
+        (short Code, string Name)[] ambiguous =
+        [
+            (2, "Glossy Photo"),
+            (7, "Premium Glossy")
+        ];
+
+        Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(ambiguous, "GLOSSY"));
+        Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(Array.Empty<(short, string)>(), "MATTE"));
+    }
+
+    [Fact]
+    public void PhotoPaperMustBeAcceptedAtExactDimensionsAndMediaType()
+    {
+        Assert.True(PrinterCapabilityRules.IsRequestedPhotoPaperSizeAccepted(
+            true, true, true, 0, 350, 450, 350, 450));
+        Assert.False(PrinterCapabilityRules.IsRequestedPhotoPaperSizeAccepted(
+            true, true, true, 0, 350, 451, 350, 450));
+        Assert.False(PrinterCapabilityRules.IsRequestedPhotoPaperSizeAccepted(
+            true, false, true, 0, 350, 450, 350, 450));
+
+        Assert.True(PrinterCapabilityRules.IsRequestedPhotoMediaTypeAccepted(true, 2, 2));
+        Assert.False(PrinterCapabilityRules.IsRequestedPhotoMediaTypeAccepted(true, 3, 2));
+        Assert.False(PrinterCapabilityRules.IsRequestedPhotoMediaTypeAccepted(false, 2, 2));
+    }
+
 }

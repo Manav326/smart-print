@@ -107,6 +107,7 @@ builder.Services.AddSingleton<DocumentStorage>();
 builder.Services.AddSingleton<PlatformAdCreativeStorage>();
 builder.Services.AddSingleton<AgentRateLimitService>();
 builder.Services.AddHostedService<DocumentRetentionWorker>();
+builder.Services.AddHostedService<DataTransferRetentionWorker>();
 builder.Services.AddHostedService<PrivateRelayRetentionWorker>();
 builder.Services.AddSingleton<PrivateRelayWakeupService>(services =>
     new PrivateRelayWakeupService(
@@ -310,6 +311,7 @@ platform.MapSubscriptionPlanEndpoints();
 platform.MapPlatformSubscriptionEndpoints();
 platform.MapPlatformOperationalSettingsEndpoints();
 platform.MapPlatformAdvertisingEndpoints();
+platform.MapPlatformDataTransferEndpoints();
 
 platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct) =>
 {
@@ -2635,12 +2637,15 @@ shop.MapPost("/photo-jobs", async (
         });
 
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
+    var photoOutputLayout = form["photoOutputLayout"].FirstOrDefault() ?? "A4_SHEET";
+    var photoPaperFinish = form["photoPaperFinish"].FirstOrDefault() ?? "PLAIN";
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
         !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
         photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
         photosPerPage < 1 ||
-        photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
+        photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode) ||
+        !PhotoSheetPdfRules.IsValidPhotoOutputOptions(photoOutputLayout, photoPaperFinish, photosPerPage))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
@@ -2758,7 +2763,7 @@ shop.MapPost("/photo-jobs", async (
         }
 
         if (stored.Analysis.PageCount != expectedPageCount ||
-            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount))
+            !PhotoSheetPdfRules.HasExactlyPhotoPages(stored.Analysis.PageSizesJson, expectedPageCount, photoOutputLayout, photoSizeCode))
         {
             await storage.DeleteAsync(stored.StorageKey);
             stored = null;
@@ -2794,6 +2799,8 @@ shop.MapPost("/photo-jobs", async (
                 existingJob.PhotoSizeCode == photoSizeCode &&
                 existingJob.PhotoCount == photoCount &&
                 existingJob.PhotosPerPage == photosPerPage &&
+                existingJob.PhotoOutputLayout == photoOutputLayout &&
+                existingJob.PhotoPaperFinish == photoPaperFinish &&
                 string.Equals(existingDocument.Sha256, stored.Sha256, StringComparison.OrdinalIgnoreCase);
 
             await storage.DeleteAsync(stored.StorageKey);
@@ -2911,6 +2918,8 @@ shop.MapPost("/photo-jobs", async (
             PhotoSizeCode = photoSizeCode,
             PhotoCount = photoCount,
             PhotosPerPage = photosPerPage,
+            PhotoOutputLayout = photoOutputLayout,
+            PhotoPaperFinish = photoPaperFinish,
             PhotoUnitPriceMinorSnapshot = unitPrice,
             PricingVersion = pricing.Version,
             QuoteExpiresUtc = now.AddMinutes(30),
@@ -4184,11 +4193,14 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
 
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault() ?? string.Empty;
+    var photoOutputLayout = form["photoOutputLayout"].FirstOrDefault() ?? "A4_SHEET";
+    var photoPaperFinish = form["photoPaperFinish"].FirstOrDefault() ?? "PLAIN";
     if (photoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
         !int.TryParse(form["photoCount"].FirstOrDefault(), out var photoCount) ||
         photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
         !int.TryParse(form["photosPerPage"].FirstOrDefault(), out var photosPerPage) ||
-        photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode))
+        photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode) ||
+        !PhotoSheetPdfRules.IsValidPhotoOutputOptions(photoOutputLayout, photoPaperFinish, photosPerPage))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
@@ -4222,13 +4234,13 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
 
     if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
         stored.Analysis.PageCount != expectedPageCount ||
-        !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount))
+        !PhotoSheetPdfRules.HasExactlyPhotoPages(stored.Analysis.PageSizesJson, expectedPageCount, photoOutputLayout, photoSizeCode))
     {
         await storage.DeleteAsync(stored.StorageKey);
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_layout_invalid",
-            message = $"The replacement Photo Studio PDF must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page 300-DPI photo raster."
+            message = $"The replacement Photo Studio PDF must match the selected photo-paper dimensions and output layout."
         });
     }
 
@@ -4350,6 +4362,8 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     job.PhotoSizeCode = photoSizeCode;
     job.PhotoCount = photoCount;
     job.PhotosPerPage = photosPerPage;
+    job.PhotoOutputLayout = photoOutputLayout;
+    job.PhotoPaperFinish = photoPaperFinish;
     job.PhotoUnitPriceMinorSnapshot = unitPrice;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
@@ -5658,7 +5672,8 @@ agentApi.MapGet("/private-relays/pending", async (
                 printer.DisplayName, printer.QueueName!, ticket.FileExtension, ticket.MediaType,
                 ticket.SizeBytes, ticket.Sha256, ticket.ColourMode, ticket.PaperSize,
                 ticket.IsDuplex, ticket.Copies, ticket.Orientation, ticket.ExpiresUtc,
-                ticket.PrintKind, printer.OutputMode, ticket.PagesPerSheet))
+                ticket.PrintKind, printer.OutputMode, ticket.PagesPerSheet,
+                ticket.PhotoPaperFinish, ticket.PhotoOutputLayout, ticket.PhotoSizeCode))
             .Take(50)
             .ToListAsync(ct);
     }
@@ -5783,7 +5798,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
                 {
                     job.Id, job.PrivatePrinting, job.PrintKind, job.JobNumber, job.Status, job.PageCount,
                     job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
-                    job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage,
+                    job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PhotoOutputLayout, job.PhotoPaperFinish,
                     job.PricingVersion, job.Currency, job.QuotedAmountMinor, job.CreatedUtc
                 },
                 Document = new
@@ -5859,7 +5874,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             });
         var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
         if (request.PageCount != expectedPageCount ||
-            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, expectedPageCount))
+            !PhotoSheetPdfRules.HasExactlyPhotoPages(request.PageSizesJson, expectedPageCount, ticket.PhotoOutputLayout, photoSizeCode))
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
@@ -6145,6 +6160,9 @@ agentApi.MapPost("/jobs/claim", async (
             job.PdfBrandingEnabled,
             job.PrivatePrinting,
             job.PrintKind,
+            job.PhotoSizeCode,
+            job.PhotoPaperFinish,
+            job.PhotoOutputLayout,
             job.Currency,
             job.QuotedAmountMinor,
             job.PrinterDeviceId,
@@ -6235,6 +6253,9 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.PdfBrandingEnabled,
             candidate.PrivatePrinting,
             candidate.PrintKind,
+            candidate.PhotoSizeCode,
+            candidate.PhotoPaperFinish,
+            candidate.PhotoOutputLayout,
             candidate.Currency,
             candidate.QuotedAmountMinor,
             candidate.PrinterDeviceId,
@@ -6323,7 +6344,96 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
     context.Response.Headers["X-Document-SHA256"] = document.Sha256;
     context.Response.Headers["X-Document-Size"] = document.SizeBytes.ToString(System.Globalization.CultureInfo.InvariantCulture);
     context.Response.Headers["X-Document-Name"] = Uri.EscapeDataString(document.OriginalFileName);
-    return Results.File(content, document.MediaType, enableRangeProcessing: false);
+    context.Response.ContentType = document.MediaType;
+    context.Response.ContentLength = document.SizeBytes;
+
+    var attemptStartedUtc = DateTimeOffset.UtcNow;
+    var attemptNumber = await db.Database.SqlQuery<int?>($"""
+        WITH updated AS (
+            UPDATE "PrintJobs"
+            SET "AgentDocumentDownloadAttempts" = "AgentDocumentDownloadAttempts" + 1
+            WHERE "Id" = {jobId}
+              AND "TenantId" = {device.TenantId}
+              AND "Status" = 'LOCAL_QUEUE_CLAIMED'
+              AND "ClaimedByAgentDeviceId" = {device.Id}
+              AND "AgentLeaseExpiresUtc" > {attemptStartedUtc}
+            RETURNING "AgentDocumentDownloadAttempts"
+        )
+        SELECT "AgentDocumentDownloadAttempts" AS "Value" FROM updated
+        """).SingleOrDefaultAsync(ct);
+    if (attemptNumber is null)
+    {
+        content.Dispose();
+        return Results.Conflict(new
+        {
+            code = "agent_document_lease_changed",
+            message = "The document download lease is no longer current. Claim the job again before downloading."
+        });
+    }
+
+    var transferStartedUtc = DateTimeOffset.UtcNow;
+    await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+    {
+        TransferId = jobId,
+        AttemptNumber = attemptNumber.Value,
+        TenantId = device.TenantId,
+        AgentDeviceId = device.Id,
+        PrintJobId = jobId,
+        Channel = "CLOUD_AGENT_DOWNLOAD",
+        Direction = "EGRESS",
+        Status = "STARTED",
+        PayloadBytes = 0,
+        NetworkBytes = null,
+        DurationMilliseconds = 0,
+        MeasurementSource = "API_RESPONSE_BODY_STREAM_STARTED",
+        CreatedUtc = transferStartedUtc
+    });
+
+    long payloadBytesSent = 0;
+    var transferStatus = "FAILED";
+    try
+    {
+        var buffer = new byte[64 * 1024];
+        int read;
+        while ((read = await content.ReadAsync(buffer.AsMemory(), ct)) > 0)
+        {
+            await context.Response.Body.WriteAsync(buffer.AsMemory(0, read), ct);
+            payloadBytesSent += read;
+        }
+        await context.Response.Body.FlushAsync(ct);
+        transferStatus = payloadBytesSent == document.SizeBytes
+            ? "COMPLETED"
+            : payloadBytesSent > 0 ? "PARTIAL" : "FAILED";
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+        transferStatus = payloadBytesSent > 0 ? "PARTIAL" : "FAILED";
+    }
+    catch (IOException)
+    {
+        transferStatus = payloadBytesSent > 0 ? "PARTIAL" : "FAILED";
+    }
+    finally
+    {
+        content.Dispose();
+        await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
+        {
+            TransferId = jobId,
+            AttemptNumber = attemptNumber.Value,
+            TenantId = device.TenantId,
+            AgentDeviceId = device.Id,
+            PrintJobId = jobId,
+            Channel = "CLOUD_AGENT_DOWNLOAD",
+            Direction = "EGRESS",
+            Status = transferStatus,
+            PayloadBytes = payloadBytesSent,
+            NetworkBytes = null,
+            DurationMilliseconds = Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds),
+            MeasurementSource = "API_RESPONSE_BODY_WRITES",
+            CreatedUtc = DateTimeOffset.UtcNow
+        });
+    }
+    return Results.Empty;
 });
 
 agentApi.MapPost("/jobs/{jobId:guid}/received", async (
@@ -6481,6 +6591,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                     completedJob.PhotoSizeCode,
                     completedJob.PhotoCount,
                     completedJob.PhotosPerPage,
+                    completedJob.PhotoOutputLayout,
+                    completedJob.PhotoPaperFinish,
                     completedJob.PricingVersion,
                     completedJob.Currency,
                     completedJob.QuotedAmountMinor,
@@ -6530,13 +6642,47 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
             message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document was transferred. Reconnect and retry the same upload."
         });
 
-    ticket.ClaimedUtc ??= now;
-    ticket.ClaimLeaseExpiresUtc = ticket.ExpiresUtc;
-    await db.SaveChangesAsync(ct);
+    var claimedAttemptNumber = await db.Database.SqlQuery<int?>($"""
+        WITH updated AS (
+            UPDATE "LocalPrintUploadTickets"
+            SET "ClaimedUtc" = COALESCE("ClaimedUtc", {now}),
+                "ClaimLeaseExpiresUtc" = "ExpiresUtc",
+                "AgentUploadAttempts" = "AgentUploadAttempts" + 1
+            WHERE "Id" = {ticket.Id}
+              AND "TenantId" = {device.TenantId}
+              AND "AgentDeviceId" = {device.Id}
+              AND "CompletedUtc" IS NULL
+              AND "ExpiresUtc" > {now}
+            RETURNING "AgentUploadAttempts"
+        )
+        SELECT "AgentUploadAttempts" AS "Value" FROM updated
+        """).SingleOrDefaultAsync(ct);
+    if (claimedAttemptNumber is null) return Results.Conflict();
+    ticket.AgentUploadAttempts = claimedAttemptNumber.Value;
+
+    await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+    {
+        TransferId = ticket.Id,
+        AttemptNumber = ticket.AgentUploadAttempts,
+        TenantId = device.TenantId,
+        AgentDeviceId = device.Id,
+        PrinterDeviceId = ticket.PrinterDeviceId,
+        QrStationId = ticket.QrStationId,
+        PrintJobId = ticket.PrintJobId,
+        Channel = "SHOP_LAN_CUSTOMER_UPLOAD",
+        Direction = "LAN_INBOUND",
+        Status = "STARTED",
+        PayloadBytes = 0,
+        NetworkBytes = null,
+        DurationMilliseconds = 0,
+        MeasurementSource = "AGENT_UPLOAD_CLAIM_STARTED",
+        CreatedUtc = DateTimeOffset.UtcNow
+    });
 
     return Results.Ok(new
     {
         AlreadyCompleted = false,
+        AttemptNumber = ticket.AgentUploadAttempts,
         ticket.Id,
         ticket.PrintJobId,
         ticket.BatchGroupName,
@@ -6559,6 +6705,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         ticket.Copies,
         ticket.Orientation,
         ticket.PagesPerSheet,
+        ticket.PhotoSizeCode,
+        ticket.PhotoCount,
+        ticket.PhotosPerPage,
+        ticket.PhotoOutputLayout,
+        ticket.PhotoPaperFinish,
         ticket.ExpiresUtc
     });
 });
@@ -6605,6 +6756,21 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         return Results.Unauthorized();
     }
 
+    var transferAttemptNumber = request.AttemptNumber > 0 ? request.AttemptNumber : 1;
+    if (request.ReceivedBytes < 0 ||
+        request.ReceivedBytes > ticket.SizeBytes ||
+        (request.ReceivedBytes != 0 && request.ReceivedBytes != ticket.SizeBytes) ||
+        request.DurationMilliseconds is < 0 or > 600_000 ||
+        request.AttemptNumber < 0 ||
+        request.AttemptNumber > ticket.AgentUploadAttempts)
+    {
+        return Results.UnprocessableEntity(new
+        {
+            code = "local_transfer_metrics_invalid",
+            message = "The Agent-reported transfer measurements do not match this upload ticket."
+        });
+    }
+
     if (ticket.CompletedUtc is not null)
     {
         var completedJob = await db.PrintJobs.AsNoTracking()
@@ -6612,6 +6778,34 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         var completedDocument = await db.PrintDocuments.AsNoTracking()
             .SingleOrDefaultAsync(item => item.PrintJobId == ticket.PrintJobId && item.TenantId == device.TenantId, ct);
         if (completedJob is null || completedDocument is null) return Results.Conflict();
+
+        if (request.ReceivedBytes > 0)
+        {
+            await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
+            {
+                TransferId = ticket.Id,
+                AttemptNumber = transferAttemptNumber,
+                TenantId = device.TenantId,
+                AgentDeviceId = device.Id,
+                PrinterDeviceId = ticket.PrinterDeviceId,
+                QrStationId = ticket.QrStationId,
+                PrintJobId = ticket.PrintJobId,
+                PrintDocumentId = completedDocument.Id,
+                Channel = "SHOP_LAN_CUSTOMER_UPLOAD",
+                Direction = "LAN_INBOUND",
+                Status = "COMPLETED",
+                PayloadBytes = request.ReceivedBytes,
+                NetworkBytes = null,
+                DurationMilliseconds = request.DurationMilliseconds,
+                MeasurementSource = "PAIRED_AGENT_RECEIVED_DOCUMENT",
+                CreatedUtc = DateTimeOffset.UtcNow
+            });
+        }
+        else
+        {
+            await DataTransferRecorder.TryDiscardAttemptAsync(
+                db, app.Logger, ticket.Id, transferAttemptNumber, "SHOP_LAN_CUSTOMER_UPLOAD");
+        }
 
         if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
         {
@@ -6728,7 +6922,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             });
         var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
         if (request.PageCount != expectedPageCount ||
-            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, expectedPageCount))
+            !PhotoSheetPdfRules.HasExactlyPhotoPages(request.PageSizesJson, expectedPageCount, ticket.PhotoOutputLayout, photoSizeCode))
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
@@ -6803,6 +6997,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                     existingJob.PhotoSizeCode,
                     existingJob.PhotoCount,
                     existingJob.PhotosPerPage,
+                    existingJob.PhotoOutputLayout,
+                    existingJob.PhotoPaperFinish,
                     existingJob.PricingVersion,
                     existingJob.Currency,
                     existingJob.QuotedAmountMinor,
@@ -6865,6 +7061,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
         PhotoSizeCode = ticket.PhotoSizeCode,
         PhotoCount = ticket.PhotoCount ?? 0,
         PhotosPerPage = ticket.PhotosPerPage,
+        PhotoOutputLayout = ticket.PhotoOutputLayout,
+        PhotoPaperFinish = ticket.PhotoPaperFinish,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -6899,6 +7097,34 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     });
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
+
+    if (request.ReceivedBytes > 0)
+    {
+        await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
+        {
+            TransferId = ticket.Id,
+            AttemptNumber = transferAttemptNumber,
+            TenantId = device.TenantId,
+            AgentDeviceId = device.Id,
+            PrinterDeviceId = ticket.PrinterDeviceId,
+            QrStationId = ticket.QrStationId,
+            PrintJobId = ticket.PrintJobId,
+            PrintDocumentId = printDocument.Id,
+            Channel = "SHOP_LAN_CUSTOMER_UPLOAD",
+            Direction = "LAN_INBOUND",
+            Status = "COMPLETED",
+            PayloadBytes = request.ReceivedBytes,
+            NetworkBytes = null,
+            DurationMilliseconds = request.DurationMilliseconds,
+            MeasurementSource = "PAIRED_AGENT_RECEIVED_DOCUMENT",
+            CreatedUtc = DateTimeOffset.UtcNow
+        });
+    }
+    else
+    {
+        await DataTransferRecorder.TryDiscardAttemptAsync(
+            db, app.Logger, ticket.Id, transferAttemptNumber, "SHOP_LAN_CUSTOMER_UPLOAD");
+    }
 
     if (privateRelayClaim && !string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
     {
@@ -7547,7 +7773,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize", async
             ["photoSheet"] = ["The prepared local photo sheet metadata is invalid."]
         });
 
-    if (!PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, request.PageCount))
+    if (!PhotoSheetPdfRules.HasExactlyPhotoPages(request.PageSizesJson, request.PageCount, request.PhotoOutputLayout, request.PhotoSizeCode))
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_layout_invalid",
@@ -7637,7 +7863,7 @@ agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete", async 
         return Results.Unauthorized();
 
     if (string.IsNullOrWhiteSpace(request.PageSizesJson) || request.PageSizesJson.Length > 64_000 ||
-        !PhotoSheetPdfRules.HasExactlyA4PortraitPages(request.PageSizesJson, request.PageCount))
+        !PhotoSheetPdfRules.HasExactlyPhotoPages(request.PageSizesJson, request.PageCount, request.PhotoOutputLayout, request.PhotoSizeCode))
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_layout_invalid",
@@ -8046,6 +8272,22 @@ agentApi.MapPost("/heartbeat", async (
     }
     device.Status = "Online";
     device.LastSeenUtc = now;
+    if (request.StorageSnapshot is { } storageSnapshot &&
+        storageSnapshot.DocumentCount >= 0 &&
+        storageSnapshot.LogicalDocumentBytes >= 0 &&
+        storageSnapshot.QueueDiskBytes >= 0 &&
+        storageSnapshot.OutputFileCount >= 0 &&
+        storageSnapshot.OutputFileBytes >= 0 &&
+        storageSnapshot.MeasuredUtc >= now.AddHours(-1) &&
+        storageSnapshot.MeasuredUtc <= now.AddMinutes(1))
+    {
+        device.LocalQueueDocumentCount = storageSnapshot.DocumentCount;
+        device.LocalQueueLogicalBytes = storageSnapshot.LogicalDocumentBytes;
+        device.LocalQueueDiskBytes = storageSnapshot.QueueDiskBytes;
+        device.LocalOutputFileCount = storageSnapshot.OutputFileCount;
+        device.LocalOutputFileBytes = storageSnapshot.OutputFileBytes;
+        device.LocalStorageMeasuredUtc = storageSnapshot.MeasuredUtc;
+    }
     await db.SaveChangesAsync(ct);
     var publicBaseUrl = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
     var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
@@ -8969,6 +9211,31 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.BadRequest(new { code = "multipart_form_required", message = "Upload the document using multipart/form-data." });
     }
 
+    // The id is a one-way derivation of tenant/session/idempotency key; the raw key is never persisted.
+    var transferId = DataTransferIdentity.ForCustomerUpload(session.TenantId, session.Id, idempotencyKey);
+    var cloudUploadAttemptNumber = await db.Database.SqlQuery<int>($"""
+        UPDATE "CustomerPrintSessions"
+        SET "CloudUploadAttemptCount" = "CloudUploadAttemptCount" + 1
+        WHERE "Id" = {session.Id} AND "TenantId" = {session.TenantId}
+        RETURNING "CloudUploadAttemptCount" AS "Value"
+        """).SingleAsync(ct);
+    var transferStartedUtc = DateTimeOffset.UtcNow;
+    await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
+    {
+        TransferId = transferId,
+        AttemptNumber = cloudUploadAttemptNumber,
+        TenantId = session.TenantId,
+        QrStationId = session.QrStationId,
+        Channel = "CLOUD_CUSTOMER_UPLOAD",
+        Direction = "INGRESS",
+        Status = "STARTED",
+        PayloadBytes = 0,
+        NetworkBytes = null,
+        DurationMilliseconds = 0,
+        MeasurementSource = "CLOUD_MULTIPART_UPLOAD_STARTED",
+        CreatedUtc = transferStartedUtc
+    });
+
     var form = await context.Request.ReadFormAsync(ct);
     if (bool.TryParse(form["privatePrinting"].FirstOrDefault(), out var privatePrintingRequested) && privatePrintingRequested)
     {
@@ -8984,6 +9251,21 @@ publicApi.MapPost("/sessions/current/jobs", async (
     }
 
     var file = form.Files[0];
+    await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
+    {
+        TransferId = transferId,
+        AttemptNumber = cloudUploadAttemptNumber,
+        TenantId = session.TenantId,
+        QrStationId = session.QrStationId,
+        Channel = "CLOUD_CUSTOMER_UPLOAD",
+        Direction = "INGRESS",
+        Status = "STARTED",
+        PayloadBytes = Math.Max(0, file.Length),
+        NetworkBytes = null,
+        DurationMilliseconds = Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds),
+        MeasurementSource = "CLOUD_MULTIPART_FILE_RECEIVED",
+        CreatedUtc = transferStartedUtc
+    });
     var requestedColourMode = form["colourMode"].FirstOrDefault() ?? "Mono";
     var requestedPaperSize = form["paperSize"].FirstOrDefault() ?? "A4";
     var requestedDuplexText = form["isDuplex"].FirstOrDefault() ?? "false";
@@ -9037,12 +9319,14 @@ publicApi.MapPost("/sessions/current/jobs", async (
     originalName = originalName[..Math.Min(originalName.Length, 255)];
 
     var photoSizeCode = form["photoSizeCode"].FirstOrDefault();
+    var photoOutputLayout = form["photoOutputLayout"].FirstOrDefault() ?? "A4_SHEET";
+    var photoPaperFinish = form["photoPaperFinish"].FirstOrDefault() ?? "PLAIN";
     var photoCountText = form["photoCount"].FirstOrDefault();
     var photosPerPageText = form["photosPerPage"].FirstOrDefault();
     var hasPhotoMetadata =
         !string.IsNullOrWhiteSpace(photoSizeCode) ||
         !string.IsNullOrWhiteSpace(photoCountText) ||
-        !string.IsNullOrWhiteSpace(photosPerPageText);
+        !string.IsNullOrWhiteSpace(photosPerPageText) || photoOutputLayout != "A4_SHEET" || photoPaperFinish != "PLAIN";
     int? photoCount = int.TryParse(photoCountText, out var parsedPhotoCount) ? parsedPhotoCount : null;
     int? photosPerPage = int.TryParse(photosPerPageText, out var parsedPhotosPerPage) ? parsedPhotosPerPage : null;
     var validPhotoMetadata =
@@ -9052,7 +9336,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
         photoCount is >= 1 and <= UploadLimits.MaxPhotoCount &&
         photosPerPage is int requestedPhotosPerPage &&
         requestedPhotosPerPage >= 1 &&
-        requestedPhotosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(supportedPhotoSizeCode);
+        requestedPhotosPerPage <= PricingCalculator.MaximumPhotosPerA4Sheet(supportedPhotoSizeCode) &&
+        PhotoSheetPdfRules.IsValidPhotoOutputOptions(photoOutputLayout, photoPaperFinish, requestedPhotosPerPage);
     var isPhotoUpload = requestedPrintKind == "PHOTO";
     var invalidPhotoUpload =
         isPhotoUpload &&
@@ -9071,7 +9356,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             code = requestedPrintKind == "ID_DOCUMENT" ? "id_document_private_printing_required" : "photo_metadata_invalid",
             message = requestedPrintKind == "ID_DOCUMENT"
                 ? "ID Studio documents require Private Printing through the paired shop computer."
-                : "Photo Studio sheets must be a valid A4 colour PDF with a supported photo size, quantity and per-page layout. No document was uploaded."
+                : "Photo Studio output must match the selected photo size, output layout and finish. No document was uploaded."
         });
     }
 
@@ -9085,7 +9370,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId,
             job.JobNumber, job.Status, job.PageCount, job.Copies, job.ColourMode,
             job.PaperSize, job.IsDuplex, job.Orientation, job.PagesPerSheet, job.PrintKind,
-            job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PricingVersion,
+            job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PhotoOutputLayout, job.PhotoPaperFinish, job.PricingVersion,
             job.Currency, job.QuotedAmountMinor, job.CreatedUtc
         })
         .SingleOrDefaultAsync(ct);
@@ -9123,6 +9408,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
             existing.PhotoSizeCode != photoSizeCode ||
             existing.PhotoCount != (photoCount ?? 0) ||
             existing.PhotosPerPage != photosPerPage ||
+            existing.PhotoOutputLayout != photoOutputLayout ||
+            existing.PhotoPaperFinish != photoPaperFinish ||
             (requestedBatchName is not null && existing.BatchName != requestedBatchName) ||
             existingDocument.OriginalFileName != originalName ||
             existingDocument.SizeBytes != file.Length ||
@@ -9135,6 +9422,22 @@ publicApi.MapPost("/sessions/current/jobs", async (
             });
         }
 
+        await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
+        {
+            TransferId = transferId,
+            AttemptNumber = cloudUploadAttemptNumber,
+            TenantId = session.TenantId,
+            QrStationId = session.QrStationId,
+            PrintJobId = existing.Id,
+            Channel = "CLOUD_CUSTOMER_UPLOAD",
+            Direction = "INGRESS",
+            Status = "COMPLETED",
+            PayloadBytes = existingDocument.SizeBytes,
+            NetworkBytes = null,
+            DurationMilliseconds = Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds),
+            MeasurementSource = "IDEMPOTENT_DOCUMENT_REUPLOAD",
+            CreatedUtc = DateTimeOffset.UtcNow
+        });
         return Results.Ok(new { Job = existing, Document = existingDocument, DuplicateRequest = true });
     }
 
@@ -9206,7 +9509,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             photoCount ?? 0, photoSizeCode ?? string.Empty, photosPerPage ?? 0);
         if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
             stored.Analysis.PageCount != photoPageCount ||
-            !PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, photoPageCount))
+            !PhotoSheetPdfRules.HasExactlyPhotoPages(stored.Analysis.PageSizesJson, photoPageCount, photoOutputLayout, photoSizeCode))
         {
             await storage.DeleteAsync(stored.StorageKey);
             return Results.UnprocessableEntity(new
@@ -9270,6 +9573,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
         PhotoSizeCode = photoSizeCode,
         PhotoCount = photoCount ?? 0,
         PhotosPerPage = photosPerPage,
+        PhotoOutputLayout = photoOutputLayout,
+        PhotoPaperFinish = photoPaperFinish,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -9339,6 +9644,22 @@ publicApi.MapPost("/sessions/current/jobs", async (
                     message = "This upload key already belongs to a different file or set of print options. Refresh the request instead of changing the original job."
                 });
             }
+            await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
+            {
+                TransferId = transferId,
+                AttemptNumber = cloudUploadAttemptNumber,
+                TenantId = session.TenantId,
+                QrStationId = session.QrStationId,
+                PrintJobId = racedJob.Id,
+                Channel = "CLOUD_CUSTOMER_UPLOAD",
+                Direction = "INGRESS",
+                Status = "COMPLETED",
+                PayloadBytes = racedDocument.SizeBytes,
+                NetworkBytes = null,
+                DurationMilliseconds = Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds),
+                MeasurementSource = "IDEMPOTENT_DOCUMENT_REUPLOAD",
+                CreatedUtc = DateTimeOffset.UtcNow
+            });
             return Results.Ok(new { Job = racedJob, Document = racedDocument, DuplicateRequest = true });
         }
 
@@ -9476,6 +9797,24 @@ publicApi.MapPost("/sessions/current/jobs", async (
         await storage.DeleteAsync(stored.StorageKey);
         throw;
     }
+
+    await DataTransferRecorder.TryCompleteAttemptAsync(db, app.Logger, new DataTransferEvent
+    {
+        TransferId = transferId,
+        AttemptNumber = cloudUploadAttemptNumber,
+        TenantId = session.TenantId,
+        QrStationId = session.QrStationId,
+        PrintJobId = job.Id,
+        PrintDocumentId = document.Id,
+        Channel = "CLOUD_CUSTOMER_UPLOAD",
+        Direction = "INGRESS",
+        Status = "COMPLETED",
+        PayloadBytes = document.SizeBytes,
+        NetworkBytes = null,
+        DurationMilliseconds = Math.Max(0, (long)(DateTimeOffset.UtcNow - transferStartedUtc).TotalMilliseconds),
+        MeasurementSource = "VALIDATED_DOCUMENT_PAYLOAD",
+        CreatedUtc = DateTimeOffset.UtcNow
+    });
 
     return Results.Created($"/api/v1/public/jobs/{job.Id}", new
     {
@@ -9668,7 +10007,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.PagesPerSheet != request.PagesPerSheet ||
             existing.PhotoSizeCode != request.PhotoSizeCode ||
             existing.PhotoCount != request.PhotoCount ||
-            existing.PhotosPerPage != request.PhotosPerPage)
+            existing.PhotosPerPage != request.PhotosPerPage ||
+            existing.PhotoOutputLayout != request.PhotoOutputLayout ||
+            existing.PhotoPaperFinish != request.PhotoPaperFinish)
         {
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document, batch or set of print options." });
         }
@@ -9929,6 +10270,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         PhotoSizeCode = request.PhotoSizeCode,
         PhotoCount = request.PhotoCount,
         PhotosPerPage = request.PhotosPerPage,
+        PhotoOutputLayout = request.PhotoOutputLayout,
+        PhotoPaperFinish = request.PhotoPaperFinish,
         CreatedUtc = now,
         ExpiresUtc = now.AddMinutes(15)
     };
@@ -10013,6 +10356,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             racedTicket.PhotoSizeCode == request.PhotoSizeCode &&
             racedTicket.PhotoCount == request.PhotoCount &&
             racedTicket.PhotosPerPage == request.PhotosPerPage &&
+            racedTicket.PhotoOutputLayout == request.PhotoOutputLayout &&
+            racedTicket.PhotoPaperFinish == request.PhotoPaperFinish &&
             CryptographicOperations.FixedTimeEquals(
                 Convert.FromHexString(racedTicket.GrantHash),
                 Convert.FromHexString(grantHash));
@@ -10384,7 +10729,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
                     job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies, job.ColourMode,
                     job.PaperSize, job.IsDuplex, job.Orientation, job.Currency, job.QuotedAmountMinor,
                     job.CreatedUtc, job.BatchGroupName, job.BatchName, job.BatchId, job.PrintKind,
-                    job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PhotoUnitPriceMinorSnapshot
+                    job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PhotoOutputLayout, job.PhotoPaperFinish, job.PhotoUnitPriceMinorSnapshot
                 },
                 Document = new
                 {
@@ -10727,6 +11072,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             PhotoSizeCode = ticket.PhotoSizeCode,
             PhotoCount = ticket.PhotoCount ?? 0,
             PhotosPerPage = ticket.PhotosPerPage,
+            PhotoOutputLayout = ticket.PhotoOutputLayout,
+            PhotoPaperFinish = ticket.PhotoPaperFinish,
             Currency = "INR",
             QuotedAmountMinor = 0,
             CreatedUtc = commitNow,
@@ -11010,7 +11357,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             var photoDocument = await db.PrintDocuments.AsNoTracking()
                 .SingleOrDefaultAsync(item => item.TenantId == job.TenantId && item.PrintJobId == job.Id, ct);
             if (photoDocument is null ||
-                !PhotoSheetPdfRules.HasExactlyA4PortraitPages(photoDocument.PageSizesJson, expectedPageCount))
+                !PhotoSheetPdfRules.HasExactlyPhotoPages(photoDocument.PageSizesJson, expectedPageCount, job.PhotoOutputLayout, photoSizeCode))
             {
                 return Results.ValidationProblem(new Dictionary<string, string[]>
                 {

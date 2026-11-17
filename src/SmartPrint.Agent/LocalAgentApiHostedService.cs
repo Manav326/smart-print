@@ -932,6 +932,8 @@ public sealed class LocalAgentApiHostedService(
                     return Results.Conflict(new { code = "local_upload_ticket_invalid", message = "The cloud API returned invalid local upload metadata." });
                 }
 
+                long receivedPayloadBytes = 0;
+                long uploadDurationMilliseconds = 0;
                 var existing = localQueueStore.Find(claim.PrintJobId);
                 DocumentAnalysis analysis;
 
@@ -960,7 +962,10 @@ public sealed class LocalAgentApiHostedService(
                         Orientation: claim.Orientation,
                         PrivatePrinting: claim.PrivatePrinting,
                         PrintKind: claim.PrintKind,
-                        PagesPerSheet: claim.PagesPerSheet);
+                        PagesPerSheet: claim.PagesPerSheet,
+                        PhotoPaperFinish: claim.PhotoPaperFinish,
+                        PhotoOutputLayout: claim.PhotoOutputLayout,
+                        PhotoSizeCode: claim.PhotoSizeCode);
 
                 bool MatchesClaimedContent(DocumentAnalysis detected) =>
                     string.Equals(detected.Extension, claim.FileExtension, StringComparison.OrdinalIgnoreCase) &&
@@ -1031,6 +1036,7 @@ public sealed class LocalAgentApiHostedService(
                                 stagingPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                                 64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
                             {
+                                var qsp2UploadStopwatch = System.Diagnostics.Stopwatch.StartNew();
                                 var metadata = await Qsp2DocumentFormat.DecryptAsync(
                                     context.Request.Body,
                                     decryptedOutput,
@@ -1043,6 +1049,8 @@ public sealed class LocalAgentApiHostedService(
                                     !string.Equals(metadata.Sha256, claim.Sha256, StringComparison.OrdinalIgnoreCase))
                                     throw new InvalidDataException("The QSP2 document SHA-256 does not match the authorised upload.");
                                 await decryptedOutput.FlushAsync(ct);
+                                receivedPayloadBytes = claim.SizeBytes;
+                                uploadDurationMilliseconds = Math.Max(0, qsp2UploadStopwatch.ElapsedMilliseconds);
                             }
 
                             await using var plaintextStream = new FileStream(
@@ -1096,6 +1104,7 @@ public sealed class LocalAgentApiHostedService(
                         return Results.BadRequest(new { code = "multipart_form_required", message = "Send the document as multipart/form-data." });
                     }
 
+                    var uploadStopwatch = System.Diagnostics.Stopwatch.StartNew();
                     var form = await context.Request.ReadFormAsync(ct);
                     var expectedWireSize = claim.PrivatePrinting
                         ? checked(claim.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
@@ -1109,6 +1118,8 @@ public sealed class LocalAgentApiHostedService(
                             title: "The received document size does not match the authorised upload.");
                     }
 
+                    receivedPayloadBytes = claim.SizeBytes;
+                    uploadDurationMilliseconds = Math.Max(0, uploadStopwatch.ElapsedMilliseconds);
                     await using var input = form.Files[0].OpenReadStream();
                     if (claim.PrivatePrinting)
                     {
@@ -1275,7 +1286,10 @@ public sealed class LocalAgentApiHostedService(
                             analysis.Extension,
                             analysis.MediaType,
                             claim.SizeBytes,
-                            claim.Sha256))
+                            claim.Sha256,
+                            receivedPayloadBytes,
+                            uploadDurationMilliseconds,
+                            claim.AttemptNumber))
                     };
                     AddAgentHeaders(completionRequest, credentials, uploadGrant);
                     using var completionResponse = await client.SendAsync(completionRequest, ct);
@@ -1363,7 +1377,13 @@ public sealed class LocalAgentApiHostedService(
         LocalUploadedPrintResult? UploadResult,
         string PrintKind = "DOCUMENT",
         string OutputMode = "PHYSICAL",
-        int PagesPerSheet = 1);
+        int PagesPerSheet = 1,
+        int AttemptNumber = 0,
+        string? PhotoSizeCode = null,
+        int? PhotoCount = null,
+        int? PhotosPerPage = null,
+        string PhotoOutputLayout = "A4_SHEET",
+        string PhotoPaperFinish = "PLAIN");
 
     private sealed record LocalUploadCompletionResponse(
         bool AlreadyCompleted,
