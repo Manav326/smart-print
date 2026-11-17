@@ -132,8 +132,8 @@ public sealed class AgentLocalQueueStoreTests
             {
                 Status = "LOCAL_UPLOAD_STAGED",
                 StorageMode = "LOCAL_AGENT",
-                OriginalFileName = "certificate-without-extension",
-                ContentType = analysis.MediaType,
+                DocumentName = "certificate-without-extension",
+                MediaType = analysis.MediaType,
                 PageCount = analysis.PageCount
             };
             var store = new AgentLocalQueueStore(root);
