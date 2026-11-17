@@ -80,16 +80,18 @@ export function useFileDownload(fileName: string): {
       let response: Response;
       try {
         response = await fetch(url, requestOptions);
-        if (!response.ok && fallbackUrl && fallbackUrl !== url) {
-          // An R2 object can be temporarily absent during rollout, or a custom
-          // domain/CORS policy can be misconfigured. Keep the existing API path
-          // as a transparent fallback so a release remains downloadable.
-          response = await fetch(fallbackUrl, requestOptions);
-        }
       } catch (primaryError) {
         if (!fallbackUrl || fallbackUrl === url || controller.signal.aborted) {
           throw primaryError;
         }
+        // CORS/network failures on the R2 custom domain transparently fall back
+        // to the established same-origin API route.
+        response = await fetch(fallbackUrl, requestOptions);
+      }
+
+      if (!response.ok && fallbackUrl && fallbackUrl !== url) {
+        // Also fall back when R2 has not received the immutable object yet.
+        await response.body?.cancel();
         response = await fetch(fallbackUrl, requestOptions);
       }
       if (!response.ok) {
