@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import "./platform-data-network.css";
 import {
   Activity, ArrowDownToLine, ArrowUpFromLine, Cloud, Database,
   RefreshCw, Router, Wifi
