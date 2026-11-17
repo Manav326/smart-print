@@ -4707,7 +4707,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   useEffect(()=>{
     if(nativeAppMode||!file||!isCustomerPdf(file)){
-      if(browserNupSourceCacheRef.current?.file!==file)browserNupSourceCacheRef.current=null;
+      browserNupSourceCacheRef.current=null;
       setBrowserNupPreview(null);
       return;
     }
@@ -4715,7 +4715,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const settings=settingsForFile(file);
     const pagesPerSheet=settings.pagesPerSheet??1;
     if(pagesPerSheet<=1||!pagesPerSheetDirection||photoSettingsByFileFingerprint[customerFileFingerprint(file)]){
-      if(browserNupSourceCacheRef.current?.file===file)browserNupSourceCacheRef.current=null;
+      browserNupSourceCacheRef.current=null;
       setBrowserNupPreview(null);
       return;
     }
@@ -4764,8 +4764,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         sheetIndex
       });
       if(cancelled)return;
-      const outputBlob=new Blob([preview.bytes],{type:"application/pdf"});
-      generatedUrl=URL.createObjectURL(outputBlob);
+      const outputBuffer=preview.bytes.buffer.slice(
+        preview.bytes.byteOffset,
+        preview.bytes.byteOffset+preview.bytes.byteLength
+      ) as ArrayBuffer;
+      generatedUrl=URL.createObjectURL(new Blob([outputBuffer],{type:"application/pdf"}));
       setBrowserNupPreview({
         url:generatedUrl,
         sheetIndex:preview.sheetIndex,
