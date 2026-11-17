@@ -424,6 +424,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.ToTable("PrintJobs", table =>
             {
                 table.HasCheckConstraint("CK_PrintJobs_PrintKind", "\"PrintKind\" IN ('DOCUMENT', 'PHOTO')");
+                table.HasCheckConstraint("CK_PrintJobs_PagesPerSheet", "\"PagesPerSheet\" BETWEEN 1 AND 500");
                 table.HasCheckConstraint("CK_PrintJobs_Origin", "\"Origin\" IN ('CUSTOMER_QR', 'SHOP_OWNER')");
                 table.HasCheckConstraint(
                     "CK_PrintJobs_PhotoQuoteSnapshot",
@@ -648,7 +649,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
         });
         modelBuilder.Entity<LocalPrintUploadTicket>(entity =>
         {
-            entity.ToTable("LocalPrintUploadTickets");
+            entity.ToTable("LocalPrintUploadTickets", table => table.HasCheckConstraint("CK_LocalPrintUploadTickets_PagesPerSheet", "\"PagesPerSheet\" BETWEEN 1 AND 500"));
             entity.HasKey(x => x.Id);
             entity.Property(x => x.JobNumber).HasMaxLength(32).IsRequired();
             entity.Property(x => x.BatchGroupName).HasMaxLength(PrintBatchGroupRules.MaximumNameLength);

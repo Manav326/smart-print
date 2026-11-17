@@ -295,6 +295,7 @@ public sealed class PrintJob
     public string PaperSize { get; set; } = "A4";
     public bool IsDuplex { get; set; }
     public string Orientation { get; set; } = "AUTO";
+    public int PagesPerSheet { get; set; } = 1;
     public string PrintKind { get; set; } = "DOCUMENT";
     public string? PhotoSizeCode { get; set; }
     public int PhotoCount { get; set; }
@@ -386,6 +387,7 @@ public sealed class LocalPrintUploadTicket
     public bool IsDuplex { get; set; }
     public int Copies { get; set; } = 1;
     public string Orientation { get; set; } = "AUTO";
+    public int PagesPerSheet { get; set; } = 1;
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset ExpiresUtc { get; set; } = DateTimeOffset.UtcNow.AddMinutes(10);
     public DateTimeOffset? ClaimedUtc { get; set; }

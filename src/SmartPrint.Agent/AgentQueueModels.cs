@@ -35,7 +35,8 @@ public sealed record AgentClaimedJob(
     string Orientation = "AUTO",
     bool PdfBrandingEnabled = false,
     bool PrivatePrinting = false,
-    string PrintKind = "DOCUMENT");
+    string PrintKind = "DOCUMENT",
+    int PagesPerSheet = 1);
 
 public sealed record AgentJobClaimResponse(
     IReadOnlyList<AgentClaimedJob> Jobs,
@@ -48,7 +49,7 @@ public sealed record AgentPrivateRelayItem(
     string PrinterName, string QueueName, string FileExtension, string MediaType,
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
-    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL");
+    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL", int PagesPerSheet = 1);
 
 public sealed record AgentPrivateTestOutputRequest(string FileName, long SizeBytes, string Sha256);
 
@@ -109,6 +110,7 @@ public sealed record AgentLocalQueueEntry(
     string? PhotoSourceSha256 = null,
     long? PhotoSourceSizeBytes = null,
     bool PrivateSpoolerCleanupCompleted = false,
+    int PagesPerSheet = 1,
     Guid? DocumentScopeId = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);

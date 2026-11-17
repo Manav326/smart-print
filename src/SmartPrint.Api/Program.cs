@@ -2442,6 +2442,7 @@ shop.MapGet("/print-jobs", async (
             job.PaperSize,
             job.IsDuplex,
             job.Orientation,
+            job.PagesPerSheet,
             job.PricingVersion,
             job.PrintKind,
             job.PhotoSizeCode,
@@ -3412,7 +3413,8 @@ shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
     var colourMode = request.ColourMode?.Trim();
     var paperSize = request.PaperSize?.Trim().ToUpperInvariant();
     var orientation = request.Orientation?.Trim().ToUpperInvariant();
-    if (colourMode is not ("Mono" or "Colour") ||
+    if (request.PagesPerSheet is < 1 or > 500 ||
+        colourMode is not ("Mono" or "Colour") ||
         paperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         request.Copies is < 1 or > 100 ||
         orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
@@ -3430,6 +3432,33 @@ shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
     {
         await transaction.RollbackAsync(ct);
         return Results.NotFound();
+    }
+
+    var pagesPerSheet = request.PagesPerSheet ?? job.PagesPerSheet;
+    if (pagesPerSheet is < 1 or > 500)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["pagesPerSheet"] = ["Choose a pages-per-sheet value between 1 and 500."] });
+    }
+    if (pagesPerSheet > 1)
+    {
+        var mediaType = await db.PrintDocuments.AsNoTracking()
+            .Where(item => item.TenantId == tenantId && item.PrintJobId == job.Id)
+            .Select(item => item.MediaType)
+            .SingleOrDefaultAsync(ct);
+        var capabilities = job.PrinterDeviceId is Guid assignedPrinterId
+            ? await db.PrinterDevices.AsNoTracking()
+                .Where(printer => printer.Id == assignedPrinterId && printer.TenantId == tenantId && printer.IsActive)
+                .Select(printer => printer.CapabilitiesJson)
+                .SingleOrDefaultAsync(ct)
+            : null;
+        if (job.PrintKind != "DOCUMENT" ||
+            !string.Equals(mediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            !PrinterPagesPerSheetRules.Supports(capabilities, pagesPerSheet))
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = "pages_per_sheet_not_supported", message = "The assigned printer driver has not reported support for this N-up value on a PDF document." });
+        }
     }
 
     if (job.PrintKind != "DOCUMENT" ||
@@ -3471,9 +3500,9 @@ shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
     long[] pageRefundAllocations;
     try
     {
-        amount = PricingCalculator.Calculate(job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing);
+        amount = PricingCalculator.Calculate(job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing, pagesPerSheet);
         pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
-            job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing);
+            job.PageCount, request.Copies, colourMode, request.IsDuplex, pricing, pagesPerSheet);
     }
     catch (DuplexPricingNotConfiguredException exception)
     {
@@ -3488,6 +3517,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
     job.IsDuplex = request.IsDuplex;
     job.Copies = request.Copies;
     job.Orientation = orientation;
+    job.PagesPerSheet = pagesPerSheet;
     job.Currency = "INR";
     job.QuotedAmountMinor = amount;
     job.PageRefundAllocationsJson = JsonSerializer.Serialize(pageRefundAllocations);
@@ -3513,7 +3543,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
     return Results.Ok(new
     {
         job.Id, job.JobNumber, job.Status, job.PageCount, job.Copies,
-        job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
+        job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation, job.PagesPerSheet,
         job.Currency, job.QuotedAmountMinor, AmountMajor = amount / 100m,
         job.PricingVersion, job.QuoteExpiresUtc, CustomerApprovalRequired = true
     });
@@ -5084,9 +5114,19 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund-preview", async (
     {
         var previous = JsonSerializer.Deserialize<int[]>(job.RejectedPageNumbersJson) ?? [];
         var selected = PrintRefundRules.NormalizeRejectedPages(job.PageCount, request.RejectedPageNumbers, previous);
-        var allocations = PrintRefundRules.NormalizePageAllocations(payment!.AmountMinor, job.PageCount,
-            JsonSerializer.Deserialize<long[]>(job.PageRefundAllocationsJson));
-        var additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment.AmountMinor, payment.RefundedAmountMinor, selected, allocations);
+        long additional;
+        if (job.PagesPerSheet > 1)
+        {
+            additional = PrintRefundRules.CalculateAdditionalNupRefundAmount(
+                payment!.AmountMinor, payment.RefundedAmountMinor, job.PageCount, job.Copies,
+                job.IsDuplex, job.PagesPerSheet, selected);
+        }
+        else
+        {
+            var allocations = PrintRefundRules.NormalizePageAllocations(payment!.AmountMinor, job.PageCount,
+                JsonSerializer.Deserialize<long[]>(job.PageRefundAllocationsJson));
+            additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment.AmountMinor, payment.RefundedAmountMinor, selected, allocations);
+        }
         var cumulative = checked(payment.RefundedAmountMinor + additional);
         return Results.Ok(new { job.Id, job.PageCount, RejectedPageNumbers = selected, RejectedPageCount = selected.Length,
             AcceptedPageCount = job.PageCount - selected.Length, OriginalAmountMinor = payment.AmountMinor,
@@ -5155,9 +5195,18 @@ shop.MapPost("/print-jobs/{jobId:guid}/refund", async (
             await tx.RollbackAsync(ct);
             return Results.Conflict(new { code = "no_new_pages_rejected", message = "Select at least one additional page to reject." });
         }
-        var allocations = PrintRefundRules.NormalizePageAllocations(payment!.AmountMinor, job.PageCount,
-            JsonSerializer.Deserialize<long[]>(job.PageRefundAllocationsJson));
-        additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment.AmountMinor, payment.RefundedAmountMinor, rejected, allocations);
+        if (job.PagesPerSheet > 1)
+        {
+            additional = PrintRefundRules.CalculateAdditionalNupRefundAmount(
+                payment!.AmountMinor, payment.RefundedAmountMinor, job.PageCount, job.Copies,
+                job.IsDuplex, job.PagesPerSheet, rejected);
+        }
+        else
+        {
+            var allocations = PrintRefundRules.NormalizePageAllocations(payment!.AmountMinor, job.PageCount,
+                JsonSerializer.Deserialize<long[]>(job.PageRefundAllocationsJson));
+            additional = PrintRefundRules.CalculateAdditionalRefundAmount(payment.AmountMinor, payment.RefundedAmountMinor, rejected, allocations);
+        }
         cumulative = checked(payment.RefundedAmountMinor + additional);
     }
     catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or OverflowException or JsonException)
@@ -5585,7 +5634,7 @@ agentApi.MapGet("/private-relays/pending", async (
                 printer.DisplayName, printer.QueueName!, ticket.FileExtension, ticket.MediaType,
                 ticket.SizeBytes, ticket.Sha256, ticket.ColourMode, ticket.PaperSize,
                 ticket.IsDuplex, ticket.Copies, ticket.Orientation, ticket.ExpiresUtc,
-                ticket.PrintKind, printer.OutputMode))
+                ticket.PrintKind, printer.OutputMode, ticket.PagesPerSheet))
             .Take(50)
             .ToListAsync(ct);
     }
@@ -5870,6 +5919,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         PaperSize = locked.PaperSize,
         IsDuplex = locked.IsDuplex,
         Orientation = locked.Orientation,
+        PagesPerSheet = locked.PagesPerSheet,
         PrivatePrinting = true,
         PrintKind = printJobKind,
         PhotoSizeCode = locked.PhotoSizeCode,
@@ -5936,7 +5986,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             Job = new
             {
                 job.Id, job.PrivatePrinting, job.PrintKind, job.JobNumber, job.Status, job.PageCount,
-                job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation,
+                job.Copies, job.ColourMode, job.PaperSize, job.IsDuplex, job.Orientation, job.PagesPerSheet,
                 job.PricingVersion, job.Currency, job.QuotedAmountMinor, job.CreatedUtc
             },
             Document = new
@@ -6067,6 +6117,7 @@ agentApi.MapPost("/jobs/claim", async (
             job.PaperSize,
             job.IsDuplex,
             job.Orientation,
+            job.PagesPerSheet,
             job.PdfBrandingEnabled,
             job.PrivatePrinting,
             job.PrintKind,
@@ -6156,6 +6207,7 @@ agentApi.MapPost("/jobs/claim", async (
             candidate.PaperSize,
             candidate.IsDuplex,
             candidate.Orientation,
+            candidate.PagesPerSheet,
             candidate.PdfBrandingEnabled,
             candidate.PrivatePrinting,
             candidate.PrintKind,
@@ -6482,6 +6534,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         ticket.IsDuplex,
         ticket.Copies,
         ticket.Orientation,
+        ticket.PagesPerSheet,
         ticket.ExpiresUtc
     });
 });
@@ -8912,12 +8965,16 @@ publicApi.MapPost("/sessions/current/jobs", async (
     var requestedDuplexText = form["isDuplex"].FirstOrDefault() ?? "false";
     var requestedCopiesText = form["copies"].FirstOrDefault() ?? "1";
     var requestedOrientation = form["orientation"].FirstOrDefault() ?? "AUTO";
+    var requestedPagesPerSheetText = form["pagesPerSheet"].FirstOrDefault() ?? "1";
     var requestedPrintKind = form["printKind"].FirstOrDefault() ?? "DOCUMENT";
     if (requestedColourMode is not ("Mono" or "Colour") ||
         requestedPaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         !bool.TryParse(requestedDuplexText, out var requestedDuplex) ||
         !int.TryParse(requestedCopiesText, out var requestedCopies) ||
         requestedCopies is < 1 or > 100 ||
+        !int.TryParse(requestedPagesPerSheetText, out var requestedPagesPerSheet) ||
+        requestedPagesPerSheet is < 1 or > 500 ||
+        (requestedPagesPerSheet > 1 && requestedPrintKind != "DOCUMENT") ||
         requestedOrientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
@@ -9003,7 +9060,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         {
             job.Id, job.BatchId, job.BatchGroupName, job.BatchName, job.CustomerSessionId,
             job.JobNumber, job.Status, job.PageCount, job.Copies, job.ColourMode,
-            job.PaperSize, job.IsDuplex, job.Orientation, job.PrintKind,
+            job.PaperSize, job.IsDuplex, job.Orientation, job.PagesPerSheet, job.PrintKind,
             job.PhotoSizeCode, job.PhotoCount, job.PhotosPerPage, job.PricingVersion,
             job.Currency, job.QuotedAmountMinor, job.CreatedUtc
         })
@@ -9037,6 +9094,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             existing.PaperSize != requestedPaperSize ||
             existing.IsDuplex != requestedDuplex ||
             existing.Orientation != requestedOrientation ||
+            existing.PagesPerSheet != requestedPagesPerSheet ||
             existing.PrintKind != requestedPrintKind ||
             existing.PhotoSizeCode != photoSizeCode ||
             existing.PhotoCount != (photoCount ?? 0) ||
@@ -9135,6 +9193,36 @@ publicApi.MapPost("/sessions/current/jobs", async (
         }
     }
 
+    if (requestedPagesPerSheet > 1)
+    {
+        if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.Conflict(new
+            {
+                code = "pages_per_sheet_pdf_required",
+                message = "Driver-backed pages per sheet is available for PDF documents only. Images and prepared photo sheets remain one page per sheet."
+            });
+        }
+
+        var assignedPrinterCapabilities = stationDefaultPrinterId is Guid assignedPrinterId
+            ? await db.PrinterDevices.AsNoTracking()
+                .Where(printer => printer.Id == assignedPrinterId &&
+                                  printer.TenantId == session.TenantId && printer.IsActive)
+                .Select(printer => printer.CapabilitiesJson)
+                .SingleOrDefaultAsync(ct)
+            : null;
+        if (!PrinterPagesPerSheetRules.Supports(assignedPrinterCapabilities, requestedPagesPerSheet))
+        {
+            await storage.DeleteAsync(stored.StorageKey);
+            return Results.Conflict(new
+            {
+                code = "pages_per_sheet_not_supported",
+                message = "The assigned printer driver has not reported support for the selected pages-per-sheet value. Choose one of the options shown for this printer."
+            });
+        }
+    }
+
     var job = new PrintJob
     {
         TenantId = session.TenantId,
@@ -9153,6 +9241,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
         PaperSize = requestedPaperSize,
         IsDuplex = requestedDuplex,
         Orientation = requestedOrientation,
+        PagesPerSheet = requestedPagesPerSheet,
         PrintKind = requestedPrintKind,
         PhotoSizeCode = photoSizeCode,
         PhotoCount = photoCount ?? 0,
@@ -9187,7 +9276,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             {
                 item.Id, item.CustomerSessionId, item.BatchId, item.BatchName, item.BatchGroupName,
                 item.JobNumber, item.Status, item.PageCount, item.Copies, item.ColourMode,
-                item.PaperSize, item.IsDuplex, item.Orientation, item.PrintKind,
+                item.PaperSize, item.IsDuplex, item.Orientation, item.PagesPerSheet, item.PrintKind,
                 item.PhotoSizeCode, item.PhotoCount, item.PhotosPerPage, item.PricingVersion,
                 item.Currency, item.QuotedAmountMinor, item.CreatedUtc
             })
@@ -9210,6 +9299,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
                 racedJob.PaperSize != requestedPaperSize ||
                 racedJob.IsDuplex != requestedDuplex ||
                 racedJob.Orientation != requestedOrientation ||
+                racedJob.PagesPerSheet != requestedPagesPerSheet ||
                 racedJob.PrintKind != requestedPrintKind ||
                 racedJob.PhotoSizeCode != photoSizeCode ||
                 racedJob.PhotoCount != (photoCount ?? 0) ||
@@ -9494,6 +9584,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         request.ColourMode is not ("Mono" or "Colour") ||
         request.PaperSize is not ("A4" or "A3" or "A5" or "LETTER" or "LEGAL") ||
         request.Copies is < 1 or > 100 ||
+        request.PagesPerSheet is < 1 or > 500 ||
+        (request.PagesPerSheet > 1 && (request.PrintKind != "DOCUMENT" || mediaType != "application/pdf")) ||
         request.Orientation is not ("AUTO" or "PORTRAIT" or "LANDSCAPE"))
     {
         return Results.UnprocessableEntity(new { code = "document_not_supported", message = $"Local upload supports PDF, JPG/JPEG and PNG files up to {UploadLimits.MaxFileBytes / (1024 * 1024)} MB with a valid SHA-256 digest." });
@@ -9549,6 +9641,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             existing.IsDuplex != request.IsDuplex ||
             existing.Copies != request.Copies ||
             existing.Orientation != request.Orientation ||
+            existing.PagesPerSheet != request.PagesPerSheet ||
             existing.PhotoSizeCode != request.PhotoSizeCode ||
             existing.PhotoCount != request.PhotoCount ||
             existing.PhotosPerPage != request.PhotosPerPage)
@@ -9605,6 +9698,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 lockedTicket.IsDuplex == request.IsDuplex &&
                 lockedTicket.Copies == request.Copies &&
                 lockedTicket.Orientation == request.Orientation &&
+                lockedTicket.PagesPerSheet == request.PagesPerSheet &&
                 lockedTicket.CompletedUtc is null &&
                 LocalUploadRecoveryRules.CanRenewExpiredTicket(
                     lockedTicket.CreatedUtc, lockedTicket.ExpiresUtc, lockedTicket.ClaimLeaseExpiresUtc,
@@ -9720,6 +9814,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             printer.Status,
             printer.LastSeenUtc,
             printer.OutputMode,
+            printer.CapabilitiesJson,
             agent.LocalEndpointsJson,
             agent.DocumentEncryptionPublicKey
         }
@@ -9735,6 +9830,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             message = request.PrivatePrinting
                 ? "The paired shop computer is offline. No document has been uploaded. Please retry when the shop computer reconnects."
                 : "The shop computer is temporarily unavailable. SmartPrint can keep this request securely online; the shop can release it when an Agent is ready."
+        });
+    }
+    if (!PrinterPagesPerSheetRules.Supports(stationPrinter.CapabilitiesJson, request.PagesPerSheet))
+    {
+        return Results.Conflict(new
+        {
+            code = "pages_per_sheet_not_supported",
+            message = "The assigned printer driver has not reported support for the selected pages-per-sheet value. Choose one of the options shown for this printer."
         });
     }
     if (request.PrivatePrinting)
@@ -9796,6 +9899,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         IsDuplex = request.IsDuplex,
         Copies = request.Copies,
         Orientation = request.Orientation,
+        PagesPerSheet = request.PagesPerSheet,
         PrivatePrinting = request.PrivatePrinting,
         PrintKind = request.PrintKind,
         PhotoSizeCode = request.PhotoSizeCode,
@@ -10722,7 +10826,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
                        item.CustomerSessionId == session.Id &&
                        item.PrintJobId == job.Id)
         .OrderBy(item => item.CreatedUtc)
-        .Select(item => new { item.PrintKind, item.PrivatePrinting })
+        .Select(item => new { item.PrintKind, item.PrivatePrinting, item.MediaType, item.PagesPerSheet })
         .FirstOrDefaultAsync(ct);
 
     if (!subscription.IsAccessActive)
@@ -10760,6 +10864,36 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
 
     var isPhotoPrint = request.PrintKind == "PHOTO";
     var isIdDocument = localUploadTicket?.PrintKind == "ID_DOCUMENT";
+    if (request.PagesPerSheet is < 1 or > 500)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.ValidationProblem(new Dictionary<string, string[]> { ["pagesPerSheet"] = ["Pages per sheet must be between 1 and 500."] });
+    }
+    if (request.PagesPerSheet > 1)
+    {
+        var mediaType = await db.PrintDocuments.AsNoTracking()
+            .Where(item => item.TenantId == session.TenantId && item.PrintJobId == job.Id)
+            .Select(item => item.MediaType)
+            .SingleOrDefaultAsync(ct);
+        var capabilities = job.PrinterDeviceId is Guid quotePrinterId
+            ? await db.PrinterDevices.AsNoTracking()
+                .Where(printer => printer.Id == quotePrinterId && printer.TenantId == session.TenantId && printer.IsActive)
+                .Select(printer => printer.CapabilitiesJson)
+                .SingleOrDefaultAsync(ct)
+            : null;
+        if (isPhotoPrint || isIdDocument || job.PrintKind != "DOCUMENT" ||
+            !string.Equals(mediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+            !PrinterPagesPerSheetRules.Supports(capabilities, request.PagesPerSheet))
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "pages_per_sheet_not_supported",
+                message = "N-up is available only for PDF documents when the assigned printer driver explicitly reports support for that value."
+            });
+        }
+    }
+
     if ((request.PrintKind is not null && request.PrintKind is not ("DOCUMENT" or "PHOTO" or "ID_DOCUMENT")) ||
         (request.PrintKind == "ID_DOCUMENT" && !isIdDocument) ||
         (isIdDocument && (!job.PrivatePrinting ||
@@ -10885,9 +11019,10 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
                     request.Copies,
                     request.ColourMode,
                     request.IsDuplex,
-                    pricing);
+                    pricing,
+                    request.PagesPerSheet);
                 pageRefundAllocations = PricingCalculator.CalculatePageRefundAllocations(
-                    job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing);
+                    job.PageCount, request.Copies, request.ColourMode, request.IsDuplex, pricing, request.PagesPerSheet);
             }
             job.PrintKind = "DOCUMENT";
             job.PhotoSizeCode = null;
@@ -10901,6 +11036,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         job.IsDuplex = request.IsDuplex;
         job.Copies = request.Copies;
         job.Orientation = request.Orientation;
+        job.PagesPerSheet = request.PagesPerSheet;
         job.Currency = "INR";
         job.QuotedAmountMinor = amount;
         job.PageRefundAllocationsJson = JsonSerializer.Serialize(pageRefundAllocations);
@@ -10937,6 +11073,8 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             job.PaperSize,
             job.IsDuplex,
             job.Orientation,
+            job.PagesPerSheet,
+            OutputSidesPerCopy = (job.PageCount + job.PagesPerSheet - 1) / job.PagesPerSheet,
             PrintKind = isIdDocument ? "ID_DOCUMENT" : job.PrintKind,
             job.PhotoSizeCode,
             job.PhotoCount,
@@ -12211,7 +12349,13 @@ publicApi.MapGet("/sessions/current", async (
         .Select(station => station.PrinterDeviceId)
         .SingleOrDefaultAsync(ct);
     var localAgent = await GetLocalAgentInfoAsync(db, session.TenantId, stationPrinterId, now, ct);
-    return Results.Ok(new { session.Id, session.ExpiresUtc, Shop = shopProfile, LocalAgent = localAgent });
+    var printer = stationPrinterId is Guid currentPrinterId
+        ? await db.PrinterDevices.AsNoTracking()
+            .Where(item => item.Id == currentPrinterId && item.TenantId == session.TenantId && item.IsActive)
+            .Select(item => new { item.DisplayName, item.Manufacturer, item.Model, item.Status, item.CapabilitiesJson })
+            .SingleOrDefaultAsync(ct)
+        : null;
+    return Results.Ok(new { session.Id, session.ExpiresUtc, Shop = shopProfile, LocalAgent = localAgent, Printer = printer });
 });
 
 

@@ -26,6 +26,9 @@ internal static class PrinterCapabilityRules
         return reportedPapers.Contains(requestedPaperCode);
     }
 
+    internal static bool SupportsPagesPerSheet(IReadOnlyCollection<int> supportedValues, int requestedValue) =>
+        requestedValue >= 1 && (requestedValue == 1 || supportedValues.Contains(requestedValue));
+
     internal static bool IsRequestedOrientationAccepted(
         bool orientationFieldReported,
         short actualOrientation,
