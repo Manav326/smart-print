@@ -408,7 +408,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                     DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
                 };
                 using var concurrency = new SemaphoreSlim(3, 3);
-                var uploads = fixtures.Select(async fixture =>
+                var uploads = fixtures.Values.Select(async fixture =>
                 {
                     await concurrency.WaitAsync();
                     try
