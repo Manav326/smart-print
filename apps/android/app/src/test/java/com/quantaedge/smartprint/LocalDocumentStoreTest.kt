@@ -1,6 +1,9 @@
 package com.quantaedge.smartprint
 
 import java.io.ByteArrayInputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.RandomAccessFile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
@@ -76,6 +79,56 @@ class LocalDocumentStoreTest {
         assertEquals("first.pdf", first.name)
         assertEquals("second.pdf", second.name)
         assertFalse(store.reorder(second, -1))
+    }
+
+    @Test
+    fun replacesOriginalPdfOnlyAfterValidatingTheCompleteReplacement() {
+        val store = LocalDocumentStore(temporaryFolder.newFolder("private"))
+        val original = store.importFile(
+            ByteArrayInputStream("%PDF-1.4 original".toByteArray()),
+            "report.pdf",
+            ""
+        )
+        val replacement = File(temporaryFolder.root, "replacement.pdf")
+        replacement.writeBytes("%PDF-1.7 rotated".toByteArray())
+
+        val returned = store.replacePdfContents(original, replacement)
+
+        assertEquals(original.canonicalPath, returned.canonicalPath)
+        assertEquals("%PDF-1.7 rotated", original.readText())
+        replacement.writeText("not a PDF")
+        assertThrows(IllegalArgumentException::class.java) {
+            store.replacePdfContents(original, replacement)
+        }
+        assertEquals("A rejected replacement must not touch the saved original.", "%PDF-1.7 rotated", original.readText())
+    }
+
+    @Test
+    fun savesDerivedPdfLargerThanThePrintBatchLimit() {
+        val store = LocalDocumentStore(temporaryFolder.newFolder("private"))
+        val source = File(temporaryFolder.root, "derived-source.pdf")
+        val targetSize = 52L * 1024L * 1024L
+        source.writeBytes("%PDF-1.7\n".toByteArray())
+        RandomAccessFile(source, "rw").use { random ->
+            val originalBytes = random.length()
+            random.setLength(targetSize)
+            random.seek(originalBytes)
+            val padding = ByteArray(64 * 1024) { ' '.code.toByte() }
+            var remaining = targetSize - originalBytes
+            while (remaining > 0) {
+                val count = minOf(remaining, padding.size.toLong()).toInt()
+                random.write(padding, 0, count)
+                remaining -= count
+            }
+        }
+
+        val saved = FileInputStream(source).use {
+            store.importDerivedPdf(it, "rotated-output.pdf", "")
+        }
+
+        assertTrue("Derived PDF save must not inherit the 50 MB combine limit.", saved.length() > 50L * 1024L * 1024L)
+        assertTrue("The derived document must still be detected by PDF content.", DocumentNamePolicy.isPdf(saved))
+        assertEquals(targetSize, saved.length())
     }
 
     @Test
