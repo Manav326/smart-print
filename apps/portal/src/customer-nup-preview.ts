@@ -26,16 +26,22 @@ export type CustomerNupPreviewResult = {
  * currently selected File and reuse it for sheet navigation or print-setting
  * changes; they should drop it as soon as that File is no longer selected.
  */
+export type CustomerNupPreviewSource = {
+  document: PdfDocumentType;
+  // Page wrappers are materialized once per selected file, not once per sheet.
+  pages: ReturnType<PdfDocumentType["getPages"]>;
+};
+
 export async function loadCustomerNupPreviewSource(
   sourceBytes: Uint8Array
-): Promise<PdfDocumentType> {
+): Promise<CustomerNupPreviewSource> {
   const { PDFDocument } = await import("pdf-lib");
-  const sourceDocument: PdfDocumentType = await PDFDocument.load(sourceBytes);
-  const pageCount = sourceDocument.getPageCount();
-  if (pageCount < 1 || pageCount > 500) {
+  const document: PdfDocumentType = await PDFDocument.load(sourceBytes);
+  const pages = document.getPages();
+  if (pages.length < 1 || pages.length > 500) {
     throw new RangeError("PDFs must contain between 1 and 500 pages.");
   }
-  return sourceDocument;
+  return { document, pages };
 }
 
 /** Backwards-compatible one-shot helper used by tests and other preview callers. */
@@ -43,8 +49,8 @@ export async function createCustomerNupPreview(
   sourceBytes: Uint8Array,
   options: CustomerNupPreviewOptions
 ): Promise<CustomerNupPreviewResult> {
-  const sourceDocument = await loadCustomerNupPreviewSource(sourceBytes);
-  return createCustomerNupPreviewFromDocument(sourceDocument, options);
+  const source = await loadCustomerNupPreviewSource(sourceBytes);
+  return createCustomerNupPreviewFromDocument(source, options);
 }
 
 /**
@@ -52,7 +58,7 @@ export async function createCustomerNupPreview(
  * sheet. Only the selected source pages are embedded into the new preview PDF.
  */
 export async function createCustomerNupPreviewFromDocument(
-  sourceDocument: PdfDocumentType,
+  source: CustomerNupPreviewSource,
   options: CustomerNupPreviewOptions
 ): Promise<CustomerNupPreviewResult> {
   if (options.pagesPerSheet < 2 || options.pagesPerSheet > 500 ||
@@ -64,7 +70,7 @@ export async function createCustomerNupPreviewFromDocument(
   }
 
   const { PDFDocument, StandardFonts, rgb, degrees } = await import("pdf-lib");
-  const sourcePages = sourceDocument.getPages();
+  const sourcePages = source.pages;
   if (sourcePages.length < 1 || sourcePages.length > 500) {
     throw new RangeError("PDFs must contain between 1 and 500 pages.");
   }
