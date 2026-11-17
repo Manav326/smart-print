@@ -19,7 +19,7 @@ public sealed class PublicDownloadService(HttpClient httpClient, IConfiguration 
     private const int MaximumRedirects = 5;
     private static readonly TimeSpan ReleaseCacheDuration = TimeSpan.FromMinutes(1);
     private static readonly TimeSpan VersionedReleaseCacheDuration = TimeSpan.FromDays(1);
-    private const int StreamCopyBufferSize = 1024 * 1024;
+    private const int StreamCopyBufferSize = 128 * 1024;
 
     private static readonly IReadOnlyDictionary<string, string> PlatformAssets =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
