@@ -67,7 +67,8 @@ export function useFileDownload(fileName: string): {
         method: "GET",
         headers: { Accept: "application/octet-stream" },
         cache: "no-store",
-        credentials: "same-origin",
+        // Public immutable release files never require shop/customer cookies.
+        credentials: "omit",
         signal: controller.signal
       });
       if (!response.ok) {
