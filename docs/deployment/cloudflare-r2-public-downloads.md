@@ -35,6 +35,8 @@ The existing same-origin API/GitHub release route remains the fallback. Do not p
    ```
 4. Create an R2 S3 API token scoped to this bucket with **Object Read & Write** permission. Store its access key and secret as GitHub Actions secrets. Never store them in `.env`, source control, a browser bundle, or the SmartPrint API container. The GitHub token intentionally has object-only scope; it cannot change bucket configuration.
 
+After changing a CORS policy on a bucket already serving files through a custom domain, purge that custom domain's cached objects once. Cloudflare notes that already-cached responses may not immediately reflect a new CORS policy.
+
 Cloudflare references:
 - R2 custom domains and cache: https://developers.cloudflare.com/cache/interaction-cloudflare-products/r2/
 - R2 CORS: https://developers.cloudflare.com/r2/buckets/cors/
