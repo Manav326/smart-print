@@ -101,6 +101,34 @@ class DocumentNamePolicyTest {
         assertTrue(DocumentNamePolicy.isBatchSource(pngNamedJpeg))
     }
 
+    @Test fun nativeViewerSupportsOnlyTheDocumentTypesItCanActuallyRender() {
+        listOf(
+            "application/pdf",
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/bmp",
+            "image/gif"
+        ).forEach { mimeType ->
+            assertTrue("$mimeType must be supported by the in-app viewer.",
+                DocumentNamePolicy.supportsInAppViewer(mimeType))
+        }
+
+        listOf(
+            "text/plain",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/octet-stream"
+        ).forEach { mimeType ->
+            assertFalse("$mimeType must not open a broken in-app preview.",
+                DocumentNamePolicy.supportsInAppViewer(mimeType))
+        }
+    }
+
     @Test fun sanitisesNames() {
         assertEquals("_safe_.pdf", DocumentNamePolicy.safeName("../safe?.pdf"))
         assertEquals("Untitled document", DocumentNamePolicy.safeName("   "))
