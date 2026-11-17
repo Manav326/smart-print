@@ -153,12 +153,15 @@ class SmartPrintDocumentViewer(
             }
             previousPage.setOnClickListener { showPdfPage(currentPage - 1) }
             nextPage.setOnClickListener { showPdfPage(currentPage + 1) }
-            rotatePage.contentDescription = "Rotate page"
+            val canSaveRotations = onResolvePendingPdfChanges != null
+            rotatePage.contentDescription = if (canSaveRotations) "Rotate page" else "Rotate view"
             rotatePage.setOnClickListener {
                 if (displayedPage != currentPage) return@setOnClickListener
                 rotationDegrees = (rotationDegrees + 90) % 360
-                if (rotationDegrees == 0) pendingPageRotations.remove(currentPage)
-                else pendingPageRotations[currentPage] = rotationDegrees
+                if (canSaveRotations) {
+                    if (rotationDegrees == 0) pendingPageRotations.remove(currentPage)
+                    else pendingPageRotations[currentPage] = rotationDegrees
+                }
                 renderCurrentPdfPage()
             }
             pageControls.contentDescription = "Document navigation"
