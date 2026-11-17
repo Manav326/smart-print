@@ -130,7 +130,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
         var runtimeReadiness = new AgentRuntimeReadiness();
 
         var host = new HostBuilder()
-            .ConfigureAppConfiguration(configuration => configuration.AddInMemoryCollection(
+            .ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(
                 new Dictionary<string, string?>
                 {
                     ["Agent:ApiBaseUrl"] = "http://127.0.0.1:8080",
@@ -201,14 +201,27 @@ public sealed class LocalAgentUploadHttpIntegrationTests
             Assert.Equal("application/pdf", stagedAnalysis.MediaType);
             Assert.Equal(".pdf", stagedAnalysis.Extension);
             Assert.Equal(1, stagedAnalysis.PageCount);
-            Assert.Equal(sha256, Convert.ToHexString(SHA256.HashData(queue.ReadDocument(jobId))).ToLowerInvariant());
+            var stagedBytes = queue.ReadDocument(jobId);
+            try
+            {
+                Assert.Equal(sha256, Convert.ToHexString(SHA256.HashData(stagedBytes)).ToLowerInvariant());
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(stagedBytes);
+            }
         }
         finally
         {
-            await host.StopAsync();
-            host.Dispose();
-            Directory.Delete(root, recursive: true);
-            CryptographicOperations.ZeroMemory(pdf);
+            try
+            {
+                await host.StopAsync();
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+                CryptographicOperations.ZeroMemory(pdf);
+            }
         }
     }
 
