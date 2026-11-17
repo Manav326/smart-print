@@ -370,6 +370,8 @@ function startBatchApiServer() {
     requests: [],
     attempts: new Map(),
     jobsByIdempotencyKey: new Map(),
+    jobsById: new Map(),
+    statusRequests: [],
     active: 0,
     maximumActive: 0
   };
@@ -424,6 +426,27 @@ function startBatchApiServer() {
     }
     if (request.method === "POST" && path === "/api/v1/public/sessions/current/resume") {
       sendJson(200, session);
+      return;
+    }
+    const statusMatch = path.match(/^\\/api\\/v1\\/public\\/jobs\\/([0-9a-f-]+)\\/status$/i);
+    if (request.method === "GET" && statusMatch) {
+      const job = metrics.jobsById.get(statusMatch[1]);
+      if (!job) {
+        sendJson(404, { message: "Unknown capacity QA print job." });
+        return;
+      }
+      metrics.statusRequests.push(statusMatch[1]);
+      sendJson(200, {
+        job: {
+          ...job,
+          updatedUtc: new Date().toISOString(),
+          quoteExpiresUtc: null,
+          privateDocumentPurgedUtc: null,
+          outputCompletedUtc: null
+        },
+        timeline: [],
+        payment: null
+      });
       return;
     }
     if (request.method !== "POST" || path !== "/api/v1/public/sessions/current/jobs") {
@@ -522,6 +545,7 @@ function startBatchApiServer() {
         } else {
           result = { ...result, duplicateRequest: true };
         }
+        metrics.jobsById.set(result.job.id, result.job);
         sendJson(200, result);
       } catch (error) {
         metrics.active = Math.max(0, metrics.active - 1);
@@ -576,6 +600,10 @@ async function runExactCapacitySelection(browser) {
   assert.equal(apiMetrics.metrics.attempts.get("capacity-07.pdf"), 2);
   assert.equal(apiMetrics.metrics.jobsByIdempotencyKey.size, 20,
     "The retry must materialise one canonical job for the failed 25 MiB file.");
+  assert.ok(apiMetrics.metrics.statusRequests.length > 0,
+    "The customer page must poll the status of uploaded 25 MiB files after transfer.");
+  assert.ok(apiMetrics.metrics.statusRequests.every(id => apiMetrics.metrics.jobsById.has(id)),
+    "Every exact-capacity status poll must resolve to the canonical accepted PrintJob.");
   assert.equal(new Set(apiMetrics.metrics.requests.map(item => item.batchId)).size, 1);
   assert.equal(new Set(apiMetrics.metrics.requests.map(item => item.idempotencyKey)).size, 20);
   assert.ok(apiMetrics.metrics.requests.every(item => item.fileBytes === 25 * 1024 * 1024));
