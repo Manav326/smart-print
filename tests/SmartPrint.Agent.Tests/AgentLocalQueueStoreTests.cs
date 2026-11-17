@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using SmartPrint.Agent;
 using SmartPrint.Documents;
+using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Writer;
 
 namespace SmartPrint.Agent.Tests;
