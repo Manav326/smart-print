@@ -71,9 +71,14 @@ class SmartPrintDocumentViewer(
     private var activeRenderTask: Future<*>? = null
     private var thumbnailBatchTask: Future<*>? = null
     private var thumbnailGeneration = 0
+    // The PDF filmstrip keeps only a viewport-sized set of views. The full
+    // document is represented by leading/trailing spacers, not one View per page.
     private val thumbnailViews = mutableMapOf<Int, ImageView>()
     private val thumbnailFrames = mutableMapOf<Int, View>()
     private val cachedPdfThumbnails = LinkedHashMap<Int, Bitmap>(32, 0.75f, true)
+    private var thumbnailWindowStart = -1
+    private var thumbnailWindowEnd = -1
+    private var thumbnailWindowUpdatePosted = false
     private val stage = FrameLayout(context)
     private val breadcrumbScroller = HorizontalScrollView(context).apply {
         isHorizontalScrollBarEnabled = false
@@ -392,13 +397,81 @@ class SmartPrintDocumentViewer(
         thumbnailRow.removeAllViews()
         thumbnailViews.clear()
         thumbnailFrames.clear()
+        thumbnailWindowStart = -1
+        thumbnailWindowEnd = -1
         if (pageCount <= 1) {
             filmstrip.visibility = View.GONE
             return
         }
 
         filmstrip.visibility = View.VISIBLE
-        for (pageIndex in 0 until pageCount) {
+        filmstrip.setOnScrollChangeListener { _, _, _, _, _ ->
+            schedulePdfThumbnailWindowUpdate()
+        }
+        filmstrip.post {
+            if (!disposed.get()) updatePdfThumbnailWindow(centerPage = currentPage, force = true)
+        }
+    }
+
+    private fun schedulePdfThumbnailWindowUpdate() {
+        if (thumbnailWindowUpdatePosted || disposed.get()) return
+        thumbnailWindowUpdatePosted = true
+        filmstrip.post {
+            thumbnailWindowUpdatePosted = false
+            updatePdfThumbnailWindow()
+        }
+    }
+
+    /**
+     * Rebuild only when the viewport approaches the current window's edge.
+     * Amortized scroll work is O(visible thumbnails), not O(total PDF pages).
+     */
+    private fun updatePdfThumbnailWindow(centerPage: Int? = null, force: Boolean = false) {
+        if (!isPdf || pageCount <= 1 || disposed.get()) return
+        if (filmstrip.width <= 0) {
+            filmstrip.post { updatePdfThumbnailWindow(centerPage, force) }
+            return
+        }
+
+        val itemWidth = dp(75).coerceAtLeast(1)
+        val visibleCount = ((filmstrip.width + itemWidth - 1) / itemWidth + 1).coerceAtLeast(1)
+        val visibleStart = if (centerPage != null) {
+            (centerPage - visibleCount / 2).coerceIn(0, max(0, pageCount - 1))
+        } else {
+            ((filmstrip.scrollX + filmstrip.paddingLeft) / itemWidth).coerceIn(0, max(0, pageCount - 1))
+        }
+        val visibleEnd = min(pageCount, visibleStart + visibleCount)
+
+        val currentWindowHasRunway =
+            thumbnailWindowStart >= 0 &&
+            visibleStart >= thumbnailWindowStart + PDF_THUMBNAIL_PREFETCH &&
+            visibleEnd <= thumbnailWindowEnd - PDF_THUMBNAIL_PREFETCH
+        if (!force && centerPage == null && currentWindowHasRunway) {
+            requestVisiblePdfThumbnails()
+            return
+        }
+
+        val newStart = max(0, visibleStart - PDF_THUMBNAIL_PREFETCH)
+        val newEnd = min(pageCount, visibleEnd + PDF_THUMBNAIL_PREFETCH)
+        if (!force && newStart == thumbnailWindowStart && newEnd == thumbnailWindowEnd) {
+            requestVisiblePdfThumbnails()
+            return
+        }
+
+        thumbnailRow.removeAllViews()
+        thumbnailViews.clear()
+        thumbnailFrames.clear()
+
+        fun addSpacer(pageSlots: Int) {
+            if (pageSlots <= 0) return
+            thumbnailRow.addView(
+                View(context),
+                LinearLayout.LayoutParams(pageSlots * itemWidth, dp(1))
+            )
+        }
+
+        addSpacer(newStart)
+        for (pageIndex in newStart until newEnd) {
             val frame = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
@@ -412,6 +485,7 @@ class SmartPrintDocumentViewer(
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 setBackgroundColor(Color.WHITE)
                 contentDescription = "Page ${pageIndex + 1} thumbnail"
+                cachedPdfThumbnails[pageIndex]?.let(::setImageBitmap)
             }
             frame.addView(preview, LinearLayout.LayoutParams(dp(62), dp(58)))
             frame.addView(
@@ -430,29 +504,18 @@ class SmartPrintDocumentViewer(
             thumbnailViews[pageIndex] = preview
             thumbnailFrames[pageIndex] = frame
         }
-        filmstrip.setOnScrollChangeListener { _, _, _, _, _ -> requestVisiblePdfThumbnails() }
-        filmstrip.post { requestVisiblePdfThumbnails() }
+        addSpacer(pageCount - newEnd)
+
+        thumbnailWindowStart = newStart
+        thumbnailWindowEnd = newEnd
+        updatePdfThumbnailSelection()
+        requestVisiblePdfThumbnails()
     }
 
     private fun requestVisiblePdfThumbnails() {
-        if (!isPdf || pageCount <= 1 || disposed.get() || filmstrip.width <= 0) return
-        val viewportStart = filmstrip.scrollX
-        val viewportEnd = viewportStart + filmstrip.width
-        val visible = thumbnailFrames.filterValues { frame ->
-            frame.left < viewportEnd && frame.right > viewportStart
-        }.keys
-        val wanted = linkedSetOf<Int>()
-        visible.forEach { index ->
-            val first = max(0, index - PDF_THUMBNAIL_PREFETCH)
-            val last = min(pageCount - 1, index + PDF_THUMBNAIL_PREFETCH)
-            for (candidate in first..last) wanted.add(candidate)
-        }
-        if (wanted.isEmpty()) {
-            val first = max(0, currentPage - PDF_THUMBNAIL_PREFETCH)
-            val last = min(pageCount - 1, currentPage + PDF_THUMBNAIL_PREFETCH)
-            for (candidate in first..last) wanted.add(candidate)
-        }
-        val pending = wanted.filter { it !in cachedPdfThumbnails }
+        if (!isPdf || pageCount <= 1 || disposed.get() || thumbnailWindowStart < 0) return
+        val pending = (thumbnailWindowStart until thumbnailWindowEnd)
+            .filter { it !in cachedPdfThumbnails }
         if (pending.isEmpty()) return
 
         val generation = ++thumbnailGeneration
@@ -480,7 +543,7 @@ class SmartPrintDocumentViewer(
                         rendered.forEach { (_, bitmap) -> if (!bitmap.isRecycled) bitmap.recycle() }
                         return@runOnUiThread
                     }
-                            rendered.forEach { (index, bitmap) ->
+                    rendered.forEach { (index, bitmap) ->
                         cachedPdfThumbnails[index] = bitmap
                         thumbnailViews[index]?.setImageBitmap(bitmap)
                         trimPdfThumbnailCache()
@@ -502,6 +565,7 @@ class SmartPrintDocumentViewer(
     }
 
     private fun updatePdfThumbnailSelection() {
+        // Only the small materialized window is visited, never all PDF pages.
         thumbnailFrames.forEach { (index, frame) ->
             frame.setBackgroundColor(if (index == currentPage) getColor(R.color.qp_soft) else Color.TRANSPARENT)
         }
@@ -509,14 +573,13 @@ class SmartPrintDocumentViewer(
 
     private fun scrollPdfThumbnailIntoView(index: Int) {
         filmstrip.post {
-            val frame = thumbnailFrames[index] ?: return@post
-            val left = filmstrip.scrollX
-            val right = left + filmstrip.width
-            if (frame.left < left || frame.right > right) {
-                filmstrip.smoothScrollTo((frame.left - (filmstrip.width - frame.width) / 2).coerceAtLeast(0), 0)
-            } else {
-                requestVisiblePdfThumbnails()
+            if (index !in thumbnailWindowStart until thumbnailWindowEnd) {
+                updatePdfThumbnailWindow(centerPage = index, force = true)
             }
+            val frame = thumbnailFrames[index] ?: return@post
+            val target = (frame.left - (filmstrip.width - frame.width) / 2).coerceAtLeast(0)
+            if (target != filmstrip.scrollX) filmstrip.smoothScrollTo(target, 0)
+            else requestVisiblePdfThumbnails()
         }
     }
 
@@ -528,6 +591,8 @@ class SmartPrintDocumentViewer(
         cachedPdfThumbnails.clear()
         thumbnailViews.clear()
         thumbnailFrames.clear()
+        thumbnailWindowStart = -1
+        thumbnailWindowEnd = -1
     }
 
     private fun PdfRenderer.openPageBitmap(index: Int, maxEdge: Int, config: Bitmap.Config = Bitmap.Config.ARGB_8888): Bitmap {
