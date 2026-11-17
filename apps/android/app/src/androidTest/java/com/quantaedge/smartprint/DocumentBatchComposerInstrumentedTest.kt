@@ -52,6 +52,45 @@ class DocumentBatchComposerInstrumentedTest {
     }
 
     @Test
+    fun combinesValidSourcesWhoseTotalIsExactly50MiB() {
+        val first = File(context.cacheDir, "batch-limit-first.pdf")
+        val second = File(context.cacheDir, "batch-limit-second.pdf")
+        val output = File(context.cacheDir, "batch-limit-output.pdf")
+        val perFileLimit = 25L * 1024L * 1024L
+        try {
+            createPdf(first, pages = 1)
+            createPdf(second, pages = 1)
+            padPdfWithWhitespace(first, perFileLimit)
+            padPdfWithWhitespace(second, perFileLimit)
+
+            assertEquals(perFileLimit * 2L, first.length() + second.length())
+            assertEquals(2, DocumentBatchComposer.compose(context, listOf(first, second), output))
+            assertPdfPageCount(output, 2)
+            assertTrue("The merged result must remain below the 50 MB upload limit.", output.length() in 1..(50L * 1024L * 1024L))
+        } finally {
+            first.delete()
+            second.delete()
+            output.delete()
+        }
+    }
+
+    private fun padPdfWithWhitespace(file: File, targetBytes: Long) {
+        RandomAccessFile(file, "rw").use { random ->
+            val originalBytes = random.length()
+            require(originalBytes < targetBytes)
+            random.setLength(targetBytes)
+            random.seek(originalBytes)
+            val padding = ByteArray(64 * 1024) { ' '.code.toByte() }
+            var remaining = targetBytes - originalBytes
+            while (remaining > 0) {
+                val count = minOf(remaining, padding.size.toLong()).toInt()
+                random.write(padding, 0, count)
+                remaining -= count
+            }
+        }
+    }
+
+    @Test
     fun rejectsCombinedSourcesOver50MiBBeforeStartingPdfWork() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val first = File(context.cacheDir, "batch-over-limit-first.pdf")
