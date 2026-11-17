@@ -45,13 +45,13 @@ function saveBlob(blob: Blob, fileName: string): void {
  */
 export function useFileDownload(fileName: string): {
   download: FileDownloadState;
-  start: (url: string) => Promise<void>;
+  start: (url: string, fallbackUrl?: string | null) => Promise<void>;
   cancel: () => void;
 } {
   const [download, setDownload] = useState<FileDownloadState>(initialState);
   const controllerRef = useRef<AbortController | null>(null);
 
-  const start = useCallback(async (url: string) => {
+  const start = useCallback(async (url: string, fallbackUrl?: string | null) => {
     if (controllerRef.current) return;
 
     const controller = new AbortController();
@@ -66,14 +66,32 @@ export function useFileDownload(fileName: string): {
     });
 
     try {
-      const response = await fetch(url, {
+      const requestOptions: RequestInit = {
         method: "GET",
         headers: { Accept: "application/octet-stream" },
-        cache: "no-store",
-        // Public immutable release files never require shop/customer cookies.
+        // The CDN object is immutable and public. Allow the browser HTTP cache
+        // to accelerate repeat downloads on the same device; the API fallback
+        // remains private/no-store and is not retained by the browser.
+        cache: "default",
         credentials: "omit",
         signal: controller.signal
-      });
+      };
+
+      let response: Response;
+      try {
+        response = await fetch(url, requestOptions);
+        if (!response.ok && fallbackUrl && fallbackUrl !== url) {
+          // An R2 object can be temporarily absent during rollout, or a custom
+          // domain/CORS policy can be misconfigured. Keep the existing API path
+          // as a transparent fallback so a release remains downloadable.
+          response = await fetch(fallbackUrl, requestOptions);
+        }
+      } catch (primaryError) {
+        if (!fallbackUrl || fallbackUrl === url || controller.signal.aborted) {
+          throw primaryError;
+        }
+        response = await fetch(fallbackUrl, requestOptions);
+      }
       if (!response.ok) {
         if (response.status === 404) {
           throw new Error("This release file is no longer available. Refresh the page and try again.");
