@@ -38,10 +38,10 @@ function saveBlob(blob: Blob, fileName: string): void {
 }
 
 /**
- * Downloads a same-origin release asset and measures bytes from the actual
- * response stream. The completed, size-checked Blob is handed to the browser
- * only after the response has finished, so an interrupted transfer cannot
- * leave an empty destination file behind or grant the site write access to it.
+ * Downloads an immutable public release asset from the R2 custom domain when
+ * configured, with the same-origin API route as a transparent fallback. Measures
+ * actual response bytes and only hands a complete, size-checked Blob to the
+ * browser, preserving the existing save-after-completion experience.
  */
 export function useFileDownload(fileName: string): {
   download: FileDownloadState;
