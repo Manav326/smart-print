@@ -11,27 +11,23 @@ The existing same-origin API/GitHub release route remains the fallback. Do not p
 3. In the bucket's **Settings → CORS Policy**, add this one-time policy. Replace the example origin with the exact `SMARTPRINT_PUBLIC_BASE_URL` origin. The policy is intentionally restricted to browser reads from the SmartPrint portal:
    
    ```json
-   {
-     "rules": [
-       {
-         "allowed": {
-           "origins": ["https://smartprint.example"],
-           "methods": ["GET", "HEAD"],
-           "headers": ["Accept", "Range", "If-Range"]
-         },
-         "exposeHeaders": [
-           "Accept-Ranges",
-           "Content-Length",
-           "Content-Range",
-           "Content-Disposition",
-           "ETag",
-           "Last-Modified",
-           "CF-Cache-Status"
-         ],
-         "maxAgeSeconds": 86400
-       }
-     ]
-   }
+   [
+     {
+       "AllowedOrigins": ["https://smartprint.example"],
+       "AllowedMethods": ["GET", "HEAD"],
+       "AllowedHeaders": ["Accept", "Range", "If-Range"],
+       "ExposeHeaders": [
+         "Accept-Ranges",
+         "Content-Length",
+         "Content-Range",
+         "Content-Disposition",
+         "ETag",
+         "Last-Modified",
+         "CF-Cache-Status"
+       ],
+       "MaxAgeSeconds": 86400
+     }
+   ]
    ```
 4. Create an R2 S3 API token scoped to this bucket with **Object Read & Write** permission. Store its access key and secret as GitHub Actions secrets. Never store them in `.env`, source control, a browser bundle, or the SmartPrint API container. The GitHub token intentionally has object-only scope; it cannot change bucket configuration.
 
