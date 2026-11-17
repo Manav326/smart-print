@@ -219,17 +219,17 @@ class LocalDocumentStore(filesDir: File) {
         }
 
         val parent = target.parentFile ?: error("The original PDF has no parent folder.")
-        val staging = File(parent, ".\${target.name}.\${UUID.randomUUID()}.replacement")
-        val backup = File(parent, ".\${target.name}.\${UUID.randomUUID()}.backup")
+        val staging = File(parent, ".${target.name}.${UUID.randomUUID()}.replacement")
+        val backup = File(parent, ".${target.name}.${UUID.randomUUID()}.backup")
+        var backupCreated = false
+        var replacementCommitted = false
         try {
             FileInputStream(source).use { input ->
                 FileOutputStream(staging).use { output ->
                     val buffer = ByteArray(64 * 1024)
-                    var total = 0L
                     while (true) {
                         val count = input.read(buffer)
                         if (count < 0) break
-                        total += count
                         require(parent.usableSpace > MIN_FREE_SPACE_RESERVE + count) {
                             "There is not enough free space to safely replace the original PDF."
                         }
@@ -249,17 +249,23 @@ class LocalDocumentStore(filesDir: File) {
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING
                 )
+                replacementCommitted = true
             } catch (_: AtomicMoveNotSupportedException) {
                 check(target.renameTo(backup)) {
                     "The original PDF could not be safely backed up. It was not changed."
                 }
+                backupCreated = true
                 try {
                     check(staging.renameTo(target)) {
-                        "The new PDF could not be installed. The original is retained as \${backup.name}."
+                        "The new PDF could not be installed. The original is retained in a recovery file."
                     }
+                    replacementCommitted = true
                     backup.delete()
+                    backupCreated = false
                 } catch (error: Exception) {
-                    if (!target.exists()) backup.renameTo(target)
+                    if (!target.exists() && backup.renameTo(target)) {
+                        backupCreated = false
+                    }
                     throw error
                 }
             }
@@ -268,8 +274,9 @@ class LocalDocumentStore(filesDir: File) {
             staging.delete()
             throw error
         } finally {
-            // Never remove a recovery backup when the replacement failed.
-            if (target.isFile) backup.delete()
+            // If restore failed, keep the backup rather than risking the only
+            // remaining copy of the customer's original PDF.
+            if (replacementCommitted && backupCreated) backup.delete()
         }
     }
 
