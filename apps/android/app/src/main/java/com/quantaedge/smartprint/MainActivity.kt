@@ -92,6 +92,9 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.ConcurrentHashMap
 import java.net.HttpURLConnection
 import java.net.URL
@@ -164,9 +167,11 @@ class MainActivity : AppCompatActivity() {
     // Keep provider URIs, not copies of customer PDFs. PdfRenderer consumes a
     // read-only descriptor and only a rendered preview sheet is returned to WebView.
     private val customerUploadPdfPreviewUris = ConcurrentHashMap<String, Uri>()
-    private val customerPdfPreviewExecutor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "SmartPrint-customer-pdf-preview").apply { isDaemon = true }
-    }
+    // One active sheet render plus one replaceable pending request bounds queue
+    // memory when customers rapidly change print settings or PDF pages.
+    private val customerPdfPreviewExecutor = ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1)
+    ) { task -> Thread(task, "SmartPrint-customer-pdf-preview").apply { isDaemon = true } }
     private var customerPdfPreviewTask: Future<*>? = null
     @Volatile private var customerPdfPreviewGeneration = 0
     private var currentCustomerPdfPreviewToken: String? = null
@@ -7294,7 +7299,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun cancelCustomerPdfPreviewRender() {
         customerPdfPreviewGeneration++
-        customerPdfPreviewTask?.cancel(true)
+        customerPdfPreviewTask?.let { task ->
+            task.cancel(true)
+            (task as? Runnable)?.let(customerPdfPreviewExecutor::remove)
+        }
         customerPdfPreviewTask = null
         currentCustomerPdfPreviewToken = null
     }
