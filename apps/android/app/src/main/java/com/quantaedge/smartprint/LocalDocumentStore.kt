@@ -11,10 +11,52 @@ import java.util.UUID
 
 class LocalDocumentStore(filesDir: File) {
     val root = File(filesDir, "documents")
+    private val derivedPdfStagingDirectory = File(root, ".smartprint-staging")
 
     init {
         check(root.exists() || root.mkdirs()) { "Document storage could not be created." }
         check(root.isDirectory) { "Document storage is not a directory." }
+        check(derivedPdfStagingDirectory.exists() || derivedPdfStagingDirectory.mkdirs()) {
+            "PDF staging storage could not be created."
+        }
+        // Files left by a force-stop are never shown as customer documents and
+        // are reclaimed on the next store startup once they are older than a day.
+        val staleBefore = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
+        derivedPdfStagingDirectory.listFiles()
+            ?.filter { it.isFile && it.lastModified() < staleBefore }
+            ?.forEach { it.delete() }
+    }
+
+    /** Creates a same-volume temporary destination so validated PDFs can be moved, not recopied. */
+    fun createDerivedPdfTempFile(): File =
+        File.createTempFile("rotated-", ".pdf", derivedPdfStagingDirectory)
+
+    /**
+     * Publishes a completed derived PDF into the customer's library. Because the
+     * temp file and destination share the same filesystem this is a rename, not
+     * a second full-file read/write, regardless of output size.
+     */
+    fun finalizeDerivedPdf(tempFile: File, name: String, destinationPath: String): File {
+        val source = tempFile.canonicalFile
+        require(source.parentFile?.canonicalPath == derivedPdfStagingDirectory.canonicalPath) {
+            "The derived PDF is not in SmartPrint staging storage."
+        }
+        require(source.isFile && source.length() > 0L && DocumentNamePolicy.isPdf(source)) {
+            "The derived PDF is empty or invalid."
+        }
+        val parent = folder(destinationPath)
+        val target = uniqueFile(parent, DocumentNamePolicy.safeName(name))
+        try {
+            java.nio.file.Files.move(source.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: AtomicMoveNotSupportedException) {
+            check(source.renameTo(target)) {
+                "The completed PDF could not be moved into My Files. The staged file is retained for recovery."
+            }
+        }
+        require(target.isFile && DocumentNamePolicy.isPdf(target)) {
+            "The saved PDF did not pass validation."
+        }
+        return target
     }
 
     fun folder(path: String): File {
@@ -105,9 +147,11 @@ class LocalDocumentStore(filesDir: File) {
         val base = root.canonicalPath
         val path = directory.canonicalPath
         require(path == base || path.startsWith(base + File.separator)) { "Folder is outside local storage." }
-        return (directory.listFiles() ?: emptyArray()).sortedWith(
-            compareBy<File>({ !it.isDirectory }, { it.lastModified() }, { it.name.lowercase(Locale.ROOT) })
-        ).toTypedArray()
+        return (directory.listFiles() ?: emptyArray())
+            .filterNot { directory.canonicalPath == base && it.canonicalPath == derivedPdfStagingDirectory.canonicalPath }
+            .sortedWith(
+                compareBy<File>({ !it.isDirectory }, { it.lastModified() }, { it.name.lowercase(Locale.ROOT) })
+            ).toTypedArray()
     }
 
     /** Places an item immediately before another sibling in the same folder. */
@@ -218,11 +262,14 @@ class LocalDocumentStore(filesDir: File) {
             "The replacement PDF is empty."
         }
 
+        if (source.parentFile?.canonicalPath == derivedPdfStagingDirectory.canonicalPath) {
+            // Rotation output was built in our private staging directory on the
+            // same filesystem. Replace by atomic move, avoiding another full copy.
+            return replacePdfByMove(target, source)
+        }
+
         val parent = target.parentFile ?: error("The original PDF has no parent folder.")
         val staging = File(parent, ".${target.name}.${UUID.randomUUID()}.replacement")
-        val backup = File(parent, ".${target.name}.${UUID.randomUUID()}.backup")
-        var backupCreated = false
-        var replacementCommitted = false
         try {
             FileInputStream(source).use { input ->
                 FileOutputStream(staging).use { output ->
@@ -242,9 +289,22 @@ class LocalDocumentStore(filesDir: File) {
                 "The replacement PDF could not be validated."
             }
 
+            return replacePdfByMove(target, staging)
+        } catch (error: Exception) {
+            staging.delete()
+            throw error
+        }
+    }
+
+    private fun replacePdfByMove(target: File, replacement: File): File {
+        val parent = target.parentFile ?: error("The original PDF has no parent folder.")
+        val backup = File(parent, ".${target.name}.${UUID.randomUUID()}.backup")
+        var backupCreated = false
+        var replacementCommitted = false
+        try {
             try {
                 java.nio.file.Files.move(
-                    staging.toPath(),
+                    replacement.toPath(),
                     target.toPath(),
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING
@@ -256,26 +316,27 @@ class LocalDocumentStore(filesDir: File) {
                 }
                 backupCreated = true
                 try {
-                    check(staging.renameTo(target)) {
+                    check(replacement.renameTo(target)) {
                         "The new PDF could not be installed. The original is retained in a recovery file."
                     }
                     replacementCommitted = true
                     backup.delete()
                     backupCreated = false
                 } catch (error: Exception) {
-                    if (!target.exists() && backup.renameTo(target)) {
-                        backupCreated = false
-                    }
+                    if (!target.exists() && backup.renameTo(target)) backupCreated = false
                     throw error
                 }
             }
+            require(target.isFile && DocumentNamePolicy.isPdf(target)) {
+                "The replaced PDF did not pass validation."
+            }
             return target
         } catch (error: Exception) {
-            staging.delete()
+            if (replacement.exists() && replacement.parentFile?.canonicalPath == derivedPdfStagingDirectory.canonicalPath) {
+                // Leave the staged replacement available for the caller's cleanup/retry.
+            }
             throw error
         } finally {
-            // If restore failed, keep the backup rather than risking the only
-            // remaining copy of the customer's original PDF.
             if (replacementCommitted && backupCreated) backup.delete()
         }
     }
