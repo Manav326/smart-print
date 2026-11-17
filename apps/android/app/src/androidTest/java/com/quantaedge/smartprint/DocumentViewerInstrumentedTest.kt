@@ -176,6 +176,107 @@ class DocumentViewerInstrumentedTest {
     }
 
     @Test
+    fun extensionlessPdfRendersThroughCustomerUploadPreviewWebViewBridge() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val code = "P".repeat(32)
+        val source = File(context.cacheDir, "CI-customer-upload-extensionless-${System.currentTimeMillis()}")
+        createPdf(source, pageCount = 2)
+        val responseReceived = java.util.concurrent.CountDownLatch(1)
+        val response = java.util.concurrent.atomic.AtomicReference<String?>()
+
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val origin = BuildConfig.SERVICE_BASE_URL.trimEnd('/')
+                    MainActivity::class.java.getDeclaredField("portalUrl").apply {
+                        isAccessible = true
+                        set(activity, "$origin/s/$code")
+                    }
+                    MainActivity::class.java.getDeclaredField("portalHost").apply {
+                        isAccessible = true
+                        set(activity, android.net.Uri.parse(origin).host)
+                    }
+                    MainActivity::class.java.getDeclaredMethod("showPrint").apply {
+                        isAccessible = true
+                        invoke(activity)
+                    }
+
+                    val token = MainActivity::class.java.getDeclaredMethod(
+                        "createCustomerUploadPdfPreview",
+                        File::class.java,
+                        File::class.java
+                    ).apply { isAccessible = true }.invoke(activity, source, null) as? String
+                    assertNotNull(
+                        "A valid PDF must receive a preview token even when its filename has no .pdf extension.",
+                        token
+                    )
+
+                    val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView").apply {
+                        isAccessible = true
+                    }.invoke(activity) as android.webkit.WebView
+                    val html = """
+                        <!doctype html><html><head><title>Waiting</title></head><body><script>
+                        const bridge = window.SmartPrintNative;
+                        bridge.addEventListener('message', event => {
+                          const value = String(event.data || '');
+                          if (value.startsWith('CUSTOMER_PDF_PREVIEW|') ||
+                              value.startsWith('CUSTOMER_PDF_PREVIEW_FAILED|')) {
+                            document.title = value;
+                          }
+                        });
+                        bridge.postMessage('previewCustomerPdf|$token|0|2|A4|LANDSCAPE|TopLeft');
+                        </script></body></html>
+                    """.trimIndent()
+                    webView.loadDataWithBaseURL(
+                        "$origin/s/$code",
+                        html,
+                        "text/html",
+                        "UTF-8",
+                        null
+                    )
+
+                    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+                    var attempts = 0
+                    fun pollForPreview() {
+                        webView.evaluateJavascript("document.title") { encodedTitle ->
+                            val title = runCatching {
+                                org.json.JSONTokener(encodedTitle).nextValue() as? String
+                            }.getOrNull().orEmpty()
+                            if (title.startsWith("CUSTOMER_PDF_PREVIEW|") ||
+                                title.startsWith("CUSTOMER_PDF_PREVIEW_FAILED|")) {
+                                response.set(title)
+                                responseReceived.countDown()
+                            } else if (attempts++ < 150) {
+                                handler.postDelayed({ pollForPreview() }, 100)
+                            }
+                        }
+                    }
+                    handler.postDelayed({ pollForPreview() }, 100)
+                }
+
+                assertTrue(
+                    "The Android customer upload preview bridge did not return a rendered sheet.",
+                    responseReceived.await(20, java.util.concurrent.TimeUnit.SECONDS)
+                )
+                val rendered = response.get().orEmpty()
+                assertTrue(
+                    "An extensionless PDF must not be rejected by the native renderer: $rendered",
+                    rendered.startsWith("CUSTOMER_PDF_PREVIEW|")
+                )
+                val payload = org.json.JSONObject(rendered.removePrefix("CUSTOMER_PDF_PREVIEW|"))
+                assertEquals(0, payload.getInt("pageIndex"))
+                assertEquals(1, payload.getInt("pageCount"))
+                assertEquals(2, payload.getInt("pagesPerSheet"))
+                assertEquals("LANDSCAPE", payload.getString("orientation"))
+                assertEquals("TopLeft", payload.getString("pagesPerSheetDirection"))
+                assertTrue("The upload preview must contain a rendered image.", payload.getString("image").length > 100)
+            }
+        } finally {
+            source.delete()
+        }
+    }
+
+    @Test
     fun opensTheTappedImageAndRestoresItsPositionAfterRecreation() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val directory = File(context.filesDir, "documents/CI-reader-images-${System.currentTimeMillis()}")
