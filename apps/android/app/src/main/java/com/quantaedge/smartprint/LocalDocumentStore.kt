@@ -331,11 +331,6 @@ class LocalDocumentStore(filesDir: File) {
                 "The replaced PDF did not pass validation."
             }
             return target
-        } catch (error: Exception) {
-            if (replacement.exists() && replacement.parentFile?.canonicalPath == derivedPdfStagingDirectory.canonicalPath) {
-                // Leave the staged replacement available for the caller's cleanup/retry.
-            }
-            throw error
         } finally {
             if (replacementCommitted && backupCreated) backup.delete()
         }
