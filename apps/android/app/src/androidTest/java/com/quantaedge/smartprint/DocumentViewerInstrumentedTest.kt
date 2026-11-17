@@ -98,6 +98,46 @@ class DocumentViewerInstrumentedTest {
     }
 
     @Test
+    fun rapidPdfPageRequestsOnlyDisplayTheLatestRequestedPage() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val source = File(context.filesDir, "documents/CI-reader-latest-page-${System.currentTimeMillis()}.pdf")
+        source.parentFile?.mkdirs()
+        createPdf(source, pageCount = 12)
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                onView(org.hamcrest.Matchers.allOf(
+                    withContentDescription("My Files"),
+                    androidx.test.espresso.matcher.ViewMatchers.isAssignableFrom(android.widget.LinearLayout::class.java)
+                )).perform(click())
+                onView(withText(source.name)).perform(scrollTo(), click())
+                waitForView(withText("Page 1 of 12"))
+
+                scenario.onActivity { activity ->
+                    val reader = MainActivity::class.java.getDeclaredField("documentViewer")
+                        .apply { isAccessible = true }
+                        .get(activity) ?: throw AssertionError("The native PDF reader was not opened.")
+                    val showPage = reader.javaClass.getDeclaredMethod("showPdfPage", Int::class.javaPrimitiveType)
+                        .apply { isAccessible = true }
+                    // Queue multiple page requests on the UI thread without waiting for
+                    // intermediate rendering. The latest request must win.
+                    for (pageIndex in 1..11) showPage.invoke(reader, pageIndex)
+                }
+
+                waitForView(withText("Page 12 of 12"))
+                waitForView(withContentDescription("PDF page 12 preview"))
+                scenario.onActivity { activity ->
+                    val reader = MainActivity::class.java.getDeclaredField("documentViewer")
+                        .apply { isAccessible = true }
+                        .get(activity) as SmartPrintDocumentViewer
+                    assertEquals(11, reader.currentPosition())
+                }
+            }
+        } finally {
+            source.delete()
+        }
+    }
+
+    @Test
     fun theFilmstripProvidesEveryPageOfALongerPdf() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val source = File(context.filesDir, "documents/CI-reader-all-pages-${System.currentTimeMillis()}.pdf")
