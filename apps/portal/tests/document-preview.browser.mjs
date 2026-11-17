@@ -97,6 +97,8 @@ async function installCloudBatchHarness(context) {
   const requestLog = [];
   const attemptsByName = new Map();
   const successfulByName = new Map();
+  const jobsById = new Map();
+  const statusRequests = [];
   let active = 0;
   let maximumActive = 0;
   let unexpected = [];
@@ -164,28 +166,30 @@ async function installCloudBatchHarness(context) {
         const id = randomUUID();
         successfulByName.set(name, (successfulByName.get(name) ?? 0) + 1);
         const mediaType = name.endsWith(".jpg") ? "image/jpeg" : name.endsWith(".png") ? "image/png" : "application/pdf";
+        const job = {
+          id,
+          batchId,
+          batchGroupName: "Documents",
+          batchName: "20-file retry QA",
+          jobNumber: "SP-BATCH-QA-" + String(successfulByName.size).padStart(3, "0"),
+          status: "AWAITING_CONFIGURATION",
+          pageCount: 1,
+          copies: 1,
+          colourMode: "Mono",
+          paperSize: "A4",
+          isDuplex: false,
+          orientation: "AUTO",
+          privatePrinting: false,
+          printKind: "DOCUMENT",
+          photoCount: 0,
+          currency: "INR",
+          quotedAmountMinor: 0,
+          createdUtc: now,
+          outputMode: "PHYSICAL"
+        };
+        jobsById.set(id, job);
         return json(route, {
-          job: {
-            id,
-            batchId,
-            batchGroupName: "Documents",
-            batchName: "20-file retry QA",
-            jobNumber: "SP-BATCH-QA-" + String(successfulByName.size).padStart(3, "0"),
-            status: "AWAITING_CONFIGURATION",
-            pageCount: 1,
-            copies: 1,
-            colourMode: "Mono",
-            paperSize: "A4",
-            isDuplex: false,
-            orientation: "AUTO",
-            privatePrinting: false,
-            printKind: "DOCUMENT",
-            photoCount: 0,
-            currency: "INR",
-            quotedAmountMinor: 0,
-            createdUtc: now,
-            outputMode: "PHYSICAL"
-          },
+          job,
           document: {
             id: randomUUID(),
             originalFileName: name,
@@ -201,11 +205,29 @@ async function installCloudBatchHarness(context) {
       }
     }
 
+    const statusMatch = path.match(/^\\/api\\/v1\\/public\\/jobs\\/([0-9a-f-]+)\\/status$/i);
+    if (method === "GET" && statusMatch) {
+      const job = jobsById.get(statusMatch[1]);
+      if (!job) return json(route, { message: "Unknown QA print job." }, 404);
+      statusRequests.push(statusMatch[1]);
+      return json(route, {
+        job: {
+          ...job,
+          updatedUtc: new Date().toISOString(),
+          quoteExpiresUtc: null,
+          privateDocumentPurgedUtc: null,
+          outputCompletedUtc: null
+        },
+        timeline: [],
+        payment: null
+      });
+    }
+
     unexpected.push({ method, path });
     return json(route, { message: "Unexpected API request: " + method + " " + path }, 404);
   });
 
-  return { requestLog, attemptsByName, successfulByName, unexpected, get maximumActive() { return maximumActive; } };
+  return { requestLog, attemptsByName, successfulByName, jobsById, statusRequests, unexpected, get maximumActive() { return maximumActive; } };
 }
 
 async function runShopDocumentPreview(browser) {
@@ -315,6 +337,10 @@ async function runCustomerBatchFlow(browser) {
   assert.equal(harness.requestLog.length, 21, "Retry must transfer only the one unfinished file.");
   assert.equal(harness.attemptsByName.get("batch-07.pdf"), 2);
   assert.equal(harness.successfulByName.size, 20);
+  assert.equal(harness.jobsById.size, 20, "Each accepted upload must have one canonical status record.");
+  assert.ok(harness.statusRequests.length > 0, "The customer page must poll the status of its accepted uploads.");
+  assert.ok(harness.statusRequests.every(id => harness.jobsById.has(id)),
+    "Every status poll must resolve to the original accepted PrintJob.");
   assert.equal(harness.maximumActive, 3);
   assert.equal(new Set(harness.requestLog.map(request => request.batchId)).size, 1,
     "Every file and its retry must remain in the same batch.");
