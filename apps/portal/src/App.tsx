@@ -4319,7 +4319,26 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     file:File;
     document:Promise<import("./customer-nup-preview").CustomerNupPreviewSource>|null;
   }|null>(null);
-  const browserNupRenderQueueRef=useRef<Promise<void>>(Promise.resolve());
+  // One active render plus one replaceable pending task: rapid page/settings
+  // changes never accumulate an unbounded queue of obsolete PDF jobs.
+  const browserNupRenderQueueRef=useRef<{
+    running:boolean;
+    pending:(()=>Promise<void>)|null;
+  }>({running:false,pending:null});
+  const enqueueBrowserNupRender=(task:()=>Promise<void>)=>{
+    const queue=browserNupRenderQueueRef.current;
+    queue.pending=task;
+    if(queue.running)return;
+    queue.running=true;
+    void (async()=>{
+      while(queue.pending){
+        const next=queue.pending;
+        queue.pending=null;
+        try{await next();}catch{/* Each task owns its visible error state. */}
+      }
+      queue.running=false;
+    })();
+  };
   const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>initialDraft?.uploaded??initialDraft?.uploadedBatch?.[0]??null);
   const [uploadedBatch,setUploadedBatch]=useState<UploadedPrintJob[]>(()=>initialDraft?.uploadedBatch??(initialDraft?.uploaded?[initialDraft.uploaded]:[]));
   const [uploadedFileFingerprints,setUploadedFileFingerprints]=useState<string[]>(()=>initialDraft?.uploadedFileFingerprints??[]);
@@ -4743,65 +4762,64 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       browserNupSourceCacheRef.current=sourceCache;
     }
 
-    const renderRequest=browserNupRenderQueueRef.current.catch(()=>undefined).then(async()=>{
-      if(cancelled)return;
-      const {loadCustomerNupPreviewSource,createCustomerNupPreviewFromDocument}=await import("./customer-nup-preview");
-      if(cancelled)return;
-      if(!sourceCache!.document){
-        const loadingDocument=(async()=>{
-          const sourceBytes=new Uint8Array(await file.arrayBuffer());
-          if(cancelled)throw new Error("PDF preview superseded.");
-          return loadCustomerNupPreviewSource(sourceBytes);
-        })();
-        // A cancelled/failed first parse must not poison the cached promise.
-        // Clear only this exact in-flight promise so a later request can retry;
-        // a newer parse for the same File is never accidentally cleared.
-        sourceCache!.document=loadingDocument;
-        void loadingDocument.catch(()=>{
-          if(sourceCache!.document===loadingDocument)sourceCache!.document=null;
+    enqueueBrowserNupRender(async()=>{
+      try{
+        if(cancelled)return;
+        const {loadCustomerNupPreviewSource,createCustomerNupPreviewFromDocument}=await import("./customer-nup-preview");
+        if(cancelled)return;
+        if(!sourceCache!.document){
+          const loadingDocument=(async()=>{
+            const sourceBytes=new Uint8Array(await file.arrayBuffer());
+            if(cancelled)throw new Error("PDF preview superseded.");
+            return loadCustomerNupPreviewSource(sourceBytes);
+          })();
+          // A cancelled/failed first parse must not poison the cached promise.
+          // Clear only this exact in-flight promise so a newer parse is preserved.
+          sourceCache!.document=loadingDocument;
+          void loadingDocument.catch(()=>{
+            if(sourceCache!.document===loadingDocument)sourceCache!.document=null;
+          });
+        }
+        const source=await sourceCache!.document;
+        if(cancelled)return;
+        const preview=await createCustomerNupPreviewFromDocument(source,{
+          pagesPerSheet,
+          paperSize:settings.paperSize,
+          orientation:settings.orientation,
+          pagesPerSheetDirection,
+          sheetIndex
         });
-      }
-      const sourceDocument=await sourceCache!.document;
-      if(cancelled)return;
-      const preview=await createCustomerNupPreviewFromDocument(sourceDocument,{
-        pagesPerSheet,
-        paperSize:settings.paperSize,
-        orientation:settings.orientation,
-        pagesPerSheetDirection,
-        sheetIndex
-      });
-      if(cancelled)return;
-      const outputBuffer=preview.bytes.buffer.slice(
-        preview.bytes.byteOffset,
-        preview.bytes.byteOffset+preview.bytes.byteLength
-      ) as ArrayBuffer;
-      generatedUrl=URL.createObjectURL(new Blob([outputBuffer],{type:"application/pdf"}));
-      setBrowserNupPreview({
-        url:generatedUrl,
-        sheetIndex:preview.sheetIndex,
-        sheetCount:preview.sheetCount,
-        pagesPerSheet,
-        pagesPerSheetDirection,
-        firstSourcePage:preview.firstSourcePage,
-        lastSourcePage:preview.lastSourcePage,
-        loading:false,
-        failed:false
-      });
-    });
-    browserNupRenderQueueRef.current=renderRequest.then(()=>undefined,()=>undefined);
-    void renderRequest.catch(()=>{
-      if(!cancelled){
+        if(cancelled)return;
+        const outputBuffer=preview.bytes.buffer.slice(
+          preview.bytes.byteOffset,
+          preview.bytes.byteOffset+preview.bytes.byteLength
+        ) as ArrayBuffer;
+        generatedUrl=URL.createObjectURL(new Blob([outputBuffer],{type:"application/pdf"}));
         setBrowserNupPreview({
-          url:"",
-          sheetIndex,
-          sheetCount:0,
+          url:generatedUrl,
+          sheetIndex:preview.sheetIndex,
+          sheetCount:preview.sheetCount,
           pagesPerSheet,
           pagesPerSheetDirection,
-          firstSourcePage:sheetIndex*pagesPerSheet+1,
-          lastSourcePage:(sheetIndex+1)*pagesPerSheet,
+          firstSourcePage:preview.firstSourcePage,
+          lastSourcePage:preview.lastSourcePage,
           loading:false,
-          failed:true
+          failed:false
         });
+      }catch{
+        if(!cancelled){
+          setBrowserNupPreview({
+            url:"",
+            sheetIndex,
+            sheetCount:0,
+            pagesPerSheet,
+            pagesPerSheetDirection,
+            firstSourcePage:sheetIndex*pagesPerSheet+1,
+            lastSourcePage:(sheetIndex+1)*pagesPerSheet,
+            loading:false,
+            failed:true
+          });
+        }
       }
     });
 
