@@ -428,7 +428,7 @@ function startBatchApiServer() {
       sendJson(200, session);
       return;
     }
-    const statusMatch = path.match(/^\\/api\\/v1\\/public\\/jobs\\/([0-9a-f-]+)\\/status$/i);
+    const statusMatch = path.match(/^\/api\/v1\/public\/jobs\/([0-9a-f-]+)\/status$/i);
     if (request.method === "GET" && statusMatch) {
       const job = metrics.jobsById.get(statusMatch[1]);
       if (!job) {
