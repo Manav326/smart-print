@@ -226,6 +226,7 @@ public sealed class WindowsPrintExecutor
         string? outputFilePath)
     {
         ValidatePrintOptions(entry);
+        var queueName = queueName!;
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
         if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase) &&
@@ -246,12 +247,12 @@ public sealed class WindowsPrintExecutor
         var docStarted = false;
         try
         {
-            if (!OpenPrinterW(entry.QueueName, out printer, IntPtr.Zero))
+            if (!OpenPrinterW(queueName, out printer, IntPtr.Zero))
                 throw Blocked("PRINTER_OPEN_FAILED", "Windows could not open the assigned printer queue.");
 
-            devMode = CreateDevMode(printer, entry.QueueName, entry,
+            devMode = CreateDevMode(printer, queueName, entry,
                 ResolveLandscape(entry.Orientation, raster.FirstPageLandscape));
-            dc = CreateDCW("WINSPOOL", entry.QueueName, null, devMode);
+            dc = CreateDCW("WINSPOOL", queueName, null, devMode);
             if (dc == IntPtr.Zero)
                 throw Blocked("PRINTER_CONTEXT_FAILED", "Windows could not create a print context for this printer.");
 
@@ -474,7 +475,7 @@ public sealed class WindowsPrintExecutor
         try
         {
             remainingJob = FindJobByDocumentName(
-                entry.QueueName ?? throw new InvalidOperationException("The Microsoft PDF queue name is missing."),
+                queueName ?? throw new InvalidOperationException("The Microsoft PDF queue name is missing."),
                 spoolerReceipt.DocumentName);
         }
         catch (Exception exception) when (exception is Win32Exception or UnauthorizedAccessException)
