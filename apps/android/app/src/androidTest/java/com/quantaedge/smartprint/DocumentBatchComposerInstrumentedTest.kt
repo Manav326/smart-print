@@ -3,8 +3,6 @@ package com.quantaedge.smartprint
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.test.core.app.ApplicationProvider
@@ -13,6 +11,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import java.io.File
 import java.io.FileOutputStream
@@ -154,6 +156,16 @@ class DocumentBatchComposerInstrumentedTest {
             val batchLimit = 50L * 1024L * 1024L
             padPdfWithWhitespace(source, batchLimit + 1024L * 1024L)
             assertTrue("The rotation fixture must exceed the print-batch limit.", source.length() > batchLimit)
+            PDDocument.load(source, com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()).use { sourcePdf ->
+                assertTrue(
+                    "The source fixture must contain selectable PDF text before rotation.",
+                    PDFTextStripper().getText(sourcePdf).contains("Source page 1")
+                )
+                assertTrue(
+                    "The second source page must contain selectable PDF text before rotation.",
+                    PDFTextStripper().getText(sourcePdf).contains("Source page 2")
+                )
+            }
 
             assertEquals(
                 2,
@@ -183,25 +195,25 @@ class DocumentBatchComposerInstrumentedTest {
         }
     }
 
+    /**
+     * Generate real PDF text operators. Android PdfDocument canvas text may be
+     * stored as glyph outlines, which is unsuitable for a selectable-text test.
+     */
     private fun createPdf(file: File, pages: Int) {
-        val document = PdfDocument()
-        try {
+        PDFBoxResourceLoader.init(context)
+        PDDocument().use { document ->
             repeat(pages) { index ->
-                val page = document.startPage(
-                    PdfDocument.PageInfo.Builder(420, 594, index + 1).create()
-                )
-                page.canvas.drawColor(if (index % 2 == 0) Color.WHITE else Color.LTGRAY)
-                page.canvas.drawText(
-                    "Source page ${index + 1}",
-                    36f,
-                    72f,
-                    Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 28f; color = Color.BLACK }
-                )
-                document.finishPage(page)
+                val page = PDPage(PDRectangle.A4)
+                document.addPage(page)
+                PDPageContentStream(document, page).use { content ->
+                    content.beginText()
+                    content.setFont(PDType1Font.HELVETICA, 28f)
+                    content.newLineAtOffset(36f, 760f)
+                    content.showText("Source page ${index + 1}")
+                    content.endText()
+                }
             }
-            FileOutputStream(file).use { document.writeTo(it) }
-        } finally {
-            document.close()
+            document.save(file)
         }
     }
 
