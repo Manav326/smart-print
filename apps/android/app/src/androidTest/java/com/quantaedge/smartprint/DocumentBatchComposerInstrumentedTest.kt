@@ -236,7 +236,7 @@ class DocumentBatchComposerInstrumentedTest {
 
     private fun readPageContent(file: File, pageIndex: Int): ByteArray {
         PDFBoxResourceLoader.init(context)
-        return PDDocument.load(file, MemoryUsageSetting.setupTempFileOnly()).use { document ->
+        return PDDocument.load(file, com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()).use { document ->
             (document.getPage(pageIndex).contents ?: error("Page content stream is missing.")).use { it.readBytes() }
         }
     }
