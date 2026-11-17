@@ -3809,6 +3809,187 @@ class MainActivity : AppCompatActivity() {
         content.addView(scroll, frameParams())
     }
 
+    /**
+     * Ask once when leaving the PDF, after all per-page rotations are accumulated.
+     * Copy and replace are separate, explicit choices. Discard never writes to disk.
+     */
+    private fun showPdfExitDecision(
+        source: File,
+        rotations: Map<Int, Int>,
+        afterExit: () -> Unit
+    ) {
+        if (rotations.isEmpty()) {
+            afterExit()
+            return
+        }
+        val changedPages = rotations.keys.sorted().joinToString(", ") { (it + 1).toString() }
+        val (dialog, root) = sheetRoot(
+            "Save PDF changes?",
+            "${rotations.size} page(s) rotated · Pages $changedPages. Choose how to keep these changes."
+        )
+        val status = text(
+            "The 50 MB print-batch limit does not apply to PDF rotation. Page content stays vector and is not rasterized.",
+            11,
+            R.color.qp_muted,
+            false
+        ).apply { setPadding(0, dp(4), 0, dp(9)) }
+        root.addView(status, linearParams())
+
+        fun addChoice(
+            title: String,
+            detail: String,
+            primary: Boolean = false,
+            destructive: Boolean = false,
+            action: () -> Unit
+        ) {
+            val card = MaterialCardView(this).apply {
+                radius = dp(13).toFloat()
+                strokeWidth = dp(1)
+                strokeColor = getColor(R.color.qp_outline)
+                setCardBackgroundColor(getColor(R.color.qp_card))
+                cardElevation = dp(1).toFloat()
+                isClickable = true
+                isFocusable = true
+                contentDescription = title
+            }
+            val body = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(13), dp(10), dp(13), dp(10))
+            }
+            body.addView(text(
+                title,
+                13,
+                if (destructive) R.color.qp_danger else if (primary) R.color.qp_primary else R.color.qp_text,
+                true
+            ))
+            body.addView(text(detail, 10, R.color.qp_muted, false).apply {
+                setPadding(0, dp(3), 0, 0)
+            })
+            card.addView(body)
+            card.setOnClickListener {
+                if (!isFinishing && !isDestroyed) action()
+            }
+            root.addView(card, linearParams().apply { bottomMargin = dp(7) })
+        }
+
+        addChoice(
+            "Save as a copy",
+            "Create a separate rotated PDF. The original remains unchanged.",
+            primary = true
+        ) {
+            dialog.dismiss()
+            saveRotatedPdfChanges(source, rotations, replaceOriginal = false, afterExit = afterExit)
+        }
+        addChoice(
+            "Update original PDF",
+            "Replace this PDF with the rotated pages. This changes the existing file.",
+            destructive = true
+        ) {
+            dialog.dismiss()
+            showConfirmSheet(
+                "Replace original PDF?",
+                "This permanently updates ${source.name}. SmartPrint validates the new PDF and stages a recovery backup before replacing the original.",
+                "Replace original",
+                destructive = true
+            ) {
+                saveRotatedPdfChanges(source, rotations, replaceOriginal = true, afterExit = afterExit)
+            }
+        }
+        addChoice(
+            "Discard changes",
+            "Leave the PDF exactly as it was before this editing session."
+        ) {
+            dialog.dismiss()
+            afterExit()
+            toast("PDF rotations discarded.")
+        }
+        root.addView(button("Continue editing", false).apply {
+            minHeight = dp(42)
+            setOnClickListener { dialog.dismiss() }
+        }, linearParams().apply { topMargin = dp(2) })
+        dialog.show()
+    }
+
+    /**
+     * PDFBox performs a disk-backed metadata rewrite. Existing PDF page streams,
+     * fonts and embedded images are not rendered into bitmaps or recompressed.
+     * The source remains untouched until the selected save action is complete.
+     */
+    private fun saveRotatedPdfChanges(
+        source: File,
+        rotations: Map<Int, Int>,
+        replaceOriginal: Boolean,
+        afterExit: () -> Unit
+    ) {
+        val output = File(cacheDir, "smartprint-rotated-${UUID.randomUUID()}.pdf")
+        toast(if (replaceOriginal) "Preparing the updated original PDF…" else "Preparing a high-quality PDF copy…")
+        Thread({
+            try {
+                val pageCount = DocumentBatchComposer.rotatePages(this, source, rotations, output)
+                require(output.isFile && output.length() > 0L && DocumentNamePolicy.isPdf(output)) {
+                    "The rotated PDF did not pass validation."
+                }
+
+                val result = if (replaceOriginal) {
+                    // Close the reader only after the new PDF has been fully generated;
+                    // the store stages and validates replacement bytes before the swap.
+                    runOnUiThreadAndWait { afterExit() }
+                    store.replacePdfContents(source, output)
+                    source
+                } else {
+                    val destination = source.parentFile?.let(store::pathOf).orEmpty()
+                    FileInputStream(output).use {
+                        store.importDerivedPdf(it, "${source.nameWithoutExtension}_rotated.pdf", destination)
+                    }
+                }
+
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        if (!replaceOriginal) afterExit()
+                        showFiles()
+                        toast(
+                            if (replaceOriginal) {
+                                "Updated ${result.name} · $pageCount pages. PDF quality preserved."
+                            } else {
+                                "Saved ${result.name} · $pageCount pages. Original unchanged."
+                            }
+                        )
+                    }
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        toast("Could not save PDF rotations: ${message(error)}. The original was not intentionally changed.")
+                    }
+                }
+            } finally {
+                output.delete()
+            }
+        }, "SmartPrint-PDF-rotation-save").start()
+    }
+
+    private fun runOnUiThreadAndWait(action: () -> Unit) {
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            action()
+            return
+        }
+        val completed = java.util.concurrent.CountDownLatch(1)
+        var failure: Throwable? = null
+        runOnUiThread {
+            try {
+                action()
+            } catch (error: Throwable) {
+                failure = error
+            } finally {
+                completed.countDown()
+            }
+        }
+        check(completed.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+            "SmartPrint could not safely close the PDF reader before replacing the original."
+        }
+        failure?.let { throw it }
+    }
+
     private fun savePdfEdits(source: File, edits: List<PdfPageEdit>) {
         val output = File(cacheDir, "SmartPrint-edited-${System.currentTimeMillis()}.pdf")
         val destinationPath = source.parentFile?.let { store.pathOf(it) }.orEmpty()
@@ -6979,7 +7160,12 @@ class MainActivity : AppCompatActivity() {
                 viewingDocument = null
                 this@MainActivity.folderPath = destination
                 showFiles()
-            }
+            },
+            onResolvePendingPdfChanges = if (!isPreparedId && documentMimeType == "application/pdf") {
+                { source, rotations, afterExit ->
+                    showPdfExitDecision(source, rotations, afterExit)
+                }
+            } else null
         )
         documentViewer = reader
         if (isPreparedId) {
@@ -7264,6 +7450,12 @@ class MainActivity : AppCompatActivity() {
         runCatching { left.canonicalPath == right.canonicalPath }.getOrDefault(false)
 
     private fun closeDocumentViewer() {
+        val reader = documentViewer ?: return
+        reader.requestExit { finishCloseDocumentViewer(reader) }
+    }
+
+    private fun finishCloseDocumentViewer(expectedReader: SmartPrintDocumentViewer? = null) {
+        if (expectedReader != null && documentViewer !== expectedReader) return
         documentViewer?.dispose()
         documentViewer = null
         viewingDocument = null
