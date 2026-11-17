@@ -161,8 +161,8 @@ object DocumentBatchComposer {
         require(source.isFile && DocumentNamePolicy.isPdf(source)) {
             "Choose a saved PDF document."
         }
-        require(source.length() in 1..MAX_EDIT_SOURCE_BYTES) {
-            "The source PDF must be no larger than 100 MB."
+        require(source.length() > 0L) {
+            "The source PDF is empty."
         }
         require(rotations.isNotEmpty() && rotations.size <= MAX_PAGES) {
             "Select at least one rotated page."
@@ -190,9 +190,13 @@ object DocumentBatchComposer {
                     val page = document.getPage(index)
                     page.rotation = ((page.rotation + degrees) % 360 + 360) % 360
                 }
+                // The operation changes page rotation metadata only. It does not
+                // render or re-encode PDF text, vector paths, fonts or embedded images.
+                // PDFBox uses disk-backed scratch files; free storage, not a print
+                // batch size ceiling, bounds this derived-document operation.
                 document.save(output)
-                require(output.length() in 1..MAX_EDIT_SOURCE_BYTES) {
-                    "The updated PDF exceeds the 100 MB document limit."
+                require(output.isFile && output.length() > 0L && DocumentNamePolicy.isPdf(output)) {
+                    "The rotated PDF could not be validated."
                 }
                 return document.numberOfPages
             }
