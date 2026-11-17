@@ -64,7 +64,7 @@ public sealed class PublicDownloadServiceTests
     [InlineData("https://downloads.smartprint.example/path")]
     [InlineData("https://user:password@downloads.smartprint.example")]
     [InlineData("https://downloads.smartprint.example?token=secret")]
-    public async Task StatusRejectsUnsafeConfiguredDownloadOrigins(string downloadBaseUrl)
+    public async Task StatusDisablesUnsafeConfiguredDownloadOriginsAndKeepsApiFallback(string downloadBaseUrl)
     {
         var handler = new QueueMessageHandler(
             _ => JsonResponse("""
@@ -76,8 +76,8 @@ public sealed class PublicDownloadServiceTests
 
         var service = CreateService(handler, downloadBaseUrl);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(
-            () => service.GetStatusAsync(CancellationToken.None));
+        var status = await service.GetStatusAsync(CancellationToken.None);
+        Assert.Null(status.DownloadBaseUrl);
     }
 
     [Fact]
