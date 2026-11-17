@@ -3233,7 +3233,7 @@ class MainActivity : AppCompatActivity() {
             } else {
                 "PDF pages are kept as vector content; photos are fitted to A4. Combined source limit: 50 MB and 500 pages."
             }
-            column.addView(text(combineHint, 10, if (overCombinedLimit) R.color.qp_error else R.color.qp_muted, false)
+            column.addView(text(combineHint, 10, if (overCombinedLimit) R.color.qp_danger else R.color.qp_muted, false)
                 .apply { setPadding(dp(2), 0, 0, dp(6)) })
         }
 
