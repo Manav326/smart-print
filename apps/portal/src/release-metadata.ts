@@ -16,7 +16,7 @@ export function getPublicDownloadPath(
 ): string {
   if (!version) return `/downloads/${platform}`;
   const assetName = platform === "windows" ? "SmartPrint-Windows-Setup.exe" : "SmartPrint-Android.apk";
-  const baseUrl = downloadBaseUrl?.trim().replace(/\\/+$/, "");
+  const baseUrl = downloadBaseUrl?.trim().replace(/\/+$/, "");
   if (baseUrl) {
     return `${baseUrl}/${encodeURIComponent(version)}/${encodeURIComponent(assetName)}`;
   }
