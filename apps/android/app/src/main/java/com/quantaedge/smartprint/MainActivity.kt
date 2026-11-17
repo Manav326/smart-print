@@ -6943,11 +6943,12 @@ class MainActivity : AppCompatActivity() {
             }.orEmpty()
             (if (siblings.any { sameDocument(it, documentFile) }) siblings else siblings + documentFile)
         }
-        val documentFolderPath = if (isPreparedId) "" else
-            documentFile.parentFile?.let { store.pathOf(it) }.orEmpty()
-        val documentBreadcrumbs = mutableListOf("My Files" to "")
+        val documentFolderPath = if (isPreparedId) null else
+            documentFile.parentFile?.let { folder -> runCatching { store.pathOf(folder) }.getOrNull() }
+        val documentBreadcrumbs = mutableListOf<Pair<String, String>>()
+        if (documentFolderPath != null) documentBreadcrumbs += "My Files" to ""
         var breadcrumbPath = ""
-        documentFolderPath.split('/').filter { it.isNotBlank() }.forEach { segment ->
+        documentFolderPath?.split('/')?.filter { it.isNotBlank() }?.forEach { segment ->
             breadcrumbPath = if (breadcrumbPath.isBlank()) segment else "$breadcrumbPath/$segment"
             documentBreadcrumbs += segment to breadcrumbPath
         }
@@ -6961,7 +6962,7 @@ class MainActivity : AppCompatActivity() {
                 viewingDocument = current
                 setToolbarPage(if (isPreparedId) "ID card preview" else current.name)
             },
-            folderBreadcrumbs = if (isPreparedId) emptyList() else documentBreadcrumbs,
+            folderBreadcrumbs = documentBreadcrumbs,
             onNavigateFolder = { destination ->
                 documentViewer?.dispose()
                 documentViewer = null
