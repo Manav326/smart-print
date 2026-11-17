@@ -352,10 +352,11 @@ class MainActivityInstrumentedTest {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
                     val viewer = SmartPrintDocumentViewer(
-                        activity,
-                        firstImage,
-                        listOf(firstImage, secondImage),
-                        0
+                        context = activity,
+                        startFile = firstImage,
+                        imageSiblings = listOf(firstImage, secondImage),
+                        startPosition = 0,
+                        onNavigateImage = {}
                     ) {}
                     try {
                         val counterField = SmartPrintDocumentViewer::class.java
