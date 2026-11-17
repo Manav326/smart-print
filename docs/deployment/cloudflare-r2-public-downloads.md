@@ -8,8 +8,32 @@ The existing same-origin API/GitHub release route remains the fallback. Do not p
 
 1. Create a dedicated R2 bucket, for example `smartprint-public-downloads`. Do not reuse a bucket containing unrelated or private objects: the release workflow applies the bucket's CORS policy for the public SmartPrint portal.
 2. In the bucket's **Settings → Public access → Custom Domains**, connect a hostname such as `downloads.smartprint.example` from a zone in the same Cloudflare account. Wait until the custom domain is active. Do not use the `r2.dev` development URL; it does not provide Cloudflare cache, WAF or bot-management features.
-3. Create an R2 S3 API token scoped to this bucket with object read/write permission. Store its access key and secret as GitHub Actions secrets. Never store them in `.env`, source control, a browser bundle, or the SmartPrint API container.
-4. The release workflow applies a bucket CORS policy restricted to `SMARTPRINT_PUBLIC_BASE_URL` for GET/HEAD, and exposes the content-length/range/ETag headers needed by the browser's progress and validation logic. This is why the R2 bucket must be dedicated to SmartPrint public release files.
+3. In the bucket's **Settings → CORS Policy**, add this one-time policy. Replace the example origin with the exact `SMARTPRINT_PUBLIC_BASE_URL` origin. The policy is intentionally restricted to browser reads from the SmartPrint portal:
+   
+   ```json
+   {
+     "rules": [
+       {
+         "allowed": {
+           "origins": ["https://smartprint.example"],
+           "methods": ["GET", "HEAD"],
+           "headers": ["Accept", "Range", "If-Range"]
+         },
+         "exposeHeaders": [
+           "Accept-Ranges",
+           "Content-Length",
+           "Content-Range",
+           "Content-Disposition",
+           "ETag",
+           "Last-Modified",
+           "CF-Cache-Status"
+         ],
+         "maxAgeSeconds": 86400
+       }
+     ]
+   }
+   ```
+4. Create an R2 S3 API token scoped to this bucket with **Object Read & Write** permission. Store its access key and secret as GitHub Actions secrets. Never store them in `.env`, source control, a browser bundle, or the SmartPrint API container. The GitHub token intentionally has object-only scope; it cannot change bucket configuration.
 
 Cloudflare references:
 - R2 custom domains and cache: https://developers.cloudflare.com/cache/interaction-cloudflare-products/r2/
@@ -34,13 +58,13 @@ Set these repository **Actions secrets**:
 | `CLOUDFLARE_R2_ACCESS_KEY_ID` | R2 S3 access key ID |
 | `CLOUDFLARE_R2_SECRET_ACCESS_KEY` | R2 S3 secret access key |
 
-The R2 variables and both secrets are an all-or-nothing configuration. If all are empty, release publication continues to GitHub Releases and the current API proxy remains the customer download origin. If only some are set, the release workflow fails rather than silently publishing a partially configured R2 release.
+The bucket CORS policy is configured once in the Cloudflare dashboard; the release workflow does not modify bucket settings. The R2 variables and both secrets are an all-or-nothing configuration. If all are empty, release publication continues to GitHub Releases and the current API proxy remains the customer download origin. If only some are set, the release workflow fails rather than silently publishing a partially configured R2 release.
 
 When configured, the workflow:
 - Rechecks the local SHA-256 checksums and GitHub draft asset sizes/digests.
 - Uploads objects at `<tag>/<filename>`, for example `v1.2.3/SmartPrint-Windows-Setup.exe`.
 - Sets a one-year immutable cache policy, attachment filename and SHA-256 object metadata.
-- Configures the dedicated bucket's CORS policy for the portal origin.
+- Verifies the preconfigured bucket CORS policy through the public custom domain.
 - Checks R2 object size, SHA-256 metadata and cache policy.
 - Probes each public custom-domain object with a one-byte Range request and validates HTTP 206, CORS, Content-Range and immutable cache headers.
 - Publishes the GitHub Release only after the configured R2 delivery path passes its checks.
