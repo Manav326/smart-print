@@ -37,10 +37,12 @@ data class PdfPageEdit(val sourceIndex: Int, val rotationDegrees: Int = 0)
  */
 object DocumentBatchComposer {
     const val MAX_SOURCE_BYTES = 50L * 1024L * 1024L
+    private const val MAX_EDIT_SOURCE_BYTES = 100L * 1024L * 1024L
     const val MAX_PRINT_PDF_BYTES = UploadLimits.MAX_FILE_BYTES
     const val MAX_PAGES = 500
     private const val MAX_RENDER_EDGE = 2000
     private const val MAX_COMBINE_IMAGE_EDGE = 2400
+    private const val MAX_COMBINE_IMAGE_PIXELS = 50_000_000L
     private const val PAGE_WIDTH = 595
     private const val PAGE_HEIGHT = 842
     private const val PAGE_MARGIN = 20f
@@ -62,8 +64,8 @@ object DocumentBatchComposer {
         require(source.isFile && DocumentNamePolicy.isPdf(source)) {
             "Choose a saved PDF document."
         }
-        require(source.length() in 1..MAX_SOURCE_BYTES) {
-            "The source PDF must be no larger than 50 MB."
+        require(source.length() in 1..MAX_EDIT_SOURCE_BYTES) {
+            "The source PDF must be no larger than 100 MB."
         }
         ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
             PdfRenderer(descriptor).use { renderer ->
@@ -154,8 +156,8 @@ object DocumentBatchComposer {
         require(source.isFile && DocumentNamePolicy.isPdf(source)) {
             "Choose a saved PDF document."
         }
-        require(source.length() in 1..MAX_SOURCE_BYTES) {
-            "The source PDF must be no larger than 50 MB."
+        require(source.length() in 1..MAX_EDIT_SOURCE_BYTES) {
+            "The source PDF must be no larger than 100 MB."
         }
         require(edits.isNotEmpty() && edits.size <= MAX_PAGES) {
             "Keep between 1 and $MAX_PAGES pages in the edited PDF."
@@ -229,12 +231,14 @@ object DocumentBatchComposer {
         try {
             PDDocument(MemoryUsageSetting.setupTempFileOnly()).use { document ->
                 val image = when (DocumentNamePolicy.mimeType(imageFile)) {
-                    "image/jpeg" -> PDImageXObject.createFromFileByContent(imageFile, document)
+                    "image/jpeg" -> {
+                        validateJpegForCombine(imageFile)
+                        PDImageXObject.createFromFileByContent(imageFile, document)
+                    }
                     "image/png" -> {
-                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
-                        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
-                            "Could not read image dimensions for ${imageFile.name}."
+                        val bounds = readCombineImageBounds(imageFile)
+                        require(bounds.outWidth.toLong() * bounds.outHeight.toLong() <= MAX_COMBINE_IMAGE_PIXELS) {
+                            "The image ${imageFile.name} exceeds the 50-megapixel image limit."
                         }
                         var sample = 1
                         while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > MAX_COMBINE_IMAGE_EDGE) {
@@ -282,6 +286,37 @@ object DocumentBatchComposer {
             temporaryPdf.delete()
             throw error
         }
+    }
+
+    private fun readCombineImageBounds(imageFile: File): BitmapFactory.Options {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+            "Could not read image dimensions for ${imageFile.name}."
+        }
+        return bounds
+    }
+
+    /**
+     * JPEG bytes remain compressed and are embedded without re-encoding, but a
+     * small sampled decode first validates that the source is decodable and
+     * enforces the same pixel ceiling as the upload analyzer.
+     */
+    private fun validateJpegForCombine(imageFile: File) {
+        val bounds = readCombineImageBounds(imageFile)
+        require(bounds.outWidth.toLong() * bounds.outHeight.toLong() <= MAX_COMBINE_IMAGE_PIXELS) {
+            "The image ${imageFile.name} exceeds the 50-megapixel image limit."
+        }
+        var sample = 1
+        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > 256) sample *= 2
+        val validationBitmap = BitmapFactory.decodeFile(
+            imageFile.absolutePath,
+            BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+        ) ?: error("Could not decode ${imageFile.name}.")
+        validationBitmap.recycle()
     }
 
     private fun formatMegabytes(bytes: Long): String =
