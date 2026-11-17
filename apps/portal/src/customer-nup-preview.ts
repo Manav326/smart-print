@@ -21,8 +21,38 @@ export type CustomerNupPreviewResult = {
  * as the Android preview. It never replaces or mutates the uploaded PDF; the
  * untouched source file remains the payload sent to the Windows print driver.
  */
+/**
+ * Parse the selected source PDF once. Callers may retain this document for the
+ * currently selected File and reuse it for sheet navigation or print-setting
+ * changes; they should drop it as soon as that File is no longer selected.
+ */
+export async function loadCustomerNupPreviewSource(
+  sourceBytes: Uint8Array
+): Promise<PdfDocumentType> {
+  const { PDFDocument } = await import("pdf-lib");
+  const sourceDocument: PdfDocumentType = await PDFDocument.load(sourceBytes);
+  const pageCount = sourceDocument.getPageCount();
+  if (pageCount < 1 || pageCount > 500) {
+    throw new RangeError("PDFs must contain between 1 and 500 pages.");
+  }
+  return sourceDocument;
+}
+
+/** Backwards-compatible one-shot helper used by tests and other preview callers. */
 export async function createCustomerNupPreview(
   sourceBytes: Uint8Array,
+  options: CustomerNupPreviewOptions
+): Promise<CustomerNupPreviewResult> {
+  const sourceDocument = await loadCustomerNupPreviewSource(sourceBytes);
+  return createCustomerNupPreviewFromDocument(sourceDocument, options);
+}
+
+/**
+ * Reuses an already parsed source PDF while producing one visual-only output
+ * sheet. Only the selected source pages are embedded into the new preview PDF.
+ */
+export async function createCustomerNupPreviewFromDocument(
+  sourceDocument: PdfDocumentType,
   options: CustomerNupPreviewOptions
 ): Promise<CustomerNupPreviewResult> {
   if (options.pagesPerSheet < 2 || options.pagesPerSheet > 500 ||
@@ -34,7 +64,6 @@ export async function createCustomerNupPreview(
   }
 
   const { PDFDocument, StandardFonts, rgb, degrees } = await import("pdf-lib");
-  const sourceDocument: PdfDocumentType = await PDFDocument.load(sourceBytes);
   const sourcePages = sourceDocument.getPages();
   if (sourcePages.length < 1 || sourcePages.length > 500) {
     throw new RangeError("PDFs must contain between 1 and 500 pages.");
