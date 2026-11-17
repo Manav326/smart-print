@@ -70,7 +70,110 @@ public sealed class WindowsPrintExecutor
     });
 
     public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, byte[] bytes, CancellationToken cancellationToken) =>
-        PrintCore(entry, bytes, cancellationToken, outputFilePath: null);
+        PrintBytes(entry, bytes, cancellationToken, outputFilePath: null);
+
+    /// <summary>
+    /// Opens a protected local PDF through PDFium random-access callbacks. QSP2 records
+    /// are authenticated only when requested, so a large encrypted document is never
+    /// copied into a second whole-file buffer for physical printing.
+    /// </summary>
+    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, Stream documentStream, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(documentStream);
+        if (documentStream is Qsp2DocumentReadStream qsp2 &&
+            string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+            return PrintQsp2Pdf(entry, qsp2, cancellationToken);
+
+        if (!documentStream.CanRead || !documentStream.CanSeek ||
+            entry.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
+            documentStream.Length != entry.SizeBytes)
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_STREAM_INVALID",
+                "The local document stream does not match the verified upload.");
+
+        var bytes = GC.AllocateUninitializedArray<byte>(checked((int)entry.SizeBytes));
+        try
+        {
+            documentStream.Position = 0;
+            var offset = 0;
+            while (offset < bytes.Length)
+            {
+                var read = documentStream.Read(bytes, offset, bytes.Length - offset);
+                if (read <= 0)
+                    throw new PrintExecutionBlockedException(
+                        "LOCAL_DOCUMENT_STREAM_INCOMPLETE",
+                        "The local document stream ended before the verified upload was complete.");
+                offset += read;
+            }
+            return PrintBytes(entry, bytes, cancellationToken, outputFilePath: null);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+        }
+    }
+
+    private SpoolerPrintReceipt PrintQsp2Pdf(
+        AgentLocalQueueEntry entry,
+        Qsp2DocumentReadStream documentStream,
+        CancellationToken cancellationToken)
+    {
+        EnsureWindowsPrintTarget(entry);
+        if (documentStream.Length != entry.SizeBytes ||
+            !Sha256Matches(entry.Sha256, documentStream.Sha256))
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                "The authenticated QSP2 document does not match the verified upload.");
+
+        using var raster = new PdfRasterDocument(documentStream, entry.ColourMode == "Mono");
+        return PrintCore(entry, raster, cancellationToken, outputFilePath: null);
+    }
+
+    private SpoolerPrintReceipt PrintBytes(
+        AgentLocalQueueEntry entry,
+        byte[] bytes,
+        CancellationToken cancellationToken,
+        string? outputFilePath)
+    {
+        EnsureWindowsPrintTarget(entry);
+        if (bytes.LongLength != entry.SizeBytes || !Sha256Matches(entry.Sha256, Convert.ToHexString(SHA256.HashData(bytes))))
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                "The local document does not match the verified upload.");
+
+        return PrintCore(entry, raster, cancellationToken, outputFilePath);
+    }
+
+    private static void EnsureWindowsPrintTarget(AgentLocalQueueEntry entry)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PrintExecutionBlockedException("WINDOWS_REQUIRED", "Physical printing is available only on the Windows Print Agent.");
+        if (string.IsNullOrWhiteSpace(entry.QueueName))
+            throw new PrintExecutionBlockedException("PRINTER_QUEUE_MISSING", "The assigned Windows printer queue name is missing.");
+    }
+
+    private static bool Sha256Matches(string expectedHex, string actualHex)
+    {
+        byte[]? expected = null;
+        byte[]? actual = null;
+        try
+        {
+            if (expectedHex.Length != 64 || actualHex.Length != 64)
+                return false;
+            expected = Convert.FromHexString(expectedHex);
+            actual = Convert.FromHexString(actualHex);
+            return CryptographicOperations.FixedTimeEquals(expected, actual);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (expected is not null) CryptographicOperations.ZeroMemory(expected);
+            if (actual is not null) CryptographicOperations.ZeroMemory(actual);
+        }
+    }
 
     /// <summary>
     /// Submits a real Windows GDI print job to the selected printer queue, directing
@@ -94,12 +197,12 @@ public sealed class WindowsPrintExecutor
             ?? throw new ArgumentException("The output path must include a directory.", nameof(outputFilePath));
         Directory.CreateDirectory(outputDirectory);
 
-        return PrintCore(entry, bytes, cancellationToken, fullOutputPath);
+        return PrintBytes(entry, bytes, cancellationToken, fullOutputPath);
     }
 
     private SpoolerPrintReceipt PrintCore(
         AgentLocalQueueEntry entry,
-        byte[] bytes,
+        IRasterDocument raster,
         CancellationToken cancellationToken,
         string? outputFilePath)
     {
@@ -107,10 +210,6 @@ public sealed class WindowsPrintExecutor
             throw new PrintExecutionBlockedException("WINDOWS_REQUIRED", "Physical printing is available only on the Windows Print Agent.");
         if (string.IsNullOrWhiteSpace(entry.QueueName))
             throw new PrintExecutionBlockedException("PRINTER_QUEUE_MISSING", "The assigned Windows printer queue name is missing.");
-        if (bytes.LongLength != entry.SizeBytes ||
-            !CryptographicOperations.FixedTimeEquals(SHA256.HashData(bytes), Convert.FromHexString(entry.Sha256)))
-            throw new PrintExecutionBlockedException("LOCAL_DOCUMENT_INTEGRITY_MISMATCH", "The local document does not match the verified upload.");
-
         // Defense in depth: public API validation is not a substitute for validating
         // persisted or locally replayed queue metadata at the final print boundary.
         if (entry.PagesPerSheet is < 1 or > 500)
@@ -1142,39 +1241,107 @@ public sealed class WindowsPrintExecutor
 
     private sealed class PdfRasterDocument : IRasterDocument
     {
-        private readonly IntPtr documentMemory;
-        private readonly int documentMemoryLength;
-        private readonly FpdfDocumentT document;
+        private IntPtr documentMemory;
+        private int documentMemoryLength;
+        private FpdfDocumentT? document;
         private readonly bool mono;
+        private FPDF_FILEACCESS? fileAccess;
+        private GCHandle streamContextHandle;
+        private PDFiumCore.Delegates.Func_int___IntPtr_ulong_bytePtr_ulong? streamReadCallback;
+
         public PdfRasterDocument(byte[] bytes, bool mono)
         {
             _ = PdfiumInitialized.Value;
+            this.mono = mono;
             documentMemoryLength = bytes.Length;
             documentMemory = Marshal.AllocHGlobal(documentMemoryLength);
             Marshal.Copy(bytes, 0, documentMemory, documentMemoryLength);
-            this.mono = mono;
             document = fpdfview.FPDF_LoadMemDocument64(documentMemory, (ulong)bytes.Length, string.Empty);
             if (document is null)
             {
-                Marshal.FreeHGlobal(documentMemory);
-                throw new PrintExecutionBlockedException("PDF_RENDER_OPEN_FAILED", $"PDFium could not open the PDF (error {fpdfview.FPDF_GetLastError()}).");
+                ClearAndFreeDocumentMemory();
+                throw new PrintExecutionBlockedException(
+                    "PDF_RENDER_OPEN_FAILED",
+                    $"PDFium could not open the PDF (error {fpdfview.FPDF_GetLastError()}).");
             }
-            HasDigitalSignatures = fpdf_signature.FPDF_GetSignatureCount(document) != 0;
-            HasInteractiveForms = fpdf_formfill.FPDF_GetFormType(document) != 0;
-            PageCount = fpdfview.FPDF_GetPageCount(document);
-            if (PageCount is <= 0 or > 500)
+
+            try
             {
-                fpdfview.FPDF_CloseDocument(document);
-                Marshal.FreeHGlobal(documentMemory);
-                throw new PrintExecutionBlockedException("PDF_PAGE_COUNT_INVALID", "The PDF page count is not supported.");
+                InitializeMetadata();
             }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        public PdfRasterDocument(Qsp2DocumentReadStream stream, bool mono)
+        {
+            _ = PdfiumInitialized.Value;
+            if (stream.Length is <= 0 or > UploadLimits.MaxFileBytes)
+                throw new PrintExecutionBlockedException(
+                    "PDF_RENDER_OPEN_FAILED",
+                    "The authenticated PDF stream has an unsupported size.");
+
+            this.mono = mono;
+            var context = new PdfiumStreamAccessContext(stream);
+            var contextHandle = GCHandle.Alloc(context, GCHandleType.Normal);
+            var access = new FPDF_FILEACCESS();
+            var callback = new PDFiumCore.Delegates.Func_int___IntPtr_ulong_bytePtr_ulong(ReadPdfiumStreamBlock);
+            FpdfDocumentT? loadedDocument;
+            try
+            {
+                access.MFileLen = checked((ulong)stream.Length);
+                access.MParam = GCHandle.ToIntPtr(contextHandle);
+                access.MGetBlock = callback;
+                loadedDocument = fpdfview.FPDF_LoadCustomDocument(access, string.Empty);
+                if (loadedDocument is null)
+                    throw new PrintExecutionBlockedException(
+                        "PDF_RENDER_OPEN_FAILED",
+                        $"PDFium could not open the authenticated QSP2 stream (error {fpdfview.FPDF_GetLastError()}).");
+            }
+            catch
+            {
+                access.Dispose();
+                if (contextHandle.IsAllocated)
+                    contextHandle.Free();
+                throw;
+            }
+
+            document = loadedDocument;
+            fileAccess = access;
+            streamContextHandle = contextHandle;
+            streamReadCallback = callback;
+            try
+            {
+                InitializeMetadata();
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        public int PageCount { get; private set; }
+        public bool FirstPageLandscape { get; private set; }
+        public bool HasDigitalSignatures { get; private set; }
+        public bool HasInteractiveForms { get; private set; }
+
+        private void InitializeMetadata()
+        {
+            var activeDocument = document
+                ?? throw new PrintExecutionBlockedException("PDF_RENDER_OPEN_FAILED", "PDFium did not retain the opened document.");
+            HasDigitalSignatures = fpdf_signature.FPDF_GetSignatureCount(activeDocument) != 0;
+            HasInteractiveForms = fpdf_formfill.FPDF_GetFormType(activeDocument) != 0;
+            PageCount = fpdfview.FPDF_GetPageCount(activeDocument);
+            if (PageCount is <= 0 or > 500)
+                throw new PrintExecutionBlockedException("PDF_PAGE_COUNT_INVALID", "The PDF page count is not supported.");
             using var page = LoadPage(0);
             FirstPageLandscape = fpdfview.FPDF_GetPageWidthF(page.Value) > fpdfview.FPDF_GetPageHeightF(page.Value);
         }
-        public int PageCount { get; }
-        public bool FirstPageLandscape { get; }
-        public bool HasDigitalSignatures { get; }
-        public bool HasInteractiveForms { get; }
+
         public RasterPage RenderPage(int pageIndex, int dpi)
         {
             using var page = LoadPage(pageIndex);
@@ -1203,17 +1370,91 @@ public sealed class WindowsPrintExecutor
             }
             finally { fpdfview.FPDFBitmapDestroy(bitmap); }
         }
+
         public void Dispose()
         {
-            fpdfview.FPDF_CloseDocument(document);
-            Marshal.Copy(new byte[documentMemoryLength], 0, documentMemory, documentMemoryLength);
-            Marshal.FreeHGlobal(documentMemory);
+            if (document is not null)
+            {
+                fpdfview.FPDF_CloseDocument(document);
+                document = null;
+            }
+
+            ClearAndFreeDocumentMemory();
+            fileAccess?.Dispose();
+            fileAccess = null;
+            if (streamContextHandle.IsAllocated)
+                streamContextHandle.Free();
+            streamReadCallback = null;
         }
+
+        private void ClearAndFreeDocumentMemory()
+        {
+            if (documentMemory == IntPtr.Zero)
+                return;
+            unsafe
+            {
+                new Span<byte>((void*)documentMemory, documentMemoryLength).Clear();
+            }
+            Marshal.FreeHGlobal(documentMemory);
+            documentMemory = IntPtr.Zero;
+            documentMemoryLength = 0;
+        }
+
         private LoadedPage LoadPage(int index)
         {
-            var page = fpdfview.FPDF_LoadPage(document, index);
+            var activeDocument = document
+                ?? throw new ObjectDisposedException(nameof(PdfRasterDocument));
+            var page = fpdfview.FPDF_LoadPage(activeDocument, index);
             if (page is null) throw new PrintExecutionBlockedException("PDF_PAGE_LOAD_FAILED", $"Could not load PDF page {index + 1}.");
             return new LoadedPage(page);
+        }
+    }
+
+    private sealed class PdfiumStreamAccessContext(Qsp2DocumentReadStream stream)
+    {
+        public Qsp2DocumentReadStream Stream { get; } = stream;
+        public object Sync { get; } = new();
+    }
+
+    private static unsafe int ReadPdfiumStreamBlock(IntPtr parameter, ulong position, byte* destination, ulong size)
+    {
+        if (parameter == IntPtr.Zero)
+            return 0;
+        if (size == 0)
+            return 1;
+        if (destination == null || size > int.MaxValue)
+            return 0;
+
+        try
+        {
+            var handle = GCHandle.FromIntPtr(parameter);
+            if (handle.Target is not PdfiumStreamAccessContext context)
+                return 0;
+
+            lock (context.Sync)
+            {
+                var stream = context.Stream;
+                var length = checked((ulong)stream.Length);
+                if (position > length || size > length - position)
+                    return 0;
+
+                stream.Position = checked((long)position);
+                var output = new Span<byte>(destination, checked((int)size));
+                var offset = 0;
+                while (offset < output.Length)
+                {
+                    var read = stream.Read(output[offset..]);
+                    if (read <= 0)
+                        return 0;
+                    offset += read;
+                }
+            }
+            return 1;
+        }
+        catch (Exception)
+        {
+            // No managed exception may cross the unmanaged PDFium callback boundary.
+            return 0;
         }
     }
 
