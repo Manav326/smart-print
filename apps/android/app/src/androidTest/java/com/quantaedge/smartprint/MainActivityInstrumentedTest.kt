@@ -357,7 +357,7 @@ class MainActivityInstrumentedTest {
                         imageSiblings = listOf(firstImage, secondImage),
                         startPosition = 0,
                         onNavigateImage = {}
-                    ) {}
+                    )
                     try {
                         val counterField = SmartPrintDocumentViewer::class.java
                             .getDeclaredField("pageCounter")
