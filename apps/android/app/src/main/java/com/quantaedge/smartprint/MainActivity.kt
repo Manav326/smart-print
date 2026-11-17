@@ -6994,6 +6994,9 @@ class MainActivity : AppCompatActivity() {
                     val buffer = ByteArray(64 * 1024)
                     var total = 0L
                     while (true) {
+                        check(!Thread.currentThread().isInterrupted) {
+                            "PDF preview preparation was cancelled."
+                        }
                         val count = input.read(buffer)
                         if (count < 0) break
                         total += count
