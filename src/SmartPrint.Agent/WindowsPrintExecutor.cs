@@ -226,7 +226,7 @@ public sealed class WindowsPrintExecutor
         string? outputFilePath)
     {
         ValidatePrintOptions(entry);
-        var queueName = queueName!;
+        var queueName = entry.QueueName!;
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
         if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase) &&
@@ -475,7 +475,7 @@ public sealed class WindowsPrintExecutor
         try
         {
             remainingJob = FindJobByDocumentName(
-                queueName ?? throw new InvalidOperationException("The Microsoft PDF queue name is missing."),
+                entry.QueueName ?? throw new InvalidOperationException("The Microsoft PDF queue name is missing."),
                 spoolerReceipt.DocumentName);
         }
         catch (Exception exception) when (exception is Win32Exception or UnauthorizedAccessException)
