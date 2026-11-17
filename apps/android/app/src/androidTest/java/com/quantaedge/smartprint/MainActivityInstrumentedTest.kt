@@ -1757,7 +1757,7 @@ class QrScannerPermissionInstrumentedTest {
                         .apply { isAccessible = true }.invoke(activity)
                 }
                 onView(withText("Move")).perform(click())
-                onView(withText("My Files  /  ${destination.name}")).perform(click())
+                onView(withText("My Files  /  ${destination.name}")).perform(scrollTo(), click())
                 assertTrue(File(destination, first.name).isFile)
                 assertTrue(File(destination, second.name).isFile)
                 assertFalse(first.exists())
