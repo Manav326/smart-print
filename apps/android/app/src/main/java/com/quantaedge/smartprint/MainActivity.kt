@@ -3908,13 +3908,13 @@ class MainActivity : AppCompatActivity() {
             primary = true
         ) {
             dialog.dismiss()
-            val (progressDialog, progressText) = showPdfSaveProgressSheet(
+            val progressDialog = showPdfSaveProgressSheet(
                 "Saving a separate PDF copy",
                 "Creating a high-quality copy. The original remains unchanged."
             )
             saveRotatedPdfChanges(
                 source, rotations, replaceOriginal = false, afterExit = afterExit,
-                progressDialog = progressDialog, progressText = progressText
+                progressDialog = progressDialog
             )
         }
         addChoice(
@@ -3929,13 +3929,13 @@ class MainActivity : AppCompatActivity() {
                 "Replace original",
                 destructive = true
             ) {
-                val (progressDialog, progressText) = showPdfSaveProgressSheet(
+                val progressDialog = showPdfSaveProgressSheet(
                     "Updating the original PDF",
                     "Applying page rotations without rasterizing document content."
                 )
                 saveRotatedPdfChanges(
                     source, rotations, replaceOriginal = true, afterExit = afterExit,
-                    progressDialog = progressDialog, progressText = progressText
+                    progressDialog = progressDialog
                 )
             }
         }
@@ -3954,7 +3954,7 @@ class MainActivity : AppCompatActivity() {
         dialog.show()
     }
 
-    private fun showPdfSaveProgressSheet(title: String, detail: String): Pair<BottomSheetDialog, TextView> {
+    private fun showPdfSaveProgressSheet(title: String, detail: String): BottomSheetDialog {
         val (dialog, root) = sheetRoot(title, detail)
         val progress = ProgressBar(this).apply {
             isIndeterminate = true
@@ -3964,15 +3964,14 @@ class MainActivity : AppCompatActivity() {
             topMargin = dp(7)
             bottomMargin = dp(5)
         })
-        val status = text("Preparing document…", 11, R.color.qp_muted, false).apply {
+        root.addView(text("Preparing document…", 11, R.color.qp_muted, false).apply {
             gravity = Gravity.CENTER
             setPadding(0, dp(3), 0, 0)
-        }
-        root.addView(status, linearParams())
+        }, linearParams())
         dialog.setCancelable(false)
         dialog.setCanceledOnTouchOutside(false)
         dialog.show()
-        return dialog to status
+        return dialog
     }
 
     /**
@@ -3985,8 +3984,7 @@ class MainActivity : AppCompatActivity() {
         rotations: Map<Int, Int>,
         replaceOriginal: Boolean,
         afterExit: () -> Unit,
-        progressDialog: BottomSheetDialog,
-        progressText: TextView
+        progressDialog: BottomSheetDialog
     ) {
         val output = File(cacheDir, "smartprint-rotated-${UUID.randomUUID()}.pdf")
         Thread({
@@ -4012,7 +4010,6 @@ class MainActivity : AppCompatActivity() {
                     if (!isFinishing && !isDestroyed) {
                         progressDialog.dismiss()
                         afterExit()
-                        showFiles()
                         toast(
                             if (replaceOriginal) {
                                 "Updated ${result.name} · $pageCount pages. PDF quality preserved."
@@ -4026,36 +4023,13 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
                         progressDialog.dismiss()
-                        progressText.text = "Save failed. Your PDF viewer and pending rotations are still open."
-                        toast("Could not save PDF rotations: ${message(error)}. The original remains recoverable.")
+                        toast("Could not save PDF rotations: ${message(error)}. Your pending edits remain open.")
                     }
                 }
             } finally {
                 output.delete()
             }
         }, "SmartPrint-PDF-rotation-save").start()
-    }
-
-    private fun runOnUiThreadAndWait(action: () -> Unit) {
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-            action()
-            return
-        }
-        val completed = java.util.concurrent.CountDownLatch(1)
-        var failure: Throwable? = null
-        runOnUiThread {
-            try {
-                action()
-            } catch (error: Throwable) {
-                failure = error
-            } finally {
-                completed.countDown()
-            }
-        }
-        check(completed.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
-            "SmartPrint could not safely close the PDF reader before replacing the original."
-        }
-        failure?.let { throw it }
     }
 
     private fun savePdfEdits(source: File, edits: List<PdfPageEdit>) {
