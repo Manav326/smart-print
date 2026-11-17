@@ -161,6 +161,15 @@ class MainActivity : AppCompatActivity() {
     private var pendingCustomerPaymentQrBytes: ByteArray? = null
     private var pendingCustomerPaymentQrReply: JavaScriptReplyProxy? = null
     private val customerUploadPdfPreviews = java.util.concurrent.ConcurrentHashMap<String, File>()
+    // Keep provider URIs, not copies of customer PDFs. PdfRenderer consumes a
+    // read-only descriptor and only a rendered preview sheet is returned to WebView.
+    private val customerUploadPdfPreviewUris = ConcurrentHashMap<String, Uri>()
+    private val customerPdfPreviewExecutor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "SmartPrint-customer-pdf-preview").apply { isDaemon = true }
+    }
+    private var customerPdfPreviewTask: Future<*>? = null
+    @Volatile private var customerPdfPreviewGeneration = 0
+    private var currentCustomerPdfPreviewToken: String? = null
     private var webView: WebView? = null
     private var photoStudioAssetLoader: WebViewAssetLoader? = null
     private var folderPath = ""
@@ -631,6 +640,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         cancelActiveChooserPreparation()
+        cancelCustomerPdfPreviewRender()
+        customerPdfPreviewExecutor.shutdownNow()
         chooserPreparationExecutor.shutdownNow()
         pickerMetadataExecutor.shutdownNow()
         releaseIdStudioReviewBitmap()
@@ -4355,6 +4366,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             data == "closeCustomerPdfPreview" -> {
                                 runOnUiThread {
+                                    cancelCustomerPdfPreviewRender()
                                     customerUploadPdfPreviewOpen = false
                                     customerUploadPdfPreviewSensitive = false
                                     applySensitiveWindowProtection()
@@ -6669,7 +6681,10 @@ class MainActivity : AppCompatActivity() {
         photoTemps: List<File>,
         previewTokens: List<String>
     ) {
-        previewTokens.forEach { customerUploadPdfPreviews.remove(it) }
+        previewTokens.forEach {
+            customerUploadPdfPreviews.remove(it)
+            customerUploadPdfPreviewUris.remove(it)
+        }
         idTemps.forEach(idStudioStore::releaseTransientFile)
         photoTemps.forEach(photoStudioStore::releaseTransientFile)
     }
@@ -6885,8 +6900,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createCustomerUploadPdfPreview(uri: Uri): String? {
-        // Probe only the bounded signature window before copying a selected phone file
-        // into the preview cache. Images and unsupported files are not duplicated.
+        if (uri.scheme == "file") {
+            val localFile = uri.path?.let(::File) ?: return null
+            return createCustomerUploadPdfPreview(localFile)
+        }
+
+        // Read only the signature window. Provider-backed documents are not
+        // duplicated into cache: PdfRenderer will read them from a granted FD.
         val hasPdfContent = try {
             contentResolver.openInputStream(uri)?.use { source ->
                 val header = ByteArray(DocumentNamePolicy.PDF_HEADER_SCAN_BYTES)
@@ -6903,41 +6923,64 @@ class MainActivity : AppCompatActivity() {
         }
         if (!hasPdfContent) return null
 
+        return try {
+            val descriptor = contentResolver.openFileDescriptor(uri, "r") ?: return null
+            val sizeBytes = descriptor.use { it.statSize }
+            if (sizeBytes == 0L || (sizeBytes > 0L && sizeBytes > MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES)) {
+                return null
+            }
+            val token = UUID.randomUUID().toString()
+            customerUploadPdfPreviewUris[token] = uri
+            token
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun openCustomerUploadPdfPreviewDescriptor(token: String): ParcelFileDescriptor {
+        customerUploadPdfPreviews[token]?.let { file ->
+            require(file.isFile && DocumentNamePolicy.isPdf(file)) {
+                "Please select this PDF again before previewing it."
+            }
+            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        }
+        val uri = customerUploadPdfPreviewUris[token]
+            ?: error("Please select this PDF again before previewing it.")
+        return contentResolver.openFileDescriptor(uri, "r")
+            ?: error("The selected PDF is no longer available.")
+    }
+
+    private fun materializeCustomerUploadPdfPreview(token: String): File? {
+        customerUploadPdfPreviews[token]?.takeIf { it.isFile }?.let { return it }
+        val uri = customerUploadPdfPreviewUris[token] ?: return null
         val directory = File(cacheDir, "customer-upload-pdf-preview")
         if (!directory.exists() && !directory.mkdirs()) return null
-        val canonicalDirectory = directory.canonicalFile
-        val existingPreviewBytes = customerUploadPdfPreviews.values.sumOf { preview ->
-            val parent = runCatching { preview.canonicalFile.parentFile }.getOrNull()
-            if (parent == canonicalDirectory) preview.length() else 0L
-        }
-        val target = runCatching { File.createTempFile("upload-preview-", ".pdf", directory) }.getOrNull()
-            ?: return null
+        val target = runCatching {
+            File.createTempFile("upload-preview-reader-", ".pdf", directory)
+        }.getOrNull() ?: return null
         return try {
-            val input = contentResolver.openInputStream(uri) ?: error("Selected document is unavailable.")
-            val copiedBytes = input.use { source ->
-                target.outputStream().use { destination ->
-                    val buffer = ByteArray(8192)
+            val copiedBytes = contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
                     var total = 0L
                     while (true) {
-                        val count = source.read(buffer)
+                        val count = input.read(buffer)
                         if (count < 0) break
                         total += count
                         require(total <= MAX_CUSTOMER_UPLOAD_PREVIEW_BYTES) {
-                            "This PDF is too large to preview."
+                            "This PDF is too large to open in the full-screen preview."
                         }
-                        require(existingPreviewBytes + total <= MAX_CUSTOMER_UPLOAD_PREVIEW_BATCH_BYTES) {
-                            "The selected PDFs exceed the preview limit for one batch."
-                        }
-                        destination.write(buffer, 0, count)
+                        output.write(buffer, 0, count)
                     }
                     total
                 }
+            } ?: error("The selected PDF is no longer available.")
+            require(copiedBytes > 0L && DocumentNamePolicy.isPdf(target)) {
+                "The selected document does not contain valid PDF content."
             }
-            require(copiedBytes > 0L) { "Selected document is empty." }
-            require(DocumentNamePolicy.isPdf(target)) { "Selected document does not contain PDF content." }
-            val token = UUID.randomUUID().toString()
             customerUploadPdfPreviews[token] = target
-            token
+            customerUploadPdfPreviewUris.remove(token, uri)
+            target
         } catch (_: Exception) {
             target.delete()
             null
@@ -6952,6 +6995,12 @@ class MainActivity : AppCompatActivity() {
             .map(String::trim)
             .filter(::isCustomerUploadPdfPreviewToken)
             .toSet()
+        if (currentCustomerPdfPreviewToken != null && currentCustomerPdfPreviewToken !in retained) {
+            cancelCustomerPdfPreviewRender()
+        }
+        customerUploadPdfPreviewUris.keys.toList().forEach { token ->
+            if (token !in retained) customerUploadPdfPreviewUris.remove(token)
+        }
         val previewDirectory = File(cacheDir, "customer-upload-pdf-preview").canonicalFile
         customerUploadPdfPreviews.entries.toList().forEach { entry ->
             if (entry.key !in retained && customerUploadPdfPreviews.remove(entry.key, entry.value)) {
@@ -6975,6 +7024,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun clearCustomerUploadPdfPreviews() {
+        cancelCustomerPdfPreviewRender()
         val previewDirectory = File(cacheDir, "customer-upload-pdf-preview").canonicalFile
         customerUploadPdfPreviews.values.forEach { file ->
             val parent = runCatching { file.canonicalFile.parentFile }.getOrNull()
@@ -6985,6 +7035,7 @@ class MainActivity : AppCompatActivity() {
             if (::photoStudioStore.isInitialized) photoStudioStore.releaseTransientFile(file)
         }
         customerUploadPdfPreviews.clear()
+        customerUploadPdfPreviewUris.clear()
         customerUploadPdfPreviewSensitiveTokens.clear()
         customerUploadPdfPreviewSensitive = false
         customerUploadPdfPreviewOpen = false
@@ -7197,6 +7248,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun cancelCustomerPdfPreviewRender() {
+        customerPdfPreviewGeneration++
+        customerPdfPreviewTask?.cancel(true)
+        customerPdfPreviewTask = null
+        currentCustomerPdfPreviewToken = null
+    }
+
     private fun renderCustomerPdfPreview(
         token: String,
         requestedSheet: Int,
@@ -7206,49 +7264,81 @@ class MainActivity : AppCompatActivity() {
         pagesPerSheetDirection: String,
         replyProxy: JavaScriptReplyProxy
     ) {
-        Thread {
-            val response = try {
-                val file = customerUploadPdfPreviews[token]
-                    ?.takeIf { it.isFile && DocumentNamePolicy.isPdf(it) }
-                    ?: error("Please select this PDF again before previewing it.")
-                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-                    PdfRenderer(descriptor).use { renderer ->
-                        require(renderer.pageCount > 0) { "This PDF has no pages to preview." }
-                        val sheetCount = (renderer.pageCount + pagesPerSheet - 1) / pagesPerSheet
-                        val sheetIndex = requestedSheet.coerceIn(0, sheetCount - 1)
-                        val firstSourcePage = sheetIndex * pagesPerSheet
-                        val lastSourcePage = minOf(renderer.pageCount, firstSourcePage + pagesPerSheet)
-                        val previewImage = renderCustomerPdfSheet(
-                            renderer,
-                            firstSourcePage,
-                            lastSourcePage,
-                            pagesPerSheet,
-                            paperSize,
-                            orientation,
-                            pagesPerSheetDirection
-                        )
-                        JSONObject()
-                            .put("token", token)
-                            .put("pageIndex", sheetIndex)
-                            .put("pageCount", sheetCount)
-                            .put("pagesPerSheet", pagesPerSheet)
-                            .put("pagesPerSheetDirection", pagesPerSheetDirection)
-                            .put("paperSize", paperSize)
-                            .put("orientation", orientation)
-                            .put("firstSourcePage", firstSourcePage + 1)
-                            .put("lastSourcePage", lastSourcePage)
-                            .put("image", previewImage)
-                            .put("thumbnails", JSONArray())
-                            .let { "CUSTOMER_PDF_PREVIEW|" + it.toString() }
+        // One worker and latest-request-wins cancellation prevent multiple full
+        // PDF page render pipelines competing for phone CPU and bitmap memory.
+        cancelCustomerPdfPreviewRender()
+        val generation = customerPdfPreviewGeneration
+        val sourceFile = customerUploadPdfPreviews[token]
+        val sourceUri = customerUploadPdfPreviewUris[token]
+        if (sourceFile == null && sourceUri == null) {
+            runCatching {
+                replyProxy.postMessage(
+                    "CUSTOMER_PDF_PREVIEW_FAILED|$token|Please select this PDF again before previewing it."
+                )
+            }
+            return
+        }
+        currentCustomerPdfPreviewToken = token
+        customerPdfPreviewTask = try {
+            customerPdfPreviewExecutor.submit {
+                val response = try {
+                    openCustomerUploadPdfPreviewDescriptor(token).use { descriptor ->
+                        PdfRenderer(descriptor).use { renderer ->
+                            require(renderer.pageCount > 0) { "This PDF has no pages to preview." }
+                            check(!Thread.currentThread().isInterrupted) {
+                                "PDF preview render cancelled."
+                            }
+                            val sheetCount = (renderer.pageCount + pagesPerSheet - 1) / pagesPerSheet
+                            val sheetIndex = requestedSheet.coerceIn(0, sheetCount - 1)
+                            val firstSourcePage = sheetIndex * pagesPerSheet
+                            val lastSourcePage = minOf(renderer.pageCount, firstSourcePage + pagesPerSheet)
+                            val previewImage = renderCustomerPdfSheet(
+                                renderer,
+                                firstSourcePage,
+                                lastSourcePage,
+                                pagesPerSheet,
+                                paperSize,
+                                orientation,
+                                pagesPerSheetDirection
+                            )
+                            JSONObject()
+                                .put("token", token)
+                                .put("pageIndex", sheetIndex)
+                                .put("pageCount", sheetCount)
+                                .put("pagesPerSheet", pagesPerSheet)
+                                .put("pagesPerSheetDirection", pagesPerSheetDirection)
+                                .put("paperSize", paperSize)
+                                .put("orientation", orientation)
+                                .put("firstSourcePage", firstSourcePage + 1)
+                                .put("lastSourcePage", lastSourcePage)
+                                .put("image", previewImage)
+                                .put("thumbnails", JSONArray())
+                                .let { "CUSTOMER_PDF_PREVIEW|" + it.toString() }
+                        }
+                    }
+                } catch (error: Exception) {
+                    "CUSTOMER_PDF_PREVIEW_FAILED|$token|" + message(error)
+                }
+
+                if (Thread.currentThread().isInterrupted) return@submit
+                runOnUiThread {
+                    val stillRetained =
+                        (sourceFile != null && customerUploadPdfPreviews[token] == sourceFile) ||
+                        (sourceUri != null && customerUploadPdfPreviewUris[token] == sourceUri)
+                    if (!isFinishing && !isDestroyed &&
+                        generation == customerPdfPreviewGeneration &&
+                        currentCustomerPdfPreviewToken == token &&
+                        stillRetained
+                    ) {
+                        customerPdfPreviewTask = null
+                        currentCustomerPdfPreviewToken = null
+                        runCatching { replyProxy.postMessage(response) }
                     }
                 }
-            } catch (error: Exception) {
-                "CUSTOMER_PDF_PREVIEW_FAILED|$token|" + message(error)
             }
-            runOnUiThread {
-                if (!isFinishing && !isDestroyed) replyProxy.postMessage(response)
-            }
-        }.start()
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            null
+        }
     }
 
     /**
@@ -7306,6 +7396,9 @@ class MainActivity : AppCompatActivity() {
             }
 
             for (sourcePage in firstSourcePage until lastSourcePageExclusive) {
+                check(!Thread.currentThread().isInterrupted) {
+                    "PDF preview render cancelled."
+                }
                 val slot = sourcePage - firstSourcePage
                 val (column, row) = when (pagesPerSheetDirection) {
                     "BottomRight" -> (slot / rows) to (slot % rows)
@@ -7424,7 +7517,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCustomerUploadPdfPreview(token: String) {
-        val file = customerUploadPdfPreviews[token]
+        val file = materializeCustomerUploadPdfPreview(token)
             ?.takeIf { it.isFile && DocumentNamePolicy.isPdf(it) }
         if (file == null) {
             toast("Please select this PDF again before previewing it.")
@@ -7456,6 +7549,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun closeCustomerUploadPdfPreview() {
+        cancelCustomerPdfPreviewRender()
         documentViewer?.dispose()
         documentViewer = null
         viewingDocument = null
