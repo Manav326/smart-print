@@ -3216,9 +3216,11 @@ class MainActivity : AppCompatActivity() {
                 minHeight = dp(38)
                 setOnClickListener { exportSelected(selectedHere); clearLibrarySelection(); showFiles() }
             }, LinearLayout.LayoutParams(0, dp(38), 1f))
+            val selectedBytes = selectedHere.sumOf { it.length() }
+            val overCombinedLimit = selectedBytes > DocumentBatchComposer.MAX_SOURCE_BYTES
             val supportedBatch = selectedHere.size in 2..UploadLimits.MAX_BATCH_FILES && selectedHere.all {
                 DocumentNamePolicy.isBatchSource(it) && it.length() in 1..UploadLimits.MAX_FILE_BYTES
-            } && selectedHere.sumOf { it.length() } <= DocumentBatchComposer.MAX_SOURCE_BYTES
+            } && !overCombinedLimit
             selectionActions.addView(button("Combine PDF", true).apply {
                 minHeight = dp(38)
                 isEnabled = supportedBatch
@@ -3226,7 +3228,12 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { preparePrintBatch(selectedHere); clearLibrarySelection(); showFiles() }
             }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(7) })
             column.addView(selectionActions, linearParams().apply { bottomMargin = dp(5) })
-            column.addView(text("Combining rasterizes PDF pages; originals stay unchanged.", 10, R.color.qp_muted, false)
+            val combineHint = if (overCombinedLimit) {
+                "Selected files total ${android.text.format.Formatter.formatShortFileSize(this, selectedBytes)}. Combine limit is 50 MB; remove files to continue."
+            } else {
+                "PDF pages are kept as vector content; photos are fitted to A4. Combined source limit: 50 MB and 500 pages."
+            }
+            column.addView(text(combineHint, 10, if (overCombinedLimit) R.color.qp_error else R.color.qp_muted, false)
                 .apply { setPadding(dp(2), 0, 0, dp(6)) })
         }
 
@@ -3628,7 +3635,7 @@ class MainActivity : AppCompatActivity() {
         toast("Preparing your PDF…")
         Thread {
             try {
-                val pages = DocumentBatchComposer.compose(orderedFiles, output)
+                val pages = DocumentBatchComposer.compose(applicationContext, orderedFiles, output)
                 val name = "Smart Print document ${SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())}.pdf"
                 val saved = FileInputStream(output).use { store.importFile(it, name, destinationPath) }
                 runOnUiThread {
@@ -6994,7 +7001,7 @@ class MainActivity : AppCompatActivity() {
         Thread {
             val response = try {
                 val file = customerUploadPdfPreviews[token]
-                    ?.takeIf { it.isFile && it.name.endsWith(".pdf", true) }
+                    ?.takeIf { it.isFile && itDocumentNamePolicy.isPdf(it) }
                     ?: error("Please select this PDF again before previewing it.")
                 ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                     PdfRenderer(descriptor).use { renderer ->
@@ -7210,7 +7217,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showCustomerUploadPdfPreview(token: String) {
         val file = customerUploadPdfPreviews[token]
-            ?.takeIf { it.isFile && it.name.endsWith(".pdf", true) }
+            ?.takeIf { it.isFile && itDocumentNamePolicy.isPdf(it) }
         if (file == null) {
             toast("Please select this PDF again before previewing it.")
             return
