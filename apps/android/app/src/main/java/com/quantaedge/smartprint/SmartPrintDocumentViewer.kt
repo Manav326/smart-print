@@ -123,6 +123,7 @@ class SmartPrintDocumentViewer(
     private var currentFile = startFile
     private var currentPage = startPosition?.coerceAtLeast(0) ?: 0
     private var displayedPage: Int? = null
+    private var pageRenderFailed = false
     private var pageCount = 0
     private var rotationDegrees = 0
     // Page-indexed state prevents rotations from being lost when customers move
@@ -263,7 +264,11 @@ class SmartPrintDocumentViewer(
 
     private fun updatePdfControls() {
         pageCounter.text = displayedPage?.let { "Page ${it + 1} of ${max(1, pageCount)}" }
-            ?: if (pageCount > 0) "Rendering page ${currentPage + 1}…" else "Opening PDF…"
+            ?: when {
+                pageRenderFailed -> "Page ${currentPage + 1} unavailable"
+                pageCount > 0 -> "Rendering page ${currentPage + 1}…"
+                else -> "Opening PDF…"
+            }
         rotatePage.isEnabled = displayedPage == currentPage && pageCount > 0
         rotatePage.alpha = if (rotatePage.isEnabled) 1f else 0.4f
         previousPage.isEnabled = currentPage > 0
@@ -323,6 +328,7 @@ class SmartPrintDocumentViewer(
         // Never leave a previous page visible beneath a new page's loading state.
         clearDisplayedBitmaps(clearThumbnails = false)
         displayedPage = null
+        pageRenderFailed = false
         updatePdfControls()
         pageImage.contentDescription = "Rendering PDF page ${requestedPage + 1} preview"
         showLoading("Rendering page ${requestedPage + 1} of $pageCount…")
@@ -338,6 +344,7 @@ class SmartPrintDocumentViewer(
                     pageCount = rendered.pageCount
                     currentPage = rendered.index
                     displayedPage = rendered.index
+                    pageRenderFailed = false
                     rotationDegrees = pendingPageRotations[rendered.index] ?: 0
                     displayedBitmaps.add(rendered.bitmap)
                     pageImage.setDocumentBitmap(rendered.bitmap)
@@ -746,6 +753,7 @@ class SmartPrintDocumentViewer(
             if (disposed.get() || request != renderVersion) return@runOnUiThread
             clearDisplayedBitmaps()
             displayedPage = null
+            pageRenderFailed = true
             updatePdfControls()
             feedback.text = "Could not open this document. Tap to try again."
             feedback.contentDescription = "Retry opening document"
