@@ -142,6 +142,7 @@ public sealed class WindowsPrintExecutor
                 "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
                 "The local document does not match the verified upload.");
 
+        using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
         return PrintCore(entry, raster, cancellationToken, outputFilePath);
     }
 
@@ -224,7 +225,6 @@ public sealed class WindowsPrintExecutor
                 "PAGES_PER_SHEET_PDF_REQUIRED",
                 "Driver-backed N-up is available only for unprepared PDF documents.");
 
-        using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
         if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase) &&
@@ -1277,7 +1277,7 @@ public sealed class WindowsPrintExecutor
             }
         }
 
-        public PdfRasterDocument(Qsp2DocumentReadStream stream, bool mono)
+        public unsafe PdfRasterDocument(Qsp2DocumentReadStream stream, bool mono)
         {
             _ = PdfiumInitialized.Value;
             if (stream.Length is <= 0 or > UploadLimits.MaxFileBytes)
