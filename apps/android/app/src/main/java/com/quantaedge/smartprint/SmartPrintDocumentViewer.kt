@@ -194,6 +194,18 @@ class SmartPrintDocumentViewer(
 
     fun pendingRotationSnapshot(): Map<Int, Int> = pendingPageRotations.toMap()
 
+    fun restorePendingRotations(rotations: Map<Int, Int>) {
+        if (!isPdf || disposed.get()) return
+        pendingPageRotations.clear()
+        rotations.forEach { (index, degrees) ->
+            if (index >= 0 && degrees in setOf(90, 180, 270)) {
+                pendingPageRotations[index] = degrees
+            }
+        }
+        rotationDegrees = pendingPageRotations[currentPage] ?: 0
+        if (pageCount > 0) renderCurrentPdfPage()
+    }
+
     /**
      * Routes every user-initiated exit through the host's save/discard decision.
      * The reader remains mounted until the customer chooses an action.
