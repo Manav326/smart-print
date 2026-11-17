@@ -1,9 +1,13 @@
 package com.quantaedge.smartprint
 
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.StandardCopyOption
 import java.util.Locale
+import java.util.UUID
 
 class LocalDocumentStore(filesDir: File) {
     val root = File(filesDir, "documents")
@@ -165,6 +169,84 @@ class LocalDocumentStore(filesDir: File) {
         require(path == base || path.startsWith(base + File.separator)) { "Item is outside local storage." }
         if (path == base) return ""
         return path.removePrefix(base + File.separator).replace(File.separatorChar, '/')
+    }
+
+    /**
+     * Replaces an existing app-private PDF only after a complete replacement has
+     * been staged and validated in the same directory. The final move is atomic
+     * when supported by the filesystem; the fallback keeps a recoverable backup.
+     */
+    fun replacePdfContents(file: File, replacement: File): File {
+        val base = root.canonicalFile
+        val target = file.canonicalFile
+        require(target.path.startsWith(base.path + File.separator)) {
+            "The original PDF is outside SmartPrint storage."
+        }
+        require(target.isFile && DocumentNamePolicy.isPdf(target)) {
+            "The original PDF is no longer available."
+        }
+
+        val source = replacement.canonicalFile
+        require(source.isFile && source.path != target.path && DocumentNamePolicy.isPdf(source)) {
+            "The replacement must be a valid PDF file."
+        }
+        require(source.length() in 1..DocumentNamePolicy.MAX_IMPORT_BYTES) {
+            "The updated PDF must be 100 MB or smaller."
+        }
+
+        val parent = target.parentFile ?: error("The original PDF has no parent folder.")
+        val staging = File(parent, ".\${target.name}.\${UUID.randomUUID()}.replacement")
+        val backup = File(parent, ".\${target.name}.\${UUID.randomUUID()}.backup")
+        try {
+            FileInputStream(source).use { input ->
+                FileOutputStream(staging).use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        require(total <= DocumentNamePolicy.MAX_IMPORT_BYTES) {
+                            "The updated PDF must be 100 MB or smaller."
+                        }
+                        output.write(buffer, 0, count)
+                    }
+                    output.fd.sync()
+                }
+            }
+            require(staging.length() > 0L && DocumentNamePolicy.isPdf(staging)) {
+                "The replacement PDF could not be validated."
+            }
+
+            try {
+                java.nio.file.Files.move(
+                    staging.toPath(),
+                    target.toPath(),
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING
+                )
+            } catch (_: AtomicMoveNotSupportedException) {
+                check(target.renameTo(backup)) {
+                    "The original PDF could not be safely backed up. It was not changed."
+                }
+                try {
+                    check(staging.renameTo(target)) {
+                        "The new PDF could not be installed. The original is retained as \${backup.name}."
+                    }
+                    backup.delete()
+                } catch (error: Exception) {
+                    if (!target.exists()) backup.renameTo(target)
+                    throw error
+                }
+            }
+            return target
+        } catch (error: Exception) {
+            staging.delete()
+            throw error
+        } finally {
+            // Never remove a recovery backup when the replacement failed.
+            if (target.isFile) backup.delete()
+        }
     }
 
     fun rename(file: File, name: String) {
