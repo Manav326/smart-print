@@ -7358,9 +7358,12 @@ class MainActivity : AppCompatActivity() {
 
                 if (Thread.currentThread().isInterrupted) return@submit
                 runOnUiThread {
-                    val stillRetained =
-                        (sourceFile != null && customerUploadPdfPreviews[token] == sourceFile) ||
-                        (sourceUri != null && customerUploadPdfPreviewUris[token] == sourceUri)
+                    val stillRetained = when {
+                        sourceFile != null -> customerUploadPdfPreviews[token] == sourceFile
+                        sourceUri != null -> customerUploadPdfPreviewUris[token] == sourceUri ||
+                            customerUploadPdfPreviews[token]?.isFile == true
+                        else -> false
+                    }
                     if (!isFinishing && !isDestroyed &&
                         generation == customerPdfPreviewGeneration &&
                         currentCustomerPdfPreviewToken == token &&
