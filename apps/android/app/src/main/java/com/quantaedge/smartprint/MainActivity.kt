@@ -6959,8 +6959,25 @@ class MainActivity : AppCompatActivity() {
         }
         val uri = customerUploadPdfPreviewUris[token]
             ?: error("Please select this PDF again before previewing it.")
-        return contentResolver.openFileDescriptor(uri, "r")
+        val descriptor = contentResolver.openFileDescriptor(uri, "r")
             ?: error("The selected PDF is no longer available.")
+
+        // PdfRenderer requires a seekable descriptor. Most document providers
+        // return a file-backed descriptor and stay zero-copy. A few providers
+        // return pipes; copy only those on-demand so preview still works.
+        return try {
+            android.system.Os.lseek(
+                descriptor.fileDescriptor,
+                0L,
+                android.system.OsConstants.SEEK_SET
+            )
+            descriptor
+        } catch (_: Exception) {
+            runCatching { descriptor.close() }
+            val localCopy = materializeCustomerUploadPdfPreview(token)
+                ?: error("This PDF provider cannot stream a seekable preview. Re-select the file or save it to the device first.")
+            ParcelFileDescriptor.open(localCopy, ParcelFileDescriptor.MODE_READ_ONLY)
+        }
     }
 
     private fun materializeCustomerUploadPdfPreview(token: String): File? {
