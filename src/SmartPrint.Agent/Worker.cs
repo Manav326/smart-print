@@ -131,10 +131,10 @@ public sealed class Worker(
                         !string.Equals(stagedEntry.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidDataException("The protected local copy does not match the pending private relay.");
 
-                    var stagedPlaintext = localQueueStore.ReadDocument(ticket.PrintJobId);
-                    try
+                    using (var stagedDocument = localQueueStore.OpenDocumentReadStream(
+                        ticket.PrintJobId, credentials.AgentDeviceId))
                     {
-                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedPlaintext, ticket.FileExtension);
+                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedDocument, ticket.FileExtension);
                         if (!string.Equals(stagedAnalysis.Extension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
                             !string.Equals(stagedAnalysis.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase))
                             throw new InvalidDataException("The protected local copy no longer matches the original file type.");
@@ -157,10 +157,6 @@ public sealed class Worker(
                             logger.LogInformation("Private relay {JobNumber} was confirmed using its existing protected local copy; no second payload download was needed.", ticket.JobNumber);
                         }
                     }
-                    finally
-                    {
-                        CryptographicOperations.ZeroMemory(stagedPlaintext);
-                    }
                     continue;
                 }
 
@@ -176,14 +172,110 @@ public sealed class Worker(
 
                 var wrappedKey = contentResponse.Headers.TryGetValues("X-Print-Encrypted-Key", out var keyValues)
                     ? keyValues.FirstOrDefault() : null;
+                var encryptedFormat = contentResponse.Headers.TryGetValues("X-Print-Encrypted-Format", out var formatValues)
+                    ? formatValues.FirstOrDefault() : null;
+                if (string.IsNullOrWhiteSpace(wrappedKey))
+                    throw new InvalidDataException("The encrypted relay key envelope is incomplete.");
+
+                if (string.Equals(encryptedFormat, "QSP2", StringComparison.Ordinal))
+                {
+                    byte[]? qsp2Key = null;
+                    string? stagingPath = null;
+                    try
+                    {
+                        qsp2Key = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
+                        stagingPath = await localQueueStore.CreatePrivateUploadStagingPathAsync(cancellationToken);
+                        await using (var encryptedStream = await contentResponse.Content.ReadAsStreamAsync(cancellationToken))
+                        await using (var decryptedOutput = new FileStream(
+                            stagingPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
+                            64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
+                        {
+                            var metadata = await Qsp2DocumentFormat.DecryptAsync(
+                                encryptedStream,
+                                decryptedOutput,
+                                qsp2Key,
+                                credentials.AgentDeviceId,
+                                ticket.PrintJobId,
+                                UploadLimits.MaxFileBytes,
+                                cancellationToken);
+                            if (metadata.PlaintextLength != ticket.SizeBytes ||
+                                !string.Equals(metadata.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
+                                throw new InvalidDataException("The QSP2 private document failed its authorised size or SHA-256 check.");
+                            await decryptedOutput.FlushAsync(cancellationToken);
+                        }
+
+                        await using var qsp2Plaintext = new FileStream(
+                            stagingPath, FileMode.Open, FileAccess.Read, FileShare.Read,
+                            64 * 1024, FileOptions.RandomAccess);
+                        DocumentAnalysis qsp2Analysis;
+                        try
+                        {
+                            qsp2Analysis = DocumentAnalyzer.Analyse(qsp2Plaintext, ticket.FileExtension);
+                        }
+                        catch (DocumentValidationException exception)
+                        {
+                            using var rejectedDocument = await SendAgentRequestAsync(
+                                client, credentials,
+                                $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                                new AgentPrivateRelayRejectRequest("document_not_supported", exception.Message),
+                                cancellationToken);
+                            if (!rejectedDocument.IsSuccessStatusCode) retryableFailure = true;
+                            continue;
+                        }
+                        if (!string.Equals(qsp2Analysis.Extension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
+                            !string.Equals(qsp2Analysis.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidDataException("The QSP2 document content does not match its authorised file type.");
+
+                        var qsp2Job = new AgentClaimedJob(
+                            ticket.PrintJobId, ticket.JobNumber, "AWAITING_CONFIGURATION",
+                            qsp2Analysis.PageCount, ticket.Copies, ticket.ColourMode, ticket.PaperSize,
+                            ticket.IsDuplex, "INR", 0, ticket.PrinterDeviceId, ticket.PrinterName,
+                            ticket.QueueName, "Private document", qsp2Analysis.MediaType, ticket.SizeBytes,
+                            ticket.Sha256, ticket.ExpiresUtc, "LOCAL_AGENT",
+                            ticket.OutputMode, ticket.Orientation,
+                            PdfBrandingEnabled: false, PrivatePrinting: true, PrintKind: ticket.PrintKind,
+                            PagesPerSheet: ticket.PagesPerSheet,
+                    PhotoPaperFinish: ticket.PhotoPaperFinish,
+                    PhotoOutputLayout: ticket.PhotoOutputLayout,
+                    PhotoSizeCode: ticket.PhotoSizeCode);
+
+                        qsp2Plaintext.Position = 0;
+                        await localQueueStore.EnqueueLocalUploadStreamingAsync(
+                            qsp2Job, credentials.AgentDeviceId, qsp2Plaintext, cancellationToken);
+                        using var qsp2Completion = await SendAgentRequestAsync(
+                            client, credentials,
+                            $"api/v1/agent/private-relays/{ticket.TicketId:D}/complete",
+                            new LocalPrintUploadCompletionRequest(
+                                qsp2Analysis.PageCount, qsp2Analysis.PageSizesJson, qsp2Analysis.Extension,
+                                qsp2Analysis.MediaType, ticket.SizeBytes, ticket.Sha256),
+                            cancellationToken);
+                        if (!qsp2Completion.IsSuccessStatusCode)
+                        {
+                            logger.LogWarning("QSP2 private relay completion for {JobNumber} returned HTTP {StatusCode}; the protected local copy is retained for retry.", ticket.JobNumber, (int)qsp2Completion.StatusCode);
+                            retryableFailure = true;
+                            continue;
+                        }
+
+                        await localQueueStore.MarkLocalUploadFinalizedAsync(ticket.PrintJobId, cancellationToken);
+                        logger.LogInformation("QSP2 private relay {JobNumber} was authenticated and secured in the shop's protected local queue.", ticket.JobNumber);
+                    }
+                    finally
+                    {
+                        if (stagingPath is not null)
+                            await localQueueStore.ErasePrivateUploadStagingFileAsync(stagingPath);
+                        if (qsp2Key is not null) CryptographicOperations.ZeroMemory(qsp2Key);
+                    }
+                    continue;
+                }
+
                 var ivText = contentResponse.Headers.TryGetValues("X-Print-Encrypted-Iv", out var ivValues)
                     ? ivValues.FirstOrDefault() : null;
-                if (string.IsNullOrWhiteSpace(wrappedKey) || string.IsNullOrWhiteSpace(ivText))
-                    throw new InvalidDataException("The encrypted relay envelope is incomplete.");
+                if (string.IsNullOrWhiteSpace(ivText))
+                    throw new InvalidDataException("The legacy encrypted relay envelope is incomplete.");
 
                 ciphertext = await contentResponse.Content.ReadAsByteArrayAsync(cancellationToken);
-                if (ticket.SizeBytes is <= 0 or > 20L * 1024 * 1024 ||
-                    ciphertext.LongLength != ticket.SizeBytes + 16)
+                if (ticket.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
+                    ciphertext.LongLength != ticket.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
                     throw new InvalidDataException("The encrypted relay payload size does not match its ticket.");
 
                 aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
@@ -255,9 +347,15 @@ public sealed class Worker(
                     PhotoOutputLayout: ticket.PhotoOutputLayout,
                     PhotoSizeCode: ticket.PhotoSizeCode);
 
-                // DPAPI-protect the document on this paired Windows computer before
-                // acknowledging the relay. Replaying the same ticket is idempotent.
-                await localQueueStore.EnqueueLocalUploadAsync(job, plaintext, cancellationToken);
+                // Re-encrypt the authenticated private plaintext into the new
+                // DPAPI-key-wrapped QSP2 queue format before acknowledging the relay.
+                // The v1 relay itself remains whole-file until the browser/relay protocol
+                // is upgraded together; local queue persistence is now bounded-memory.
+                await using (var plaintextStream = new MemoryStream(plaintext, writable: false))
+                {
+                    await localQueueStore.EnqueueLocalUploadStreamingAsync(
+                        job, credentials.AgentDeviceId, plaintextStream, cancellationToken);
+                }
                 using var completion = await SendAgentRequestAsync(
                     client, credentials,
                     $"api/v1/agent/private-relays/{ticket.TicketId:D}/complete",
@@ -808,15 +906,12 @@ public sealed class Worker(
                         throw new InvalidDataException("The document response headers do not match the claimed job metadata.");
                     }
 
-                    var bytes = await documentResponse.Content.ReadAsByteArrayAsync(cancellationToken);
-                    try
-                    {
-                        await localQueueStore.EnqueueAsync(job, bytes, cancellationToken);
-                    }
-                    finally
-                    {
-                        CryptographicOperations.ZeroMemory(bytes);
-                    }
+                    await using var documentStream = await documentResponse.Content.ReadAsStreamAsync(cancellationToken);
+                    await localQueueStore.EnqueueStreamingAsync(
+                        job,
+                        credentials.AgentDeviceId,
+                        documentStream,
+                        cancellationToken);
                 }
 
                 await AcknowledgeLocalQueueReceiptAsync(
