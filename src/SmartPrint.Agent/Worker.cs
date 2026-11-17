@@ -1197,18 +1197,34 @@ public sealed class Worker(
 
                 await localQueueStore.MarkSubmissionStartedAsync(
                     job.Id, job.SpoolerJobName, ct, job.OutputMode);
-                var bytes = localQueueStore.ReadDocument(job.Id);
-                SpoolerPrintReceipt spoolerReceipt;
-                try
+                var printEntry = entry with
                 {
-                    spoolerReceipt = printExecutor.Print(entry with
-                    {
-                        OutputMode = job.OutputMode,
-                        SpoolerJobName = job.SpoolerJobName,
-                        RejectedPageNumbers = rejectedPages
-                    }, bytes, ct);
+                    OutputMode = job.OutputMode,
+                    SpoolerJobName = job.SpoolerJobName,
+                    RejectedPageNumbers = rejectedPages
+                };
+                SpoolerPrintReceipt spoolerReceipt;
+                if (string.Equals(printEntry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Physical PDF jobs use the authenticated QSP2 random-access stream.
+                    // Legacy queue files are transparently handled by Print(Stream) with
+                    // the bounded compatibility buffer; current QSP2 jobs never materialise
+                    // the complete PDF in a byte array.
+                    using var documentStream = localQueueStore.OpenDocumentReadStream(job.Id, credentials.AgentDeviceId);
+                    spoolerReceipt = printExecutor.Print(printEntry, documentStream, ct);
                 }
-                finally { CryptographicOperations.ZeroMemory(bytes); }
+                else
+                {
+                    var bytes = localQueueStore.ReadDocument(job.Id);
+                    try
+                    {
+                        spoolerReceipt = printExecutor.Print(printEntry, bytes, ct);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(bytes);
+                    }
+                }
 
                 await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
                 await ReportSpoolerAcceptedAsync(client, credentials, job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, "QUEUED", ct);
