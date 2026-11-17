@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Net.Http;
 using System.IO;
 using System.Security.AccessControl;
@@ -5,6 +6,7 @@ using System.Security.Cryptography;
 using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
+using SmartPrint.Documents;
 
 namespace SmartPrint.Agent;
 
@@ -20,6 +22,9 @@ public sealed class AgentLocalQueueStore
     private readonly bool applyWindowsAcl;
     private readonly SemaphoreSlim stagedUploadLeaseGate = new(1, 1);
     private readonly SemaphoreSlim privateSpoolerCleanupGate = new(1, 1);
+    private readonly object queueIndexSync = new();
+    private Dictionary<Guid, AgentLocalQueueEntry>? queueIndex;
+    private readonly Dictionary<Guid, ManifestStamp> queueManifestStamps = new();
 
     public AgentLocalQueueStore(string? rootOverride = null)
     {
@@ -30,7 +35,25 @@ public sealed class AgentLocalQueueStore
         applyWindowsAcl = rootOverride is null;
     }
 
+    private readonly SemaphoreSlim initializationGate = new(1, 1);
+    private bool initialized;
+
     public async Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        await initializationGate.WaitAsync(cancellationToken);
+        try
+        {
+            if (initialized) return;
+            await InitializeCoreAsync(cancellationToken);
+            initialized = true;
+        }
+        finally
+        {
+            initializationGate.Release();
+        }
+    }
+
+    private async Task InitializeCoreAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Directory.CreateDirectory(queueRoot);
@@ -142,28 +165,161 @@ public sealed class AgentLocalQueueStore
         }
     }
 
+    /// <summary>
+    /// Creates a unique staging path inside the Agent's SYSTEM-protected queue directory.
+    /// Plaintext QSP2 decrypt staging must never use the shared OS temp directory.
+    /// </summary>
+    public async Task<string> CreatePrivateUploadStagingPathAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+        return Path.Combine(queueRoot, "private-qsp2-" + Guid.NewGuid().ToString("N") + ".tmp");
+    }
+
+    /// <summary>Securely overwrites and removes a temporary plaintext upload inside the protected queue.</summary>
+    public Task ErasePrivateUploadStagingFileAsync(string path)
+    {
+        var queueRootFull = Path.GetFullPath(queueRoot);
+        var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) +
+            Path.DirectorySeparatorChar;
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        return EraseProtectedQueueFileAsync(path, queuePrefix, comparison, CancellationToken.None);
+    }
+
     public AgentLocalQueueEntry? Find(Guid jobId)
     {
-        var manifestPath = GetManifestPath(jobId);
-        if (!File.Exists(manifestPath))
-        {
-            return null;
-        }
-
-        var json = File.ReadAllText(manifestPath, Encoding.UTF8);
-        return JsonSerializer.Deserialize<AgentLocalQueueEntry>(json, JsonOptions)
-            ?? throw new InvalidDataException("A local print queue manifest is invalid.");
+        EnsureQueueIndexLoaded();
+        RefreshManifestFromDisk(jobId, forceReload: true);
+        lock (queueIndexSync)
+            return queueIndex!.TryGetValue(jobId, out var entry) ? entry : null;
     }
 
     private IReadOnlyList<AgentLocalQueueEntry> ReadEntries()
     {
-        var result = new List<AgentLocalQueueEntry>();
-        foreach (var path in Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly))
+        EnsureQueueIndexLoaded();
+        RefreshQueueIndexFromDisk();
+        lock (queueIndexSync)
+            return queueIndex!.Values.OrderBy(entry => entry.ReceivedUtc).ToArray();
+    }
+
+    private void RefreshQueueIndexFromDisk()
+    {
+        var manifestPaths = Directory.Exists(queueRoot)
+            ? Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly).ToArray()
+            : Array.Empty<string>();
+        var presentJobIds = new HashSet<Guid>();
+
+        foreach (var path in manifestPaths)
         {
-            var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(File.ReadAllText(path, Encoding.UTF8), JsonOptions);
-            if (entry is not null) result.Add(entry);
+            var fileName = Path.GetFileNameWithoutExtension(path);
+            if (!Guid.TryParseExact(fileName, "N", out var jobId))
+                continue;
+
+            presentJobIds.Add(jobId);
+            RefreshManifestFromDisk(jobId);
         }
-        return result.OrderBy(x => x.ReceivedUtc).ToArray();
+
+        lock (queueIndexSync)
+        {
+            var index = queueIndex ?? throw new InvalidOperationException("The queue index must be loaded before it can be refreshed.");
+            foreach (var staleId in index.Keys.Where(jobId => !presentJobIds.Contains(jobId)).ToArray())
+            {
+                index.Remove(staleId);
+                queueManifestStamps.Remove(staleId);
+            }
+        }
+    }
+
+    private void RefreshManifestFromDisk(Guid jobId, bool forceReload = false)
+    {
+        var path = GetManifestPath(jobId);
+        var info = new FileInfo(path);
+        lock (queueIndexSync)
+        {
+            var index = queueIndex ?? throw new InvalidOperationException("The queue index must be loaded before a manifest can be refreshed.");
+            if (!info.Exists)
+            {
+                index.Remove(jobId);
+                queueManifestStamps.Remove(jobId);
+                return;
+            }
+
+            var stamp = new ManifestStamp(info.Length, info.LastWriteTimeUtc.Ticks);
+            if (!forceReload &&
+                queueManifestStamps.TryGetValue(jobId, out var currentStamp) &&
+                currentStamp == stamp)
+                return;
+
+            AgentLocalQueueEntry entry;
+            try
+            {
+                entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(
+                    File.ReadAllText(path, Encoding.UTF8), JsonOptions)
+                    ?? throw new InvalidDataException("A local print queue manifest is invalid.");
+            }
+            catch (JsonException exception)
+            {
+                throw new InvalidDataException("A local print queue manifest is invalid.", exception);
+            }
+
+            if (entry.JobId != jobId)
+                throw new InvalidDataException("A local print queue manifest does not match its filename.");
+
+            index[jobId] = entry;
+            queueManifestStamps[jobId] = stamp;
+        }
+    }
+
+    private readonly record struct ManifestStamp(long Length, long LastWriteUtcTicks);
+
+    /// <summary>
+    /// Loads small queue manifests once. Payload files are never opened while this
+    /// index is built. Mutations update it after the durable manifest is committed;
+    /// startup reconstruction remains the recovery source of truth.
+    /// </summary>
+    private void EnsureQueueIndexLoaded()
+    {
+        lock (queueIndexSync)
+        {
+            if (queueIndex is not null) return;
+
+            var index = new Dictionary<Guid, AgentLocalQueueEntry>();
+            if (Directory.Exists(queueRoot))
+            {
+                foreach (var path in Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly))
+                {
+                    var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(
+                        File.ReadAllText(path, Encoding.UTF8), JsonOptions);
+                    if (entry is not null)
+                    {
+                        var jobId = entry.JobId;
+                        var expectedPath = GetManifestPath(jobId);
+                        if (!string.Equals(
+                            Path.GetFullPath(expectedPath),
+                            Path.GetFullPath(path),
+                            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                            throw new InvalidDataException("A local print queue manifest does not match its filename.");
+
+                        index[jobId] = entry;
+                        var file = new FileInfo(path);
+                        queueManifestStamps[jobId] = new ManifestStamp(file.Length, file.LastWriteTimeUtc.Ticks);
+                    }
+                }
+            }
+
+            queueIndex = index;
+        }
+    }
+
+    private void RemoveManifest(Guid jobId, string manifestPath)
+    {
+        if (File.Exists(manifestPath))
+            File.Delete(manifestPath);
+
+        lock (queueIndexSync)
+        {
+            queueIndex?.Remove(jobId);
+            queueManifestStamps.Remove(jobId);
+        }
     }
 
     public IReadOnlyList<AgentLocalQueueEntry> GetAcknowledgedJobs() =>
@@ -290,8 +446,9 @@ public sealed class AgentLocalQueueStore
         var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
         long queueDiskBytes = 0;
-        foreach (var path in Directory.EnumerateFiles(queueRootFull, "*", SearchOption.TopDirectoryOnly))
-            queueDiskBytes = checked(queueDiskBytes + new FileInfo(path).Length);
+        if (Directory.Exists(queueRootFull))
+            foreach (var path in Directory.EnumerateFiles(queueRootFull, "*", SearchOption.TopDirectoryOnly))
+                queueDiskBytes = checked(queueDiskBytes + new FileInfo(path).Length);
 
         var entries = ReadEntries();
         long logicalDocumentBytes = 0;
@@ -332,21 +489,8 @@ public sealed class AgentLocalQueueStore
             DateTimeOffset.UtcNow);
     }
 
-    public IReadOnlyList<AgentLocalQueueEntry> GetPendingAcknowledgements()
-    {
-        var entries = new List<AgentLocalQueueEntry>();
-        foreach (var path in Directory.EnumerateFiles(queueRoot, "*.json", SearchOption.TopDirectoryOnly))
-        {
-            var json = File.ReadAllText(path, Encoding.UTF8);
-            var entry = JsonSerializer.Deserialize<AgentLocalQueueEntry>(json, JsonOptions);
-            if (entry is not null && entry.State == "ACK_PENDING")
-            {
-                entries.Add(entry);
-            }
-        }
-
-        return entries.OrderBy(entry => entry.ReceivedUtc).ToArray();
-    }
+    public IReadOnlyList<AgentLocalQueueEntry> GetPendingAcknowledgements() =>
+        ReadEntries().Where(entry => entry.State == "ACK_PENDING").ToArray();
 
     public Task<AgentLocalQueueEntry> EnqueueAsync(
         AgentClaimedJob job,
@@ -359,6 +503,372 @@ public sealed class AgentLocalQueueStore
         ReadOnlyMemory<byte> documentBytes,
         CancellationToken cancellationToken) =>
         EnqueueCoreAsync(job, documentBytes, "LOCAL_UPLOAD_STAGED", cancellationToken);
+
+    /// <summary>
+    /// Streams a verified cloud or LAN document into a DPAPI-key-wrapped QSP2 queue
+    /// object. The encrypted payload is written directly to the protected queue file;
+    /// the method never creates a document-sized plaintext or ciphertext array.
+    /// </summary>
+    public Task<AgentLocalQueueEntry> EnqueueStreamingAsync(
+        AgentClaimedJob job,
+        Guid agentScopeId,
+        Stream documentStream,
+        CancellationToken cancellationToken) =>
+        EnqueueStreamingCoreAsync(job, agentScopeId, documentStream, "ACK_PENDING", cancellationToken);
+
+    /// <summary>
+    /// Streams a customer LAN upload into the protected queue without buffering the
+    /// complete document in memory.
+    /// </summary>
+    public Task<AgentLocalQueueEntry> EnqueueLocalUploadStreamingAsync(
+        AgentClaimedJob job,
+        Guid agentScopeId,
+        Stream documentStream,
+        CancellationToken cancellationToken) =>
+        EnqueueStreamingCoreAsync(job, agentScopeId, documentStream, "LOCAL_UPLOAD_STAGED", cancellationToken);
+
+    private async Task<AgentLocalQueueEntry> EnqueueStreamingCoreAsync(
+        AgentClaimedJob job,
+        Guid agentScopeId,
+        Stream documentStream,
+        string initialState,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(job);
+        ArgumentNullException.ThrowIfNull(documentStream);
+        if (agentScopeId == Guid.Empty ||
+            !documentStream.CanRead ||
+            job.Id == Guid.Empty ||
+            string.IsNullOrWhiteSpace(job.JobNumber) ||
+            job.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
+            string.IsNullOrWhiteSpace(job.Sha256) ||
+            job.Sha256.Length != 64 ||
+            !job.Sha256.All(Uri.IsHexDigit) ||
+            initialState is not ("ACK_PENDING" or "LOCAL_UPLOAD_STAGED"))
+        {
+            throw new InvalidDataException("The streaming queue request or job metadata is invalid.");
+        }
+
+        var existing = Find(job.Id);
+        if (existing is not null)
+        {
+            if (!string.Equals(existing.Sha256, job.Sha256, StringComparison.OrdinalIgnoreCase) ||
+                existing.SizeBytes != job.SizeBytes)
+                throw new InvalidDataException("A different document is already stored for this print job.");
+
+            if (!File.Exists(existing.DocumentPath))
+                throw new FileNotFoundException("The local queue manifest exists but its protected document is missing.", existing.DocumentPath);
+            return existing;
+        }
+
+        await InitializeAsync(cancellationToken);
+        var documentPath = Path.Combine(queueRoot, job.Id.ToString("N") + ".qdoc");
+        var temporaryDocumentPath = documentPath + ".tmp";
+        var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+        byte[]? protectedKey = null;
+
+        try
+        {
+            protectedKey = ProtectedData.Protect(
+                dataKey,
+                Qsp2QueueKeyEntropy,
+                DataProtectionScope.LocalMachine);
+            if (protectedKey.Length is <= 0 or > MaximumProtectedQueueKeyBytes)
+                throw new InvalidDataException("The Windows-protected QSP2 queue key has an invalid size.");
+
+            Qsp2DocumentMetadata metadata;
+            await using (var output = new FileStream(
+                temporaryDocumentPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                64 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var queueHeader = new byte[Qsp2QueueHeaderSize];
+                "QLQ2"u8.CopyTo(queueHeader);
+                queueHeader[4] = Qsp2QueueVersion;
+                BinaryPrimitives.WriteUInt32BigEndian(queueHeader.AsSpan(5, sizeof(uint)), checked((uint)protectedKey.Length));
+                await output.WriteAsync(queueHeader, cancellationToken);
+                await output.WriteAsync(protectedKey, cancellationToken);
+                metadata = await Qsp2DocumentFormat.EncryptAsync(
+                    documentStream,
+                    output,
+                    agentScopeId,
+                    job.Id,
+                    job.SizeBytes,
+                    dataKey,
+                    cancellationToken: cancellationToken);
+                await output.FlushAsync(cancellationToken);
+                output.Flush(flushToDisk: true);
+                CryptographicOperations.ZeroMemory(queueHeader);
+            }
+
+            if (!string.Equals(metadata.Sha256, job.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("The streamed document SHA-256 does not match the authorised print job.");
+
+            File.Move(temporaryDocumentPath, documentPath);
+        }
+        catch
+        {
+            if (File.Exists(temporaryDocumentPath))
+                File.Delete(temporaryDocumentPath);
+            if (File.Exists(documentPath))
+                File.Delete(documentPath);
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dataKey);
+            if (protectedKey is not null)
+                CryptographicOperations.ZeroMemory(protectedKey);
+        }
+
+        var entry = CreateQueueEntry(job, documentPath, initialState, agentScopeId);
+        try
+        {
+            await SaveManifestAsync(entry, cancellationToken);
+            return entry;
+        }
+        catch
+        {
+            if (File.Exists(documentPath))
+                File.Delete(documentPath);
+            throw;
+        }
+    }
+
+    private static AgentLocalQueueEntry CreateQueueEntry(
+        AgentClaimedJob job,
+        string documentPath,
+        string initialState,
+        Guid agentScopeId) =>
+        new(
+            job.Id,
+            job.JobNumber,
+            job.PrinterDeviceId,
+            job.PrinterName,
+            job.QueueName,
+            job.DocumentName,
+            job.MediaType,
+            job.Sha256.ToLowerInvariant(),
+            job.SizeBytes,
+            job.PageCount,
+            job.Copies,
+            job.ColourMode,
+            job.PaperSize,
+            job.IsDuplex,
+            job.Currency,
+            job.QuotedAmountMinor,
+            documentPath,
+            initialState,
+            DateTimeOffset.UtcNow,
+            job.LeaseExpiresUtc,
+            OutputMode: job.OutputMode,
+            Orientation: job.Orientation,
+            PdfBrandingEnabled: job.PdfBrandingEnabled,
+            PrivatePrinting: job.PrivatePrinting,
+            PrintKind: job.PrintKind,
+            DocumentScopeId: agentScopeId);
+
+    private const byte Qsp2QueueVersion = 1;
+    private const int Qsp2QueueHeaderSize = 4 + 1 + sizeof(uint);
+    private const int MaximumProtectedQueueKeyBytes = 4096;
+    private static readonly byte[] Qsp2QueueKeyEntropy =
+        Encoding.UTF8.GetBytes("QRtoPrint.Agent.LocalQueue.QSP2.DataKey.v1");
+
+    /// <summary>
+    /// Opens a seekable document stream. QLQ2 data is authenticated record-by-record;
+    /// legacy whole-file DPAPI objects remain readable during the migration.
+    /// </summary>
+    public Stream OpenDocumentReadStream(Guid jobId, Guid agentScopeId)
+    {
+        var entry = Find(jobId)
+            ?? throw new FileNotFoundException("The print job is not present in the local queue.");
+        var path = GetValidatedDocumentPath(entry.DocumentPath);
+        var file = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            64 * 1024,
+            FileOptions.RandomAccess);
+
+        byte[]? protectedKey = null;
+        byte[]? dataKey = null;
+        try
+        {
+            Span<byte> magic = stackalloc byte[4];
+            ReadExactly(file, magic);
+            file.Position = 0;
+            if (!magic.SequenceEqual("QLQ2"u8))
+            {
+                file.Dispose();
+                file = null!;
+                return new MemoryStream(ReadLegacyDocument(entry), writable: false);
+            }
+
+            Span<byte> queueHeader = stackalloc byte[Qsp2QueueHeaderSize];
+            ReadExactly(file, queueHeader);
+            if (queueHeader[4] != Qsp2QueueVersion)
+                throw new InvalidDataException("The protected local queue document version is unsupported.");
+
+            var protectedKeyLength = checked((int)BinaryPrimitives.ReadUInt32BigEndian(
+                queueHeader.Slice(5, sizeof(uint))));
+            if (protectedKeyLength is <= 0 or > MaximumProtectedQueueKeyBytes ||
+                file.Length < Qsp2QueueHeaderSize + protectedKeyLength + Qsp2DocumentFormat.HeaderSizeBytes + Qsp2DocumentFormat.HeaderMacSizeBytes)
+                throw new InvalidDataException("The protected local queue key envelope is invalid.");
+
+            protectedKey = new byte[protectedKeyLength];
+            ReadExactly(file, protectedKey);
+            dataKey = ProtectedData.Unprotect(
+                protectedKey,
+                Qsp2QueueKeyEntropy,
+                DataProtectionScope.LocalMachine);
+            if (dataKey.Length != Qsp2DocumentFormat.DataKeySizeBytes)
+                throw new InvalidDataException("The protected local queue data key has an invalid size.");
+
+            var body = new QueueOffsetReadStream(file, Qsp2QueueHeaderSize + protectedKeyLength, leaveOpen: false);
+            file = null!;
+            return Qsp2DocumentFormat.OpenRead(
+                body,
+                dataKey,
+                agentScopeId,
+                jobId,
+                UploadLimits.MaxFileBytes,
+                entry.Sha256,
+                leaveOpen: false);
+        }
+        catch
+        {
+            file?.Dispose();
+            throw;
+        }
+        finally
+        {
+            if (protectedKey is not null)
+                CryptographicOperations.ZeroMemory(protectedKey);
+            if (dataKey is not null)
+                CryptographicOperations.ZeroMemory(dataKey);
+        }
+    }
+
+    private byte[] ReadLegacyDocument(AgentLocalQueueEntry entry)
+    {
+        var protectedBytes = File.ReadAllBytes(GetValidatedDocumentPath(entry.DocumentPath));
+        try
+        {
+            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
+            var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
+            if (plaintext.LongLength != entry.SizeBytes ||
+                !string.Equals(actualHash, entry.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                CryptographicOperations.ZeroMemory(plaintext);
+                throw new InvalidDataException("The protected local document failed its integrity check.");
+            }
+            return plaintext;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(protectedBytes);
+        }
+    }
+
+    private string GetValidatedDocumentPath(string documentPath)
+    {
+        var root = Path.GetFullPath(queueRoot);
+        var prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var fullPath = Path.GetFullPath(documentPath);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!fullPath.StartsWith(prefix, comparison))
+            throw new InvalidDataException("The local queue document path is outside the protected queue.");
+        return fullPath;
+    }
+
+    private static void ReadExactly(Stream stream, Span<byte> destination)
+    {
+        var offset = 0;
+        while (offset < destination.Length)
+        {
+            var read = stream.Read(destination[offset..]);
+            if (read == 0)
+                throw new EndOfStreamException("The protected local queue document is incomplete.");
+            offset += read;
+        }
+    }
+
+    private sealed class QueueOffsetReadStream : Stream
+    {
+        private readonly Stream inner;
+        private readonly long offset;
+        private readonly bool leaveOpen;
+        private bool disposed;
+
+        public QueueOffsetReadStream(Stream inner, long offset, bool leaveOpen)
+        {
+            if (!inner.CanRead || !inner.CanSeek || offset < 0 || offset > inner.Length)
+                throw new ArgumentException("The QSP2 queue source must be a readable, seekable file stream.", nameof(inner));
+            this.inner = inner;
+            this.offset = offset;
+            this.leaveOpen = leaveOpen;
+            inner.Position = offset;
+        }
+
+        public override bool CanRead => !disposed && inner.CanRead;
+        public override bool CanSeek => !disposed && inner.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length { get { ThrowIfDisposed(); return inner.Length - offset; } }
+        public override long Position
+        {
+            get { ThrowIfDisposed(); return inner.Position - offset; }
+            set { ThrowIfDisposed(); if (value < 0) throw new ArgumentOutOfRangeException(nameof(value)); inner.Position = checked(offset + value); }
+        }
+        public override int Read(byte[] buffer, int bufferOffset, int count)
+        {
+            ArgumentNullException.ThrowIfNull(buffer);
+            ArgumentOutOfRangeException.ThrowIfNegative(bufferOffset);
+            ArgumentOutOfRangeException.ThrowIfNegative(count);
+            if (bufferOffset > buffer.Length - count) throw new ArgumentException("The offset and count exceed the destination buffer.");
+            ThrowIfDisposed();
+            return inner.Read(buffer, bufferOffset, count);
+        }
+        public override int Read(Span<byte> buffer) { ThrowIfDisposed(); return inner.Read(buffer); }
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            return inner.ReadAsync(buffer, cancellationToken);
+        }
+        public override long Seek(long seekOffset, SeekOrigin origin)
+        {
+            ThrowIfDisposed();
+            var target = origin switch
+            {
+                SeekOrigin.Begin => seekOffset,
+                SeekOrigin.Current => checked(Position + seekOffset),
+                SeekOrigin.End => checked(Length + seekOffset),
+                _ => throw new ArgumentOutOfRangeException(nameof(origin))
+            };
+            if (target < 0) throw new IOException("Cannot seek before the local QSP2 document body.");
+            Position = target;
+            return target;
+        }
+        public override void Flush() { }
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int bufferOffset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (!disposed)
+            {
+                disposed = true;
+                if (disposing && !leaveOpen) inner.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+        private void ThrowIfDisposed()
+        {
+            if (disposed) throw new ObjectDisposedException(nameof(QueueOffsetReadStream));
+        }
+    }
 
     private async Task<AgentLocalQueueEntry> EnqueueCoreAsync(
         AgentClaimedJob job,
@@ -572,7 +1082,7 @@ public sealed class AgentLocalQueueStore
                 throw new InvalidDataException("The retained photo source path is outside the protected queue.");
             await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
             await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, cancellationToken);
-            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+            RemoveManifest(jobId, manifestPath);
             return true;
         }
         finally
@@ -609,7 +1119,7 @@ public sealed class AgentLocalQueueStore
             throw new InvalidDataException("The retained photo source path is outside the protected queue.");
         await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
         await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, cancellationToken);
-        if (File.Exists(manifestPath)) File.Delete(manifestPath);
+        RemoveManifest(jobId, manifestPath);
     }
 
     public string EnsurePrivateTestOutputDirectory()
@@ -675,7 +1185,7 @@ public sealed class AgentLocalQueueStore
                     await EraseProtectedQueueFileAsync(outputPath, queuePrefix, comparison, cancellationToken);
                 }
                 var privateManifestPath = GetManifestPath(entry.JobId);
-                if (File.Exists(privateManifestPath)) File.Delete(privateManifestPath);
+                RemoveManifest(entry.JobId, privateManifestPath);
                 removed++;
                 continue;
             }
@@ -693,7 +1203,7 @@ public sealed class AgentLocalQueueStore
                 // private job needs no local reconciliation manifest. This also
                 // cleans sanitized manifests left by earlier Agent versions.
                 var sanitizedManifestPath = GetManifestPath(entry.JobId);
-                if (File.Exists(sanitizedManifestPath)) File.Delete(sanitizedManifestPath);
+                RemoveManifest(entry.JobId, sanitizedManifestPath);
                 removed++;
                 continue;
             }
@@ -733,7 +1243,7 @@ public sealed class AgentLocalQueueStore
             var manifestPath = GetManifestPath(entry.JobId);
             if (File.Exists(documentPath)) File.Delete(documentPath);
             if (File.Exists(photoSourcePath)) File.Delete(photoSourcePath);
-            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+            RemoveManifest(entry.JobId, manifestPath);
             removed++;
         }
 
@@ -1083,7 +1593,7 @@ public sealed class AgentLocalQueueStore
             // For a real physical private print, the server has now acknowledged
             // source-metadata redaction. No local job manifest is needed afterwards.
             var manifestPath = GetManifestPath(jobId);
-            if (File.Exists(manifestPath)) File.Delete(manifestPath);
+            RemoveManifest(jobId, manifestPath);
     
         }
         finally
@@ -1375,24 +1885,35 @@ public sealed class AgentLocalQueueStore
     {
         var entry = Find(jobId)
             ?? throw new FileNotFoundException("The print job is not present in the local queue.");
-        var protectedBytes = File.ReadAllBytes(entry.DocumentPath);
-        try
+        var path = GetValidatedDocumentPath(entry.DocumentPath);
+        using (var probe = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
         {
-            var plaintext = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.LocalMachine);
-            var actualHash = Convert.ToHexString(SHA256.HashData(plaintext)).ToLowerInvariant();
-            if (plaintext.LongLength != entry.SizeBytes ||
-                !string.Equals(actualHash, entry.Sha256, StringComparison.OrdinalIgnoreCase))
+            Span<byte> magic = stackalloc byte[4];
+            ReadExactly(probe, magic);
+            if (magic.SequenceEqual("QLQ2"u8))
             {
-                CryptographicOperations.ZeroMemory(plaintext);
-                throw new InvalidDataException("The protected local document failed its integrity check.");
+                // Compatibility API for callers that still require a byte array.
+                // New print and processing paths should use OpenDocumentReadStream.
+                var manifest = entry;
+                var scopeId = entry.DocumentScopeId
+                    ?? throw new InvalidDataException("The QSP2 local queue manifest is missing its Agent scope identity.");
+                using var document = OpenDocumentReadStream(jobId, scopeId);
+                using var output = new MemoryStream(checked((int)manifest.SizeBytes));
+                document.CopyTo(output);
+                var bytes = output.ToArray();
+                if (!string.Equals(
+                    Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+                    manifest.Sha256,
+                    StringComparison.OrdinalIgnoreCase))
+                {
+                    CryptographicOperations.ZeroMemory(bytes);
+                    throw new InvalidDataException("The protected local document failed its integrity check.");
+                }
+                return bytes;
             }
+        }
 
-            return plaintext;
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(protectedBytes);
-        }
+        return ReadLegacyDocument(entry);
     }
 
     private async Task SaveManifestAsync(AgentLocalQueueEntry entry, CancellationToken cancellationToken)
@@ -1421,6 +1942,16 @@ public sealed class AgentLocalQueueStore
         else
         {
             File.Move(temporaryPath, manifestPath);
+        }
+
+        // Publish to the in-memory queue index only after the durable manifest swap.
+        var committedInfo = new FileInfo(manifestPath);
+        var committedStamp = new ManifestStamp(committedInfo.Length, committedInfo.LastWriteTimeUtc.Ticks);
+        lock (queueIndexSync)
+        {
+            if (queueIndex is not null)
+                queueIndex[entry.JobId] = entry;
+            queueManifestStamps[entry.JobId] = committedStamp;
         }
     }
 

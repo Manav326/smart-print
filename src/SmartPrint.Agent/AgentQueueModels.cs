@@ -76,7 +76,10 @@ public sealed record LocalPrintUploadCompletionRequest(
     string FileExtension,
     string MediaType,
     long SizeBytes,
-    string Sha256);
+    string Sha256,
+    long ReceivedBytes = 0,
+    long DurationMilliseconds = 0,
+    int AttemptNumber = 0);
 
 public sealed record AgentLocalQueueEntry(
     Guid JobId,
@@ -125,7 +128,8 @@ public sealed record AgentLocalQueueEntry(
     int PagesPerSheet = 1,
     string PhotoPaperFinish = "PLAIN",
     string PhotoOutputLayout = "A4_SHEET",
-    string? PhotoSizeCode = null);
+    string? PhotoSizeCode = null,
+    Guid? DocumentScopeId = null);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);

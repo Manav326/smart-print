@@ -165,7 +165,7 @@ test("Photo Studio locks background scroll and supports accessible keyboard dism
 test("a successful shop photo PDF save is not misreported as failed when refreshing the queue fails",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/The enhanced multi-page A4 photo PDF is saved to the same print job/);
- assert.match(app,/The A4 photo PDF was saved to the existing print job, but the queue could not refresh/);
+ assert.match(app,/The prepared photo output was saved to the existing print job, but the queue could not refresh/);
 });
 
 

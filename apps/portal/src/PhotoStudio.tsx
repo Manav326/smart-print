@@ -6,7 +6,7 @@ import {
 import styles from "./PhotoStudio.module.css";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
-import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdf, getPhotoPaperPageGeometry, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution, type PhotoOutputLayout, type PhotoPaperFinish } from "./photo-studio-layout";
+import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdfBlob, getPhotoPaperPageGeometry, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution, type PhotoOutputLayout, type PhotoPaperFinish } from "./photo-studio-layout";
 
 export type PhotoStudioEditorSettings = {
   sizeId: string;
@@ -398,7 +398,7 @@ export default function PhotoStudio({
   const previewHeight = isPhotoPaperLayout ? photoPaperGeometry.heightPx : 594;
   const previewWidthMm = isPhotoPaperLayout ? size.widthMm : A4_WIDTH_MM;
   const previewHeightMm = isPhotoPaperLayout ? size.heightMm : A4_HEIGHT_MM;
-  useEffect(()=>{setPreviewPage(current=>Math.min(current,sheetCount-1));},[sheetCount]);
+  useEffect(()=>{setPreviewPage(current=>Math.min(current,outputPageCount-1));},[outputPageCount]);
   useEffect(()=>{
     if(photosPerPageInput!=="auto"&&(!Number.isInteger(Number(photosPerPageInput))||Number(photosPerPageInput)>maximumLayout.perSheet))
       setPhotosPerPageInput("auto");
@@ -616,7 +616,7 @@ export default function PhotoStudio({
     if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photos. The A4 page count is calculated automatically.");return;}
     busyRef.current=true;setBusy(true);setError("");
     try{
-      const pages=Math.ceil(parsedCopies/photosPerPage);
+      const pages = Math.ceil(parsedCopies / outputPhotosPerPage);
       const jpegPages: Uint8Array[] = [];
       let jpegByteLength=0;
       const pdfStructureAllowance=4096+pages*1024;
@@ -648,11 +648,9 @@ export default function PhotoStudio({
         sharedPhotoTile.width=0;
         sharedPhotoTile.height=0;
       }
-      const bytes = buildPhotoPdf(jpegPages, photoOutputLayout, isPhotoPaperLayout ? size : undefined);
-      const buffer=bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength) as ArrayBuffer;
-      const pdf=new Blob([buffer],{type:"application/pdf"});
+      const pdf = buildPhotoPdfBlob(jpegPages, photoOutputLayout, isPhotoPaperLayout ? size : undefined);
       if(mode!=="private-library"&&pdf.size>MAX_FILE_BYTES)throw new Error(`The prepared photo PDF exceeds SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo or reduce the number of copies.`);
-      const output = new File([pdf], safeBaseName(source.name) + "-" + size.id + (isPhotoPaperLayout ? "-photo-paper-prints.pdf" : "-a4-photo-sheet.pdf"), { type: "application/pdf", lastModified: Date.now() });
+      const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
       const editorSettings: PhotoStudioEditorSettings = {
         sizeId: size.id,
         look,

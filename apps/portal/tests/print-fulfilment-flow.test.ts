@@ -57,7 +57,7 @@ test("standard Cloud-assisted Photo Studio uploads keep photo identity through t
   const routeEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"', routeStart);
   assert.ok(routeStart >= 0 && routeEnd > routeStart);
   const route = program.slice(routeStart, routeEnd);
-  assert.match(route, /PhotoSheetPdfRules\.HasExactlyA4PortraitPages/);
+  assert.match(route, /PhotoSheetPdfRules\.HasExactlyPhotoPages/);
   assert.match(route, /PrintKind = requestedPrintKind/);
   assert.match(route, /PhotoSizeCode = photoSizeCode/);
   assert.match(route, /PhotoCount = photoCount \?\? 0/);
@@ -318,9 +318,9 @@ test("customer web upload accepts drag and drop and contains no JavaScript brows
 test("photo studio's selected photo quantity creates one multi-page file with one photo-count record",()=>{
  const app=read("../src/App.tsx");
  const studio=read("../src/PhotoStudio.tsx");
- assert.match(studio,/const pages=Math\.ceil\(parsedCopies\/photosPerPage\)/);
+ assert.match(studio,/const pages\s*=\s*Math\.ceil\(parsedCopies\s*\/\s*outputPhotosPerPage\)/);
  assert.match(studio,/onApply\(\[\{file:output,sizeCode:size\.id,photoCount:parsedCopies,photosPerPage,captionHeightMm,resolutionDpi:300,editorSettings,previewPages:jpegPages\.map/);
- assert.match(studio,/buildPhotoPdf\(jpegPages\)/);
+ assert.match(studio,/buildPhotoPdfBlob\(jpegPages, photoOutputLayout, isPhotoPaperLayout \? size : undefined\)/);
  assert.match(studio,/export type PreparedPhotoSheet = \{/);
  assert.match(studio,/resolutionDpi\?: number/);
  assert.match(studio,/editorSettings\?: PhotoStudioEditorSettings/);
@@ -367,7 +367,7 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  assert.match(studio,/mode === "shop-create" \? "Create photo order"/);
  assert.match(studio,/mode === "shop" \? "Save sheet to this job"/);
  assert.match(studio,/: "Prepare A4 sheet"/);
- assert.match(studio,/Prepared A4 replaces this upload; original stays untouched/);
+ assert.match(studio,/Prepared photo output replaces this upload; original stays untouched/);
  assert.match(studio,/Replace the unpaid job photo PDF; approval and dispatch still apply/);
  assert.match(studio,/type="date"/);
  assert.match(studio,/formatDobForPrint/);
@@ -589,8 +589,8 @@ test("local shop Photo Studio revision authorization and completion enforce the 
   const authorize=program.slice(authorizeStart,authorizeEnd);
   const complete=program.slice(completeStart,completeEnd);
   assert.match(authorize,/request\.PageSizesJson\.Length > 64_000/);
-  assert.match(authorize,/PhotoSheetPdfRules\.HasExactlyA4PortraitPages\(request\.PageSizesJson, request\.PageCount\)/);
-  assert.match(complete,/PhotoSheetPdfRules\.HasExactlyA4PortraitPages\(request\.PageSizesJson, request\.PageCount\)/);
+  assert.match(authorize,/PhotoSheetPdfRules\.HasExactlyPhotoPages\(request\.PageSizesJson, request\.PageCount\)/);
+  assert.match(complete,/PhotoSheetPdfRules\.HasExactlyPhotoPages\(request\.PageSizesJson, request\.PageCount\)/);
   assert.match(authorize,/photo_sheet_layout_invalid/);
   assert.match(complete,/photo_sheet_layout_invalid/);
 });
@@ -601,7 +601,7 @@ test("cloud shop Photo Studio revisions validate complete A4 raster geometry bef
   const end=program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/preview-source"',start);
   assert.ok(start>=0&&end>start);
   const endpoint=program.slice(start,end);
-  const validation=endpoint.indexOf("PhotoSheetPdfRules.HasExactlyA4PortraitPages(stored.Analysis.PageSizesJson, expectedPageCount)");
+  const validation=endpoint.indexOf("PhotoSheetPdfRules.HasExactlyPhotoPages(stored.Analysis.PageSizesJson, expectedPageCount, photoOutputLayout, photoSizeCode)");
   const replacement=endpoint.indexOf("document.StorageKey = stored.StorageKey");
   assert.match(endpoint,/string\.Equals\(stored\.Analysis\.MediaType, "application\/pdf"/);
   assert.ok(validation>=0&&replacement>validation,
@@ -630,7 +630,7 @@ test("shop-originated photo orders use their own tenant-owned job and the shared
  assert.match(endpoint,/CustomerSessionId = null/);
  assert.match(endpoint,/Status = paymentMethod == "UPI" \? "AWAITING_CUSTOMER_PAYMENT" : "AWAITING_COUNTER_PAYMENT"/);
  assert.match(endpoint,/new PrintPayment/);
- assert.match(endpoint,/PhotoSheetPdfRules\.HasExactlyA4PortraitPages/);
+ assert.match(endpoint,/PhotoSheetPdfRules\.HasExactlyPhotoPages/);
  assert.match(endpoint,/item\.IdempotencyKey == idempotencyKey/);
  assert.match(endpoint,/session\.TenantId == tenantId && session\.CustomerUserId == user\.Id/);
  assert.match(endpoint,/SHOP_PHOTO_ORDER_CREATED_AWAITING_PAYMENT/);

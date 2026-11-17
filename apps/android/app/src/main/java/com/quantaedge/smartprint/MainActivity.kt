@@ -7228,7 +7228,13 @@ class MainActivity : AppCompatActivity() {
         setBottomNavigationVisible(false)
         content.removeAllViews()
 
-        val reader = SmartPrintDocumentViewer(this, file, emptyList(), null) {}
+        val reader = SmartPrintDocumentViewer(
+            context = this,
+            startFile = file,
+            imageSiblings = emptyList(),
+            startPosition = null,
+            onNavigateImage = {}
+        )
         documentViewer = reader
         content.addView(reader, frameParams())
     }

@@ -126,9 +126,11 @@ builder.Services.AddRateLimiter(options =>
     options.AddPolicy("qr-session", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetRateLimitPartitionKey(context),
             _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+    // A 20-file Private Printing batch reserves one ticket and posts one encrypted
+    // relay per file. Keep the per-session abuse limit, but allow the complete batch.
     options.AddPolicy("document-upload", context =>
         RateLimitPartition.GetFixedWindowLimiter(GetSessionRateLimitPartitionKey(context),
-            _ => new FixedWindowRateLimiterOptions { PermitLimit = 30, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
+            _ => new FixedWindowRateLimiterOptions { PermitLimit = UploadLimits.MaxBatchFiles * 3, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
 });
 var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins")
     .Get<string[]>()?
@@ -2578,6 +2580,7 @@ shop.MapPost("/photo-jobs", async (
     HttpContext context,
     CancellationToken ct) =>
 {
+    Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? transaction = null;
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
         return Results.Forbid();
 
@@ -2691,8 +2694,9 @@ shop.MapPost("/photo-jobs", async (
     }
 
     var expectedPageCount = PricingCalculator.PhotoPageCount(photoCount, photoSizeCode, photosPerPage);
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
     StoredDocument? stored = null;
+
+
 
     async Task CleanupUncommittedStorageAsync()
     {
@@ -2727,11 +2731,10 @@ shop.MapPost("/photo-jobs", async (
         try
         {
             await using var input = upload.OpenReadStream();
-            stored = await storage.ValidateAndStoreAsync(tenantId, documentId, outputName, input, upload.Length, ct);
+            stored = await storage.ValidateAndStoreStreamingAsync(tenantId, documentId, outputName, input, upload.Length, ct);
         }
         catch (DocumentValidationException exception)
         {
-            await transaction.RollbackAsync(ct);
             return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
         }
 
@@ -2740,13 +2743,16 @@ shop.MapPost("/photo-jobs", async (
         {
             await storage.DeleteAsync(stored.StorageKey);
             stored = null;
-            await transaction.RollbackAsync(ct);
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
                 message = $"The prepared file must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page 2480 × 3508 raster. Check the sheet preview and prepare it again."
             });
         }
+
+        // Transfer, encrypt and validate before taking database locks. The
+        // transaction below covers only idempotency, pricing, quota and job commit.
+        transaction = await db.Database.BeginTransactionAsync(ct);
 
         var existingJob = await db.PrintJobs.AsNoTracking()
             .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IdempotencyKey == idempotencyKey, ct);
@@ -2994,7 +3000,12 @@ shop.MapPost("/photo-jobs", async (
     }
     catch (DbUpdateException)
     {
-        await transaction.RollbackAsync(ct);
+        if (transaction is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            await transaction.DisposeAsync();
+            transaction = null;
+        }
         await CleanupUncommittedStorageAsync();
 
         // A concurrent request may have won the unique (TenantId, IdempotencyKey)
@@ -3011,9 +3022,19 @@ shop.MapPost("/photo-jobs", async (
     }
     catch
     {
-        await transaction.RollbackAsync(ct);
+        if (transaction is not null)
+        {
+            await transaction.RollbackAsync(ct);
+            await transaction.DisposeAsync();
+            transaction = null;
+        }
         await CleanupUncommittedStorageAsync();
         throw;
+    }
+    finally
+    {
+        if (transaction is not null)
+            await transaction.DisposeAsync();
     }
 })
 .WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
@@ -4070,100 +4091,76 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
         return Results.Forbid();
 
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
-        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
-        .ToListAsync(ct);
-    var job = lockedJobs.SingleOrDefault();
-    if (job is null)
-    {
-        await transaction.RollbackAsync(ct);
+    // Read-only preflight before receiving the replacement. No transaction or row
+    // lock remains open while the customer/shop owner transfers a multi-megabyte PDF.
+    var jobPreflight = await db.PrintJobs.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.Id == jobId && item.TenantId == tenantId, ct);
+    if (jobPreflight is null)
         return Results.NotFound();
-    }
-    if (job.PrivatePrinting)
-    {
-        await transaction.RollbackAsync(ct);
+    if (jobPreflight.PrivatePrinting)
         return Results.Conflict(new
         {
             code = "private_printing_source_locked",
             message = "Private Printing never transfers the original photo or editor settings to the shop. Ask the customer to submit a new document if a change is needed."
         });
-    }
 
-    if (job.Status != "AWAITING_SHOP_APPROVAL" ||
-        job.LocalQueueReceivedUtc is not null ||
-        job.ClaimedByAgentDeviceId is not null)
-    {
-        await transaction.RollbackAsync(ct);
+    if (jobPreflight.Status != "AWAITING_SHOP_APPROVAL" ||
+        jobPreflight.LocalQueueReceivedUtc is not null ||
+        jobPreflight.ClaimedByAgentDeviceId is not null)
         return Results.Conflict(new
         {
             code = "photo_revision_not_allowed",
             message = "Photo enhancements can only be saved while this job is awaiting shop review and before any payment or printer handoff."
         });
-    }
 
-    var document = await db.PrintDocuments.SingleOrDefaultAsync(
-        item => item.TenantId == tenantId && item.PrintJobId == jobId, ct);
-    if (document is null || document.PurgedUtc is not null)
-    {
-        await transaction.RollbackAsync(ct);
+    var documentSnapshot = await db.PrintDocuments.AsNoTracking()
+        .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.PrintJobId == jobId, ct);
+    if (documentSnapshot is null || documentSnapshot.PurgedUtc is not null)
         return Results.NotFound();
-    }
 
-    if (!string.Equals(document.StorageMode, "CLOUD", StringComparison.Ordinal))
-    {
-        await transaction.RollbackAsync(ct);
+    if (!string.Equals(documentSnapshot.StorageMode, "CLOUD", StringComparison.Ordinal))
         return Results.Conflict(new
         {
             code = "photo_revision_local_storage",
             message = "This original is stored only on the paired shop computer. It has not been copied to cloud storage; local-only photo editing is not available in this release."
         });
-    }
 
-    var photoSourceMediaType = document.PhotoSourceMediaType ?? document.MediaType;
+    var photoSourceMediaType = documentSnapshot.PhotoSourceMediaType ?? documentSnapshot.MediaType;
     if (photoSourceMediaType is not ("image/jpeg" or "image/png"))
-    {
-        await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
             code = "photo_revision_source_not_image",
             message = "The shop editor can enhance an original JPG or PNG photo. This job has no retained editable photo source."
         });
-    }
 
-    var hasPayment = await db.PrintPayments.AnyAsync(item =>
+    var preflightHasPayment = await db.PrintPayments.AnyAsync(item =>
         item.TenantId == tenantId && item.PrintJobId == jobId &&
         item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
-    var hasBatchPayment = job.BatchId is Guid batchId && await db.PrintBatchPayments.AnyAsync(item =>
-        item.TenantId == tenantId && item.BatchId == batchId &&
-        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
-    if (hasPayment || hasBatchPayment)
-    {
-        await transaction.RollbackAsync(ct);
+    var preflightHasBatchPayment = jobPreflight.BatchId is Guid preflightBatchId &&
+        await db.PrintBatchPayments.AnyAsync(item =>
+            item.TenantId == tenantId && item.BatchId == preflightBatchId &&
+            item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    if (preflightHasPayment || preflightHasBatchPayment)
         return Results.Conflict(new
         {
             code = "photo_revision_payment_started",
             message = "This file or its batch already has a payment attempt. The original is locked against editing; use the existing refund/review workflow."
         });
-    }
 
     if (!context.Request.HasFormContentType)
     {
-        await transaction.RollbackAsync(ct);
         return Results.BadRequest(new { code = "photo_revision_form_required", message = "Send the prepared photo sheet as a multipart file." });
     }
 
     var form = await context.Request.ReadFormAsync(ct);
     if (form.Files.Count != 1)
     {
-        await transaction.RollbackAsync(ct);
         return Results.BadRequest(new { code = "one_photo_sheet_required", message = "Save exactly one prepared photo-sheet PDF." });
     }
 
     var file = form.Files[0];
     if (file.Length is <= 0 or > UploadLimits.MaxFileBytes)
     {
-        await transaction.RollbackAsync(ct);
         return Results.UnprocessableEntity(new
         {
             code = "photo_sheet_invalid",
@@ -4181,7 +4178,6 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         photosPerPage < 1 || photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(photoSizeCode) ||
         !PhotoSheetPdfRules.IsValidPhotoOutputOptions(photoOutputLayout, photoPaperFinish, photosPerPage))
     {
-        await transaction.RollbackAsync(ct);
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
             ["photoDetails"] = [$"Choose a supported ID photo size and a quantity from 1 to {UploadLimits.MaxPhotoCount}."]
@@ -4192,7 +4188,6 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     if (!PhotoStudioEditorSettingsRules.TryNormalizeJson(
             form["editorSettingsJson"].FirstOrDefault(), out var editorSettingsJson))
     {
-        await transaction.RollbackAsync(ct);
         return Results.BadRequest(new
         {
             code = "photo_editor_settings_invalid",
@@ -4200,13 +4195,96 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
         });
     }
 
+    var newDocumentId = Guid.NewGuid();
+    var outputName = $"photo-sheet-{jobPreflight.JobNumber}.pdf";
+    StoredDocument stored;
+    try
+    {
+        await using var input = file.OpenReadStream();
+        stored = await storage.ValidateAndStoreStreamingAsync(tenantId, newDocumentId, outputName, input, file.Length, ct);
+    }
+    catch (DocumentValidationException exception)
+    {
+        return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
+    }
+
+    if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+        stored.Analysis.PageCount != expectedPageCount ||
+        !PhotoSheetPdfRules.HasExactlyPhotoPages(stored.Analysis.PageSizesJson, expectedPageCount, photoOutputLayout, photoSizeCode))
+    {
+        await storage.DeleteAsync(stored.StorageKey);
+        return Results.UnprocessableEntity(new
+        {
+            code = "photo_sheet_layout_invalid",
+            message = $"The replacement Photo Studio PDF must match the selected photo-paper dimensions and output layout."
+        });
+    }
+
+    // The replacement is now fully encrypted, hashed and layout-validated.
+    // Only now acquire the business-row lock and recheck all mutable eligibility.
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+
+    async Task<IResult> RejectStagedRevisionAsync(IResult response)
+    {
+        await transaction.RollbackAsync(ct);
+        await storage.DeleteAsync(stored.StorageKey);
+        return response;
+    }
+
+    var lockedJobs = await db.PrintJobs.FromSqlInterpolated(
+        $"SELECT * FROM \"PrintJobs\" WHERE \"Id\" = {jobId} AND \"TenantId\" = {tenantId} FOR UPDATE")
+        .ToListAsync(ct);
+    var job = lockedJobs.SingleOrDefault();
+    if (job is null)
+        return await RejectStagedRevisionAsync(Results.NotFound());
+    if (job.PrivatePrinting ||
+        job.Status != "AWAITING_SHOP_APPROVAL" ||
+        job.LocalQueueReceivedUtc is not null ||
+        job.ClaimedByAgentDeviceId is not null)
+        return await RejectStagedRevisionAsync(Results.Conflict(new
+        {
+            code = "photo_revision_not_allowed",
+            message = "The job changed while the replacement was uploading. Refresh the queue and confirm the job is still awaiting shop review."
+        }));
+
+    var document = await db.PrintDocuments.SingleOrDefaultAsync(
+        item => item.TenantId == tenantId && item.PrintJobId == jobId, ct);
+    if (document is null || document.PurgedUtc is not null)
+        return await RejectStagedRevisionAsync(Results.NotFound());
+    if (!string.Equals(document.StorageMode, "CLOUD", StringComparison.Ordinal) ||
+        !string.Equals(document.StorageKey, documentSnapshot.StorageKey, StringComparison.Ordinal) ||
+        !string.Equals(document.Sha256, documentSnapshot.Sha256, StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(document.PhotoSourceStorageKey, documentSnapshot.PhotoSourceStorageKey, StringComparison.Ordinal) ||
+        !string.Equals(document.PhotoSourceSha256, documentSnapshot.PhotoSourceSha256, StringComparison.OrdinalIgnoreCase) ||
+        !string.Equals(document.PhotoSourceMediaType, documentSnapshot.PhotoSourceMediaType, StringComparison.Ordinal))
+        return await RejectStagedRevisionAsync(Results.Conflict(new
+        {
+            code = "photo_revision_source_changed",
+            message = "The source document was changed while the replacement uploaded. Refresh the editor before trying again."
+        }));
+
+    var hasPayment = await db.PrintPayments.AnyAsync(item =>
+        item.TenantId == tenantId && item.PrintJobId == jobId &&
+        item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    var hasBatchPayment = job.BatchId is Guid batchId &&
+        await db.PrintBatchPayments.AnyAsync(item =>
+            item.TenantId == tenantId && item.BatchId == batchId &&
+            item.Status != "REJECTED" && item.Status != "REFUNDED", ct);
+    if (hasPayment || hasBatchPayment)
+        return await RejectStagedRevisionAsync(Results.Conflict(new
+        {
+            code = "photo_revision_payment_started",
+            message = "A payment attempt started while the replacement uploaded. The original document remains unchanged."
+        }));
+
     var pricing = await db.ShopPricingProfiles.AsNoTracking()
         .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.IsConfigured, ct);
     if (pricing is null)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = "shop_pricing_not_configured", message = "Configure photo prices before saving an enhanced photo job." });
-    }
+        return await RejectStagedRevisionAsync(Results.Conflict(new
+        {
+            code = "shop_pricing_not_configured",
+            message = "Configure photo prices before saving an enhanced photo job."
+        }));
 
     long amount;
     long unitPrice;
@@ -4217,38 +4295,15 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
     catch (Exception exception) when (exception is ArgumentException or InvalidOperationException or OverflowException)
     {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = "photo_pricing_unavailable", message = exception.Message });
-    }
-
-    var newDocumentId = Guid.NewGuid();
-    var outputName = $"photo-sheet-{job.JobNumber}.pdf";
-    StoredDocument stored;
-    try
-    {
-        await using var input = file.OpenReadStream();
-        stored = await storage.ValidateAndStoreAsync(tenantId, newDocumentId, outputName, input, file.Length, ct);
-    }
-    catch (DocumentValidationException exception)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.UnprocessableEntity(new { code = "photo_sheet_not_supported", message = exception.Message });
-    }
-
-    if (!string.Equals(stored.Analysis.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
-        stored.Analysis.PageCount != expectedPageCount ||
-        !PhotoSheetPdfRules.HasExactlyPhotoPages(stored.Analysis.PageSizesJson, expectedPageCount, photoOutputLayout, photoSizeCode))
-    {
-        await storage.DeleteAsync(stored.StorageKey);
-        await transaction.RollbackAsync(ct);
-        return Results.UnprocessableEntity(new
+        return await RejectStagedRevisionAsync(Results.Conflict(new
         {
-            code = "photo_sheet_layout_invalid",
-            message = $"The replacement Photo Studio PDF must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page 300-DPI photo raster."
-        });
+            code = "photo_pricing_unavailable",
+            message = exception.Message
+        }));
     }
 
     var previousStorageKey = document.StorageKey;
+
     var now = DateTimeOffset.UtcNow;
     if (document.PhotoSourceOriginalFileName is null)
     {
@@ -4313,8 +4368,31 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     }
     catch
     {
-        await transaction.RollbackAsync(ct);
-        await storage.DeleteAsync(stored.StorageKey);
+        try
+        {
+            await transaction.RollbackAsync(ct);
+        }
+        catch
+        {
+            // The transaction outcome may be uncertain. The reference check below
+            // decides whether the staged object is safe to remove.
+        }
+
+        bool referencedByCommittedDocument;
+        try
+        {
+            referencedByCommittedDocument = await db.PrintDocuments.AsNoTracking()
+                .AnyAsync(item => item.TenantId == tenantId && item.StorageKey == stored.StorageKey, ct);
+        }
+        catch
+        {
+            // A database outcome that cannot be checked is uncertain. Retain the
+            // encrypted object so a committed photo revision cannot lose its source.
+            throw;
+        }
+
+        if (!referencedByCommittedDocument)
+            await storage.DeleteAsync(stored.StorageKey);
         throw;
     }
 
@@ -4570,12 +4648,16 @@ shop.MapGet("/print-jobs/{jobId:guid}/document", async (
             return Results.Conflict(new { code = "photo_source_unavailable", message = "The original JPG or PNG photo is not available for editing." });
     }
 
-    MemoryStream content;
+    var expectedDocumentSha256 = document.Sha256;
+    if (photoSourcePreview)
+        expectedDocumentSha256 = document.PhotoSourceSha256 ?? document.Sha256;
+
+    Stream content;
     try
     {
-        content = storage.OpenRead(storageKey);
+        content = storage.OpenReadStream(storageKey, tenantId, expectedDocumentSha256);
     }
-    catch (IOException)
+    catch (Exception exception) when (exception is IOException or InvalidDataException or CryptographicException)
     {
         return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "The stored document could not be opened.");
     }
@@ -5620,8 +5702,7 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
         })
         .SingleOrDefaultAsync(ct);
     if (relay is null || string.IsNullOrWhiteSpace(relay.PrivateRelayStorageKey) ||
-        string.IsNullOrWhiteSpace(relay.PrivateRelayWrappedKey) ||
-        string.IsNullOrWhiteSpace(relay.PrivateRelayIv))
+        string.IsNullOrWhiteSpace(relay.PrivateRelayWrappedKey))
         return Results.NotFound();
     if (!await IsPrivatePrintingOutputQueueReadyAsync(
             db, environment, device.TenantId, device.Id, relay.PrinterDeviceId, ct))
@@ -5631,14 +5712,27 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
             message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document could be delivered. No payload was downloaded."
         });
 
-    MemoryStream ciphertext;
-    try { ciphertext = storage.OpenRead(relay.PrivateRelayStorageKey); }
+    Stream ciphertext;
+    try
+    {
+        // New QSP2 objects are already end-to-end encrypted and are sent directly
+        // from disk. Older v1 relay objects retain their server-wrapped reader.
+        if (string.IsNullOrWhiteSpace(relay.PrivateRelayIv))
+        {
+            ciphertext = storage.OpenOpaquePrivateQsp2RelayReadStream(relay.PrivateRelayStorageKey);
+            context.Response.Headers["X-Print-Encrypted-Format"] = "QSP2";
+        }
+        else
+        {
+            ciphertext = storage.OpenRead(relay.PrivateRelayStorageKey);
+            context.Response.Headers["X-Print-Encrypted-Iv"] = relay.PrivateRelayIv;
+        }
+    }
     catch (IOException) { return Results.NotFound(); }
     context.Response.Headers.CacheControl = "private, no-store";
     context.Response.Headers.Pragma = "no-cache";
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Print-Encrypted-Key"] = relay.PrivateRelayWrappedKey;
-    context.Response.Headers["X-Print-Encrypted-Iv"] = relay.PrivateRelayIv;
     return Results.File(ciphertext, "application/octet-stream", enableRangeProcessing: false);
 });
 
@@ -6211,12 +6305,12 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
         });
     }
 
-    MemoryStream content;
+    Stream content;
     try
     {
-        content = storage.OpenRead(document.StorageKey);
+        content = storage.OpenReadStream(document.StorageKey, device.TenantId, document.Sha256);
     }
-    catch (IOException)
+    catch (Exception exception) when (exception is IOException or InvalidDataException or CryptographicException)
     {
         return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "The stored document could not be opened.");
     }
@@ -6473,6 +6567,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
                     completedJob.PhotoSizeCode,
                     completedJob.PhotoCount,
                     completedJob.PhotosPerPage,
+                    completedJob.PhotoOutputLayout,
+                    completedJob.PhotoPaperFinish,
                     completedJob.PricingVersion,
                     completedJob.Currency,
                     completedJob.QuotedAmountMinor,
@@ -6585,6 +6681,11 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         ticket.Copies,
         ticket.Orientation,
         ticket.PagesPerSheet,
+        ticket.PhotoSizeCode,
+        ticket.PhotoCount,
+        ticket.PhotosPerPage,
+        ticket.PhotoOutputLayout,
+        ticket.PhotoPaperFinish,
         ticket.ExpiresUtc
     });
 });
@@ -6872,6 +6973,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                     existingJob.PhotoSizeCode,
                     existingJob.PhotoCount,
                     existingJob.PhotosPerPage,
+                    existingJob.PhotoOutputLayout,
+                    existingJob.PhotoPaperFinish,
                     existingJob.PricingVersion,
                     existingJob.Currency,
                     existingJob.QuotedAmountMinor,
@@ -9229,7 +9332,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
             code = requestedPrintKind == "ID_DOCUMENT" ? "id_document_private_printing_required" : "photo_metadata_invalid",
             message = requestedPrintKind == "ID_DOCUMENT"
                 ? "ID Studio documents require Private Printing through the paired shop computer."
-                : "Photo Studio sheets must be a valid A4 colour PDF with a supported photo size, quantity and per-page layout. No document was uploaded."
+                : "Photo Studio output must match the selected photo size, output layout and finish. No document was uploaded."
         });
     }
 
@@ -9367,7 +9470,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
     try
     {
         await using var input = file.OpenReadStream();
-        stored = await storage.ValidateAndStoreAsync(
+        stored = await storage.ValidateAndStoreStreamingAsync(
             session.TenantId, documentId, originalName, input, file.Length, ct);
     }
     catch (DocumentValidationException exception)
@@ -9446,6 +9549,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
         PhotoSizeCode = photoSizeCode,
         PhotoCount = photoCount ?? 0,
         PhotosPerPage = photosPerPage,
+        PhotoOutputLayout = photoOutputLayout,
+        PhotoPaperFinish = photoPaperFinish,
         Currency = "INR",
         QuotedAmountMinor = 0,
         CreatedUtc = now,
@@ -10377,22 +10482,25 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
     var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
     var ivText = context.Request.Headers["X-Print-Encrypted-Iv"].FirstOrDefault();
+    var encryptedFormat = context.Request.Headers["X-Print-Encrypted-Format"].FirstOrDefault();
+    var isQsp2 = string.Equals(encryptedFormat, "QSP2", StringComparison.Ordinal);
     if (string.IsNullOrWhiteSpace(rawToken) || string.IsNullOrWhiteSpace(rawGrant) ||
         rawGrant.Length is < 40 or > 128 || string.IsNullOrWhiteSpace(wrappedKey) ||
-        wrappedKey.Length > 2048 || string.IsNullOrWhiteSpace(ivText) || ivText.Length > 64)
+        wrappedKey.Length > 2048 || (!isQsp2 && (string.IsNullOrWhiteSpace(ivText) || ivText.Length > 64)))
         return Results.Unauthorized();
 
     byte[] keyBytes;
-    byte[] ivBytes;
+    byte[]? ivBytes = null;
     try
     {
         keyBytes = Convert.FromBase64String(wrappedKey);
-        ivBytes = Convert.FromBase64String(ivText);
+        if (!isQsp2) ivBytes = Convert.FromBase64String(ivText!);
     }
     catch (FormatException) { return Results.BadRequest(new { code = "private_relay_envelope_invalid" }); }
-    var envelopeValid = keyBytes.Length is >= 256 and <= 512 && ivBytes.Length == 12;
+    var envelopeValid = keyBytes.Length is >= 256 and <= 512 &&
+        (isQsp2 ? string.IsNullOrWhiteSpace(ivText) : ivBytes?.Length == 12);
     CryptographicOperations.ZeroMemory(keyBytes);
-    CryptographicOperations.ZeroMemory(ivBytes);
+    if (ivBytes is not null) CryptographicOperations.ZeroMemory(ivBytes);
     if (!envelopeValid)
         return Results.BadRequest(new { code = "private_relay_envelope_invalid" });
 
@@ -10437,21 +10545,40 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey) && ticket.PrivateRelayUploadedUtc is not null)
         return Results.Ok(new { Accepted = true, DuplicateRequest = true, ticket.PrintJobId, ticket.JobNumber });
 
-    if (!context.Request.HasFormContentType)
-        return Results.BadRequest(new { code = "private_relay_form_required" });
-    var form = await context.Request.ReadFormAsync(ct);
-    if (form.Files.Count != 1)
-        return Results.BadRequest(new { code = "private_relay_file_required" });
-    var file = form.Files[0];
-    if (file.Length != ticket.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes || file.Length > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
-        return Results.UnprocessableEntity(new { code = "private_relay_size_mismatch", message = "The encrypted file size does not match its original upload ticket." });
-
     string storageKey;
     try
     {
-        await using var input = file.OpenReadStream();
-        storageKey = await storage.StoreOpaquePrivateRelayAsync(
-            ticket.TenantId, ticket.Id, input, file.Length, ct);
+        if (isQsp2)
+        {
+            if (!string.Equals(context.Request.ContentType?.Split(';', 2)[0].Trim(),
+                    "application/vnd.smartprint.qsp2", StringComparison.OrdinalIgnoreCase) ||
+                !long.TryParse(context.Request.Headers["X-Print-Encrypted-Size"].FirstOrDefault(), out var encryptedSize) ||
+                encryptedSize != Qsp2DocumentFormat.GetEncryptedLength(ticket.SizeBytes) ||
+                (context.Request.ContentLength is long contentLength && contentLength != encryptedSize))
+                return Results.UnprocessableEntity(new
+                {
+                    code = "private_relay_size_mismatch",
+                    message = "The QSP2 encrypted stream size does not match its original upload ticket."
+                });
+
+            storageKey = await storage.StoreOpaquePrivateQsp2RelayAsync(
+                ticket.TenantId, ticket.Id, context.Request.Body, encryptedSize, ticket.SizeBytes, ct);
+        }
+        else
+        {
+            if (!context.Request.HasFormContentType)
+                return Results.BadRequest(new { code = "private_relay_form_required" });
+            var form = await context.Request.ReadFormAsync(ct);
+            if (form.Files.Count != 1)
+                return Results.BadRequest(new { code = "private_relay_file_required" });
+            var file = form.Files[0];
+            if (file.Length != ticket.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes ||
+                file.Length > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
+                return Results.UnprocessableEntity(new { code = "private_relay_size_mismatch", message = "The encrypted file size does not match its original upload ticket." });
+            await using var input = file.OpenReadStream();
+            storageKey = await storage.StoreOpaquePrivateRelayAsync(
+                ticket.TenantId, ticket.Id, input, file.Length, ct);
+        }
     }
     catch (InvalidDataException exception)
     {
@@ -10477,7 +10604,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
 
         locked.PrivateRelayStorageKey = storageKey;
         locked.PrivateRelayWrappedKey = wrappedKey;
-        locked.PrivateRelayIv = ivText;
+        locked.PrivateRelayIv = isQsp2 ? null : ivText;
         locked.PrivateRelayUploadedUtc = now;
         locked.ExpiresUtc = now.AddHours(24);
         await db.SaveChangesAsync(ct);
@@ -10704,7 +10831,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     try
     {
         await using var input = file.OpenReadStream();
-        stored = await storage.ValidateAndStoreAsync(
+        stored = await storage.ValidateAndStoreStreamingAsync(
             preflightTicket.TenantId, documentId, preflightTicket.OriginalFileName, input, preflightTicket.SizeBytes, ct);
     }
     catch (DocumentValidationException exception)
@@ -10921,6 +11048,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
             PhotoSizeCode = ticket.PhotoSizeCode,
             PhotoCount = ticket.PhotoCount ?? 0,
             PhotosPerPage = ticket.PhotosPerPage,
+            PhotoOutputLayout = ticket.PhotoOutputLayout,
+            PhotoPaperFinish = ticket.PhotoPaperFinish,
             Currency = "INR",
             QuotedAmountMinor = 0,
             CreatedUtc = commitNow,
