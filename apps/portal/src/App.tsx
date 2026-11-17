@@ -4748,11 +4748,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       const {loadCustomerNupPreviewSource,createCustomerNupPreviewFromDocument}=await import("./customer-nup-preview");
       if(cancelled)return;
       if(!sourceCache!.document){
-        sourceCache!.document=(async()=>{
+        const loadingDocument=(async()=>{
           const sourceBytes=new Uint8Array(await file.arrayBuffer());
           if(cancelled)throw new Error("PDF preview superseded.");
           return loadCustomerNupPreviewSource(sourceBytes);
         })();
+        // A cancelled/failed first parse must not poison the cached promise.
+        // Clear only this exact in-flight promise so a later request can retry;
+        // a newer parse for the same File is never accidentally cleared.
+        const cachedDocument=loadingDocument.catch(error=>{
+          if(sourceCache!.document===cachedDocument)sourceCache!.document=null;
+          throw error;
+        });
+        sourceCache!.document=cachedDocument;
       }
       const sourceDocument=await sourceCache!.document;
       if(cancelled)return;
