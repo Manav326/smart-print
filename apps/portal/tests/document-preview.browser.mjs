@@ -440,7 +440,11 @@ function startBatchApiServer() {
         assert.ok(headerEnd >= 0, "The multipart file header must terminate before its content.");
         const footer = Buffer.from("\r\n--" + boundary + "--\r\n", "latin1");
         assert.ok(tail.subarray(-footer.length).equals(footer), "The final multipart boundary must be complete.");
-        const fileBytes = bodyBytes - (headerEnd + 4) - footer.length;
+        const nextPartBoundary = Buffer.from("\\r\\n--" + boundary + "\\r\\n", "latin1");
+        const fileEndInTail = tail.indexOf(nextPartBoundary);
+        assert.ok(fileEndInTail >= 0, "The file part must end at a valid multipart boundary.");
+        const fileEndOffset = bodyBytes - tail.length + fileEndInTail;
+        const fileBytes = fileEndOffset - (headerEnd + 4);
         assert.equal(prefix.subarray(headerEnd + 4, headerEnd + 9).toString("ascii"), "%PDF-",
           "Each streamed file must retain its original PDF bytes.");
         assert.equal(fileBytes, 25 * 1024 * 1024, "Every file must transfer its full 25 MiB payload.");
