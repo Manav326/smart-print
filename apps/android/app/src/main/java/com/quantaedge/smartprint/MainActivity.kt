@@ -4107,7 +4107,12 @@ class MainActivity : AppCompatActivity() {
             list.addView(item, linearParams().apply { bottomMargin = dp(6) })
         }
         scroll.addView(list)
-        root.addView(scroll, LinearLayout.LayoutParams(-1, -2))
+        // Bound the destination list to the visible sheet. A wrap-content
+        // ScrollView can otherwise measure to the full height of hundreds of
+        // folders, leaving later buttons below the screen and untappable.
+        val maxListHeight = (resources.displayMetrics.heightPixels * 0.52f).toInt().coerceAtLeast(dp(180))
+        val desiredListHeight = (actions.size.coerceAtLeast(1) * dp(52)).coerceAtMost(maxListHeight)
+        root.addView(scroll, LinearLayout.LayoutParams(-1, desiredListHeight))
         root.addView(button("Cancel", false).apply {
             minHeight = dp(42)
             setOnClickListener { dialog.dismiss() }
