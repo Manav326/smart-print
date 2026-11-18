@@ -498,7 +498,7 @@ function startBatchApiServer() {
         const fileBytes = fileEndOffset - (headerEnd + 4);
         assert.equal(prefix.subarray(headerEnd + 4, headerEnd + 9).toString("ascii"), "%PDF-",
           "Each streamed file must retain its original PDF bytes.");
-        assert.equal(fileBytes, 25 * 1024 * 1024, "Every file must transfer its full 25 MiB payload.");
+        assert.equal(fileBytes, 50 * 1024 * 1024, "Every file must transfer its full 50 MiB payload.");
         assert.ok(batchId && idempotencyKey, "Batch and idempotency headers are required.");
         const attempt = (metrics.attempts.get(name) ?? 0) + 1;
         metrics.attempts.set(name, attempt);
@@ -565,13 +565,13 @@ async function runExactCapacitySelection(browser) {
   await page.goto(baseUrl + "/s/" + stationCode, { waitUntil: "domcontentloaded" });
   await page.getByRole("heading", { name: /500 MiB Cloud Batch QA Shop/ }).waitFor({ state: "visible", timeout: 30000 });
 
-  // Create 20 browser File objects directly; each contains a PDF signature and
-  // exactly 25 MiB. This verifies the customer picker accepts the full 500 MiB
-  // boundary without copying file bodies into the Node test process.
+  // Create ten browser File objects directly; each contains a PDF signature and
+  // exactly 50 MiB. This verifies the maximum individual file size and exact
+  // 500 MiB batch boundary without copying file bodies into Node.
   await page.evaluate(() => {
     const transfer = new DataTransfer();
-    for (let index = 0; index < 20; index += 1) {
-      const size = 25 * 1024 * 1024;
+    for (let index = 0; index < 10; index += 1) {
+      const size = 50 * 1024 * 1024;
       const header = new TextEncoder().encode("%PDF-1.4\n");
       const content = new Uint8Array(size - header.length);
       const bytes = new File([header, content], "capacity-" + String(index + 1).padStart(2, "0") + ".pdf", { type: "application/pdf" });
@@ -582,36 +582,37 @@ async function runExactCapacitySelection(browser) {
     input.files = transfer.files;
     input.dispatchEvent(new Event("change", { bubbles: true }));
   });
-  await page.waitForFunction(() => document.querySelectorAll(".customer-folder-file-name").length === 20, null, { timeout: 30000 });
+  await page.waitForFunction(() => document.querySelectorAll(".customer-folder-file-name").length === 10, null, { timeout: 30000 });
   assert.equal(await page.locator(".customer-upload-notice.warning").count(), 0,
-    "A valid 20-file / 500 MiB selection must not show a capacity warning.");
-  const uploadButton = page.getByRole("button", { name: /Upload 20 file\(s\)/i });
+    "A valid ten-file / 500 MiB selection at 50 MiB per file must not show a capacity warning.");
+  const uploadButton = page.getByRole("button", { name: /Upload 10 file\(s\)/i });
   await uploadButton.waitFor({ state: "visible", timeout: 15000 });
   assert.equal(await uploadButton.isDisabled(), false);
   await uploadButton.click();
-  await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 19, null, { timeout: 180000 });
-  assert.equal(apiMetrics.metrics.requests.length, 20,
-    "The browser must stream all 20 file bodies to the local cloud API before retry.");
+  await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 9, null, { timeout: 180000 });
+  assert.equal(apiMetrics.metrics.requests.length, 10,
+    "The browser must stream all ten 50 MiB file bodies to the local cloud API before retry.");
   assert.equal(apiMetrics.metrics.maximumActive, 3,
     "The full-size 500 MiB batch must keep concurrency bounded at three.");
   const failedFile = page.getByRole("button", { name: "Upload 1 file(s)" });
   await failedFile.waitFor({ state: "visible", timeout: 30000 });
   await failedFile.click();
-  await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 20, null, { timeout: 60000 });
-  assert.equal(apiMetrics.metrics.requests.length, 21);
+  await page.waitForFunction(() => document.querySelectorAll(".customer-uploaded-batch-item").length === 10, null, { timeout: 60000 });
+  assert.equal(apiMetrics.metrics.requests.length, 11);
   assert.equal(apiMetrics.metrics.attempts.get("capacity-07.pdf"), 2);
-  assert.equal(apiMetrics.metrics.jobsByIdempotencyKey.size, 20,
-    "The retry must materialise one canonical job for the failed 25 MiB file.");
+  assert.equal(apiMetrics.metrics.jobsByIdempotencyKey.size, 10,
+    "The retry must materialise one canonical job for the failed 50 MiB file.");
   assert.ok(apiMetrics.metrics.statusRequests.length > 0,
-    "The customer page must poll the status of uploaded 25 MiB files after transfer.");
+    "The customer page must poll the status of uploaded 50 MiB files after transfer.");
   assert.ok(apiMetrics.metrics.statusRequests.every(id => apiMetrics.metrics.jobsById.has(id)),
     "Every exact-capacity status poll must resolve to the canonical accepted PrintJob.");
   assert.equal(new Set(apiMetrics.metrics.requests.map(item => item.batchId)).size, 1);
-  assert.equal(new Set(apiMetrics.metrics.requests.map(item => item.idempotencyKey)).size, 20);
-  assert.ok(apiMetrics.metrics.requests.every(item => item.fileBytes === 25 * 1024 * 1024));
+  assert.equal(new Set(apiMetrics.metrics.requests.map(item => item.idempotencyKey)).size, 10);
+  assert.ok(apiMetrics.metrics.requests.every(item => item.fileBytes === 50 * 1024 * 1024));
   await context.close();
   return {
-    files: 20,
+    files: 10,
+    perFileBytes: 50 * 1024 * 1024,
     totalBytes: 500 * 1024 * 1024,
     selectionAccepted: true,
     cloudTransferBytes: apiMetrics.metrics.requests.reduce((sum, item) => sum + item.fileBytes, 0),
