@@ -99,6 +99,7 @@ async function installCloudBatchHarness(context) {
   const successfulByName = new Map();
   const jobsById = new Map();
   const resultsByIdempotencyKey = new Map();
+  const canonicalJobIdByName = new Map();
   const duplicateReplies = [];
   const statusRequests = [];
   let active = 0;
@@ -191,6 +192,7 @@ async function installCloudBatchHarness(context) {
           outputMode: "PHYSICAL"
         };
         jobsById.set(id, job);
+        canonicalJobIdByName.set(name, id);
         const accepted = {
           job,
           document: {
@@ -238,7 +240,7 @@ async function installCloudBatchHarness(context) {
     return json(route, { message: "Unexpected API request: " + method + " " + path }, 404);
   });
 
-  return { requestLog, attemptsByName, successfulByName, jobsById, resultsByIdempotencyKey, duplicateReplies, statusRequests, unexpected, get maximumActive() { return maximumActive; } };
+  return { requestLog, attemptsByName, successfulByName, jobsById, resultsByIdempotencyKey, canonicalJobIdByName, duplicateReplies, statusRequests, unexpected, get maximumActive() { return maximumActive; } };
 }
 
 async function runShopDocumentPreview(browser) {
@@ -355,10 +357,8 @@ async function runCustomerBatchFlow(browser) {
   assert.equal(harness.duplicateReplies.length, 1,
     "The single retry after the simulated lost response must replay the committed PrintJob.");
   assert.equal(harness.duplicateReplies[0].name, "batch-07.pdf");
-  assert.equal(harness.duplicateReplies[0].jobId,
-    [...harness.jobsById.values()].find(job => job.batchGroupName === "Documents" &&
-      harness.requestLog.some(request => request.name === "batch-07.pdf" &&
-        request.idempotencyKey === harness.duplicateReplies[0].idempotencyKey))?.id);
+  assert.equal(harness.duplicateReplies[0].jobId, harness.canonicalJobIdByName.get("batch-07.pdf"),
+    "The retry response must point to the already-committed canonical job ID.");
   assert.ok(harness.statusRequests.length > 0, "The customer page must poll the status of its accepted uploads.");
   assert.ok(harness.statusRequests.every(id => harness.jobsById.has(id)),
     "Every status poll must resolve to the original accepted PrintJob.");
