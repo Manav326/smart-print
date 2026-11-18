@@ -98,6 +98,8 @@ async function installCloudBatchHarness(context) {
   const attemptsByName = new Map();
   const successfulByName = new Map();
   const jobsById = new Map();
+  const resultsByIdempotencyKey = new Map();
+  const duplicateReplies = [];
   const statusRequests = [];
   let active = 0;
   let maximumActive = 0;
@@ -158,11 +160,12 @@ async function installCloudBatchHarness(context) {
       maximumActive = Math.max(maximumActive, active);
       await new Promise(resolve => setTimeout(resolve, 35));
       try {
-        // One deterministic failure proves that the customer can retry the
-        // unfinished file without uploading the other 19 files a second time.
-        if (name === "batch-07.pdf" && attempt === 1) {
-          return json(route, { message: "Synthetic one-file transport failure." }, 503);
+        const previousResult = resultsByIdempotencyKey.get(idempotencyKey);
+        if (previousResult) {
+          duplicateReplies.push({ name, idempotencyKey, jobId: previousResult.job.id });
+          return json(route, { ...previousResult, duplicateRequest: true });
         }
+
         const id = randomUUID();
         successfulByName.set(name, (successfulByName.get(name) ?? 0) + 1);
         const mediaType = name.endsWith(".jpg") ? "image/jpeg" : name.endsWith(".png") ? "image/png" : "application/pdf";
@@ -188,7 +191,7 @@ async function installCloudBatchHarness(context) {
           outputMode: "PHYSICAL"
         };
         jobsById.set(id, job);
-        return json(route, {
+        const accepted = {
           job,
           document: {
             id: randomUUID(),
@@ -199,7 +202,15 @@ async function installCloudBatchHarness(context) {
             storageMode: "CLOUD"
           },
           duplicateRequest: false
-        });
+        };
+        // The server commits this PrintJob before the response is lost. A retry
+        // with the same idempotency key must recover this exact record, never
+        // create a second job or upload the other successful files again.
+        resultsByIdempotencyKey.set(idempotencyKey, accepted);
+        if (name === "batch-07.pdf" && attempt === 1) {
+          return json(route, { message: "Synthetic response lost after server commit." }, 503);
+        }
+        return json(route, accepted);
       } finally {
         active = Math.max(0, active - 1);
       }
@@ -227,7 +238,7 @@ async function installCloudBatchHarness(context) {
     return json(route, { message: "Unexpected API request: " + method + " " + path }, 404);
   });
 
-  return { requestLog, attemptsByName, successfulByName, jobsById, statusRequests, unexpected, get maximumActive() { return maximumActive; } };
+  return { requestLog, attemptsByName, successfulByName, jobsById, resultsByIdempotencyKey, duplicateReplies, statusRequests, unexpected, get maximumActive() { return maximumActive; } };
 }
 
 async function runShopDocumentPreview(browser) {
@@ -340,6 +351,14 @@ async function runCustomerBatchFlow(browser) {
   assert.equal(harness.attemptsByName.get("batch-07.pdf"), 2);
   assert.equal(harness.successfulByName.size, 20);
   assert.equal(harness.jobsById.size, 20, "Each accepted upload must have one canonical status record.");
+  assert.equal(harness.resultsByIdempotencyKey.size, 20);
+  assert.equal(harness.duplicateReplies.length, 1,
+    "The single retry after the simulated lost response must replay the committed PrintJob.");
+  assert.equal(harness.duplicateReplies[0].name, "batch-07.pdf");
+  assert.equal(harness.duplicateReplies[0].jobId,
+    [...harness.jobsById.values()].find(job => job.batchGroupName === "Documents" &&
+      harness.requestLog.some(request => request.name === "batch-07.pdf" &&
+        request.idempotencyKey === harness.duplicateReplies[0].idempotencyKey))?.id);
   assert.ok(harness.statusRequests.length > 0, "The customer page must poll the status of its accepted uploads.");
   assert.ok(harness.statusRequests.every(id => harness.jobsById.has(id)),
     "Every status poll must resolve to the original accepted PrintJob.");
