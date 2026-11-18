@@ -312,7 +312,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                     using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
                     Assert.Equal(fixture!.SizeBytes, body.RootElement.GetProperty("sizeBytes").GetInt64());
                     Assert.Equal(fixture.Sha256, body.RootElement.GetProperty("sha256").GetString());
-                    Assert.Equal(fixture.SizeBytes, body.RootElement.GetProperty("receivedPayloadBytes").GetInt64());
+                    Assert.Equal(fixture.SizeBytes, body.RootElement.GetProperty("receivedBytes").GetInt64());
                     completionCounts.AddOrUpdate(ticketId, 1, (_, count) => count + 1);
                     Interlocked.Decrement(ref activeTransfers);
 
