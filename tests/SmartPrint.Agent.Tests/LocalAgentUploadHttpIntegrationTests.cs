@@ -228,10 +228,10 @@ public sealed class LocalAgentUploadHttpIntegrationTests
     }
 
     [Fact]
-    public async Task HostedAgentStreamsTwentyFiveHundredMiBFilesThroughItsRealMultipartRouteWithThreeConcurrentTransfers()
+    public async Task HostedAgentStreamsTenFiftyMiBFilesThroughItsRealMultipartRouteWithThreeConcurrentTransfers()
     {
-        const int fileCount = 20;
-        const long perFileBytes = 25L * 1024L * 1024L;
+        const int fileCount = 10;
+        const long perFileBytes = 50L * 1024L * 1024L;
         const long expectedBatchBytes = 500L * 1024L * 1024L;
         var root = Path.Combine(Path.GetTempPath(), "smartprint-agent-http-batch-tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
@@ -259,6 +259,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
 
             Assert.Equal(expectedBatchBytes, fixtures.Values.Sum(item => item.SizeBytes));
             Assert.Equal(fileCount, fixtures.Count);
+            Assert.All(fixtures.Values, fixture => Assert.Equal(50L * 1024L * 1024L, fixture.SizeBytes));
 
             var cloud = new FakeCloudHandler(async (request, cancellationToken) =>
             {
@@ -475,22 +476,116 @@ public sealed class LocalAgentUploadHttpIntegrationTests
 
     private static async Task WritePaddedPdfAsync(string path, long targetBytes)
     {
-        var pdf = CreatePdf();
-        await using var output = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, useAsync: true);
-        await output.WriteAsync(pdf);
-        CryptographicOperations.ZeroMemory(pdf);
-        var padding = new byte[64 * 1024];
-        Array.Fill(padding, (byte)' ');
-        var remaining = targetBytes - output.Length;
-        if (remaining < 0) throw new InvalidOperationException("The PDF fixture is larger than the requested test size.");
+        // Keep the 50 MiB payload inside one valid, unreferenced PDF stream object.
+        // The page tree and its one small text page remain quick for PdfPig to analyse;
+        // this avoids making the analyser scan tens of MiB of trailing whitespace just
+        // to locate %%EOF, while the HTTP upload, hashing, queue encryption and disk I/O
+        // still process the complete authorised payload.
+        const string pageContent = "BT /F1 18 Tf 72 720 Td (SmartPrint 50 MiB upload acceptance) Tj ET\\n";
+        var pageContentLength = Encoding.ASCII.GetByteCount(pageContent);
+        var builder = new StringBuilder("%PDF-1.4\\n");
+        var offsets = new long[7];
+
+        void AddObject(int objectNumber, string body)
+        {
+            offsets[objectNumber] = Encoding.ASCII.GetByteCount(builder.ToString());
+            builder.Append(objectNumber).Append(" 0 obj\\n")
+                .Append(body).Append("\\nendobj\\n");
+        }
+
+        AddObject(1, "<< /Type /Catalog /Pages 2 0 R >>");
+        AddObject(2, "<< /Type /Pages /Count 1 /Kids [3 0 R] >>");
+        AddObject(3,
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] " +
+            "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>");
+        AddObject(4, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        AddObject(5,
+            "<< /Length " + pageContentLength + " >>\\nstream\\n" +
+            pageContent + "endstream");
+
+        offsets[6] = Encoding.ASCII.GetByteCount(builder.ToString());
+        var paddingBytes = targetBytes;
+        string payloadPrefix = string.Empty;
+        const string payloadSuffix = "\\nendstream\\nendobj\\n";
+        string crossReference = string.Empty;
+        string trailer = string.Empty;
+
+        // The /Length and startxref values are decimal strings whose digit counts
+        // affect the final size. Iterate to a stable exact target without buffering
+        // the 50 MiB body in memory.
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            payloadPrefix = "6 0 obj\\n<< /Length " + paddingBytes + " >>\\nstream\\n";
+            var xrefOffset = offsets[6] +
+                Encoding.ASCII.GetByteCount(payloadPrefix) +
+                paddingBytes +
+                Encoding.ASCII.GetByteCount(payloadSuffix);
+
+            var xrefBuilder = new StringBuilder("xref\\n0 7\\n0000000000 65535 f \\n");
+            for (var objectNumber = 1; objectNumber <= 6; objectNumber++)
+            {
+                xrefBuilder.Append(offsets[objectNumber].ToString("D10", System.Globalization.CultureInfo.InvariantCulture))
+                    .Append(" 00000 n \\n");
+            }
+            crossReference = xrefBuilder.ToString();
+            trailer = "trailer\\n<< /Size 7 /Root 1 0 R >>\\nstartxref\\n" +
+                xrefOffset.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\\n%%EOF\\n";
+
+            var fixedBytes =
+                Encoding.ASCII.GetByteCount(builder.ToString()) +
+                Encoding.ASCII.GetByteCount(payloadPrefix) +
+                Encoding.ASCII.GetByteCount(payloadSuffix) +
+                Encoding.ASCII.GetByteCount(crossReference) +
+                Encoding.ASCII.GetByteCount(trailer);
+            var nextPaddingBytes = targetBytes - fixedBytes;
+            if (nextPaddingBytes < 0)
+                throw new InvalidOperationException("The requested PDF test payload is too small for its structure.");
+            if (nextPaddingBytes == paddingBytes) break;
+            paddingBytes = nextPaddingBytes;
+        }
+
+        // Rebuild the final xref/trailer using the converged stream length.
+        payloadPrefix = "6 0 obj\\n<< /Length " + paddingBytes + " >>\\nstream\\n";
+        var finalXrefOffset = offsets[6] +
+            Encoding.ASCII.GetByteCount(payloadPrefix) +
+            paddingBytes +
+            Encoding.ASCII.GetByteCount(payloadSuffix);
+        var finalXref = new StringBuilder("xref\\n0 7\\n0000000000 65535 f \\n");
+        for (var objectNumber = 1; objectNumber <= 6; objectNumber++)
+        {
+            finalXref.Append(offsets[objectNumber].ToString("D10", System.Globalization.CultureInfo.InvariantCulture))
+                .Append(" 00000 n \\n");
+        }
+        crossReference = finalXref.ToString();
+        trailer = "trailer\\n<< /Size 7 /Root 1 0 R >>\\nstartxref\\n" +
+            finalXrefOffset.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\\n%%EOF\\n";
+
+        await using var output = new FileStream(
+            path, FileMode.Create, FileAccess.Write, FileShare.None,
+            1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        await output.WriteAsync(Encoding.ASCII.GetBytes(builder.ToString()));
+        await output.WriteAsync(Encoding.ASCII.GetBytes(payloadPrefix));
+
+        var padding = new byte[1024 * 1024];
+        Array.Fill(padding, (byte)0xA5);
+        var remaining = paddingBytes;
         while (remaining > 0)
         {
             var count = (int)Math.Min(remaining, padding.Length);
             await output.WriteAsync(padding.AsMemory(0, count));
             remaining -= count;
         }
+
+        await output.WriteAsync(Encoding.ASCII.GetBytes(payloadSuffix));
+        await output.WriteAsync(Encoding.ASCII.GetBytes(crossReference));
+        await output.WriteAsync(Encoding.ASCII.GetBytes(trailer));
         await output.FlushAsync();
+
+        if (output.Length != targetBytes)
+            throw new InvalidOperationException(
+                $"The PDF test fixture is {output.Length} bytes; expected exactly {targetBytes} bytes.");
     }
+
 
     private static void UpdateMaximum(ref int maximum, int candidate)
     {
