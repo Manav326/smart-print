@@ -481,16 +481,16 @@ public sealed class LocalAgentUploadHttpIntegrationTests
         // this avoids making the analyser scan tens of MiB of trailing whitespace just
         // to locate %%EOF, while the HTTP upload, hashing, queue encryption and disk I/O
         // still process the complete authorised payload.
-        const string pageContent = "BT /F1 18 Tf 72 720 Td (SmartPrint 50 MiB upload acceptance) Tj ET\\n";
+        const string pageContent = "BT /F1 18 Tf 72 720 Td (SmartPrint 50 MiB upload acceptance) Tj ET\n";
         var pageContentLength = Encoding.ASCII.GetByteCount(pageContent);
-        var builder = new StringBuilder("%PDF-1.4\\n");
+        var builder = new StringBuilder("%PDF-1.4\n");
         var offsets = new long[7];
 
         void AddObject(int objectNumber, string body)
         {
             offsets[objectNumber] = Encoding.ASCII.GetByteCount(builder.ToString());
-            builder.Append(objectNumber).Append(" 0 obj\\n")
-                .Append(body).Append("\\nendobj\\n");
+            builder.Append(objectNumber).Append(" 0 obj\n")
+                .Append(body).Append("\nendobj\n");
         }
 
         AddObject(1, "<< /Type /Catalog /Pages 2 0 R >>");
@@ -500,13 +500,13 @@ public sealed class LocalAgentUploadHttpIntegrationTests
             "/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>");
         AddObject(4, "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
         AddObject(5,
-            "<< /Length " + pageContentLength + " >>\\nstream\\n" +
+            "<< /Length " + pageContentLength + " >>\nstream\n" +
             pageContent + "endstream");
 
         offsets[6] = Encoding.ASCII.GetByteCount(builder.ToString());
         var paddingBytes = targetBytes;
         string payloadPrefix = string.Empty;
-        const string payloadSuffix = "\\nendstream\\nendobj\\n";
+        const string payloadSuffix = "\nendstream\nendobj\n";
         string crossReference = string.Empty;
         string trailer = string.Empty;
 
@@ -515,21 +515,21 @@ public sealed class LocalAgentUploadHttpIntegrationTests
         // the 50 MiB body in memory.
         for (var attempt = 0; attempt < 8; attempt++)
         {
-            payloadPrefix = "6 0 obj\\n<< /Length " + paddingBytes + " >>\\nstream\\n";
+            payloadPrefix = "6 0 obj\n<< /Length " + paddingBytes + " >>\nstream\n";
             var xrefOffset = offsets[6] +
                 Encoding.ASCII.GetByteCount(payloadPrefix) +
                 paddingBytes +
                 Encoding.ASCII.GetByteCount(payloadSuffix);
 
-            var xrefBuilder = new StringBuilder("xref\\n0 7\\n0000000000 65535 f \\n");
+            var xrefBuilder = new StringBuilder("xref\n0 7\n0000000000 65535 f \n");
             for (var objectNumber = 1; objectNumber <= 6; objectNumber++)
             {
                 xrefBuilder.Append(offsets[objectNumber].ToString("D10", System.Globalization.CultureInfo.InvariantCulture))
-                    .Append(" 00000 n \\n");
+                    .Append(" 00000 n \n");
             }
             crossReference = xrefBuilder.ToString();
-            trailer = "trailer\\n<< /Size 7 /Root 1 0 R >>\\nstartxref\\n" +
-                xrefOffset.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\\n%%EOF\\n";
+            trailer = "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n" +
+                xrefOffset.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n%%EOF\n";
 
             var fixedBytes =
                 Encoding.ASCII.GetByteCount(builder.ToString()) +
@@ -545,20 +545,20 @@ public sealed class LocalAgentUploadHttpIntegrationTests
         }
 
         // Rebuild the final xref/trailer using the converged stream length.
-        payloadPrefix = "6 0 obj\\n<< /Length " + paddingBytes + " >>\\nstream\\n";
+        payloadPrefix = "6 0 obj\n<< /Length " + paddingBytes + " >>\nstream\n";
         var finalXrefOffset = offsets[6] +
             Encoding.ASCII.GetByteCount(payloadPrefix) +
             paddingBytes +
             Encoding.ASCII.GetByteCount(payloadSuffix);
-        var finalXref = new StringBuilder("xref\\n0 7\\n0000000000 65535 f \\n");
+        var finalXref = new StringBuilder("xref\n0 7\n0000000000 65535 f \n");
         for (var objectNumber = 1; objectNumber <= 6; objectNumber++)
         {
             finalXref.Append(offsets[objectNumber].ToString("D10", System.Globalization.CultureInfo.InvariantCulture))
-                .Append(" 00000 n \\n");
+                .Append(" 00000 n \n");
         }
         crossReference = finalXref.ToString();
-        trailer = "trailer\\n<< /Size 7 /Root 1 0 R >>\\nstartxref\\n" +
-            finalXrefOffset.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\\n%%EOF\\n";
+        trailer = "trailer\n<< /Size 7 /Root 1 0 R >>\nstartxref\n" +
+            finalXrefOffset.ToString(System.Globalization.CultureInfo.InvariantCulture) + "\n%%EOF\n";
 
         await using var output = new FileStream(
             path, FileMode.Create, FileAccess.Write, FileShare.None,
