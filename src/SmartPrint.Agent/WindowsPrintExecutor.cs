@@ -859,13 +859,46 @@ public sealed class WindowsPrintExecutor
                 mode.PaperLength = photoPaperHeight;
                 mode.Fields |= DmPaperSize | DmPaperWidth | DmPaperLength;
 
-                photoMediaType = WindowsPrinterCapabilityDiscovery.ResolvePhotoMediaTypeCode(queueName, pointer, entry.PhotoPaperFinish);
-                if (photoMediaType is null)
-                    throw new PrintExecutionBlockedException(
-                        "PHOTO_MEDIA_TYPE_UNSUPPORTED",
-                        $"The selected printer driver does not expose one unambiguous {entry.PhotoPaperFinish.ToLowerInvariant()} photo media type. Choose a printer that supports it or change the requested finish. No pages were sent.");
-                mode.MediaType = unchecked((ushort)photoMediaType.Value);
-                mode.Fields |= DmMediaType;
+                var schemaDevMode = WindowsPrinterCapabilityDiscovery.CreatePhotoMediaDevMode(
+                    queueName,
+                    entry.PhotoPaperFinish);
+                if (schemaDevMode is not null)
+                {
+                    try
+                    {
+                        if (schemaDevMode.Length != size)
+                            throw new PrintExecutionBlockedException(
+                                "PRINTER_SETTINGS_REJECTED",
+                                "Windows returned a photo PrintTicket DEVMODE with an unexpected size. No pages were sent.");
+                        Marshal.Copy(schemaDevMode, 0, pointer, schemaDevMode.Length);
+                        mode = Marshal.PtrToStructure<DevModeW>(pointer);
+                        if ((mode.Fields & DmMediaType) == 0)
+                            throw new PrintExecutionBlockedException(
+                                "PHOTO_MEDIA_TYPE_REJECTED",
+                                "The validated Print Schema photo media option was not present in the converted Windows DEVMODE. No pages were sent.");
+                        photoMediaType = unchecked((short)mode.MediaType);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(schemaDevMode);
+                    }
+                }
+                else
+                {
+                    // Legacy drivers sometimes expose only DeviceCapabilities media
+                    // codes/names. Match a small alias set only when it identifies
+                    // one unambiguous code; otherwise refuse before StartDoc.
+                    photoMediaType = WindowsPrinterCapabilityDiscovery.ResolvePhotoMediaTypeCode(
+                        queueName,
+                        pointer,
+                        entry.PhotoPaperFinish);
+                    if (photoMediaType is null)
+                        throw new PrintExecutionBlockedException(
+                            "PHOTO_MEDIA_TYPE_UNSUPPORTED",
+                            $"The selected printer driver does not expose a matching {entry.PhotoPaperFinish.ToLowerInvariant()} photo media type through Print Schema or an unambiguous legacy driver label. Choose a printer that supports it or change the requested finish. No pages were sent.");
+                    mode.MediaType = unchecked((ushort)photoMediaType.Value);
+                    mode.Fields |= DmMediaType;
+                }
             }
             else
             {
