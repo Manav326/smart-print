@@ -6362,7 +6362,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             ?"Not charged"
             :needsFreshQuote?"—"
               :!entry.quote?"Pending"
-                :quoteExpired?"See payment status"
+                :quoteExpired?"See order status"
                   :formatMoney(entry.quote.quotedAmountMinor,entry.quote.currency);
           return <div className="customer-batch-quote-line" key={entry.item.job.id}>
             <span className="customer-batch-quote-line-copy">
