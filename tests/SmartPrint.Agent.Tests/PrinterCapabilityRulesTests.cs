@@ -105,7 +105,7 @@ public sealed class PrinterCapabilityRulesTests
         (short Code, string Name)[] ambiguous =
         [
             (2, "Glossy Photo"),
-            (7, "Premium Glossy")
+            (7, "PhotographicGlossy")
         ];
 
         Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(ambiguous, "GLOSSY"));
