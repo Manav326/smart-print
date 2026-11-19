@@ -1025,6 +1025,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Vertical position\b/ }).locator('input[type="range"]').inputValue()), 50);
 
     // Direct manipulation of a photo tile must update the same focus controls used by export.
+    await setPhotoRange(dialog, "Zoom", 2);
     const cropBounds = await preview.boundingBox();
     assert.ok(cropBounds, "Photo preview must be measurable for direct framing.");
     const beforeDragPixels = await readPhotoCanvasPixels(page);
