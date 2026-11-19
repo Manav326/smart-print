@@ -932,7 +932,7 @@ public sealed class WindowsPrintExecutor
                     if (photoMediaType is null)
                         throw new PrintExecutionBlockedException(
                             "PHOTO_MEDIA_TYPE_UNSUPPORTED",
-                            $"The selected printer driver does not expose a matching ${entry.PhotoPaperFinish.ToLowerInvariant()} photo media type through Print Schema or an unambiguous legacy driver label. Choose a printer that supports it or change the requested finish. No pages were sent.");
+                            $"The selected printer driver does not expose a matching {entry.PhotoPaperFinish.ToLowerInvariant()} photo media type through Print Schema or an unambiguous legacy driver label. Choose a printer that supports it or change the requested finish. No pages were sent.");
                     mode.MediaType = unchecked((ushort)photoMediaType.Value);
                     mode.Fields |= DmMediaType;
                 }
