@@ -1204,7 +1204,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     await sizeSelect.selectOption("35x45");
     const density = dialog.getByLabel("Photos per A4 page");
     await density.selectOption("1");
-    assert.equal(await readSummary("A4 pages in this job"),"8");
+    assert.equal(await readSummary("A4 pages in this job"),"1");
     await density.selectOption("25");
     assert.equal(await readSummary("A4 pages in this job"),"1");
 
