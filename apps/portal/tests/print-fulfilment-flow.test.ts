@@ -61,7 +61,7 @@ test("standard Cloud-assisted Photo Studio uploads keep photo identity through t
   assert.match(cloudUpload, /form\.append\("photoSizeCode", photoSettings\.sizeCode\)/);
   assert.match(cloudUpload, /form\.append\("photoCount", String\(photoSettings\.photoCount\)\)/);
   assert.match(cloudUpload, /form\.append\("photosPerPage", String\(photoSettings\.photosPerPage \?\? 1\)\)/);
-  assert.match(app, /await uploadCustomerDocument\(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName\|\|undefined,settings,printKind,photoSettings\)/);
+  assert.match(app, /await uploadCustomerDocument\(\s*sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName\|\|undefined,\s*settings,printKind,photoSettings,\s*progress=>reportTransferProgress\(index,progress\)\s*\)/);
   const routeStart = program.indexOf('publicApi.MapPost("/sessions/current/jobs"');
   const routeEnd = program.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"', routeStart);
   assert.ok(routeStart >= 0 && routeEnd > routeStart);
