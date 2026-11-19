@@ -385,7 +385,8 @@ try {
       animations: "disabled"
     });
     await exerciseShopOwnerPrintQueue(desktop.page);
-    await desktop.page.getByRole("button", { name: "Print Queue", exact: true }).waitFor();
+    await desktop.page.getByRole("button", { name: "Printers", exact: true }).click();
+    await desktop.page.locator(".printer-capability-panel").waitFor({ state: "visible" });
     await desktop.page.getByRole("button", { name: "Switch to dark theme" }).click();
     await desktop.page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
     await assertEpsonDetails(desktop.page, "desktop-dark");
