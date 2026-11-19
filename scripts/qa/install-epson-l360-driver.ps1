@@ -3,7 +3,7 @@
 [CmdletBinding()]
 param(
     [string]$QueueName = "SmartPrint CI Epson L360",
-    [string]$PackageUrl = "https://download-center.epson.com/f/module/1335e8df-d703-40da-884b-c7cea22d34ee/L360_x64_260JAHomeExportAsiaML.exe"
+    [string]$PackageUrl = "https://download-center.epson.com/f/module/39ac0a8a-10f0-4760-8949-cd1dd0ad646c/L360_x64_260JAHomeExportAsiaML.exe"
 )
 
 Set-StrictMode -Version Latest
@@ -28,13 +28,26 @@ New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
 
 $packagePath = Join-Path $root "L360_x64_260JAHomeExportAsiaML.exe"
 Write-Host "[EPSON-L360] Downloading the official Epson L360 x64 2.60.00 driver package."
-Invoke-WebRequest -Uri $PackageUrl -OutFile $packagePath -UseBasicParsing
+$downloadHeaders = @{
+    "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+    "Referer" = "https://www.epson.co.in/Support/Printers/All-In-One/L-Series/Epson-L360/s/SPT_C11CE55501?review-filter=Windows+10+64-bit"
+    "Accept" = "application/octet-stream, application/x-msdownload, */*"
+}
+try {
+    Invoke-WebRequest -Uri $PackageUrl -OutFile $packagePath -Headers $downloadHeaders -MaximumRedirection 10 -UseBasicParsing
+}
+catch {
+    throw "The official Epson L360 v2.60.00 download was blocked or unavailable. Source: $PackageUrl. $($_.Exception.Message)"
+}
 $package = Get-Item -LiteralPath $packagePath
 if ($package.Length -lt 5MB) {
     throw "The Epson driver package download is unexpectedly small ($($package.Length) bytes)."
 }
 $hash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
 $signature = Get-AuthenticodeSignature -FilePath $packagePath
+if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "(?i)Epson") {
+    throw "The downloaded L360 package did not have a valid Epson Authenticode signature. Status=$($signature.Status); signer=$($signature.SignerCertificate.Subject)"
+}
 Write-Host "[EPSON-L360] Package bytes=$($package.Length); SHA256=$hash; Authenticode=$($signature.Status); signer=$($signature.SignerCertificate.Subject)"
 
 $sevenZipCommand = Get-Command 7z.exe -ErrorAction SilentlyContinue
