@@ -150,8 +150,7 @@ public sealed class PrinterCapabilityRulesTests
     [InlineData("Satin Photo Paper", "GLOSSY")]
     [InlineData("Lustre Photo Paper", "GLOSSY")]
     [InlineData("Luster Photo Paper", "GLOSSY")]
-    [InlineData("Premium Matte; Matte Photo", "MATTE")]
-    public void DoesNotGuessBetweenDifferentOrAmbiguousPhotoFinishes(string name, string finish)
+    public void DoesNotFoldDistinctSemiGlossSatinOrLustreFinishesIntoGlossy(string name, string finish)
     {
         (short Code, string Name)[] media =
         [
@@ -159,6 +158,17 @@ public sealed class PrinterCapabilityRulesTests
             (3, "Plain Paper")
         ];
         Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(media, finish));
+    }
+
+    [Fact]
+    public void AmbiguousEquivalentLegacyMediaNamesRemainUnconfirmed()
+    {
+        (short Code, string Name)[] media =
+        [
+            (2, "Glossy Photo Paper"),
+            (3, "PhotographicGlossy")
+        ];
+        Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(media, "GLOSSY"));
     }
 
     [Fact]
