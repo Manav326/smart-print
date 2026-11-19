@@ -31,6 +31,8 @@ export interface PrivateQsp2UploadOptions {
   readonly printJobId: string;
   /** RSA-OAEP/SHA-256 SubjectPublicKeyInfo, base64 encoded by the Agent. */
   readonly encryptionPublicKey: string;
+  /** Counts encrypted QSP2 bytes handed to the request stream, not server acknowledgement. */
+  readonly onProgress?: (bytesSent: number, totalBytes: number) => void;
 }
 
 /**
@@ -135,7 +137,9 @@ export async function preparePrivateQsp2Upload(
           attemptHeaderHash,
           attemptNoncePrefix,
           attemptSalt,
-          attemptRecordKey
+          attemptRecordKey,
+          encryptedSizeBytes,
+          options.onProgress
         );
 
         return {
@@ -206,7 +210,9 @@ function createQsp2BodyStream(
   headerHash: Uint8Array,
   noncePrefix: Uint8Array,
   salt: Uint8Array,
-  recordKey: CryptoKey
+  recordKey: CryptoKey,
+  encryptedSizeBytes: number,
+  onProgress?: (bytesSent: number, totalBytes: number) => void
 ): ReadableStream<Uint8Array> {
   const fileHasher = sha256.create();
   const recordCount = Math.ceil(file.size / QSP2_RECORD_BYTES);
@@ -226,6 +232,13 @@ function createQsp2BodyStream(
     salt.fill(0);
   };
 
+  let emittedBytes = 0;
+  const reportProgress = (chunkBytes: number) => {
+    emittedBytes = Math.min(encryptedSizeBytes, emittedBytes + chunkBytes);
+    try { onProgress?.(emittedBytes, encryptedSizeBytes); }
+    catch { /* UI telemetry must not break encryption or stream integrity. */ }
+  };
+
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
       try {
@@ -235,6 +248,7 @@ function createQsp2BodyStream(
           prefix.set(header, 0);
           prefix.set(headerMac, QSP2_HEADER_BYTES);
           controller.enqueue(prefix);
+          reportProgress(prefix.byteLength);
           return;
         }
 
@@ -265,6 +279,7 @@ function createQsp2BodyStream(
             offset += length;
             recordIndex++;
             controller.enqueue(record);
+            reportProgress(record.byteLength);
             return;
           } finally {
             chunk.fill(0);
@@ -305,6 +320,7 @@ function createQsp2BodyStream(
             tag.fill(0);
             new Uint8Array(encryptedTag).fill(0);
             controller.enqueue(footer);
+            reportProgress(footer.byteLength);
           } finally {
             digest.fill(0);
             footerCore.fill(0);
