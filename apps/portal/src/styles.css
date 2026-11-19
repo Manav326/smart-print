@@ -140,7 +140,6 @@
 .customer-privacy-option-copy strong{font-size:11px;font-weight:800;color:#293147}
 .customer-privacy-option-copy small{font-size:8px;line-height:1.5;color:#69758a}
 .customer-privacy-option-state{grid-column:2;font-size:8px;font-weight:800;color:#7360d7}
-.customer-privacy-unavailable{display:block;margin-top:8px;color:#7a8497;font-size:8px;line-height:1.45}
 .customer-private-confirmation,.customer-private-transfer-note{display:flex;align-items:flex-start;gap:8px;margin-top:9px;padding:9px 10px;border-radius:9px;background:#eaf7f1;color:#24654b;font-size:8px;line-height:1.5}
 .customer-private-confirmation svg,.customer-private-transfer-note svg{flex:0 0 auto;margin-top:1px}
 .customer-private-confirmation strong{color:#175b3d}
@@ -161,7 +160,7 @@ html[data-theme="dark"] .customer-private-purge-complete{background:#18372d;bord
 .customer-entry:not(.smartprint-native) .customer-privacy-option-icon{width:40px;height:40px}
 .customer-entry:not(.smartprint-native) .customer-privacy-option-copy strong{font-size:13px}
 .customer-entry:not(.smartprint-native) .customer-privacy-option-copy small{font-size:10px}
-.customer-entry:not(.smartprint-native) .customer-privacy-option-state,.customer-entry:not(.smartprint-native) .customer-privacy-unavailable{font-size:9px}
+.customer-entry:not(.smartprint-native) .customer-privacy-option-state{font-size:9px}
 .customer-entry:not(.smartprint-native) .customer-private-confirmation,.customer-entry:not(.smartprint-native) .customer-private-transfer-note{font-size:10px;padding:11px 12px}
 .customer-entry.smartprint-native .customer-privacy-choice{padding:13px;margin:0 0 12px;border-radius:12px}
 .customer-entry.smartprint-native .customer-privacy-choice-heading>div>span{font-size:9px}
@@ -171,7 +170,7 @@ html[data-theme="dark"] .customer-private-purge-complete{background:#18372d;bord
 .customer-entry.smartprint-native .customer-privacy-option-icon{width:32px;height:32px}
 .customer-entry.smartprint-native .customer-privacy-option-copy strong{font-size:11px}
 .customer-entry.smartprint-native .customer-privacy-option-copy small{font-size:9px;line-height:1.45}
-.customer-entry.smartprint-native .customer-privacy-option-state,.customer-entry.smartprint-native .customer-privacy-unavailable{font-size:9px}
+.customer-entry.smartprint-native .customer-privacy-option-state{font-size:9px}
 .customer-entry.smartprint-native .customer-private-confirmation,.customer-entry.smartprint-native .customer-private-transfer-note{font-size:9px;padding:10px}
 .customer-upload-local-note{display:block;margin-top:8px;text-align:center;color:#7e899d;font-size:7px;line-height:1.5}
 @media(max-width:420px){.customer-upload-modes{grid-template-columns:1fr}.customer-privacy-choice-heading{align-items:flex-start;flex-direction:column}.customer-privacy-choice-heading>small{text-align:left}.customer-privacy-choice-grid{grid-template-columns:1fr}.customer-privacy-option{min-height:0}.customer-entry:not(.smartprint-native) .customer-privacy-choice{padding:12px}.customer-entry:not(.smartprint-native) .customer-privacy-option{min-height:0}}
@@ -1862,7 +1861,7 @@ html[data-theme="dark"] .customer-privacy-option.private{background:#29243e;bord
 html[data-theme="dark"] .customer-privacy-option.selected{background:#342c53;border-color:#a99aff;box-shadow:0 0 0 2px rgba(169,154,255,.14)}
 html[data-theme="dark"] .customer-privacy-option-icon{background:#40375f;color:#d1c8ff}
 html[data-theme="dark"] .customer-privacy-option-copy strong{color:#f0edff}
-html[data-theme="dark"] .customer-privacy-option-copy small,html[data-theme="dark"] .customer-privacy-unavailable{color:#b9b3ca}
+html[data-theme="dark"] .customer-privacy-option-copy small{color:#b9b3ca}
 html[data-theme="dark"] .customer-privacy-option-state{color:#c5bbff}
 html[data-theme="dark"] .customer-private-confirmation,html[data-theme="dark"] .customer-private-transfer-note{background:#18372d;color:#c2f0da}
 .private-printing-tag{display:inline-flex;align-items:center;padding:2px 6px;border:1px solid #b8dfcf;border-radius:999px;background:#edf8f2;color:#216849;font-size:8px;font-weight:800;line-height:1.35;white-space:nowrap}
