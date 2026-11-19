@@ -2159,6 +2159,135 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   );
 }
 
+type PrinterCapabilitySnapshot = {
+  source?: string;
+  queueName?: string;
+  driverName?: string | null;
+  discoveredAtUtc?: string;
+  color?: boolean | null;
+  colorStatus?: string;
+  duplex?: boolean | null;
+  duplexStatus?: string;
+  orientation?: { portrait?: boolean | null; landscape?: boolean | null } | null;
+  paperSizes?: Array<{ name?: string | null; code?: number }> | null;
+  pagesPerSheet?: number[] | null;
+  pagesPerSheetStatus?: string;
+  pagesPerSheetDirection?: string | null;
+  pagesPerSheetDirectionStatus?: string;
+  mediaTypes?: Array<{ name?: string | null; code?: number }> | null;
+  resolutions?: Array<{ xDpi?: number; yDpi?: number }> | null;
+};
+
+function parsePrinterCapabilitySnapshot(json?:string|null):PrinterCapabilitySnapshot|null {
+  if(!json?.trim()||json.trim()==="{}")return null;
+  try {
+    const value=JSON.parse(json) as unknown;
+    return value&&typeof value==="object"&&!Array.isArray(value)
+      ?value as PrinterCapabilitySnapshot:null;
+  } catch {
+    return null;
+  }
+}
+
+function capabilityState(value:unknown,reported?:string):"supported"|"unsupported"|"unknown" {
+  if(reported==="supported"||reported==="unsupported"||reported==="unknown")return reported;
+  return typeof value==="boolean"?(value?"supported":"unsupported"):"unknown";
+}
+
+function capabilityStateLabel(state:"supported"|"unsupported"|"unknown"):string {
+  return state==="supported"?"Supported":state==="unsupported"?"Not supported":"Not reported";
+}
+
+function formatCapabilityTimestamp(value?:string):string {
+  if(!value)return "Not yet discovered";
+  const date=new Date(value);
+  return Number.isFinite(date.getTime())?date.toLocaleString():"Timestamp unavailable";
+}
+
+function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
+  const snapshot=parsePrinterCapabilitySnapshot(printer.capabilitiesJson);
+  const pages=Array.isArray(snapshot?.pagesPerSheet)
+    ?snapshot.pagesPerSheet.filter(value=>Number.isInteger(value)&&value>=1&&value<=500):[];
+  const nupValues=pages.filter(value=>value>1).sort((a,b)=>a-b);
+  const nupState=capabilityState(nupValues.length>0,snapshot?.pagesPerSheetStatus);
+  const colourState=capabilityState(snapshot?.color,snapshot?.colorStatus);
+  const duplexState=capabilityState(snapshot?.duplex,snapshot?.duplexStatus);
+  const directionState=capabilityState(
+    Boolean(snapshot?.pagesPerSheetDirection),
+    snapshot?.pagesPerSheetDirectionStatus
+  );
+  const paperSizes=(snapshot?.paperSizes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
+  const mediaTypes=(snapshot?.mediaTypes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
+  const resolutions=(snapshot?.resolutions??[]).map(item=>
+    item.xDpi&&item.yDpi?item.xDpi+" × "+item.yDpi+" dpi":""
+  ).filter(Boolean);
+  const status=printer.status.toLowerCase();
+  const statusIssue=status.includes("offline")||status.includes("stale")||status.includes("revoked")||
+    status.includes("paused")||status==="unknown";
+  const diagnostic=status.includes("revoked")
+    ?"The paired Print Agent has been revoked. Re-enrol the shop computer before using this queue."
+    :status.includes("offline")
+      ?"The Print Agent is offline. Check that the shop computer is powered on, connected to the internet and running SmartPrint Agent."
+      :status.includes("stale")
+        ?"The last Windows printer inventory is stale. Reconnect the Agent or refresh printer discovery on the shop computer."
+        :status.includes("paused")
+          ?"Windows reports this queue as paused. Resume it in Windows Settings → Printers & scanners, then refresh discovery."
+          :status==="unknown"
+            ?"Windows could not confirm the live queue state. Check the printer, cable/network and Windows queue before retrying."
+            :!snapshot
+              ?"No capability snapshot has been received yet. Confirm the Agent is connected, then reconnect or rediscover this printer."
+              :nupState==="unknown"||colourState==="unknown"||duplexState==="unknown"
+                ?"Some driver capabilities were not reported. Update or reinstall the printer driver, then reconnect the queue to refresh its capability report."
+                :"The Agent has reported this queue. Compare the requested print settings with the driver capabilities below before retrying a failed job.";
+  const capabilityTiles=[
+    {label:"Colour",value:snapshot?.color===true?"Colour":snapshot?.color===false?"Mono only":"Not reported",state:colourState},
+    {label:"Duplex",value:snapshot?.duplex===true?"Available":snapshot?.duplex===false?"Simplex only":"Not reported",state:duplexState},
+    {label:"N-up",value:nupValues.length?nupValues.map(value=>value+"-up").join(" · "):capabilityStateLabel(nupState),state:nupState},
+    {label:"Paper sizes",value:paperSizes.length?paperSizes.length+" reported":"Not reported",state:paperSizes.length?"supported" as const:"unknown" as const}
+  ];
+  return (
+    <div className="printer-capability-panel">
+      <div className="printer-capability-heading">
+        <strong>Driver capabilities</strong>
+        <span>{snapshot?formatCapabilityTimestamp(snapshot.discoveredAtUtc):"Awaiting Agent discovery"}</span>
+      </div>
+      {snapshot&&<div className="printer-capability-tiles">
+        {capabilityTiles.map(tile=><div className="printer-capability-tile" key={tile.label}>
+          <span>{tile.label}</span>
+          <strong className={"capability-state-"+tile.state}>{tile.value}</strong>
+        </div>)}
+      </div>}
+      <details className="printer-diagnostics" open={statusIssue||!snapshot}>
+        <summary>{snapshot?"Full capabilities & troubleshooting":"Capability diagnostics"}</summary>
+        <div className="printer-diagnostic-content">
+          <div className="printer-driver-identity">
+            <span>Installed driver</span>
+            <strong>{snapshot?.driverName||"Driver name not reported by Agent"}</strong>
+            <small>{snapshot?.source==="WINDOWS_DRIVER"?"Read from the Windows print driver":"Capability source not reported"}</small>
+          </div>
+          <div className="printer-capability-facts">
+            <div><span>Colour printing</span><strong>{capabilityStateLabel(colourState)}</strong></div>
+            <div><span>Duplex printing</span><strong>{capabilityStateLabel(duplexState)}</strong></div>
+            <div><span>Page order for N-up</span><strong>{snapshot?.pagesPerSheetDirection||capabilityStateLabel(directionState)}</strong></div>
+            <div><span>Orientation</span><strong>{snapshot?.orientation?[
+              snapshot.orientation.portrait===true?"Portrait":null,
+              snapshot.orientation.landscape===true?"Landscape":null
+            ].filter(Boolean).join(" · ")||"Not reported":"Not reported"}</strong></div>
+            <div><span>Paper sizes</span><strong>{paperSizes.length?paperSizes.slice(0,10).join(", ")+(paperSizes.length>10?" +"+(paperSizes.length-10)+" more":""):"Not reported"}</strong></div>
+            <div><span>Media types</span><strong>{mediaTypes.length?mediaTypes.slice(0,8).join(", ")+(mediaTypes.length>8?" +"+(mediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>Resolutions</span><strong>{resolutions.length?resolutions.slice(0,8).join(", ")+(resolutions.length>8?" +"+(resolutions.length-8)+" more":""):"Not reported"}</strong></div>
+          </div>
+          <div className={"printer-diagnostic-advice"+(statusIssue||!snapshot?" warning":"")} role="note">
+            <strong>{statusIssue||!snapshot?"What to check":"Troubleshooting guidance"}</strong>
+            <span>{diagnostic}</span>
+          </div>
+          {printer.lastSeenUtc&&<small className="printer-last-seen">Agent last seen · {formatCapabilityTimestamp(printer.lastSeenUtc)}</small>}
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function PrintersPage({ printers, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
   return (
     <section className="panel collection-panel">
@@ -2178,6 +2307,7 @@ function PrintersPage({ printers, busyResourceId, onAdd, onToggle }: { printers:
             <span>{isUnsupportedVirtual?"Not available for print dispatch":printer.outputMode==="PDF_EXPORT"?"PDF test destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span>
             <span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span>
           </div>
+          <PrinterCapabilityPanel printer={printer}/>
           {possibleDuplicates.length>0&&<div className="printer-duplicate-warning" role="note">
             <strong>Possible duplicate printer</strong>
             <span>{possibleDuplicates.map(item=>item.displayName).join(", ")} uses the same Windows port. SmartPrint keeps both queues separate; confirm whether they are alternate queues for one physical printer.</span>
@@ -4161,6 +4291,19 @@ function parseCustomerPagesPerSheetDirection(
   }
 }
 
+function parseCustomerPagesPerSheetStatus(capabilitiesJson?:string|null):"supported"|"unsupported"|"unknown" {
+  if(!capabilitiesJson?.trim()||capabilitiesJson.trim()==="{}")return "unknown";
+  try {
+    const capabilities=JSON.parse(capabilitiesJson) as {pagesPerSheetStatus?:unknown;pagesPerSheet?:unknown};
+    if(capabilities.pagesPerSheetStatus==="supported"||capabilities.pagesPerSheetStatus==="unsupported"||capabilities.pagesPerSheetStatus==="unknown")
+      return capabilities.pagesPerSheetStatus;
+    return Array.isArray(capabilities.pagesPerSheet)&&capabilities.pagesPerSheet.some(value=>
+      typeof value==="number"&&Number.isInteger(value)&&value>1&&value<=500)?"supported":"unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 function parseCustomerPagesPerSheetCapabilities(capabilitiesJson?:string|null):number[] {
   if(!capabilitiesJson)return [1];
   try {
@@ -4299,9 +4442,17 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     :null;
   // A direction must be reported too, otherwise a customer preview could
   // show a different page reading order from the eventual physical output.
+  const nupCapabilityStatus=parseCustomerPagesPerSheetStatus(printerCapabilitiesJson);
   const nupOptions=pagesPerSheetDirection
     ?supportedPagesPerSheet.filter(value=>value>1)
     :[];
+  const nupUnavailableReason=!hasAssignedPrinter
+    ?"No printer is assigned to this QR station. Ask the shop owner to assign an active printer."
+    :nupCapabilityStatus==="unsupported"
+      ?"The installed driver explicitly reports that multiple pages per sheet is not supported."
+      :nupCapabilityStatus==="supported"
+        ?"The driver reports N-up counts but not a reliable page-reading direction. SmartPrint keeps this option hidden to prevent the preview and printed page order from disagreeing."
+        :"The printer has not reported its N-up capabilities yet. Ask the shop owner to reconnect the printer or refresh the Print Agent.";
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
   const [files,setFiles]=useState<File[]>([]);
@@ -5690,6 +5841,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                 <option value={1}>1 page per sheet</option>
                 {nupOptions.map(value=><option key={value} value={value}>{value} pages per sheet</option>)}
               </select></label>}
+              {nupOptions.length===0&&group.files.some(candidate=>
+                isCustomerPdf(candidate)&&!isSmartPrintIdDocument(candidate)&&!isSmartPrintPhotoDocument(candidate)
+              )&&<p className="customer-advanced-help">Multiple pages per sheet is unavailable. {nupUnavailableReason}</p>}
             </div>}
           </div>
           <div className="customer-folder-file-list">{group.files.map(selected=>{
@@ -5744,6 +5898,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                     <option value={1}>1 page per sheet</option>
                     {nupOptions.map(value=><option key={value} value={value}>{value} pages per sheet</option>)}
                   </select></label>}
+                  {nupOptions.length===0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<p className="customer-advanced-help">Multiple pages per sheet is unavailable. {nupUnavailableReason}</p>}
                 </div>}
               </div>}
             </div>;
