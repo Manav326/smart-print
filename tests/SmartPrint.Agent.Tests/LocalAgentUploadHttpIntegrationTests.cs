@@ -255,7 +255,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
             {
                 var name = $"batch-{index + 1:D2}.pdf";
                 var file = new FileInfo(Path.Combine(root, name));
-                await WriteSizedPdfAsync(file.FullName, targetFileSizes[index]);
+                await WritePaddedPdfAsync(file.FullName, targetFileSizes[index]);
                 file.Refresh();
                 using var source = File.OpenRead(file.FullName);
                 var sha256 = Convert.ToHexString(await SHA256.HashDataAsync(source)).ToLowerInvariant();
@@ -481,103 +481,6 @@ public sealed class LocalAgentUploadHttpIntegrationTests
         }
     }
 
-
-    private static async Task WriteSizedPdfAsync(string path, long targetBytes)
-    {
-        const string pageContent = "BT /F1 18 Tf 72 720 Td (SmartPrint large-batch acceptance) Tj ET\\n";
-        var contentBytes = Encoding.ASCII.GetBytes(pageContent);
-        await using var output = new FileStream(
-            path, FileMode.Create, FileAccess.Write, FileShare.None, 1024 * 1024, useAsync: true);
-        var offsets = new long[7];
-
-        async Task WriteTextAsync(string value)
-        {
-            var bytes = Encoding.ASCII.GetBytes(value);
-            await output.WriteAsync(bytes);
-        }
-
-        await WriteTextAsync("%PDF-1.4\\n");
-        offsets[1] = output.Position;
-        await WriteTextAsync("1 0 obj\\n<< /Type /Catalog /Pages 2 0 R >>\\nendobj\\n");
-        offsets[2] = output.Position;
-        await WriteTextAsync("2 0 obj\\n<< /Type /Pages /Count 1 /Kids [3 0 R] >>\\nendobj\\n");
-        offsets[3] = output.Position;
-        await WriteTextAsync(
-            "3 0 obj\\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] " +
-            "/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>\\nendobj\\n");
-        offsets[4] = output.Position;
-        await WriteTextAsync($"4 0 obj\\n<< /Length {contentBytes.Length} >>\\nstream\\n");
-        await output.WriteAsync(contentBytes);
-        await WriteTextAsync("endstream\\nendobj\\n");
-        offsets[5] = output.Position;
-        await WriteTextAsync("5 0 obj\\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\\nendobj\\n");
-        offsets[6] = output.Position;
-
-        const string streamEnd = "\\nendstream\\nendobj\\n";
-        var streamEndBytes = Encoding.ASCII.GetByteCount(streamEnd);
-        var paddingLength = targetBytes - output.Position - streamEndBytes - 512;
-        if (paddingLength <= 0)
-            throw new InvalidOperationException("The requested PDF fixture is too small.");
-
-        string BuildXref(long xrefOffset)
-        {
-            var trailer = new StringBuilder();
-            trailer.Append("xref\\n0 7\\n0000000000 65535 f \\n");
-            for (var index = 1; index <= 6; index++)
-            {
-                trailer.Append(offsets[index].ToString("D10", System.Globalization.CultureInfo.InvariantCulture))
-                    .Append(" 00000 n \\n");
-            }
-            trailer.Append("trailer\\n<< /Size 7 /Root 1 0 R >>\\n")
-                .Append("startxref\\n")
-                .Append(xrefOffset.ToString(System.Globalization.CultureInfo.InvariantCulture))
-                .Append("\\n%%EOF\\n");
-            return trailer.ToString();
-        }
-
-        // Solve the small variable-width object/xref fields until the stream
-        // data and exact trailer occupy the requested file size.
-        string trailerText = string.Empty;
-        for (var attempt = 0; attempt < 16; attempt++)
-        {
-            var streamHeader = Encoding.ASCII.GetBytes(
-                $"6 0 obj\\n<< /Length {paddingLength} >>\\nstream\\n");
-            var xrefOffset = output.Position + streamHeader.LongLength + paddingLength + streamEndBytes;
-            trailerText = BuildXref(xrefOffset);
-            var nextPaddingLength = targetBytes - output.Position - streamHeader.LongLength -
-                streamEndBytes - Encoding.ASCII.GetByteCount(trailerText);
-            if (nextPaddingLength == paddingLength)
-                break;
-            paddingLength = nextPaddingLength;
-            if (paddingLength <= 0)
-                throw new InvalidOperationException("Could not size the PDF fixture to its requested length.");
-        }
-
-        var finalHeader = Encoding.ASCII.GetBytes($"6 0 obj\\n<< /Length {paddingLength} >>\\nstream\\n");
-        var finalXrefOffset = output.Position + finalHeader.LongLength + paddingLength + streamEndBytes;
-        trailerText = BuildXref(finalXrefOffset);
-        await output.WriteAsync(finalHeader);
-
-        // The large payload is inside a declared, unreferenced PDF stream. The
-        // actual page and its selectable text remain a normal parseable PDF;
-        // the analyzer no longer has to scan a deliberately malformed EOF tail.
-        var padding = new byte[64 * 1024];
-        Array.Fill(padding, (byte)'A');
-        var remaining = paddingLength;
-        while (remaining > 0)
-        {
-            var count = (int)Math.Min(remaining, padding.Length);
-            await output.WriteAsync(padding.AsMemory(0, count));
-            remaining -= count;
-        }
-
-        await WriteTextAsync(streamEnd);
-        await WriteTextAsync(trailerText);
-        await output.FlushAsync();
-        if (output.Length != targetBytes)
-            throw new InvalidOperationException(
-                $"PDF fixture was {output.Length} bytes; expected exactly {targetBytes} bytes.");
-    }
 
     private static async Task WritePaddedPdfAsync(string path, long targetBytes)
     {
