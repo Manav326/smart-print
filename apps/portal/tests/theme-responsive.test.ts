@@ -984,3 +984,15 @@ test("customer upload page uses a consistent responsive layout for every conditi
   assert.match(app, /role="progressbar"/);
   assert.match(app, /aria-pressed=\{selectedFileIndex===index\}/);
 });
+
+
+test("native customer upload and nested payment states retain spacing and fit phone widths", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /customer-entry\.smartprint-native \.customer-print-flow \{\s*display:grid/);
+  assert.match(css, /customer-entry \.customer-state-timeline>div>span \{[^}]*min-width:0/s);
+  assert.match(css, /customer-upi-qr svg,[\s\S]*max-width:min\(100%,280px\)/);
+  assert.match(css, /customer-batch-checkout-lines>div,[\s\S]*grid-template-columns:minmax\(0,1fr\) auto/);
+  assert.match(css, /customer-batch-print-breakdown>div strong/);
+  assert.match(css, /customer-session-complete \{\s*align-items:stretch;\s*flex-direction:column/);
+});
