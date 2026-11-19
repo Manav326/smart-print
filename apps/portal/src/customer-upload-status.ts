@@ -103,7 +103,8 @@ export function resolveCustomerUploadStatusMessage(state: CustomerUploadStatusSt
   // printing/fulfilment and terminal job states as the more useful status.
   const paymentMessage = paymentStatus ? paymentStatusMessages[paymentStatus] : undefined;
   if (paymentMessage && (!status || paymentLifecycleJobStatuses.has(status) ||
-      paymentStatus === "REJECTED" || paymentStatus === "PAYMENT_REJECTED")) {
+      paymentStatus === "REJECTED" || paymentStatus === "PAYMENT_REJECTED" ||
+      paymentStatus === "REFUNDED" || paymentStatus === "PARTIALLY_REFUNDED")) {
     return paymentMessage;
   }
 
