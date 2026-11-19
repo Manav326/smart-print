@@ -1812,8 +1812,10 @@ function createStreamingLocalMultipartBody(
   const encodedName = encodeURIComponent(file.name).replace(/['()]/g, character =>
     "%" + character.charCodeAt(0).toString(16).toUpperCase()
   );
-  const mediaType = /^[a-z0-9!#function isPrivateLocalAgentEndpoint(value: string): URL | null {^_.+-]+\/[a-z0-9!#function isPrivateLocalAgentEndpoint(value: string): URL | null {^_.+-]+$/i.test(file.type)
-    ? file.type : "application/octet-stream";
+  const mediaTypeParts = file.type.toLowerCase().split("/");
+  const mediaType = mediaTypeParts.length === 2 &&
+    mediaTypeParts.every(part => /^[a-z0-9.+-]+$/i.test(part))
+      ? file.type : "application/octet-stream";
   const encoder = new TextEncoder();
   const prefix = encoder.encode(
     "--" + boundary + "\r\n" +
