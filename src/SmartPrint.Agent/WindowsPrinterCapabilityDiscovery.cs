@@ -10,6 +10,9 @@ namespace SmartPrint.Agent;
 /// </summary>
 public static class WindowsPrinterCapabilityDiscovery
 {
+    private sealed record PagesPerSheetCapabilityResult(IReadOnlyList<int> Values, string Status);
+    private sealed record PagesPerSheetDirectionResult(string? Value, string Status);
+
     private const short DcPapers = 2;
     private const short DcPaperSizes = 3;
     private const short DcDuplex = 7;
@@ -23,26 +26,42 @@ public static class WindowsPrinterCapabilityDiscovery
     private const int MaximumReportedItems = 128;
     private const int FixedNameCharacters = 64;
 
-    public static string DiscoverJson(string queueName)
+    public static string DiscoverJson(string queueName, string? driverName = null)
     {
         if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(queueName))
             return "{}";
 
         try
         {
+            var colour = ReadBoolean(queueName, DcColorDevice);
+            var duplex = ReadBoolean(queueName, DcDuplex);
+            var paperSizes = ReadPaperSizes(queueName);
+            var mediaTypes = ReadMediaTypes(queueName);
+            var resolutions = ReadResolutions(queueName);
+            var pagesPerSheet = ReadPagesPerSheet(queueName);
+            var pagesPerSheetDirection = ReadPagesPerSheetDirection(queueName);
             var payload = new
             {
-                schemaVersion = 1,
+                schemaVersion = 2,
                 source = "WINDOWS_DRIVER",
+                queueName = queueName.Trim(),
+                driverName = string.IsNullOrWhiteSpace(driverName) ? null : driverName.Trim(),
                 discoveredAtUtc = DateTimeOffset.UtcNow,
-                color = ReadBoolean(queueName, DcColorDevice),
-                duplex = ReadBoolean(queueName, DcDuplex),
+                color = colour,
+                colorStatus = ResolveBooleanCapabilityState(colour),
+                duplex,
+                duplexStatus = ResolveBooleanCapabilityState(duplex),
                 orientation = ReadOrientation(queueName),
-                paperSizes = ReadPaperSizes(queueName),
-                pagesPerSheet = ReadPagesPerSheet(queueName),
-                pagesPerSheetDirection = ReadPagesPerSheetDirection(queueName),
-                mediaTypes = ReadMediaTypes(queueName),
-                resolutions = ReadResolutions(queueName)
+                paperSizes,
+                paperSizesStatus = paperSizes.Count > 0 ? "supported" : "unknown",
+                pagesPerSheet = pagesPerSheet.Values,
+                pagesPerSheetStatus = pagesPerSheet.Status,
+                pagesPerSheetDirection = pagesPerSheetDirection.Value,
+                pagesPerSheetDirectionStatus = pagesPerSheetDirection.Status,
+                mediaTypes,
+                mediaTypesStatus = mediaTypes.Count > 0 ? "supported" : "unknown",
+                resolutions,
+                resolutionsStatus = resolutions.Count > 0 ? "supported" : "unknown"
             };
             return JsonSerializer.Serialize(payload);
         }
@@ -54,6 +73,13 @@ public static class WindowsPrinterCapabilityDiscovery
             return "{}";
         }
     }
+
+    private static string ResolveBooleanCapabilityState(bool? value) => value switch
+    {
+        true => "supported",
+        false => "unsupported",
+        _ => "unknown"
+    };
 
     private static bool? ReadBoolean(string queueName, short capability)
     {
@@ -124,7 +150,7 @@ public static class WindowsPrinterCapabilityDiscovery
         }
     }
 
-    private static string? ReadPagesPerSheetDirection(string queueName)
+    private static PagesPerSheetDirectionResult ReadPagesPerSheetDirection(string queueName)
     {
         try
         {
@@ -132,13 +158,22 @@ public static class WindowsPrinterCapabilityDiscovery
             using var queue = server.GetPrintQueue(queueName);
             queue.Refresh();
             var capabilities = queue.GetPrintCapabilities();
-            return ResolvePagesPerSheetDirection(queue, capabilities)?.ToString();
+            var supported = capabilities.PagesPerSheetDirectionCapability;
+            var resolved = ResolvePagesPerSheetDirection(queue, capabilities);
+            if (resolved.HasValue)
+                return new PagesPerSheetDirectionResult(resolved.Value.ToString(), "supported");
+
+            // A successful Print Schema query with an empty direction list is an
+            // explicit driver response. A failed query is kept distinct as unknown.
+            return new PagesPerSheetDirectionResult(
+                null,
+                supported is { Count: 0 } ? "unsupported" : "unknown");
         }
         catch (Exception exception) when (
             exception is PrintQueueException or InvalidOperationException or
                 ExternalException or ArgumentException or UnauthorizedAccessException)
         {
-            return null;
+            return new PagesPerSheetDirectionResult(null, "unknown");
         }
     }
 
@@ -167,10 +202,10 @@ public static class WindowsPrinterCapabilityDiscovery
         return supported[0];
     }
 
-    private static IReadOnlyList<int> ReadPagesPerSheet(string queueName)
+    private static PagesPerSheetCapabilityResult ReadPagesPerSheet(string queueName)
     {
-        // Print Schema capabilities represent the standard JobNUpAllDocumentsContiguously
-        // feature. If a legacy driver does not expose Print Schema, query DC_NUP instead.
+        // Prefer Print Schema because it reports both supported N-up values and
+        // the page-reading order used by the final PrintTicket.
         try
         {
             using var server = new LocalPrintServer();
@@ -181,19 +216,22 @@ public static class WindowsPrinterCapabilityDiscovery
                 .Distinct()
                 .OrderBy(value => value)
                 .ToArray();
-            if (schemaOptions.Length > 0)
-                return new[] { 1 }.Concat(schemaOptions).ToArray();
+            return schemaOptions.Length > 0
+                ? new PagesPerSheetCapabilityResult(new[] { 1 }.Concat(schemaOptions).ToArray(), "supported")
+                : new PagesPerSheetCapabilityResult([1], "unsupported");
         }
         catch (Exception exception) when (
             exception is PrintQueueException or InvalidOperationException or
                 ExternalException or ArgumentException or UnauthorizedAccessException)
         {
-            // Fall back to the Win32 capability query below.
+            // A legacy driver may expose DC_NUP even when Print Schema is unavailable.
         }
 
         var count = DeviceCapabilitiesW(queueName, null, DcNup, IntPtr.Zero, IntPtr.Zero);
-        if (count is <= 0 or > MaximumReportedItems)
-            return [1];
+        // Win32 returns zero for several "not exposed" cases. Do not turn that
+        // ambiguous result into a false claim that the printer cannot do N-up.
+        if (count <= 0 || count > MaximumReportedItems)
+            return new PagesPerSheetCapabilityResult([1], "unknown");
 
         // DC_NUP returns a DWORD array, unlike DC_PAPERS which returns WORD values.
         var buffer = Marshal.AllocHGlobal(checked(count * sizeof(uint)));
@@ -201,16 +239,27 @@ public static class WindowsPrinterCapabilityDiscovery
         {
             var actual = DeviceCapabilitiesW(queueName, null, DcNup, buffer, IntPtr.Zero);
             if (actual <= 0 || actual > count)
-                return [1];
+                return new PagesPerSheetCapabilityResult([1], "unknown");
 
             var values = new SortedSet<int> { 1 };
+            var foundValidValue = false;
             for (var index = 0; index < actual; index++)
             {
                 var pagesPerSheet = Marshal.ReadInt32(buffer, checked(index * sizeof(uint)));
-                if (pagesPerSheet is > 1 and <= 500)
-                    values.Add(pagesPerSheet);
+                if (pagesPerSheet is >= 1 and <= 500)
+                {
+                    foundValidValue = true;
+                    if (pagesPerSheet > 1)
+                        values.Add(pagesPerSheet);
+                }
             }
-            return values.ToArray();
+
+            if (!foundValidValue)
+                return new PagesPerSheetCapabilityResult([1], "unknown");
+
+            return new PagesPerSheetCapabilityResult(
+                values.ToArray(),
+                values.Count > 1 ? "supported" : "unsupported");
         }
         finally
         {
