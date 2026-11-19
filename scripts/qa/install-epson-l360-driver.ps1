@@ -107,9 +107,22 @@ if (-not $infCandidates -or $infCandidates.Count -eq 0) {
 }
 $infPath = $infCandidates[0].FullName
 $driverInfText = Get-Content -LiteralPath $infPath -Raw
-$driverVersionMatch = [regex]::Match(
-    $driverInfText,
-    '(?im)^\s*DriverVer\s*=\s*\d{1,2}/\d{1,2}/\d{4}\s*,\s*(?<version>\d+(?:\.\d+){1,3})\s*
+$driverVerLine = $driverInfText -split "`r?`n" |
+    Where-Object { $_.Trim().StartsWith("DriverVer", [System.StringComparison]::OrdinalIgnoreCase) } |
+    Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($driverVerLine)) {
+    throw "The selected Epson L360 INF does not contain a DriverVer field: $infPath"
+}
+$driverVerParts = $driverVerLine -split ',', 2
+if ($driverVerParts.Count -ne 2) {
+    throw "The selected Epson L360 INF contains a malformed DriverVer field: $driverVerLine"
+}
+$driverVersion = [version]$driverVerParts[1].Trim()
+if ($driverVersion.Major -ne 2 -or $driverVersion.Minor -ne 60) {
+    throw "The selected Epson L360 package is version $driverVersion; this qualification requires Epson v2.60.00."
+}
+Write-Host "[EPSON-L360] Selected INF: $infPath; DriverVer=$driverVersion"
+
 $installedDriver = Get-PrinterDriver -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match "(?i)EPSON.*L360|L360.*EPSON" } |
     Select-Object -First 1
