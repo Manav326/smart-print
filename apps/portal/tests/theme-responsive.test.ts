@@ -1007,3 +1007,14 @@ test("native customer upload and nested payment states retain spacing and fit ph
   assert.match(css, /customer-batch-print-breakdown>div strong/);
   assert.match(css, /customer-session-complete \{\s*align-items:stretch;\s*flex-direction:column/);
 });
+
+ 
+test("customer upload progress counts confirmed files separately from failed and waiting transfers", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /const uploadConfirmedCount=uploadProgress\?\.files\.filter\(file=>file\.status==="COMPLETED"\)\.length\?\?0;/);
+  assert.match(app, /const uploadFailedCount=uploadProgress\?\.files\.filter\(file=>file\.status==="FAILED"\)\.length\?\?0;/);
+  assert.match(app, /const uploadWaitingCount=uploadProgress\?\.files\.filter\(file=>file\.status==="WAITING_FOR_SHOP"\)\.length\?\?0;/);
+  assert.match(app, /\{uploadConfirmedCount\} of \{uploadProgress\.total\} files uploaded/);
+  assert.match(app, /Retry only failed files/);
+  assert.doesNotMatch(app, /\{uploadProgress\.completed\} of \{uploadProgress\.total\} files complete/);
+});
