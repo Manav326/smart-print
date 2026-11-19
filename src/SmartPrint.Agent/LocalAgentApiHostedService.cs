@@ -1057,7 +1057,12 @@ public sealed class LocalAgentApiHostedService(
                                     "application/vnd.smartprint.qsp2", StringComparison.OrdinalIgnoreCase) ||
                                 !long.TryParse(context.Request.Headers["X-Print-Encrypted-Size"].FirstOrDefault(), out var encryptedSize) ||
                                 encryptedSize != expectedEncryptedSize || (context.Request.ContentLength is long contentLength && contentLength != expectedEncryptedSize))
+                            {
+                                await ReportPrivateValidationFailureAsync(
+                                    "private_document_integrity_failed",
+                                    "The encrypted transfer did not match the authorised ticket. Retry the same file.");
                                 return Results.BadRequest(new { code = "private_document_envelope_invalid", message = "The QSP2 encrypted stream does not match its authorised upload." });
+                            }
 
                             await ReportPrivateStageAsync("DECRYPTING_AND_AUTHENTICATING");
                             dataKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
