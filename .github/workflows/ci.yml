@@ -427,12 +427,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Shop-owner Epson L360 printer details and print dispatch acceptance failed." }
       - name: Run Windows Agent unit and real spooler integration tests
         id: agent_tests
-        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' && (steps.epson_l360_setup.outcome != 'success' || steps.epson_l360_shop_owner_ui.outcome == 'success') }}
         env:
           SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION: ${{ steps.pdf_queue.outcome == 'success' && '1' || '0' }}
           SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION: ${{ steps.secondary_queue.outcome == 'success' && '1' || '0' }}
           SMARTPRINT_NUP_TEST_QUEUE: ${{ steps.nup_queue.outputs.queue }}
-          SMARTPRINT_RUN_EPSON_L360_DRIVER_INTEGRATION: ${{ steps.epson_l360_setup.outcome == 'success' && '1' || '0' }}
+          SMARTPRINT_RUN_EPSON_L360_DRIVER_INTEGRATION: ${{ steps.epson_l360_shop_owner_ui.outcome == 'success' && '1' || '0' }}
           SMARTPRINT_EPSON_L360_QUEUE: ${{ steps.epson_l360_setup.outputs.queue_name }}
           SMARTPRINT_EPSON_L360_DRIVER_NAME: ${{ steps.epson_l360_setup.outputs.driver_name }}
           SMARTPRINT_EPSON_L360_SPOOLER_OUTPUT: ${{ steps.epson_l360_setup.outputs.spooler_output_path }}
@@ -441,12 +441,14 @@ jobs:
         run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
       - name: Collect Epson L360 capability, driver and spooler evidence
         id: epson_l360_capture
-        if: ${{ always() && steps.epson_l360_setup.outcome == 'success' && steps.agent_tests.outcome == 'success' }}
+        if: ${{ always() && steps.epson_l360_setup.outcome == 'success' && steps.epson_l360_capability_probe.outcome == 'success' }}
         shell: pwsh
         env:
           EPSON_SPOOLER_OUTPUT: ${{ steps.epson_l360_setup.outputs.spooler_output_path }}
           EPSON_OUTPUT_DIRECTORY: ${{ runner.temp }}/smartprint-epson-l360-driver-qa
           EPSON_METADATA_PATH: ${{ steps.epson_l360_setup.outputs.metadata_path }}
+          EPSON_SHOP_OWNER_UI_PASSED: ${{ steps.epson_l360_shop_owner_ui.outcome == 'success' }}
+          EPSON_AGENT_TESTS_PASSED: ${{ steps.agent_tests.outcome == 'success' }}
         run: |
           $evidence = "artifacts/epson-l360"
           New-Item -ItemType Directory -Force -Path $evidence | Out-Null
@@ -455,19 +457,25 @@ jobs:
           if (-not (Test-Path -LiteralPath $snapshot)) {
             throw "Epson driver capability discovery did not write the shop-owner evidence snapshot."
           }
-          if (-not (Test-Path -LiteralPath $manifest)) {
+          if ($env:EPSON_SHOP_OWNER_UI_PASSED -eq "true" -and -not (Test-Path -LiteralPath $manifest)) {
             throw "The shop-owner browser did not save the print assignment/dispatch manifest."
           }
-          if (-not (Test-Path -LiteralPath $env:EPSON_SPOOLER_OUTPUT)) {
-            throw "Epson driver did not produce an isolated Windows spooler file-port output."
+          if (Test-Path -LiteralPath $manifest) {
+            Write-Host "Captured shop-owner assignment/dispatch manifest."
+          } else {
+            Write-Warning "No shop-owner manifest was created; the earlier UI step did not complete."
+          }
+          if (Test-Path -LiteralPath $env:EPSON_SPOOLER_OUTPUT) {
+            Copy-Item -LiteralPath $env:EPSON_SPOOLER_OUTPUT -Destination (Join-Path $evidence "epson-l360-spooler-output.prn") -Force
+          } else {
+            Write-Warning "No final spooler port file exists; see the individual accepted-output files below."
           }
           if (-not (Test-Path -LiteralPath $env:EPSON_METADATA_PATH)) {
             throw "Epson driver installation metadata is missing."
           }
-          Copy-Item -LiteralPath $env:EPSON_SPOOLER_OUTPUT -Destination (Join-Path $evidence "epson-l360-spooler-output.prn") -Force
           Copy-Item -LiteralPath $env:EPSON_METADATA_PATH -Destination (Join-Path $evidence "epson-l360-driver-metadata.json") -Force
           $acceptedOutputs = @(Get-ChildItem -LiteralPath $env:EPSON_OUTPUT_DIRECTORY -Filter "*-accepted.prn" -File)
-          if ($acceptedOutputs.Count -ne 6) {
+          if ($env:EPSON_AGENT_TESTS_PASSED -eq "true" -and $acceptedOutputs.Count -ne 6) {
             throw "Expected six separate Epson driver/spooler output files from the shop-owner dispatches; found $($acceptedOutputs.Count)."
           }
           foreach ($accepted in $acceptedOutputs) {
@@ -475,13 +483,14 @@ jobs:
             Copy-Item -LiteralPath $accepted.FullName -Destination $evidence -Force
           }
           $ownerScreenshots = "artifacts/epson-l360-shop-owner"
-          $screenshotEvidence = Join-Path $evidence "shop-owner-ui"
-          if (-not (Test-Path -LiteralPath $ownerScreenshots)) {
-            throw "The shop-owner browser evidence directory is missing."
+          if (Test-Path -LiteralPath $ownerScreenshots) {
+            $screenshotEvidence = Join-Path $evidence "shop-owner-ui"
+            New-Item -ItemType Directory -Force -Path $screenshotEvidence | Out-Null
+            Copy-Item -Path (Join-Path $ownerScreenshots "*") -Destination $screenshotEvidence -Recurse -Force
+          } else {
+            Write-Warning "Shop-owner UI screenshots are unavailable because browser acceptance did not complete."
           }
-          New-Item -ItemType Directory -Force -Path $screenshotEvidence | Out-Null
-          Copy-Item -Path (Join-Path $ownerScreenshots "*") -Destination $screenshotEvidence -Recurse -Force
-          Write-Host "Captured the real Epson driver capability snapshot, shop-owner dispatch manifest, UI screenshots, and $($acceptedOutputs.Count) separate spooler outputs."
+          Write-Host "Captured Epson driver capability and $($acceptedOutputs.Count) separate spooler outputs."
       - name: Upload Epson L360 driver capability and spooler evidence
         id: epson_l360_artifact_upload
         if: ${{ always() && steps.epson_l360_capture.outcome == 'success' }}
