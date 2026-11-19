@@ -5996,7 +5996,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
   const batchQuoteNeedsRefresh=quoteRows.filter(entry=>
-    !entry.excluded&&(!entry.quote||quoteExpiredForBatchItem(entry.item))
+    !entry.excluded&&!shouldBlockQuoteRefreshForStatus(statusForBatchItem(entry.item))&&
+    (!entry.quote||quoteExpiredForBatchItem(entry.item))
   ).length;
   const batchQuoteCurrency=quoteEntries[0]?.quote?.currency??quoteItems[0]?.job.currency??"INR";
   const batchQuoteCounts={
@@ -6317,7 +6318,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {(quoteEntries.length>0||batchQuoteNeedsRefresh>0)&&<section className="customer-quote-card customer-batch-quote-card" aria-label="Batch quote summary">
       <div className="customer-batch-quote-heading">
-        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,batchQuoteCurrency)}</strong><small>{acceptedQuoteEntries.length} accepted {acceptedQuoteEntries.length===1?"file has":"files have"} a current quote. {batchQuoteNeedsRefresh>0?batchQuoteNeedsRefresh+" need a fresh quote. ":""}Excluded files are not charged.</small></div>
+        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,batchQuoteCurrency)}</strong><small>{acceptedQuoteEntries.length} {acceptedQuoteEntries.length===1?"file has":"files have"} a current quote. {batchQuoteNeedsRefresh>0?batchQuoteNeedsRefresh+" need a fresh quote. ":""}Excluded files are not charged.</small></div>
         <span className="customer-batch-quote-validity">{batchQuoteNeedsRefresh>0?"Review required":"Quote for review"}</span>
       </div>
       <div className="customer-batch-quote-categories" aria-label="Files included in this quote">
@@ -6330,7 +6331,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       </div>
       <div className="customer-batch-quote-lines" aria-label="File-by-file prices">
         {quoteRows.map(entry=>{
-          const expired=!entry.quote||quoteExpiredForBatchItem(entry.item);
+          const status=statusForBatchItem(entry.item);
+          const quoteExpired=Boolean(entry.quote)&&quoteExpiredForBatchItem(entry.item);
+          const needsFreshQuote=!entry.excluded&&!shouldBlockQuoteRefreshForStatus(status)&&(!entry.quote||quoteExpired);
           const printKind=normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind);
           const detail=entry.quote
             ? entry.quote.printKind==="PHOTO"
@@ -6339,13 +6342,24 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                 ? entry.quote.pageCount+" A4 portrait "+(entry.quote.pageCount===1?"sheet":"sheets")+" × "+entry.quote.copies+" copy · "+entry.quote.colourMode+" · Single-sided"
                 : entry.quote.pageCount+" source pages · "+customerDocumentOutputSummary(entry.quote.pageCount,entry.quote.copies,entry.quote.pagesPerSheet??1,entry.quote.isDuplex)+" · "+entry.quote.colourMode+" · "+(entry.quote.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote.paperSize+" · "+(entry.quote.orientation==="LANDSCAPE"?"Landscape":entry.quote.orientation==="PORTRAIT"?"Portrait":"Auto orientation")
             : entry.item.job.pageCount+" source "+(entry.item.job.pageCount===1?"page":"pages")+" · "+entry.item.job.copies+" "+(entry.item.job.copies===1?"copy":"copies")+" · quote not available yet";
-          const lineState=entry.excluded?"Excluded":expired?(entry.quote?"Quote expired":"Quote needed"):"Included";
+          const lineState=entry.excluded
+            ?"Excluded"
+            :needsFreshQuote?(entry.quote?"Quote expired":"Quote needed")
+              :!entry.quote?customerStatusLabel(status)
+                :quoteExpired?"Quote locked · "+customerStatusLabel(status)
+                  :"Included in total";
+          const amountLabel=entry.excluded
+            ?"Not charged"
+            :needsFreshQuote?"—"
+              :!entry.quote?"Pending"
+                :quoteExpired?"See payment status"
+                  :formatMoney(entry.quote.quotedAmountMinor,entry.quote.currency);
           return <div className="customer-batch-quote-line" key={entry.item.job.id}>
             <span className="customer-batch-quote-line-copy">
-              <span className="customer-batch-quote-line-top"><strong>{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={printKind}/><span className={"customer-batch-quote-line-state "+(entry.excluded?"excluded":expired?"refresh":"included")}>{lineState}</span></span>
+              <span className="customer-batch-quote-line-top"><strong>{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={printKind}/><span className={"customer-batch-quote-line-state "+(entry.excluded?"excluded":needsFreshQuote?"refresh":"included")}>{lineState}</span></span>
               <small>{detail}</small>
             </span>
-            <strong className={"customer-batch-quote-line-amount "+(entry.excluded||expired?"excluded":"")}>{entry.excluded?"Not charged":expired?"—":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong>
+            <strong className={"customer-batch-quote-line-amount "+(entry.excluded||needsFreshQuote||quoteExpired?"excluded":"")}>{amountLabel}</strong>
           </div>;
         })}
       </div>
