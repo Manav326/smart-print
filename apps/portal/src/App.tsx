@@ -59,6 +59,21 @@ import { getSubscriptionReminderState } from "./subscription-checkout-state";
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
 
+type CustomerUploadFileProgress = {
+  name: string;
+  sizeBytes: number;
+  bytesSent: number;
+  totalBytes: number;
+  status: "QUEUED" | "PREPARING" | "TRANSFERRING" | "STREAMING_ENCRYPTED" | "WAITING_FOR_SHOP" | "PROCESSING" | "COMPLETED" | "FAILED";
+  message: string;
+};
+
+type CustomerUploadProgressState = {
+  completed: number;
+  total: number;
+  files: CustomerUploadFileProgress[];
+};
+
 const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: "Order Journey", icon: Activity },
   { label: "Overview", icon: LayoutDashboard },
@@ -4509,7 +4524,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [photoSettingsByJobId,setPhotoSettingsByJobId]=useState<Record<string,CustomerPhotoSettings>>(()=>initialDraft?.photoSettingsByJobId??{});
   const [photoStudioSource,setPhotoStudioSource]=useState<File|null>(null);
   const [photoStudioSourceFingerprint,setPhotoStudioSourceFingerprint]=useState<string|null>(null);
-  const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number;activeFiles:string[]}|null>(null);
+  const [uploadProgress,setUploadProgress]=useState<CustomerUploadProgressState|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
   const [batchStatuses,setBatchStatuses]=useState<Record<string,CustomerJobStatus>>({});
@@ -5025,14 +5040,63 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const currentBatchBytes=results.reduce((sum,item)=>sum+item.document.sizeBytes,0);
     const uploadCapacityError=validateCustomerUploadBatchLimits(results.length,currentBatchBytes,pending.map(candidate=>candidate.size));
     if(uploadCapacityError){setError(uploadCapacityError.code==="FILE_SIZE"?"One selected file exceeds the 50 MB per-file upload limit.":uploadCapacityError.code==="FILE_COUNT"?"A print batch can contain up to 20 files.":"A print batch can contain up to 500 MB in total.");return;}
-    setBusy(true);setError("");setNotice(null);setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,activeFiles:pending.slice(0,CUSTOMER_UPLOAD_CONCURRENCY).map(candidate=>candidate.name)});
+    setBusy(true);setError("");setNotice(null);setQuote(null);setQuotesByJobId({});setJobStatus(null);
+    setUploadProgress({
+      completed:0,
+      total:pending.length,
+      files:pending.map(candidate=>({
+        name:candidate.name,
+        sizeBytes:candidate.size,
+        bytesSent:0,
+        totalBytes:candidate.size,
+        status:"QUEUED",
+        message:"Waiting for an available upload slot"
+      }))
+    });
+    const updateFileProgress=(index:number,patch:Partial<CustomerUploadFileProgress>)=>{
+      setUploadProgress(current=>{
+        if(!current||!current.files[index])return current;
+        const next=[...current.files];
+        const previous=next[index];
+        next[index]={
+          ...previous,
+          ...patch,
+          ...(patch.status==="COMPLETED"
+            ?{bytesSent:previous.totalBytes||previous.sizeBytes}
+            :{})
+        };
+        return {...current,files:next};
+      });
+    };
+    const reportTransferProgress=(index:number,progress:{bytesSent:number;totalBytes:number;stage:string})=>{
+      updateFileProgress(index,{
+        bytesSent:progress.bytesSent,
+        totalBytes:progress.totalBytes,
+        status:progress.stage==="STREAMING_ENCRYPTED"?"STREAMING_ENCRYPTED":"TRANSFERRING",
+        message:progress.stage==="STREAMING_ENCRYPTED"
+          ?"Encrypting and streaming authenticated records"
+          :"Transferring file bytes"
+      });
+    };
+    const reportPrivateStage=(index:number,stage:string,message:string)=>{
+      const status=stage==="WAITING_FOR_AGENT"||stage==="WAITING_FOR_UPLOAD"
+        ?"WAITING_FOR_SHOP"
+        :stage==="READY"?"COMPLETED"
+          :stage==="FAILED"||stage==="EXPIRED"?"FAILED"
+            :"PROCESSING";
+      updateFileProgress(index,{status,message});
+    };
     try {
       const initialResults=[...results];
       const resultsByPendingIndex=new Map<number,UploadedPrintJob>();
       const outcomes=await mapConcurrentSettled(
         pending,
         CUSTOMER_UPLOAD_CONCURRENCY,
-        async candidate=>{
+        async (candidate,index)=>{
+          updateFileProgress(index,{
+            status:"PREPARING",
+            message:effectivePrivatePrinting?"Preparing encrypted Private Printing transfer":"Preparing secure upload"
+          });
           const fingerprint=customerFileFingerprint(candidate);
           const batchGroupName=groupNameForFile(candidate);
           const settings=settingsForFile(candidate);
@@ -5041,10 +5105,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
           if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards must use Private Printing. No normal cloud upload is allowed.",409);
           const uploadedItem=effectiveUploadMode==="LOCAL"&&localAgent
-            ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)
+            ? await uploadCustomerDocumentLocally(
+                sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,
+                cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings,
+                progress=>reportTransferProgress(index,progress),
+                (stage,message)=>reportPrivateStage(index,stage,message)
+              )
             : idDocument
               ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded or sent to cloud storage.",409);})()
-              : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings,printKind,photoSettings);
+              : await uploadCustomerDocument(
+                  sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,
+                  settings,printKind,photoSettings,
+                  progress=>reportTransferProgress(index,progress)
+                );
           const created=effectivePrivatePrinting
             ? {...uploadedItem,document:{...uploadedItem.document,originalFileName:candidate.name}}
             : uploadedItem;
@@ -5055,13 +5128,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           return created;
         },
         progress=>{
-          setUploadProgress({
-            completed:progress.completed,
-            total:pending.length,
-            activeFiles:progress.activeIndices.map(index=>pending[index]?.name).filter((name):name is string=>Boolean(name))
-          });
+          setUploadProgress(current=>current?{...current,completed:progress.completed}:current);
         },
         (index,outcome)=>{
+          if(outcome.status==="fulfilled") {
+            updateFileProgress(index,{status:"COMPLETED",message:"Upload confirmed"});
+          } else if(outcome.reason instanceof LocalUploadOutcomeUnknownError) {
+            updateFileProgress(index,{status:"WAITING_FOR_SHOP",message:outcome.reason.message});
+          } else {
+            updateFileProgress(index,{
+              status:"FAILED",
+              message:outcome.reason instanceof Error?outcome.reason.message:"Upload failed"
+            });
+          }
           if(outcome.status!=="fulfilled")return;
           const candidate=pending[index];
           const created=outcome.value;
@@ -5153,7 +5232,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           : exception instanceof ApiError ? exception.message
           : "Upload stopped after "+completedFingerprints.size+" file(s). Retry the selected files to continue; completed files will be skipped.";
       setError(uploadError);
-    } finally {setBusy(false);setUploadProgress(null);}
+    } finally {setBusy(false);}
   }
 
   function selectUploadedFile(item:UploadedPrintJob) {
@@ -5934,7 +6013,39 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   </div>}
 </>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
-    {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.activeFiles.length?`Uploading ${uploadProgress.activeFiles.length} file(s) in parallel: ${uploadProgress.activeFiles.join(", ")}`:`${uploadProgress.completed} of ${uploadProgress.total} file transfers complete`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.activeFiles.length>0&&<b aria-hidden="true"/>}</div>{!nativeAppMode&&<small>Up to ${CUSTOMER_UPLOAD_CONCURRENCY} encrypted or secure transfers run at a time. Completed files are retained if another file fails.</small>}</div>}
+    {uploadProgress&&<section className="customer-upload-progress" aria-live="polite" aria-label="Upload progress">
+      <div className="customer-upload-progress-header">
+        <div><strong>{uploadProgress.completed} of {uploadProgress.total} files processed</strong><span>Up to {CUSTOMER_UPLOAD_CONCURRENCY} transfers run at the same time</span></div>
+        <span className="customer-upload-progress-count">{Math.round(uploadProgress.files.reduce((sum,file)=>sum+(file.totalBytes>0?Math.min(1,file.bytesSent/file.totalBytes):0),0)/Math.max(1,uploadProgress.total)*100)}%</span>
+      </div>
+      <div className="customer-upload-progress-list">
+        {uploadProgress.files.map((file,index)=>{
+          const isComplete=file.status==="COMPLETED";
+          const isWaiting=file.status==="WAITING_FOR_SHOP"||file.status==="PROCESSING";
+          const total=file.totalBytes||file.sizeBytes;
+          const percent=isComplete?100:total>0?Math.min(100,file.bytesSent/total*100):0;
+          const hasMeasuredBytes=file.totalBytes>0&&file.bytesSent>0;
+          return <div className="customer-upload-progress-file" key={index}>
+            <div className="customer-upload-progress-file-head">
+              <span className="customer-upload-progress-file-icon">{isComplete?<Check size={14}/>:file.status==="FAILED"?<X size={14}/>:<FileText size={14}/>}</span>
+              <div className="customer-upload-progress-file-main">
+                <strong title={file.name}>{file.name}</strong>
+                <span>{file.message}</span>
+              </div>
+              <span className={"customer-upload-progress-file-status "+(isComplete?"complete":file.status==="FAILED"?"failed":isWaiting?"waiting":"active")}>
+                {isComplete?"Done":file.status==="FAILED"?"Failed":isWaiting?"Processing":file.status==="QUEUED"?"Queued":"Uploading"}
+              </span>
+            </div>
+            <div className="customer-upload-progress-track"><i className={hasMeasuredBytes||isComplete?"measured":"indeterminate"} style={{width:percent+"%"}}/></div>
+            <div className="customer-upload-progress-file-foot">
+              <span>{hasMeasuredBytes?formatBytes(Math.min(file.bytesSent,total))+" / "+formatBytes(total):formatBytes(file.sizeBytes)}</span>
+              <span>{isComplete?"100%":hasMeasuredBytes?Math.floor(percent)+"%":file.status==="QUEUED"?"Waiting":isWaiting?"Transfer sent":"Preparing"}</span>
+            </div>
+          </div>;
+        })}
+      </div>
+      <small>HTTPS progress is measured by the browser. Local and encrypted streams report bytes handed to the connection; each file is marked complete only after SmartPrint confirms the response. Successful files remain saved if another file fails.</small>
+    </section>}
     {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?<>Local transfer is not encrypted. <InfoTooltip label="Local transfer security"><span>Shop Wi-Fi uses local HTTP. Choose Cloud-assisted for encrypted HTTPS transfer.</span></InfoTooltip></>:<>Check shop Wi-Fi first. <InfoTooltip label="Shop Wi-Fi access"><span>In a browser, tap Check shop Wi-Fi above to grant local network access.</span></InfoTooltip></>}</small>}
     {files.length>0&&uploadMode==="CLOUD"&&<small className="customer-upload-local-note">Encrypted HTTPS upload. <InfoTooltip label="Secure upload details"><span>Files are encrypted in transit and stored in the existing print queue until the shop computer is ready.</span></InfoTooltip></small>}
     {uploaded&&<>
