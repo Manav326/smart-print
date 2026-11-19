@@ -7,6 +7,8 @@ const api = read("../../../src/SmartPrint.Api/Program.cs");
 const portalApi = read("../src/api.ts");
 const agentApi = read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
 const agentWorker = read("../../../src/SmartPrint.Agent/Worker.cs");
+const customerApp = read("../src/App.tsx");
+const privateRelayRules = read("../../../src/SmartPrint.Api/Domain/PrivateRelayProgressRules.cs");
 const localAgentApi = read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
 const nginx = read("../nginx.conf");
 
@@ -101,4 +103,24 @@ test("cloud document transfer routes stream through Nginx with the matching mult
   assert.ok(transferLocation.includes("proxy_request_buffering off;"));
   assert.ok(transferLocation.includes("proxy_buffering off;"));
   assert.ok(transferLocation.includes("proxy_read_timeout 10m;"));
+});
+
+
+test("customer retry copy preserves ticket identity without promising byte-offset resume", () => {
+  assert.match(portalApi, /may need to be sent again from the beginning/i);
+  assert.match(portalApi, /no second print job will be created/i);
+  assert.doesNotMatch(portalApi, /resume the same (?:job|request|file)/i);
+  assert.match(customerApp, /may need to be sent again from the beginning/i);
+  assert.doesNotMatch(customerApp, /the same upload will resume|resume that same upload/i);
+});
+
+test("Private Printing progress uses short, plain-language customer messages", () => {
+  const start = privateRelayRules.indexOf("public static string CustomerMessage");
+  assert.ok(start >= 0, "customer-facing stage messages must remain defined");
+  const messages = privateRelayRules.slice(start);
+  assert.match(messages, /Waiting to send your secure file/);
+  assert.match(messages, /Checking file security/);
+  assert.match(messages, /Checking that the file can be printed/);
+  assert.match(messages, /File secured on the shop computer · ready for printing/);
+  assert.doesNotMatch(messages, /decrypting|authenticating|encrypted payload|local print queue/i);
 });
