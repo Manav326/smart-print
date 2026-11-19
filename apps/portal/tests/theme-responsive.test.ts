@@ -170,8 +170,14 @@ test("light and dark palettes cover authentication, customer QR and public landi
   assert.match(css, /html\[data-theme="dark"\] \.auth-card-footer,[\s\S]*?color:\s*#aab6ca/s,
     "Dark authentication helper text must not use the legacy low-contrast footer colour.");
   const photoStudio = read("../src/PhotoStudio.module.css");
-  assert.match(photoStudio, /\.panelHeading\s*>\s*div\s*\{[^}]*display:grid[^}]*\}/s,
-    "Photo Studio title and helper copy must render on separate lines.");
+  const photoStudioComponent = read("../src/PhotoStudio.tsx");
+  assert.match(photoStudio, /\.panelHeadingRow\s*\{[^}]*display:flex[^}]*\}/s,
+    "Photo Studio title and help control must remain aligned in a dedicated header row.");
+  assert.match(photoStudio, /\.helpTooltipPanel\s*\{[^}]*display:grid[^}]*line-height:1\.65/s,
+    "Photo Studio guidance must use readable line spacing in its contextual panel.");
+  assert.match(photoStudioComponent, /aria-label=\{"Help: "\+panelTitle\}/);
+  assert.match(photoStudioComponent, /role="region" aria-label=\{panelTitle\+" guidance"\}/,
+    "Photo Studio helper content must be available in the accessible contextual-help region.");
 });
 
 test("web shell keeps navigation, header and workspace independently usable at desktop and mobile sizes", () => {

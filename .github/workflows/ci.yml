@@ -50,7 +50,8 @@ jobs:
       - name: Install Chromium for real-browser appearance and viewport checks
         id: chromium_install
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
-        run: npx --yes --package=playwright@1.56.1 playwright install --with-deps chromium
+        # The ubuntu-24.04 runner image provides Chromium's runtime libraries; avoid apt mirror downloads here.
+        run: npx --yes --package=playwright@1.56.1 playwright install chromium
       - name: Validate Photo Studio browser runner syntax
         if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
         run: node --check apps/portal/tests/photo-studio.browser.mjs
