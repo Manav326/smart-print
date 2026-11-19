@@ -65,3 +65,11 @@ test("Private Printing publishes durable, authenticated stage updates for direct
   assert.match(localAgentApi, /ReportPrivateStageAsync\("VALIDATING_DOCUMENT"\)/);
   assert.match(localAgentApi, /ReportPrivateStageAsync\("SECURING_LOCAL_QUEUE"\)/);
 });
+
+test("Private Printing never starts a second relay while the same ticket is claimed for direct LAN transfer", () => {
+  assert.match(api, /TransferPath = transferPath/);
+  assert.match(api, /ticket\.ClaimedUtc is not null[\\s\\S]{0,180}ticket\.ClaimLeaseExpiresUtc > now/);
+  const relay = api.slice(api.indexOf("async function uploadCustomerPrivateRelay"), api.indexOf("function createStreamingLocalMultipartBody"));
+  assert.match(relay, /existing\.transferPath === "DIRECT_LAN"/);
+  assert.match(relay, /has not started a second encrypted transfer/);
+});
