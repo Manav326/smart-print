@@ -948,8 +948,18 @@ async function exercisePhotoStudioFeatureMatrix() {
     const preview = dialog.locator("canvas");
     await preview.waitFor({ state: "visible" });
 
-    // Crop, framing, focus boundaries and reset.
+    // Crop help opens as a readable panel, closes on Escape, and leaves the editor open.
     await dialog.getByRole("button", { name: "Crop", exact: true }).click();
+    const cropHelp = dialog.getByRole("button", { name: "Help: Crop & position" });
+    await cropHelp.click();
+    assert.equal(await cropHelp.getAttribute("aria-expanded"), "true");
+    const cropGuidance = dialog.getByRole("region", { name: "Crop & position guidance" });
+    assert.match(await cropGuidance.innerText(), /Drag directly on any photo/);
+    await page.keyboard.press("Escape");
+    assert.equal(await cropHelp.getAttribute("aria-expanded"), "false",
+      "Escape closes the help panel before the Photo Studio dialog.");
+    assert.equal(await dialog.isVisible(), true, "Dismissing help must leave Photo Studio open.");
+
     let pixels = await readPhotoCanvasPixels(page);
     await setPhotoRange(dialog, "Zoom", 3);
     assert.equal(await dialog.getByText(/This crop may look soft at the selected size/).count(), 1,
@@ -966,6 +976,25 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Zoom\b/ }).locator('input[type="range"]').inputValue()), 1);
     assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Horizontal position\b/ }).locator('input[type="range"]').inputValue()), 50);
     assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Vertical position\b/ }).locator('input[type="range"]').inputValue()), 50);
+
+    // Direct manipulation of a photo tile must update the same focus controls used by export.
+    const cropBounds = await preview.boundingBox();
+    assert.ok(cropBounds, "Photo preview must be measurable for direct framing.");
+    const beforeDragPixels = await readPhotoCanvasPixels(page);
+    const dragStartX = cropBounds.x + cropBounds.width * 16 / 210;
+    const dragStartY = cropBounds.y + cropBounds.height * 20 / 297;
+    await page.mouse.move(dragStartX, dragStartY);
+    await page.mouse.down();
+    await page.mouse.move(dragStartX + 2, dragStartY + 12, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForFunction(() => {
+      const input = document.querySelector("#photo-studio-vertical-position");
+      return input instanceof HTMLInputElement && Number(input.value) !== 50;
+    });
+    assert.notDeepEqual(await readPhotoCanvasPixels(page), beforeDragPixels,
+      "Dragging a photo must reframe the live preview, not just move a UI overlay.");
+    await dialog.getByRole("button", { name: "Reset crop" }).click();
+    assert.equal(Number(await dialog.locator("#photo-studio-vertical-position").inputValue()), 50);
 
     // Named looks, monochrome output and custom manual adjustments.
     await dialog.getByRole("button", { name: "Looks", exact: true }).click();
