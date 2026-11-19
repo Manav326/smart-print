@@ -4045,6 +4045,9 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 .customer-previous-order-warning{color:var(--red);font-size:10px;line-height:1.5}
 .customer-previous-order-footnote{color:var(--faint);font-size:10px;line-height:1.5}
 .shop-document-preview{position:relative}
+.shop-document-preview-slow{position:absolute;z-index:2;left:50%;top:12px;transform:translateX(-50%);display:grid;gap:4px;width:min(520px,calc(100% - 24px));padding:10px 13px;border:1px solid color-mix(in srgb,var(--amber) 35%,var(--border));border-radius:9px;background:var(--surface);color:var(--text);box-shadow:0 4px 18px #0002}
+.shop-document-preview-slow strong{font-size:11px}
+.shop-document-preview-slow span{font-size:10px;line-height:1.45;color:var(--muted)}
 .shop-document-preview-loading{position:absolute;z-index:2;left:50%;top:12px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;max-width:calc(100% - 24px);padding:8px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);box-shadow:0 4px 18px #0002}
 .shop-document-preview-loading strong{font-size:11px;white-space:nowrap}
 .shop-document-preview-loading small{font-size:10px;color:var(--muted)}
