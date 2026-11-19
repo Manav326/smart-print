@@ -684,7 +684,7 @@ test("customer-facing print choices explain privacy versus connection without ch
  const app=read("../src/App.tsx");
  assert.match(app,/How your files reach the shop/);
  assert.match(app,/Choose a connection method\. Your privacy setting above stays the same\./);
- assert.match(app,/Direct over shop Wi-Fi · unencrypted connection/);
+ assert.match(app,/Direct transfer over shop Wi-Fi/);
  assert.match(app,/Encrypted online transfer · print when ready/);
  assert.match(app,/customerStatusLabel\(status:string\):string/);
  assert.match(app,/Waiting for shop review/);
