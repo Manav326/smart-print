@@ -37,7 +37,8 @@ $hash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerI
 $signature = Get-AuthenticodeSignature -FilePath $packagePath
 Write-Host "[EPSON-L360] Package bytes=$($package.Length); SHA256=$hash; Authenticode=$($signature.Status); signer=$($signature.SignerCertificate.Subject)"
 
-$sevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+$sevenZipCommand = Get-Command 7z.exe -ErrorAction SilentlyContinue
+$sevenZip = if ($sevenZipCommand) { $sevenZipCommand.Source } else { $null }
 if (-not $sevenZip) {
     $knownPaths = @(
         (Join-Path $env:ProgramFiles "7-Zip\7z.exe"),
@@ -53,7 +54,8 @@ if (-not $sevenZip) {
     if ($LASTEXITCODE -ne 0) {
         throw "Chocolatey could not install 7-Zip for Epson driver package extraction."
     }
-    $sevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
+    $sevenZipCommand = Get-Command 7z.exe -ErrorAction SilentlyContinue
+    $sevenZip = if ($sevenZipCommand) { $sevenZipCommand.Source } else { $null }
     if (-not $sevenZip) {
         $sevenZip = Join-Path $env:ProgramFiles "7-Zip\7z.exe"
     }
