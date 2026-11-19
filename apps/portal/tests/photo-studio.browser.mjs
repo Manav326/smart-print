@@ -244,6 +244,12 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await openComponentStudio(page);
 
   await page.getByRole("button", { name: "Crop" }).click();
+  // Toolbar magnification must not change the crop used by the prepared print.
+  await page.getByRole("button", { name: "Preview zoom in" }).click();
+  assert.equal(await getEditorControl(page, "Zoom").inputValue(), "1");
+  assert.equal(await page.getByTestId("photo-studio-preview-zoom").innerText(), "1.1×");
+  await page.getByRole("button", { name: "Reset preview" }).click();
+  assert.equal(await page.getByTestId("photo-studio-preview-zoom").innerText(), "1.0×");
   await setControlValue(page, "Zoom", "1.35");
   await setControlValue(page, "Horizontal position", "55");
   await setControlValue(page, "Vertical position", "45");
