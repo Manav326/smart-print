@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
   Check, ChevronLeft, ChevronRight, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
-  Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette
+  Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette, Info
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
-import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdfBlob, getPhotoPaperPageGeometry, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution, type PhotoOutputLayout, type PhotoPaperFinish } from "./photo-studio-layout";
+import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdfBlob, getPhotoPaperPageGeometry, getPhotoSheetLayout, getPhotoSheetPhotoPositions, getPhotoCropFocusAfterDrag, hasSufficientPhotoResolution, type PhotoOutputLayout, type PhotoPaperFinish } from "./photo-studio-layout";
 
 export type PhotoStudioEditorSettings = {
   sizeId: string;
@@ -294,6 +294,11 @@ export default function PhotoStudio({
   const [image, setImage] = useState<HTMLImageElement | null>(null);
   const [imageError, setImageError] = useState("");
   const [activeTool, setActiveTool] = useState<Tool>("sheet");
+  const [openHelpTool, setOpenHelpTool] = useState<Tool | null>(null);
+  const openHelpToolRef = useRef<Tool | null>(null);
+  openHelpToolRef.current = openHelpTool;
+  const helpPanelRef = useRef<HTMLDivElement | null>(null);
+  const [cropDragging, setCropDragging] = useState(false);
   const [sizeId, setSizeId] = useState(() =>
     initialSettings?.sizeId && PHOTO_SIZES.some(item => item.id === initialSettings.sizeId)
       ? initialSettings.sizeId : "35x45"
@@ -355,6 +360,11 @@ export default function PhotoStudio({
     id:string; pointerId:number; startX:number; startY:number;
     initialX:number; initialY:number; width:number; height:number;
   }|null>(null);
+  const cropDragRef=useRef<{
+    pointerId:number; startX:number; startY:number;
+    initialFocusX:number; initialFocusY:number;
+    tileWidthPx:number; tileHeightPx:number;
+  }|null>(null);
   const [targetBackgroundColor,setTargetBackgroundColor]=useState(
     /^#[0-9a-f]{6}$/i.test(initialSettings?.targetBackgroundColor ?? "") ? initialSettings!.targetBackgroundColor! : "#ffffff"
   );
@@ -412,6 +422,12 @@ export default function PhotoStudio({
     const focusableElements = () => Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []);
     const handleDialogKeydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        if (openHelpToolRef.current !== null) {
+          setOpenHelpTool(null);
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          return;
+        }
         if (!busyRef.current) {
           event.preventDefault();
           onCancelRef.current();
@@ -443,6 +459,22 @@ export default function PhotoStudio({
       previouslyFocused?.focus();
     };
   }, []);
+
+  useEffect(() => {
+    setOpenHelpTool(null);
+    cropDragRef.current = null;
+    setCropDragging(false);
+  }, [activeTool]);
+
+  useEffect(() => {
+    if (openHelpTool === null) return;
+    const dismissOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !helpPanelRef.current?.contains(target)) setOpenHelpTool(null);
+    };
+    document.addEventListener("pointerdown", dismissOnOutsidePointer, true);
+    return () => document.removeEventListener("pointerdown", dismissOnOutsidePointer, true);
+  }, [openHelpTool]);
 
   useEffect(() => {
     if (availableSizes.length && !availableSizes.some(item => item.id === sizeId)) setSizeId(availableSizes[0].id);
@@ -577,6 +609,56 @@ export default function PhotoStudio({
     if(textDragRef.current?.pointerId===event.pointerId)textDragRef.current=null;
   }
 
+  function handleCropPointerDown(event:ReactPointerEvent<HTMLCanvasElement>){
+    if(activeTool!=="crop"||pickingBackground||!image||event.button!==0)return;
+    const canvas=event.currentTarget,bounds=canvas.getBoundingClientRect();
+    if(!bounds.width||!bounds.height)return;
+    const pageWidthMm=isPhotoPaperLayout?size.widthMm:A4_WIDTH_MM;
+    const pageHeightMm=isPhotoPaperLayout?size.heightMm:A4_HEIGHT_MM;
+    const xMm=(event.clientX-bounds.left)/bounds.width*pageWidthMm;
+    const yMm=(event.clientY-bounds.top)/bounds.height*pageHeightMm;
+    const positions=isPhotoPaperLayout
+      ? [{photoIndex:0,row:0,column:0,xMm:0,yMm:0}]
+      : getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount);
+    const photoPosition=positions.find(position=>
+      xMm>=position.xMm&&xMm<=position.xMm+size.widthMm&&
+      yMm>=position.yMm&&yMm<=position.yMm+size.heightMm
+    );
+    if(!photoPosition)return;
+    const tileWidthPx=bounds.width*size.widthMm/pageWidthMm;
+    const tileHeightPx=bounds.height*size.heightMm/pageHeightMm;
+    if(tileWidthPx<=0||tileHeightPx<=0)return;
+    event.preventDefault();
+    cropDragRef.current={
+      pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,
+      initialFocusX:focusX,initialFocusY:focusY,tileWidthPx,tileHeightPx
+    };
+    setCropDragging(true);
+    try{canvas.setPointerCapture(event.pointerId);}catch{/* Pointer capture is best-effort on older WebViews. */}
+  }
+
+  function handleCropPointerMove(event:ReactPointerEvent<HTMLCanvasElement>){
+    const drag=cropDragRef.current;
+    if(!drag||drag.pointerId!==event.pointerId)return;
+    const next=getPhotoCropFocusAfterDrag(
+      drag.initialFocusX,drag.initialFocusY,
+      event.clientX-drag.startX,event.clientY-drag.startY,
+      drag.tileWidthPx,drag.tileHeightPx
+    );
+    setFocusX(next.focusX);
+    setFocusY(next.focusY);
+  }
+
+  function handleCropPointerUp(event:ReactPointerEvent<HTMLCanvasElement>){
+    const drag=cropDragRef.current;
+    if(!drag||drag.pointerId!==event.pointerId)return;
+    cropDragRef.current=null;
+    setCropDragging(false);
+    try{
+      if(event.currentTarget.hasPointerCapture(event.pointerId))event.currentTarget.releasePointerCapture(event.pointerId);
+    }catch{/* A cancelled pointer may already have released capture. */}
+  }
+
   function handleBackgroundPick(event:ReactPointerEvent<HTMLCanvasElement>){
     if(!pickingBackground||!image)return;
     const canvas=event.currentTarget,bounds=canvas.getBoundingClientRect();
@@ -702,6 +784,7 @@ export default function PhotoStudio({
   const outputActionLabel = isPhotoPaperLayout ? (mode === "private-library" ? "Save photo-paper prints" : mode === "shop" ? "Save photo-paper prints to this job" : "Prepare photo-paper prints") : actionLabel;
   const busyLabel = mode === "private-library" ? "Saving privately…" : mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your photo output…";
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
+  const panelTitle=cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Text layers":backgroundPanel?"Photo background":"Photo sheet & form details";
 
   return (
     <div ref={dialogRef} className={styles.overlay + (dark ? " " + styles.dark : "")} role="dialog" aria-modal="true" aria-labelledby="photo-studio-title" aria-busy={busy} tabIndex={-1}>
@@ -724,8 +807,43 @@ export default function PhotoStudio({
         </nav>
 
         <aside className={styles.toolPanel} data-testid="photo-studio-tool-panel">
-          <div className={styles.panelHeading}>
-            <div><strong>{cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Text layers":backgroundPanel?"Photo background":"Photo sheet & form details"}</strong><small>{cropPanel?"Frame the photo without changing facial features.":lookPanel?"Use subtle, print-friendly adjustments.":textPanel?"Add, select, edit and drag text directly on the A4 preview.":backgroundPanel?"Sample a flat background from the photo and replace only the edge-connected area.":"Set the ID photo size, form details and print quantity."}</small></div>
+          <div ref={helpPanelRef} className={styles.panelHeading} data-photo-studio-help>
+            <div className={styles.panelHeadingRow}>
+              <strong>{panelTitle}</strong>
+              <button
+                type="button"
+                className={styles.helpTooltipTrigger}
+                aria-label={"Help: "+panelTitle}
+                aria-controls="photo-studio-help-panel"
+                aria-expanded={openHelpTool===activeTool}
+                onClick={()=>setOpenHelpTool(current=>current===activeTool?null:activeTool)}
+              ><Info size={15}/></button>
+            </div>
+            {openHelpTool===activeTool&&<div id="photo-studio-help-panel" className={styles.helpTooltipPanel} role="region" aria-label={panelTitle+" guidance"}>
+              {cropPanel&&<>
+                <p>Drag directly on any photo to move its framing. Move the image left to reveal more of its right side; the position sliders remain available for precise adjustments.</p>
+                <p>Zoom in for a tighter crop, then inspect the full tile. The same crop is used for every copy and for the final print-ready PDF.</p>
+                <p>The 300-DPI check warns when the selected crop may look soft. Your original photo is never changed, and facial features are not reshaped or retouched.</p>
+              </>}
+              {lookPanel&&<>
+                <p>Natural, Warm, Crisp and Black &amp; white are print-oriented starting points. Choose one, then fine-tune brightness, contrast and colour.</p>
+                <p>Reset restores the original framing and Natural look. Adjustments are applied to the prepared output, not to your source file.</p>
+              </>}
+              {textPanel&&<>
+                <p>Add a text layer, select it on the preview, and drag it into position. Use the controls to change its wording, size, colour and weight.</p>
+                <p>Text layers are included in the prepared PDF. Name and date-of-birth captions are separate, optional fields and are only printed when enabled in Sheet.</p>
+              </>}
+              {backgroundPanel&&<>
+                <p>Pick a flat background colour from inside a photo, choose a replacement colour, and adjust tolerance. SmartPrint changes only similar pixels connected to the image edges.</p>
+                <p>This is a colour-key tool, not AI subject recognition. Use an evenly lit plain background and inspect hair and shoulder edges carefully. Reset restores the original background.</p>
+              </>}
+              {activeTool==="sheet"&&<>
+                <p>Choose a physical photo size and quantity. Auto fits the maximum safe grid; a manual photos-per-page choice is retained only when every full-size photo still fits.</p>
+                <p>A4 output places photos at their exact physical dimensions. The final page keeps unused slots blank. Photo-paper output creates one physical-size page per copy and requires the assigned printer driver to confirm the requested size and finish.</p>
+                <p>Name and date-of-birth captions are off by default. Enable them only when needed; turning them off clears both fields. Text styling is separate from these captions.</p>
+                <p>The original image stays unchanged. The shop confirms the final price and printer compatibility before the print is authorised.</p>
+              </>}
+            </div>}
           </div>
 
           {cropPanel && <>
@@ -763,10 +881,9 @@ export default function PhotoStudio({
                 <span><strong>Bold text</strong><small>Apply a stronger weight to the selected text.</small></span>
               </label>
               <button type="button" id="photo-studio-remove-text" className={styles.secondaryButton} onClick={removeSelectedTextLayer}><X size={14}/> Remove selected text</button>
-              <div className={styles.editorHelp}>Drag the selected text on the page to position it. Text is included in the prepared A4 PDF.</div>
-            </> : <div className={styles.editorHelp}>Add a text layer, then select it on the preview to edit its content, size and colour. You can add multiple text layers.</div>}
+
+            </> : null}
             {includeFormDetails && <>
-              <div className={styles.editorHelp}>Photo caption styling</div>
               <label className={styles.fieldLabel}>Caption font size<select id="photo-studio-caption-font-size" value={captionFontSizePt} onChange={event=>setCaptionFontSizePt(Number(event.target.value))}><option value={5}>5 pt · Compact</option><option value={6}>6 pt · Standard</option><option value={7}>7 pt · Large</option></select></label>
               <label className={styles.fieldLabel}>Caption colour<input id="photo-studio-caption-colour" type="color" value={captionColor} onChange={event=>setCaptionColor(event.target.value)}/></label>
             </>}
@@ -778,7 +895,6 @@ export default function PhotoStudio({
             <label className={styles.fieldLabel}>Replacement background<input id="photo-studio-replacement-background" type="color" value={targetBackgroundColor} onChange={event=>setTargetBackgroundColor(event.target.value)}/></label>
             <div className={styles.backgroundPresets}>{["#ffffff","#f3f6fa","#dcecff","#dff3e7","#f6eadb"].map(color=><button key={color} type="button" style={{background:color}} aria-label={"Set background "+color} aria-pressed={targetBackgroundColor===color} onClick={()=>setTargetBackgroundColor(color)}/>)}</div>
             <label className={styles.rangeControl}>Background tolerance<output>{backgroundTolerance}</output><input id="photo-studio-background-tolerance" type="range" min="5" max="90" value={backgroundTolerance} onChange={event=>setBackgroundTolerance(Number(event.target.value))}/></label>
-            <div className={styles.editorHelp}>This replaces sampled-colour pixels connected to the photo edges. Use a plain, evenly lit background and inspect hair/shoulders. This is a colour-key tool, not AI subject segmentation.</div>
             <button type="button" id="photo-studio-reset-background" className={styles.secondaryButton} onClick={()=>{setSourceBackgroundColor(null);setPickingBackground(false);setBackgroundTolerance(30);setTargetBackgroundColor("#ffffff");}}>Reset background</button>
           </>}
 
@@ -798,7 +914,6 @@ export default function PhotoStudio({
               <label className={styles.fieldLabel}>Date of birth (optional)
                 <input id="photo-studio-date-of-birth" type="date" min="1900-01-01" max={new Date().toISOString().slice(0,10)} value={dateOfBirth} onChange={event=>setDateOfBirth(event.target.value)}/>
               </label>
-              <div className={styles.editorHelp}>Only the details you enter are printed below each photo. The photo dimensions stay unchanged.</div>
             </>}
             <label className={styles.fieldLabel}>Photo size
               <select id="photo-studio-photo-size" value={sizeId} onChange={event => setSizeId(event.target.value)}>
@@ -831,7 +946,6 @@ export default function PhotoStudio({
             {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter a whole number from 1 to {maxCopies}. The sheet count is calculated automatically.</div>}
             {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.</div>}
             <div className={styles.fieldLabel}>Paper and output
-              <div className={styles.editorHelp}>Choose how the finished photos should be printed.</div>
               <div className={styles.photoOutputChoices} role="group" aria-label="Photo output type">
                 <button type="button" id="photo-studio-output-a4" className={photoOutputLayout === "A4_SHEET" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "A4_SHEET"} onClick={() => setPhotoOutputLayout("A4_SHEET")}>
                   <strong>Regular A4 paper</strong><span>Arrange photos on one A4 sheet</span>
@@ -846,7 +960,6 @@ export default function PhotoStudio({
                 <option value="GLOSSY">Glossy</option>
                 <option value="MATTE">Matte</option>
               </select>
-              <small className={styles.editorHelp}>The selected shop printer must support this finish and physical size. SmartPrint blocks the job if the driver does not confirm them.</small>
             </label>}
             {!isPhotoPaperLayout && <label className={styles.fieldLabel}>Photos per A4 page
               <select id="photo-studio-photos-per-page" value={photosPerPageInput} onChange={event=>setPhotosPerPageInput(event.target.value)}>
@@ -868,7 +981,6 @@ export default function PhotoStudio({
             </div>
           </>}
 
-          <div className={styles.privacyNote}><SlidersHorizontal size={14}/><span>Your original photo is not changed. ID-safe tools adjust framing and print appearance only; they do not reshape or retouch facial features.</span></div>
         </aside>
 
         <main className={styles.canvasWorkspace}>
@@ -890,7 +1002,29 @@ export default function PhotoStudio({
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
               {image ? <div className={styles.previewStage} data-photo-preview-stage style={{ aspectRatio: `${previewWidthMm} / ${previewHeightMm}`, width: `min(100%, calc((100dvh - 210px) * ${previewWidthMm / previewHeightMm}))` }}>
-                <canvas id="photo-studio-preview-canvas" ref={canvasRef} width={previewWidth} height={previewHeight} onPointerUp={handleBackgroundPick} onClick={handleBackgroundPick} style={{cursor:pickingBackground?"crosshair":"default"}} className={styles.previewCanvas} data-testid="photo-studio-preview-canvas" data-background-sample-x-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.xMm ?? 0) + 2} data-background-sample-y-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.yMm ?? 0) + 2} draggable={false} role="img" aria-label={isPhotoPaperLayout ? `Photo-paper print ${previewPageIndex+1} of ${outputPageCount}` : "A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}/>
+                <canvas
+                  id="photo-studio-preview-canvas"
+                  ref={canvasRef}
+                  width={previewWidth}
+                  height={previewHeight}
+                  onPointerDown={handleCropPointerDown}
+                  onPointerMove={handleCropPointerMove}
+                  onPointerUp={event=>{handleCropPointerUp(event);handleBackgroundPick(event);}}
+                  onPointerCancel={handleCropPointerUp}
+                  onClick={handleBackgroundPick}
+                  style={{
+                    cursor:pickingBackground?"crosshair":cropDragging?"grabbing":cropPanel?"grab":"default",
+                    touchAction:cropPanel?"none":"pan-y"
+                  }}
+                  className={styles.previewCanvas}
+                  data-testid="photo-studio-preview-canvas"
+                  data-background-sample-x-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.xMm ?? 0) + 2}
+                  data-background-sample-y-mm={(getPhotoSheetPhotoPositions(size,captionHeightMm,photosPerPage,previewPhotoCount)[0]?.yMm ?? 0) + 2}
+                  draggable={false}
+                  role="img"
+                  aria-describedby={openHelpTool==="crop"?"photo-studio-help-panel":undefined}
+                  aria-label={isPhotoPaperLayout ? `Photo-paper print ${previewPageIndex+1} of ${outputPageCount}` : "A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}
+                />
                 <div className={styles.previewProtection} aria-hidden="true"/>
                 {textLayers.map(layer=><button
                   key={layer.id}
