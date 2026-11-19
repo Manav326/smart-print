@@ -160,6 +160,8 @@ public sealed class Worker(
                     continue;
                 }
 
+                await ReportPrivateRelayStageAsync(
+                    client, credentials, ticket.TicketId, "DOWNLOADING_ENCRYPTED_PAYLOAD", cancellationToken);
                 using var contentResponse = await SendAgentGetRequestAsync(
                     client, credentials,
                     $"api/v1/agent/private-relays/{ticket.TicketId:D}/content", cancellationToken);
@@ -183,6 +185,8 @@ public sealed class Worker(
                     string? stagingPath = null;
                     try
                     {
+                        await ReportPrivateRelayStageAsync(
+                            client, credentials, ticket.TicketId, "DECRYPTING_AND_AUTHENTICATING", cancellationToken);
                         qsp2Key = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
                         stagingPath = await localQueueStore.CreatePrivateUploadStagingPathAsync(cancellationToken);
                         await using (var encryptedStream = await contentResponse.Content.ReadAsStreamAsync(cancellationToken))
@@ -207,6 +211,8 @@ public sealed class Worker(
                         await using var qsp2Plaintext = new FileStream(
                             stagingPath, FileMode.Open, FileAccess.Read, FileShare.Read,
                             64 * 1024, FileOptions.RandomAccess);
+                        await ReportPrivateRelayStageAsync(
+                            client, credentials, ticket.TicketId, "VALIDATING_DOCUMENT", cancellationToken);
                         DocumentAnalysis qsp2Analysis;
                         try
                         {
@@ -240,6 +246,8 @@ public sealed class Worker(
                     PhotoSizeCode: ticket.PhotoSizeCode);
 
                         qsp2Plaintext.Position = 0;
+                        await ReportPrivateRelayStageAsync(
+                            client, credentials, ticket.TicketId, "SECURING_LOCAL_QUEUE", cancellationToken);
                         await localQueueStore.EnqueueLocalUploadStreamingAsync(
                             qsp2Job, credentials.AgentDeviceId, qsp2Plaintext, cancellationToken);
                         using var qsp2Completion = await SendAgentRequestAsync(
@@ -1678,6 +1686,36 @@ public sealed class Worker(
         if (cloudState?.Status == "COMPLETED")
             await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
         return true;
+    }
+
+    private async Task ReportPrivateRelayStageAsync(
+        HttpClient client,
+        AgentCredentials credentials,
+        Guid ticketId,
+        string stage,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            using var response = await SendAgentRequestAsync(
+                client, credentials,
+                $"api/v1/agent/private-relays/{ticketId:D}/stage",
+                new { stage },
+                cancellationToken);
+            if (!response.IsSuccessStatusCode)
+                logger.LogDebug("Private relay stage {Stage} for ticket {TicketId} returned HTTP {StatusCode}; processing continues safely.",
+                    stage, ticketId, (int)response.StatusCode);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            // Telemetry must never block or duplicate the protected local staging
+            // operation. The durable API stage simply remains at its last update.
+            logger.LogDebug(exception, "Private relay stage {Stage} for ticket {TicketId} could not be reported.", stage, ticketId);
+        }
     }
 
     private static async Task<HttpResponseMessage> SendAgentGetRequestAsync(
