@@ -394,6 +394,14 @@ test("A4 raster uses independent physical x and y scales before exact-A4 PDF pla
  assert.equal(value.split(fullPageImage).length-1,2);
 });
 
+test("interactive Photo Studio previews use a smaller raster while exports retain print resolution",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/const PHOTO_PREVIEW_DPI = 120/);
+ assert.match(studio,/sharedPhotoTile\?\?createPhotoTile\(image,size,zoom,focusX,focusY,adjustments,background,PHOTO_PREVIEW_DPI\)/);
+ assert.match(studio,/sharedPhotoTile \?\? createPhotoTile\(image, size, zoom, focusX, focusY, adjustments, background, PHOTO_PREVIEW_DPI\)/);
+ assert.match(studio,/targetColor:targetBackgroundColor,tolerance:backgroundTolerance\},300\)/);
+});
+
 test("Photo Studio preview supports direct crop dragging with pointer capture and slider parity",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.match(studio,/function handleCropPointerDown\(/);
