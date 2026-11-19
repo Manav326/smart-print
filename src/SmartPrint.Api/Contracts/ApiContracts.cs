@@ -92,6 +92,8 @@ public sealed record AgentPrinterDiscoveryRequest(
 
 public sealed record AgentPrinterSyncRequest(IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
 
+public sealed record AgentPrivateRelayStageUpdateRequest(string Stage);
+
 
 public sealed record ShopPaymentSettingsRequest(
     bool UpiEnabled,
