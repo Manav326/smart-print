@@ -1684,9 +1684,9 @@ function createLocalUploadGrantToken(): string {
 }
 
 type CustomerPrivateRelayStatus =
-  | { state: "PENDING"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; message?: string }
-  | { state: "FAILED" | "EXPIRED"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; message?: string }
-  | { state: "READY"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; message?: string; uploadResult: UploadedPrintJob };
+  | { state: "PENDING"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; message?: string }
+  | { state: "FAILED" | "EXPIRED"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; message?: string }
+  | { state: "READY"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; message?: string; uploadResult: UploadedPrintJob };
 
 async function getCustomerPrivateRelayStatus(
   sessionToken: string,
@@ -1770,6 +1770,55 @@ async function uploadCustomerPrivateRelay(
       existing.message || "The shop could not validate this file. Please select it again.",
       422,
       existing.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
+    );
+  }
+
+  // A direct Agent claim already owns this ticket. Do not start a cloud relay
+  // concurrently; reconcile that same local handoff first to prevent duplicate
+  // queue staging after a lost LAN response.
+  if (existing.state === "PENDING" && existing.transferPath === "DIRECT_LAN") {
+    const deadline = Date.now() + 45_000;
+    let lastStageMessage = existing.stageMessage ?? existing.message ?? "The shop computer is receiving the encrypted file";
+    while (Date.now() < deadline) {
+      await new Promise(resolve => window.setTimeout(resolve, 2_500));
+      let status:CustomerPrivateRelayStatus;
+      try {
+        status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+      } catch (exception) {
+        if (exception instanceof ApiError && exception.status >= 400) throw exception;
+        continue;
+      }
+      lastStageMessage = status.stageMessage ?? status.message ?? lastStageMessage;
+      onStage?.(
+        status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state),
+        lastStageMessage,
+        status.stageUpdatedUtc
+      );
+      if (status.state === "READY") {
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        return {
+          ...status.uploadResult,
+          document: { ...status.uploadResult.document, originalFileName: "Private document" },
+          job: {
+            ...status.uploadResult.job,
+            batchId: ticket.batchId ?? status.uploadResult.job.batchId ?? null,
+            batchGroupName: ticket.batchGroupName ?? status.uploadResult.job.batchGroupName ?? null,
+            batchName: ticket.batchName ?? status.uploadResult.job.batchName ?? null
+          }
+        };
+      }
+      if (status.state === "FAILED" || status.state === "EXPIRED") {
+        clearCustomerLocalUploadAttempt(sessionToken, file);
+        throw new LocalUploadPreflightError(
+          status.message || "The shop could not validate this file. Please select it again.",
+          422,
+          status.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
+        );
+      }
+      if (status.transferPath !== "DIRECT_LAN") break;
+    }
+    throw new LocalUploadOutcomeUnknownError(
+      "The original direct shop-Wi-Fi transfer is still being reconciled: "+lastStageMessage+". Retry this same file to check its existing ticket; SmartPrint has not started a second encrypted transfer."
     );
   }
 
