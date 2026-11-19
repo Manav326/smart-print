@@ -650,7 +650,9 @@ test("session renewal refreshes customer payment choices and explains unavailabl
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
   assert.match(app, /paymentOptions:session\.paymentOptions/);
   assert.match(backend, /PaymentOptions = paymentOptions/);
-  assert.equal((app.match(/The shop has not enabled UPI or cash payment/g) ?? []).length, 2);
+  assert.equal((app.match(/Ask the shop to enable UPI or cash at the counter/g) ?? []).length, 2);
+  assert.equal((app.match(/title="No payment method available"/g) ?? []).length, 2);
+  assert.equal((app.match(/title="Cash at counter unavailable"/g) ?? []).length, 2);
 });
 
 test("contextual help supports outside-click and Escape dismissal", () => {
