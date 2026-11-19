@@ -986,7 +986,7 @@ test("customer upload page uses a consistent responsive layout for every conditi
   assert.match(app, /aria-pressed=\{selectedFileIndex===index\}/);
   assert.match(app, /Local transfer unavailable\./);
   assert.match(app, /The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue\./);
-  assert.match(app, /localAgent\?\.endpoints\.length&&message&&checkStatus/);
+  assert.match(app, /Boolean\(localAgent\?\.endpoints\.length\)&&message&&checkStatus/);
   assert.doesNotMatch(app, /title="Shop connection unavailable"/);
 });
 
