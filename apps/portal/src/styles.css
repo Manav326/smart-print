@@ -4414,7 +4414,7 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
   display:grid;
   grid-template-columns:minmax(0,1fr);
   gap:clamp(11px,1.4vw,16px);
-  width:min(100%,1080px);
+  width:min(100%,1040px);
   margin:16px auto 0;
   padding-top:16px;
 }
