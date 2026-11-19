@@ -120,8 +120,10 @@ test("customer Photo Studio cannot turn an already uploaded original into a seco
  assert.match(app,/if\(uploadedFileFingerprints\.includes\(fingerprint\)\)/);
  assert.match(app,/const photoAlreadyUploaded=Boolean\(file&&uploadedFileFingerprints\.includes\(customerFileFingerprint\(file\)\)\)/);
  assert.match(app,/disabled=\{busy\|\|batchLockedForPayment\|\|photoAlreadyUploaded\}/);
- assert.match(app,/Photo already sent\./);
- assert.match(app,/InfoTooltip label="Photo already sent"/);
+ assert.match(app,/This photo has already been sent to the shop\./);
+ assert.match(app,/Already sent to shop/);
+ assert.match(app,/Photo already sent/);
+ assert.match(app,/No second upload is needed/);
  assert.match(app,/without creating another print job/);
 });
 
@@ -234,9 +236,8 @@ test("Photo Studio restores focus to the customer or shop control after it close
 test("customers are told when the shop has not enabled photo printing",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/Photo printing unavailable/);
- assert.match(app,/InfoTooltip label="Photo printing details"/);
- assert.match(app,/Photo printing unavailable\. Contact shop\./);
- assert.match(app,/This shop must enable photo printing and configure its photo sizes and rates/);
+ assert.match(app,/CustomerInlineNotice kind="info" title="Photo printing unavailable"/);
+ assert.match(app,/Ask the shop to enable photo printing and set its rates/);
 });
 
 test("50 photos can be laid out as nine per A4 page with a partially filled final page",()=>{
