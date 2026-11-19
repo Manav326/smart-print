@@ -781,8 +781,33 @@ else if (mode == "discover-printer")
     var expectedQueue = args[2];
     if (!printers.Any(printer => string.Equals(printer.QueueName, expectedQueue, StringComparison.OrdinalIgnoreCase)))
         throw new InvalidOperationException($"The Agent's LocalService discovery did not find machine-wide printer queue '{expectedQueue}'.");
+
+    // Exercise the same Windows driver capability query used during inventory:
+    // colour, duplex, media sizes/types, resolutions and N-up Print Schema data.
+    // Unknown capabilities are valid, but a failed/empty driver query is not.
+    using (var capabilities = System.Text.Json.JsonDocument.Parse(
+               WindowsPrinterCapabilityDiscovery.DiscoverJson(expectedQueue)))
+    {
+        var capabilityRoot = capabilities.RootElement;
+        var requiredCapabilityFields = new[]
+        {
+            "schemaVersion", "source", "queueName", "color", "duplex",
+            "orientation", "paperSizes", "pagesPerSheet",
+            "pagesPerSheetDirection", "mediaTypes", "resolutions"
+        };
+        if (capabilityRoot.ValueKind != System.Text.Json.JsonValueKind.Object ||
+            !capabilityRoot.TryGetProperty("schemaVersion", out var schemaVersion) ||
+            schemaVersion.GetInt32() != 2 ||
+            !capabilityRoot.TryGetProperty("source", out var capabilitySource) ||
+            capabilitySource.GetString() != "WINDOWS_DRIVER" ||
+            !capabilityRoot.TryGetProperty("queueName", out var capabilityQueue) ||
+            !string.Equals(capabilityQueue.GetString(), expectedQueue, StringComparison.OrdinalIgnoreCase) ||
+            requiredCapabilityFields.Any(field => !capabilityRoot.TryGetProperty(field, out _)))
+            throw new InvalidOperationException($"The LocalService printer-driver capability query did not return the complete Windows driver schema for '{expectedQueue}'.");
+    }
+
     await File.WriteAllTextAsync(args[1], "FOUND");
-    Console.WriteLine($"LocalService Agent discovery found '{expectedQueue}'.");
+    Console.WriteLine($"LocalService Agent discovered '{expectedQueue}' and queried its installed Windows driver capabilities.");
 }
 else if (mode == "print-printer")
 {
