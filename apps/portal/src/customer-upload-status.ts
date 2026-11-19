@@ -10,6 +10,17 @@ export interface CustomerUploadStatusState {
 }
 
 const statusMessages: Record<string, string> = {
+  UPLOADED: "Your files are uploaded. Choose print settings to continue.",
+  VALIDATING: "We are checking your files. Your next step will appear here.",
+  ANALYSING: "We are checking your files and preparing the print options.",
+  AWAITING_CONFIGURATION: "Choose your print settings to continue.",
+  AWAITING_CUSTOMER_APPROVAL: "Review your print settings and quote, then confirm to continue.",
+  QUEUED: "Your print is waiting in the shop's printer queue.",
+  SUBMITTING_TO_SPOOLER: "Your print is being sent to the printer.",
+  PDF_EXPORTING: "Your PDF is being prepared. Keep this request open for the result.",
+  PARTIALLY_COMPLETED: "Some files are complete. Review the results for each file.",
+  MIXED_OUTCOME: "Some files need attention. Review each result before retrying.",
+  MIXED_PROGRESS: "Your files are still being processed. Check the results for each file.",
   TEST_OUTPUT_READY: "This was a test only. No physical pages were printed.",
   AWAITING_SHOP_APPROVAL: "Your files are with the shop for review.",
   AWAITING_PAYMENT: "Your files are accepted. Complete payment to continue.",
