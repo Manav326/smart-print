@@ -4,7 +4,7 @@
 param(
     [string]$QueueName = "SmartPrint CI Epson L360",
     [string]$PackageUrl = "https://download-center.epson.com/f/module/39ac0a8a-10f0-4760-8949-cd1dd0ad646c/L360_x64_260JAHomeExportAsiaML.exe",
-    [string]$PackagePath = $env:SMARTPRINT_EPSON_L360_PACKAGE_PATH
+    [string]$SuppliedPackagePath = $env:SMARTPRINT_EPSON_L360_PACKAGE_PATH
 )
 
 Set-StrictMode -Version Latest
@@ -27,13 +27,13 @@ if (Test-Path -LiteralPath $root) {
 $extractRoot = Join-Path $root "extracted"
 New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
 
-$packagePath = Join-Path $root "L360_x64_260JAHomeExportAsiaML.exe"
-if (-not [string]::IsNullOrWhiteSpace($PackagePath)) {
-    if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) {
-        throw "The supplied official Epson L360 driver package does not exist: $PackagePath"
+$stagedPackagePath = Join-Path $root "L360_x64_260JAHomeExportAsiaML.exe"
+if (-not [string]::IsNullOrWhiteSpace($SuppliedPackagePath)) {
+    if (-not (Test-Path -LiteralPath $SuppliedPackagePath -PathType Leaf)) {
+        throw "The supplied official Epson L360 driver package does not exist: $SuppliedPackagePath"
     }
-    Write-Host "[EPSON-L360] Using the official Epson package downloaded through the browser session: $PackagePath"
-    Copy-Item -LiteralPath $PackagePath -Destination $packagePath -Force
+    Write-Host "[EPSON-L360] Using the official Epson package downloaded through the browser session: $SuppliedPackagePath"
+    Copy-Item -LiteralPath $SuppliedPackagePath -Destination $stagedPackagePath -Force
 }
 else {
     Write-Host "[EPSON-L360] Downloading the official Epson L360 x64 2.60.00 driver package."
@@ -41,7 +41,7 @@ else {
         "Accept" = "application/octet-stream, application/x-msdownload, */*"
     }
     try {
-        Invoke-WebRequest -Uri $PackageUrl -OutFile $packagePath -Headers $downloadHeaders `
+        Invoke-WebRequest -Uri $PackageUrl -OutFile $stagedPackagePath -Headers $downloadHeaders `
             -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36" `
             -MaximumRedirection 10 -UseBasicParsing
     }
@@ -49,12 +49,12 @@ else {
         throw "The official Epson L360 v2.60.00 download was blocked or unavailable. Source: $PackageUrl. $($_.Exception.Message)"
     }
 }
-$package = Get-Item -LiteralPath $packagePath
+$package = Get-Item -LiteralPath $stagedPackagePath
 if ($package.Length -lt 5MB) {
     throw "The Epson driver package download is unexpectedly small ($($package.Length) bytes)."
 }
-$hash = (Get-FileHash -LiteralPath $packagePath -Algorithm SHA256).Hash.ToLowerInvariant()
-$signature = Get-AuthenticodeSignature -FilePath $packagePath
+$hash = (Get-FileHash -LiteralPath $stagedPackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$signature = Get-AuthenticodeSignature -FilePath $stagedPackagePath
 if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -notmatch "(?i)Epson") {
     throw "The downloaded L360 package did not have a valid Epson Authenticode signature. Status=$($signature.Status); signer=$($signature.SignerCertificate.Subject)"
 }
@@ -88,7 +88,7 @@ if (-not (Test-Path -LiteralPath $sevenZip)) {
 }
 
 Write-Host "[EPSON-L360] Inspecting/extracting the Epson package without launching its interactive USB setup wizard."
-& $sevenZip x $packagePath "-o$extractRoot" -y | Out-Host
+& $sevenZip x $stagedPackagePath "-o$extractRoot" -y | Out-Host
 if ($LASTEXITCODE -ne 0) {
     throw "7-Zip could not extract the official Epson driver package (exit $LASTEXITCODE)."
 }
