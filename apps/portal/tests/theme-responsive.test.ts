@@ -857,3 +857,14 @@ test("QR image sharing prepares the file before a separate user-activated share 
   assert.ok(app.includes("Share image now"));
   assert.ok(app.includes("stationImageSignature(station)"), "Stale prepared artwork must not be shared after station details change.");
 });
+
+
+test("shop PDF previews never leave an indefinite loading spinner when the browser viewer is slow", () => {
+  const preview = read("../src/ShopDocumentPreviewSurface.tsx");
+  const css = read("../src/styles.css");
+  assert.ok(preview.includes("setTimeout(() => setSlow(true), 8_000)"));
+  assert.ok(preview.includes('slow ? "slow" : "loading"'));
+  assert.ok(preview.includes("Preview is taking longer than expected"));
+  assert.ok(preview.includes("setSlow(false); setLoading(false)"), "A late viewer load must still clear the advisory state.");
+  assert.ok(css.includes(".shop-document-preview-slow{"));
+});
