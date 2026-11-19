@@ -883,7 +883,7 @@ test("customer batch quote separates the total, included files, excluded files a
   assert.match(app, /customer-batch-quote-chip photo/);
   assert.match(app, /aria-label="File-by-file prices"/);
   assert.match(app, /customer-batch-quote-line-amount/);
-  assert.match(app, /quoteRows\\.map\\(entry=>/);
+  assert.match(app, /quoteRows\.map\(entry=>/);
   assert.match(app, /batchQuoteNeedsRefresh/);
   assert.match(app, /batchQuoteTotalDisplay/);
   assert.match(app, /Quote expired/);
