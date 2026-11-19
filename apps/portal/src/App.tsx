@@ -4289,7 +4289,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
         : <button type="button" className="customer-flow-button" disabled={checkStatus==="checking"} onClick={()=>void checkConnection()}>
             {checkStatus==="checking"?"Checking…":checkStatus==="connected"?"Check again":nativeAppMode?"Check Wi-Fi":"Check shop Wi-Fi"}
           </button>}
-    {localAgent?.endpoints.length&&message&&checkStatus!=="insecure"&&!(permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission)&&<small className="entry-local-agent-message">{message}</small>}
+    {Boolean(localAgent?.endpoints.length)&&message&&checkStatus!=="insecure"&&!(permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission)&&<small className="entry-local-agent-message">{message}</small>}
   </section>;
 }
 
