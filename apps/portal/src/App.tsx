@@ -1677,7 +1677,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onOpenPhotoStudio={job=>void openShopPhotoStudioForJob(job)}
           />}
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
-          {active === "Printers" && <PrintersPage printers={printers} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
+          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
