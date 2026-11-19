@@ -40,7 +40,7 @@ public static class PrivateRelayProgressRules
     public static bool CanAdvance(string currentStage, string requestedStage) =>
         IsAgentStage(requestedStage) &&
         Rank(currentStage) >= 0 &&
-        Rank(requestedStage) >= Rank(currentStage) &&
+        Rank(requestedStage) > Rank(currentStage) &&
         currentStage is not (Ready or Failed or Expired);
 
     public static string CustomerMessage(string stage) => stage switch
