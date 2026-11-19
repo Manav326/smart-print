@@ -182,3 +182,41 @@
 .dark .photoOutputChoice,.dark .photoOutputChoiceActive{border-color:#48566a;background:#202c3d;color:#e4ebf6}
 .dark .photoOutputChoice span,.dark .photoOutputChoiceActive span{color:#aab8cc}
 .dark .photoOutputChoiceActive{border-color:#a394ed;background:#36314f}
+
+
+/* Keep advanced editing visually separate while exposing mobile scroll affordances. */
+.toolRailSectionLabel{margin-top:5px;padding:7px 0 2px;color:#94a4bb;font-size:7px;font-weight:850;letter-spacing:.7px;text-transform:uppercase;white-space:nowrap}
+.toolRail{scrollbar-width:thin;scrollbar-color:#8493aa #202e44}
+.toolRail::-webkit-scrollbar{width:4px;height:4px}
+.toolRail::-webkit-scrollbar-thumb{border-radius:8px;background:#8797ad}
+.toolRail:focus-visible{outline:2px solid #b9acff;outline-offset:-2px}
+.toolPanel{scrollbar-width:thin;scrollbar-color:#9aa8bc transparent}
+.toolPanel::-webkit-scrollbar{width:4px}
+.toolPanel::-webkit-scrollbar-thumb{border-radius:8px;background:#8797ad}
+
+/* Preview magnification must not be clipped; the viewport provides scrolling. */
+.sheetFrame{max-height:none;overflow:visible}
+.canvasFooter{flex-wrap:wrap}
+.fieldHint{display:block;margin-top:-5px;color:#718097;font-size:9px;font-weight:500;line-height:1.45}
+.sourceQuality{display:block;flex-basis:100%;margin:0;padding:6px 8px;border:1px solid #d6e2ee;border-radius:7px;background:#f2f7fc;color:#496179!important;font-size:8px!important;line-height:1.45}
+.sourceQuality strong{font-weight:850}
+.sourceQualityWarning{border-color:#e1c58b;background:#fff8e7;color:#805b17!important}
+.dark .sourceQuality{border-color:#43566d;background:#202d40;color:#bfcede!important}
+.dark .sourceQualityWarning{border-color:#7a633c;background:#3a3020;color:#f0d7a5!important}
+.dark .fieldHint{color:#a9b5c7}
+
+/* A little more room for settings and quality feedback on touch-sized screens. */
+@media(max-width:720px){
+  .toolRailSectionLabel{align-self:center;margin:0 3px 0 7px;padding:0 0 0 10px;border-left:1px solid #52617a;font-size:8px}
+  .toolPanel{max-height:min(30vh,230px)}
+  .canvasWorkspace{grid-template-rows:30px minmax(0,1fr) auto}
+  .canvasFooter{gap:4px 7px}
+  .canvasFooter small.sourceQuality{display:block;font-size:8px!important}
+}
+@media(max-width:390px){
+  .toolRail button{min-width:72px}
+}
+@media(max-width:720px) and (max-height:620px){
+  .toolPanel{max-height:min(27vh,155px)}
+  .canvasWorkspace{grid-template-rows:27px minmax(0,1fr) auto}
+}
