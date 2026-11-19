@@ -184,7 +184,7 @@ app.MapGet("/downloads/status", async (
     HttpContext context,
     CancellationToken cancellationToken) =>
 {
-    context.Response.Headers["Cache-Control"] = "no-store";
+    context.Response.Headers.CacheControl = "no-store";
     try
     {
         return Results.Ok(await downloads.GetStatusAsync(cancellationToken));
@@ -12499,7 +12499,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
     SmartPrintDbContext db,
     CancellationToken ct) =>
 {
-    context.Response.Headers.CacheControl = "no-store";
+    context.Response.Headers["Cache-Control"] = "no-store";
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
     if (string.IsNullOrWhiteSpace(rawToken))
     {
