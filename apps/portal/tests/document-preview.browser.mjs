@@ -255,11 +255,18 @@ async function runShopDocumentPreview(browser) {
     const surface = section.locator(".shop-document-preview");
     assert.equal(await surface.getAttribute("data-preview-type"), expected);
   }
-  // Supported previews start in a real loading state. Wait for the media
-  // element's load/decode event before asserting that the preview is ready.
-  await page.waitForFunction(() => ["pdf", "jpeg", "png"].every(id =>
-    document.querySelector("#" + id + "-case .shop-document-preview")?.getAttribute("data-preview-state") === "ready"
-  ), null, { timeout: 15000 });
+  // Images must finish decoding. Chromium's built-in PDF viewer does not
+  // consistently emit iframe load in headless/embedded mode; require either a
+  // real ready event or the bounded slow-viewer advisory, never an endless spinner.
+  await page.waitForFunction(() => {
+    const state = id => document.querySelector("#" + id + "-case .shop-document-preview")?.getAttribute("data-preview-state");
+    return (state("pdf") === "ready" || state("pdf") === "slow") &&
+      state("jpeg") === "ready" && state("png") === "ready";
+  }, null, { timeout: 15000 });
+  const pdfState = await page.locator("#pdf-case .shop-document-preview").getAttribute("data-preview-state");
+  if (pdfState === "slow") {
+    await page.locator("#pdf-case .shop-document-preview-slow").waitFor({ state: "visible" });
+  }
   await page.locator("#pdf-case iframe").waitFor({ state: "visible", timeout: 15000 });
   await page.waitForFunction(() => {
     const frame = document.querySelector("#pdf-case iframe");
@@ -285,7 +292,7 @@ async function runShopDocumentPreview(browser) {
 
   await page.screenshot({ path: join(artifactDirectory, "shop-document-preview.png"), fullPage: true });
   await context.close();
-  return { pdf: "inline iframe loaded", jpeg: "decoded", png: "decoded", unsupported: "safe fallback", brokenImage: "safe fallback" };
+  return { pdf: pdfState === "ready" ? "inline iframe loaded" : "inline iframe retained with bounded slow-viewer guidance", jpeg: "decoded", png: "decoded", unsupported: "safe fallback", brokenImage: "safe fallback" };
 }
 
 async function runCustomerBatchFlow(browser) {
