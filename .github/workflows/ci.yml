@@ -426,6 +426,7 @@ jobs:
         shell: pwsh
         env:
           PLAYWRIGHT_MODULE_DIR: ${{ steps.epson_l360_chromium.outputs.module_directory }}
+          SMARTPRINT_EPSON_L360_PACKAGE_URL: ${{ vars.SMARTPRINT_EPSON_L360_PACKAGE_URL }}
           SMARTPRINT_EPSON_L360_PACKAGE_OUTPUT: ${{ runner.temp }}/smartprint-epson-l360-download/L360_x64_260JAHomeExportAsiaML.exe
         run: |
           node scripts/qa/download-epson-l360-driver.browser.mjs
