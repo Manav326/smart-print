@@ -44,7 +44,7 @@ public sealed class WindowsPrintExecutor
     private const int DcOrientation = 17;
     private const int DcColorDevice = 32;
     private const int DcNup = 33;
-    private const uint PrinterAccessAdminister = 0x00000004;
+    private const uint PrinterAccessUse = 0x00000008;
     private const uint JobStatusPrinting = 0x00000010;
     private const uint JobStatusSpooling = 0x00000008;
     private const uint JobStatusPrinted = 0x00000080;
@@ -807,7 +807,7 @@ public sealed class WindowsPrintExecutor
     public void ReleaseRetainedJob(string queueName, int jobId)
     {
         if (jobId <= 0) throw new ArgumentOutOfRangeException(nameof(jobId));
-        using var handle = OpenQueueForJobAdministration(queueName);
+        using var handle = OpenQueueForRetainedJobCleanup(queueName);
         if (SetJobW(handle.Value, jobId, 0, IntPtr.Zero, JobControlRelease)) return;
 
         var error = Marshal.GetLastWin32Error();
@@ -1222,11 +1222,16 @@ public sealed class WindowsPrintExecutor
         return new SafePrinterHandle(handle);
     }
 
-    private static SafePrinterHandle OpenQueueForJobAdministration(string queueName)
+    private static SafePrinterHandle OpenQueueForRetainedJobCleanup(string queueName)
     {
-        var defaults = new PrinterDefaultsW { DesiredAccess = PrinterAccessAdminister };
+        // The Agent releases only jobs submitted under its own LocalService
+        // identity. Request standard print-use access rather than administrative
+        // queue access; the spooler authorizes control against the job's own
+        // security descriptor. This avoids requiring Manage Printers on a shop
+        // printer or changing its existing security settings.
+        var defaults = new PrinterDefaultsW { DesiredAccess = PrinterAccessUse };
         if (!OpenPrinterW(queueName, out var handle, ref defaults))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not open printer '{queueName}' for retained-job management.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not open printer '{queueName}' for its own retained-job cleanup with standard print access.");
         return new SafePrinterHandle(handle);
     }
 
