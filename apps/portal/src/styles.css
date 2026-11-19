@@ -3979,3 +3979,35 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
   .printer-grid{grid-template-columns:minmax(0,1fr)}
   .printer-capability-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+/* Individual upload activity: byte-accurate, calm hierarchy and responsive rows. */
+.customer-upload-progress{display:flex;flex-direction:column;gap:12px;margin-top:13px;padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface);min-width:0}
+.customer-upload-progress-header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.customer-upload-progress-header>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.customer-upload-progress-header strong{font:700 11px Manrope,sans-serif;color:var(--text)}
+.customer-upload-progress-header>div>span{font-size:9px;color:var(--muted)}
+.customer-upload-progress-count{font:700 13px Manrope,sans-serif;font-variant-numeric:tabular-nums;color:var(--accent)}
+.customer-upload-progress-list{display:flex;flex-direction:column;gap:9px;min-width:0}
+.customer-upload-progress-file{display:flex;flex-direction:column;gap:6px;min-width:0;padding:10px 11px;border:1px solid var(--border-soft);border-radius:10px;background:var(--surface-2)}
+.customer-upload-progress-file-head{display:flex;align-items:center;gap:9px;min-width:0}
+.customer-upload-progress-file-icon{display:grid;place-items:center;flex:0 0 28px;width:28px;height:28px;border-radius:8px;background:var(--surface);color:var(--muted)}
+.customer-upload-progress-file-main{display:flex;flex:1;flex-direction:column;gap:3px;min-width:0}
+.customer-upload-progress-file-main strong{font-size:9px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.customer-upload-progress-file-main>span{font-size:8px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
+.customer-upload-progress-file-status{flex:0 0 auto;padding:4px 7px;border:1px solid var(--border);border-radius:999px;font-size:8px;font-weight:700;color:var(--muted);background:var(--surface)}
+.customer-upload-progress-file-status.active{color:var(--accent);border-color:color-mix(in srgb,var(--accent) 28%,var(--border))}
+.customer-upload-progress-file-status.waiting{color:var(--amber);border-color:color-mix(in srgb,var(--amber) 30%,var(--border))}
+.customer-upload-progress-file-status.complete{color:var(--green);border-color:color-mix(in srgb,var(--green) 28%,var(--border))}
+.customer-upload-progress-file-status.failed{color:var(--red);border-color:color-mix(in srgb,var(--red) 28%,var(--border))}
+.customer-upload-progress-track{height:5px;overflow:hidden;border-radius:99px;background:var(--border-soft)}
+.customer-upload-progress-track>i{display:block;height:100%;border-radius:inherit;background:var(--accent);transition:width .16s ease}
+.customer-upload-progress-track>i.indeterminate{width:34%!important;animation:customer-upload-indeterminate 1.3s ease-in-out infinite}
+.customer-upload-progress-file-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:8px;font-variant-numeric:tabular-nums;color:var(--faint)}
+.customer-upload-progress>small{font-size:8px;line-height:1.55;color:var(--faint)}
+@keyframes customer-upload-indeterminate{0%{transform:translateX(-110%)}100%{transform:translateX(360%)}}
+@media(max-width:480px){
+  .customer-upload-progress{padding:11px}
+  .customer-upload-progress-file{padding:9px}
+  .customer-upload-progress-file-status{font-size:7px;padding:4px 6px}
+  .customer-upload-progress-file-foot{font-size:7px}
+}
