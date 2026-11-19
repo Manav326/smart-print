@@ -1686,7 +1686,7 @@ function createLocalUploadGrantToken(): string {
 type CustomerPrivateRelayStatus =
   | { state: "PENDING"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; message?: string }
   | { state: "FAILED" | "EXPIRED"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; message?: string }
-  | { state: "READY"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; uploadResult: UploadedPrintJob };
+  | { state: "READY"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; message?: string; uploadResult: UploadedPrintJob };
 
 async function getCustomerPrivateRelayStatus(
   sessionToken: string,
@@ -1711,7 +1711,6 @@ async function uploadCustomerPrivateRelay(
   ticket: CustomerLocalUploadTicket,
   grantToken: string,
   privateUpload: PrivateQsp2UploadFactory,
-  onProgress?: CustomerUploadProgressCallback,
   onStage?: CustomerPrivateRelayStageCallback
 ): Promise<UploadedPrintJob> {
   // A direct LAN request may have completed even if its response was lost.
@@ -2158,7 +2157,7 @@ export async function uploadCustomerDocumentLocally(
     if (!privateUpload)
       throw new LocalUploadOutcomeUnknownError("Private Printing is waiting for its encrypted upload to be prepared. Retry this same file.");
     return uploadCustomerPrivateRelay(
-      sessionToken, file, ticket, grantToken, privateUpload, onProgress, onStage
+      sessionToken, file, ticket, grantToken, privateUpload, onStage
     );
   }
 
