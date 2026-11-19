@@ -122,6 +122,7 @@ if ($driverVersion.Major -ne 2 -or $driverVersion.Minor -ne 60) {
     throw "The selected Epson L360 package is version $driverVersion; this qualification requires Epson v2.60.00."
 }
 Write-Host "[EPSON-L360] Selected INF: $infPath; DriverVer=$driverVersion"
+$driverNameCandidates = @("EPSON L360 Series", "Epson L360 Series", "EPSON L360")
 
 $installedDriver = Get-PrinterDriver -ErrorAction SilentlyContinue |
     Where-Object { $_.Name -match "(?i)EPSON.*L360|L360.*EPSON" } |
@@ -201,90 +202,3 @@ Write-Host "[EPSON-L360] Driver: $driverName"
 Write-Host "[EPSON-L360] Spooler output port: $spoolerOutputPath"
 Write-Host "[EPSON-L360] No default printer, physical queue, USB device or Spooler service setting was changed."
 
-)
-if (-not $driverVersionMatch.Success) {
-    throw "The selected Epson L360 INF does not contain a parseable DriverVer field: $infPath"
-}
-$driverVersion = [version]$driverVersionMatch.Groups["version"].Value
-if ($driverVersion.Major -ne 2 -or $driverVersion.Minor -ne 60) {
-    throw "The selected Epson L360 package is version $driverVersion; this qualification requires Epson v2.60.00."
-}
-Write-Host "[EPSON-L360] Selected INF: $infPath; DriverVer=$driverVersion"
-
-$driverNameCandidates = @("EPSON L360 Series", "Epson L360 Series", "EPSON L360")
-$installedDriver = Get-PrinterDriver -ErrorAction SilentlyContinue |
-    Where-Object { $_.Name -match "(?i)EPSON.*L360|L360.*EPSON" } |
-    Select-Object -First 1
-
-if (-not $installedDriver) {
-    & pnputil.exe /add-driver $infPath /install | Out-Host
-    if ($LASTEXITCODE -ne 0) {
-        throw "pnputil could not stage/install the Epson L360 INF (exit $LASTEXITCODE)."
-    }
-
-    foreach ($candidate in $driverNameCandidates) {
-        try {
-            Add-PrinterDriver -Name $candidate -InfPath $infPath -PrinterEnvironment "Windows x64" -ErrorAction Stop | Out-Null
-            $installedDriver = Get-PrinterDriver -Name $candidate -ErrorAction Stop
-            break
-        }
-        catch {
-            Write-Host "[EPSON-L360] Driver name candidate '$candidate' was not accepted: $($_.Exception.Message)"
-        }
-    }
-}
-
-if (-not $installedDriver) {
-    $available = Get-PrinterDriver -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match "(?i)EPSON|L360" } |
-        Select-Object -ExpandProperty Name
-    throw "The L360 driver package was staged, but Windows did not register the L360 printer driver. Related drivers: $($available -join '; ')"
-}
-$driverName = $installedDriver.Name
-if ($driverName -notmatch "(?i)EPSON" -or $driverName -notmatch "(?i)L360") {
-    throw "Windows resolved an unexpected printer driver name '$driverName'."
-}
-Write-Host "[EPSON-L360] Registered Windows driver: $driverName"
-
-# A path-backed local port captures the exact data emitted by the Epson print
-# processor. It lets us exercise PrintTicket/DEVMODE validation and spooler
-# submission without claiming a USB-connected device printed physical paper.
-$spoolerOutputPath = Join-Path $root "epson-l360-spooler-output.prn"
-if (Get-PrinterPort -Name $spoolerOutputPath -ErrorAction SilentlyContinue) {
-    throw "Refusing to reuse an existing local printer port '$spoolerOutputPath'."
-}
-Add-PrinterPort -Name $spoolerOutputPath
-# Keep the print processor selected by the signed Epson driver package.
-Add-Printer -Name $QueueName -DriverName $driverName -PortName $spoolerOutputPath -ErrorAction Stop
-
-$printer = Get-Printer -Name $QueueName -ErrorAction Stop
-if ($printer.DriverName -ne $driverName -or $printer.PortName -ne $spoolerOutputPath) {
-    throw "The isolated queue does not use the selected Epson driver and output file port."
-}
-$metadataPath = Join-Path $root "epson-l360-driver-metadata.json"
-[ordered]@{
-    manufacturer = "Epson"
-    model = "L360"
-    packageVersion = "2.60.00"
-    packageUrl = $PackageUrl
-    packageSha256 = $hash
-    packageAuthenticodeStatus = [string]$signature.Status
-    infPath = $infPath
-    driverName = $driverName
-    queueName = $QueueName
-    portName = $spoolerOutputPath
-    physicalPrinterConnected = $false
-    qualificationBoundary = "Genuine Epson driver PrintTicket/DEVMODE and Windows spooler file-port acceptance only; not physical USB output certification."
-} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $metadataPath -Encoding utf8
-
-if ($env:GITHUB_OUTPUT) {
-    "queue_name=$QueueName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-    "driver_name=$driverName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-    "spooler_output_path=$spoolerOutputPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-    "metadata_path=$metadataPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-}
-
-Write-Host "[EPSON-L360] Isolated queue ready: $QueueName"
-Write-Host "[EPSON-L360] Driver: $driverName"
-Write-Host "[EPSON-L360] Spooler output port: $spoolerOutputPath"
-Write-Host "[EPSON-L360] No default printer, physical queue, USB device or Spooler service setting was changed."
