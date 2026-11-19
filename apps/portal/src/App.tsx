@@ -2305,12 +2305,13 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   );
 }
 
-function PrintersPage({ printers, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
+function PrintersPage({ printers, agents, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; agents:AgentDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
   return (
     <section className="panel collection-panel">
       <div className="collection-header"><div><h2>Your printers</h2><p>Each Windows queue stays separate. Microsoft Print to PDF is the supported virtual test destination; other virtual/document drivers remain visible but cannot be assigned for output.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
       {printers.length===0 ? <EmptyModule icon={<Printer size={24}/>} title="No printers registered yet" text="Add your first printer. It will appear here as awaiting local-agent discovery until the Windows Print Agent reports its capabilities and live status." actionLabel="Add your first printer" onAction={onAdd}/> :
       <div className="printer-grid">{printers.map(printer=>{
+        const agent=agents.find(candidate=>candidate.id===printer.agentDeviceId);
         const isUnsupportedVirtual=printer.outputMode==="UNSUPPORTED_VIRTUAL";
         const possibleDuplicates=printer.outputMode==="PHYSICAL"&&printer.agentDeviceId&&printer.connectionAddress
           ?printers.filter(other=>other.id!==printer.id&&other.outputMode==="PHYSICAL"&&other.agentDeviceId===printer.agentDeviceId&&
@@ -2323,6 +2324,7 @@ function PrintersPage({ printers, busyResourceId, onAdd, onToggle }: { printers:
           <div className="printer-meta">
             <span>{isUnsupportedVirtual?"Not available for print dispatch":printer.outputMode==="PDF_EXPORT"?"PDF test destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span>
             <span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span>
+            <span>Print Agent · {agent?.deviceName||"Not linked"}</span>
           </div>
           <PrinterCapabilityPanel printer={printer}/>
           {possibleDuplicates.length>0&&<div className="printer-duplicate-warning" role="note">
