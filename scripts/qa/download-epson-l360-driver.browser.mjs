@@ -60,6 +60,7 @@ try {
   });
   await page.locator("body").waitFor({ state: "visible" });
   await page.waitForLoadState("networkidle", { timeout: 25000 }).catch(() => undefined);
+  let packageDownloaded = false;
   if (downloadCenterResponse && downloadCenterResponse.status() >= 400) {
     console.log("[EPSON-L360-DOWNLOAD] Global Download Center returned HTTP " + downloadCenterResponse.status() + "; trying Epson China's official L360 driver page.");
     const chinaResponse = await page.goto(officialChinaSupportUrl, {
@@ -84,27 +85,25 @@ try {
     console.log("[EPSON-L360-DOWNLOAD] Epson China support page HTTP " + (chinaResponse?.status() ?? "unknown") +
       "; official driver link=" + (chinaLink?.href ?? "not exposed"));
     if (chinaLink?.href) {
-      const downloadPage = await context.newPage();
-      const downloadPromise = downloadPage.waitForEvent("download", { timeout: 90000 });
       try {
-        await downloadPage.goto(chinaLink.href, { waitUntil: "commit", timeout: 90000 });
+        const downloadPage = await context.newPage();
+        const downloadPromise = downloadPage.waitForEvent("download", { timeout: 90000 });
+        try {
+          await downloadPage.goto(chinaLink.href, { waitUntil: "commit", timeout: 90000 });
+        } catch (error) {
+          if (!String(error).includes("ERR_ABORTED")) throw error;
+        }
+        const download = await downloadPromise;
+        await download.saveAs(target);
+        const file = statSync(target);
+        assert.ok(file.size >= expectedMinimumBytes,
+          "Epson China driver package is unexpectedly small: " + file.size + " bytes");
+        console.log("[EPSON-L360-DOWNLOAD] Saved official Epson China package: " + target + " (" + file.size + " bytes).");
+        packageDownloaded = true;
       } catch (error) {
-        if (!String(error).includes("ERR_ABORTED")) throw error;
+        console.log("[EPSON-L360-DOWNLOAD] Epson China binary request did not complete; retaining diagnostics and checking the other official Download Center route. " + String(error));
       }
-      const download = await downloadPromise;
-      await download.saveAs(target);
-      const file = statSync(target);
-      assert.ok(file.size >= expectedMinimumBytes,
-        "Epson China driver package is unexpectedly small: " + file.size + " bytes");
-      console.log("[EPSON-L360-DOWNLOAD] Saved official Epson China package: " + target + " (" + file.size + " bytes).");
-      packageDownloaded = true;
     }
-  }
-
-  if (downloadCenterResponse && downloadCenterResponse.status() >= 400) {
-    // The official Epson China fallback above may save the package. Continue
-    // to the global Download Center only if it did not produce the file.
-    packageDownloaded = false;
   }
 
   if (!packageDownloaded) {
