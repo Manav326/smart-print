@@ -7,7 +7,7 @@ import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeE
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
   ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound, Share2,
-  ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, RefreshCw, Zap, Info, Lock
+  ShieldCheck, AlertTriangle, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, RefreshCw, Zap, Info, Lock
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } from "./PhotoStudio";
@@ -3776,6 +3776,14 @@ async function copyText(value:string):Promise<boolean> {
   finally { helper.remove(); }
 }
 
+function CustomerInlineNotice({kind,title,children}:{kind:"info"|"warning";title:string;children:ReactNode}) {
+  const Icon=kind==="warning"?AlertTriangle:Info;
+  return <div className={"customer-inline-notice "+kind} role={kind==="warning"?"alert":"status"}>
+    <Icon size={16} aria-hidden="true"/>
+    <div><strong>{title}</strong><span>{children}</span></div>
+  </div>;
+}
+
 function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
   const tooltipId=useId();
   const rootRef=useRef<HTMLSpanElement>(null);
@@ -4810,7 +4818,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
-  const [notice,setNotice]=useState<{kind:"info"|"warning";message:string}|null>(null);
+  const [notices,setNotices]=useState<Array<{kind:"info"|"warning";message:string}>>([]);
   const [uploadMode,setUploadMode]=useState<"LOCAL"|"CLOUD">(
     localAgent?.endpoints.length ? "LOCAL" : "CLOUD"
   );
@@ -5256,7 +5264,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const currentBatchBytes=results.reduce((sum,item)=>sum+item.document.sizeBytes,0);
     const uploadCapacityError=validateCustomerUploadBatchLimits(results.length,currentBatchBytes,pending.map(candidate=>candidate.size));
     if(uploadCapacityError){setError(uploadCapacityError.code==="FILE_SIZE"?"One selected file exceeds the 50 MB per-file upload limit.":uploadCapacityError.code==="FILE_COUNT"?"A print batch can contain up to 20 files.":"A print batch can contain up to 500 MB in total.");return;}
-    setBusy(true);setError("");setNotice(null);setQuote(null);setQuotesByJobId({});setJobStatus(null);
+    setBusy(true);setError("");setNotices([]);setQuote(null);setQuotesByJobId({});setJobStatus(null);
     setUploadProgress({
       completed:0,
       total:pending.length,
@@ -5762,7 +5770,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
   }
   async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
-    setNotice(null);
+    setNotices([]);
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
       return;
@@ -5887,12 +5895,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return updated;
     });
     selectedFilesRef.current=selected;setFiles(selected);setSelectedFileIndex(0);
-    const notices:string[]=[];
-    if(nestedSkipped)notices.push("Nested folders are skipped; only files directly inside each selected folder are included.");
-    if(unsupportedSkipped)notices.push("Files without a supported PDF, JPEG or PNG signature were skipped.");
-    if(mismatchedNames.length)notices.push(`${mismatchedNames.length} file(s) were identified by their contents; their original filenames are preserved.`);
+    const selectionNotices:Array<{kind:"info"|"warning";message:string}>=[];
+    if(nestedSkipped||unsupportedSkipped) {
+      const skippedMessages:string[]=[];
+      if(nestedSkipped)skippedMessages.push("Files inside nested folders aren't included.");
+      if(unsupportedSkipped)skippedMessages.push("Only PDF, JPG and PNG files are supported.");
+      selectionNotices.push({kind:"warning",message:skippedMessages.join(" ")});
+    }
+    if(mismatchedNames.length)selectionNotices.push({
+      kind:"info",
+      message:`${mismatchedNames.length} file(s) were identified by content. Original filenames were kept.`
+    });
     setError("");
-    setNotice(notices.length?{kind:nestedSkipped||unsupportedSkipped?"warning":"info",message:notices.join(" ")}:null);
+    setNotices(selectionNotices);
   }
 
   function removeSelectedFile(fingerprint: string) {
@@ -5917,7 +5932,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     });
     setPhotoSettingsByFileFingerprint(current=>{const next={...current};delete next[fingerprint];return next;});
     setError("");
-    setNotice(null);
+    setNotices([]);
   }
 
   const pendingFilesCount=files.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate))).length;
@@ -6077,7 +6092,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Normal print queue. 7-day auto-delete.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
-      <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>Files are encrypted before leaving your device and decrypted only by the paired Windows Agent. {privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"In development, the Agent can create a protected test PDF. It is not physical fulfilment; the test artifact is retained locally for up to 24 hours.":"The Agent erases its working source after physical output is confirmed."} Your original stays on your device.</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Standard Printing uses the shop's normal print queue. Completed source copies are deleted automatically 7 days after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
+      <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted on your device. The protected test PDF stays on this computer for up to 24 hours; it is not a physical print. Your original stays on your device.":"Encrypted on your device and decrypted only by the paired Windows Agent. The shop-side copy is erased after confirmed output. Your original stays on your device."}</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Uses the shop's normal print queue. The shop-side copy is deleted 7 days after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
       {!canOfferPrivatePrinting&&<small className="customer-privacy-unavailable">Private Printing unavailable. <InfoTooltip label="Why Private Printing is unavailable"><span>{!hasAssignedPrinter?"This QR station needs an active printer assignment.":!localAgent?.agentDeviceId||!localAgent.documentEncryptionPublicKey?"The paired Windows Agent must be online and publish its encryption key.":!privateQueueReady?"The assigned printer queue must report Ready or Busy.":privateVirtualTestMode?"Virtual test output is blocked until the Company Main Admin enables it in non-production.":"Private Printing requires an eligible physical printer or an approved non-production test printer."}</span></InfoTooltip></small>}
       {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on.</strong></span></div>}
       {files.some(isSmartPrintPhotoDocument)&&<div className="customer-private-confirmation" role="status">
@@ -6092,13 +6107,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       : <div className="customer-upload-modes">
       <div className="customer-upload-mode-heading"><strong>How your files reach the shop</strong><small>Choose a connection method. Your privacy setting above stays the same.</small></div>
       {localAgent?.endpoints.length
-        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct over shop Wi-Fi · unencrypted connection</small></button>
+        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct transfer over shop Wi-Fi</small></button>
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Unavailable</small></button>}
       {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Encrypted online transfer · print when ready</small></button>}
     </div>}
-    {!localAgent?.endpoints.length&&<small className="customer-upload-local-note">Shop connection details <InfoTooltip label="Shop connection unavailable"><span>The paired shop computer has not reported a reachable local connection.</span></InfoTooltip></small>}
-    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload unavailable. <InfoTooltip label="Upload unavailable"><span>No document was uploaded. Ask the shop to reconnect its print service, then try again.</span></InfoTooltip></div>}
-    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<div className="customer-upload-local-note" role="status">Encrypted online relay in use. <InfoTooltip label="Secure relay details"><span>Shop Wi-Fi is not verified. SmartPrint uses the encrypted online relay automatically; no Wi-Fi setup is needed.</span></InfoTooltip></div>}
+    {!privatePrinting&&uploadMode==="LOCAL"&&!!localAgent?.endpoints.length&&<CustomerInlineNotice kind="warning" title="Local transfer is not encrypted">Choose HTTPS or Private Printing for an encrypted transfer.</CustomerInlineNotice>}
+    {!localAgent?.endpoints.length&&<small className="customer-upload-local-note">Shop connection details <InfoTooltip label="Shop connection unavailable"><span>The shop computer has no reachable local connection.</span></InfoTooltip></small>}
+    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload unavailable. <InfoTooltip label="Upload unavailable"><span>No file was uploaded. Ask the shop to reconnect its print service, then retry.</span></InfoTooltip></div>}
+    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<div className="customer-upload-local-note" role="status">Encrypted online relay in use. <InfoTooltip label="Secure relay details"><span>No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.</span></InfoTooltip></div>}
     <div className="customer-upload-picker-grid"
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
       onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
@@ -6325,13 +6341,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         </section>)}
       </div>}
       <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><div className="uploaded-document-title"><strong>{resolveCustomerDocumentName(uploaded,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[uploaded.job.id]??batchStatuses[uploaded.job.id]?.printKind??uploaded.job.printKind)}/></div><span>{(photoSettingsByJobId[uploaded.job.id]||batchStatuses[uploaded.job.id]?.printKind==="PHOTO"||uploaded.job.printKind==="PHOTO")?`${photoSettingsByJobId[uploaded.job.id]?.photoCount??batchStatuses[uploaded.job.id]?.photoCount??uploaded.job.photoCount??0} photos · ${photoSettingsByJobId[uploaded.job.id]?.sizeCode??batchStatuses[uploaded.job.id]?.photoSizeCode??uploaded.job.photoSizeCode??""} · ${uploaded.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(uploaded.job.pageCount,printSettingsByJobId[uploaded.job.id]?.copies??uploaded.job.copies,printSettingsByJobId[uploaded.job.id]?.pagesPerSheet??uploaded.job.pagesPerSheet??1,printSettingsByJobId[uploaded.job.id]?.isDuplex??uploaded.job.isDuplex??false)}`} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={customerStatusLabel(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={customerStatusTone(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")}/></div>
-      {batchId&&hasLegacyIndividualPayment&&<p className="customer-payment-warning">A file in this batch already has a separate individual payment. Complete or resolve that attempt before starting another payment for this batch. A second collection path is blocked to prevent duplicate charges.</p>}
+      {batchId&&hasLegacyIndividualPayment&&<CustomerInlineNotice kind="warning" title="Individual payment already exists">Resolve that payment before paying for this batch to avoid a duplicate charge.</CustomerInlineNotice>}
       {canCalculateBatch&&<div className="customer-batch-quote-action">
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Review batch settings</h2></div><small>{quoteItems.length} files</small></div>
         <button className="customer-flow-button" disabled={busy} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
       </div>}
     </>}
-    {notice&&<div className={"customer-upload-notice "+notice.kind} role={notice.kind==="warning"?"alert":"status"}>{notice.message}</div>}
+    {notices.length>0&&<div className="customer-inline-notices" aria-label="File selection messages">
+      {notices.map((item,index)=><CustomerInlineNotice
+        key={item.kind+"-"+index}
+        kind={item.kind}
+        title={item.kind==="warning"?"Some files were skipped":"File details"}
+      >{item.message}</CustomerInlineNotice>)}
+    </div>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {(quoteEntries.length>0||batchQuoteNeedsRefresh>0)&&<section className="customer-quote-card customer-batch-quote-card" aria-label="Batch quote summary">
       <div className="customer-batch-quote-heading">
@@ -6456,7 +6478,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter transaction ID after paying"/></label>
             <small className="customer-payment-reference-hint">Find it in your UPI app under payment details or transaction history.</small>
             <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
-            <small className="customer-payment-warning">UPI transfers can still be declined by the bank or UPI provider. A downloaded QR offers a scan-from-image route; it does not bypass payment security checks.</small>
+            <CustomerInlineNotice kind="warning" title="Bank security checks still apply">Downloading the QR does not bypass bank or UPI checks.</CustomerInlineNotice>
           </div>
         </>}
         {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>{nativeAppMode?"Pay at counter · Await confirmation.":"Pay at the shop counter. The shop will confirm receipt before authorising the job."}</p>}
@@ -6484,8 +6506,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           </div>;
         })}
       </div>
-      {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<p className="customer-payment-warning">Refreshing the per-file payment breakdown. Check the complete file list before paying or submitting a reference.</p>}
-      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<p className="customer-payment-warning">Recorded file refunds: {formatMoney(batchPaymentRefundedTotal,batchCheckoutCurrency)}. Remaining amount after those returns: {formatMoney(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</p>}
+      {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<CustomerInlineNotice kind="info" title="Checking payment breakdown">Review the full file list before paying or submitting a reference.</CustomerInlineNotice>}
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<CustomerInlineNotice kind="info" title="Refund summary">Refunded: {formatMoney(batchPaymentRefundedTotal,batchCheckoutCurrency)} · Remaining: {formatMoney(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</CustomerInlineNotice>}
       {!batchCheckoutUsesPayment&&<>
         {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">The previous batch payment was rejected. {batchPayment.rejectionReason||"Check with the shop before trying again."}</p>}
         {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<small className="customer-payment-method-note">Cash at counter unavailable. <InfoTooltip label="Why cash is unavailable"><span>The shop must enable Cash at counter in Payments settings.</span></InfoTooltip></small>}
@@ -6515,7 +6537,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter transaction ID after paying"/></label>
             <small className="customer-payment-reference-hint">Find it in your UPI app under payment details or transaction history.</small>
           <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
-          <small className="customer-payment-warning">The shop verifies the actual UPI credit. A downloaded QR offers an alternative scan route; it cannot override a bank or UPI security decline.</small>
+          <CustomerInlineNotice kind="warning" title="Bank security checks still apply">The shop verifies payment. A downloaded QR does not bypass bank or UPI checks.</CustomerInlineNotice>
         </div>
       </>}
       {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.</p>}
