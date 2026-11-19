@@ -10799,6 +10799,14 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
     if (!CryptographicOperations.FixedTimeEquals(suppliedHash, expectedHash))
         return Results.Unauthorized();
 
+    var transferPath = ticket.PrivateRelayUploadedUtc is not null
+        ? "CLOUD_RELAY"
+        : ticket.ClaimedUtc is not null &&
+          ticket.AgentUploadAttempts > 0 &&
+          ticket.ClaimLeaseExpiresUtc > now
+            ? "DIRECT_LAN"
+            : (string?)null;
+
     if (ticket.PrivateRelayFailedUtc is not null)
         return Results.Ok(new
         {
@@ -10806,6 +10814,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
             Stage = PrivateRelayProgressRules.Failed,
             StageMessage = ticket.PrivateRelayFailureMessage ?? PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Failed),
             StageUpdatedUtc = ticket.PrivateRelayStageUpdatedUtc,
+            TransferPath = transferPath,
             Message = ticket.PrivateRelayFailureMessage ?? "The shop computer could not validate this file. Please select it again."
         });
     if (ticket.CompletedUtc is null && ticket.ExpiresUtc <= now)
@@ -10815,6 +10824,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
             Stage = PrivateRelayProgressRules.Expired,
             StageMessage = PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Expired),
             StageUpdatedUtc = ticket.PrivateRelayStageUpdatedUtc,
+            TransferPath = transferPath,
             Message = "The shop computer did not receive this file in time. Please retry the same file."
         });
 
@@ -10848,6 +10858,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
             Stage = PrivateRelayProgressRules.Ready,
             StageMessage = PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Ready),
             StageUpdatedUtc = ticket.PrivateRelayStageUpdatedUtc,
+            TransferPath = transferPath,
             UploadResult = new { result.Job, result.Document, DuplicateRequest = false }
         });
     }
@@ -10861,6 +10872,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
         Stage = stage,
         StageMessage = PrivateRelayProgressRules.CustomerMessage(stage),
         StageUpdatedUtc = ticket.PrivateRelayStageUpdatedUtc,
+        TransferPath = transferPath,
         Message = PrivateRelayProgressRules.CustomerMessage(stage)
     });
 }).RequireRateLimiting("public-api");
