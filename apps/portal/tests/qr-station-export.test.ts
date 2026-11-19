@@ -34,7 +34,7 @@ test("customer-controlled shop text is escaped before entering SVG markup", () =
   assert.match(svg, /Counter &quot;A&quot; &amp; B/);
   // Escaped event-handler text is safe inside an SVG text node. Inspect
   // actual element tags so harmless user-visible text does not false-positive.
-  const elementTags = svg.match(/<(?!\\/|!|\\?)[^>]+>/g) ?? [];
+  const elementTags = svg.match(/<(?=[A-Za-z])[^>]*>/g) ?? [];
   assert.ok(elementTags.every(tag => !/<img\\b|\\bonerror\\s*=/i.test(tag)));
 });
 
