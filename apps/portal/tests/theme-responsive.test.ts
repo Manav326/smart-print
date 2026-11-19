@@ -291,8 +291,9 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   assert.match(app, /Shop computer:/);
   assert.match(app, /Paper output manually confirmed by/);
   assert.match(app, /Cloud-assisted upload is now selected/);
-  assert.match(app, /attached to its original job/);
-  assert.match(app, /resume that same upload without creating another print job/);
+  assert.match(app, /Your original print request is saved/);
+  assert.match(app, /will not create a duplicate print job/);
+  assert.doesNotMatch(app, /resume that same upload without creating another print job/);
   assert.match(api, /local-upload-tickets.*cloud-recovery/);
   assert.doesNotMatch(app, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
   assert.match(api, /printerAgentName\?: string \| null/);
@@ -940,4 +941,21 @@ test("shop batch review communicates included and excluded choices, valid quotes
   assert.ok(css.includes("@media(max-width:650px){"));
   assert.ok(css.includes(".batch-review-row{grid-template-columns:minmax(0,1fr) auto;"));
   assert.match(css, /html\[data-theme="dark"\] \.batch-review-overview/);
+});
+
+
+test("customer warnings and info use concise accessible notices with toolkit icons", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /function CustomerInlineNotice/);
+  assert.match(app, /AlertTriangle:Info/);
+  assert.match(app, /role=\{kind==="warning"\?"alert":"status"\}/);
+  assert.match(app, /Files inside nested folders aren't included/);
+  assert.match(app, /Only PDF, JPG and PNG files are supported/);
+  assert.match(app, /identified by content\. Original filenames were kept/);
+  assert.match(app, /Local transfer is not encrypted/);
+  assert.match(css, /\.customer-inline-notice\.warning/);
+  assert.match(css, /\.customer-inline-notice\.info/);
+  assert.match(css, /\.customer-upload-mode-warning/);
 });
