@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ShopPayment, ShopPrintJob } from "../src/api.ts";
-import { buildShopOrderJourneys, filterShopOrderJourneys } from "../src/order-journey.ts";
+import { buildShopOrderJourneys, filterShopOrderJourneys, isActiveOrderWork } from "../src/order-journey.ts";
 function job(v: Partial<ShopPrintJob> & Pick<ShopPrintJob,"id"|"jobNumber"|"status">): ShopPrintJob {
   return {
     id:v.id, jobNumber:v.jobNumber, status:v.status, batchId:v.batchId??null,
     batchName:v.batchName??null, batchGroupName:v.batchGroupName??null, rejectedPageNumbersJson:v.rejectedPageNumbersJson??"[]",
-    pageCount:v.pageCount??2,copies:v.copies??1,colourMode:v.colourMode??"Mono",paperSize:"A4",isDuplex:false,
+    pageCount:v.pageCount??2,copies:v.copies??1,colourMode:v.colourMode??"Mono",paperSize:"A4",isDuplex:false,pagesPerSheet:v.pagesPerSheet,
     printKind:v.printKind??"DOCUMENT",privatePrinting:v.privatePrinting??false,
     photoCount:v.photoCount??0,photosPerPage:v.photosPerPage??null,photoSizeCode:v.photoSizeCode??null,
     currency:v.currency??"INR",quotedAmountMinor:v.quotedAmountMinor??1000,
@@ -146,4 +146,36 @@ test("private orders use generic labels and never match original filenames in or
   assert.equal(filterShopOrderJourneys([order],"all","Sensitive group").length,0);
   assert.equal(filterShopOrderJourneys([order],"all","SP-PRIVATE-1").length,1,
     "The operational order reference remains searchable");
+});
+
+
+test("N-up output-side counts group remaining source pages before multiplying copies", () => {
+  const twoUp = buildShopOrderJourneys([
+    job({ id: "two-up", jobNumber: "SP-2UP", status: "PRINTING", pageCount: 5, copies: 2, pagesPerSheet: 2 })
+  ], [])[0];
+  assert.equal(twoUp.pageCount, 6, "Five source pages on two-up layout require three output sides per copy.");
+
+  const rejectedSourcePages = buildShopOrderJourneys([
+    job({ id: "two-up-rejected", jobNumber: "SP-2UR", status: "PRINTING",
+      pageCount: 5, copies: 2, pagesPerSheet: 2, rejectedPageNumbersJson: "[1,2]" })
+  ], [])[0];
+  assert.equal(rejectedSourcePages.pageCount, 4, "Three remaining source pages require two output sides per copy.");
+
+  const legacyWithoutNup = buildShopOrderJourneys([
+    job({ id: "legacy", jobNumber: "SP-LEGACY", status: "PRINTING", pageCount: 5, copies: 2 })
+  ], [])[0];
+  assert.equal(legacyWithoutNup.pageCount, 10);
+});
+
+test("ready-for-collection orders remain visible but do not inflate active work", () => {
+  const ready = buildShopOrderJourneys([
+    job({ id: "ready", jobNumber: "SP-READY", status: "COMPLETED" })
+  ], [])[0];
+  const printing = buildShopOrderJourneys([
+    job({ id: "printing", jobNumber: "SP-PRINT", status: "PRINTING" })
+  ], [])[0];
+  assert.equal(ready.stage, "ready");
+  assert.equal(ready.isClosed, false, "Ready orders remain in the journey until collected or closed.");
+  assert.equal(isActiveOrderWork(ready), false);
+  assert.equal(isActiveOrderWork(printing), true);
 });

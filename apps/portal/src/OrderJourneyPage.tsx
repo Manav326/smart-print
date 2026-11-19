@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, Check, ChevronDown, Clock3, CreditCard, Eye, FileText, History, Image as ImageIcon, Inbox, PackageCheck, Printer, RefreshCw, RotateCcw, ShieldCheck, Wallet, Wifi, X } from "lucide-react";
 import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./api";
 import { formatIstDateTime } from "./date-time";
-import { buildShopOrderJourneys, filterShopOrderJourneys, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
+import { buildShopOrderJourneys, filterShopOrderJourneys, isActiveOrderWork, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
 import styles from "./OrderJourney.module.css";
 import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
 
@@ -109,6 +109,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
 }){
   const printer=printerSummary(journey.jobs,printers,agents);
   const canReview=journey.canReview&&!!journey.batchId;
+  const singleFileReviewJob=journey.jobs.length===1&&!journey.batchId?journey.jobs[0]:null;
   const allOutputsReady=journey.jobs.length>0&&journey.jobs.every(job=>readyStatuses.has(job.status));
   const headline=journey.isClosed?"No files moving forward":journey.attentionJobs.length?"Needs a quick check":journey.stage==="received"?"New order received":journey.stage==="review"?"Your review is next":journey.stage==="payment"?"Waiting for payment":journey.stage==="printing"?"Order is being prepared":allOutputsReady?"Ready for collection":"Print output saved";
   const stageIndex=journey.isClosed?1:journey.stageIndex;
@@ -136,6 +137,11 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
     </div>
     <div className={styles.cardWorkflowActions}>
       {canReview&&<button type="button" className={styles.actionButton} onClick={()=>onReviewBatch(journey.batchId!)}><FileText size={14}/> Review all files</button>}
+      {singleFileReviewJob?.status==="AWAITING_SHOP_APPROVAL"&&<>
+        <button type="button" className={styles.actionButton} onClick={()=>actions.onApprove(singleFileReviewJob)}><Check size={14}/> Accept file</button>
+        <button type="button" className={styles.actionButton} onClick={()=>actions.onReject(singleFileReviewJob)}><X size={14}/> Reject file</button>
+      </>}
+      {singleFileReviewJob?.status==="AWAITING_PAYMENT"&&<button type="button" className={styles.actionButton} onClick={()=>actions.onReject(singleFileReviewJob)}><X size={14}/> Reject file</button>}
       {journey.canVerifyPayment&&journey.payment&&<button type="button" className={styles.actionButton} onClick={()=>onVerifyPayment(journey.payment!)}><ShieldCheck size={14}/> Verify payment</button>}
       {journey.isClosed&&<span className={styles.closedHint}>All files have a recorded final decision.</span>}
     </div>
@@ -172,7 +178,8 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
   }),[journeys]);
   const agentsOnline=agents.filter(isAgentOnline).length;
   const reachable=printers.filter(p=>p.isActive&&!!p.agentDeviceId&&agents.some(a=>a.id===p.agentDeviceId&&isAgentOnline(a))).length;
-  const inMotion=journeys.filter(j=>!j.isClosed).length;
+  const inMotion=journeys.filter(isActiveOrderWork).length;
+  const readyForCollection=journeys.filter(j=>j.stage==="ready").length;
   const paymentsToVerify=journeys.filter(j=>j.canVerifyPayment).length;
 
   return <div className={styles.journeyPage}>
@@ -191,7 +198,7 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
     </section>
 
     <section className={styles.operationsStrip} aria-label="Shop operations summary">
-      <div className={styles.operationsLabel}><span className={styles.operationsGlyph}><Wifi size={15}/></span><div><strong>{inMotion} active orders</strong><small>{paymentsToVerify} payments need verification</small></div></div>
+      <div className={styles.operationsLabel}><span className={styles.operationsGlyph}><Wifi size={15}/></span><div><strong>{inMotion} active orders</strong><small>{readyForCollection} ready for collection · {paymentsToVerify} payments to verify</small></div></div>
       <div className={styles.operationMetric}><strong>{agentsOnline}</strong><span>Agents online</span></div>
       <div className={styles.operationMetric}><strong>{reachable}</strong><span>Printers reachable</span></div>
       <button type="button" className={styles.subtleLink} onClick={()=>onNavigate("Print Agent")}>Shop computer</button>

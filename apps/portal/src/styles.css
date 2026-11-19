@@ -4011,3 +4011,47 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
   .customer-upload-progress-file-status{font-size:7px;padding:4px 6px}
   .customer-upload-progress-file-foot{font-size:7px}
 }
+
+
+/* Additive QR image export controls; the original print poster remains untouched. */
+.qr-share-export{margin-top:10px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);overflow:hidden}
+.qr-share-export>summary{min-height:44px;padding:10px 12px;display:flex;align-items:center;gap:8px;list-style:none;cursor:pointer;color:var(--text);font-size:12px;font-weight:700}
+.qr-share-export>summary::-webkit-details-marker{display:none}
+.qr-share-export>summary:after{content:"+";margin-left:auto;color:var(--accent);font-size:18px}
+.qr-share-export[open]>summary:after{content:"−"}
+.qr-share-export>summary span{margin-left:auto;color:var(--muted);font-size:10px;font-weight:600}
+.qr-share-export-controls{display:flex;flex-wrap:wrap;align-items:end;gap:8px;padding:0 12px 12px}
+.qr-share-export-controls label{display:grid;gap:5px;min-width:150px;color:var(--muted);font-size:10px;font-weight:700}
+.qr-share-export-controls select{height:38px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:0 9px;font:600 11px "DM Sans",sans-serif}
+.qr-share-export-controls .secondary-button{min-height:38px;display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.qr-share-export-help,.qr-share-paused-note,.qr-share-feedback{display:block;margin:0 12px 11px;color:var(--muted);font-size:10px;line-height:1.5}
+.qr-share-paused-note{color:#a65a16}
+.qr-share-feedback.success{color:var(--green)}
+.qr-share-feedback.error{color:var(--red)}
+.qr-share-feedback.info{color:var(--accent)}
+.customer-previous-order{display:grid;gap:10px;margin:0 0 18px;padding:15px;border:1px solid var(--border);border-radius:13px;background:var(--surface-2)}
+.customer-previous-order-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.customer-previous-order-heading>div{display:grid;gap:3px}
+.customer-previous-order-heading>div>span{color:var(--accent);font-size:9px;font-weight:800;letter-spacing:1.2px}
+.customer-previous-order-heading>div>strong{color:var(--text);font-size:14px}
+.customer-previous-order-readonly{padding:5px 9px;border:1px solid var(--border);border-radius:20px;color:var(--muted);font-size:10px;font-weight:700}
+.customer-previous-order>p{margin:0;color:var(--muted);font-size:11px;line-height:1.5}
+.customer-previous-order-list{display:grid;gap:7px}
+.customer-previous-order-item{display:flex;align-items:center;gap:10px;min-width:0;padding:9px;border:1px solid var(--border);border-radius:9px;background:var(--surface)}
+.customer-previous-order-item>span{width:30px;height:30px;flex:0 0 30px;display:grid;place-items:center;border-radius:8px;background:var(--accent-soft);color:var(--accent)}
+.customer-previous-order-item>div{display:grid;gap:3px;min-width:0}
+.customer-previous-order-item strong{overflow-wrap:anywhere;color:var(--text);font-size:11px}
+.customer-previous-order-item small{color:var(--muted);font-size:10px;line-height:1.35}
+.customer-previous-order-warning{color:var(--red);font-size:10px;line-height:1.5}
+.customer-previous-order-footnote{color:var(--faint);font-size:10px;line-height:1.5}
+.shop-document-preview{position:relative}
+.shop-document-preview-loading{position:absolute;z-index:2;left:50%;top:12px;transform:translateX(-50%);display:flex;align-items:center;gap:8px;max-width:calc(100% - 24px);padding:8px 12px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);box-shadow:0 4px 18px #0002}
+.shop-document-preview-loading strong{font-size:11px;white-space:nowrap}
+.shop-document-preview-loading small{font-size:10px;color:var(--muted)}
+@media(max-width:600px){
+  .qr-share-export-controls{display:grid;grid-template-columns:1fr 1fr}
+  .qr-share-export-controls label{grid-column:1/-1}
+  .qr-share-export-controls .secondary-button{width:100%;white-space:normal}
+  .shop-document-preview-loading small{display:none}
+  .customer-previous-order{padding:12px}
+}

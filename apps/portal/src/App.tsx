@@ -6,7 +6,7 @@ import { calculateBatchQuoteBreakdown } from "./batch-quote-breakdown.js";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound,
+  ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound, Share2,
   ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, RefreshCw, Zap, Info, Lock
 } from "lucide-react";
 import QRCode from "react-qr-code";
@@ -23,6 +23,8 @@ import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from ".
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
 import QrStationPrintDocument from "./QrStationPrintDocument";
+import { createQrStationImageFile, downloadQrStationImage, loadQrStationLogoDataUri, shareQrStationImage, type QrStationImageFormat } from "./qr-station-export";
+import { resolveCustomerUploadStatusMessage } from "./customer-upload-status";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import PlatformAdminConsole from "./PlatformAdminConsole";
 import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
@@ -2342,6 +2344,52 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
   const [printingStationId,setPrintingStationId]=useState<string|null>(null);
+  const [formatByStation,setFormatByStation]=useState<Record<string,QrStationImageFormat>>({});
+  const [exportingStationId,setExportingStationId]=useState<string|null>(null);
+  const [copyFeedback,setCopyFeedback]=useState<Record<string,{kind:"success"|"error";message:string}>>({});
+  const [exportFeedback,setExportFeedback]=useState<Record<string,{kind:"success"|"info"|"error";message:string}>>({});
+  const imageFormatFor=(station:QrStation)=>formatByStation[station.id]??"png";
+  const copyStationUrl=async(station:QrStation)=>{
+    if(!station.publicUrl)return;
+    const copied=await copyText(station.publicUrl);
+    setCopyFeedback(current=>({...current,[station.id]:copied
+      ?{kind:"success",message:"Station link copied."}
+      :{kind:"error",message:"Could not copy automatically. Open the link and copy it manually."}}));
+  };
+  const createStationImage=async(station:QrStation)=>{
+    if(!station.publicUrl)throw new Error("This station does not have a public QR link yet.");
+    const root=document.getElementById("qr-station-"+station.id);
+    const qrSvg=root?.querySelector<SVGSVGElement>(".qr-code-frame svg");
+    if(!qrSvg)throw new Error("The station QR code is not ready. Refresh the page and try again.");
+    const logoDataUri=await loadQrStationLogoDataUri(profile?.logoUrl);
+    return createQrStationImageFile({
+      shopName:profile?.displayName?.trim()||station.displayName,
+      stationName:station.displayName,
+      isEnabled:station.isEnabled,
+      logoDataUri
+    },new XMLSerializer().serializeToString(qrSvg),imageFormatFor(station));
+  };
+  const exportStationImage=async(station:QrStation,mode:"download"|"share")=>{
+    setExportingStationId(station.id);
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing a sharp, scan-ready QR image…"}}));
+    try{
+      const file=await createStationImage(station);
+      if(mode==="download"){
+        downloadQrStationImage(file);
+        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Your "+imageFormatFor(station).toUpperCase()+" QR image is ready."}}));
+      }else{
+        const result=await shareQrStationImage(file);
+        if(result==="shared")setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR image shared successfully."}}));
+        else if(result==="cancelled")setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Sharing was cancelled. The image was not sent."}}));
+        else{
+          downloadQrStationImage(file);
+          setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"File sharing is not supported here, so the QR image was downloaded instead."}}));
+        }
+      }
+    }catch(exception){
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+    }finally{setExportingStationId(null);}
+  };
   useEffect(()=>{
     if(!printingStationId)return;
     let cancelled=false;
@@ -2384,7 +2432,26 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
           <div className="qr-powered"><small>POWERED BY</small><div className="qr-powered-lockup" aria-label="QuantaEdge, Smarter Decisions. Greater Growth."><img className="qr-quantaedge-mark" src="/branding/quantaedge-mark.png" alt="" onError={event=>{event.currentTarget.hidden=true;const fallback=event.currentTarget.nextElementSibling;if(fallback instanceof HTMLElement)fallback.hidden=false;}}/><span className="qr-quantaedge-mark-fallback" hidden aria-hidden="true">Q</span><div className="qr-powered-wordmark"><strong>Quanta<span>Edge</span></strong><small>Smarter Decisions. Greater Growth.</small></div></div></div>
         </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div>}</div>
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:station.isEnabled?"Disable station":"Enable station"}</button></div>
-        {station.publicUrl && <div className="station-actions"><button className="secondary-button" onClick={()=>void copyText(station.publicUrl!)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print / download QR poster</button></div>}
+        {station.publicUrl && <>
+           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print / download QR poster</button></div>
+           {copyFeedback[station.id]&&<small className={"qr-share-feedback "+copyFeedback[station.id].kind} role="status" aria-live="polite">{copyFeedback[station.id].message}</small>}
+           <details className="qr-share-export">
+             <summary><Share2 size={15}/> Download or share QR image <span>PNG / JPG</span></summary>
+             <div className="qr-share-export-controls">
+               <label>Image format
+                 <select value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));}} disabled={!!exportingStationId}>
+                   <option value="png">PNG · best QR clarity</option>
+                   <option value="jpg">JPG · smaller file</option>
+                 </select>
+               </label>
+               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station,"download")}>{exportingStationId===station.id?<span className="button-spinner"/>:<ImageIcon size={14}/>} Download image</button>
+               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station,"share")}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Share image</button>
+             </div>
+             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The exported image is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
+             {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
+             <small className="qr-share-export-help">Share sends the actual image file when your device supports file sharing. Otherwise SmartPrint downloads the image for you. The QR contains this station’s current public link, never a customer session token.</small>
+           </details>
+         </>}
       </article>)}</div>}
     </section>
     <QrStationPrintDocument station={stations.find(station => station.id === printingStationId) ?? null} profile={profile}/>
@@ -3618,11 +3685,11 @@ function pageDescription(section:Section) {
   };
   return descriptions[section];
 }
-async function copyText(value:string) {
+async function copyText(value:string):Promise<boolean> {
   try {
     if(navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);
-      return;
+      return true;
     }
   } catch {
     // Fall through to the in-page clipboard fallback.
@@ -3634,7 +3701,8 @@ async function copyText(value:string) {
   helper.style.opacity="0";
   document.body.appendChild(helper);
   helper.select();
-  try { document.execCommand("copy"); } finally { helper.remove(); }
+  try { return document.execCommand("copy"); } catch { return false; }
+  finally { helper.remove(); }
 }
 
 function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
@@ -3728,6 +3796,9 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
           existing=await resumeCustomerSession(storedToken,publicCode);
         } catch(exception) {
           if(exception instanceof ApiError&&exception.status===401){
+            // Retain the expired capability only in this tab, for read-only
+            // restoration of its own order. It is never saved to localStorage.
+            sessionStorage.setItem("qrtoprint.customer-previous-session:"+publicCode,storedToken);
             sessionStorage.removeItem(stationKey);
             sessionStorage.removeItem("qrtoprint.customer-session");
             await clearNativeCustomerPrintSession(publicCode);
@@ -3757,6 +3828,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     setLocalReady(false);
     setLocalFallbackSuggested(false);
     try{
+      sessionStorage.removeItem("qrtoprint.customer-previous-session:"+publicCode);
       const value=await createCustomerSession(publicCode);
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       await saveNativeCustomerShopProfile(publicCode,value.shop);
@@ -4410,15 +4482,23 @@ function normalizeCustomerCopies(value:string):string {
 }
 
 function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCustomerDraft|null {
-  try {
-    const raw=localStorage.getItem(`qrtoprint.customer-active-job:${publicCode}`);
-    if(!raw)return null;
-    const draft=JSON.parse(raw) as StoredCustomerDraft;
-    return draft.sessionMarker===sessionToken.slice(-16)&&
-      (draft.uploaded?.job?.id||draft.uploadedBatch?.length||draft.batchName?.trim())?draft:null;
-  } catch {
-    return null;
+  const marker=sessionToken.slice(-16);
+  const keys=[
+    `qrtoprint.customer-active-job:${publicCode}`,
+    `qrtoprint.customer-previous-job:${publicCode}`
+  ];
+  for(const key of keys){
+    try {
+      const raw=localStorage.getItem(key);
+      if(!raw)continue;
+      const draft=JSON.parse(raw) as StoredCustomerDraft;
+      if(draft.sessionMarker===marker&&
+        (draft.uploaded?.job?.id||draft.uploadedBatch?.length||draft.batchName?.trim()))return draft;
+    } catch {
+      // A corrupt draft must not stop the customer from starting a new upload.
+    }
   }
+  return null;
 }
 
 function smartPrintNativeHeadline(status:string):string {
@@ -4474,6 +4554,42 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         :"The printer has not reported its N-up capabilities yet. Ask the shop owner to reconnect the printer or refresh the Print Agent.";
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
+  const previousSessionToken=sessionStorage.getItem("qrtoprint.customer-previous-session:"+publicCode);
+  const previousDraft=useState(()=>previousSessionToken&&previousSessionToken!==sessionToken
+    ?readStoredCustomerDraft(publicCode,previousSessionToken):null)[0];
+  const previousItems=previousDraft?.uploadedBatch?.length
+    ?previousDraft.uploadedBatch
+    :previousDraft?.uploaded?[previousDraft.uploaded]:[];
+  const previousHistoryKey=previousItems.map(item=>item.job.id).join("|");
+  const [previousHistoryStatuses,setPreviousHistoryStatuses]=useState<Record<string,CustomerJobStatus>>({});
+  const [previousHistoryLoading,setPreviousHistoryLoading]=useState(previousItems.length>0);
+  const [previousHistoryUnavailable,setPreviousHistoryUnavailable]=useState(false);
+  useEffect(()=>{
+    if(!previousSessionToken||!previousHistoryKey){setPreviousHistoryLoading(false);return;}
+    let active=true;
+    let running=false;
+    const refreshPreviousHistory=async()=>{
+      if(running)return;
+      running=true;
+      try{
+        const results=await Promise.all(previousItems.map(async item=>{
+          try{return [item.job.id,await getCustomerJobStatus(previousSessionToken,item.job.id)] as const;}
+          catch{return [item.job.id,null] as const;}
+        }));
+        if(!active)return;
+        const recovered=results.reduce<Record<string,CustomerJobStatus>>((map,[id,status])=>{
+          if(status)map[id]=status;
+          return map;
+        },{});
+        setPreviousHistoryStatuses(recovered);
+        setPreviousHistoryUnavailable(results.some(([,status])=>status===null));
+        setPreviousHistoryLoading(false);
+      }finally{running=false;}
+    };
+    void refreshPreviousHistory();
+    const timer=window.setInterval(()=>void refreshPreviousHistory(),60000);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[previousSessionToken,previousHistoryKey]);
   const [files,setFiles]=useState<File[]>([]);
   const selectedFilesRef=useRef<File[]>([]);
   useEffect(()=>{selectedFilesRef.current=files;},[files]);
@@ -4689,13 +4805,38 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
+    const previousStorageKey=`qrtoprint.customer-previous-job:${publicCode}`;
+    const currentMarker=sessionToken.slice(-16);
     if(!uploaded&&uploadedBatch.length===0&&!batchName.trim()){
+      const existingRaw=localStorage.getItem(storageKey);
+      if(existingRaw){
+        try{
+          const existing=JSON.parse(existingRaw) as StoredCustomerDraft;
+          // A fresh QR session must not erase the previous session's order.
+          if(existing.sessionMarker&&existing.sessionMarker!==currentMarker)return;
+        }catch{
+          // Corrupt local metadata can be cleared safely.
+        }
+      }
       localStorage.removeItem(storageKey);
       return;
     }
+    const existingRaw=localStorage.getItem(storageKey);
+    if(existingRaw){
+      try{
+        const existing=JSON.parse(existingRaw) as StoredCustomerDraft;
+        if(existing.sessionMarker&&existing.sessionMarker!==currentMarker&&
+          (existing.uploaded?.job?.id||existing.uploadedBatch?.length||existing.batchName?.trim())){
+          // Keep one bounded prior-order snapshot; never persist a token or file bytes.
+          localStorage.setItem(previousStorageKey,existingRaw);
+        }
+      }catch{
+        // Replace malformed metadata with this session's valid snapshot.
+      }
+    }
     // Store only job metadata, never the bearer session capability.
     localStorage.setItem(storageKey,JSON.stringify({
-      sessionMarker:sessionToken.slice(-16),
+      sessionMarker:currentMarker,
       uploaded: uploaded??uploadedBatch[0],
       uploadedBatch,
       uploadedFileFingerprints,
@@ -5815,6 +5956,22 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   const photoAlreadyUploaded=Boolean(file&&uploadedFileFingerprints.includes(customerFileFingerprint(file)));
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
+    {previousItems.length>0&&<section className="customer-previous-order" aria-label="Previous print request">
+      <div className="customer-previous-order-heading"><div><span>PREVIOUS REQUEST</span><strong>From your earlier QR session</strong></div><span className="customer-previous-order-readonly">Read only</span></div>
+      <p>This request is separate from your current session. Its status is restored for reference only; printing, payment and file changes are not available here.</p>
+      <div className="customer-previous-order-list">
+        {previousItems.map(item=>{
+          const recovered=previousHistoryStatuses[item.job.id];
+          const status=recovered?.status??(previousHistoryLoading?"Refreshing status":previousHistoryUnavailable?"Status unavailable · ask the shop before resubmitting":customerStatusLabel(item.job.status??"UPLOADED"));
+          return <div className="customer-previous-order-item" key={item.job.id}>
+            <span><FileText size={14}/></span>
+            <div><strong>{resolveCustomerDocumentName(item,storedCustomerPrivateFileNames(previousDraft))}</strong><small>{item.job.jobNumber} · {status}</small></div>
+          </div>;
+        })}
+      </div>
+      {previousHistoryUnavailable&&<small className="customer-previous-order-warning">Some earlier status details could not be restored. Contact the shop before uploading the same document again.</small>}
+      <small className="customer-previous-order-footnote">Your earlier order remains attached to its original shop session. Document contents stay private; this panel restores status metadata only.</small>
+    </section>}
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · Up to {UPLOAD_LIMITS.maxBatchFiles} files / {UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB</span></div>
     <section className="customer-privacy-choice" aria-label="Document privacy choice">
       <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>Choose how files are handled</strong></div><small>Applies to all files</small></div>
@@ -6224,7 +6381,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}
     </section>}
-    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="PAID_AUTHORISED"?"Payment received. The shop is preparing your print.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop approved your print. Printing will start shortly.":["PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus?.status??"")?"Your print is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking whether your pages were printed. Please do not submit the same file again.":jobStatus?.status==="COMPLETED"?"Printing is complete. Your pages are ready for collection.":jobStatus?.status==="PDF_EXPORTED"?"Your PDF is ready.":jobStatus?.status==="REFUNDED"?"This file was not printed and the payment was returned.":jobStatus?.status==="CANCELLED"?"This request was cancelled.":jobStatus?.status==="FAILED"?"Printing could not be completed. Please speak to the shop.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"||jobStatus?.status==="LOCAL_QUEUE_READY"?"Your files have reached the shop and are being prepared.":jobStatus?.status==="AWAITING_PAYMENT"?"Your files are accepted. Complete payment to continue.":jobStatus?.status==="PAYMENT_REPORTED"?"The shop is checking your payment.":quote?"Check the price and print options before sending your request to the shop.":"Choose your files to get started."}</span></div>
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{resolveCustomerUploadStatusMessage({
+      jobStatus:jobStatus?.status??(uploaded?batchStatuses[uploaded.job.id]?.status??uploaded.job.status:null),
+      filesSelected:files.length,
+      uploadedFileCount:uploadedBatch.length||(uploaded?1:0),
+      quoteAvailable:Boolean(quote),
+      paymentStatus:payment?.status??batchPayment?.status??null,
+      uploadProgress:uploadProgress?{files:uploadProgress.files}:null
+    })}</span></div>
   </section></>;
 }
 

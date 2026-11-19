@@ -773,3 +773,73 @@ test("customer upload controls and selected-document preview reflow cleanly on n
   assert.match(css, /\.customer-file-studio-button\s*\{[^}]*grid-column:\s*2/s);
   assert.match(css, /\.customer-file-preview iframe\s*\{[^}]*height:\s*clamp\(240px,60vh,480px\)/s);
 });
+
+
+test("QR station image sharing keeps the canonical station QR and offers PNG/JPG file actions", () => {
+  const app = read("../src/App.tsx");
+  const exporter = read("../src/qr-station-export.ts");
+  const printPoster = read("../src/QrStationPrintDocument.tsx");
+  assert.ok(app.includes("Download or share QR image"));
+  assert.ok(app.includes("PNG · best QR clarity"));
+  assert.ok(app.includes("JPG · smaller file"));
+  assert.ok(app.includes("shareQrStationImage(file)"));
+  assert.ok(app.includes("File sharing is not supported here"));
+  assert.ok(app.includes("The QR contains this station’s current public link"));
+  assert.ok(app.includes("The image was not sent"));
+  assert.ok(app.includes("Station link copied."));
+  assert.ok(app.includes("Could not copy automatically"));
+  assert.ok(app.includes("downloadQrStationImage(file)"));
+  assert.ok(app.includes('document.getElementById("qr-station-"+station.id)'));
+  assert.ok(app.includes('QRCode value={station.publicUrl}'));
+  assert.ok(exporter.includes('width="1080" height="1350"'));
+  assert.ok(exporter.includes("TEMPORARILY PAUSED"));
+  assert.ok(exporter.includes("shareNavigator.canShare"));
+  assert.ok(exporter.includes("image/jpeg"));
+  assert.ok(printPoster.includes("<QRCode value={station.publicUrl}"),
+    "The existing A5 print poster must remain available.");
+});
+
+test("customer QR session recovery is tab-scoped and the previous order is explicitly read-only", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../../../src/SmartPrint.Api/Program.cs");
+  assert.ok(app.includes("qrtoprint.customer-previous-session:"));
+  assert.ok(app.includes("qrtoprint.customer-previous-job:"));
+  assert.ok(app.includes("From your earlier QR session"));
+  assert.ok(app.includes("Read only"));
+  assert.ok(app.includes("read-only"));
+  const routeStart = api.indexOf('publicApi.MapGet("/jobs/{jobId:guid}/status"');
+  assert.ok(routeStart >= 0, "The public per-job status route must exist.");
+  const routeEnd = api.indexOf("publicApi.Map", routeStart + 20);
+  const route = api.slice(routeStart, routeEnd > routeStart ? routeEnd : undefined);
+  assert.ok(route.includes("CustomerSessionHistoryRules.CanReadStatus"));
+  assert.ok(route.includes("item.CustomerSessionId == session.Id"));
+  assert.ok(!route.includes("MapPost"), "The history grace period must not add write actions.");
+});
+
+test("customer status footer differentiates selected, uploading and previously uploaded files", () => {
+  const app = read("../src/App.tsx");
+  const status = read("../src/customer-upload-status.ts");
+  assert.ok(app.includes("resolveCustomerUploadStatusMessage({"));
+  assert.ok(status.includes("Uploading your documents"));
+  assert.ok(status.includes("Files uploaded successfully"));
+  assert.ok(status.includes("Review your selected files and upload"));
+  assert.ok(status.includes("Choose documents or images to begin"));
+});
+
+test("shop order journey exposes single-file decisions and separates ready work from active work", () => {
+  const page = read("../src/OrderJourneyPage.tsx");
+  const css = read("../src/OrderJourney.module.css");
+  assert.ok(page.includes('singleFileReviewJob?.status==="AWAITING_SHOP_APPROVAL"'));
+  assert.ok(page.includes("Accept file"));
+  assert.ok(page.includes("Reject file"));
+  assert.ok(page.includes("readyForCollection"));
+  assert.ok(css.includes(".miniAction{min-height:40px"));
+  assert.ok(css.includes(".signalRow small{font-size:9px"));
+});
+
+test("shop media preview distinguishes loading, unsupported and failed media states", () => {
+  const preview = read("../src/ShopDocumentPreviewSurface.tsx");
+  assert.ok(preview.includes('data-preview-state={failed ? "failed"'));
+  assert.ok(preview.includes("Loading preview"));
+  assert.ok(preview.includes("access link may have expired"));
+});
