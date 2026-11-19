@@ -610,8 +610,8 @@ async function prepareUploadPagePhoto(page, name) {
   const dialog = page.getByRole("dialog", { name: "Photo Studio" });
   await dialog.waitFor({ state: "visible", timeout: 15000 });
   await dialog.getByLabel("Photo size").selectOption("4x6");
-  await dialog.getByLabel("Number of photos").fill("2");
-  await dialog.getByLabel("Number of photos").press("Tab");
+  await dialog.getByLabel("Number of copies").fill("2");
+  await dialog.getByLabel("Number of copies").press("Tab");
   await page.waitForFunction(() => {
     const button = document.querySelector("#photo-studio-apply");
     return button instanceof HTMLButtonElement && !button.disabled;
