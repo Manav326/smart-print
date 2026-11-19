@@ -6111,7 +6111,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Unavailable</small></button>}
       {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Encrypted online transfer · print when ready</small></button>}
     </div>}
-    {!privatePrinting&&uploadMode==="LOCAL"&&!!localAgent?.endpoints.length&&<CustomerInlineNotice kind="warning" title="Local transfer is not encrypted">Choose HTTPS or Private Printing for an encrypted transfer.</CustomerInlineNotice>}
     {!localAgent?.endpoints.length&&<small className="customer-upload-local-note">Shop connection details <InfoTooltip label="Shop connection unavailable"><span>The shop computer has no reachable local connection.</span></InfoTooltip></small>}
     {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload unavailable. <InfoTooltip label="Upload unavailable"><span>No file was uploaded. Ask the shop to reconnect its print service, then retry.</span></InfoTooltip></div>}
     {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<div className="customer-upload-local-note" role="status">Encrypted online relay in use. <InfoTooltip label="Secure relay details"><span>No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.</span></InfoTooltip></div>}
@@ -6322,7 +6321,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       </div>
       <small>HTTPS progress is measured by the browser. Local and encrypted streams report bytes handed to the connection; each file is marked complete only after SmartPrint confirms the response. Successful files remain saved if another file fails.</small>
     </section>}
-    {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?<>Local transfer is not encrypted. <InfoTooltip label="Local transfer security"><span>Shop Wi-Fi uses local HTTP. Choose Cloud-assisted for encrypted HTTPS transfer.</span></InfoTooltip></>:<>Check shop Wi-Fi first. <InfoTooltip label="Shop Wi-Fi access"><span>In a browser, tap Check shop Wi-Fi above to grant local network access.</span></InfoTooltip></>}</small>}
+    {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&(localReady
+      ?<CustomerInlineNotice kind="warning" title="Local transfer is not encrypted">Shop Wi-Fi uses HTTP. Choose the HTTPS option when available.</CustomerInlineNotice>
+      :<CustomerInlineNotice kind="info" title="Check shop Wi-Fi">Tap Check shop Wi-Fi above and allow local-network access.</CustomerInlineNotice>)}
     {files.length>0&&uploadMode==="CLOUD"&&<small className="customer-upload-local-note">Encrypted HTTPS upload. <InfoTooltip label="Secure upload details"><span>Files are encrypted in transit and stored in the existing print queue until the shop computer is ready.</span></InfoTooltip></small>}
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
