@@ -184,7 +184,7 @@ app.MapGet("/downloads/status", async (
     HttpContext context,
     CancellationToken cancellationToken) =>
 {
-    context.Response.Headers["Cache-Control"] = "no-store";
+    context.Response.Headers.CacheControl = "no-store";
     try
     {
         return Results.Ok(await downloads.GetStatusAsync(cancellationToken));
@@ -10789,7 +10789,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
     SmartPrintDbContext db,
     CancellationToken ct) =>
 {
-    context.Response.Headers.CacheControl = "no-store";
+    context.Response.Headers["Cache-Control"] = "no-store";
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
     var rawGrant = context.Request.Headers["X-Print-Upload-Grant"].FirstOrDefault();
     if (string.IsNullOrWhiteSpace(rawToken) || string.IsNullOrWhiteSpace(rawGrant) || rawGrant.Length is < 40 or > 128)
@@ -12499,6 +12499,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
     SmartPrintDbContext db,
     CancellationToken ct) =>
 {
+    context.Response.Headers["Cache-Control"] = "no-store";
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
     if (string.IsNullOrWhiteSpace(rawToken))
     {
@@ -12509,14 +12510,18 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
     var now = DateTimeOffset.UtcNow;
     var session = await db.CustomerPrintSessions.AsNoTracking()
         .Where(item => item.TokenHash == tokenHash && item.Status == "Active" &&
-                       item.RevokedUtc == null && item.ExpiresUtc > now)
-        .Select(item => new { item.Id, item.TenantId })
+                       item.RevokedUtc == null)
+        .Select(item => new { item.Id, item.TenantId, item.Status, item.RevokedUtc, item.ExpiresUtc })
         .SingleOrDefaultAsync(ct);
-    if (session is null)
+    if (session is null || !CustomerSessionHistoryRules.CanReadStatus(
+            session.Status, session.RevokedUtc, session.ExpiresUtc, now))
     {
         return Results.Unauthorized();
     }
 
+    // This endpoint is read-only. The grace period lets a customer check the
+    // original session's jobs after the QR session expires; every upload, quote,
+    // payment, renewal and print action continues to require a live session.
     var storedJob = await db.PrintJobs.AsNoTracking()
         .Where(item => item.Id == jobId && item.TenantId == session.TenantId &&
                        item.CustomerSessionId == session.Id)

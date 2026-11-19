@@ -662,7 +662,7 @@ test("customer uploader keeps its batch example, inline Android PDF preview and 
  assert.match(api,/previousStatus\?: string \| null/);
  assert.match(program,/new \{ item\.PreviousStatus, item\.NewStatus, item\.ActorType, item\.CreatedUtc \}/);
  assert.match(css,/\.customer-native-pdf-preview/);
- assert.match(css,/\.customer-batch-quote-card>div:first-child>strong\{[\s\S]*?white-space:nowrap/);
+ assert.match(css,/\.customer-batch-quote-card \.customer-batch-quote-title>strong\{[\s\S]*?white-space:normal;[\s\S]*?overflow-wrap:anywhere/);
 });
 
 test("Android customer PDF preview stays inline and UPI QR downloads through the Android Save As picker",()=>{
@@ -694,15 +694,18 @@ test("customer-facing print choices explain privacy versus connection without ch
  assert.match(app,/batchQuoteBreakdown\.normalDocumentSourcePages/);
  assert.match(app,/batchQuoteBreakdown\.totalOutputPagesAndSheets/);
  assert.match(app,/className="customer-batch-quote-lines"/);
- assert.match(app,/Normal documents ·/);
- assert.match(app,/ID cards ·/);
- assert.match(app,/Photo printing ·/);
+ assert.match(app,/<details className="customer-batch-quote-details">/);
+ assert.match(app,/<strong>Normal documents<\/strong>/);
+ assert.match(app,/<strong>ID cards<\/strong>/);
+ assert.match(app,/<strong>Photo printing<\/strong>/);
+ assert.match(app,/<strong>Total output<\/strong>/);
+ assert.match(app,/output sides after N-up and copies/);
  assert.match(app,/UPI transaction ID \(UTR\)/);
  assert.match(app,/Find it in your UPI app under payment details or transaction history/);
  assert.ok(app.includes("Normal PDF/document pages are original pages."));
- assert.ok(app.includes("For driver-backed N-up, the selected pages-per-sheet value groups source pages onto output sides;"));
- assert.ok(app.includes("Normal-document output counts page sides after copies."));
- assert.ok(app.includes("With duplex printing, two page sides may share one physical sheet."));
+ assert.ok(app.includes("For N-up printing, pages per sheet groups source pages onto output sides;"));
+ assert.ok(app.includes("Rejected or refunded files are excluded from the total."));
+ assert.ok(app.includes("Duplex printing can place two output sides on one physical sheet."));
 });
 
 

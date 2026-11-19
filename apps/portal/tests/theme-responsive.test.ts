@@ -773,3 +773,165 @@ test("customer upload controls and selected-document preview reflow cleanly on n
   assert.match(css, /\.customer-file-studio-button\s*\{[^}]*grid-column:\s*2/s);
   assert.match(css, /\.customer-file-preview iframe\s*\{[^}]*height:\s*clamp\(240px,60vh,480px\)/s);
 });
+
+
+test("QR station image sharing keeps the canonical station QR and offers PNG/JPG file actions", () => {
+  const app = read("../src/App.tsx");
+  const exporter = read("../src/qr-station-export.ts");
+  const printPoster = read("../src/QrStationPrintDocument.tsx");
+  assert.ok(app.includes("Download or share QR image"));
+  assert.ok(app.includes("PNG · best QR clarity"));
+  assert.ok(app.includes("JPG · smaller file"));
+  assert.ok(app.includes("shareQrStationImage(file)"));
+  assert.ok(app.includes("File sharing is not supported here"));
+  assert.ok(app.includes("The QR contains this station’s current public link"));
+  assert.ok(app.includes("The image was not sent"));
+  assert.ok(app.includes("Station link copied."));
+  assert.ok(app.includes("Could not copy automatically"));
+  assert.ok(app.includes("downloadQrStationImage(file)"));
+  assert.ok(app.includes('document.getElementById("qr-station-"+station.id)'));
+  assert.ok(app.includes('QRCode value={station.publicUrl}'));
+  assert.ok(exporter.includes('width="1080" height="1350"'));
+  assert.ok(exporter.includes("TEMPORARILY PAUSED"));
+  assert.ok(exporter.includes("shareNavigator.canShare"));
+  assert.ok(exporter.includes("image/jpeg"));
+  assert.ok(printPoster.includes("<QRCode value={station.publicUrl}"),
+    "The existing A5 print poster must remain available.");
+});
+
+test("customer QR session recovery is tab-scoped and the previous order is explicitly read-only", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../../../src/SmartPrint.Api/Program.cs");
+  assert.ok(app.includes("qrtoprint.customer-previous-session:"));
+  assert.ok(app.includes("qrtoprint.customer-previous-job:"));
+  assert.ok(app.includes("From your earlier QR session"));
+  assert.ok(app.includes("Read only"));
+  assert.ok(app.includes("read-only"));
+  const routeStart = api.indexOf('publicApi.MapGet("/jobs/{jobId:guid}/status"');
+  assert.ok(routeStart >= 0, "The public per-job status route must exist.");
+  const routeEnd = api.indexOf("publicApi.Map", routeStart + 20);
+  const route = api.slice(routeStart, routeEnd > routeStart ? routeEnd : undefined);
+  assert.ok(route.includes("CustomerSessionHistoryRules.CanReadStatus"));
+  assert.ok(route.includes("item.CustomerSessionId == session.Id"));
+  assert.ok(!route.includes("MapPost"), "The history grace period must not add write actions.");
+});
+
+test("customer status footer differentiates selected, uploading and previously uploaded files", () => {
+  const app = read("../src/App.tsx");
+  const status = read("../src/customer-upload-status.ts");
+  assert.ok(app.includes("resolveCustomerUploadStatusMessage({"));
+  assert.ok(status.includes("Uploading your documents"));
+  assert.ok(status.includes("Files uploaded successfully"));
+  assert.ok(status.includes("Review your selected files and upload"));
+  assert.ok(status.includes("Choose documents or images to begin"));
+});
+
+test("shop order journey exposes single-file decisions and separates ready work from active work", () => {
+  const page = read("../src/OrderJourneyPage.tsx");
+  const css = read("../src/OrderJourney.module.css");
+  assert.ok(page.includes('singleFileReviewJob?.status==="AWAITING_SHOP_APPROVAL"'));
+  assert.ok(page.includes("Accept file"));
+  assert.ok(page.includes("Reject file"));
+  assert.ok(page.includes("readyForCollection"));
+  assert.ok(css.includes(".miniAction{min-height:40px"));
+  assert.ok(css.includes(".signalRow small{font-size:9px"));
+});
+
+test("shop media preview distinguishes loading, unsupported and failed media states", () => {
+  const preview = read("../src/ShopDocumentPreviewSurface.tsx");
+  assert.ok(preview.includes('data-preview-state={failed ? "failed"'));
+  assert.ok(preview.includes("Loading preview"));
+  assert.ok(preview.includes("access link may have expired"));
+});
+
+
+test("QR image sharing prepares the file before a separate user-activated share action", () => {
+  const app = read("../src/App.tsx");
+  const handlerStart = app.indexOf("const sharePreparedStationImage=(station:QrStation)=>{");
+  assert.ok(handlerStart >= 0, "The ready-to-share file must have a dedicated click handler.");
+  const handlerEnd = app.indexOf("\n  useEffect(()=>{", handlerStart);
+  const handler = app.slice(handlerStart, handlerEnd > handlerStart ? handlerEnd : undefined);
+  assert.ok(handler.includes("void shareQrStationImage(file)"));
+  assert.ok(!handler.includes("await "), "Image generation must finish before the share click to preserve browser user activation.");
+  assert.ok(app.includes("Prepare to share"));
+  assert.ok(app.includes("Share image now"));
+  assert.ok(app.includes("stationImageSignature(station)"), "Stale prepared artwork must not be shared after station details change.");
+});
+
+
+test("shop PDF previews never leave an indefinite loading spinner when the browser viewer is slow", () => {
+  const preview = read("../src/ShopDocumentPreviewSurface.tsx");
+  const css = read("../src/styles.css");
+  assert.ok(preview.includes("setTimeout(() => setSlow(true), 8_000)"));
+  assert.ok(preview.includes('slow ? "slow" : "loading"'));
+  assert.ok(preview.includes("Preview is taking longer than expected"));
+  assert.ok(preview.includes("setSlow(false); setLoading(false)"), "A late viewer load must still clear the advisory state.");
+  assert.ok(css.includes(".shop-document-preview-slow{"));
+});
+
+
+test("customer batch quote separates the total, included files, excluded files and optional price details", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /aria-label="Batch quote summary"/);
+  assert.match(app, /batchQuoteSummary/);
+  assert.match(app, /customer-batch-quote-chip included/);
+  assert.match(app, /customer-batch-quote-chip excluded/);
+  assert.match(app, /customer-batch-quote-chip document/);
+  assert.match(app, /customer-batch-quote-chip id-card/);
+  assert.match(app, /customer-batch-quote-chip photo/);
+  assert.match(app, /aria-label="File-by-file prices"/);
+  assert.match(app, /customer-batch-quote-line-amount/);
+  assert.match(app, /quoteRows\.map\(entry=>/);
+  assert.match(app, /batchQuoteNeedsRefresh/);
+  assert.match(app, /batchQuoteTotalDisplay/);
+  assert.match(app, /hasAcceptedQuoteLocked/);
+  assert.match(app, /No accepted files have a current quote yet/);
+  assert.match(app, /acceptedBatchRows/);
+  assert.match(app, /Quote expired/);
+  assert.match(app, /Quote needed/);
+  assert.match(app, /<details className="customer-batch-quote-details">/);
+  assert.match(app, /See price breakdown/);
+  assert.match(app, /This is a quote, not a payment/);
+  assert.match(css, /\.customer-batch-quote-lines>div\.customer-batch-quote-line\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\) auto/s);
+  assert.match(css, /\.customer-batch-quote-details\s*\{/);
+  assert.match(css, /@media\(max-width:650px\)\s*\{[^}]*\.customer-batch-quote-card/s);
+  assert.match(css, /@media\(max-width:380px\)\s*\{[^}]*\.customer-batch-quote-heading/s);
+});
+
+test("shop batch review communicates included and excluded choices, valid quotes and non-payment next steps", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /aria-label="Batch review summary"/);
+  assert.match(app, /Accepted value · valid quotes only/);
+  assert.match(app, /Included files stay in one checkout/);
+  assert.match(app, /See order status/);
+  assert.match(app, /need a fresh quote/);
+  assert.match(app, /Include this file in the customer's batch checkout/);
+  assert.match(app, /Will be excluded/);
+  assert.match(app, /Not charged/);
+  assert.match(app, /source pages → \$\{outputSides\} output sides/);
+  assert.match(app, /acceptedOutputSides/);
+  assert.match(app, /ID-card A4 sheets/);
+  assert.match(app, /photo A4 pages/);
+  assert.match(app, /Document output mix/);
+  assert.match(app, /Applying this review saves the file decisions\. It does not collect payment or send files to a printer\./);
+  assert.match(app, /Save batch review/);
+  assert.match(app, /<details className="batch-review-folder"/);
+  assert.match(css, /\.batch-review-overview\s*\{/);
+  assert.match(css, /\.batch-review-stats\s*>\.included/);
+  assert.match(css, /\.batch-review-stats\s*>\.excluded/);
+  assert.match(css, /\.batch-review-stats\s*>\.refresh/);
+  assert.match(css, /\.batch-review-stats\s*>\.id-cards/);
+  assert.match(css, /\.batch-review-stats\s*>\.photos/);
+  assert.match(css, /\.batch-review-file-finance/);
+  assert.match(css, /\.batch-review-next-step/);
+  assert.match(css, /\.batch-review-toggle\{[^}]*min-height:40px/);
+  assert.match(css, /\.batch-review-folder-head\{[^}]*min-height:44px/);
+  assert.match(css, /\.batch-review-preview\{min-height:40px/);
+  assert.ok(css.includes("@media(max-width:650px){"));
+  assert.ok(css.includes(".batch-review-row{grid-template-columns:minmax(0,1fr) auto;"));
+  assert.match(css, /html\[data-theme="dark"\] \.batch-review-overview/);
+});

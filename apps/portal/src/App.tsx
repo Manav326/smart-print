@@ -6,7 +6,7 @@ import { calculateBatchQuoteBreakdown } from "./batch-quote-breakdown.js";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound,
+  ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound, Share2,
   ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, RefreshCw, Zap, Info, Lock
 } from "lucide-react";
 import QRCode from "react-qr-code";
@@ -23,6 +23,8 @@ import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from ".
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
 import QrStationPrintDocument from "./QrStationPrintDocument";
+import { createQrStationImageFile, downloadQrStationImage, loadQrStationLogoDataUri, shareQrStationImage, type QrStationImageFormat } from "./qr-station-export";
+import { resolveCustomerUploadStatusMessage } from "./customer-upload-status";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import PlatformAdminConsole from "./PlatformAdminConsole";
 import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
@@ -2342,6 +2344,85 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
   const [printingStationId,setPrintingStationId]=useState<string|null>(null);
+  const [formatByStation,setFormatByStation]=useState<Record<string,QrStationImageFormat>>({});
+  const [exportingStationId,setExportingStationId]=useState<string|null>(null);
+  const [copyFeedback,setCopyFeedback]=useState<Record<string,{kind:"success"|"error";message:string}>>({});
+  const [exportFeedback,setExportFeedback]=useState<Record<string,{kind:"success"|"info"|"error";message:string}>>({});
+  const [preparedShareImage,setPreparedShareImage]=useState<{stationId:string;signature:string;file:File}|null>(null);
+  const imageFormatFor=(station:QrStation)=>formatByStation[station.id]??"png";
+  const stationImageSignature=(station:QrStation)=>JSON.stringify([
+    station.publicUrl??"",station.displayName,station.isEnabled,
+    profile?.displayName??"",profile?.logoUrl??"",imageFormatFor(station)
+  ]);
+  const copyStationUrl=async(station:QrStation)=>{
+    if(!station.publicUrl)return;
+    const copied=await copyText(station.publicUrl);
+    setCopyFeedback(current=>({...current,[station.id]:copied
+      ?{kind:"success",message:"Station link copied."}
+      :{kind:"error",message:"Could not copy automatically. Open the link and copy it manually."}}));
+  };
+  const createStationImage=async(station:QrStation)=>{
+    if(!station.publicUrl)throw new Error("This station does not have a public QR link yet.");
+    const root=document.getElementById("qr-station-"+station.id);
+    const qrSvg=root?.querySelector<SVGSVGElement>(".qr-code-frame svg");
+    if(!qrSvg)throw new Error("The station QR code is not ready. Refresh the page and try again.");
+    const logoDataUri=await loadQrStationLogoDataUri(profile?.logoUrl);
+    return createQrStationImageFile({
+      shopName:profile?.displayName?.trim()||station.displayName,
+      stationName:station.displayName,
+      isEnabled:station.isEnabled,
+      logoDataUri
+    },new XMLSerializer().serializeToString(qrSvg),imageFormatFor(station));
+  };
+  const exportStationImage=async(station:QrStation)=>{
+    setExportingStationId(station.id);
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing a sharp, scan-ready QR image…"}}));
+    try{
+      const file=await createStationImage(station);
+      downloadQrStationImage(file);
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Your "+imageFormatFor(station).toUpperCase()+" QR image is ready."}}));
+    }catch(exception){
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+    }finally{setExportingStationId(null);}
+  };
+  const prepareStationShare=async(station:QrStation)=>{
+    setExportingStationId(station.id);
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing the QR image for sharing…"}}));
+    try{
+      const file=await createStationImage(station);
+      setPreparedShareImage({stationId:station.id,signature:stationImageSignature(station),file});
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Image ready. Tap “Share image now” to open your device’s share options."}}));
+    }catch(exception){
+      setPreparedShareImage(null);
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+    }finally{setExportingStationId(null);}
+  };
+  const sharePreparedStationImage=(station:QrStation)=>{
+    const prepared=preparedShareImage;
+    if(!prepared||prepared.stationId!==station.id||prepared.signature!==stationImageSignature(station)){
+      setPreparedShareImage(null);
+      setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Station details changed. Prepare the image again before sharing."}}));
+      return;
+    }
+    setExportingStationId(station.id);
+    const file=prepared.file;
+    // Invoke navigator.share directly from this click. Image generation has
+    // already finished, so the browser's transient user activation is intact.
+    void shareQrStationImage(file).then(result=>{
+      if(result==="shared"){
+        setPreparedShareImage(null);
+        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR image shared successfully."}}));
+      }else if(result==="cancelled"){
+        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Sharing was cancelled. The image was not sent."}}));
+      }else{
+        downloadQrStationImage(file);
+        setPreparedShareImage(null);
+        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"File sharing is not supported here, so the QR image was downloaded instead."}}));
+      }
+    }).catch(exception=>{
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not share this QR image."}}));
+    }).finally(()=>setExportingStationId(null));
+  };
   useEffect(()=>{
     if(!printingStationId)return;
     let cancelled=false;
@@ -2384,7 +2465,28 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
           <div className="qr-powered"><small>POWERED BY</small><div className="qr-powered-lockup" aria-label="QuantaEdge, Smarter Decisions. Greater Growth."><img className="qr-quantaedge-mark" src="/branding/quantaedge-mark.png" alt="" onError={event=>{event.currentTarget.hidden=true;const fallback=event.currentTarget.nextElementSibling;if(fallback instanceof HTMLElement)fallback.hidden=false;}}/><span className="qr-quantaedge-mark-fallback" hidden aria-hidden="true">Q</span><div className="qr-powered-wordmark"><strong>Quanta<span>Edge</span></strong><small>Smarter Decisions. Greater Growth.</small></div></div></div>
         </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div>}</div>
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:station.isEnabled?"Disable station":"Enable station"}</button></div>
-        {station.publicUrl && <div className="station-actions"><button className="secondary-button" onClick={()=>void copyText(station.publicUrl!)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print / download QR poster</button></div>}
+        {station.publicUrl && <>
+           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print / download QR poster</button></div>
+           {copyFeedback[station.id]&&<small className={"qr-share-feedback "+copyFeedback[station.id].kind} role="status" aria-live="polite">{copyFeedback[station.id].message}</small>}
+           <details className="qr-share-export">
+             <summary><Share2 size={15}/> Download or share QR image <span>PNG / JPG</span></summary>
+             <div className="qr-share-export-controls">
+               <label>Image format
+                 <select value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));}} disabled={!!exportingStationId}>
+                   <option value="png">PNG · best QR clarity</option>
+                   <option value="jpg">JPG · smaller file</option>
+                 </select>
+               </label>
+               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<ImageIcon size={14}/>} Download image</button>
+               {preparedShareImage?.stationId===station.id&&preparedShareImage.signature===stationImageSignature(station)
+                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Share image now</button>
+                 :<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Prepare to share</button>}
+             </div>
+             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The exported image is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
+             {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
+             <small className="qr-share-export-help">Prepare the image first, then tap “Share image now” to open your device’s share sheet. If file sharing is unavailable, SmartPrint downloads the same image instead. The QR contains this station’s current public link, never a customer session token.</small>
+           </details>
+         </>}
       </article>)}</div>}
     </section>
     <QrStationPrintDocument station={stations.find(station => station.id === printingStationId) ?? null} profile={profile}/>
@@ -3041,24 +3143,60 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   const quoteRefreshRequiredCount=acceptedJobs.filter(quoteExpired).length;
   const acceptedTotal=acceptedJobs.filter(job=>!quoteExpired(job))
     .reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
-  const acceptedRequestedPages=acceptedJobs.reduce((sum,job)=>sum+printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies),0);
-  const acceptedMonoPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
-  const acceptedColourPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
+  const acceptedDocumentJobs=acceptedJobs.filter(job=>job.printKind!=="PHOTO"&&job.printKind!=="ID_DOCUMENT");
+  const acceptedIdCardJobs=acceptedJobs.filter(job=>job.printKind==="ID_DOCUMENT");
+  const acceptedPhotoJobs=acceptedJobs.filter(job=>job.printKind==="PHOTO");
+  const acceptedOutputSides=acceptedDocumentJobs.reduce((sum,job)=>sum+printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies),0);
+  const acceptedIdSheets=acceptedIdCardJobs.reduce((sum,job)=>sum+job.pageCount,0);
+  const acceptedPhotoPages=acceptedPhotoJobs.reduce((sum,job)=>sum+job.pageCount,0);
+  const acceptedMonoPages=acceptedDocumentJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
+  const acceptedColourPages=acceptedDocumentJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
   const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
-  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Files start accepted. Uncheck a file to exclude it; recheck it to restore it."} onClose={onClose}>
-    <div className="batch-review-list">{folders.map(folderName=><section className="batch-review-folder" key={folderName}>
-      <div className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).length} files</small></div>
-      {jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).map((job,index)=>{
-        const accepted=decisions[job.id]??true;
-        const needsFreshQuote=accepted&&quoteExpired(job);
-        return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
-          <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
-          <span className="batch-review-index">{index+1}</span>
-          <div className="batch-review-file"><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag">Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
-          <button className="subtle-button" type="button" disabled={busy||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source · preview disabled":"Preview"}</button>
-        </div>;
-      })}
-    </section>)}</div>
+  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Select the files that should remain in the customer's batch checkout. Excluded files will not be charged."} onClose={onClose}>
+    <section className="batch-review-overview" aria-label="Batch review summary">
+      <div className="batch-review-overview-heading"><div><span>REVIEW SUMMARY</span><strong>{jobs.length} {jobs.length===1?"file":"files"} in this batch</strong><small>Included files stay in one checkout. Excluded files will not be charged.</small></div><div className="batch-review-total"><small>Accepted value · valid quotes only</small><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong></div></div>
+      <div className="batch-review-stats">
+        <span className="included"><b>{acceptedCount}</b> included</span>
+        <span className="excluded"><b>{rejectedCount}</b> excluded</span>
+        <span className="output"><b>{acceptedOutputSides}</b> document output sides</span>
+        {acceptedIdSheets>0&&<span className="id-cards"><b>{acceptedIdSheets}</b> ID-card A4 sheets</span>}
+        {acceptedPhotoPages>0&&<span className="photos"><b>{acceptedPhotoPages}</b> photo A4 pages</span>}
+        {quoteRefreshRequiredCount>0&&<span className="refresh"><b>{quoteRefreshRequiredCount}</b> need a fresh quote</span>}
+      </div>
+      <div className="batch-review-output-note"><span><strong>Document output mix</strong></span><span><i className="mono-dot"/> B&W <strong>{acceptedMonoPages}</strong></span><span><i className="colour-dot"/> Colour <strong>{acceptedColourPages}</strong></span></div>
+    </section>
+    <div className="batch-review-list">{folders.map(folderName=>{
+      const folderJobs=jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName);
+      const folderAccepted=folderJobs.filter(job=>decisions[job.id]??true).length;
+      return <details className="batch-review-folder" key={folderName} open>
+        <summary className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{folderAccepted} of {folderJobs.length} included</small></summary>
+        {folderJobs.map((job,index)=>{
+          const accepted=decisions[job.id]??true;
+          const needsFreshQuote=accepted&&quoteExpired(job);
+          const outputSides=printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies);
+          const fileName=job.document.originalFileName;
+          const printDetail=job.printKind==="PHOTO"
+            ? `${job.photoCount??0} finished photos · ${job.photoSizeCode??"Size not recorded"} · ${job.pageCount} A4 pages`
+            : job.printKind==="ID_DOCUMENT"
+              ? `${job.pageCount} prepared A4 ${job.pageCount===1?"sheet":"sheets"} · ${job.copies} ${job.copies===1?"copy":"copies"} · ID card layout`
+              : `${job.pageCount} source pages → ${outputSides} output sides · ${job.copies} ${job.copies===1?"copy":"copies"} · ${job.pagesPerSheet??1} per sheet · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`;
+          return <article className={"batch-review-row "+(accepted?"accepted":"rejected")} key={job.id}>
+            <label className="batch-review-toggle" title="Include this file in the customer's batch checkout">
+              <input type="checkbox" checked={accepted} disabled={busy} aria-label={"Include "+fileName+" in batch checkout"} onChange={event=>onDecision(job.id,event.currentTarget.checked)}/>
+              <span>{accepted?"Included":"Excluded"}</span>
+            </label>
+            <span className="batch-review-index">{index+1}</span>
+            <div className="batch-review-file">
+              <div className="batch-review-file-heading"><strong>{fileName}</strong>{job.privatePrinting&&<span className="private-printing-tag">Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/></div>
+              <small>{printDetail}</small>
+              <div className="batch-review-file-status"><Status label={!accepted?"Will be excluded":needsFreshQuote?"Fresh quote required":"Included in checkout"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
+            </div>
+            <div className="batch-review-file-finance"><strong>{!accepted?"Not charged":needsFreshQuote?"—":formatMoney(job.quotedAmountMinor,job.currency)}</strong><small>{!accepted?"Excluded":needsFreshQuote?"Recalculate before checkout":"Current quote"}</small></div>
+            <button className="subtle-button batch-review-preview" type="button" disabled={busy||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source":"Preview"}</button>
+          </article>;
+        })}
+      </details>;
+    })}</div>
     <div className="batch-branding-setting">
       <div className="batch-branding-copy">
         <strong>SmartPrint PDF footer <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Multi-copy or reformatted exports may be flattened.</span></InfoTooltip></strong>
@@ -3069,8 +3207,8 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         <span>{hasIdDocument?"Unavailable for ID card sheets":pdfBrandingEnabled?"On for this batch":"Off · default"}</span>
       </label>
     </div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedRequestedPages}</strong> output sides requested</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value with valid quotes</span>{quoteRefreshRequiredCount>0&&<span><strong>{quoteRefreshRequiredCount}</strong> need a fresh quote</span>}<small>Original PDF pages remain available for page review. Billable output sides = ceil(source pages ÷ pages per sheet) × copies. Duplex sheets group two output sides. Refresh expired quotes before checkout.</small></div>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled&&!hasIdDocument)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
+    <p className="batch-review-next-step">{quoteRefreshRequiredCount>0?quoteRefreshRequiredCount+" accepted file(s) need a new quote before customer checkout. ":""}Applying this review saves the file decisions. It does not collect payment or send files to a printer.</p>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled&&!hasIdDocument)}>{busy?<span className="button-spinner"/>:"Save batch review"}</button></div>
   </Modal>;
 }
 
@@ -3618,11 +3756,11 @@ function pageDescription(section:Section) {
   };
   return descriptions[section];
 }
-async function copyText(value:string) {
+async function copyText(value:string):Promise<boolean> {
   try {
     if(navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);
-      return;
+      return true;
     }
   } catch {
     // Fall through to the in-page clipboard fallback.
@@ -3634,7 +3772,8 @@ async function copyText(value:string) {
   helper.style.opacity="0";
   document.body.appendChild(helper);
   helper.select();
-  try { document.execCommand("copy"); } finally { helper.remove(); }
+  try { return document.execCommand("copy"); } catch { return false; }
+  finally { helper.remove(); }
 }
 
 function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
@@ -3728,6 +3867,9 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
           existing=await resumeCustomerSession(storedToken,publicCode);
         } catch(exception) {
           if(exception instanceof ApiError&&exception.status===401){
+            // Retain the expired capability only in this tab, for read-only
+            // restoration of its own order. It is never saved to localStorage.
+            sessionStorage.setItem("qrtoprint.customer-previous-session:"+publicCode,storedToken);
             sessionStorage.removeItem(stationKey);
             sessionStorage.removeItem("qrtoprint.customer-session");
             await clearNativeCustomerPrintSession(publicCode);
@@ -3757,6 +3899,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     setLocalReady(false);
     setLocalFallbackSuggested(false);
     try{
+      sessionStorage.removeItem("qrtoprint.customer-previous-session:"+publicCode);
       const value=await createCustomerSession(publicCode);
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       await saveNativeCustomerShopProfile(publicCode,value.shop);
@@ -4410,15 +4553,23 @@ function normalizeCustomerCopies(value:string):string {
 }
 
 function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCustomerDraft|null {
-  try {
-    const raw=localStorage.getItem(`qrtoprint.customer-active-job:${publicCode}`);
-    if(!raw)return null;
-    const draft=JSON.parse(raw) as StoredCustomerDraft;
-    return draft.sessionMarker===sessionToken.slice(-16)&&
-      (draft.uploaded?.job?.id||draft.uploadedBatch?.length||draft.batchName?.trim())?draft:null;
-  } catch {
-    return null;
+  const marker=sessionToken.slice(-16);
+  const keys=[
+    `qrtoprint.customer-active-job:${publicCode}`,
+    `qrtoprint.customer-previous-job:${publicCode}`
+  ];
+  for(const key of keys){
+    try {
+      const raw=localStorage.getItem(key);
+      if(!raw)continue;
+      const draft=JSON.parse(raw) as StoredCustomerDraft;
+      if(draft.sessionMarker===marker&&
+        (draft.uploaded?.job?.id||draft.uploadedBatch?.length||draft.batchName?.trim()))return draft;
+    } catch {
+      // A corrupt draft must not stop the customer from starting a new upload.
+    }
   }
+  return null;
 }
 
 function smartPrintNativeHeadline(status:string):string {
@@ -4474,6 +4625,42 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         :"The printer has not reported its N-up capabilities yet. Ask the shop owner to reconnect the printer or refresh the Print Agent.";
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
+  const previousSessionToken=sessionStorage.getItem("qrtoprint.customer-previous-session:"+publicCode);
+  const previousDraft=useState(()=>previousSessionToken&&previousSessionToken!==sessionToken
+    ?readStoredCustomerDraft(publicCode,previousSessionToken):null)[0];
+  const previousItems=previousDraft?.uploadedBatch?.length
+    ?previousDraft.uploadedBatch
+    :previousDraft?.uploaded?[previousDraft.uploaded]:[];
+  const previousHistoryKey=previousItems.map(item=>item.job.id).join("|");
+  const [previousHistoryStatuses,setPreviousHistoryStatuses]=useState<Record<string,CustomerJobStatus>>({});
+  const [previousHistoryLoading,setPreviousHistoryLoading]=useState(previousItems.length>0);
+  const [previousHistoryUnavailable,setPreviousHistoryUnavailable]=useState(false);
+  useEffect(()=>{
+    if(!previousSessionToken||!previousHistoryKey){setPreviousHistoryLoading(false);return;}
+    let active=true;
+    let running=false;
+    const refreshPreviousHistory=async()=>{
+      if(running)return;
+      running=true;
+      try{
+        const results=await Promise.all(previousItems.map(async item=>{
+          try{return [item.job.id,await getCustomerJobStatus(previousSessionToken,item.job.id)] as const;}
+          catch{return [item.job.id,null] as const;}
+        }));
+        if(!active)return;
+        const recovered=results.reduce<Record<string,CustomerJobStatus>>((map,[id,status])=>{
+          if(status)map[id]=status;
+          return map;
+        },{});
+        setPreviousHistoryStatuses(recovered);
+        setPreviousHistoryUnavailable(results.some(([,status])=>status===null));
+        setPreviousHistoryLoading(false);
+      }finally{running=false;}
+    };
+    void refreshPreviousHistory();
+    const timer=window.setInterval(()=>void refreshPreviousHistory(),60000);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[previousSessionToken,previousHistoryKey]);
   const [files,setFiles]=useState<File[]>([]);
   const selectedFilesRef=useRef<File[]>([]);
   useEffect(()=>{selectedFilesRef.current=files;},[files]);
@@ -4689,13 +4876,38 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
+    const previousStorageKey=`qrtoprint.customer-previous-job:${publicCode}`;
+    const currentMarker=sessionToken.slice(-16);
     if(!uploaded&&uploadedBatch.length===0&&!batchName.trim()){
+      const existingRaw=localStorage.getItem(storageKey);
+      if(existingRaw){
+        try{
+          const existing=JSON.parse(existingRaw) as StoredCustomerDraft;
+          // A fresh QR session must not erase the previous session's order.
+          if(existing.sessionMarker&&existing.sessionMarker!==currentMarker)return;
+        }catch{
+          // Corrupt local metadata can be cleared safely.
+        }
+      }
       localStorage.removeItem(storageKey);
       return;
     }
+    const existingRaw=localStorage.getItem(storageKey);
+    if(existingRaw){
+      try{
+        const existing=JSON.parse(existingRaw) as StoredCustomerDraft;
+        if(existing.sessionMarker&&existing.sessionMarker!==currentMarker&&
+          (existing.uploaded?.job?.id||existing.uploadedBatch?.length||existing.batchName?.trim())){
+          // Keep one bounded prior-order snapshot; never persist a token or file bytes.
+          localStorage.setItem(previousStorageKey,existingRaw);
+        }
+      }catch{
+        // Replace malformed metadata with this session's valid snapshot.
+      }
+    }
     // Store only job metadata, never the bearer session capability.
     localStorage.setItem(storageKey,JSON.stringify({
-      sessionMarker:sessionToken.slice(-16),
+      sessionMarker:currentMarker,
       uploaded: uploaded??uploadedBatch[0],
       uploadedBatch,
       uploadedFileFingerprints,
@@ -5781,13 +5993,38 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       :batchPayment!.status==="CASH_AWAITING_PAYMENT"?"PAY AT SHOP COUNTER"
       :"PAYMENT FOR ACCEPTED FILES"
     :"PAY FOR ACCEPTED FILES";
-  const quoteEntries=quoteItems.map(item=>({item,quote:quotesByJobId[item.job.id]}))
-    .filter(entry=>!!entry.quote&&!quoteExpiredForBatchItem(entry.item));
-  const acceptedQuoteEntries=quoteEntries.filter(entry=>
-    !["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))
-  );
+  const quoteRows=quoteItems.map(item=>({
+    item,
+    quote:quotesByJobId[item.job.id],
+    excluded:["REJECTED","REFUNDED"].includes(statusForBatchItem(item))
+  }));
+  const quoteEntries=quoteRows.filter(entry=>!!entry.quote&&!quoteExpiredForBatchItem(entry.item));
+  const acceptedQuoteEntries=quoteEntries.filter(entry=>!entry.excluded);
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
+  const batchQuoteNeedsRefresh=quoteRows.filter(entry=>
+    !entry.excluded&&!shouldBlockQuoteRefreshForStatus(statusForBatchItem(entry.item))&&
+    (!entry.quote||quoteExpiredForBatchItem(entry.item))
+  ).length;
+  const batchQuoteCurrency=quoteEntries[0]?.quote?.currency??quoteItems[0]?.job.currency??"INR";
+  const hasAcceptedQuoteLocked=quoteRows.some(entry=>
+    !entry.excluded&&!!entry.quote&&quoteExpiredForBatchItem(entry.item)&&
+    shouldBlockQuoteRefreshForStatus(statusForBatchItem(entry.item))
+  );
+  const batchQuoteTotalDisplay=acceptedQuoteEntries.length>0
+    ?formatMoney(batchQuoteTotal,batchQuoteCurrency)
+    :batchQuoteNeedsRefresh>0||hasAcceptedQuoteLocked?"—"
+      :quoteRows.some(entry=>!entry.excluded)?"Pending":formatMoney(0,batchQuoteCurrency);
+  const acceptedBatchRows=quoteRows.filter(entry=>!entry.excluded);
+  const batchQuoteCounts={
+    documents:acceptedBatchRows.filter(entry=>normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="DOCUMENT").length,
+    idCards:acceptedBatchRows.filter(entry=>normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="ID_DOCUMENT").length,
+    photos:acceptedBatchRows.filter(entry=>normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="PHOTO").length,
+    excluded:quoteRows.filter(entry=>entry.excluded).length
+  };
+  const batchQuoteSummary=acceptedQuoteEntries.length>0
+    ?acceptedQuoteEntries.length+" "+(acceptedQuoteEntries.length===1?"file has":"files have")+" a current quote."
+    :"No accepted files have a current quote yet.";
   const batchQuoteBreakdown=calculateBatchQuoteBreakdown(acceptedQuoteEntries.map(entry=>({
     printKind:printKindsByJobId[entry.item.job.id]==="ID_DOCUMENT"
       ?"ID_DOCUMENT"
@@ -5815,6 +6052,22 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   const photoAlreadyUploaded=Boolean(file&&uploadedFileFingerprints.includes(customerFileFingerprint(file)));
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
+    {previousItems.length>0&&<section className="customer-previous-order" aria-label="Previous print request">
+      <div className="customer-previous-order-heading"><div><span>PREVIOUS REQUEST</span><strong>From your earlier QR session</strong></div><span className="customer-previous-order-readonly">Read only</span></div>
+      <p>This request is separate from your current session. Its status is restored for reference only; printing, payment and file changes are not available here.</p>
+      <div className="customer-previous-order-list">
+        {previousItems.map(item=>{
+          const recovered=previousHistoryStatuses[item.job.id];
+          const status=recovered?.status??(previousHistoryLoading?"Refreshing status":previousHistoryUnavailable?"Status unavailable · ask the shop before resubmitting":customerStatusLabel(item.job.status??"UPLOADED"));
+          return <div className="customer-previous-order-item" key={item.job.id}>
+            <span><FileText size={14}/></span>
+            <div><strong>{resolveCustomerDocumentName(item,storedCustomerPrivateFileNames(previousDraft))}</strong><small>{item.job.jobNumber} · {status}</small></div>
+          </div>;
+        })}
+      </div>
+      {previousHistoryUnavailable&&<small className="customer-previous-order-warning">Some earlier status details could not be restored. Contact the shop before uploading the same document again.</small>}
+      <small className="customer-previous-order-footnote">Your earlier order remains attached to its original shop session. Document contents stay private; this panel restores status metadata only.</small>
+    </section>}
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · Up to {UPLOAD_LIMITS.maxBatchFiles} files / {UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB</span></div>
     <section className="customer-privacy-choice" aria-label="Document privacy choice">
       <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>Choose how files are handled</strong></div><small>Applies to all files</small></div>
@@ -6082,17 +6335,64 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     </>}
     {notice&&<div className={"customer-upload-notice "+notice.kind} role={notice.kind==="warning"?"alert":"status"}>{notice.message}</div>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
-    {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{acceptedQuoteEntries.length} accepted file(s) · {batchQuoteBreakdown.idCardCount} ID-card file(s) · {batchQuoteBreakdown.idCardSheets} ID-card A4 sheet(s) · {batchQuoteBreakdown.photoPages} photo A4 page(s) · {batchQuoteBreakdown.normalDocumentSourcePages} normal document page(s) · {batchQuoteBreakdown.totalOutputPagesAndSheets} total output page sides / prepared sheets</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[entry.item.job.id]??entry.quote!.printKind??entry.item.job.printKind)}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.printKind==="ID_DOCUMENT"?entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided":customerDocumentOutputSummary(entry.quote!.pageCount,entry.quote!.copies,entry.quote!.pagesPerSheet??1,entry.quote!.isDuplex)+" · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
-      <div className="customer-batch-print-breakdown">
-        <div><span>Normal documents · {batchQuoteBreakdown.normalDocumentFileCount} file(s) · {batchQuoteBreakdown.normalDocumentSourcePages} original PDF page(s) = {batchQuoteBreakdown.normalDocumentOutputPages} output page sides after N-up and copies</span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,quoteEntries[0].quote!.currency)}</strong><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,quoteEntries[0].quote!.currency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,quoteEntries[0].quote!.currency)}</small></div>
-        <div><span>ID cards · {batchQuoteBreakdown.idCardCount} prepared ID-card file(s) · {batchQuoteBreakdown.idCardSheets} A4 sheet(s)</span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
-        <div><span>Photo printing · {batchQuoteBreakdown.photoPages} A4 page(s) · {batchQuoteBreakdown.finishedPhotos} finished photo(s)</span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
-        <div className="customer-batch-print-total"><span>Total output page sides / prepared A4 sheets</span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
+    {(quoteEntries.length>0||batchQuoteNeedsRefresh>0)&&<section className="customer-quote-card customer-batch-quote-card" aria-label="Batch quote summary">
+      <div className="customer-batch-quote-heading">
+        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{batchQuoteTotalDisplay}</strong><small>{batchQuoteSummary} {batchQuoteNeedsRefresh>0?batchQuoteNeedsRefresh+" need a fresh quote. ":""}Excluded files are not charged.</small></div>
+        <span className="customer-batch-quote-validity">{batchQuoteNeedsRefresh>0?"Review required":"Quote for review"}</span>
       </div>
-      <p className="customer-payment-model-note customer-quote-explanation">Pricing varies by document type and print settings. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For driver-backed N-up, the selected pages-per-sheet value groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted separately as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing shows both finished photo quantity and the A4 PDF pages they occupy; pricing remains per finished photo.</span><span>Normal-document output counts page sides after copies. With duplex printing, two page sides may share one physical sheet.</span><span>Rejected files are excluded. Pay once for all accepted files after review.</span></InfoTooltip></p>
-    </div>}
+      <div className="customer-batch-quote-categories" aria-label="Files included in this quote">
+        <span className="customer-batch-quote-chip included"><b>{acceptedQuoteEntries.length}</b> priced</span>
+        {batchQuoteNeedsRefresh>0&&<span className="customer-batch-quote-chip refresh"><b>{batchQuoteNeedsRefresh}</b> quote needed</span>}
+        {batchQuoteCounts.excluded>0&&<span className="customer-batch-quote-chip excluded"><b>{batchQuoteCounts.excluded}</b> excluded</span>}
+        {batchQuoteCounts.documents>0&&<span className="customer-batch-quote-chip document"><b>{batchQuoteCounts.documents}</b> documents</span>}
+        {batchQuoteCounts.idCards>0&&<span className="customer-batch-quote-chip id-card"><b>{batchQuoteCounts.idCards}</b> ID cards</span>}
+        {batchQuoteCounts.photos>0&&<span className="customer-batch-quote-chip photo"><b>{batchQuoteCounts.photos}</b> photo jobs</span>}
+      </div>
+      <div className="customer-batch-quote-lines" aria-label="File-by-file prices">
+        {quoteRows.map(entry=>{
+          const status=statusForBatchItem(entry.item);
+          const quoteExpired=Boolean(entry.quote)&&quoteExpiredForBatchItem(entry.item);
+          const needsFreshQuote=!entry.excluded&&!shouldBlockQuoteRefreshForStatus(status)&&(!entry.quote||quoteExpired);
+          const printKind=normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind);
+          const detail=entry.quote
+            ? entry.quote.printKind==="PHOTO"
+              ? (entry.quote.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote.photoSizeCode)+" · "+(entry.quote.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote.pageCount+" A4 pages · "+formatMoney(entry.quote.photoUnitPriceMinor??0,entry.quote.currency)+" per photo"
+              : entry.quote.printKind==="ID_DOCUMENT"
+                ? entry.quote.pageCount+" A4 portrait "+(entry.quote.pageCount===1?"sheet":"sheets")+" × "+entry.quote.copies+" copy · "+entry.quote.colourMode+" · Single-sided"
+                : entry.quote.pageCount+" source pages · "+customerDocumentOutputSummary(entry.quote.pageCount,entry.quote.copies,entry.quote.pagesPerSheet??1,entry.quote.isDuplex)+" · "+entry.quote.colourMode+" · "+(entry.quote.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")
+            : entry.item.job.pageCount+" source "+(entry.item.job.pageCount===1?"page":"pages")+" · "+entry.item.job.copies+" "+(entry.item.job.copies===1?"copy":"copies")+" · quote not available yet";
+          const lineState=entry.excluded
+            ?"Excluded"
+            :needsFreshQuote?(entry.quote?"Quote expired":"Quote needed")
+              :!entry.quote?customerStatusLabel(status)
+                :quoteExpired?"Quote locked · "+customerStatusLabel(status)
+                  :"Included in total";
+          const amountLabel=entry.excluded
+            ?"Not charged"
+            :needsFreshQuote?"—"
+              :!entry.quote?"Pending"
+                :quoteExpired?"See order status"
+                  :formatMoney(entry.quote.quotedAmountMinor,entry.quote.currency);
+          return <div className="customer-batch-quote-line" key={entry.item.job.id}>
+            <span className="customer-batch-quote-line-copy">
+              <span className="customer-batch-quote-line-top"><strong>{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={printKind}/><span className={"customer-batch-quote-line-state "+(entry.excluded?"excluded":needsFreshQuote?"refresh":"included")}>{lineState}</span></span>
+              <small>{detail}</small>
+            </span>
+            <strong className={"customer-batch-quote-line-amount "+(entry.excluded||needsFreshQuote||quoteExpired?"excluded":"")}>{amountLabel}</strong>
+          </div>;
+        })}
+      </div>
+      {acceptedQuoteEntries.length>0&&<details className="customer-batch-quote-details">
+        <summary><span>See price breakdown</span><small>Documents, ID cards and photos</small></summary>
+        <div className="customer-batch-print-breakdown">
+          <div><span><strong>Normal documents</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,batchQuoteCurrency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,batchQuoteCurrency)}</small></span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>ID cards</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>Photo printing</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div className="customer-batch-print-total"><span><strong>Total output</strong><small>Page sides and prepared A4 sheets, grouped by print type</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
+        </div>
+      </details>}
+      <p className="customer-payment-model-note customer-quote-explanation">{batchQuoteNeedsRefresh>0?"Only files with a current quote are included in this displayed total. Calculate a fresh quote for the highlighted files before sending the batch to the shop. ":""}This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing is priced per finished photo; the A4 page count is shown for planning.</span><span>Duplex printing can place two output sides on one physical sheet.</span><span>Rejected or refunded files are excluded from the total.</span></InfoTooltip></p>
+    </section>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
     {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={customerStatusLabel(jobStatus.status)} tone={customerStatusTone(jobStatus.status)}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
@@ -6224,7 +6524,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}
     </section>}
-    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="PAID_AUTHORISED"?"Payment received. The shop is preparing your print.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop approved your print. Printing will start shortly.":["PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus?.status??"")?"Your print is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking whether your pages were printed. Please do not submit the same file again.":jobStatus?.status==="COMPLETED"?"Printing is complete. Your pages are ready for collection.":jobStatus?.status==="PDF_EXPORTED"?"Your PDF is ready.":jobStatus?.status==="REFUNDED"?"This file was not printed and the payment was returned.":jobStatus?.status==="CANCELLED"?"This request was cancelled.":jobStatus?.status==="FAILED"?"Printing could not be completed. Please speak to the shop.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"||jobStatus?.status==="LOCAL_QUEUE_READY"?"Your files have reached the shop and are being prepared.":jobStatus?.status==="AWAITING_PAYMENT"?"Your files are accepted. Complete payment to continue.":jobStatus?.status==="PAYMENT_REPORTED"?"The shop is checking your payment.":quote?"Check the price and print options before sending your request to the shop.":"Choose your files to get started."}</span></div>
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{resolveCustomerUploadStatusMessage({
+      jobStatus:jobStatus?.status??(uploaded?batchStatuses[uploaded.job.id]?.status??uploaded.job.status:null),
+      filesSelected:files.length,
+      uploadedFileCount:uploadedBatch.length||(uploaded?1:0),
+      quoteAvailable:Boolean(quote),
+      paymentStatus:payment?.status??batchPayment?.status??null,
+      uploadProgress:uploadProgress?{files:uploadProgress.files}:null
+    })}</span></div>
   </section></>;
 }
 

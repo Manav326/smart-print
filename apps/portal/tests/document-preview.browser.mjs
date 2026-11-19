@@ -254,7 +254,18 @@ async function runShopDocumentPreview(browser) {
     assert.equal(await section.getAttribute("data-identified-type"), expected, id + " must be identified from its file bytes.");
     const surface = section.locator(".shop-document-preview");
     assert.equal(await surface.getAttribute("data-preview-type"), expected);
-    assert.equal(await surface.getAttribute("data-preview-state"), "available");
+  }
+  // Images must finish decoding. Chromium's built-in PDF viewer does not
+  // consistently emit iframe load in headless/embedded mode; require either a
+  // real ready event or the bounded slow-viewer advisory, never an endless spinner.
+  await page.waitForFunction(() => {
+    const state = id => document.querySelector("#" + id + "-case .shop-document-preview")?.getAttribute("data-preview-state");
+    return (state("pdf") === "ready" || state("pdf") === "slow") &&
+      state("jpeg") === "ready" && state("png") === "ready";
+  }, null, { timeout: 15000 });
+  const pdfState = await page.locator("#pdf-case .shop-document-preview").getAttribute("data-preview-state");
+  if (pdfState === "slow") {
+    await page.locator("#pdf-case .shop-document-preview-slow").waitFor({ state: "visible" });
   }
   await page.locator("#pdf-case iframe").waitFor({ state: "visible", timeout: 15000 });
   await page.waitForFunction(() => {
@@ -273,15 +284,15 @@ async function runShopDocumentPreview(browser) {
   }
 
   const unsupported = page.locator("#unsupported-case .shop-document-preview");
-  assert.equal(await unsupported.getAttribute("data-preview-state"), "unavailable");
+  assert.equal(await unsupported.getAttribute("data-preview-state"), "unsupported");
   assert.equal(await page.locator("#unsupported-case .shop-document-preview-unavailable").count(), 1);
   const broken = page.locator("#broken-case .shop-document-preview");
-  await page.waitForFunction(() => document.querySelector("#broken-case .shop-document-preview")?.getAttribute("data-preview-state") === "unavailable", null, { timeout: 15000 });
-  assert.equal(await broken.getAttribute("data-preview-state"), "unavailable");
+  await page.waitForFunction(() => document.querySelector("#broken-case .shop-document-preview")?.getAttribute("data-preview-state") === "failed", null, { timeout: 15000 });
+  assert.equal(await broken.getAttribute("data-preview-state"), "failed");
 
   await page.screenshot({ path: join(artifactDirectory, "shop-document-preview.png"), fullPage: true });
   await context.close();
-  return { pdf: "inline iframe loaded", jpeg: "decoded", png: "decoded", unsupported: "safe fallback", brokenImage: "safe fallback" };
+  return { pdf: pdfState === "ready" ? "inline iframe loaded" : "inline iframe retained with bounded slow-viewer guidance", jpeg: "decoded", png: "decoded", unsupported: "safe fallback", brokenImage: "safe fallback" };
 }
 
 async function runCustomerBatchFlow(browser) {
