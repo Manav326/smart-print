@@ -29,12 +29,12 @@ New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
 $packagePath = Join-Path $root "L360_x64_260JAHomeExportAsiaML.exe"
 Write-Host "[EPSON-L360] Downloading the official Epson L360 x64 2.60.00 driver package."
 $downloadHeaders = @{
-    "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
-    "Referer" = "https://www.epson.co.in/Support/Printers/All-In-One/L-Series/Epson-L360/s/SPT_C11CE55501?review-filter=Windows+10+64-bit"
     "Accept" = "application/octet-stream, application/x-msdownload, */*"
 }
 try {
-    Invoke-WebRequest -Uri $PackageUrl -OutFile $packagePath -Headers $downloadHeaders -MaximumRedirection 10 -UseBasicParsing
+    Invoke-WebRequest -Uri $PackageUrl -OutFile $packagePath -Headers $downloadHeaders `
+        -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36" `
+        -MaximumRedirection 10 -UseBasicParsing
 }
 catch {
     throw "The official Epson L360 v2.60.00 download was blocked or unavailable. Source: $PackageUrl. $($_.Exception.Message)"
