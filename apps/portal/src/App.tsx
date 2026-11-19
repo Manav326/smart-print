@@ -2228,7 +2228,7 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   const colourState=capabilityState(snapshot?.color,snapshot?.colorStatus);
   const duplexState=capabilityState(snapshot?.duplex,snapshot?.duplexStatus);
   const directionState=capabilityState(
-    Boolean(snapshot?.pagesPerSheetDirection),
+    snapshot?.pagesPerSheetDirection,
     snapshot?.pagesPerSheetDirectionStatus
   );
   const paperSizes=(snapshot?.paperSizes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
@@ -5079,11 +5079,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       });
     };
     const reportPrivateStage=(index:number,stage:string,message:string)=>{
-      const status=stage==="WAITING_FOR_AGENT"||stage==="WAITING_FOR_UPLOAD"
+      const status=stage==="WAITING_FOR_AGENT"
         ?"WAITING_FOR_SHOP"
-        :stage==="READY"?"COMPLETED"
-          :stage==="FAILED"||stage==="EXPIRED"?"FAILED"
-            :"PROCESSING";
+        :stage==="WAITING_FOR_UPLOAD"?"PREPARING"
+          :stage==="RECEIVING_ENCRYPTED_PAYLOAD"?"STREAMING_ENCRYPTED"
+            :stage==="READY"?"COMPLETED"
+              :stage==="FAILED"||stage==="EXPIRED"?"FAILED"
+                :"PROCESSING";
       updateFileProgress(index,{status,message});
     };
     try {
