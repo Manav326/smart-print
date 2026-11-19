@@ -2348,7 +2348,12 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
   const [exportingStationId,setExportingStationId]=useState<string|null>(null);
   const [copyFeedback,setCopyFeedback]=useState<Record<string,{kind:"success"|"error";message:string}>>({});
   const [exportFeedback,setExportFeedback]=useState<Record<string,{kind:"success"|"info"|"error";message:string}>>({});
+  const [preparedShareImage,setPreparedShareImage]=useState<{stationId:string;signature:string;file:File}|null>(null);
   const imageFormatFor=(station:QrStation)=>formatByStation[station.id]??"png";
+  const stationImageSignature=(station:QrStation)=>JSON.stringify([
+    station.publicUrl??"",station.displayName,station.isEnabled,
+    profile?.displayName??"",profile?.logoUrl??"",imageFormatFor(station)
+  ]);
   const copyStationUrl=async(station:QrStation)=>{
     if(!station.publicUrl)return;
     const copied=await copyText(station.publicUrl);
@@ -2369,26 +2374,54 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
       logoDataUri
     },new XMLSerializer().serializeToString(qrSvg),imageFormatFor(station));
   };
-  const exportStationImage=async(station:QrStation,mode:"download"|"share")=>{
+  const exportStationImage=async(station:QrStation)=>{
     setExportingStationId(station.id);
     setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing a sharp, scan-ready QR image…"}}));
     try{
       const file=await createStationImage(station);
-      if(mode==="download"){
-        downloadQrStationImage(file);
-        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Your "+imageFormatFor(station).toUpperCase()+" QR image is ready."}}));
-      }else{
-        const result=await shareQrStationImage(file);
-        if(result==="shared")setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR image shared successfully."}}));
-        else if(result==="cancelled")setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Sharing was cancelled. The image was not sent."}}));
-        else{
-          downloadQrStationImage(file);
-          setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"File sharing is not supported here, so the QR image was downloaded instead."}}));
-        }
-      }
+      downloadQrStationImage(file);
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Your "+imageFormatFor(station).toUpperCase()+" QR image is ready."}}));
     }catch(exception){
       setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
     }finally{setExportingStationId(null);}
+  };
+  const prepareStationShare=async(station:QrStation)=>{
+    setExportingStationId(station.id);
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing the QR image for sharing…"}}));
+    try{
+      const file=await createStationImage(station);
+      setPreparedShareImage({stationId:station.id,signature:stationImageSignature(station),file});
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Image ready. Tap “Share image now” to open your device’s share options."}}));
+    }catch(exception){
+      setPreparedShareImage(null);
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+    }finally{setExportingStationId(null);}
+  };
+  const sharePreparedStationImage=(station:QrStation)=>{
+    const prepared=preparedShareImage;
+    if(!prepared||prepared.stationId!==station.id||prepared.signature!==stationImageSignature(station)){
+      setPreparedShareImage(null);
+      setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Station details changed. Prepare the image again before sharing."}}));
+      return;
+    }
+    setExportingStationId(station.id);
+    const file=prepared.file;
+    // Invoke navigator.share directly from this click. Image generation has
+    // already finished, so the browser's transient user activation is intact.
+    void shareQrStationImage(file).then(result=>{
+      if(result==="shared"){
+        setPreparedShareImage(null);
+        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR image shared successfully."}}));
+      }else if(result==="cancelled"){
+        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Sharing was cancelled. The image was not sent."}}));
+      }else{
+        downloadQrStationImage(file);
+        setPreparedShareImage(null);
+        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"File sharing is not supported here, so the QR image was downloaded instead."}}));
+      }
+    }).catch(exception=>{
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not share this QR image."}}));
+    }).finally(()=>setExportingStationId(null));
   };
   useEffect(()=>{
     if(!printingStationId)return;
@@ -2444,12 +2477,14 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
                    <option value="jpg">JPG · smaller file</option>
                  </select>
                </label>
-               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station,"download")}>{exportingStationId===station.id?<span className="button-spinner"/>:<ImageIcon size={14}/>} Download image</button>
-               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station,"share")}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Share image</button>
+               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<ImageIcon size={14}/>} Download image</button>
+               {preparedShareImage?.stationId===station.id&&preparedShareImage.signature===stationImageSignature(station)
+                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Share image now</button>
+                 :<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Prepare to share</button>}
              </div>
              {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The exported image is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
              {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
-             <small className="qr-share-export-help">Share sends the actual image file when your device supports file sharing. Otherwise SmartPrint downloads the image for you. The QR contains this station’s current public link, never a customer session token.</small>
+             <small className="qr-share-export-help">Prepare the image first, then tap “Share image now” to open your device’s share sheet. If file sharing is unavailable, SmartPrint downloads the same image instead. The QR contains this station’s current public link, never a customer session token.</small>
            </details>
          </>}
       </article>)}</div>}
