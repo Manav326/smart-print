@@ -114,6 +114,11 @@ test("customer retry copy preserves ticket identity without promising byte-offse
   assert.doesNotMatch(customerApp, /the same upload will resume|resume that same upload/i);
 });
 
+test("shop queue labels distinguish Agent preparation from print readiness", () => {
+  assert.match(customerApp, /LOCAL_QUEUE_CLAIMED:"Shop computer preparing"/);
+  assert.match(customerApp, /LOCAL_QUEUE_READY:"Ready for print"/);
+});
+
 test("Private Printing progress uses short, plain-language customer messages", () => {
   const start = privateRelayRules.indexOf("public static string CustomerMessage");
   assert.ok(start >= 0, "customer-facing stage messages must remain defined");
