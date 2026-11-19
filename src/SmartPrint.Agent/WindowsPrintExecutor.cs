@@ -876,6 +876,13 @@ public sealed class WindowsPrintExecutor
                             throw new PrintExecutionBlockedException(
                                 "PHOTO_MEDIA_TYPE_REJECTED",
                                 "The validated Print Schema photo media option was not present in the converted Windows DEVMODE. No pages were sent.");
+                        // PrintTicket conversion starts from the printer-default DEVMODE.
+                        // Reapply the requested custom dimensions because the conversion
+                        // may replace the DEVMODE buffer that carried them.
+                        mode.PaperSize = 0;
+                        mode.PaperWidth = photoPaperWidth;
+                        mode.PaperLength = photoPaperHeight;
+                        mode.Fields |= DmPaperSize | DmPaperWidth | DmPaperLength;
                         photoMediaType = unchecked((short)mode.MediaType);
                     }
                     finally
