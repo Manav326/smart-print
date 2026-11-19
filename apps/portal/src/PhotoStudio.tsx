@@ -74,6 +74,9 @@ function formatPhotoRate(minor: number) {
 }
 const MAX_FILE_BYTES = UPLOAD_LIMITS.maxFileBytes;
 const MAX_PHOTO_COUNT = UPLOAD_LIMITS.maxPhotoCount;
+// The live canvas is only 420 px wide; 120 DPI keeps preview processing fast.
+// Final PDFs explicitly use 300 DPI and are not affected by this preview setting.
+const PHOTO_PREVIEW_DPI = 120;
 
 const PHOTO_SIZES: PhotoSize[] = [
   { id: "35x45", label: "35 × 45 mm", detail: "Portrait ID photo", widthMm: 35, heightMm: 45 },
@@ -122,11 +125,11 @@ function formatDobForPrint(value:string){
 
 function createPhotoTile(
   image:HTMLImageElement,size:PhotoSize,zoom:number,focusX:number,focusY:number,adjustments:Adjustments,
-  background:{sourceColor:string|null;targetColor:string;tolerance:number}
+  background:{sourceColor:string|null;targetColor:string;tolerance:number},dpi=300
 ){
   const source=cropSource(image,size,zoom,focusX,focusY);
   const filter=`brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%)`;
-  const photoW=Math.max(1,Math.round(size.widthMm/25.4*300)),photoH=Math.max(1,Math.round(size.heightMm/25.4*300));
+  const photoW=Math.max(1,Math.round(size.widthMm/25.4*dpi)),photoH=Math.max(1,Math.round(size.heightMm/25.4*dpi));
   const photoTile=document.createElement("canvas");
   photoTile.width=photoW;photoTile.height=photoH;
   const tileContext=photoTile.getContext("2d");
@@ -153,7 +156,7 @@ function drawPhotoSheetPage(
   context.fillRect(0,0,canvasWidth,context.canvas.height);context.scale(scaleX,scaleY);
   // A multi-page export passes one processed tile to every page. Live preview
   // creates and releases its own tile because it renders only the visible page.
-  const photoTile=sharedPhotoTile??createPhotoTile(image,size,zoom,focusX,focusY,adjustments,background);
+  const photoTile=sharedPhotoTile??createPhotoTile(image,size,zoom,focusX,focusY,adjustments,background,PHOTO_PREVIEW_DPI);
 
   for(const position of positions){
     const x=position.xMm,y=position.yMm;
@@ -228,7 +231,7 @@ function drawPhotoPaperPage(
   context.fillStyle = "#fff";
   context.fillRect(0, 0, context.canvas.width, context.canvas.height);
   context.scale(scaleX, scaleY);
-  const tile = sharedPhotoTile ?? createPhotoTile(image, size, zoom, focusX, focusY, adjustments, background);
+  const tile = sharedPhotoTile ?? createPhotoTile(image, size, zoom, focusX, focusY, adjustments, background, PHOTO_PREVIEW_DPI);
   context.drawImage(tile, 0, 0, size.widthMm, size.heightMm);
   if (!sharedPhotoTile) {
     tile.width = 0;
@@ -703,7 +706,7 @@ export default function PhotoStudio({
       let jpegByteLength=0;
       const pdfStructureAllowance=4096+pages*1024;
       const sharedPhotoTile=createPhotoTile(image,size,zoom,focusX,focusY,adjustments,
-        {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance});
+        {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},300);
       try{
         for (let page = 0; page < pages; page++) {
           const canvas = document.createElement("canvas");
