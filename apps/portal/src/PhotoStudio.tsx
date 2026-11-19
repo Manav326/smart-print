@@ -318,7 +318,7 @@ export default function PhotoStudio({
     const initialCount = Number(initialSettings?.copiesInput ?? initialPhotoCount);
     return Number.isInteger(initialCount) && initialCount >= 1 && initialCount <= MAX_PHOTO_COUNT
       ? String(initialCount)
-      : "8";
+      : "1";
   });
   const [photosPerPageInput,setPhotosPerPageInput]=useState(() =>
     initialSettings?.photosPerPageInput === "auto" ||
@@ -332,6 +332,8 @@ export default function PhotoStudio({
     initialSettings?.photoPaperFinish === "MATTE" ? "MATTE" : "GLOSSY"
   );
   const [previewPage,setPreviewPage]=useState(0);
+  // Preview magnification affects only the editor viewport, never print framing.
+  const [previewScale,setPreviewScale]=useState(1);
   const [zoom, setZoom] = useState(() => Math.min(3, Math.max(1, initialSettings?.zoom ?? 1)));
   const [focusX, setFocusX] = useState(() => Math.min(100, Math.max(0, initialSettings?.focusX ?? 50)));
   const [focusY, setFocusY] = useState(() => Math.min(100, Math.max(0, initialSettings?.focusY ?? 50)));
@@ -772,10 +774,11 @@ export default function PhotoStudio({
     finally{busyRef.current=false;setBusy(false);}
   }
 
+  const resolutionIsSufficient = image ? hasSufficientPhotoResolution(image.naturalWidth,image.naturalHeight,size,zoom) : true;
   const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
   const outputDescription = isPhotoPaperLayout
-    ? `individual ${size.label} prints on ${photoPaperFinish.toLowerCase()} photo paper`
-    : "photos arranged on regular A4 paper";
+    ? `one ${size.label} print per sheet on ${photoPaperFinish.toLowerCase()} photo paper`
+    : "copies arranged at the selected physical size on regular A4 sheets";
   const footerHint = mode === "private-library"
     ? (isPhotoPaperLayout ? "Original stays private · individual photo-paper prints saved here." : "Original stays private · A4 sheet saved here.")
     : mode === "shop-create"
@@ -796,17 +799,18 @@ export default function PhotoStudio({
           <span className={styles.brandMark}><ImageIcon size={17}/></span>
           <span><strong id="photo-studio-title">Photo Studio</strong><small>{mode === "private-library" ? "PRIVATE · ON THIS DEVICE" : mode === "shop-create" ? "SHOP · NEW PHOTO ORDER" : mode === "shop" ? "SHOP · EDIT EXISTING JOB" : "CUSTOMER · BEFORE UPLOAD"}</small></span>
         </div>
-        <div className={styles.topbarMeta}><span>{isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm photo` : "A4 · 210 × 297 mm"}</span><span>300 DPI</span></div>
+        <div className={styles.topbarMeta}><span>{isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm photo` : "A4 · 210 × 297 mm"}</span><span>PDF target · 300 DPI</span></div>
         <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label="Close Photo Studio" title="Close"><X size={18}/></button>
       </header>
 
       <div className={styles.editor}>
-        <nav className={styles.toolRail} aria-label="Photo editing tools">
+        <nav className={styles.toolRail} aria-label="Photo editing tools; scroll horizontally on small screens to see all tools" tabIndex={0}>
           <button type="button" id="photo-studio-tool-sheet" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
           <button type="button" id="photo-studio-tool-crop" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
           <button type="button" id="photo-studio-tool-looks" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
+          <span className={styles.toolRailSectionLabel}>Advanced</span>
           <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} title="Add, select and position text on the A4 sheet"><Type size={17}/><span>Text</span></button>
-          <button type="button" id="photo-studio-tool-background" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"}><PaintBucket size={17}/><span>Background</span></button>
+          <button type="button" id="photo-studio-tool-background" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"} title="Advanced: replace a plain photo background"><PaintBucket size={17}/><span>Background</span></button>
         </nav>
 
         <aside className={styles.toolPanel} data-testid="photo-studio-tool-panel">
@@ -825,11 +829,12 @@ export default function PhotoStudio({
             {openHelpTool===activeTool&&<div id="photo-studio-help-panel" className={styles.helpTooltipPanel} role="region" aria-label={panelTitle+" guidance"}>
               {cropPanel&&<>
                 <p>Drag directly on any photo to move its framing. Move the image left to reveal more of its right side; the position sliders remain available for precise adjustments.</p>
-                <p>Zoom in for a tighter crop, then inspect the full tile. The same crop is used for every copy and for the final print-ready PDF.</p>
-                <p>The 300-DPI check warns when the selected crop may look soft. Your original photo is never changed, and facial features are not reshaped or retouched.</p>
+                <p>Crop zoom changes the framing printed on every copy. Preview zoom in the toolbar only enlarges the editor view; it never changes the crop or the PDF.</p>
+                <p>The PDF has a 300-DPI output target, but that cannot restore detail missing from the original. Use a sharper source or reduce crop zoom when the source-quality message warns that the print may look soft.</p>
+                <p>Your original photo is never changed, and facial features are not reshaped or retouched.</p>
               </>}
               {lookPanel&&<>
-                <p>Choose a print-friendly starting point, then fine-tune brightness, contrast and colour. Reset restores the original framing and Natural look.</p>
+                <p>Choose a print-friendly starting point, then fine-tune brightness, contrast and colour. Use Reset look to return to Natural; Reset crop only changes framing.</p>
                 {LOOKS.map(item=><p key={item.id}><strong>{item.label}:</strong> {item.note}</p>)}
                 <p>Adjustments are applied to the prepared output, not to your source file.</p>
               </>}
@@ -863,6 +868,7 @@ export default function PhotoStudio({
                 <span className={styles.lookSwatch + " " + styles["look_" + item.id]}/><strong>{item.label}</strong>
               </button>)}
             </div>
+            <button type="button" id="photo-studio-reset-look" className={styles.secondaryButton} onClick={() => selectLook("natural")}><RotateCcw size={14}/> Reset look</button>
             <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input id="photo-studio-brightness" type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
             <label className={styles.rangeControl}>Contrast <output>{adjustments.contrast}%</output><input id="photo-studio-contrast" type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
             <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input id="photo-studio-colour" type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
@@ -909,7 +915,7 @@ export default function PhotoStudio({
                 setIncludeFormDetails(enabled);
                 if(!enabled){setPhotoName("");setDateOfBirth("");}
               }}/>
-              <span><strong>Add name and DOB to each photo</strong></span>
+              <span><strong>Print name and date of birth below each photo</strong></span>
             </label>
             {includeFormDetails&&<>
               <label className={styles.fieldLabel}>Name for form (optional)
@@ -924,11 +930,11 @@ export default function PhotoStudio({
                 {availableSizes.map(item => <option key={item.id} value={item.id}>{item.label} · {item.detail}{mode === "private-library" ? "" : " · "+formatPhotoRate(photoPrices[item.id])+"/photo"}</option>)}
               </select>
             </label>
-            <label className={styles.fieldLabel}>Number of photos
+            <label className={styles.fieldLabel}>Number of copies
               <input
                 id="photo-studio-photo-count"
                 type="number"
-                aria-label="Number of photos"
+                aria-label="Number of copies"
                 min="1"
                 max={maxCopies}
                 step="1"
@@ -947,15 +953,18 @@ export default function PhotoStudio({
                 }}
               />
             </label>
+            <small className={styles.fieldHint}>Copies of this same photo. For example, 4 means 4 identical prints.</small>
             {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter a whole number from 1 to {maxCopies}. The sheet count is calculated automatically.</div>}
             {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.</div>}
             <div className={styles.fieldLabel}>Paper and output
               <div className={styles.photoOutputChoices} role="group" aria-label="Photo output type">
                 <button type="button" id="photo-studio-output-a4" className={photoOutputLayout === "A4_SHEET" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "A4_SHEET"} onClick={() => setPhotoOutputLayout("A4_SHEET")}>
                   <strong>Regular A4 paper</strong>
+                  <span>Several copies arranged on A4 sheets, each at the selected photo size.</span>
                 </button>
                 <button type="button" id="photo-studio-output-photo-paper" className={photoOutputLayout === "PHOTO_PAPER" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "PHOTO_PAPER"} onClick={() => setPhotoOutputLayout("PHOTO_PAPER")}>
                   <strong>Photo paper</strong>
+                  <span>One print per sheet at the selected size. Choose glossy or matte.</span>
                 </button>
               </div>
             </div>
@@ -978,10 +987,10 @@ export default function PhotoStudio({
                 <div><span>Grid alignment</span><strong>{layout.columns} × {layout.rows}</strong></div>
               </>}
               <div><span>{isPhotoPaperLayout ? "Individual photo prints" : "A4 pages in this job"}</span><strong>{isPhotoPaperLayout ? copies : sheetCount}</strong></div>
-              <div><span>Preview page</span><strong>{previewPageIndex+1} of {sheetCount}</strong></div>
+              <div><span>Preview page</span><strong>{previewPageIndex+1} of {outputPageCount}</strong></div>
               {!isPhotoPaperLayout && copies>photosPerPage&&copies%photosPerPage!==0&&<small>Final A4 page: {copies%photosPerPage} photos, with the remaining sheet area left blank.</small>}
               <small>Output: {outputDescription}</small>
-              {mode !== "private-library"&&<small>Shop rate: {formatPhotoRate(photoPrices[size.id] ?? 0)} per photo. The server confirms the final total in your quote.</small>}
+              {mode !== "private-library"&&<small>Estimated photo subtotal: {formatPhotoRate((photoPrices[size.id] ?? 0) * copies)} ({formatPhotoRate(photoPrices[size.id] ?? 0)} × {copies} copies). Final total is confirmed in the shop quote.</small>}
             </div>
           </>}
 
@@ -990,22 +999,22 @@ export default function PhotoStudio({
         <main className={styles.canvasWorkspace}>
           <div className={styles.contextToolbar}>
             <span>PRINT SHEET PREVIEW</span>
-            {sheetCount>1&&<div className={styles.pageNavigator}>
-              <button type="button" id="photo-studio-previous-page" aria-label="Previous A4 page" onClick={()=>setPreviewPage(current=>Math.max(0,current-1))} disabled={previewPageIndex===0}><ChevronLeft size={14}/></button>
-              <span>Page {previewPageIndex+1} of {sheetCount}</span>
-              <button type="button" id="photo-studio-next-page" aria-label="Next A4 page" onClick={()=>setPreviewPage(current=>Math.min(sheetCount-1,current+1))} disabled={previewPageIndex>=sheetCount-1}><ChevronRight size={14}/></button>
+            {outputPageCount>1&&<div className={styles.pageNavigator}>
+              <button type="button" id="photo-studio-previous-page" aria-label={isPhotoPaperLayout ? "Previous photo-paper page" : "Previous A4 page"} onClick={()=>setPreviewPage(current=>Math.max(0,current-1))} disabled={previewPageIndex===0}><ChevronLeft size={14}/></button>
+              <span>Page {previewPageIndex+1} of {outputPageCount}</span>
+              <button type="button" id="photo-studio-next-page" aria-label={isPhotoPaperLayout ? "Next photo-paper page" : "Next A4 page"} onClick={()=>setPreviewPage(current=>Math.min(outputPageCount-1,current+1))} disabled={previewPageIndex>=outputPageCount-1}><ChevronRight size={14}/></button>
             </div>}
             <span className={styles.toolbarDivider}/>
-            <button type="button" onClick={() => setZoom(value => Math.max(1, Number((value - 0.1).toFixed(2))))} disabled={zoom <= 1} aria-label="Zoom out"><ZoomOut size={15}/></button>
-            <span className={styles.zoomLabel}>{zoom.toFixed(1)}×</span>
-            <button type="button" onClick={() => setZoom(value => Math.min(3, Number((value + 0.1).toFixed(2))))} disabled={zoom >= 3} aria-label="Zoom in"><ZoomIn size={15}/></button>
+            <button type="button" onClick={() => setPreviewScale(value => Math.max(0.8, Number((value - 0.1).toFixed(2))))} disabled={previewScale <= 0.8} aria-label="Preview zoom out"><ZoomOut size={15}/></button>
+            <span className={styles.zoomLabel} data-testid="photo-studio-preview-zoom">{previewScale.toFixed(1)}×</span>
+            <button type="button" onClick={() => setPreviewScale(value => Math.min(2, Number((value + 0.1).toFixed(2))))} disabled={previewScale >= 2} aria-label="Preview zoom in"><ZoomIn size={15}/></button>
             <span className={styles.toolbarDivider}/>
-            <button type="button" id="photo-studio-reset-look" onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); selectLook("natural"); }}><RotateCcw size={14}/> Reset</button>
+            <button type="button" id="photo-studio-reset-preview" onClick={() => setPreviewScale(1)}><RotateCcw size={14}/> Reset preview</button>
           </div>
           <div className={styles.canvasViewport}>
             {pickingBackground&&<div className={styles.pickInstruction}>Click a flat background area in the photo to sample its colour.</div>}
             <div className={styles.sheetFrame} onContextMenu={event=>event.preventDefault()} onDragStart={event=>event.preventDefault()}>
-              {image ? <div className={styles.previewStage} data-photo-preview-stage style={{ aspectRatio: `${previewWidthMm} / ${previewHeightMm}`, width: `min(100%, calc((100dvh - 210px) * ${previewWidthMm / previewHeightMm}))` }}>
+              {image ? <div className={styles.previewStage} data-photo-preview-stage style={{ aspectRatio: `${previewWidthMm} / ${previewHeightMm}`, width: `min(100%, calc((100dvh - 210px) * ${previewWidthMm / previewHeightMm}))`, transform: `scale(${previewScale})`, transformOrigin: "center center" }} data-testid="photo-studio-preview-stage">
                 <canvas
                   id="photo-studio-preview-canvas"
                   ref={canvasRef}
@@ -1058,7 +1067,7 @@ export default function PhotoStudio({
             <span>{size.label} · {size.widthMm} × {size.heightMm} mm</span>
             <span>{copies} photos · {isPhotoPaperLayout ? copies + " photo-paper sheets" : sheetCount + " A4 pages"}</span>
             <small>{isPhotoPaperLayout ? `Photo ${previewPageIndex+1} of ${outputPageCount}` : `Page ${previewPageIndex+1}: ${previewPhotoCount} photos`}</small>
-            {resolutionMessage && <small>{resolutionMessage}</small>}
+            {resolutionMessage && <small className={`${styles.sourceQuality} ${resolutionIsSufficient ? "" : styles.sourceQualityWarning}`} data-testid="photo-studio-source-quality" role="status"><strong>Source quality: </strong>{resolutionMessage} PDF output uses a 300-DPI target; it cannot add missing detail to the original.</small>}
           </div>
         </main>
       </div>
