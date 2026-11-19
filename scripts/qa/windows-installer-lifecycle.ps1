@@ -88,7 +88,7 @@ $fixturePrinter = $null
 $installRoot = Join-Path $env:ProgramFiles "SmartPrint"
 $ownsInstall = $false
 $ownsPrinter = $false
-$ownsTask = $false
+$script:ownsLocalServiceProbe = $false
 $script:localServiceFixtureStaged = $false
 $script:ownsLifecycleDataRoot = $false
 
@@ -229,17 +229,16 @@ function Invoke-Fixture([string]$Mode) {
 }
 
 function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArguments = @()) {
-    Write-Host "[QA-ACTION] Run protected Agent data-preservation fixture as LocalService: mode=$Mode" -ForegroundColor Cyan
-    $taskName = "SmartPrintLifecycleLocalServicePrinterProbe"
+    Write-Host "[QA-ACTION] Run protected Agent data-preservation fixture as LocalService Windows service: mode=$Mode" -ForegroundColor Cyan
+    $probeServiceName = "SmartPrintLifecycleLocalServiceProbe"
     $fixtureDataDirectory = $lifecycleDataRoot
     $resultDirectory = Join-Path $fixtureDataDirectory "Results"
     $serviceFixtureDirectory = $lifecycleFixtureRuntimeRoot
     New-Item -ItemType Directory -Force -Path $fixtureDataDirectory, $resultDirectory | Out-Null
     $script:ownsLifecycleDataRoot = $true
     $buildOutputDirectory = Join-Path $fixtureProject "bin\Release\net10.0-windows"
-    # Execute the QA apphost from Program Files rather than ProgramData. The
-    # latter is intended for data and may be subject to endpoint execution policy.
-    # Keep only LocalService read/execute rights on the fixture payload.
+    # The service executable and immutable dependencies live under Program Files.
+    # Its child worker inherits the actual LocalService service token.
     $fixtureDataAcl = @(
         "*S-1-5-18:(OI)(CI)F",
         "*S-1-5-32-544:(OI)(CI)F",
@@ -266,9 +265,8 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     Assert-True (Test-Path -LiteralPath $buildAssemblyPath) "The Agent lifecycle fixture assembly was not built."
     Assert-True (Test-Path -LiteralPath $buildExecutablePath) "The Agent lifecycle fixture apphost was not built."
 
-    # The scheduled task runs as LocalService, not the interactive CI runner.
-    # Stage and secure the fixture binaries once; every subsequent mode reuses
-    # the same immutable output instead of recopying the full .NET dependency set.
+    # Stage and secure fixture binaries once; every service invocation reuses
+    # this immutable payload instead of recopying the .NET dependency set.
     if (-not $script:localServiceFixtureStaged) {
         if (Test-Path -LiteralPath $serviceFixtureDirectory) {
             throw "Refusing to overwrite an existing LocalService lifecycle runtime directory."
@@ -279,9 +277,6 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
             throw "Could not grant LocalService read/execute access to the isolated lifecycle fixture runtime."
         }
         Copy-Item -Path (Join-Path $buildOutputDirectory "*") -Destination $serviceFixtureDirectory -Recurse -Force
-        # The fixture executable and its managed dependencies are protected
-        # independently from the data/result directory; LocalService can read/execute
-        # but cannot change the staged QA binary payload.
         & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureExecutableAcl /T /C /Q | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Could not grant the LocalService lifecycle fixture access to its test-only binaries."
@@ -289,59 +284,65 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
         $script:localServiceFixtureStaged = $true
     }
 
+    if (Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue) {
+        throw "Refusing to replace an existing LocalService lifecycle probe service."
+    }
     Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
-    $extraArguments = @($AdditionalArguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
-    $arguments = $Mode + ' "' + $resultPath + '"'
-    if ($extraArguments.Count -gt 0) { $arguments += ' ' + ($extraArguments -join ' ') }
-    # Run the staged apphost directly. Invoking dotnet.exe from a scheduled
-    # service-account task depends on the interactive runner's runtime lookup
-    # environment and can fail without exposing a useful task exit code.
-    $action = New-ScheduledTaskAction -Execute $fixtureExecutablePath -Argument $arguments -WorkingDirectory $serviceFixtureDirectory
-    $principal = New-ScheduledTaskPrincipal -UserId "NT AUTHORITY\LocalService" -LogonType ServiceAccount -RunLevel Limited
+    $serviceArguments = @("--service-fixture", $Mode, $resultPath) + @($AdditionalArguments)
+    $quotedArguments = @($serviceArguments | ForEach-Object { '"' + [string]$_ + '"' })
+    $binaryPath = '"' + $fixtureExecutablePath + '" ' + ($quotedArguments -join " ")
+
     try {
-        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
-        $script:ownsTask = $true
-        $taskStartedAt = Get-Date
-        Start-ScheduledTask -TaskName $taskName
-        $deadline = $taskStartedAt.AddSeconds(45)
-        $poll = 0
-        while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
-            $poll++
-            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-            $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-            $taskState = if ($task) { [string]$task.State } else { "unavailable" }
-            $taskHasExecuted = $taskInfo -and $taskInfo.LastRunTime -ge $taskStartedAt.AddSeconds(-2)
-            if ($taskHasExecuted -and $taskState -ne "Running") { break }
-            if ($poll -eq 1 -or $poll % 10 -eq 0) {
-                Write-Host "[QA-PROGRESS] LocalService fixture | mode=$Mode | state=$taskState | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
-            }
+        & sc.exe create $probeServiceName binPath= $binaryPath start= demand obj= "NT AUTHORITY\LocalService" password= "" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not create the disposable LocalService fixture Windows service."
+        }
+        $script:ownsLocalServiceProbe = $true
+        $probeConfiguration = Get-CimInstance -ClassName Win32_Service -Filter "Name='$probeServiceName'"
+        Assert-True ($probeConfiguration.StartName -match 'LocalService$') "The lifecycle fixture service is not configured as LocalService: $($probeConfiguration.StartName)"
+
+        & sc.exe start $probeServiceName | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Windows could not start the disposable LocalService fixture service."
+        }
+
+        $deadline = [DateTime]::UtcNow.AddSeconds(45)
+        do {
+            if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
+            $currentProbe = Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue
+            if (-not $currentProbe -or $currentProbe.Status -eq "Stopped") { break }
             Start-Sleep -Milliseconds 500
+        } while ([DateTime]::UtcNow -lt $deadline)
+
+        if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            $currentProbe = Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue
+            $probeStatus = if ($currentProbe) { [string]$currentProbe.Status } else { "unavailable" }
+            $serviceDetails = (& sc.exe queryex $probeServiceName 2>&1 | Out-String).Trim()
+            throw "LocalService fixture '$Mode' produced no result. ServiceState=$probeStatus; ServiceDetails=$serviceDetails"
         }
-        if (-not (Test-Path -LiteralPath $resultPath)) {
-            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
-            $taskInfo = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
-            $lastResult = if ($taskInfo) { "0x{0:X8}" -f ([long]$taskInfo.LastTaskResult -band 0xFFFFFFFFL) } else { "unavailable" }
-            $taskState = if ($task) { [string]$task.State } else { "unavailable" }
-            $taskAction = if ($task) { ($task.Actions | ForEach-Object { "$($_.Execute) $($_.Arguments)" }) -join "; " } else { "unavailable" }
-            $eventDetails = @()
-            try {
-                $eventDetails = @(Get-WinEvent -FilterHashtable @{
-                    LogName = "Microsoft-Windows-TaskScheduler/Operational"
-                    StartTime = $taskStartedAt
-                } -MaxEvents 30 -ErrorAction Stop |
-                    Where-Object { $_.Message -like "*$taskName*" } |
-                    Select-Object -First 5 -ExpandProperty Message)
-            }
-            catch { }
-            $eventSummary = if ($eventDetails.Count -gt 0) { ($eventDetails -join " | ") } else { "no matching Task Scheduler events were available" }
-            throw "LocalService lifecycle fixture '$Mode' produced no result. TaskState=$taskState; LastTaskResult=$lastResult; Action=$taskAction; Events=$eventSummary"
+
+        $serviceStopDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        do {
+            $currentProbe = Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue
+            if (-not $currentProbe -or $currentProbe.Status -eq "Stopped") { break }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTime]::UtcNow -lt $serviceStopDeadline)
+
+        $result = (Get-Content -LiteralPath $resultPath -Raw).Trim()
+        if ($result.StartsWith("ERROR:", [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "LocalService fixture '$Mode' failed: $result"
         }
-        return (Get-Content -LiteralPath $resultPath -Raw).Trim()
+        return $result
     }
     finally {
-        if ($script:ownsTask) {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-            $script:ownsTask = $false
+        if ($script:ownsLocalServiceProbe) {
+            $currentProbe = Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue
+            if ($currentProbe -and $currentProbe.Status -ne "Stopped") {
+                Stop-Service -Name $probeServiceName -Force -ErrorAction SilentlyContinue
+                try { (Get-Service -Name $probeServiceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(15)) } catch { }
+            }
+            & sc.exe delete $probeServiceName | Out-Null
+            $script:ownsLocalServiceProbe = $false
         }
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
     }
@@ -564,7 +565,7 @@ try {
     Assert-True (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) "Refusing to test on a runner that already has the SmartPrint Agent service."
     Assert-True (-not (Test-Path -LiteralPath $installRoot)) "Refusing to test on a runner that already has a SmartPrint installation directory."
     Assert-True (-not (Get-Printer -Name $testPrinterName -ErrorAction SilentlyContinue)) "Refusing to overwrite an existing printer queue named '$testPrinterName'."
-    Assert-True (-not (Get-ScheduledTask -TaskName "SmartPrintLifecycleLocalServicePrinterProbe" -ErrorAction SilentlyContinue)) "Refusing to replace an existing lifecycle printer-probe task."
+    Assert-True (-not (Get-Service -Name "SmartPrintLifecycleLocalServiceProbe" -ErrorAction SilentlyContinue)) "Refusing to replace an existing LocalService lifecycle probe service."
     $existingRules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
     Assert-True ($existingRules.Count -eq 0) "Refusing to alter existing SmartPrint firewall rules."
     Assert-True (-not (Test-Path -LiteralPath $identityPath)) "Refusing to overwrite an existing machine Agent identity fixture."
@@ -592,9 +593,12 @@ try {
 
     @'
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Agent;
 
@@ -602,6 +606,20 @@ const string expectedIdentityId = "22222222-2222-4222-8222-222222222222";
 const string expectedNetworkId = "LIFECYCLE-QA-SHOP-NETWORK";
 const string expectedJobId = "11111111-1111-4111-8111-111111111111";
 const string expectedDocument = "SmartPrint lifecycle queue fixture - preserve me.";
+if (args.Length > 0 && string.Equals(args[0], "--service-fixture", StringComparison.Ordinal))
+{
+    var fixtureArguments = args.Skip(1).ToArray();
+    var serviceBuilder = Host.CreateApplicationBuilder(Array.Empty<string>());
+    serviceBuilder.Services.AddSingleton(fixtureArguments);
+    serviceBuilder.Services.AddWindowsService(options =>
+    {
+        options.ServiceName = "SmartPrint Lifecycle QA LocalService Probe";
+    });
+    serviceBuilder.Services.AddHostedService<LifecycleFixtureService>();
+    await serviceBuilder.Build().RunAsync();
+    return;
+}
+
 var mode = args.FirstOrDefault() ?? "verify";
 var credentialStore = new AgentCredentialStore();
 var queueStore = new AgentLocalQueueStore();
@@ -888,6 +906,67 @@ else
     throw new ArgumentException($"Unknown fixture mode: {mode}");
 }
 
+internal sealed class LifecycleFixtureService(
+    string[] fixtureArguments,
+    IHostApplicationLifetime applicationLifetime) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var resultPath = fixtureArguments.Length > 1 ? fixtureArguments[1] : null;
+        try
+        {
+            var executablePath = Environment.ProcessPath
+                ?? throw new InvalidOperationException("The LocalService fixture executable path is unavailable.");
+            var startInfo = new ProcessStartInfo(executablePath)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = AppContext.BaseDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            foreach (var argument in fixtureArguments)
+                startInfo.ArgumentList.Add(argument);
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Could not launch the LocalService fixture worker process.");
+            var standardOutput = process.StandardOutput.ReadToEndAsync();
+            var standardError = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync(stoppingToken);
+            var output = await standardOutput;
+            var error = await standardError;
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"The LocalService fixture worker exited with code {process.ExitCode}. " +
+                    $"stdout: {output} stderr: {error}");
+            }
+        }
+        catch (Exception exception)
+        {
+            if (!string.IsNullOrWhiteSpace(resultPath))
+            {
+                try
+                {
+                    await File.WriteAllTextAsync(
+                        resultPath,
+                        "ERROR: " + exception,
+                        CancellationToken.None);
+                }
+                catch
+                {
+                    // The PowerShell harness reports a missing result if the
+                    // LocalService result-directory ACL itself is incorrect.
+                }
+            }
+        }
+        finally
+        {
+            applicationLifetime.StopApplication();
+        }
+    }
+}
+
 internal static class RetainedSpoolerJobProbe
 {
     private const uint JobControlRetain = 8;
@@ -1114,9 +1193,10 @@ finally {
     if ($ownsInstall) {
         try { Invoke-Uninstall } catch { Write-Warning "Final uninstall cleanup: $($_.Exception.Message)" }
     }
-    if ($ownsTask) {
-        Unregister-ScheduledTask -TaskName "SmartPrintLifecycleLocalServicePrinterProbe" -Confirm:$false -ErrorAction SilentlyContinue
-        $script:ownsTask = $false
+    if ($script:ownsLocalServiceProbe) {
+        Stop-Service -Name "SmartPrintLifecycleLocalServiceProbe" -Force -ErrorAction SilentlyContinue
+        & sc.exe delete "SmartPrintLifecycleLocalServiceProbe" | Out-Null
+        $script:ownsLocalServiceProbe = $false
     }
     if ($script:ownsLifecycleDataRoot -and (Test-Path -LiteralPath $lifecycleDataRoot)) {
         Remove-Item -LiteralPath $lifecycleDataRoot -Recurse -Force -ErrorAction SilentlyContinue
