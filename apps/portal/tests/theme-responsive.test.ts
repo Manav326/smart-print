@@ -360,7 +360,7 @@ test("customer local-upload recovery explains shop Wi-Fi and hotspot without add
   const app = read("../src/App.tsx");
   assert.match(app, /same Wi-Fi or hotspot as the shop computer/);
   assert.match(app, /same shop Wi-Fi or hotspot/);
-  assert.match(app, /Direct shop Wi-Fi or hotspot transfer is temporarily unavailable/);
+  assert.match(app, /The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue/);
   assert.match(app, /Shop connection ready/);
 });
 
