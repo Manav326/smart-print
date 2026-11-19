@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import {
-  Check, ChevronLeft, ChevronRight, Crop, Image as ImageIcon, RotateCcw, SlidersHorizontal,
+  Check, ChevronLeft, ChevronRight, Crop, Image as ImageIcon, RotateCcw,
   Sparkles, X, ZoomIn, ZoomOut, Type, PaintBucket, Pipette, Info
 } from "lucide-react";
 import styles from "./PhotoStudio.module.css";
@@ -856,7 +856,7 @@ export default function PhotoStudio({
           {lookPanel && <>
             <div className={styles.lookGrid}>
               {LOOKS.map(item => <button type="button" key={item.id} id={"photo-studio-look-" + item.id} className={look === item.id ? styles.lookActive : styles.lookButton} onClick={() => selectLook(item.id)} aria-pressed={look === item.id}>
-                <span className={styles.lookSwatch + " " + styles["look_" + item.id]}/><strong>{item.label}</strong><small>{item.note}</small>
+                <span className={styles.lookSwatch + " " + styles["look_" + item.id]}/><strong>{item.label}</strong>
               </button>)}
             </div>
             <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input id="photo-studio-brightness" type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
@@ -878,7 +878,7 @@ export default function PhotoStudio({
               </label>
               <label className={styles.captionOptIn}>
                 <input id="photo-studio-text-bold" type="checkbox" checked={selectedTextLayer.bold} onChange={event=>updateSelectedTextLayer({bold:event.target.checked})}/>
-                <span><strong>Bold text</strong><small>Apply a stronger weight to the selected text.</small></span>
+                <span><strong>Bold text</strong></span>
               </label>
               <button type="button" id="photo-studio-remove-text" className={styles.secondaryButton} onClick={removeSelectedTextLayer}><X size={14}/> Remove selected text</button>
 
@@ -905,7 +905,7 @@ export default function PhotoStudio({
                 setIncludeFormDetails(enabled);
                 if(!enabled){setPhotoName("");setDateOfBirth("");}
               }}/>
-              <span><strong>Add name and DOB to each photo</strong><small>Optional. Nothing is printed below the photos unless you switch this on.</small></span>
+              <span><strong>Add name and DOB to each photo</strong></span>
             </label>
             {includeFormDetails&&<>
               <label className={styles.fieldLabel}>Name for form (optional)
@@ -948,10 +948,10 @@ export default function PhotoStudio({
             <div className={styles.fieldLabel}>Paper and output
               <div className={styles.photoOutputChoices} role="group" aria-label="Photo output type">
                 <button type="button" id="photo-studio-output-a4" className={photoOutputLayout === "A4_SHEET" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "A4_SHEET"} onClick={() => setPhotoOutputLayout("A4_SHEET")}>
-                  <strong>Regular A4 paper</strong><span>Arrange photos on one A4 sheet</span>
+                  <strong>Regular A4 paper</strong>
                 </button>
                 <button type="button" id="photo-studio-output-photo-paper" className={photoOutputLayout === "PHOTO_PAPER" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "PHOTO_PAPER"} onClick={() => setPhotoOutputLayout("PHOTO_PAPER")}>
-                  <strong>Photo paper</strong><span>Print each photo at its selected size</span>
+                  <strong>Photo paper</strong>
                 </button>
               </div>
             </div>
