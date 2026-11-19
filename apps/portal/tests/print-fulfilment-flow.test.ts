@@ -305,7 +305,8 @@ test("customer local transfer remains visible with a clear unavailable state whe
  const connection=app.slice(start,end);
  assert.match(connection,/if\(!localAgent\?\.endpoints\.length\)[\s\S]*?setCheckStatus\("unavailable"\)/);
  assert.doesNotMatch(connection,/if\(!localAgent\?\.endpoints\.length\)return null/);
- assert.match(connection,/Direct transfer is temporarily unavailable/);
+ assert.match(connection,/Local transfer unavailable/);
+ assert.match(connection,/The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue/);
  assert.match(app,/customer-upload-mode-unavailable/);
 });
 
