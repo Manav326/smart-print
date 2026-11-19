@@ -418,7 +418,7 @@ public sealed class EpsonL360DriverIntegrationTests
             var widthPoints = (float)(dimensions.WidthMm * 72d / 25.4d);
             var heightPoints = (float)(dimensions.HeightMm * 72d / 25.4d);
             var gap = 12f;
-            var columns = Math.Max(1, Math.Min(4, photoCount));
+            var columns = Math.Max(1, Math.Min(photoCount, (int)Math.Floor((499f + gap) / (widthPoints + gap))));
             for (var index = 0; index < photoCount; index++)
             {
                 var column = index % columns;
