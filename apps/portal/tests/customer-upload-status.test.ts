@@ -46,3 +46,42 @@ test("a fresh quote remains the primary next step after the upload is complete",
   assert.match(resolveCustomerUploadStatusMessage({ quoteAvailable: true, uploadedFileCount: 1,
     uploadProgress: { files: [{ status: "COMPLETED" }] } }), /^Check the price/);
 });
+
+
+test("new uploads and selected files take priority over an older order status", () => {
+  assert.match(resolveCustomerUploadStatusMessage({
+    jobStatus: "AWAITING_SHOP_APPROVAL",
+    uploadProgress: { files: [{ status: "TRANSFERRING" }] }
+  }), /^Uploading your documents/);
+  assert.equal(resolveCustomerUploadStatusMessage({
+    jobStatus: "AWAITING_SHOP_APPROVAL",
+    filesSelected: 1
+  }), "Review your selected files and upload.");
+});
+
+test("partial failures remain visible while other files are still uploading", () => {
+  assert.match(resolveCustomerUploadStatusMessage({
+    jobStatus: "AWAITING_SHOP_APPROVAL",
+    uploadProgress: { files: [{ status: "FAILED" }, { status: "TRANSFERRING" }] }
+  }), /^Some files need attention while the remaining files are still uploading/);
+});
+
+test("the latest payment result overrides a stale payment-stage job status", () => {
+  assert.equal(resolveCustomerUploadStatusMessage({
+    jobStatus: "AWAITING_CUSTOMER_PAYMENT",
+    paymentStatus: "VERIFIED"
+  }), "Payment received. The shop is preparing your print.");
+  assert.equal(resolveCustomerUploadStatusMessage({
+    jobStatus: "AWAITING_CUSTOMER_PAYMENT",
+    paymentStatus: "REJECTED"
+  }), "The payment could not be confirmed. Please check with the shop before paying again.");
+  assert.equal(resolveCustomerUploadStatusMessage({ paymentStatus: "REJECTED" }),
+    "The payment could not be confirmed. Please check with the shop before paying again.");
+});
+
+test("later fulfilment status remains more useful than an already verified payment", () => {
+  assert.equal(resolveCustomerUploadStatusMessage({
+    jobStatus: "PRINTING",
+    paymentStatus: "VERIFIED"
+  }), "Your print is in progress.");
+});
