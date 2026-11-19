@@ -220,7 +220,7 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
                 StringComparison.Ordinal))
             return;
 
-        Assert.True(OperatingSystem.IsWindows(), "The spooler administration test requires a Windows runner.");
+        Assert.True(OperatingSystem.IsWindows(), "The Windows spooler integration test requires a Windows runner.");
         const string queueName = "Microsoft Print to PDF";
         const int absentJobId = int.MaxValue;
         var executor = new WindowsPrintExecutor();
