@@ -903,6 +903,8 @@ test("shop batch review communicates included and excluded choices, valid quotes
 
   assert.match(app, /aria-label="Batch review summary"/);
   assert.match(app, /Accepted value · valid quotes only/);
+  assert.match(app, /Included files stay in one checkout/);
+  assert.match(app, /See order status/);
   assert.match(app, /need a fresh quote/);
   assert.match(app, /Include this file in the customer's batch checkout/);
   assert.match(app, /Will be excluded/);
