@@ -6020,7 +6020,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {uploadProgress&&<section className="customer-upload-progress" aria-live="polite" aria-label="Upload progress">
       <div className="customer-upload-progress-header">
         <div><strong>{uploadProgress.completed} of {uploadProgress.total} files processed</strong><span>Up to {CUSTOMER_UPLOAD_CONCURRENCY} transfers run at the same time</span></div>
-        <span className="customer-upload-progress-count">{Math.round(uploadProgress.files.reduce((sum,file)=>sum+(file.totalBytes>0?Math.min(1,file.bytesSent/file.totalBytes):0),0)/Math.max(1,uploadProgress.total)*100)}%</span>
+        <span className="customer-upload-progress-count">{Math.round(
+          uploadProgress.files.reduce((sum,file)=>sum+Math.min(file.bytesSent,file.totalBytes||file.sizeBytes),0)/
+          Math.max(1,uploadProgress.files.reduce((sum,file)=>sum+(file.totalBytes||file.sizeBytes),0))*100
+        )}%</span>
       </div>
       <div className="customer-upload-progress-list">
         {uploadProgress.files.map((file,index)=>{
