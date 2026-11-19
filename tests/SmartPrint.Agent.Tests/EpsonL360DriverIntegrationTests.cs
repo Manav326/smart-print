@@ -288,7 +288,7 @@ public sealed class EpsonL360DriverIntegrationTests
         string printKind,
         int pagesPerSheet,
         string photoPaperFinish = "PLAIN",
-        string? photoOutputLayout = null,
+        string photoOutputLayout = "A4_SHEET",
         string? photoSizeCode = null)
     {
         var now = DateTimeOffset.UtcNow;
@@ -365,7 +365,7 @@ public sealed class EpsonL360DriverIntegrationTests
             Thread.Sleep(250);
         }
 
-        Assert.True(false,
+        Assert.Fail(
             $"Epson L360 accepted StartDoc for {scenario} (JobId={receipt.JobId}) but the isolated spooler file port did not reach a stable output file.");
     }
 
