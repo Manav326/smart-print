@@ -925,14 +925,16 @@ jobs:
         env:
           API_RESULT: ${{ needs.api_dotnet.result }}
           AGENT_RESULT: ${{ needs.agent_dotnet.result }}
+          EPSON_L360_RESULT: ${{ needs.agent_dotnet.outputs.epson_l360_qa_ready }}
           DESKTOP_RESULT: ${{ needs.windows_desktop.result }}
           INSTALLER_RESULT: ${{ needs.windows_installer.result }}
         run: |
           set -euo pipefail
-          printf 'API: %s\nAgent: %s\nDesktop: %s\nInstaller: %s\n' \
-            "$API_RESULT" "$AGENT_RESULT" "$DESKTOP_RESULT" "$INSTALLER_RESULT"
+          printf 'API: %s\nAgent: %s\nEpson L360 qualification: %s\nDesktop: %s\nInstaller: %s\n' \
+            "$API_RESULT" "$AGENT_RESULT" "$EPSON_L360_RESULT" "$DESKTOP_RESULT" "$INSTALLER_RESULT"
           test "$API_RESULT" = "success"
           test "$AGENT_RESULT" = "success"
+          test "$EPSON_L360_RESULT" = "true"
           test "$DESKTOP_RESULT" = "success"
           test "$INSTALLER_RESULT" = "success"
 
