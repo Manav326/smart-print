@@ -955,7 +955,8 @@ test("customer warnings and info use concise accessible notices with toolkit ico
   assert.match(app, /Only PDF, JPG and PNG files are supported/);
   assert.match(app, /identified by content\. Original filenames were kept/);
   assert.match(app, /Local transfer is not encrypted/);
+  assert.match(app, /Tap Check shop Wi-Fi above and allow local-network access/);
   assert.match(css, /\.customer-inline-notice\.warning/);
   assert.match(css, /\.customer-inline-notice\.info/);
-  assert.match(css, /\.customer-upload-mode-warning/);
+  assert.match(css, /\.customer-inline-notices \.customer-inline-notice/);
 });
