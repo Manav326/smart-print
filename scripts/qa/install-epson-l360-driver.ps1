@@ -141,7 +141,8 @@ if (Get-PrinterPort -Name $spoolerOutputPath -ErrorAction SilentlyContinue) {
     throw "Refusing to reuse an existing local printer port '$spoolerOutputPath'."
 }
 Add-PrinterPort -Name $spoolerOutputPath
-Add-Printer -Name $QueueName -DriverName $driverName -PortName $spoolerOutputPath -PrintProcessor "WinPrint" -ErrorAction Stop
+# Keep the print processor selected by the signed Epson driver package.
+Add-Printer -Name $QueueName -DriverName $driverName -PortName $spoolerOutputPath -ErrorAction Stop
 
 $printer = Get-Printer -Name $QueueName -ErrorAction Stop
 if ($printer.DriverName -ne $driverName -or $printer.PortName -ne $spoolerOutputPath) {
