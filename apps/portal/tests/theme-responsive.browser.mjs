@@ -775,6 +775,33 @@ async function exercisePhotoStudioBrowser() {
     await openButton.click();
     const reopened = page.getByRole("dialog", { name: "Photo Studio" });
     await reopened.waitFor({ state: "visible" });
+
+    // The Sheet guidance must remain readable and use the correct theme at every viewport.
+    const sheetHelp = reopened.getByRole("button", { name: "Help: Photo sheet & form details" });
+    await sheetHelp.click();
+    const sheetGuidance = reopened.getByRole("region", { name: "Photo sheet & form details guidance" });
+    assert.equal(await sheetGuidance.isVisible(), true);
+    const helpMetrics = await sheetGuidance.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const panel = element.closest("[class*='toolPanel']");
+      const panelRect = panel?.getBoundingClientRect();
+      return {
+        width: rect.width,
+        height: rect.height,
+        right: rect.right,
+        panelRight: panelRect?.right ?? 0,
+        background: getComputedStyle(element).backgroundColor,
+        scrollHeight: panel?.scrollHeight ?? 0,
+        clientHeight: panel?.clientHeight ?? 0
+      };
+    });
+    assert.ok(helpMetrics.width > 0 && helpMetrics.height > 0 && helpMetrics.right <= helpMetrics.panelRight + 1,
+      `Photo Studio help overflows the tool panel at ${item.width}x${item.height}: ${JSON.stringify(helpMetrics)}`);
+    assert.equal(helpMetrics.background, item.theme === "dark" ? "rgb(34, 45, 62)" : "rgb(244, 246, 251)",
+      "Contextual help must use the requested light/dark palette.");
+    await sheetHelp.click();
+    assert.equal(await sheetHelp.getAttribute("aria-expanded"), "false");
+
     if (item.mode === "customer") {
       assert.equal(await reopened.locator('input[type="date"]').count(), 0,
         "Customer name and DOB fields must be hidden until explicitly enabled.");
@@ -959,6 +986,26 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.equal(await cropHelp.getAttribute("aria-expanded"), "false",
       "Escape closes the help panel before the Photo Studio dialog.");
     assert.equal(await dialog.isVisible(), true, "Dismissing help must leave Photo Studio open.");
+
+    // Each tool keeps its guidance in the same accessible panel rather than a permanent paragraph.
+    const helpCases = [
+      { tool: "Looks", title: "Photo look", expected: /Balanced, true-to-life colour/ },
+      { tool: "Text", title: "Text layers", expected: /Bold text/ },
+      { tool: "Background", title: "Photo background", expected: /colour-key tool, not AI subject recognition/ },
+      { tool: "Sheet", title: "Photo sheet & form details", expected: /assigned printer driver/ }
+    ];
+    for (const item of helpCases) {
+      await dialog.getByRole("button", { name: item.tool, exact: true }).click();
+      const trigger = dialog.getByRole("button", { name: "Help: " + item.title });
+      await trigger.click();
+      const guidance = dialog.getByRole("region", { name: item.title + " guidance" });
+      assert.match(await guidance.innerText(), item.expected);
+      const bounds = await guidance.boundingBox();
+      assert.ok(bounds && bounds.height > 0 && bounds.width > 0, item.title + " help must render.");
+      await trigger.click();
+      assert.equal(await trigger.getAttribute("aria-expanded"), "false");
+    }
+    await dialog.getByRole("button", { name: "Crop", exact: true }).click();
 
     let pixels = await readPhotoCanvasPixels(page);
     await setPhotoRange(dialog, "Zoom", 3);
