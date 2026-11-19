@@ -1608,6 +1608,28 @@ public sealed class WindowsPrintExecutor
         public void Dispose() => fpdfview.FPDF_ClosePage(Value);
     }
 
+    private sealed class NonClosingStream(Stream inner) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => inner.Read(buffer);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.ReadAsync(buffer, cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        // Deliberately do not dispose the underlying queue stream. Its owner is
+        // the Worker, which must retain it until the full print/export operation
+        // (including a possible fallback) is complete.
+        protected override void Dispose(bool disposing) => base.Dispose(disposing);
+    }
+
     private sealed class ImageRasterDocument : IRasterDocument
     {
         private readonly SKImage image;
@@ -1631,7 +1653,12 @@ public sealed class WindowsPrintExecutor
             if (!stream.CanRead || !stream.CanSeek)
                 throw new PrintExecutionBlockedException("IMAGE_RENDER_OPEN_FAILED", "The image stream is not seekable.");
             stream.Position = 0;
-            using var bitmap = SKBitmap.Decode(stream);
+            // Skia owns and disposes the stream instance passed to Decode on some
+            // native decoder paths. Give it a non-owning facade so PDF export can
+            // safely rewind and reuse the queue's authenticated source stream for
+            // the existing fallback renderer.
+            using var decoderStream = new NonClosingStream(stream);
+            using var bitmap = SKBitmap.Decode(decoderStream);
             if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0 ||
                 (long)bitmap.Width * bitmap.Height > MaxRasterPixels ||
                 bitmap.Width > MaxRasterDimension || bitmap.Height > MaxRasterDimension)
