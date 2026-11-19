@@ -960,3 +960,25 @@ test("customer warnings and info use concise accessible notices with toolkit ico
   assert.match(css, /\.customer-inline-notice\.info/);
   assert.match(css, /\.customer-inline-notices \.customer-inline-notice/);
 });
+
+
+test("customer upload page uses a consistent responsive layout for every conditional panel", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(css, /customer-print-flow \{\s*display:grid/);
+  assert.match(css, /customer-print-flow > \* \{\s*min-width:0;\s*margin-block:0/);
+  assert.match(css, /customer-upload-progress>div \{[\s\S]*height:auto;[\s\S]*background:transparent/);
+  assert.match(css, /customer-folder-group-head \{\s*display:grid/);
+  assert.match(css, /customer-folder-file-row \{\s*display:grid/);
+  assert.match(css, /customer-file-overrides \{\s*display:grid/);
+  assert.match(css, /customer-upload-picker-grid \{\s*display:grid/);
+  assert.match(css, /customer-file-preview iframe \{[\s\S]*max-width:100%/);
+  assert.match(css, /@media\(max-width:760px\)/);
+  assert.match(css, /@media\(max-width:650px\)/);
+  assert.match(css, /@media\(max-width:420px\)/);
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\)/);
+  assert.match(app, /aria-label="Selected files and print settings"/);
+  assert.match(app, /role="progressbar"/);
+  assert.match(app, /aria-pressed=\{selectedFileIndex===index\}/);
+});
