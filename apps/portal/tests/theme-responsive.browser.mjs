@@ -1007,6 +1007,14 @@ async function exercisePhotoStudioFeatureMatrix() {
     }
     await dialog.getByRole("button", { name: "Crop", exact: true }).click();
 
+    // Preview magnification changes the editor view, not the saved print crop.
+    const cropZoomInput = dialog.locator("#photo-studio-zoom");
+    await dialog.getByRole("button", { name: "Preview zoom in" }).click();
+    assert.equal(await cropZoomInput.inputValue(), "1");
+    assert.equal(await dialog.locator('[data-testid="photo-studio-preview-zoom"]').innerText(), "1.1×");
+    await dialog.getByRole("button", { name: "Reset preview" }).click();
+    assert.equal(await dialog.locator('[data-testid="photo-studio-preview-zoom"]').innerText(), "1.0×");
+
     let pixels = await readPhotoCanvasPixels(page);
     await setPhotoRange(dialog, "Zoom", 3);
     assert.equal(await dialog.getByText(/This crop may look soft at the selected size/).count(), 1,
