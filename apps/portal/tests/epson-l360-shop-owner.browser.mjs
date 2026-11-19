@@ -169,7 +169,7 @@ async function createShopOwnerPage(browser, viewport, label) {
       localEndpoints: []
     }];
     else if (path === "/api/v1/shop/print-jobs" && request.method() === "GET") value = shopJobs;
-    else if (/^\\/api\\/v1\\/shop\\/print-jobs\\/[^/]+\\/printer$/.test(path) && request.method() === "PATCH") {
+    else if (/^\/api\/v1\/shop\/print-jobs\/[^/]+\/printer$/.test(path) && request.method() === "PATCH") {
       const jobId = path.split("/")[5];
       const job = shopJobs.find(item => item.id === jobId);
       const body = request.postDataJSON();
@@ -193,7 +193,7 @@ async function createShopOwnerPage(browser, viewport, label) {
         assignedJobCount: assignedJobs.length, updatedUtc: new Date().toISOString()
       };
     }
-    else if (/^\\/api\\/v1\\/shop\\/print-jobs\\/[^/]+\\/dispatch$/.test(path) && request.method() === "POST") {
+    else if (/^\/api\/v1\/shop\/print-jobs\/[^/]+\/dispatch$/.test(path) && request.method() === "POST") {
       const jobId = path.split("/")[5];
       const job = shopJobs.find(item => item.id === jobId);
       if (!job || job.printerDeviceId !== printer.id) {
