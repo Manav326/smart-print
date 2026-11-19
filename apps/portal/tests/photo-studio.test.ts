@@ -425,7 +425,7 @@ test("Photo Studio contextual help is readable, dismissible and theme-aware inst
  assert.match(studio,/role="region" aria-label=\{panelTitle\+" guidance"\}/);
  assert.match(studio,/openHelpToolRef\.current !== null/);
  assert.match(studio,/dismissOnOutsidePointer/);
- for(const help of ["Drag directly on any photo","Natural, Warm, Crisp","colour-key tool, not AI subject recognition","Name and date-of-birth captions are off by default"])
+ for(const help of ["Drag directly on any photo","Balanced, true-to-life colour","A gentle warmer tone","Slightly clearer and brighter","Monochrome photo","Bold text","colour-key tool, not AI subject recognition","Name and date-of-birth captions are off by default"])
    assert.ok(studio.includes(help),"Missing contextual guidance: "+help);
  assert.match(css,/\.helpTooltipPanel\{[^}]*max-height:190px[^}]*overflow:auto/s);
  assert.match(css,/\.dark \.helpTooltipPanel/);
