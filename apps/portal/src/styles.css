@@ -3874,7 +3874,7 @@ html[data-theme="dark"] .customer-inline-notice.warning>svg{color:#f0c879}
 @media(max-width:520px){
  .customer-native-pdf-page{max-height:min(60vh,480px)}
  .customer-native-pdf-controls button{min-height:40px;padding-inline:9px}
- .customer-upload-notice{font-size:11px}
+ .customer-inline-notice{font-size:11px}
  .customer-batch-quote-card>div:first-child>strong{font-size:clamp(20px,6vw,26px)}
 }
 html[data-theme="dark"] .customer-native-pdf-controls button,
