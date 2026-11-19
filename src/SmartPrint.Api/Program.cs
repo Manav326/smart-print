@@ -6094,7 +6094,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
-    if (request.Code is not ("document_not_supported" or "document_content_type_mismatch" or "private_document_integrity_failed" or "private_document_decryption_failed") ||
+    if (request.Code is not ("document_not_supported" or "document_content_type_mismatch" or "private_document_encryption_required" or "private_document_integrity_failed" or "private_document_decryption_failed") ||
         string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 400)
         return Results.BadRequest(new { code = "private_relay_rejection_invalid" });
 
