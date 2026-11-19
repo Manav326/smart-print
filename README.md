@@ -158,7 +158,7 @@ The Agent service runs as built-in **LocalService**, not LocalSystem. It uses ma
 
 During a hostname migration, keep every previously configured public or legacy Agent API hostname routed to the portal until Agents have updated and old QR codes are no longer in circulation. Legacy Agent heartbeats must continue to reach the API long enough to receive the new canonical URL.
 
-Direct LAN uploads still require the phone and Agent to share the shop LAN, the browser's Local Network Access permission when requested, and the Agent's Private-profile firewall rule on TCP 17842. Cloud-assisted upload remains the fallback.
+Direct LAN uploads still require the phone and Agent to share the shop LAN, the browser's Local Network Access permission when requested, and the Agent's local-subnet firewall rule on TCP 17842. Cloud-assisted upload remains the fallback.
 
 ### Backups and operations
 
