@@ -843,3 +843,17 @@ test("shop media preview distinguishes loading, unsupported and failed media sta
   assert.ok(preview.includes("Loading preview"));
   assert.ok(preview.includes("access link may have expired"));
 });
+
+
+test("QR image sharing prepares the file before a separate user-activated share action", () => {
+  const app = read("../src/App.tsx");
+  const handlerStart = app.indexOf("const sharePreparedStationImage=(station:QrStation)=>{");
+  assert.ok(handlerStart >= 0, "The ready-to-share file must have a dedicated click handler.");
+  const handlerEnd = app.indexOf("\n  useEffect(()=>{", handlerStart);
+  const handler = app.slice(handlerStart, handlerEnd > handlerStart ? handlerEnd : undefined);
+  assert.ok(handler.includes("void shareQrStationImage(file)"));
+  assert.ok(!handler.includes("await "), "Image generation must finish before the share click to preserve browser user activation.");
+  assert.ok(app.includes("Prepare to share"));
+  assert.ok(app.includes("Share image now"));
+  assert.ok(app.includes("stationImageSignature(station)"), "Stale prepared artwork must not be shared after station details change.");
+});
