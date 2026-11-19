@@ -875,7 +875,7 @@ test("customer batch quote separates the total, included files, excluded files a
   const css = read("../src/styles.css");
 
   assert.match(app, /aria-label="Batch quote summary"/);
-  assert.match(app, /acceptedQuoteEntries\.length===1\?"file has":"files have"\} a current quote/);
+  assert.match(app, /batchQuoteSummary/);
   assert.match(app, /customer-batch-quote-chip included/);
   assert.match(app, /customer-batch-quote-chip excluded/);
   assert.match(app, /customer-batch-quote-chip document/);
@@ -886,6 +886,9 @@ test("customer batch quote separates the total, included files, excluded files a
   assert.match(app, /quoteRows\.map\(entry=>/);
   assert.match(app, /batchQuoteNeedsRefresh/);
   assert.match(app, /batchQuoteTotalDisplay/);
+  assert.match(app, /hasAcceptedQuoteLocked/);
+  assert.match(app, /No accepted files have a current quote yet/);
+  assert.match(app, /acceptedBatchRows/);
   assert.match(app, /Quote expired/);
   assert.match(app, /Quote needed/);
   assert.match(app, /<details className="customer-batch-quote-details">/);
