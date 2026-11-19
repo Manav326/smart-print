@@ -53,16 +53,24 @@ test("QSP2 private encoder emits a correct header, record layout and authenticat
   for (let index = 0; index < bytes.length; index++)
     bytes[index] = (index * 17 + 3) & 0xff;
 
+  const progress: Array<{ bytesSent:number; totalBytes:number }> = [];
   const factory = await preparePrivateQsp2Upload(
     new File([bytes], "private.pdf", { type: "application/pdf" }),
     {
       agentDeviceId: "00112233-4455-6677-8899-aabbccddeeff",
       printJobId: "ffeeddcc-bbaa-9988-7766-554433221100",
-      encryptionPublicKey: Buffer.from(publicKey).toString("base64")
+      encryptionPublicKey: Buffer.from(publicKey).toString("base64"),
+      onProgress: (bytesSent,totalBytes) => progress.push({bytesSent,totalBytes})
     }
   );
   const attempt = await factory.createAttempt();
   const encrypted = await collect(attempt.body);
+  assert.ok(progress.length >= 4);
+  assert.equal(progress[0].bytesSent, 132);
+  assert.equal(progress.at(-1)?.bytesSent, encrypted.length);
+  assert.ok(progress.every((value,index)=>value.totalBytes===encrypted.length&&
+    (index===0||value.bytesSent>=progress[index-1].bytesSent)));
+  assert.equal(progress.at(-1)?.totalBytes, encrypted.length);
 
   assert.equal(factory.encryptedSizeBytes, getQsp2EncryptedLength(bytes.length));
   assert.equal(attempt.encryptedSizeBytes, encrypted.length);
