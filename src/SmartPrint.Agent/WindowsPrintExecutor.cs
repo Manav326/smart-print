@@ -1391,6 +1391,9 @@ public sealed class WindowsPrintExecutor
                     "The PDF stream has an unsupported size.");
 
             this.mono = mono;
+            // PDFium's file-access wrapper can dispose its callback context after a
+            // render attempt. Give it a non-owning view so a rejected driver attempt
+            // can still rewind and read the same source for the existing PDF fallback.
             var context = new PdfiumStreamAccessContext(stream);
             var contextHandle = GCHandle.Alloc(context, GCHandleType.Normal);
             var access = new FPDF_FILEACCESS();
@@ -1489,7 +1492,11 @@ public sealed class WindowsPrintExecutor
             fileAccess?.Dispose();
             fileAccess = null;
             if (streamContextHandle.IsAllocated)
+            {
+                if (streamContextHandle.Target is PdfiumStreamAccessContext context)
+                    context.Dispose();
                 streamContextHandle.Free();
+            }
             streamReadCallback = null;
         }
 
@@ -1516,10 +1523,41 @@ public sealed class WindowsPrintExecutor
         }
     }
 
-    private sealed class PdfiumStreamAccessContext(Stream stream)
+    private sealed class PdfiumStreamAccessContext(Stream stream) : IDisposable
     {
-        public Stream Stream { get; } = stream;
+        public Stream Stream { get; } = new NonOwningReadStream(stream);
         public object Sync { get; } = new();
+        public void Dispose() => Stream.Dispose();
+    }
+
+    /// <summary>
+    /// Gives PDFium a seekable view without transferring ownership of the source
+    /// stream. PDFium can dispose this adapter when it closes a document; the caller
+    /// may still need the original stream for an authorised fallback path.
+    /// </summary>
+    private sealed class NonOwningReadStream(Stream source) : Stream
+    {
+        public override bool CanRead => source.CanRead;
+        public override bool CanSeek => source.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length => source.Length;
+        public override long Position
+        {
+            get => source.Position;
+            set => source.Position = value;
+        }
+
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => source.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => source.Read(buffer);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            source.ReadAsync(buffer, cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin) => source.Seek(offset, origin);
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        // Deliberately do not dispose source; ownership remains with the print/worker caller.
+        protected override void Dispose(bool disposing) => base.Dispose(disposing);
     }
 
     private static unsafe int ReadPdfiumStreamBlock(IntPtr parameter, ulong position, byte* destination, ulong size)
