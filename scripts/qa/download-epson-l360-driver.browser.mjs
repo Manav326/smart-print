@@ -44,11 +44,15 @@ try {
     const candidates = anchors.map(anchor => ({
       text: (anchor.textContent ?? "").trim(),
       href: anchor.href
-    })).filter(item =>
-      /DriverDownloadInfo\.do/i.test(item.href) &&
-      /PRN=L360/i.test(item.href)
-    );
-    return candidates.at(-1) ?? null;
+    })).filter(item => {
+      let parsed;
+      try { parsed = new URL(item.href); } catch { return false; }
+      return /DriverDownloadInfo\.do/i.test(parsed.pathname) &&
+        parsed.searchParams.get("PRN")?.toLowerCase() === "l360 series" &&
+        parsed.searchParams.get("CTI") === "4" &&
+        parsed.searchParams.get("OSC") === "W1064";
+    });
+    return candidates[0] ?? null;
   });
 
   if (!driverLink?.href) {
