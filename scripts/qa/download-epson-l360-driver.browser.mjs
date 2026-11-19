@@ -14,8 +14,11 @@ mkdirSync(dirname(target), { recursive: true });
 
 const officialSupportUrl =
   "https://www.epson.co.in/Support/Printers/All-In-One/L-Series/Epson-L360/s/SPT_C11CE55501?review-filter=Windows+10+64-bit";
-// This module URL is the official Download Center page linked by Epson's L360
-// product support page for its Windows x64 Printer Driver v2.60.00.
+const officialChinaSupportUrl =
+  "https://www.epson.com.cn/drive/393e7b3d407c4b5c88679fe6a037d0dc.html?productId=d1fcffbb64ab41f7a970e57c2fda4613";
+// Global Download Center is the India support page's official 2.60.00 module.
+// The China support page is an official region-specific alternative for the same
+// L360 x64 2.60.00 driver; either package must pass the Epson Authenticode check.
 const officialDownloadCenterUrl =
   "https://download-center.epson.com/download/?device_id=L360+Series&module_id=39ac0a8a-10f0-4760-8949-cd1dd0ad646c%3A2.60.00&os=WIN1064&region=GB";
 const expectedMinimumBytes = 5 * 1024 * 1024;
@@ -57,6 +60,47 @@ try {
   });
   await page.locator("body").waitFor({ state: "visible" });
   await page.waitForLoadState("networkidle", { timeout: 25000 }).catch(() => undefined);
+  if (downloadCenterResponse && downloadCenterResponse.status() >= 400) {
+    console.log("[EPSON-L360-DOWNLOAD] Global Download Center returned HTTP " + downloadCenterResponse.status() + "; trying Epson China's official L360 driver page.");
+    const chinaResponse = await page.goto(officialChinaSupportUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 90000
+    });
+    await page.locator("body").waitFor({ state: "visible" });
+    await page.waitForLoadState("networkidle", { timeout: 25000 }).catch(() => undefined);
+    const chinaText = await page.locator("body").innerText();
+    assert.match(chinaText, /L360/i, "Epson China support page did not identify the L360.");
+    assert.match(chinaText, /Windows.*64.*打印驱动程序|Windows.*64.*driver/i,
+      "Epson China page did not identify the L360 Windows x64 printer driver.");
+    const chinaLink = await page.locator("a[href]").evaluateAll(anchors => {
+      const candidates = anchors.map(anchor => ({
+        text: (anchor.textContent ?? "").trim(),
+        href: anchor.href
+      })).filter(item =>
+        /download-center\.epson\.com\/f\/module\/[^/]+\/L360_x64_260JAHomeExportAsiaML\.exe/i.test(item.href)
+      );
+      return candidates[0] ?? null;
+    });
+    console.log("[EPSON-L360-DOWNLOAD] Epson China support page HTTP " + (chinaResponse?.status() ?? "unknown") +
+      "; official driver link=" + (chinaLink?.href ?? "not exposed"));
+    if (chinaLink?.href) {
+      const downloadPage = await context.newPage();
+      const downloadPromise = downloadPage.waitForEvent("download", { timeout: 90000 });
+      try {
+        await downloadPage.goto(chinaLink.href, { waitUntil: "commit", timeout: 90000 });
+      } catch (error) {
+        if (!String(error).includes("ERR_ABORTED")) throw error;
+      }
+      const download = await downloadPromise;
+      await download.saveAs(target);
+      const file = statSync(target);
+      assert.ok(file.size >= expectedMinimumBytes,
+        "Epson China driver package is unexpectedly small: " + file.size + " bytes");
+      console.log("[EPSON-L360-DOWNLOAD] Saved official Epson China package: " + target + " (" + file.size + " bytes).");
+      return;
+    }
+  }
+
   const pageInfo = await Promise.all(page.frames().map(async frame => {
     try {
       return await frame.evaluate(() => ({
