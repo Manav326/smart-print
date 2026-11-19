@@ -1,0 +1,277 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
+import { dirname, resolve, join } from "node:path";
+import { pathToFileURL } from "node:url";
+
+const moduleDirectory = process.env.PLAYWRIGHT_MODULE_DIR;
+const outputPath = process.env.SMARTPRINT_EPSON_L360_PACKAGE_OUTPUT;
+if (!moduleDirectory) throw new Error("PLAYWRIGHT_MODULE_DIR is required.");
+if (!outputPath) throw new Error("SMARTPRINT_EPSON_L360_PACKAGE_OUTPUT is required.");
+
+const { chromium } = await import(pathToFileURL(join(moduleDirectory, "index.mjs")).href);
+const target = resolve(outputPath);
+mkdirSync(dirname(target), { recursive: true });
+
+const officialSupportUrl =
+  "https://www.epson.co.in/Support/Printers/All-In-One/L-Series/Epson-L360/s/SPT_C11CE55501?review-filter=Windows+10+64-bit";
+const officialChinaSupportUrl =
+  "https://www.epson.com.cn/drive/393e7b3d407c4b5c88679fe6a037d0dc.html?productId=d1fcffbb64ab41f7a970e57c2fda4613";
+// Resolved from the visible "立即下载" link (link 61) on Epson's official L360
+// x64 2.60.00 product support page. This is the vendor's binary URL, not a mirror.
+const officialChinaBinaryUrl =
+  "https://download-center.epson.com/f/module/1335e8df-d703-40da-884b-c7cea22d34ee/L360_x64_260JAHomeExportAsiaML.exe";
+// Global Download Center is the India support page's official 2.60.00 module.
+// The China support page is an official region-specific alternative for the same
+// L360 x64 2.60.00 driver; either package must pass the Epson Authenticode check.
+const officialDownloadCenterUrl =
+  "https://download-center.epson.com/download/?device_id=L360+Series&module_id=39ac0a8a-10f0-4760-8949-cd1dd0ad646c%3A2.60.00&os=WIN1064&region=GB";
+const expectedMinimumBytes = 5 * 1024 * 1024;
+const expectedFilePattern = /L360_x64_260JAHomeExportAsiaML\.exe/i;
+
+const suppliedPackageUrl = process.env.SMARTPRINT_EPSON_L360_PACKAGE_URL?.trim();
+const expectedSha256 = "f07151e17b39dc2528dd60f0206c2bd68e6e6c1d4897768b32d0e1decd17bb63";
+const expectedPackageBytes = 30404936;
+
+if (suppliedPackageUrl) {
+  console.log("[EPSON-L360-DOWNLOAD] Downloading the exact user-supplied Epson L360 package from the configured runner handoff URL.");
+  const response = await fetch(suppliedPackageUrl, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(90000),
+    headers: { "Accept": "application/octet-stream, application/x-msdownload, */*" }
+  });
+  if (!response.ok) {
+    throw new Error("Configured Epson L360 package URL returned HTTP " + response.status + ".");
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  assert.equal(bytes.length, expectedPackageBytes,
+    "Runner handoff package size does not match the exact uploaded Epson L360 executable.");
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  assert.equal(digest, expectedSha256,
+    "Runner handoff package SHA-256 does not match the exact uploaded Epson L360 executable.");
+  writeFileSync(target, bytes, { flag: "wx" });
+  console.log("[EPSON-L360-DOWNLOAD] Exact uploaded installer staged at " + target +
+    " (" + bytes.length + " bytes; SHA256=" + digest + ").");
+} else {
+const browser = await chromium.launch({ headless: true });
+try {
+  const context = await browser.newContext({
+    acceptDownloads: true,
+    viewport: { width: 1440, height: 1000 },
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+  });
+  const page = await context.newPage();
+  page.on("response", response => {
+    const url = response.url();
+    if (/epson|download/i.test(url)) {
+      console.log("[EPSON-L360-DOWNLOAD] HTTP " + response.status() + " " + url);
+    }
+  });
+  page.on("requestfailed", request => {
+    if (/epson|download/i.test(request.url())) {
+      console.log("[EPSON-L360-DOWNLOAD] REQUEST FAILED " + request.url() + " " + (request.failure()?.errorText ?? ""));
+    }
+  });
+
+  console.log("[EPSON-L360-DOWNLOAD] Verifying the L360 Windows x64 driver on Epson India support.");
+  const supportResponse = await page.goto(officialSupportUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
+  await page.locator("body").waitFor({ state: "visible" });
+  const supportText = await page.locator("body").innerText();
+  assert.match(supportText, /Epson L360/i, "Epson India support page did not identify the L360 product.");
+  console.log("[EPSON-L360-DOWNLOAD] Epson India support page HTTP " + (supportResponse?.status() ?? "unknown") +
+    "; product identity verified. The official Download Center page is the authority for OS/package metadata.");
+
+  console.log("[EPSON-L360-DOWNLOAD] Opening the Epson-published Download Center module page for v2.60.00.");
+  const downloadCenterResponse = await page.goto(officialDownloadCenterUrl, {
+    waitUntil: "domcontentloaded",
+    timeout: 90000
+  });
+  await page.locator("body").waitFor({ state: "visible" });
+  await page.waitForLoadState("networkidle", { timeout: 25000 }).catch(() => undefined);
+  let packageDownloaded = false;
+  if (downloadCenterResponse && downloadCenterResponse.status() >= 400) {
+    console.log("[EPSON-L360-DOWNLOAD] Global Download Center returned HTTP " + downloadCenterResponse.status() + "; trying Epson China's official L360 driver page.");
+    const chinaResponse = await page.goto(officialChinaSupportUrl, {
+      waitUntil: "domcontentloaded",
+      timeout: 90000
+    });
+    await page.locator("body").waitFor({ state: "visible" });
+    await page.waitForLoadState("networkidle", { timeout: 25000 }).catch(() => undefined);
+    const chinaText = await page.locator("body").innerText();
+    assert.match(chinaText, /L360/i, "Epson China support page did not identify the L360.");
+    assert.match(chinaText, /Windows.*64.*打印驱动程序|Windows.*64.*driver/i,
+      "Epson China page did not identify the L360 Windows x64 printer driver.");
+
+    // The published support-page link resolves to the direct executable URL.
+    // Use Playwright's cookie-aware request context with the official product
+    // page as Referer; this avoids relying on a JavaScript control to emit a
+    // browser download event.
+    if (!packageDownloaded) {
+      const response = await context.request.get(officialChinaBinaryUrl, {
+        headers: {
+          "Accept": "application/octet-stream, application/x-msdownload, */*",
+          "Referer": officialChinaSupportUrl,
+          "Origin": "https://www.epson.com.cn",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+        },
+        timeout: 90000,
+        maxRedirects: 10
+      });
+      console.log("[EPSON-L360-DOWNLOAD] Official Epson China binary request HTTP " + response.status() +
+        "; content-type=" + (response.headers()["content-type"] ?? "unknown") +
+        "; content-disposition=" + (response.headers()["content-disposition"] ?? "unknown"));
+      if (response.ok()) {
+        const body = await response.body();
+        assert.ok(body.length >= expectedMinimumBytes,
+          "Epson China driver package is unexpectedly small: " + body.length + " bytes");
+        writeFileSync(target, body);
+        console.log("[EPSON-L360-DOWNLOAD] Saved the official Epson L360 binary from the resolved support-page link: " +
+          target + " (" + body.length + " bytes).");
+        packageDownloaded = true;
+      } else {
+        const responseText = (await response.text()).slice(0, 1000);
+        console.log("[EPSON-L360-DOWNLOAD] Direct Epson package request was blocked: HTTP " +
+          response.status() + "; response=" + responseText);
+      }
+    }
+
+    const chinaLink = await page.locator("a[href]").evaluateAll(anchors => {
+      const candidates = anchors.map(anchor => ({
+        text: (anchor.textContent ?? "").trim(),
+        href: anchor.href
+      })).filter(item =>
+        /download-center\.epson\.com\/f\/module\/[^/]+\/L360_x64_260JAHomeExportAsiaML\.exe/i.test(item.href)
+      );
+      return candidates[0] ?? null;
+    });
+    console.log("[EPSON-L360-DOWNLOAD] Epson China support page HTTP " + (chinaResponse?.status() ?? "unknown") +
+      "; official driver link=" + (chinaLink?.href ?? "not exposed"));
+    if (!packageDownloaded && chinaLink?.href) {
+      try {
+        const downloadPage = await context.newPage();
+        const downloadPromise = downloadPage.waitForEvent("download", { timeout: 90000 });
+        try {
+          await downloadPage.goto(chinaLink.href, { waitUntil: "commit", timeout: 90000 });
+        } catch (error) {
+          if (!String(error).includes("ERR_ABORTED")) throw error;
+        }
+        const download = await downloadPromise;
+        await download.saveAs(target);
+        const file = statSync(target);
+        assert.ok(file.size >= expectedMinimumBytes,
+          "Epson China driver package is unexpectedly small: " + file.size + " bytes");
+        console.log("[EPSON-L360-DOWNLOAD] Saved official Epson China package: " + target + " (" + file.size + " bytes).");
+        packageDownloaded = true;
+      } catch (error) {
+        console.log("[EPSON-L360-DOWNLOAD] Epson China binary request did not complete; retaining diagnostics and checking the other official Download Center route. " + String(error));
+      }
+    }
+  }
+
+  if (!packageDownloaded) {
+  const pageInfo = await Promise.all(page.frames().map(async frame => {
+    try {
+      return await frame.evaluate(() => ({
+        url: location.href,
+        title: document.title,
+        text: (document.body?.innerText ?? "").slice(0, 3500),
+        links: Array.from(document.querySelectorAll("a[href]")).map(anchor => ({
+          text: (anchor.textContent ?? "").trim().slice(0, 120),
+          href: anchor.href,
+          target: anchor.target
+        })).filter(item => /download|L360|\.exe|\/f\/module\//i.test(item.text + " " + item.href)).slice(0, 40),
+        controls: Array.from(document.querySelectorAll("button,input[type=submit],input[type=checkbox],label"))
+          .map(element => ({
+            tag: element.tagName,
+            text: (element.textContent ?? "").trim().slice(0, 120),
+            type: element.getAttribute("type") ?? "",
+            checked: element.checked ?? false,
+            label: element.labels?.[0]?.textContent?.trim() ?? "",
+            value: element.value ?? ""
+          })).slice(0, 40)
+      }));
+    } catch (error) {
+      return { url: frame.url(), error: String(error) };
+    }
+  }));
+  console.log("[EPSON-L360-DOWNLOAD] Download Center HTTP " + (downloadCenterResponse?.status() ?? "unknown"));
+  console.log("[EPSON-L360-DOWNLOAD] Download Center frame diagnostics: " + JSON.stringify(pageInfo));
+
+  const frames = page.frames();
+  let directDownload = null;
+  let downloadButtonFrame = null;
+
+  for (const frame of frames) {
+    try {
+      const candidate = await frame.locator("a[href]").evaluateAll(anchors => anchors.map(anchor => ({
+        href: anchor.href,
+        text: (anchor.textContent ?? "").trim()
+      })).find(item =>
+        /L360_x64_260JAHomeExportAsiaML\.exe/i.test(item.href) ||
+        /\/f\/module\/[^/]+\/L360_x64_260JAHomeExportAsiaML\.exe/i.test(item.href)
+      ) ?? null);
+      if (candidate?.href) {
+        directDownload = { frame, href: candidate.href };
+        break;
+      }
+
+      const downloadControls = await frame.locator("a,button,input[type=submit]").evaluateAll(elements =>
+        elements.map(element => ({
+          tag: element.tagName,
+          text: (element.textContent ?? "").trim(),
+          href: element.href ?? "",
+          value: element.value ?? ""
+        })).filter(item => /^(download|proceed to download|download now)$/i.test(item.text || item.value))
+      );
+      if (downloadControls.length > 0) {
+        downloadButtonFrame = frame;
+      }
+    } catch {
+      // Cross-origin and transient frames are inspected independently; a failed
+      // frame must not prevent checking the actual Epson Download Center frame.
+    }
+  }
+
+  if (directDownload) {
+    console.log("[EPSON-L360-DOWNLOAD] Found the official Epson binary link: " + directDownload.href);
+    const exactLink = directDownload.frame.locator("a[href]").evaluateAll(anchors =>
+      anchors.find(anchor => /L360_x64_260JAHomeExportAsiaML\.exe/i.test(anchor.href))?.href ?? null
+    );
+    const href = await exactLink;
+    if (!href) throw new Error("The Epson binary link disappeared before it could be activated.");
+    const downloadPage = await context.newPage();
+    const downloadPromise = downloadPage.waitForEvent("download", { timeout: 90000 });
+    try {
+      await downloadPage.goto(href, { waitUntil: "commit", timeout: 90000 });
+    } catch (error) {
+      if (!String(error).includes("ERR_ABORTED")) throw error;
+    }
+    const download = await downloadPromise;
+    await download.saveAs(target);
+  } else if (downloadButtonFrame) {
+    const control = downloadButtonFrame.locator("a,button,input[type=submit]").filter({
+      hasText: /^(download|proceed to download|download now)$/i
+    }).last();
+    await control.evaluate(element => {
+      if (element instanceof HTMLAnchorElement) element.target = "_self";
+    });
+    const downloadPromise = page.waitForEvent("download", { timeout: 90000 });
+    await control.click({ timeout: 20000 });
+    const download = await downloadPromise;
+    await download.saveAs(target);
+  } else {
+    throw new Error(
+      "The official Epson L360 Download Center module page exposed neither the v2.60.00 binary link nor its Download control. HTTP " +
+      (downloadCenterResponse?.status() ?? "unknown") + ". Diagnostics: " + JSON.stringify(pageInfo)
+    );
+  }
+
+  const file = statSync(target);
+  assert.ok(file.size >= expectedMinimumBytes,
+    "Epson driver download is unexpectedly small: " + file.size + " bytes");
+  console.log("[EPSON-L360-DOWNLOAD] Saved official Epson package: " + target + " (" + file.size + " bytes).");
+  }
+} finally {
+  await browser.close();
+}
+}

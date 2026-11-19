@@ -2192,6 +2192,8 @@ type PrinterCapabilitySnapshot = {
   pagesPerSheetDirection?: string | null;
   pagesPerSheetDirectionStatus?: string;
   mediaTypes?: Array<{ name?: string | null; code?: number }> | null;
+  pageMediaTypes?: string[] | null;
+  pageMediaTypesStatus?: string;
   resolutions?: Array<{ xDpi?: number; yDpi?: number }> | null;
 };
 
@@ -2235,6 +2237,10 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   );
   const paperSizes=(snapshot?.paperSizes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
   const mediaTypes=(snapshot?.mediaTypes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
+  const pageMediaTypes=(snapshot?.pageMediaTypes??[]).map(value=>value?.trim()).filter((value):value is string=>!!value);
+  const photoMediaTypes=[...new Set([...pageMediaTypes,...mediaTypes.filter(value=>/(gloss|matt|satin|lustre|luster)/i.test(value))])];
+  const photoMediaLabels=[...new Set(photoMediaTypes.map(value=>/gloss/i.test(value)?"Glossy":/matt/i.test(value)?"Matte":/satin/i.test(value)?"Satin":/lustre|luster/i.test(value)?"Lustre":value))];
+  const photoMediaState=photoMediaLabels.length>0?"supported" as const:capabilityState(undefined,snapshot?.pageMediaTypesStatus);
   const resolutions=(snapshot?.resolutions??[]).map(item=>
     item.xDpi&&item.yDpi?item.xDpi+" × "+item.yDpi+" dpi":""
   ).filter(Boolean);
@@ -2262,6 +2268,7 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
     {label:"Colour",value:snapshot?.color===true?"Colour":snapshot?.color===false?"Mono only":"Not reported",state:colourState},
     {label:"Duplex",value:snapshot?.duplex===true?"Available":snapshot?.duplex===false?"Simplex only":"Not reported",state:duplexState},
     {label:"N-up",value:nupValues.length?nupValues.map(value=>value+"-up").join(" · "):capabilityStateLabel(nupState),state:nupState},
+    {label:"Photo media",value:photoMediaLabels.length?photoMediaLabels.join(" · "):capabilityStateLabel(photoMediaState),state:photoMediaState},
     {label:"Paper sizes",value:paperSizes.length?paperSizes.length+" reported":"Not reported",state:paperSizes.length?"supported" as const:"unknown" as const}
   ];
   return (
@@ -2293,7 +2300,9 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
               snapshot.orientation.landscape===true?"Landscape":null
             ].filter(Boolean).join(" · ")||"Not reported":"Not reported"}</strong></div>
             <div><span>Paper sizes</span><strong>{paperSizes.length?paperSizes.slice(0,10).join(", ")+(paperSizes.length>10?" +"+(paperSizes.length-10)+" more":""):"Not reported"}</strong></div>
-            <div><span>Media types</span><strong>{mediaTypes.length?mediaTypes.slice(0,8).join(", ")+(mediaTypes.length>8?" +"+(mediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>Photo media types</span><strong>{photoMediaTypes.length?photoMediaTypes.slice(0,8).join(", ")+(photoMediaTypes.length>8?" +"+(photoMediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>Print Schema media</span><strong>{pageMediaTypes.length?pageMediaTypes.slice(0,8).join(", ")+(pageMediaTypes.length>8?" +"+(pageMediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>All driver media types</span><strong>{mediaTypes.length?mediaTypes.slice(0,8).join(", ")+(mediaTypes.length>8?" +"+(mediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
             <div><span>Resolutions</span><strong>{resolutions.length?resolutions.slice(0,8).join(", ")+(resolutions.length>8?" +"+(resolutions.length-8)+" more":""):"Not reported"}</strong></div>
           </div>
           <div className={"printer-diagnostic-advice"+(statusIssue||!snapshot?" warning":"")} role="note">
@@ -3040,7 +3049,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)} · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.photoPaperFinish==="GLOSSY"?"Glossy":job.photoPaperFinish==="MATTE"?"Matte":"Plain"} · ${job.photoOutputLayout==="PHOTO_PAPER"?"individual photo paper":"A4 photo paper"} · ${job.pageCount} ${job.photoOutputLayout==="PHOTO_PAPER"?"photo-paper pages":"A4 pages"}` : `${job.batchGroupName??"Loose files"} · ${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)} · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>

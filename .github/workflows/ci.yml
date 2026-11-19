@@ -9,6 +9,12 @@ on:
     branches: [main, "feature/**", "feat/**"]
   pull_request:
     branches: [main, "feature/**", "feat/**"]
+  workflow_dispatch:
+    inputs:
+      epson_l360_driver_package_url:
+        description: "Public HTTPS URL for the official Epson L360 x64 2.60.00 EXE. It is verified for Epson Authenticode signing before install."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -263,6 +269,7 @@ jobs:
   agent_dotnet:
     outputs:
       agent_package_ready: ${{ steps.agent_package_upload.outcome == 'success' }}
+      epson_l360_qa_ready: ${{ steps.epson_l360_setup.outcome == 'success' && steps.epson_l360_capability_probe.outcome == 'success' && steps.epson_l360_shop_owner_ui.outcome == 'success' && steps.agent_tests.outcome == 'success' && steps.epson_l360_capture.outcome == 'success' && steps.epson_l360_artifact_upload.outcome == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -366,14 +373,195 @@ jobs:
           }
           "queue=$nupName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "N-up validation queue: $($nupQueue.Name) -> $($nupQueue.PortName)"
+      - uses: pnpm/action-setup@v6
+        if: ${{ !cancelled() && steps.pdf_queue.outcome == 'success' }}
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v7
+        if: ${{ !cancelled() && steps.pdf_queue.outcome == 'success' }}
+        with:
+          node-version: 22
+      - name: Install an isolated Playwright package and Chromium for Epson QA
+        id: epson_l360_chromium
+        if: ${{ !cancelled() && steps.pdf_queue.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $playwrightRoot = Join-Path $env:RUNNER_TEMP "smartprint-epson-playwright"
+          New-Item -ItemType Directory -Force -Path $playwrightRoot | Out-Null
+          npm install --prefix $playwrightRoot --no-save --no-package-lock playwright@1.56.1
+          if ($LASTEXITCODE -ne 0) { throw "Playwright npm package installation failed for Epson QA." }
+          $module = Join-Path $playwrightRoot "node_modules/playwright"
+          $entry = Join-Path $module "index.mjs"
+          $cli = Join-Path $module "cli.js"
+          if (-not (Test-Path -LiteralPath $entry) -or -not (Test-Path -LiteralPath $cli)) {
+            throw "The isolated Playwright install is missing its expected API or CLI entrypoint: $module"
+          }
+          node $cli install chromium
+          if ($LASTEXITCODE -ne 0) { throw "Playwright Chromium installation failed for Epson driver acquisition." }
+          "module_directory=$module" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Validate official Epson L360 browser downloader
+        if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' }}
+        run: node --check scripts/qa/download-epson-l360-driver.browser.mjs
+      - name: Download supplied Epson L360 driver package from HTTPS URL
+        id: epson_l360_supplied_package
+        if: ${{ !cancelled() && (inputs.epson_l360_driver_package_url != '' || vars.EPSON_L360_DRIVER_PACKAGE_URL != '') }}
+        shell: pwsh
+        env:
+          EPSON_DRIVER_URL: ${{ inputs.epson_l360_driver_package_url || vars.EPSON_L360_DRIVER_PACKAGE_URL }}
+          EPSON_PACKAGE_OUTPUT: ${{ runner.temp }}/smartprint-epson-l360-download/L360_x64_260JAHomeExportAsiaML.exe
+        run: |
+          $uri = [Uri]$env:EPSON_DRIVER_URL
+          if ($uri.Scheme -ne "https") { throw "The supplied Epson driver URL must use HTTPS." }
+          $directory = Split-Path -Parent $env:EPSON_PACKAGE_OUTPUT
+          New-Item -ItemType Directory -Force -Path $directory | Out-Null
+          Invoke-WebRequest -Uri $env:EPSON_DRIVER_URL -OutFile $env:EPSON_PACKAGE_OUTPUT -MaximumRedirection 10 -UseBasicParsing
+          $package = Get-Item -LiteralPath $env:EPSON_PACKAGE_OUTPUT
+          $expectedPackageBytes = 30404936
+          $expectedPackageSha256 = "f07151e17b39dc2528dd60f0206c2bd68e6e6c1d4897768b32d0e1decd17bb63"
+          if ($package.Length -ne $expectedPackageBytes) {
+            throw "The supplied installer is not the exact uploaded Epson L360 binary: expected $expectedPackageBytes bytes, got $($package.Length)."
+          }
+          $actualPackageSha256 = (Get-FileHash -LiteralPath $env:EPSON_PACKAGE_OUTPUT -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualPackageSha256 -ne $expectedPackageSha256) {
+            throw "The supplied installer SHA-256 does not match the exact uploaded Epson L360 binary."
+          }
+          Write-Host "Verified exact supplied Epson L360 package: $($package.Length) bytes; SHA256=$actualPackageSha256. Epson Authenticode is checked again before driver installation."
+          "package_path=$env:EPSON_PACKAGE_OUTPUT" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Download the official Epson L360 driver through Epson Support
+        id: epson_l360_package_download
+        if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' && inputs.epson_l360_driver_package_url == '' && vars.EPSON_L360_DRIVER_PACKAGE_URL == '' }}
+        continue-on-error: true
+        shell: pwsh
+        env:
+          PLAYWRIGHT_MODULE_DIR: ${{ steps.epson_l360_chromium.outputs.module_directory }}
+          SMARTPRINT_EPSON_L360_PACKAGE_URL: ${{ vars.SMARTPRINT_EPSON_L360_PACKAGE_URL }}
+          SMARTPRINT_EPSON_L360_PACKAGE_OUTPUT: ${{ runner.temp }}/smartprint-epson-l360-download/L360_x64_260JAHomeExportAsiaML.exe
+        run: |
+          node scripts/qa/download-epson-l360-driver.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Epson's Download Center blocked or did not return the L360 package. Supply a public HTTPS Epson-signed package URL through workflow_dispatch to run the vendor-driver qualification." }
+          "package_path=$env:SMARTPRINT_EPSON_L360_PACKAGE_OUTPUT" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Install the official Epson L360 driver in an isolated file-port queue
+        id: epson_l360_setup
+        if: ${{ !cancelled() && (steps.epson_l360_supplied_package.outcome == 'success' || steps.epson_l360_package_download.outcome == 'success') }}
+        shell: pwsh
+        env:
+          SMARTPRINT_EPSON_L360_PACKAGE_PATH: ${{ steps.epson_l360_supplied_package.outputs.package_path || steps.epson_l360_package_download.outputs.package_path }}
+        run: ./scripts/qa/install-epson-l360-driver.ps1 -QueueName "SmartPrint CI Epson L360" -SuppliedPackagePath $env:SMARTPRINT_EPSON_L360_PACKAGE_PATH
+      - name: Install Portal workspace for the real shop-owner browser flow
+        id: epson_l360_portal_dependencies
+        if: ${{ !cancelled() && steps.epson_l360_setup.outcome == 'success' }}
+        run: pnpm install --frozen-lockfile --filter @smart-print/portal...
+      - name: Read Epson L360 capabilities for the shop-owner printer details screen
+        id: epson_l360_capability_probe
+        if: ${{ !cancelled() && steps.epson_l360_portal_dependencies.outcome == 'success' }}
+        shell: pwsh
+        env:
+          SMARTPRINT_RUN_EPSON_L360_DRIVER_INTEGRATION: "1"
+          SMARTPRINT_EPSON_L360_QUEUE: ${{ steps.epson_l360_setup.outputs.queue_name }}
+          SMARTPRINT_EPSON_L360_DRIVER_NAME: ${{ steps.epson_l360_setup.outputs.driver_name }}
+          SMARTPRINT_EPSON_L360_SPOOLER_OUTPUT: ${{ steps.epson_l360_setup.outputs.spooler_output_path }}
+          SMARTPRINT_EPSON_L360_CAPABILITIES_OUTPUT: artifacts/epson-l360/epson-l360-capabilities.json
+        run: |
+          dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --filter "FullyQualifiedName~EpsonL360DriverIntegrationTests.EpsonL360CapabilitySnapshotAdvertisesNupAndPhotoMediaForShopOwnerDetails" --logger "console;verbosity=normal"
+          if ($LASTEXITCODE -ne 0) { throw "The installed Epson L360 driver did not publish the required N-up/Glossy/Matte capability snapshot." }
+      - name: Validate Epson L360 shop-owner browser runner
+        if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' }}
+        run: node --check apps/portal/tests/epson-l360-shop-owner.browser.mjs
+      - name: Run the shop-owner Epson L360 printer details, assignment and dispatch workflow
+        id: epson_l360_shop_owner_ui
+        if: ${{ !cancelled() && steps.epson_l360_capability_probe.outcome == 'success' }}
+        shell: pwsh
+        env:
+          PLAYWRIGHT_MODULE_DIR: ${{ steps.epson_l360_chromium.outputs.module_directory }}
+          SMARTPRINT_EPSON_L360_CAPABILITIES_PATH: artifacts/epson-l360/epson-l360-capabilities.json
+          SMARTPRINT_EPSON_L360_PRINT_MANIFEST_PATH: artifacts/epson-l360/shop-owner-print-workflow.json
+          SMARTPRINT_EPSON_L360_UI_ARTIFACT_DIR: artifacts/epson-l360-shop-owner
+        run: |
+          New-Item -ItemType Directory -Force -Path "artifacts/epson-l360-shop-owner" | Out-Null
+          node apps/portal/tests/epson-l360-shop-owner.browser.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Shop-owner Epson L360 printer details and print dispatch acceptance failed." }
       - name: Run Windows Agent unit and real spooler integration tests
         id: agent_tests
-        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' && (steps.epson_l360_setup.outcome != 'success' || steps.epson_l360_shop_owner_ui.outcome == 'success') }}
         env:
           SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION: ${{ steps.pdf_queue.outcome == 'success' && '1' || '0' }}
           SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION: ${{ steps.secondary_queue.outcome == 'success' && '1' || '0' }}
           SMARTPRINT_NUP_TEST_QUEUE: ${{ steps.nup_queue.outputs.queue }}
+          SMARTPRINT_RUN_EPSON_L360_DRIVER_INTEGRATION: ${{ steps.epson_l360_shop_owner_ui.outcome == 'success' && '1' || '0' }}
+          SMARTPRINT_EPSON_L360_QUEUE: ${{ steps.epson_l360_setup.outputs.queue_name }}
+          SMARTPRINT_EPSON_L360_DRIVER_NAME: ${{ steps.epson_l360_setup.outputs.driver_name }}
+          SMARTPRINT_EPSON_L360_SPOOLER_OUTPUT: ${{ steps.epson_l360_setup.outputs.spooler_output_path }}
+          SMARTPRINT_EPSON_L360_CAPABILITIES_OUTPUT: artifacts/epson-l360/epson-l360-capabilities.json
+          SMARTPRINT_EPSON_L360_PRINT_MANIFEST: artifacts/epson-l360/shop-owner-print-workflow.json
         run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
+      - name: Collect Epson L360 capability, driver and spooler evidence
+        id: epson_l360_capture
+        if: ${{ always() && steps.epson_l360_setup.outcome == 'success' && steps.epson_l360_capability_probe.outcome == 'success' }}
+        shell: pwsh
+        env:
+          EPSON_SPOOLER_OUTPUT: ${{ steps.epson_l360_setup.outputs.spooler_output_path }}
+          EPSON_OUTPUT_DIRECTORY: ${{ runner.temp }}/smartprint-epson-l360-driver-qa
+          EPSON_METADATA_PATH: ${{ steps.epson_l360_setup.outputs.metadata_path }}
+          EPSON_SHOP_OWNER_UI_PASSED: ${{ steps.epson_l360_shop_owner_ui.outcome == 'success' }}
+          EPSON_AGENT_TESTS_PASSED: ${{ steps.agent_tests.outcome == 'success' }}
+        run: |
+          $evidence = "artifacts/epson-l360"
+          New-Item -ItemType Directory -Force -Path $evidence | Out-Null
+          $snapshot = Join-Path $evidence "epson-l360-capabilities.json"
+          $manifest = Join-Path $evidence "shop-owner-print-workflow.json"
+          if (-not (Test-Path -LiteralPath $snapshot)) {
+            throw "Epson driver capability discovery did not write the shop-owner evidence snapshot."
+          }
+          if ($env:EPSON_SHOP_OWNER_UI_PASSED -eq "true" -and -not (Test-Path -LiteralPath $manifest)) {
+            throw "The shop-owner browser did not save the print assignment/dispatch manifest."
+          }
+          if (Test-Path -LiteralPath $manifest) {
+            Write-Host "Captured shop-owner assignment/dispatch manifest."
+          } else {
+            Write-Warning "No shop-owner manifest was created; the earlier UI step did not complete."
+          }
+          if (Test-Path -LiteralPath $env:EPSON_SPOOLER_OUTPUT) {
+            Copy-Item -LiteralPath $env:EPSON_SPOOLER_OUTPUT -Destination (Join-Path $evidence "epson-l360-spooler-output.prn") -Force
+          } else {
+            Write-Warning "No final spooler port file exists; see the individual accepted-output files below."
+          }
+          if (-not (Test-Path -LiteralPath $env:EPSON_METADATA_PATH)) {
+            throw "Epson driver installation metadata is missing."
+          }
+          Copy-Item -LiteralPath $env:EPSON_METADATA_PATH -Destination (Join-Path $evidence "epson-l360-driver-metadata.json") -Force
+          $acceptedOutputs = @(Get-ChildItem -LiteralPath $env:EPSON_OUTPUT_DIRECTORY -Filter "*-accepted.prn" -File)
+          if ($env:EPSON_AGENT_TESTS_PASSED -eq "true" -and $acceptedOutputs.Count -ne 6) {
+            throw "Expected six separate Epson driver/spooler output files from the shop-owner dispatches; found $($acceptedOutputs.Count)."
+          }
+          foreach ($accepted in $acceptedOutputs) {
+            if ($accepted.Length -le 128) { throw "Epson spooler output is unexpectedly small: $($accepted.Name)" }
+            Copy-Item -LiteralPath $accepted.FullName -Destination $evidence -Force
+          }
+          $ownerScreenshots = "artifacts/epson-l360-shop-owner"
+          if (Test-Path -LiteralPath $ownerScreenshots) {
+            $screenshotEvidence = Join-Path $evidence "shop-owner-ui"
+            New-Item -ItemType Directory -Force -Path $screenshotEvidence | Out-Null
+            Copy-Item -Path (Join-Path $ownerScreenshots "*") -Destination $screenshotEvidence -Recurse -Force
+          } else {
+            Write-Warning "Shop-owner UI screenshots are unavailable because browser acceptance did not complete."
+          }
+          Write-Host "Captured Epson driver capability and $($acceptedOutputs.Count) separate spooler outputs."
+      - name: Upload Epson L360 driver capability and spooler evidence
+        id: epson_l360_artifact_upload
+        if: ${{ always() && steps.epson_l360_capture.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-epson-l360-driver-qa
+          path: artifacts/epson-l360/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Remove isolated Epson L360 QA queue and port
+        if: ${{ always() && steps.epson_l360_setup.outcome == 'success' }}
+        shell: pwsh
+        env:
+          EPSON_QUEUE_NAME: ${{ steps.epson_l360_setup.outputs.queue_name }}
+          EPSON_PORT_NAME: ${{ steps.epson_l360_setup.outputs.spooler_output_path }}
+        run: ./scripts/qa/remove-epson-l360-driver.ps1 -QueueName $env:EPSON_QUEUE_NAME -PortName $env:EPSON_PORT_NAME
       - name: Remove the temporary N-up Windows queue
         if: always()
         shell: pwsh
@@ -745,14 +933,16 @@ jobs:
         env:
           API_RESULT: ${{ needs.api_dotnet.result }}
           AGENT_RESULT: ${{ needs.agent_dotnet.result }}
+          EPSON_L360_RESULT: ${{ needs.agent_dotnet.outputs.epson_l360_qa_ready }}
           DESKTOP_RESULT: ${{ needs.windows_desktop.result }}
           INSTALLER_RESULT: ${{ needs.windows_installer.result }}
         run: |
           set -euo pipefail
-          printf 'API: %s\nAgent: %s\nDesktop: %s\nInstaller: %s\n' \
-            "$API_RESULT" "$AGENT_RESULT" "$DESKTOP_RESULT" "$INSTALLER_RESULT"
+          printf 'API: %s\nAgent: %s\nEpson L360 qualification: %s\nDesktop: %s\nInstaller: %s\n' \
+            "$API_RESULT" "$AGENT_RESULT" "$EPSON_L360_RESULT" "$DESKTOP_RESULT" "$INSTALLER_RESULT"
           test "$API_RESULT" = "success"
           test "$AGENT_RESULT" = "success"
+          test "$EPSON_L360_RESULT" = "true"
           test "$DESKTOP_RESULT" = "success"
           test "$INSTALLER_RESULT" = "success"
 

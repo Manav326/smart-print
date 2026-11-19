@@ -102,6 +102,10 @@ public sealed class WindowsPrinterDiscoveryTests
         Assert.True(root.GetProperty("orientation").ValueKind is JsonValueKind.Object);
         Assert.True(root.GetProperty("paperSizes").ValueKind is JsonValueKind.Array);
         Assert.True(root.GetProperty("mediaTypes").ValueKind is JsonValueKind.Array);
+        Assert.True(root.GetProperty("pageMediaTypes").ValueKind is JsonValueKind.Array);
+        Assert.Contains(
+            root.GetProperty("pageMediaTypesStatus").GetString(),
+            new[] { "supported", "unsupported", "unknown" });
         Assert.True(root.GetProperty("resolutions").ValueKind is JsonValueKind.Array);
         Assert.Contains(root.GetProperty("colorStatus").GetString(), new[] { "supported", "unsupported", "unknown" });
         Assert.Contains(root.GetProperty("duplexStatus").GetString(), new[] { "supported", "unsupported", "unknown" });

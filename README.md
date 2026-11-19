@@ -154,9 +154,11 @@ The script prompts securely for a password and creates or repairs only a tenantl
 
 Install the Windows Agent on the computer physically connected to the printer. Pair it with PUBLIC_BASE_URL and install the Windows Service using the exact same customer origin. The Agent learns later URL changes from the authenticated heartbeat and updates its API destination and local CORS allowlist without re-pairing.
 
+The Agent service runs as built-in **LocalService**, not LocalSystem. It uses machine-wide Windows printer queues and their already-installed vendor drivers; each queue must grant the service standard **Print** permission. Per-user-only queues and network queues that depend on the signed-in user's saved Windows credentials are not guaranteed to be available. SmartPrint does not install or replace vendor drivers, alter queue/port/default-printer settings, or restart the Windows Print Spooler. Driver-specific features such as duplex, N-up and photo media are offered only when the selected driver reports and accepts the requested capability; test physical printer models on the actual shop PC before declaring them supported.
+
 During a hostname migration, keep every previously configured public or legacy Agent API hostname routed to the portal until Agents have updated and old QR codes are no longer in circulation. Legacy Agent heartbeats must continue to reach the API long enough to receive the new canonical URL.
 
-Direct LAN uploads still require the phone and Agent to share the shop LAN, the browser's Local Network Access permission when requested, and the Agent's Private-profile firewall rule on TCP 17842. Cloud-assisted upload remains the fallback.
+Direct LAN uploads still require the phone and Agent to share the shop LAN, the browser's Local Network Access permission when requested, and the Agent's local-subnet firewall rule on TCP 17842. Cloud-assisted upload remains the fallback.
 
 ### Backups and operations
 
