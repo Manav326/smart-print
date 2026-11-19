@@ -903,6 +903,10 @@ test("shop batch review communicates included and excluded choices, valid quotes
   assert.match(app, /Will be excluded/);
   assert.match(app, /Not charged/);
   assert.match(app, /source pages → \$\{outputSides\} output sides/);
+  assert.match(app, /acceptedOutputSides/);
+  assert.match(app, /ID-card A4 sheets/);
+  assert.match(app, /photo A4 pages/);
+  assert.match(app, /Document output mix/);
   assert.match(app, /Applying this review saves the file decisions\. It does not collect payment or send files to a printer\./);
   assert.match(app, /Save batch review/);
   assert.match(app, /<details className="batch-review-folder"/);
@@ -910,6 +914,8 @@ test("shop batch review communicates included and excluded choices, valid quotes
   assert.match(css, /\.batch-review-stats\s*>\.included/);
   assert.match(css, /\.batch-review-stats\s*>\.excluded/);
   assert.match(css, /\.batch-review-stats\s*>\.refresh/);
+  assert.match(css, /\.batch-review-stats\s*>\.id-cards/);
+  assert.match(css, /\.batch-review-stats\s*>\.photos/);
   assert.match(css, /\.batch-review-file-finance/);
   assert.match(css, /\.batch-review-next-step/);
   assert.match(css, /\.batch-review-toggle\{[^}]*min-height:40px/);
