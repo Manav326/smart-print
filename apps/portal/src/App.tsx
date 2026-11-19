@@ -5986,18 +5986,24 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       :batchPayment!.status==="CASH_AWAITING_PAYMENT"?"PAY AT SHOP COUNTER"
       :"PAYMENT FOR ACCEPTED FILES"
     :"PAY FOR ACCEPTED FILES";
-  const quoteEntries=quoteItems.map(item=>({item,quote:quotesByJobId[item.job.id]}))
-    .filter(entry=>!!entry.quote&&!quoteExpiredForBatchItem(entry.item));
-  const acceptedQuoteEntries=quoteEntries.filter(entry=>
-    !["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))
-  );
+  const quoteRows=quoteItems.map(item=>({
+    item,
+    quote:quotesByJobId[item.job.id],
+    excluded:["REJECTED","REFUNDED"].includes(statusForBatchItem(item))
+  }));
+  const quoteEntries=quoteRows.filter(entry=>!!entry.quote&&!quoteExpiredForBatchItem(entry.item));
+  const acceptedQuoteEntries=quoteEntries.filter(entry=>!entry.excluded);
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
+  const batchQuoteNeedsRefresh=quoteRows.filter(entry=>
+    !entry.excluded&&(!entry.quote||quoteExpiredForBatchItem(entry.item))
+  ).length;
+  const batchQuoteCurrency=quoteEntries[0]?.quote?.currency??quoteItems[0]?.job.currency??"INR";
   const batchQuoteCounts={
     documents:acceptedQuoteEntries.filter(entry=>normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="DOCUMENT").length,
     idCards:acceptedQuoteEntries.filter(entry=>normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="ID_DOCUMENT").length,
     photos:acceptedQuoteEntries.filter(entry=>normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="PHOTO").length,
-    excluded:quoteItems.filter(item=>["REJECTED","REFUNDED"].includes(statusForBatchItem(item))).length
+    excluded:quoteRows.filter(entry=>entry.excluded).length
   };
   const batchQuoteBreakdown=calculateBatchQuoteBreakdown(acceptedQuoteEntries.map(entry=>({
     printKind:printKindsByJobId[entry.item.job.id]==="ID_DOCUMENT"
@@ -6309,46 +6315,50 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     </>}
     {notice&&<div className={"customer-upload-notice "+notice.kind} role={notice.kind==="warning"?"alert":"status"}>{notice.message}</div>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
-    {quoteEntries.length>0&&<section className="customer-quote-card customer-batch-quote-card" aria-label="Batch quote summary">
+    {(quoteEntries.length>0||batchQuoteNeedsRefresh>0)&&<section className="customer-quote-card customer-batch-quote-card" aria-label="Batch quote summary">
       <div className="customer-batch-quote-heading">
-        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>Total for {acceptedQuoteEntries.length} accepted {acceptedQuoteEntries.length===1?"file":"files"}. Excluded files are not charged.</small></div>
-        <span className="customer-batch-quote-validity">Quote for review</span>
+        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,batchQuoteCurrency)}</strong><small>{acceptedQuoteEntries.length} accepted {acceptedQuoteEntries.length===1?"file has":"files have"} a current quote. {batchQuoteNeedsRefresh>0?batchQuoteNeedsRefresh+" need a fresh quote. ":""}Excluded files are not charged.</small></div>
+        <span className="customer-batch-quote-validity">{batchQuoteNeedsRefresh>0?"Review required":"Quote for review"}</span>
       </div>
       <div className="customer-batch-quote-categories" aria-label="Files included in this quote">
-        <span className="customer-batch-quote-chip included"><b>{acceptedQuoteEntries.length}</b> included</span>
+        <span className="customer-batch-quote-chip included"><b>{acceptedQuoteEntries.length}</b> priced</span>
+        {batchQuoteNeedsRefresh>0&&<span className="customer-batch-quote-chip refresh"><b>{batchQuoteNeedsRefresh}</b> quote needed</span>}
         {batchQuoteCounts.excluded>0&&<span className="customer-batch-quote-chip excluded"><b>{batchQuoteCounts.excluded}</b> excluded</span>}
         {batchQuoteCounts.documents>0&&<span className="customer-batch-quote-chip document"><b>{batchQuoteCounts.documents}</b> documents</span>}
         {batchQuoteCounts.idCards>0&&<span className="customer-batch-quote-chip id-card"><b>{batchQuoteCounts.idCards}</b> ID cards</span>}
         {batchQuoteCounts.photos>0&&<span className="customer-batch-quote-chip photo"><b>{batchQuoteCounts.photos}</b> photo jobs</span>}
       </div>
       <div className="customer-batch-quote-lines" aria-label="File-by-file prices">
-        {quoteEntries.map(entry=>{
-          const excluded=["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item));
-          const printKind=normalizedCustomerPrintKind(printKindsByJobId[entry.item.job.id]??entry.quote!.printKind??entry.item.job.printKind);
-          const detail=entry.quote!.printKind==="PHOTO"
-            ? (entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo"
-            : entry.quote!.printKind==="ID_DOCUMENT"
-              ? entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided"
-              : entry.quote!.pageCount+" source pages · "+customerDocumentOutputSummary(entry.quote!.pageCount,entry.quote!.copies,entry.quote!.pagesPerSheet??1,entry.quote!.isDuplex)+" · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation");
+        {quoteRows.map(entry=>{
+          const expired=!entry.quote||quoteExpiredForBatchItem(entry.item);
+          const printKind=normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind);
+          const detail=entry.quote
+            ? entry.quote.printKind==="PHOTO"
+              ? (entry.quote.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote.photoSizeCode)+" · "+(entry.quote.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote.pageCount+" A4 pages · "+formatMoney(entry.quote.photoUnitPriceMinor??0,entry.quote.currency)+" per photo"
+              : entry.quote.printKind==="ID_DOCUMENT"
+                ? entry.quote.pageCount+" A4 portrait "+(entry.quote.pageCount===1?"sheet":"sheets")+" × "+entry.quote.copies+" copy · "+entry.quote.colourMode+" · Single-sided"
+                : entry.quote.pageCount+" source pages · "+customerDocumentOutputSummary(entry.quote.pageCount,entry.quote.copies,entry.quote.pagesPerSheet??1,entry.quote.isDuplex)+" · "+entry.quote.colourMode+" · "+(entry.quote.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote.paperSize+" · "+(entry.quote.orientation==="LANDSCAPE"?"Landscape":entry.quote.orientation==="PORTRAIT"?"Portrait":"Auto orientation")
+            : entry.item.job.pageCount+" source "+(entry.item.job.pageCount===1?"page":"pages")+" · "+entry.item.job.copies+" "+(entry.item.job.copies===1?"copy":"copies")+" · quote not available yet";
+          const lineState=entry.excluded?"Excluded":expired?(entry.quote?"Quote expired":"Quote needed"):"Included";
           return <div className="customer-batch-quote-line" key={entry.item.job.id}>
             <span className="customer-batch-quote-line-copy">
-              <span className="customer-batch-quote-line-top"><strong>{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={printKind}/><span className={"customer-batch-quote-line-state "+(excluded?"excluded":"included")}>{excluded?"Excluded":"Included"}</span></span>
+              <span className="customer-batch-quote-line-top"><strong>{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={printKind}/><span className={"customer-batch-quote-line-state "+(entry.excluded?"excluded":expired?"refresh":"included")}>{lineState}</span></span>
               <small>{detail}</small>
             </span>
-            <strong className={"customer-batch-quote-line-amount "+(excluded?"excluded":"")}>{excluded?"Not charged":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong>
+            <strong className={"customer-batch-quote-line-amount "+(entry.excluded||expired?"excluded":"")}>{entry.excluded?"Not charged":expired?"—":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong>
           </div>;
         })}
       </div>
-      <details className="customer-batch-quote-details">
+      {acceptedQuoteEntries.length>0&&<details className="customer-batch-quote-details">
         <summary><span>See price breakdown</span><small>Documents, ID cards and photos</small></summary>
         <div className="customer-batch-print-breakdown">
-          <div><span><strong>Normal documents</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,quoteEntries[0].quote!.currency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,quoteEntries[0].quote!.currency)}</small></span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
-          <div><span><strong>ID cards</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
-          <div><span><strong>Photo printing</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
+          <div><span><strong>Normal documents</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,batchQuoteCurrency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,batchQuoteCurrency)}</small></span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>ID cards</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>Photo printing</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,batchQuoteCurrency)}</strong></div>
           <div className="customer-batch-print-total"><span><strong>Total output</strong><small>Page sides and prepared A4 sheets, grouped by print type</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
         </div>
-      </details>
-      <p className="customer-payment-model-note customer-quote-explanation">This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing is priced per finished photo; the A4 page count is shown for planning.</span><span>Duplex printing can place two output sides on one physical sheet.</span><span>Rejected or refunded files are excluded from the total.</span></InfoTooltip></p>
+      </details>}
+      <p className="customer-payment-model-note customer-quote-explanation">{batchQuoteNeedsRefresh>0?"Only files with a current quote are included in this displayed total. Calculate a fresh quote for the highlighted files before sending the batch to the shop. ":""}This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing is priced per finished photo; the A4 page count is shown for planning.</span><span>Duplex printing can place two output sides on one physical sheet.</span><span>Rejected or refunded files are excluded from the total.</span></InfoTooltip></p>
     </section>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
