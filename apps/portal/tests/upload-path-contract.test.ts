@@ -70,6 +70,7 @@ test("Private Printing never starts a second relay while the same ticket is clai
   assert.match(api, /TransferPath = transferPath/);
   assert.match(api, /ticket\.ClaimedUtc is not null[\\s\\S]{0,180}ticket\.ClaimLeaseExpiresUtc > now/);
   assert.match(api, /private_relay_direct_transfer_in_progress/);
+  assert.match(api, /private_relay_cloud_transfer_in_progress/);
   assert.match(api, /if \(privatePrinting\) break/);
   assert.match(api, /item\.PrivateRelayStage == PrivateRelayProgressRules\.WaitingForUpload[\\s\\S]{0,120}item\.PrivateRelayStage == PrivateRelayProgressRules\.ReceivingEncryptedPayload/);
   const relay = api.slice(api.indexOf("async function uploadCustomerPrivateRelay"), api.indexOf("function createStreamingLocalMultipartBody"));
