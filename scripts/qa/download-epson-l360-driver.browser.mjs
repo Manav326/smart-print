@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -28,6 +29,30 @@ const officialDownloadCenterUrl =
 const expectedMinimumBytes = 5 * 1024 * 1024;
 const expectedFilePattern = /L360_x64_260JAHomeExportAsiaML\.exe/i;
 
+const suppliedPackageUrl = process.env.SMARTPRINT_EPSON_L360_PACKAGE_URL?.trim();
+const expectedSha256 = "f07151e17b39dc2528dd60f0206c2bd68e6e6c1d4897768b32d0e1decd17bb63";
+const expectedPackageBytes = 30404936;
+
+if (suppliedPackageUrl) {
+  console.log("[EPSON-L360-DOWNLOAD] Downloading the exact user-supplied Epson L360 package from the configured runner handoff URL.");
+  const response = await fetch(suppliedPackageUrl, {
+    redirect: "follow",
+    signal: AbortSignal.timeout(90000),
+    headers: { "Accept": "application/octet-stream, application/x-msdownload, */*" }
+  });
+  if (!response.ok) {
+    throw new Error("Configured Epson L360 package URL returned HTTP " + response.status + ".");
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  assert.equal(bytes.length, expectedPackageBytes,
+    "Runner handoff package size does not match the exact uploaded Epson L360 executable.");
+  const digest = createHash("sha256").update(bytes).digest("hex");
+  assert.equal(digest, expectedSha256,
+    "Runner handoff package SHA-256 does not match the exact uploaded Epson L360 executable.");
+  writeFileSync(target, bytes, { flag: "wx" });
+  console.log("[EPSON-L360-DOWNLOAD] Exact uploaded installer staged at " + target +
+    " (" + bytes.length + " bytes; SHA256=" + digest + ").");
+} else {
 const browser = await chromium.launch({ headless: true });
 try {
   const context = await browser.newContext({
@@ -248,4 +273,5 @@ try {
   }
 } finally {
   await browser.close();
+}
 }
