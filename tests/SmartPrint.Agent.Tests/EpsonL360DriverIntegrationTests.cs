@@ -38,8 +38,8 @@ public sealed class EpsonL360DriverIntegrationTests
             return;
 
         Assert.True(OperatingSystem.IsWindows(), "The Epson L360 driver test requires Windows.");
-        Assert.Contains("EPSON", DriverName, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("L360", DriverName, StringComparison.OrdinalIgnoreCase);
+        Assert.True(DriverName.Contains("EPSON", StringComparison.OrdinalIgnoreCase));
+        Assert.True(DriverName.Contains("L360", StringComparison.OrdinalIgnoreCase));
 
         var json = WindowsPrinterCapabilityDiscovery.DiscoverJson(QueueName, DriverName);
         using var document = JsonDocument.Parse(json);
@@ -77,8 +77,10 @@ public sealed class EpsonL360DriverIntegrationTests
                 .Where(value => !string.IsNullOrWhiteSpace(value)));
         }
 
-        Assert.Contains(media, value => value.Contains("gloss", StringComparison.OrdinalIgnoreCase));
-        Assert.Contains(media, value => value.Contains("matt", StringComparison.OrdinalIgnoreCase));
+        Assert.True(media.Any(value => value.Contains("gloss", StringComparison.OrdinalIgnoreCase)),
+            "Epson L360 driver did not report an available Glossy stock.");
+        Assert.True(media.Any(value => value.Contains("matt", StringComparison.OrdinalIgnoreCase)),
+            "Epson L360 driver did not report an available Matte stock.");
 
         var outputPath = Environment.GetEnvironmentVariable("SMARTPRINT_EPSON_L360_CAPABILITIES_OUTPUT");
         Assert.False(string.IsNullOrWhiteSpace(outputPath),
