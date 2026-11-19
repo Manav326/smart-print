@@ -6608,15 +6608,6 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         return Results.Unauthorized();
     }
 
-    if (ticket.PrivatePrinting &&
-        ticket.PrivateRelayUploadedUtc is not null &&
-        !string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
-        return Results.Conflict(new
-        {
-            code = "private_relay_cloud_transfer_in_progress",
-            message = "This upload is already safely stored as an encrypted cloud relay. The shop computer will continue that same ticket; a second local payload is not accepted."
-        });
-
     if (ticket.CompletedUtc is not null)
     {
         var completedJob = await db.PrintJobs.AsNoTracking()
@@ -6668,6 +6659,15 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
             }
         });
     }
+
+    if (ticket.PrivatePrinting &&
+        ticket.PrivateRelayUploadedUtc is not null &&
+        !string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
+        return Results.Conflict(new
+        {
+            code = "private_relay_cloud_transfer_in_progress",
+            message = "This upload is already safely stored as an encrypted cloud relay. The shop computer will continue that same ticket; a second local payload is not accepted."
+        });
 
     var now = DateTimeOffset.UtcNow;
     if (ticket.ExpiresUtc <= now)
