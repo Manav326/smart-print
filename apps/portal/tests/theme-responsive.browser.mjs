@@ -816,7 +816,7 @@ async function exercisePhotoStudioBrowser() {
       await activatePhotoTool(page, reopened, "Sheet", "Photos per A4 page");
       const batchQuantity = reopened.getByLabel("Number of copies");
       await batchQuantity.waitFor({ state: "visible" });
-      assert.equal(await batchQuantity.count(),1,"Shop Photo Studio must show one number-of-photos input in Sheet settings.");
+      assert.equal(await batchQuantity.count(),1,"Shop Photo Studio must show one copies input in Sheet settings.");
       await batchQuantity.fill("50");
       await batchQuantity.press("Tab");
       await page.waitForFunction(() => {
@@ -848,7 +848,7 @@ async function exercisePhotoStudioBrowser() {
     const output = JSON.parse(await page.locator("#photo-studio-result").innerText());
     assert.equal(output.mode, item.mode);
     assert.equal(output.mediaType, "application/pdf");
-    assert.equal(output.photoCount, largePhotoBatch ? 50 : 8);
+    assert.equal(output.photoCount, largePhotoBatch ? 50 : 1);
     assert.equal(output.photosPerPage, largePhotoBatch ? 9 : 25);
     assert.equal(output.previewPageCount, output.pageCount, "Every PDF page must have a matching inspected source raster.");
     assert.ok(output.embeddedPreviewPages.length === output.pageCount && output.embeddedPreviewPages.every(Boolean),
