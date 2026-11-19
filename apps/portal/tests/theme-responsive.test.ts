@@ -985,7 +985,9 @@ test("customer upload page uses a consistent responsive layout for every conditi
   assert.match(app, /role="progressbar"/);
   assert.match(app, /aria-pressed=\{selectedFileIndex===index\}/);
   assert.match(app, /Local transfer unavailable\./);
-  assert.match(app, /The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue\./);
+  assert.match(app, /cloudAssistedPrintingEnabled\s*\?\s*"The shop computer isn't reachable on this Wi-Fi\. Choose Cloud-assisted · HTTPS to continue\."/);
+  assert.match(app, /"The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue\."/);
+  assert.match(app, /cloudAssistedPrintingEnabled\?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"/);
   assert.match(app, /Boolean\(localAgent\?\.endpoints\.length\)&&message&&checkStatus/);
   assert.doesNotMatch(app, /title="Shop connection unavailable"/);
   assert.match(app, /CustomerInlineNotice kind="info" title="Private Printing unavailable"/);
