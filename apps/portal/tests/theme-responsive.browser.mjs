@@ -1226,7 +1226,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     // specific stepMismatch blur behaviour for input[type=number].
     await count.fill("1.5");
     assert.equal(await count.inputValue(),"1.5");
-    assert.equal(await dialog.getByText(/Enter a whole number of copies from 1 to 100/).count(),1);
+    assert.equal(await dialog.getByText(/Enter 1–100 whole copies/).count(),1);
     assert.equal(await dialog.getByRole("button",{name:"Prepare A4 sheet"}).isDisabled(),true);
 
     // Manual density, ceil(N/q), navigation boundaries and partial last page.
