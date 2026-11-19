@@ -2117,6 +2117,8 @@ export async function uploadCustomerDocumentLocally(
     if (!endpoint) continue;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 90_000);
+    let localStagePollController:AbortController|null=null;
+    let localStagePollPromise:Promise<void>|null=null;
     try {
       const requestHeaders: Record<string, string> = {
         "X-Print-Upload-Grant": grantToken
@@ -2145,8 +2147,8 @@ export async function uploadCustomerDocumentLocally(
         requestBody = multipart.body;
       }
 
-      const localStagePollController=privatePrinting?new AbortController():null;
-      const localStagePollPromise=localStagePollController
+      localStagePollController=privatePrinting?new AbortController():null;
+      localStagePollPromise=localStagePollController
         ?pollCustomerPrivateRelayStages(
             sessionToken,ticket,grantToken,onStage,localStagePollController.signal
           ).catch(()=>undefined)
