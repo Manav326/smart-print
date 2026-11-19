@@ -289,7 +289,7 @@ export class LocalUploadPreflightError extends ApiError {
   }
 }
 
-/** The Agent may have stored this file; the customer must retry the same ticket. */
+/** The original ticket is retained; retry checks or repeats the transfer without creating a second job. */
 export class LocalUploadOutcomeUnknownError extends Error {
   constructor(message: string) {
     super(message);
@@ -514,11 +514,11 @@ async function apiRequestWithUploadProgress<T>(
       }
     };
     xhr.onerror = () => reject(new ApiError(
-      "The upload connection was interrupted. SmartPrint kept the original retry identity; retry the same file to continue safely.",
+      "The upload connection was interrupted before SmartPrint confirmed it. Retry this file; it may need to be sent again from the beginning using the same request identity.",
       0
     ));
     xhr.onabort = () => reject(new ApiError("The upload was cancelled before SmartPrint confirmed it.", 0));
-    xhr.ontimeout = () => reject(new ApiError("The upload timed out before SmartPrint confirmed it. Retry the same file.", 0));
+    xhr.ontimeout = () => reject(new ApiError("The upload timed out before SmartPrint confirmed it. Retry this file; it may need to be sent again from the beginning.", 0));
     xhr.onload = () => {
       let payload: unknown = null;
       if (xhr.responseText) {
@@ -2032,11 +2032,11 @@ export async function uploadCustomerDocumentLocally(
     if (!(exception instanceof ApiError) || exception.status === 0) {
       // Fetch may fail with TypeError/AbortError rather than an ApiError. The
       // POST may nevertheless have committed; retain the key and grant so the
-      // Standard uploads may resume over HTTPS. Private uploads must retry
-      // only against the same paired shop Agent and never use cloud recovery.
+      // Standard uploads may be recovered over HTTPS using the same ticket.
+      // Private uploads must retry only against the same paired shop Agent.
       throw new LocalUploadOutcomeUnknownError(privatePrinting
         ? "SmartPrint lost the response while preparing this private upload. Its original upload identity is saved; reconnect to the same shop computer and retry this file. Cloud recovery is disabled."
-        : "SmartPrint lost the response while preparing this upload. The original upload identity is saved; choose Cloud-assisted · HTTPS or retry this file and SmartPrint will resume the same job.");
+        : "SmartPrint lost the response while preparing this upload. The original print request is saved. Retry to check it; the file may need to be sent again from the beginning. No duplicate print job will be created.");
     }
     throw exception;
   }
@@ -2056,7 +2056,7 @@ export async function uploadCustomerDocumentLocally(
           "private_relay_expired"
         );
       }
-      throw new LocalUploadOutcomeUnknownError("The encrypted private request is still attached to its original ticket. SmartPrint will resume the same request when the shop computer reconnects.");
+      throw new LocalUploadOutcomeUnknownError("Your secure print request is still attached to its original ticket. SmartPrint will check it again when the shop computer reconnects.");
     }
     // Keep the original ticket/grant: its monthly quota and batch capacity are
     // still reserved during the 24-hour recovery window. First let the API
@@ -2296,7 +2296,7 @@ export async function uploadCustomerDocumentLocally(
         : " HTTPS continuation could not be confirmed.";
       throw new LocalUploadOutcomeUnknownError(
         "The shop Wi-Fi connection was interrupted."+detail+
-        " SmartPrint retained the original upload ticket and is ready to resume the same file. "+
+        " SmartPrint retained the original upload ticket. The file may need to be sent again from the beginning. "+
         (cloudAssistedPrintingEnabled ? "HTTPS recovery was attempted. " : "Secure online recovery was attempted. ")+
         "Retry this file in the same batch; no second print job will be created."
       );

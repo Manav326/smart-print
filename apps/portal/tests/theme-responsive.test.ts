@@ -291,8 +291,9 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   assert.match(app, /Shop computer:/);
   assert.match(app, /Paper output manually confirmed by/);
   assert.match(app, /Cloud-assisted upload is now selected/);
-  assert.match(app, /attached to its original job/);
-  assert.match(app, /resume that same upload without creating another print job/);
+  assert.match(app, /Your original print request is saved/);
+  assert.match(app, /will not create a duplicate print job/);
+  assert.doesNotMatch(app, /resume that same upload without creating another print job/);
   assert.match(api, /local-upload-tickets.*cloud-recovery/);
   assert.doesNotMatch(app, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
   assert.match(api, /printerAgentName\?: string \| null/);
@@ -359,7 +360,7 @@ test("customer local-upload recovery explains shop Wi-Fi and hotspot without add
   const app = read("../src/App.tsx");
   assert.match(app, /same Wi-Fi or hotspot as the shop computer/);
   assert.match(app, /same shop Wi-Fi or hotspot/);
-  assert.match(app, /Direct shop Wi-Fi or hotspot transfer is temporarily unavailable/);
+  assert.match(app, /The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue/);
   assert.match(app, /Shop connection ready/);
 });
 
@@ -649,7 +650,9 @@ test("session renewal refreshes customer payment choices and explains unavailabl
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
   assert.match(app, /paymentOptions:session\.paymentOptions/);
   assert.match(backend, /PaymentOptions = paymentOptions/);
-  assert.equal((app.match(/The shop has not enabled UPI or cash payment/g) ?? []).length, 2);
+  assert.equal((app.match(/Ask the shop to enable UPI or cash at the counter/g) ?? []).length, 2);
+  assert.equal((app.match(/title="No payment method available"/g) ?? []).length, 2);
+  assert.equal((app.match(/title="Cash at counter unavailable"/g) ?? []).length, 2);
 });
 
 test("contextual help supports outside-click and Escape dismissal", () => {
@@ -940,4 +943,78 @@ test("shop batch review communicates included and excluded choices, valid quotes
   assert.ok(css.includes("@media(max-width:650px){"));
   assert.ok(css.includes(".batch-review-row{grid-template-columns:minmax(0,1fr) auto;"));
   assert.match(css, /html\[data-theme="dark"\] \.batch-review-overview/);
+});
+
+
+test("customer warnings and info use concise accessible notices with toolkit icons", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /function CustomerInlineNotice/);
+  assert.match(app, /AlertTriangle:Info/);
+  assert.match(app, /role=\{kind==="warning"\?"alert":"status"\}/);
+  assert.match(app, /Files inside nested folders aren't included/);
+  assert.match(app, /Only PDF, JPG and PNG files are supported/);
+  assert.match(app, /identified by content\. Original filenames were kept/);
+  assert.match(app, /Local transfer is not encrypted/);
+  assert.match(app, /Tap Check shop Wi-Fi above and allow local-network access/);
+  assert.match(css, /\.customer-inline-notice\.warning/);
+  assert.match(css, /\.customer-inline-notice\.info/);
+  assert.match(css, /\.customer-inline-notices \.customer-inline-notice/);
+});
+
+
+test("customer upload page uses a consistent responsive layout for every conditional panel", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(css, /customer-print-flow \{\s*display:grid/);
+  assert.match(css, /customer-print-flow > \* \{\s*min-width:0;\s*margin-block:0/);
+  assert.match(css, /customer-print-flow \{[\s\S]*width:min\(100%,1040px\)/);
+  assert.match(css, /customer-upload-progress>div \{[\s\S]*height:auto;[\s\S]*background:transparent/);
+  assert.match(css, /customer-folder-group-head \{\s*display:grid/);
+  assert.match(css, /customer-folder-file-row \{\s*display:grid/);
+  assert.match(css, /customer-file-overrides \{\s*display:grid/);
+  assert.match(css, /customer-upload-picker-grid \{\s*display:grid/);
+  assert.match(css, /customer-file-preview iframe \{[\s\S]*max-width:100%/);
+  assert.match(css, /@media\(max-width:760px\)/);
+  assert.match(css, /@media\(max-width:650px\)/);
+  assert.match(css, /@media\(max-width:420px\)/);
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\)/);
+  assert.match(app, /aria-label="Selected files and print settings"/);
+  assert.match(app, /role="progressbar"/);
+  assert.match(app, /aria-pressed=\{selectedFileIndex===index\}/);
+  assert.match(app, /Local transfer unavailable\./);
+  assert.match(app, /cloudAssistedPrintingEnabled\s*\?\s*"The shop computer isn't reachable on this Wi-Fi\. Choose Cloud-assisted · HTTPS to continue\."/);
+  assert.match(app, /"The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue\."/);
+  assert.match(app, /cloudAssistedPrintingEnabled\?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"/);
+  assert.match(app, /Boolean\(localAgent\?\.endpoints\.length\)&&message&&checkStatus/);
+  assert.doesNotMatch(app, /title="Shop connection unavailable"/);
+  assert.match(app, /CustomerInlineNotice kind="info" title="Private Printing unavailable"/);
+  assert.match(app, /The paired shop computer must be online and publish its encryption key/);
+  assert.doesNotMatch(app, /className="customer-privacy-unavailable"/);
+  assert.doesNotMatch(css, /customer-privacy-unavailable/);
+});
+
+
+test("native customer upload and nested payment states retain spacing and fit phone widths", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /customer-entry\.smartprint-native \.customer-print-flow \{\s*display:grid/);
+  assert.match(css, /customer-entry \.customer-state-timeline>div>span \{[^}]*min-width:0/s);
+  assert.match(css, /customer-upi-qr svg,[\s\S]*max-width:min\(100%,280px\)/);
+  assert.match(css, /customer-batch-checkout-lines>div,[\s\S]*grid-template-columns:minmax\(0,1fr\) auto/);
+  assert.match(css, /customer-batch-print-breakdown>div strong/);
+  assert.match(css, /customer-session-complete \{\s*align-items:stretch;\s*flex-direction:column/);
+});
+
+ 
+test("customer upload progress counts confirmed files separately from failed and waiting transfers", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /const uploadConfirmedCount=uploadProgress\?\.files\.filter\(file=>file\.status==="COMPLETED"\)\.length\?\?0;/);
+  assert.match(app, /const uploadFailedCount=uploadProgress\?\.files\.filter\(file=>file\.status==="FAILED"\)\.length\?\?0;/);
+  assert.match(app, /const uploadWaitingCount=uploadProgress\?\.files\.filter\(file=>file\.status==="WAITING_FOR_SHOP"\)\.length\?\?0;/);
+  assert.match(app, /\{uploadConfirmedCount\} of \{uploadProgress\.total\} files uploaded/);
+  assert.match(app, /Retry only failed files/);
+  assert.doesNotMatch(app, /\{uploadProgress\.completed\} of \{uploadProgress\.total\} files complete/);
 });

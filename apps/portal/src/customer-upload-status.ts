@@ -44,8 +44,8 @@ const statusMessages: Record<string, string> = {
   FAILED: "Printing could not be completed. Please speak to the shop.",
   REJECTED: "The shop could not accept this file. Please ask the shop for help.",
   QUOTE_EXPIRED: "Your quote has expired · Request a new quote.",
-  LOCAL_QUEUE_CLAIMED: "Your files have reached the shop and are being prepared.",
-  LOCAL_QUEUE_READY: "Your files have reached the shop and are being prepared.",
+  LOCAL_QUEUE_CLAIMED: "The shop computer has picked up your request and is preparing your file.",
+  LOCAL_QUEUE_READY: "Your file is safely stored on the shop computer and ready for the shop to print.",
   VERIFIED: "Payment received. The shop is preparing your print."
 };
 

@@ -1,3 +1,4 @@
+using System.Net.Http;
 using SmartPrint.Agent;
 
 namespace SmartPrint.Agent.Tests;
@@ -12,5 +13,11 @@ public sealed class AgentCloudHttpTimingTests
         Assert.Equal(
             5,
             AgentCloudHttpTiming.RequestTimeoutSeconds - AgentCloudHttpTiming.PrivateRelayPendingWaitSeconds);
+        Assert.Equal(HttpCompletionOption.ResponseHeadersRead, AgentCloudHttpTiming.DocumentResponseCompletionOption);
+        Assert.Equal(600, AgentCloudHttpTiming.DocumentTransferTimeoutSeconds);
+        Assert.Equal(4, AgentCloudHttpTiming.MaxJobClaimBatchesPerCycle);
+
+        using var transferTimeout = AgentCloudHttpTiming.CreateDocumentTransferCancellationSource(CancellationToken.None);
+        Assert.True(transferTimeout.Token.CanBeCanceled);
     }
 }

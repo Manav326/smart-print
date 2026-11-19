@@ -109,3 +109,14 @@ test("partial refunds are described as partial rather than full refunds", () => 
   assert.match(resolveCustomerUploadStatusMessage({ jobStatus: "PARTIALLY_REFUNDED" }), /partial refund/i);
   assert.match(resolveCustomerUploadStatusMessage({ paymentStatus: "PARTIALLY_REFUNDED" }), /partial refund/i);
 });
+
+
+test("the shop-claimed and locally-ready states have distinct customer meanings", () => {
+  const claimed = resolveCustomerUploadStatusMessage({ jobStatus: "LOCAL_QUEUE_CLAIMED" });
+  const ready = resolveCustomerUploadStatusMessage({ jobStatus: "LOCAL_QUEUE_READY" });
+  assert.match(claimed, /shop computer has picked up your request/i);
+  assert.match(claimed, /preparing your file/i);
+  assert.match(ready, /safely stored on the shop computer/i);
+  assert.match(ready, /ready for the shop to print/i);
+  assert.notEqual(claimed, ready);
+});

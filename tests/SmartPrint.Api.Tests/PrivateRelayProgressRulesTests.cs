@@ -66,10 +66,13 @@ public sealed class PrivateRelayProgressRulesTests
         Assert.Contains("waiting for the shop computer",
             PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.WaitingForAgent),
             StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("decrypting and authenticating",
+        Assert.Contains("checking file security",
             PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.DecryptingAndAuthenticating),
             StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("local print queue",
+        Assert.Contains("file secured on the shop computer",
+            PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Ready),
+            StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("ready for printing",
             PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Ready),
             StringComparison.OrdinalIgnoreCase);
     }
