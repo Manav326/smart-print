@@ -126,8 +126,7 @@
 .dark .pickInstruction{border-color:#8b7cdb;background:#302a4d;color:#e1dcff}
 .dark .errorToast{border-color:#874f56;background:#351f26;color:#ffd7da}
 
-/* Keep the panel title and its explanatory copy on distinct readable lines. */
-.panelHeading > div { display:grid; gap:6px; min-width:0; }
+/* Panel header controls stay inline; contextual help is laid out below it. */
 
 /* Keep mobile slider thumbs outside Android's left/right system gesture zones. */
 @media(max-width:720px){
@@ -142,8 +141,7 @@
   .toolRail button{min-width:64px;min-height:34px;padding:4px 7px;gap:4px}
   .toolPanel{max-height:min(22vh,180px);padding:7px 9px;gap:7px}
   .panelHeading{padding-bottom:5px}
-  .panelHeading small{display:none}
-  .fieldLabel select,.fieldLabel input{min-height:34px;padding:6px 8px}
+    .fieldLabel select,.fieldLabel input{min-height:34px;padding:6px 8px}
   .sheetSummary{gap:5px;padding:8px}
   .privacyNote{padding:7px;font-size:8px;line-height:1.35}
   .canvasWorkspace{grid-template-rows:30px minmax(0,1fr) 23px}
