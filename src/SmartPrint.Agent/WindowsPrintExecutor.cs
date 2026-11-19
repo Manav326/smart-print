@@ -838,7 +838,7 @@ public sealed class WindowsPrintExecutor
             var isPhotoPaper = isPhoto && string.Equals(entry.PhotoOutputLayout, "PHOTO_PAPER", StringComparison.OrdinalIgnoreCase);
             if (isPhoto && entry.PhotoOutputLayout is not ("A4_SHEET" or "PHOTO_PAPER"))
                 throw new PrintExecutionBlockedException("PHOTO_OUTPUT_LAYOUT_INVALID", "The requested photo output layout is not supported.");
-            var requestsPhotoMediaType = isPhoto && entry.PhotoPaperFinish is "GLOSSY" or "MATTE";
+            var requestsPhotoMediaType = isPhoto && entry.PhotoPaperFinish is ("GLOSSY" or "MATTE");
             if (isPhoto && !isPhotoPaper &&
                 entry.PhotoPaperFinish != "PLAIN" && !requestsPhotoMediaType)
                 throw new PrintExecutionBlockedException(
