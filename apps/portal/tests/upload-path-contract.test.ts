@@ -87,7 +87,8 @@ test("Private Printing never starts a second relay while the same ticket is clai
 
 test("cloud document transfer routes stream through Nginx with the matching multipart ceiling", () => {
   assert.ok(nginx.includes("client_max_body_size 22m;"));
-  const transferStart = nginx.indexOf("    location ~ ^/api/v1/");
+  assert.ok(nginx.includes("upstream smart_print_api {"));
+  const transferStart = nginx.indexOf('    location ~ "^/api/v1/');
   const transferEnd = nginx.indexOf("\n    }", transferStart);
   assert.ok(transferStart >= 0 && transferEnd > transferStart, "the dedicated transfer location must exist");
   const transferLocation = nginx.slice(transferStart, transferEnd);
@@ -95,6 +96,7 @@ test("cloud document transfer routes stream through Nginx with the matching mult
   assert.ok(transferLocation.includes("private-relay|cloud-recovery"));
   assert.ok(transferLocation.includes("[0-9a-fA-F-]{36}/document"));
   assert.ok(transferLocation.includes("[0-9a-fA-F-]{36}/content"));
+  assert.ok(transferLocation.includes("proxy_pass http://smart_print_api;"));
   assert.ok(transferLocation.includes("client_max_body_size 51m;"));
   assert.ok(transferLocation.includes("proxy_request_buffering off;"));
   assert.ok(transferLocation.includes("proxy_buffering off;"));
