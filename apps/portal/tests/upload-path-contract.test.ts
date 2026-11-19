@@ -6,6 +6,7 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 const api = read("../../../src/SmartPrint.Api/Program.cs");
 const agentApi = read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
 const agentWorker = read("../../../src/SmartPrint.Agent/Worker.cs");
+const localAgentApi = read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
 
 test("standard cloud multipart uploads enforce the per-file and aggregate batch limits", () => {
   assert.match(api, /file\.Length is <= 0 or > UploadLimits\.MaxFileBytes/);
@@ -52,4 +53,15 @@ test("shop batch review cannot accept more than twenty files", () => {
 
 test("per-session upload rate budget can carry a complete 20-file Private Printing batch", () => {
   assert.match(api, /PermitLimit = UploadLimits\.MaxBatchFiles \* 3/);
+});
+test("Private Printing publishes durable, authenticated stage updates for direct LAN and cloud relay processing", () => {
+  assert.match(api, /MapPost\("\/private-relays\/\{ticketId:guid\}\/stage"/);
+  assert.match(api, /hasClaimedDirectLanUpload/);
+  assert.match(api, /PrivateRelayProgressRules\.ReceivingEncryptedPayload/);
+  assert.match(api, /StageMessage = PrivateRelayProgressRules\.CustomerMessage\(stage\)/);
+  assert.match(agentWorker, /ReportPrivateRelayStageAsync\([\s\S]{0,250}DECRYPTING_AND_AUTHENTICATING/);
+  assert.match(agentWorker, /ReportPrivateRelayStageAsync\([\s\S]{0,250}VALIDATING_DOCUMENT/);
+  assert.match(localAgentApi, /ReportPrivateStageAsync\("DECRYPTING_AND_AUTHENTICATING"\)/);
+  assert.match(localAgentApi, /ReportPrivateStageAsync\("VALIDATING_DOCUMENT"\)/);
+  assert.match(localAgentApi, /ReportPrivateStageAsync\("SECURING_LOCAL_QUEUE"\)/);
 });
