@@ -14,7 +14,6 @@ mkdirSync(dirname(target), { recursive: true });
 
 const officialSupportUrl =
   "https://www.epson.co.in/Support/Printers/All-In-One/L-Series/Epson-L360/s/SPT_C11CE55501?review-filter=Windows+10+64-bit";
-const expectedFileName = "L360_x64_260JAHomeExportAsiaML.exe";
 const expectedMinimumBytes = 5 * 1024 * 1024;
 
 const browser = await chromium.launch({ headless: true });
