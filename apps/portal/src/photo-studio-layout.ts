@@ -84,6 +84,31 @@ export function getPhotoSheetPhotoPositions(
   });
 }
 
+/**
+ * Maps pointer movement on a photo tile to the shared crop focus.
+ * Moving the image right/down reveals more of its left/top source area, so the
+ * source-window focus moves in the opposite direction. Invalid tile dimensions
+ * do not change that axis, and all results remain inside the source bounds.
+ */
+export function getPhotoCropFocusAfterDrag(
+  focusX: number,
+  focusY: number,
+  deltaX: number,
+  deltaY: number,
+  tileWidthPx: number,
+  tileHeightPx: number
+): { focusX: number; focusY: number } {
+  const clamp = (value: number) => Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 50;
+  const move = (current: number, delta: number, extent: number) =>
+    Number.isFinite(delta) && Number.isFinite(extent) && extent > 0
+      ? clamp(clamp(current) - delta / extent * 100)
+      : clamp(current);
+  return {
+    focusX: move(focusX, deltaX, tileWidthPx),
+    focusY: move(focusY, deltaY, tileHeightPx)
+  };
+}
+
 /** Checks the cropped pixels available after framing/zoom against both 300-DPI axes. */
 export function hasSufficientPhotoResolution(
   sourceWidth: number,
