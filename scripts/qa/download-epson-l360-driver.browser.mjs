@@ -86,8 +86,8 @@ try {
   console.log("[EPSON-L360-DOWNLOAD] Download Center frame diagnostics: " + JSON.stringify(pageInfo));
 
   const frames = page.frames();
-  let directDownload: { frame: typeof page.mainFrame; href: string } | null = null;
-  let downloadButtonFrame: typeof page.mainFrame | null = null;
+  let directDownload = null;
+  let downloadButtonFrame = null;
 
   for (const frame of frames) {
     try {
@@ -122,7 +122,6 @@ try {
 
   if (directDownload) {
     console.log("[EPSON-L360-DOWNLOAD] Found the official Epson binary link: " + directDownload.href);
-    const trigger = directDownload.frame.locator("a[href]").filter({ has: directDownload.frame.locator("body") }).first();
     const exactLink = directDownload.frame.locator("a[href]").evaluateAll(anchors =>
       anchors.find(anchor => /L360_x64_260JAHomeExportAsiaML\.exe/i.test(anchor.href))?.href ?? null
     );
