@@ -5938,6 +5938,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   }
 
   const pendingFilesCount=files.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate))).length;
+  const uploadConfirmedCount=uploadProgress?.files.filter(file=>file.status==="COMPLETED").length??0;
+  const uploadFailedCount=uploadProgress?.files.filter(file=>file.status==="FAILED").length??0;
+  const uploadWaitingCount=uploadProgress?.files.filter(file=>file.status==="WAITING_FOR_SHOP").length??0;
   const uploadGroups=Array.from(new Set(files.map(candidate=>groupNameForFile(candidate)))).map(name=>({
     name, files:files.filter(candidate=>groupNameForFile(candidate)===name)
   }));
@@ -6312,7 +6315,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<section className="customer-upload-progress" aria-live="polite" aria-label="Upload progress">
       <div className="customer-upload-progress-header">
-        <div><strong>{uploadProgress.completed} of {uploadProgress.total} files complete</strong><span>Files upload in parallel.</span></div>
+        <div><strong>{uploadConfirmedCount} of {uploadProgress.total} files uploaded</strong><span>{uploadFailedCount>0?`${uploadFailedCount} failed · Retry only failed files.`:uploadWaitingCount>0?`${uploadWaitingCount} waiting for the shop computer.`:uploadConfirmedCount===uploadProgress.total?"All files uploaded. Printing status is shown separately.":"Files upload in parallel."}</span></div>
         <span className="customer-upload-progress-count">{Math.round(
           uploadProgress.files.reduce((sum,file)=>sum+Math.min(file.bytesSent,file.totalBytes||file.sizeBytes),0)/
           Math.max(1,uploadProgress.files.reduce((sum,file)=>sum+(file.totalBytes||file.sizeBytes),0))*100
