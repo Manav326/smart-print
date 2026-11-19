@@ -3152,9 +3152,9 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   const acceptedMonoPages=acceptedDocumentJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
   const acceptedColourPages=acceptedDocumentJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
   const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
-  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Choose which files should be included in the customer's single batch checkout."} onClose={onClose}>
+  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Select the files that should remain in the customer's batch checkout. Excluded files will not be charged."} onClose={onClose}>
     <section className="batch-review-overview" aria-label="Batch review summary">
-      <div className="batch-review-overview-heading"><div><span>REVIEW SUMMARY</span><strong>{jobs.length} {jobs.length===1?"file":"files"} in this batch</strong><small>New files are included by default. Excluded files will not be charged.</small></div><div className="batch-review-total"><small>Accepted value · valid quotes only</small><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong></div></div>
+      <div className="batch-review-overview-heading"><div><span>REVIEW SUMMARY</span><strong>{jobs.length} {jobs.length===1?"file":"files"} in this batch</strong><small>Included files stay in one checkout. Excluded files will not be charged.</small></div><div className="batch-review-total"><small>Accepted value · valid quotes only</small><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong></div></div>
       <div className="batch-review-stats">
         <span className="included"><b>{acceptedCount}</b> included</span>
         <span className="excluded"><b>{rejectedCount}</b> excluded</span>
