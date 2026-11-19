@@ -69,6 +69,25 @@ jobs:
           path: artifacts/photo-studio-browser/
           if-no-files-found: warn
           retention-days: 14
+      - name: Validate document preview and batch upload browser runner syntax
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        run: node --check apps/portal/tests/document-preview.browser.mjs
+      - name: Run document preview and 20-file batch recovery browser acceptance
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        env:
+          VITE_API_BASE_URL: ""
+          SMARTPRINT_DOCUMENT_PREVIEW_ARTIFACT_DIR: artifacts/document-preview-browser
+        run: |
+          mkdir -p artifacts/document-preview-browser
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" SMARTPRINT_DOCUMENT_PREVIEW_ARTIFACT_DIR=artifacts/document-preview-browser node apps/portal/tests/document-preview.browser.mjs'
+      - name: Upload document preview and batch recovery browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-document-preview-batch-browser-qa
+          path: artifacts/document-preview-browser/
+          if-no-files-found: warn
+          retention-days: 14
       - name: Validate Private Printing browser runner syntax
         if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
         run: node --check apps/portal/tests/private-printing.browser.mjs

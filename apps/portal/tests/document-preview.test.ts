@@ -33,3 +33,42 @@ test("legacy Firefox and Safari PDF viewers are supported, unknown WebViews are 
   assert.equal(supportsInlinePdfPreview({ userAgent: "Mozilla/5.0 Chrome/130" }), false);
   assert.equal(supportsInlinePdfPreview({ userAgent: "Mozilla/5.0 (Linux; Android 14; wv) Chrome/130" }), false);
 });
+
+test("browser N-up preview reuses a parsed source PDF for multiple output sheets", async () => {
+  const { PDFDocument } = await import("pdf-lib");
+  const {
+    loadCustomerNupPreviewSource,
+    createCustomerNupPreviewFromDocument
+  } = await import("../src/customer-nup-preview.ts");
+  const source = await PDFDocument.create();
+  for (let index = 0; index < 5; index++) {
+    const page = source.addPage([612, 792]);
+    page.drawText(`Source page ${index + 1}`, { x: 30, y: 740, size: 18 });
+  }
+  const bytes = await source.save();
+  const parsed = await loadCustomerNupPreviewSource(bytes);
+
+  const first = await createCustomerNupPreviewFromDocument(parsed, {
+    pagesPerSheet: 2,
+    paperSize: "A4",
+    orientation: "PORTRAIT",
+    pagesPerSheetDirection: "RightBottom",
+    sheetIndex: 0
+  });
+  const third = await createCustomerNupPreviewFromDocument(parsed, {
+    pagesPerSheet: 2,
+    paperSize: "A4",
+    orientation: "PORTRAIT",
+    pagesPerSheetDirection: "RightBottom",
+    sheetIndex: 2
+  });
+  const previewFirst = await PDFDocument.load(first.bytes);
+  const previewThird = await PDFDocument.load(third.bytes);
+
+  assert.equal(previewFirst.getPageCount(), 1);
+  assert.equal(previewThird.getPageCount(), 1);
+  assert.equal(first.sheetCount, 3);
+  assert.equal(third.sheetIndex, 2);
+  assert.equal(third.firstSourcePage, 5);
+  assert.equal(third.lastSourcePage, 5);
+});

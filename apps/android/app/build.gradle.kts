@@ -142,6 +142,7 @@ dependencies {
     implementation("com.github.Dimezis:BlurView:version-3.2.0")
     implementation("androidx.webkit:webkit:1.18.0")
     implementation("com.google.android.material:material:1.12.0")
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     implementation("androidx.camera:camera-camera2:1.6.2")
     implementation("androidx.camera:camera-core:1.6.2")
     implementation("androidx.camera:camera-lifecycle:1.6.2")

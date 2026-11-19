@@ -21,8 +21,44 @@ export type CustomerNupPreviewResult = {
  * as the Android preview. It never replaces or mutates the uploaded PDF; the
  * untouched source file remains the payload sent to the Windows print driver.
  */
+/**
+ * Parse the selected source PDF once. Callers may retain this document for the
+ * currently selected File and reuse it for sheet navigation or print-setting
+ * changes; they should drop it as soon as that File is no longer selected.
+ */
+export type CustomerNupPreviewSource = {
+  document: PdfDocumentType;
+  // Page wrappers are materialized once per selected file, not once per sheet.
+  pages: ReturnType<PdfDocumentType["getPages"]>;
+};
+
+export async function loadCustomerNupPreviewSource(
+  sourceBytes: Uint8Array
+): Promise<CustomerNupPreviewSource> {
+  const { PDFDocument } = await import("pdf-lib");
+  const document: PdfDocumentType = await PDFDocument.load(sourceBytes);
+  const pages = document.getPages();
+  if (pages.length < 1 || pages.length > 500) {
+    throw new RangeError("PDFs must contain between 1 and 500 pages.");
+  }
+  return { document, pages };
+}
+
+/** Backwards-compatible one-shot helper used by tests and other preview callers. */
 export async function createCustomerNupPreview(
   sourceBytes: Uint8Array,
+  options: CustomerNupPreviewOptions
+): Promise<CustomerNupPreviewResult> {
+  const source = await loadCustomerNupPreviewSource(sourceBytes);
+  return createCustomerNupPreviewFromDocument(source, options);
+}
+
+/**
+ * Reuses an already parsed source PDF while producing one visual-only output
+ * sheet. Only the selected source pages are embedded into the new preview PDF.
+ */
+export async function createCustomerNupPreviewFromDocument(
+  source: CustomerNupPreviewSource,
   options: CustomerNupPreviewOptions
 ): Promise<CustomerNupPreviewResult> {
   if (options.pagesPerSheet < 2 || options.pagesPerSheet > 500 ||
@@ -34,8 +70,7 @@ export async function createCustomerNupPreview(
   }
 
   const { PDFDocument, StandardFonts, rgb, degrees } = await import("pdf-lib");
-  const sourceDocument: PdfDocumentType = await PDFDocument.load(sourceBytes);
-  const sourcePages = sourceDocument.getPages();
+  const sourcePages = source.pages;
   if (sourcePages.length < 1 || sourcePages.length > 500) {
     throw new RangeError("PDFs must contain between 1 and 500 pages.");
   }
