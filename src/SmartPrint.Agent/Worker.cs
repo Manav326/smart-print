@@ -841,111 +841,111 @@ public sealed class Worker(
         await RetryPendingAcknowledgementsAsync(client, credentials, cancellationToken);
 
         for (var claimBatchIndex = 0; claimBatchIndex < AgentCloudHttpTiming.MaxJobClaimBatchesPerCycle; claimBatchIndex++)
-        {
-        using var claimResponse = await SendAgentRequestAsync(
-            client,
-            credentials,
-            "api/v1/agent/jobs/claim",
-            new { },
-            cancellationToken);
-        if (!claimResponse.IsSuccessStatusCode)
-        {
-            logger.LogWarning("Paid print job claim returned HTTP {StatusCode}.", (int)claimResponse.StatusCode);
-            return;
-        }
-
-        var claim = await claimResponse.Content.ReadFromJsonAsync<AgentJobClaimResponse>(cancellationToken);
-        if (claim?.Jobs is null || claim.Jobs.Count == 0)
-        {
-            return;
-        }
-
-        foreach (var job in claim.Jobs)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
             {
-                var existing = localQueueStore.Find(job.Id);
-                if (existing is not null)
+            using var claimResponse = await SendAgentRequestAsync(
+                client,
+                credentials,
+                "api/v1/agent/jobs/claim",
+                new { },
+                cancellationToken);
+            if (!claimResponse.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Paid print job claim returned HTTP {StatusCode}.", (int)claimResponse.StatusCode);
+                return;
+            }
+
+            var claim = await claimResponse.Content.ReadFromJsonAsync<AgentJobClaimResponse>(cancellationToken);
+            if (claim?.Jobs is null || claim.Jobs.Count == 0)
+            {
+                return;
+            }
+
+            foreach (var job in claim.Jobs)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
                 {
-                    if (!string.Equals(existing.Sha256, job.Sha256, StringComparison.OrdinalIgnoreCase) ||
-                        existing.SizeBytes != job.SizeBytes)
+                    var existing = localQueueStore.Find(job.Id);
+                    if (existing is not null)
                     {
-                        throw new InvalidDataException("The local queue already contains different content for this job ID.");
+                        if (!string.Equals(existing.Sha256, job.Sha256, StringComparison.OrdinalIgnoreCase) ||
+                            existing.SizeBytes != job.SizeBytes)
+                        {
+                            throw new InvalidDataException("The local queue already contains different content for this job ID.");
+                        }
+
+                        if (!File.Exists(existing.DocumentPath))
+                        {
+                            throw new FileNotFoundException("The local queue manifest exists but its protected document is missing.", existing.DocumentPath);
+                        }
+                        if (job.StorageMode == "LOCAL_AGENT" ||
+                            existing.State is "LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT" or "ACK_PENDING" or "ACKNOWLEDGED")
+                        {
+                            // An HTTPS recovery can complete the same ticket while the
+                            // Agent still holds the original protected LAN copy. Promote
+                            // that copy with the paid job's final print settings.
+                            await localQueueStore.UpdateFromClaimAsync(job, cancellationToken);
+                        }
+                    }
+                    else
+                    {
+                        if (job.StorageMode == "LOCAL_AGENT")
+                        {
+                            logger.LogError("Local-only document {JobNumber} is missing from this Agent's protected queue. It will not be downloaded from the cloud.", job.JobNumber);
+                            continue;
+                        }
+
+                        using var transferTimeout = AgentCloudHttpTiming.CreateDocumentTransferCancellationSource(cancellationToken);
+                        using var documentResponse = await SendAgentGetRequestAsync(
+                            client,
+                            credentials,
+                            $"api/v1/agent/jobs/{job.Id}/document",
+                            transferTimeout.Token,
+                            AgentCloudHttpTiming.DocumentResponseCompletionOption);
+                        if (!documentResponse.IsSuccessStatusCode)
+                        {
+                            logger.LogWarning("Job {JobNumber} document download returned HTTP {StatusCode}.", job.JobNumber, (int)documentResponse.StatusCode);
+                            continue;
+                        }
+
+                        var responseHash = documentResponse.Headers.TryGetValues("X-Document-SHA256", out var hashes)
+                            ? hashes.FirstOrDefault()
+                            : null;
+                        var responseSize = documentResponse.Headers.TryGetValues("X-Document-Size", out var sizes)
+                            ? sizes.FirstOrDefault()
+                            : null;
+                        if (!string.Equals(responseHash, job.Sha256, StringComparison.OrdinalIgnoreCase) ||
+                            !long.TryParse(responseSize, out var declaredSize) ||
+                            declaredSize != job.SizeBytes)
+                        {
+                            throw new InvalidDataException("The document response headers do not match the claimed job metadata.");
+                        }
+
+                        await using var documentStream = await documentResponse.Content.ReadAsStreamAsync(transferTimeout.Token);
+                        await localQueueStore.EnqueueStreamingAsync(
+                            job,
+                            credentials.AgentDeviceId,
+                            documentStream,
+                            transferTimeout.Token);
                     }
 
-                    if (!File.Exists(existing.DocumentPath))
-                    {
-                        throw new FileNotFoundException("The local queue manifest exists but its protected document is missing.", existing.DocumentPath);
-                    }
-                    if (job.StorageMode == "LOCAL_AGENT" ||
-                        existing.State is "LOCAL_UPLOAD_STAGED" or "LOCAL_UPLOAD_PENDING_PAYMENT" or "ACK_PENDING" or "ACKNOWLEDGED")
-                    {
-                        // An HTTPS recovery can complete the same ticket while the
-                        // Agent still holds the original protected LAN copy. Promote
-                        // that copy with the paid job's final print settings.
-                        await localQueueStore.UpdateFromClaimAsync(job, cancellationToken);
-                    }
-                }
-                else
-                {
-                    if (job.StorageMode == "LOCAL_AGENT")
-                    {
-                        logger.LogError("Local-only document {JobNumber} is missing from this Agent's protected queue. It will not be downloaded from the cloud.", job.JobNumber);
-                        continue;
-                    }
-
-                    using var transferTimeout = AgentCloudHttpTiming.CreateDocumentTransferCancellationSource(cancellationToken);
-                    using var documentResponse = await SendAgentGetRequestAsync(
+                    await AcknowledgeLocalQueueReceiptAsync(
                         client,
                         credentials,
-                        $"api/v1/agent/jobs/{job.Id}/document",
-                        transferTimeout.Token,
-                        AgentCloudHttpTiming.DocumentResponseCompletionOption);
-                    if (!documentResponse.IsSuccessStatusCode)
-                    {
-                        logger.LogWarning("Job {JobNumber} document download returned HTTP {StatusCode}.", job.JobNumber, (int)documentResponse.StatusCode);
-                        continue;
-                    }
-
-                    var responseHash = documentResponse.Headers.TryGetValues("X-Document-SHA256", out var hashes)
-                        ? hashes.FirstOrDefault()
-                        : null;
-                    var responseSize = documentResponse.Headers.TryGetValues("X-Document-Size", out var sizes)
-                        ? sizes.FirstOrDefault()
-                        : null;
-                    if (!string.Equals(responseHash, job.Sha256, StringComparison.OrdinalIgnoreCase) ||
-                        !long.TryParse(responseSize, out var declaredSize) ||
-                        declaredSize != job.SizeBytes)
-                    {
-                        throw new InvalidDataException("The document response headers do not match the claimed job metadata.");
-                    }
-
-                    await using var documentStream = await documentResponse.Content.ReadAsStreamAsync(transferTimeout.Token);
-                    await localQueueStore.EnqueueStreamingAsync(
-                        job,
-                        credentials.AgentDeviceId,
-                        documentStream,
-                        transferTimeout.Token);
+                        job.Id,
+                        job.Sha256,
+                        job.SizeBytes,
+                        cancellationToken);
                 }
-
-                await AcknowledgeLocalQueueReceiptAsync(
-                    client,
-                    credentials,
-                    job.Id,
-                    job.Sha256,
-                    job.SizeBytes,
-                    cancellationToken);
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    logger.LogError(exception, "Could not secure paid job {JobNumber} in the local queue.", job.JobNumber);
+                }
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                logger.LogError(exception, "Could not secure paid job {JobNumber} in the local queue.", job.JobNumber);
-            }
-        }
         }
     }
 

@@ -86,14 +86,17 @@ test("Private Printing never starts a second relay while the same ticket is clai
 
 
 test("cloud document transfer routes stream through Nginx with the matching multipart ceiling", () => {
-  assert.match(nginx, /client_max_body_size 22m;/);
-  const transferLocation = nginx.match(/location ~ \\^\\/api\\/v1\\/[^\\{]+\\{[\\s\\S]*?\\n    \\}/)?.[0] ?? "";
-  assert.match(transferLocation, /sessions\\/current\\/jobs/);
-  assert.match(transferLocation, /private-relay\\|cloud-recovery/);
-  assert.match(transferLocation, /agent\\/jobs\\/\\[0-9a-fA-F-\\]\\{36\\}\\/document/);
-  assert.match(transferLocation, /agent\\/private-relays\\/\\[0-9a-fA-F-\\]\\{36\\}\\/content/);
-  assert.match(transferLocation, /client_max_body_size 51m;/);
-  assert.match(transferLocation, /proxy_request_buffering off;/);
-  assert.match(transferLocation, /proxy_buffering off;/);
-  assert.match(transferLocation, /proxy_read_timeout 10m;/);
+  assert.ok(nginx.includes("client_max_body_size 22m;"));
+  const transferStart = nginx.indexOf("    location ~ ^/api/v1/");
+  const transferEnd = nginx.indexOf("\n    }", transferStart);
+  assert.ok(transferStart >= 0 && transferEnd > transferStart, "the dedicated transfer location must exist");
+  const transferLocation = nginx.slice(transferStart, transferEnd);
+  assert.ok(transferLocation.includes("sessions/current/jobs"));
+  assert.ok(transferLocation.includes("private-relay|cloud-recovery"));
+  assert.ok(transferLocation.includes("[0-9a-fA-F-]{36}/document"));
+  assert.ok(transferLocation.includes("[0-9a-fA-F-]{36}/content"));
+  assert.ok(transferLocation.includes("client_max_body_size 51m;"));
+  assert.ok(transferLocation.includes("proxy_request_buffering off;"));
+  assert.ok(transferLocation.includes("proxy_buffering off;"));
+  assert.ok(transferLocation.includes("proxy_read_timeout 10m;"));
 });

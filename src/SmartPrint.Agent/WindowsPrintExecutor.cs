@@ -1394,7 +1394,7 @@ public sealed class WindowsPrintExecutor
                 if (loadedDocument is null)
                     throw new PrintExecutionBlockedException(
                         "PDF_RENDER_OPEN_FAILED",
-                        $"PDFium could not open the authenticated QSP2 stream (error {fpdfview.FPDF_GetLastError()}).");
+                        $"PDFium could not open the document stream (error {fpdfview.FPDF_GetLastError()}).");
             }
             catch
             {
