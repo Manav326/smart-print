@@ -272,6 +272,15 @@ export class ApiError extends Error {
   }
 }
 
+export interface CustomerUploadTransferProgress {
+  bytesSent: number;
+  totalBytes: number;
+  stage: "TRANSFERRING" | "STREAMING_ENCRYPTED" | "WAITING_FOR_SHOP";
+}
+
+export type CustomerUploadProgressCallback = (progress: CustomerUploadTransferProgress) => void;
+export type CustomerPrivateRelayStageCallback = (stage: string, message: string, updatedUtc?: string | null) => void;
+
 /** A known API rejection with a safe next step; no print output was authorised. */
 export class LocalUploadPreflightError extends ApiError {
   constructor(message: string, status: number, code: string | null) {
@@ -470,6 +479,70 @@ export async function apiRequest<T>(
   }
 
   return payload as T;
+}
+
+/**
+ * Uses the browser's upload progress events for multipart HTTPS requests.
+ * This is the only portal path where the browser exposes acknowledged transport
+ * progress directly; local and QSP2 streams report bounded bytes handed to fetch.
+ */
+async function apiRequestWithUploadProgress<T>(
+  path: string,
+  options: RequestInit,
+  onProgress?: CustomerUploadProgressCallback
+): Promise<T> {
+  await refreshDesktopApiBaseUrl();
+  const headers = new Headers(options.headers);
+  headers.set("Accept", "application/json");
+
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open((options.method || "POST").toUpperCase(), `${apiBase}${path}`, true);
+    xhr.withCredentials = false;
+    for (const [name, value] of headers.entries()) xhr.setRequestHeader(name, value);
+
+    xhr.upload.onprogress = event => {
+      if (!event.lengthComputable || event.total <= 0) return;
+      try {
+        onProgress?.({
+          bytesSent: Math.min(event.loaded, event.total),
+          totalBytes: event.total,
+          stage: "TRANSFERRING"
+        });
+      } catch {
+        // Rendering progress must never affect the upload itself.
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(
+      "The upload connection was interrupted. SmartPrint kept the original retry identity; retry the same file to continue safely.",
+      0
+    ));
+    xhr.onabort = () => reject(new ApiError("The upload was cancelled before SmartPrint confirmed it.", 0));
+    xhr.ontimeout = () => reject(new ApiError("The upload timed out before SmartPrint confirmed it. Retry the same file.", 0));
+    xhr.onload = () => {
+      let payload: unknown = null;
+      if (xhr.responseText) {
+        try { payload = JSON.parse(xhr.responseText); }
+        catch { payload = xhr.responseText; }
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const body = payload as { code?: string; title?: string; detail?: string; message?: string; errors?: Record<string, string[]> } | null;
+        const validation = body?.errors ? Object.values(body.errors).flat().join(" ") : "";
+        reject(new ApiError(
+          validation || body?.detail || body?.message || body?.title || `Request failed (${xhr.status}).`,
+          xhr.status,
+          body?.code ?? null
+        ));
+        return;
+      }
+      resolve(payload as T);
+    };
+    try {
+      xhr.send(options.body as XMLHttpRequestBodyInit | null);
+    } catch {
+      reject(new ApiError("The upload could not be started. Retry the same file.", 0));
+    }
+  });
 }
 
 function isSerializedPlatformAdmin(raw: string): boolean {
@@ -1485,21 +1558,29 @@ async function uploadCustomerLocalTicketViaCloud(
   sessionToken: string,
   file: File,
   ticket: CustomerLocalUploadTicket,
-  grantToken: string
+  grantToken: string,
+  onProgress?: CustomerUploadProgressCallback
 ): Promise<UploadedPrintJob> {
   const form = ticket.completed ? undefined : new FormData();
   if (form) form.append("file", file, file.name);
-  return apiRequest<UploadedPrintJob>(
-    `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/cloud-recovery`,
-    {
-      method: "POST",
-      headers: {
-        "X-Print-Session": sessionToken,
-        "X-Print-Upload-Grant": grantToken
-      },
-      body: form
-    }
-  );
+  const request = {
+    method: "POST",
+    headers: {
+      "X-Print-Session": sessionToken,
+      "X-Print-Upload-Grant": grantToken
+    },
+    body: form
+  };
+  return onProgress
+    ? apiRequestWithUploadProgress<UploadedPrintJob>(
+        `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/cloud-recovery`,
+        request,
+        onProgress
+      )
+    : apiRequest<UploadedPrintJob>(
+        `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/cloud-recovery`,
+        request
+      );
 }
 
 export async function uploadCustomerDocument(
@@ -1510,7 +1591,8 @@ export async function uploadCustomerDocument(
   batchName?: string,
   settings: CustomerPrintRequestSettings = { copies: 1, colourMode: "Mono", paperSize: "A4", isDuplex: false, orientation: "AUTO" },
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
-  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" }
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" },
+  onProgress?: CustomerUploadProgressCallback
 ) {
   validateUploadFileSize(file);
   const identified=await identifySupportedDocument(file);
@@ -1557,7 +1639,7 @@ export async function uploadCustomerDocument(
     form.append("photoOutputLayout", photoSettings.photoOutputLayout ?? "A4_SHEET");
     form.append("photoPaperFinish", photoSettings.photoPaperFinish ?? "PLAIN");
   }
-  const uploaded = await apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", {
+  const uploadRequest = {
     method: "POST",
     headers: {
       "X-Print-Session": sessionToken,
@@ -1565,7 +1647,12 @@ export async function uploadCustomerDocument(
       ...(batchId ? { "X-Print-Batch-Id": batchId } : {})
     },
     body: form
-  });
+  };
+  const uploaded = onProgress
+    ? await apiRequestWithUploadProgress<UploadedPrintJob>(
+        "/api/v1/public/sessions/current/jobs", uploadRequest, onProgress
+      )
+    : await apiRequest<UploadedPrintJob>("/api/v1/public/sessions/current/jobs", uploadRequest);
 
   sessionStorage.removeItem(storageKey);
   return uploaded;
@@ -1597,9 +1684,9 @@ function createLocalUploadGrantToken(): string {
 }
 
 type CustomerPrivateRelayStatus =
-  | { state: "PENDING"; message?: string }
-  | { state: "FAILED" | "EXPIRED"; message?: string }
-  | { state: "READY"; uploadResult: UploadedPrintJob };
+  | { state: "PENDING"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; message?: string }
+  | { state: "FAILED" | "EXPIRED"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; message?: string }
+  | { state: "READY"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; uploadResult: UploadedPrintJob };
 
 async function getCustomerPrivateRelayStatus(
   sessionToken: string,
@@ -1623,11 +1710,18 @@ async function uploadCustomerPrivateRelay(
   file: File,
   ticket: CustomerLocalUploadTicket,
   grantToken: string,
-  privateUpload: PrivateQsp2UploadFactory
+  privateUpload: PrivateQsp2UploadFactory,
+  onProgress?: CustomerUploadProgressCallback,
+  onStage?: CustomerPrivateRelayStageCallback
 ): Promise<UploadedPrintJob> {
   // A direct LAN request may have completed even if its response was lost.
   // Check the canonical ticket before attempting a second transport.
   const existing = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+  onStage?.(
+    existing.stage ?? (existing.state === "PENDING" ? "WAITING_FOR_AGENT" : existing.state),
+    existing.stageMessage ?? existing.message ?? "Checking the secure shop handoff",
+    existing.stageUpdatedUtc
+  );
   if (existing.state === "READY") {
     clearCustomerLocalUploadAttempt(sessionToken, file);
     return existing.uploadResult;
@@ -1675,6 +1769,11 @@ async function uploadCustomerPrivateRelay(
       await new Promise(resolve => window.setTimeout(resolve, 5_000));
       continue;
     }
+    onStage?.(
+      status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state),
+      status.stageMessage ?? status.message ?? "Checking the secure shop handoff",
+      status.stageUpdatedUtc
+    );
     if (status.state === "READY") {
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
@@ -1702,6 +1801,77 @@ async function uploadCustomerPrivateRelay(
   throw new LocalUploadOutcomeUnknownError(
     "Your file is still being prepared. Tap Retry to check its status."
   );
+}
+
+function createStreamingLocalMultipartBody(
+  file: File,
+  onProgress?: CustomerUploadProgressCallback
+): { body: ReadableStream<Uint8Array>; contentType: string; totalBytes: number } {
+  const boundary = "SmartPrint-" + crypto.randomUUID().replace(/-/g, "");
+  const safeName = file.name.replace(/[\r\n"]/g, "_").slice(0, 240) || "document";
+  const encodedName = encodeURIComponent(file.name).replace(/['()]/g, character =>
+    "%" + character.charCodeAt(0).toString(16).toUpperCase()
+  );
+  const mediaType = /^[a-z0-9!#function isPrivateLocalAgentEndpoint(value: string): URL | null {^_.+-]+\/[a-z0-9!#function isPrivateLocalAgentEndpoint(value: string): URL | null {^_.+-]+$/i.test(file.type)
+    ? file.type : "application/octet-stream";
+  const encoder = new TextEncoder();
+  const prefix = encoder.encode(
+    "--" + boundary + "\r\n" +
+    'Content-Disposition: form-data; name="file"; filename="' + safeName +
+    '"; filename*=UTF-8\'\'' + encodedName + "\r\n" +
+    "Content-Type: " + mediaType + "\r\n\r\n"
+  );
+  const suffix = encoder.encode("\r\n--" + boundary + "--\r\n");
+  const totalBytes = prefix.byteLength + file.size + suffix.byteLength;
+  const reader = file.stream().getReader();
+  let prefixSent = false;
+  let fileFinished = false;
+  let suffixSent = false;
+  let bytesSent = 0;
+  const report = (count: number) => {
+    bytesSent = Math.min(totalBytes, bytesSent + count);
+    try { onProgress?.({ bytesSent, totalBytes, stage: "TRANSFERRING" }); }
+    catch { /* UI telemetry cannot break the transport stream. */ }
+  };
+  return {
+    contentType: "multipart/form-data; boundary=" + boundary,
+    totalBytes,
+    body: new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          if (!prefixSent) {
+            prefixSent = true;
+            controller.enqueue(prefix);
+            report(prefix.byteLength);
+            return;
+          }
+          if (!fileFinished) {
+            const next = await reader.read();
+            if (next.done) {
+              fileFinished = true;
+            } else if (next.value.byteLength > 0) {
+              controller.enqueue(next.value);
+              report(next.value.byteLength);
+              return;
+            }
+          }
+          if (fileFinished && !suffixSent) {
+            suffixSent = true;
+            controller.enqueue(suffix);
+            report(suffix.byteLength);
+            return;
+          }
+          controller.close();
+        } catch (error) {
+          await reader.cancel(error).catch(() => undefined);
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        await reader.cancel(reason).catch(() => undefined);
+      }
+    })
+  };
 }
 
 function isPrivateLocalAgentEndpoint(value: string): URL | null {
@@ -1734,7 +1904,9 @@ export async function uploadCustomerDocumentLocally(
   privatePrinting = false,
   localNetworkReady = true,
   printKind: "DOCUMENT" | "PHOTO" | "ID_DOCUMENT" = "DOCUMENT",
-  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" }
+  photoSettings?: { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" },
+  onProgress?: CustomerUploadProgressCallback,
+  onStage?: CustomerPrivateRelayStageCallback
 ): Promise<UploadedPrintJob> {
   validateUploadFileSize(file);
   if (printKind === "ID_DOCUMENT" && !privatePrinting) {
@@ -1799,7 +1971,7 @@ export async function uploadCustomerDocumentLocally(
     // plan without that entitlement, the ticket endpoint renews its LAN lease.
     try {
       const recovered = await uploadCustomerLocalTicketViaCloud(
-        sessionToken, file, ticket, grantToken
+        sessionToken, file, ticket, grantToken, onProgress
       );
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return recovered;
@@ -1862,7 +2034,7 @@ export async function uploadCustomerDocumentLocally(
     // Standard local uploads may still reconcile through the existing HTTPS recovery route.
     try {
       const completed = await uploadCustomerLocalTicketViaCloud(
-        sessionToken, file, ticket, grantToken
+        sessionToken, file, ticket, grantToken, onProgress
       );
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
@@ -1890,7 +2062,11 @@ export async function uploadCustomerDocumentLocally(
     privateUpload = await preparePrivateQsp2Upload(file, {
       agentDeviceId: ticket.agentDeviceId,
       printJobId: ticket.printJobId,
-      encryptionPublicKey: localAgent.documentEncryptionPublicKey
+      encryptionPublicKey: localAgent.documentEncryptionPublicKey,
+      onProgress: (bytesSent, totalBytes) => {
+        try { onProgress?.({ bytesSent, totalBytes, stage: "STREAMING_ENCRYPTED" }); }
+        catch { /* Progress UI is isolated from the cryptographic stream. */ }
+      }
     });
   } else if (!ticket.completed && form) {
     form.append("file", file, file.name);
@@ -1906,7 +2082,7 @@ export async function uploadCustomerDocumentLocally(
         "X-Print-Upload-Grant": grantToken
       };
       let requestBody: BodyInit | null = form;
-      let requestDuplex: "half" | undefined;
+      let requestDuplex: "half" | undefined = "half";
       if (privatePrinting) {
         if (!privateUpload)
           throw new LocalUploadPreflightError("The Private Printing encryption stream is unavailable.", 409, "private_printing_unavailable");
@@ -1916,7 +2092,17 @@ export async function uploadCustomerDocumentLocally(
         requestHeaders["X-Print-Encrypted-Key"] = attempt.wrappedKey;
         requestHeaders["X-Print-Encrypted-Size"] = String(attempt.encryptedSizeBytes);
         requestBody = attempt.body;
-        requestDuplex = "half";
+        onProgress?.({
+          bytesSent: 0,
+          totalBytes: attempt.encryptedSizeBytes,
+          stage: "STREAMING_ENCRYPTED"
+        });
+      } else {
+        if (!form)
+          throw new LocalUploadPreflightError("The local upload body is unavailable.", 409, "local_upload_body_missing");
+        const multipart = createStreamingLocalMultipartBody(file, onProgress);
+        requestHeaders["Content-Type"] = multipart.contentType;
+        requestBody = multipart.body;
       }
 
       const response = await fetch(`${endpoint.origin}/api/v1/local/uploads/${encodeURIComponent(ticket.id)}`, {
@@ -1970,7 +2156,7 @@ export async function uploadCustomerDocumentLocally(
     if (!privateUpload)
       throw new LocalUploadOutcomeUnknownError("Private Printing is waiting for its encrypted upload to be prepared. Retry this same file.");
     return uploadCustomerPrivateRelay(
-      sessionToken, file, ticket, grantToken, privateUpload
+      sessionToken, file, ticket, grantToken, privateUpload, onProgress, onStage
     );
   }
 
@@ -1978,7 +2164,7 @@ export async function uploadCustomerDocumentLocally(
   // HTTPS recovery reconciles this exact ticket and can never create another PrintJob.
   try {
       const recovered = await uploadCustomerLocalTicketViaCloud(
-        sessionToken, file, ticket, grantToken
+        sessionToken, file, ticket, grantToken, onProgress
       );
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
