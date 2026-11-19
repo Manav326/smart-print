@@ -4892,3 +4892,91 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
     transform:translateX(95%);
   }
 }
+
+
+/* Native customer screens share the same spacing rhythm as the responsive web page. */
+.customer-entry.smartprint-native .customer-print-flow {
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:12px;
+  min-width:0;
+}
+.customer-entry.smartprint-native .customer-print-flow > * {
+  min-width:0;
+}
+.customer-entry .customer-previous-order-heading {
+  flex-wrap:wrap;
+}
+.customer-entry .customer-previous-order-heading>div {min-width:0}
+.customer-entry .customer-previous-order-list,
+.customer-entry .customer-state-timeline {min-width:0}
+.customer-entry .customer-state-timeline>div>span {
+  min-width:0;
+  overflow-wrap:anywhere;
+}
+.customer-entry .customer-state-timeline small {
+  overflow-wrap:anywhere;
+}
+.customer-entry .customer-upi-details,
+.customer-entry .customer-upi-qr {min-width:0;max-width:100%}
+.customer-entry .customer-upi-qr svg,
+.customer-entry .customer-upi-qr canvas {
+  max-width:min(100%,280px);
+  height:auto;
+}
+.customer-entry .customer-batch-checkout-lines>div,
+.customer-entry .customer-batch-print-breakdown>div {
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:start;
+  gap:6px 10px;
+  min-width:0;
+}
+.customer-entry .customer-batch-checkout-lines>div span,
+.customer-entry .customer-batch-print-breakdown>div span {
+  min-width:0;
+  overflow-wrap:anywhere;
+}
+.customer-entry .customer-batch-checkout-lines>div strong,
+.customer-entry .customer-batch-print-breakdown>div strong {
+  justify-self:end;
+  max-width:100%;
+  white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+.customer-entry .customer-session-complete {min-width:0}
+.customer-entry .customer-session-complete>div {min-width:0}
+.customer-entry .customer-session-complete span {overflow-wrap:anywhere}
+@media(max-width:520px) {
+  .customer-entry .customer-previous-order-heading {
+    align-items:flex-start;
+  }
+  .customer-entry .customer-previous-order-readonly {
+    flex:0 0 auto;
+  }
+  .customer-entry .customer-batch-checkout-lines>div,
+  .customer-entry .customer-batch-print-breakdown>div {
+    grid-template-columns:minmax(0,1fr) auto;
+    gap:5px 8px;
+  }
+  .customer-entry .customer-batch-checkout-lines>div span,
+  .customer-entry .customer-batch-print-breakdown>div span {
+    font-size:10px;
+    line-height:1.4;
+  }
+  .customer-entry .customer-session-complete {
+    align-items:stretch;
+    flex-direction:column;
+  }
+  .customer-entry .customer-session-complete .customer-flow-button {
+    width:100%;
+    min-width:0;
+  }
+  .customer-entry .customer-job-state-top {
+    align-items:flex-start;
+  }
+  .customer-entry .customer-refresh-status {
+    min-height:36px;
+    padding:6px 8px;
+  }
+}
