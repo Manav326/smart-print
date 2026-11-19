@@ -984,6 +984,9 @@ test("customer upload page uses a consistent responsive layout for every conditi
   assert.match(app, /aria-label="Selected files and print settings"/);
   assert.match(app, /role="progressbar"/);
   assert.match(app, /aria-pressed=\{selectedFileIndex===index\}/);
+  assert.match(app, /Local transfer unavailable\./);
+  assert.match(app, /The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue\./);
+  assert.doesNotMatch(app, /title="Shop connection unavailable"/);
 });
 
 
