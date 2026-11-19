@@ -37,6 +37,7 @@ public static class WindowsPrinterCapabilityDiscovery
             var duplex = ReadBoolean(queueName, DcDuplex);
             var paperSizes = ReadPaperSizes(queueName);
             var mediaTypes = ReadMediaTypes(queueName);
+            var pageMediaTypes = ReadPageMediaTypes(queueName);
             var resolutions = ReadResolutions(queueName);
             var pagesPerSheet = ReadPagesPerSheet(queueName);
             var pagesPerSheetDirection = ReadPagesPerSheetDirection(queueName);
@@ -60,6 +61,8 @@ public static class WindowsPrinterCapabilityDiscovery
                 pagesPerSheetDirectionStatus = pagesPerSheetDirection.Status,
                 mediaTypes,
                 mediaTypesStatus = mediaTypes.Count > 0 ? "supported" : "unknown",
+                pageMediaTypes = pageMediaTypes.Values,
+                pageMediaTypesStatus = pageMediaTypes.Status,
                 resolutions,
                 resolutionsStatus = resolutions.Count > 0 ? "supported" : "unknown"
             };
@@ -264,6 +267,84 @@ public static class WindowsPrinterCapabilityDiscovery
         finally
         {
             Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private sealed record PageMediaTypeCapabilityResult(IReadOnlyList<string> Values, string Status);
+
+    private static PageMediaTypeCapabilityResult ReadPageMediaTypes(string queueName)
+    {
+        try
+        {
+            using var server = new LocalPrintServer();
+            using var queue = server.GetPrintQueue(queueName);
+            queue.Refresh();
+            var values = queue.GetPrintCapabilities().PageMediaTypeCapability
+                .Select(value => value.ToString())
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(value => value, StringComparer.Ordinal)
+                .ToArray();
+            return new PageMediaTypeCapabilityResult(
+                values,
+                values.Length > 0 ? "supported" : "unsupported");
+        }
+        catch (Exception exception) when (
+            exception is PrintQueueException or InvalidOperationException or
+                ExternalException or ArgumentException or UnauthorizedAccessException)
+        {
+            return new PageMediaTypeCapabilityResult(Array.Empty<string>(), "unknown");
+        }
+    }
+
+    /// <summary>
+    /// Converts a canonical Print Schema media choice through the installed
+    /// printer's own PrintTicket provider. This avoids relying on localized
+    /// vendor display strings when the driver exposes standard PageMediaType.
+    /// Returns null only when the schema does not advertise a matching finish.
+    /// </summary>
+    internal static byte[]? CreatePhotoMediaDevMode(string queueName, string finish)
+    {
+        try
+        {
+            using var server = new LocalPrintServer();
+            using var queue = server.GetPrintQueue(queueName);
+            queue.Refresh();
+            var capabilities = queue.GetPrintCapabilities();
+            var selectedName = PrinterCapabilityRules.SelectPhotoPrintSchemaMediaType(
+                capabilities.PageMediaTypeCapability.Select(value => value.ToString()),
+                finish);
+            if (selectedName is null)
+                return null;
+
+            var requestedType = Enum.Parse<PageMediaType>(selectedName, ignoreCase: false);
+            var requestedTicket = new PrintTicket { PageMediaType = requestedType };
+            var validation = queue.MergeAndValidatePrintTicket(
+                queue.DefaultPrintTicket,
+                requestedTicket,
+                PrintTicketScope.JobScope);
+            if (validation.ValidatedPrintTicket.PageMediaType != requestedType)
+                throw new PrintQueueException(
+                    "The printer changed the requested photo media finish while validating its PrintTicket.");
+
+            using var converter = new System.Printing.Interop.PrintTicketConverter(
+                queueName,
+                System.Printing.Interop.PrintTicketConverter.MaxPrintSchemaVersion);
+            return converter.ConvertPrintTicketToDevMode(
+                validation.ValidatedPrintTicket,
+                System.Printing.Interop.BaseDevModeType.PrinterDefault,
+                PrintTicketScope.JobScope);
+        }
+        catch (Exception exception) when (
+            exception is PrintQueueException or InvalidOperationException or
+                ExternalException or ArgumentException or UnauthorizedAccessException)
+        {
+            // If Print Schema advertised a matching type but rejected conversion,
+            // surface the failure. Do not silently guess another media code.
+            throw new PrintExecutionBlockedException(
+                "PRINTER_SETTINGS_REJECTED",
+                "Windows could not convert the driver's advertised photo media option into a validated printer setting.",
+                exception);
         }
     }
 
