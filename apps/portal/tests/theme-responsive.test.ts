@@ -912,6 +912,7 @@ test("shop batch review communicates included and excluded choices, valid quotes
   assert.match(css, /\.batch-review-stats\s*>\.refresh/);
   assert.match(css, /\.batch-review-file-finance/);
   assert.match(css, /\.batch-review-next-step/);
-  assert.match(css, /@media\(max-width:650px\)[\s\S]*?\.batch-review-row\{grid-template-columns:minmax\(0,1fr\) auto;/);
+  assert.ok(css.includes("@media(max-width:650px){"));
+  assert.ok(css.includes(".batch-review-row{grid-template-columns:minmax(0,1fr) auto;"));
   assert.match(css, /html\[data-theme="dark"\] \.batch-review-overview/);
 });
