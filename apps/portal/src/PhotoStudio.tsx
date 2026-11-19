@@ -700,7 +700,7 @@ export default function PhotoStudio({
   async function createPrintSheets(){
     if(!image||busyRef.current)return;
     const parsedCopies=Number(copiesInput);
-    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" copies. The A4 page count is calculated automatically.");return;}
+    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose 1–"+maxCopies+" whole copies.");return;}
     busyRef.current=true;setBusy(true);setError("");
     try{
       const pages = Math.ceil(parsedCopies / outputPhotosPerPage);
@@ -777,8 +777,8 @@ export default function PhotoStudio({
   const resolutionIsSufficient = image ? hasSufficientPhotoResolution(image.naturalWidth,image.naturalHeight,size,zoom) : true;
   const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
   const outputDescription = isPhotoPaperLayout
-    ? `one ${size.label} print per sheet on ${photoPaperFinish.toLowerCase()} photo paper`
-    : "copies arranged at the selected physical size on regular A4 sheets";
+    ? `${size.label} · ${photoPaperFinish.toLowerCase()} photo paper`
+    : `${size.label} · regular A4 sheets`;
   const footerHint = mode === "private-library"
     ? (isPhotoPaperLayout ? "Original stays private · individual photo-paper prints saved here." : "Original stays private · A4 sheet saved here.")
     : mode === "shop-create"
@@ -828,10 +828,9 @@ export default function PhotoStudio({
             </div>
             {openHelpTool===activeTool&&<div id="photo-studio-help-panel" className={styles.helpTooltipPanel} role="region" aria-label={panelTitle+" guidance"}>
               {cropPanel&&<>
-                <p>Drag directly on any photo to move its framing. Move the image left to reveal more of its right side; the position sliders remain available for precise adjustments.</p>
-                <p>Crop zoom changes the framing printed on every copy. Preview zoom in the toolbar only enlarges the editor view; it never changes the crop or the PDF.</p>
-                <p>The PDF has a 300-DPI output target, but that cannot restore detail missing from the original. Use a sharper source or reduce crop zoom when the source-quality message warns that the print may look soft.</p>
-                <p>Your original photo is never changed, and facial features are not reshaped or retouched.</p>
+                <p>Drag a photo to reframe it. Use the sliders for precise positioning.</p>
+                <p>Crop zoom changes the print. Preview zoom changes only the editor view.</p>
+                <p>300-DPI output cannot restore detail missing from the source. Your original remains unchanged.</p>
               </>}
               {lookPanel&&<>
                 <p>Choose a print-friendly starting point, then fine-tune brightness, contrast and colour. Use Reset look to return to Natural; Reset crop only changes framing.</p>
@@ -847,10 +846,9 @@ export default function PhotoStudio({
                 <p>This is a colour-key tool, not AI subject recognition. Use an evenly lit plain background and inspect hair and shoulder edges carefully. Reset restores the original background.</p>
               </>}
               {activeTool==="sheet"&&<>
-                <p>Choose a physical photo size and quantity. Auto fits the maximum safe grid; a manual photos-per-page choice is retained only when every full-size photo still fits.</p>
-                <p>A4 output places photos at their exact physical dimensions. The final page keeps unused slots blank. Photo-paper output creates one physical-size page per copy and requires the assigned printer driver to confirm the requested size and finish.</p>
-                <p>Name and date-of-birth captions are off by default. Enable them only when needed; turning them off clears both fields. Text styling is separate from these captions.</p>
-                <p>The original image stays unchanged. The shop confirms the final price and printer compatibility before the print is authorised.</p>
+                <p>Set photo size, copy count and layout. Auto fits the safest A4 grid; manual density applies only when full-size photos fit.</p>
+                <p>A4 places copies at physical size; the last sheet may have blank slots. Photo paper creates one print per sheet.</p>
+                <p>Name and DOB captions are optional. The shop confirms price and printer compatibility before printing.</p>
               </>}
             </div>}
           </div>
@@ -953,18 +951,18 @@ export default function PhotoStudio({
                 }}
               />
             </label>
-            <small className={styles.fieldHint}>Copies of this same photo. For example, 4 means 4 identical prints.</small>
-            {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter a whole number of copies from 1 to {maxCopies}. The sheet count is calculated automatically.</div>}
+            <small className={styles.fieldHint}>Same photo, multiple copies.</small>
+            {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter 1–{maxCopies} whole copies.</div>}
             {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.</div>}
             <div className={styles.fieldLabel}>Paper and output
               <div className={styles.photoOutputChoices} role="group" aria-label="Photo output type">
                 <button type="button" id="photo-studio-output-a4" className={photoOutputLayout === "A4_SHEET" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "A4_SHEET"} onClick={() => setPhotoOutputLayout("A4_SHEET")}>
                   <strong>Regular A4 paper</strong>
-                  <span>Several copies arranged on A4 sheets, each at the selected photo size.</span>
+                  <span>Multiple copies per A4 sheet.</span>
                 </button>
                 <button type="button" id="photo-studio-output-photo-paper" className={photoOutputLayout === "PHOTO_PAPER" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "PHOTO_PAPER"} onClick={() => setPhotoOutputLayout("PHOTO_PAPER")}>
                   <strong>Photo paper</strong>
-                  <span>One print per sheet at the selected size. Choose glossy or matte.</span>
+                  <span>One print per sheet.</span>
                 </button>
               </div>
             </div>
@@ -990,7 +988,7 @@ export default function PhotoStudio({
               <div><span>Preview page</span><strong>{previewPageIndex+1} of {outputPageCount}</strong></div>
               {!isPhotoPaperLayout && copies>photosPerPage&&copies%photosPerPage!==0&&<small>Final A4 page: {copies%photosPerPage} photos, with the remaining sheet area left blank.</small>}
               <small>Output: {outputDescription}</small>
-              {mode !== "private-library"&&<small>Estimated photo subtotal: {formatPhotoRate((photoPrices[size.id] ?? 0) * copies)} ({formatPhotoRate(photoPrices[size.id] ?? 0)} × {copies} copies). Final total is confirmed in the shop quote.</small>}
+              {mode !== "private-library"&&<small title="Before the final shop quote">Est. subtotal: {formatPhotoRate((photoPrices[size.id] ?? 0) * copies)}</small>}
             </div>
           </>}
 
@@ -1067,7 +1065,7 @@ export default function PhotoStudio({
             <span>{size.label} · {size.widthMm} × {size.heightMm} mm</span>
             <span>{copies} copies · {isPhotoPaperLayout ? copies + " photo-paper sheets" : sheetCount + " A4 pages"}</span>
             <small>{isPhotoPaperLayout ? `Photo ${previewPageIndex+1} of ${outputPageCount}` : `Page ${previewPageIndex+1}: ${previewPhotoCount} copies`}</small>
-            {resolutionMessage && <small className={`${styles.sourceQuality} ${resolutionIsSufficient ? "" : styles.sourceQualityWarning}`} data-testid="photo-studio-source-quality" role="status"><strong>Source quality: </strong>{resolutionMessage} PDF output uses a 300-DPI target; it cannot add missing detail to the original.</small>}
+            {resolutionMessage && <small className={`${styles.sourceQuality} ${resolutionIsSufficient ? "" : styles.sourceQualityWarning}`} data-testid="photo-studio-source-quality" role="status"><strong>Source: </strong>{resolutionMessage}</small>}
           </div>
         </main>
       </div>
