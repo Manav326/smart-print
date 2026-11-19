@@ -107,7 +107,7 @@ if (-not $infCandidates -or $infCandidates.Count -eq 0) {
 }
 $infPath = $infCandidates[0].FullName
 $driverInfText = Get-Content -LiteralPath $infPath -Raw
-$driverVerLine = $driverInfText -split "`r?`n" |
+$driverVerLine = $driverInfText -split '\r?\n' |
     Where-Object { $_.Trim().StartsWith("DriverVer", [System.StringComparison]::OrdinalIgnoreCase) } |
     Select-Object -First 1
 if ([string]::IsNullOrWhiteSpace($driverVerLine)) {
