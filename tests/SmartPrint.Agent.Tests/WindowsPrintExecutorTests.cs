@@ -885,3 +885,133 @@ public sealed class PdfBrandingOverlayTests
     }
 }
 }
+
+public sealed class WindowsPrinterPhotoMediaIntegrationTests
+{
+    [Theory]
+    [InlineData("35x45", "GLOSSY")]
+    [InlineData("25x35", "MATTE")]
+    [InlineData("2x2", "GLOSSY")]
+    [InlineData("4x6", "MATTE")]
+    public async Task PhysicalPhotoPaperIsPrintedOnlyWhenTheInstalledDriverAcceptsExactSizeAndFinish(
+        string photoSizeCode,
+        string finish)
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Assert.True(OperatingSystem.IsWindows(), "Photo-media driver integration requires Windows.");
+        const string queueName = "Microsoft Print to PDF";
+        var documentName = $"SmartPrint-Photo-Media-{photoSizeCode}-{finish}-{Guid.NewGuid():N}";
+        var outputDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "smartprint-photo-media-driver-" + Guid.NewGuid().ToString("N"));
+        var outputPath = Path.Combine(outputDirectory, "photo-media-output.pdf");
+
+        using var bitmap = new SkiaSharp.SKBitmap(360, 480);
+        bitmap.Erase(SkiaSharp.SKColors.White);
+        using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+        {
+            using var border = new SkiaSharp.SKPaint
+            {
+                Color = SkiaSharp.SKColors.Black,
+                Style = SkiaSharp.SKPaintStyle.Stroke,
+                StrokeWidth = 8,
+                IsAntialias = true
+            };
+            canvas.DrawRect(new SkiaSharp.SKRect(12, 12, 348, 468), border);
+            using var fill = new SkiaSharp.SKPaint { Color = new SkiaSharp.SKColor(48, 96, 160), IsAntialias = true };
+            canvas.DrawCircle(180, 240, 90, fill);
+        }
+
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        var bytes = encoded.ToArray();
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-PHOTO-MEDIA-DRIVER", Guid.NewGuid(), queueName, queueName,
+            "photo-media-driver-test.png", "image/png",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+            1, 1, "Mono", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            Orientation: "PORTRAIT",
+            PrintKind: "PHOTO",
+            PagesPerSheet: 1,
+            PhotoPaperFinish: finish,
+            PhotoOutputLayout: "PHOTO_PAPER",
+            PhotoSizeCode: photoSizeCode,
+            SpoolerJobName: documentName);
+        var executor = new WindowsPrintExecutor();
+
+        try
+        {
+            Assert.Null(executor.FindJobByDocumentName(queueName, documentName));
+            Directory.CreateDirectory(outputDirectory);
+
+            try
+            {
+                var receipt = executor.PrintToFile(entry, bytes, outputPath, CancellationToken.None);
+                Assert.True(receipt.JobId > 0, "Windows did not accept the photo-media spooler job.");
+                var deadline = DateTime.UtcNow.AddSeconds(45);
+                var outputReady = false;
+                while (DateTime.UtcNow < deadline && !outputReady)
+                {
+                    if (File.Exists(outputPath))
+                    {
+                        try
+                        {
+                            var output = await File.ReadAllBytesAsync(outputPath);
+                            try
+                            {
+                                outputReady = output.Length > 1000 &&
+                                    output.AsSpan(0, 5).SequenceEqual("%PDF-"u8) &&
+                                    System.Text.Encoding.ASCII.GetString(output)
+                                        .Contains("%%EOF", StringComparison.Ordinal);
+                            }
+                            finally { CryptographicOperations.ZeroMemory(output); }
+                        }
+                        catch (IOException)
+                        {
+                            // The Windows print processor may still be finalising the PDF.
+                        }
+                    }
+
+                    if (!outputReady) await Task.Delay(500);
+                }
+
+                Assert.True(
+                    outputReady,
+                    $"The driver accepted {photoSizeCode} {finish} photo media but did not produce a complete PDF.");
+                Console.WriteLine(
+                    $"Installed driver accepted and printed photo media {photoSizeCode} {finish} on '{queueName}'.");
+            }
+            catch (PrintExecutionBlockedException exception)
+            {
+                // A virtual or physical queue that does not expose a unique glossy/matte
+                // media type or retain the exact custom dimensions must reject the request
+                // before StartDoc. A driver that accepts the exact options is verified above.
+                Assert.Contains(exception.ReasonCode, new[]
+                {
+                    "PHOTO_MEDIA_TYPE_UNSUPPORTED",
+                    "PHOTO_PAPER_SIZE_REJECTED",
+                    "PHOTO_MEDIA_TYPE_REJECTED",
+                    "PRINTER_SETTINGS_REJECTED"
+                });
+                Assert.False(File.Exists(outputPath), "A rejected photo-media request created a spooler output file.");
+                Assert.Null(
+                    executor.FindJobByDocumentName(queueName, documentName));
+                Console.WriteLine(
+                    $"Installed driver correctly refused {photoSizeCode} {finish} before spooler submission: {exception.ReasonCode}.");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
+        }
+    }
+}
+
