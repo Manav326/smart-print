@@ -45,16 +45,16 @@ public static class PrivateRelayProgressRules
 
     public static string CustomerMessage(string stage) => stage switch
     {
-        WaitingForUpload => "Waiting for the encrypted file transfer to start",
-        ReceivingEncryptedPayload => "Securely receiving your encrypted file",
-        WaitingForAgent => "Encrypted file received · waiting for the shop computer",
-        DownloadingEncryptedPayload => "Shop computer is receiving the encrypted file",
-        DecryptingAndAuthenticating => "Shop computer is decrypting and authenticating the file",
-        ValidatingDocument => "Checking the document format, pages and integrity",
-        SecuringLocalQueue => "Securing the validated file in the shop's local print queue",
-        Ready => "Ready at the shop · the file is safely in the local print queue",
-        Failed => "The shop computer could not validate this file",
-        Expired => "The secure upload expired before it reached the shop queue",
-        _ => "Your encrypted file is being prepared"
+        WaitingForUpload => "Waiting to send your secure file",
+        ReceivingEncryptedPayload => "Securely sending your file to the shop",
+        WaitingForAgent => "File received · waiting for the shop computer",
+        DownloadingEncryptedPayload => "Shop computer is receiving your file",
+        DecryptingAndAuthenticating => "Checking file security",
+        ValidatingDocument => "Checking that the file can be printed",
+        SecuringLocalQueue => "Saving your file securely on the shop computer",
+        Ready => "File secured on the shop computer · ready for printing",
+        Failed => "The shop computer could not verify this file",
+        Expired => "The secure upload expired before the file reached the print queue",
+        _ => "Your secure file is being prepared"
     };
 }
