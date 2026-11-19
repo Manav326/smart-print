@@ -41,7 +41,7 @@ $sevenZip = (Get-Command 7z.exe -ErrorAction SilentlyContinue).Source
 if (-not $sevenZip) {
     $knownPaths = @(
         (Join-Path $env:ProgramFiles "7-Zip\7z.exe"),
-        (Join-Path $env:ProgramFiles(x86) "7-Zip\7z.exe")
+        (Join-Path ${env:ProgramFiles(x86)} "7-Zip\7z.exe")
     )
     $sevenZip = $knownPaths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
 }
