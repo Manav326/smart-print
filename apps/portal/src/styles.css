@@ -4315,7 +4315,7 @@ html[data-theme="dark"] .customer-entry .customer-batch-quote-details .customer-
 .batch-review-output-note .colour-dot{background:#a36bcd}
 .batch-review-list{max-height:48vh}
 details.batch-review-folder{display:block;margin-bottom:8px;padding:9px;border:1px solid var(--border);border-radius:11px;background:var(--surface)}
-.batch-review-folder-head{display:flex;align-items:center;gap:8px;min-height:36px;padding:2px 2px 8px;color:var(--accent);list-style:none;cursor:pointer}
+.batch-review-folder-head{display:flex;align-items:center;gap:8px;min-height:44px;padding:4px 2px 8px;color:var(--accent);list-style:none;cursor:pointer;touch-action:manipulation}
 .batch-review-folder-head::-webkit-details-marker{display:none}
 .batch-review-folder-head:after{content:"−";margin-left:3px;color:var(--muted);font-size:16px}
 .batch-review-folder:not([open]) .batch-review-folder-head:after{content:"+"}
@@ -4330,7 +4330,7 @@ details.batch-review-folder{display:block;margin-bottom:8px;padding:9px;border:1
 }
 .batch-review-row.accepted{border-color:color-mix(in srgb,var(--green) 24%,var(--border))}
 .batch-review-row.rejected{border-color:color-mix(in srgb,var(--red) 35%,var(--border));background:color-mix(in srgb,var(--red) 5%,var(--surface))}
-.batch-review-toggle{display:flex;align-items:center;gap:6px;min-width:0;color:var(--green);font-size:10px;font-weight:750;cursor:pointer}
+.batch-review-toggle{display:flex;align-items:center;gap:7px;min-width:0;min-height:40px;padding:4px 2px;color:var(--green);font-size:11px;font-weight:750;cursor:pointer;touch-action:manipulation}
 .batch-review-toggle input{width:17px;height:17px;flex:0 0 17px;margin:0;accent-color:var(--green)}
 .batch-review-row.rejected .batch-review-toggle{color:var(--red)}
 .batch-review-row.rejected .batch-review-toggle input{accent-color:var(--red)}
@@ -4344,7 +4344,7 @@ details.batch-review-folder{display:block;margin-bottom:8px;padding:9px;border:1
 .batch-review-file-finance>strong{color:var(--text);font-size:12px;font-weight:800;white-space:nowrap;font-variant-numeric:tabular-nums}
 .batch-review-file-finance>small{color:var(--muted);font-size:9px;text-align:right;line-height:1.35}
 .batch-review-row.rejected .batch-review-file-finance>strong{color:var(--muted);font-size:10px}
-.batch-review-preview{min-height:34px;white-space:nowrap}
+.batch-review-preview{min-height:40px;padding-inline:11px;white-space:nowrap}
 .batch-review-next-step{margin:10px 0 2px;padding:10px 11px;border:1px solid var(--border);border-radius:9px;background:var(--surface-2);color:var(--muted);font-size:10px;line-height:1.5}
 html[data-theme="dark"] .batch-review-overview,
 html[data-theme="dark"] .batch-review-next-step{background:#111a28;border-color:#39465c}
