@@ -122,7 +122,9 @@ test("shop queue labels distinguish Agent preparation from print readiness", () 
 test("Private Printing progress uses short, plain-language customer messages", () => {
   const start = privateRelayRules.indexOf("public static string CustomerMessage");
   assert.ok(start >= 0, "customer-facing stage messages must remain defined");
-  const messages = privateRelayRules.slice(start);
+  const messages = Array.from(privateRelayRules.slice(start).matchAll(/"([^"]*)"/g))
+    .map(([, message]) => message)
+    .join("\n");
   assert.match(messages, /Waiting to send your secure file/);
   assert.match(messages, /Checking file security/);
   assert.match(messages, /Checking that the file can be printed/);
