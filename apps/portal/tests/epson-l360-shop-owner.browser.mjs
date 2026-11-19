@@ -30,14 +30,14 @@ const printer = {
   displayName: "Epson L360 Series",
   manufacturer: "Epson",
   model: "L360",
-  connectionType: "USB",
+  connectionType: "WindowsQueue",
   outputMode: "PHYSICAL",
   connectionAddress: null,
   queueName: capabilities.queueName ?? "SmartPrint CI Epson L360",
   capabilitiesJson: JSON.stringify(capabilities),
   status: "Ready",
   isActive: true,
-  isDefault: true,
+  isDefault: false,
   agentDeviceId: "50000000-0000-4000-8000-000000000360",
   lastSeenUtc: new Date().toISOString()
 };
