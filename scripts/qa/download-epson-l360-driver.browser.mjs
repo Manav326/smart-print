@@ -97,10 +97,17 @@ try {
       assert.ok(file.size >= expectedMinimumBytes,
         "Epson China driver package is unexpectedly small: " + file.size + " bytes");
       console.log("[EPSON-L360-DOWNLOAD] Saved official Epson China package: " + target + " (" + file.size + " bytes).");
-      return;
+      packageDownloaded = true;
     }
   }
 
+  if (downloadCenterResponse && downloadCenterResponse.status() >= 400) {
+    // The official Epson China fallback above may save the package. Continue
+    // to the global Download Center only if it did not produce the file.
+    packageDownloaded = false;
+  }
+
+  if (!packageDownloaded) {
   const pageInfo = await Promise.all(page.frames().map(async frame => {
     try {
       return await frame.evaluate(() => ({
@@ -202,6 +209,7 @@ try {
   assert.ok(file.size >= expectedMinimumBytes,
     "Epson driver download is unexpectedly small: " + file.size + " bytes");
   console.log("[EPSON-L360-DOWNLOAD] Saved official Epson package: " + target + " (" + file.size + " bytes).");
+  }
 } finally {
   await browser.close();
 }
