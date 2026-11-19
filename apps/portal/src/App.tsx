@@ -3147,20 +3147,49 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   const acceptedMonoPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
   const acceptedColourPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
   const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
-  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Files start accepted. Uncheck a file to exclude it; recheck it to restore it."} onClose={onClose}>
-    <div className="batch-review-list">{folders.map(folderName=><section className="batch-review-folder" key={folderName}>
-      <div className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).length} files</small></div>
-      {jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).map((job,index)=>{
-        const accepted=decisions[job.id]??true;
-        const needsFreshQuote=accepted&&quoteExpired(job);
-        return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
-          <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
-          <span className="batch-review-index">{index+1}</span>
-          <div className="batch-review-file"><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag">Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
-          <button className="subtle-button" type="button" disabled={busy||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source · preview disabled":"Preview"}</button>
-        </div>;
-      })}
-    </section>)}</div>
+  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Choose which files should be included in the customer's single batch checkout."} onClose={onClose}>
+    <section className="batch-review-overview" aria-label="Batch review summary">
+      <div className="batch-review-overview-heading"><div><span>REVIEW SUMMARY</span><strong>{jobs.length} {jobs.length===1?"file":"files"} in this batch</strong><small>New files are included by default. Excluded files will not be charged.</small></div><div className="batch-review-total"><small>Accepted value · valid quotes only</small><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong></div></div>
+      <div className="batch-review-stats">
+        <span className="included"><b>{acceptedCount}</b> included</span>
+        <span className="excluded"><b>{rejectedCount}</b> excluded</span>
+        <span className="output"><b>{acceptedRequestedPages}</b> output sides</span>
+        {quoteRefreshRequiredCount>0&&<span className="refresh"><b>{quoteRefreshRequiredCount}</b> need a fresh quote</span>}
+      </div>
+      <div className="batch-review-output-note"><span><i className="mono-dot"/> B&W <strong>{acceptedMonoPages}</strong></span><span><i className="colour-dot"/> Colour <strong>{acceptedColourPages}</strong></span></div>
+    </section>
+    <div className="batch-review-list">{folders.map(folderName=>{
+      const folderJobs=jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName);
+      const folderAccepted=folderJobs.filter(job=>decisions[job.id]??true).length;
+      return <details className="batch-review-folder" key={folderName} open>
+        <summary className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{folderAccepted} of {folderJobs.length} included</small></summary>
+        {folderJobs.map((job,index)=>{
+          const accepted=decisions[job.id]??true;
+          const needsFreshQuote=accepted&&quoteExpired(job);
+          const outputSides=printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies);
+          const fileName=job.document.originalFileName;
+          const printDetail=job.printKind==="PHOTO"
+            ? `${job.photoCount??0} finished photos · ${job.photoSizeCode??"Size not recorded"} · ${job.pageCount} A4 pages`
+            : job.printKind==="ID_DOCUMENT"
+              ? `${job.pageCount} prepared A4 ${job.pageCount===1?"sheet":"sheets"} · ${job.copies} ${job.copies===1?"copy":"copies"} · ID card layout`
+              : `${job.pageCount} source pages → ${outputSides} output sides · ${job.copies} ${job.copies===1?"copy":"copies"} · ${job.pagesPerSheet??1} per sheet · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`;
+          return <article className={"batch-review-row "+(accepted?"accepted":"rejected")} key={job.id}>
+            <label className="batch-review-toggle" title="Include this file in the customer's batch checkout">
+              <input type="checkbox" checked={accepted} disabled={busy} aria-label={"Include "+fileName+" in batch checkout"} onChange={event=>onDecision(job.id,event.currentTarget.checked)}/>
+              <span>{accepted?"Included":"Excluded"}</span>
+            </label>
+            <span className="batch-review-index">{index+1}</span>
+            <div className="batch-review-file">
+              <div className="batch-review-file-heading"><strong>{fileName}</strong>{job.privatePrinting&&<span className="private-printing-tag">Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/></div>
+              <small>{printDetail}</small>
+              <div className="batch-review-file-status"><Status label={!accepted?"Will be excluded":needsFreshQuote?"Fresh quote required":"Included in checkout"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
+            </div>
+            <div className="batch-review-file-finance"><strong>{!accepted?"Not charged":needsFreshQuote?"—":formatMoney(job.quotedAmountMinor,job.currency)}</strong><small>{!accepted?"Excluded":needsFreshQuote?"Recalculate before checkout":"Current quote"}</small></div>
+            <button className="subtle-button batch-review-preview" type="button" disabled={busy||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source":"Preview"}</button>
+          </article>;
+        })}
+      </details>;
+    })}</div>
     <div className="batch-branding-setting">
       <div className="batch-branding-copy">
         <strong>SmartPrint PDF footer <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Multi-copy or reformatted exports may be flattened.</span></InfoTooltip></strong>
@@ -3171,8 +3200,8 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         <span>{hasIdDocument?"Unavailable for ID card sheets":pdfBrandingEnabled?"On for this batch":"Off · default"}</span>
       </label>
     </div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedRequestedPages}</strong> output sides requested</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value with valid quotes</span>{quoteRefreshRequiredCount>0&&<span><strong>{quoteRefreshRequiredCount}</strong> need a fresh quote</span>}<small>Original PDF pages remain available for page review. Billable output sides = ceil(source pages ÷ pages per sheet) × copies. Duplex sheets group two output sides. Refresh expired quotes before checkout.</small></div>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled&&!hasIdDocument)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
+    <p className="batch-review-next-step">{quoteRefreshRequiredCount>0?quoteRefreshRequiredCount+" accepted file(s) need a new quote before customer checkout. ":""}Applying this review saves the file decisions. It does not collect payment or send files to a printer.</p>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled&&!hasIdDocument)}>{busy?<span className="button-spinner"/>:"Save batch review"}</button></div>
   </Modal>;
 }
 
@@ -5964,6 +5993,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   );
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
+  const batchQuoteCounts={
+    documents:acceptedQuoteEntries.filter(entry=>normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="DOCUMENT").length,
+    idCards:acceptedQuoteEntries.filter(entry=>normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="ID_DOCUMENT").length,
+    photos:acceptedQuoteEntries.filter(entry=>normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="PHOTO").length,
+    excluded:quoteItems.filter(item=>["REJECTED","REFUNDED"].includes(statusForBatchItem(item))).length
+  };
   const batchQuoteBreakdown=calculateBatchQuoteBreakdown(acceptedQuoteEntries.map(entry=>({
     printKind:printKindsByJobId[entry.item.job.id]==="ID_DOCUMENT"
       ?"ID_DOCUMENT"
@@ -6274,17 +6309,47 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     </>}
     {notice&&<div className={"customer-upload-notice "+notice.kind} role={notice.kind==="warning"?"alert":"status"}>{notice.message}</div>}
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
-    {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{acceptedQuoteEntries.length} accepted file(s) · {batchQuoteBreakdown.idCardCount} ID-card file(s) · {batchQuoteBreakdown.idCardSheets} ID-card A4 sheet(s) · {batchQuoteBreakdown.photoPages} photo A4 page(s) · {batchQuoteBreakdown.normalDocumentSourcePages} normal document page(s) · {batchQuoteBreakdown.totalOutputPagesAndSheets} total output page sides / prepared sheets</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[entry.item.job.id]??entry.quote!.printKind??entry.item.job.printKind)}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.printKind==="ID_DOCUMENT"?entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided":customerDocumentOutputSummary(entry.quote!.pageCount,entry.quote!.copies,entry.quote!.pagesPerSheet??1,entry.quote!.isDuplex)+" · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
-      <div className="customer-batch-print-breakdown">
-        <div><span>Normal documents · {batchQuoteBreakdown.normalDocumentFileCount} file(s) · {batchQuoteBreakdown.normalDocumentSourcePages} original PDF page(s) = {batchQuoteBreakdown.normalDocumentOutputPages} output page sides after N-up and copies</span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,quoteEntries[0].quote!.currency)}</strong><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,quoteEntries[0].quote!.currency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,quoteEntries[0].quote!.currency)}</small></div>
-        <div><span>ID cards · {batchQuoteBreakdown.idCardCount} prepared ID-card file(s) · {batchQuoteBreakdown.idCardSheets} A4 sheet(s)</span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
-        <div><span>Photo printing · {batchQuoteBreakdown.photoPages} A4 page(s) · {batchQuoteBreakdown.finishedPhotos} finished photo(s)</span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
-        <div className="customer-batch-print-total"><span>Total output page sides / prepared A4 sheets</span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
+    {quoteEntries.length>0&&<section className="customer-quote-card customer-batch-quote-card" aria-label="Batch quote summary">
+      <div className="customer-batch-quote-heading">
+        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>Total for {acceptedQuoteEntries.length} accepted {acceptedQuoteEntries.length===1?"file":"files"}. Excluded files are not charged.</small></div>
+        <span className="customer-batch-quote-validity">Quote for review</span>
       </div>
-      <p className="customer-payment-model-note customer-quote-explanation">Pricing varies by document type and print settings. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For driver-backed N-up, the selected pages-per-sheet value groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted separately as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing shows both finished photo quantity and the A4 PDF pages they occupy; pricing remains per finished photo.</span><span>Normal-document output counts page sides after copies. With duplex printing, two page sides may share one physical sheet.</span><span>Rejected files are excluded. Pay once for all accepted files after review.</span></InfoTooltip></p>
-    </div>}
+      <div className="customer-batch-quote-categories" aria-label="Files included in this quote">
+        <span className="customer-batch-quote-chip included"><b>{acceptedQuoteEntries.length}</b> included</span>
+        {batchQuoteCounts.excluded>0&&<span className="customer-batch-quote-chip excluded"><b>{batchQuoteCounts.excluded}</b> excluded</span>}
+        {batchQuoteCounts.documents>0&&<span className="customer-batch-quote-chip document"><b>{batchQuoteCounts.documents}</b> documents</span>}
+        {batchQuoteCounts.idCards>0&&<span className="customer-batch-quote-chip id-card"><b>{batchQuoteCounts.idCards}</b> ID cards</span>}
+        {batchQuoteCounts.photos>0&&<span className="customer-batch-quote-chip photo"><b>{batchQuoteCounts.photos}</b> photo jobs</span>}
+      </div>
+      <div className="customer-batch-quote-lines" aria-label="File-by-file prices">
+        {quoteEntries.map(entry=>{
+          const excluded=["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item));
+          const printKind=normalizedCustomerPrintKind(printKindsByJobId[entry.item.job.id]??entry.quote!.printKind??entry.item.job.printKind);
+          const detail=entry.quote!.printKind==="PHOTO"
+            ? (entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo"
+            : entry.quote!.printKind==="ID_DOCUMENT"
+              ? entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided"
+              : entry.quote!.pageCount+" source pages · "+customerDocumentOutputSummary(entry.quote!.pageCount,entry.quote!.copies,entry.quote!.pagesPerSheet??1,entry.quote!.isDuplex)+" · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation");
+          return <div className="customer-batch-quote-line" key={entry.item.job.id}>
+            <span className="customer-batch-quote-line-copy">
+              <span className="customer-batch-quote-line-top"><strong>{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={printKind}/><span className={"customer-batch-quote-line-state "+(excluded?"excluded":"included")}>{excluded?"Excluded":"Included"}</span></span>
+              <small>{detail}</small>
+            </span>
+            <strong className={"customer-batch-quote-line-amount "+(excluded?"excluded":"")}>{excluded?"Not charged":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong>
+          </div>;
+        })}
+      </div>
+      <details className="customer-batch-quote-details">
+        <summary><span>See price breakdown</span><small>Documents, ID cards and photos</small></summary>
+        <div className="customer-batch-print-breakdown">
+          <div><span><strong>Normal documents</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,quoteEntries[0].quote!.currency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,quoteEntries[0].quote!.currency)}</small></span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
+          <div><span><strong>ID cards</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
+          <div><span><strong>Photo printing</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
+          <div className="customer-batch-print-total"><span><strong>Total output</strong><small>Page sides and prepared A4 sheets, grouped by print type</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
+        </div>
+      </details>
+      <p className="customer-payment-model-note customer-quote-explanation">This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing is priced per finished photo; the A4 page count is shown for planning.</span><span>Duplex printing can place two output sides on one physical sheet.</span><span>Rejected or refunded files are excluded from the total.</span></InfoTooltip></p>
+    </section>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
     {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={customerStatusLabel(jobStatus.status)} tone={customerStatusTone(jobStatus.status)}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
