@@ -5429,10 +5429,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       const uploadError=exception instanceof LocalUploadOutcomeUnknownError
         ? privatePrinting
-          ? "Your file is still being prepared. Tap Retry to check its status."
-          : cloudAssistedPrintingEnabled
-            ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
-            : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
+          ? "The shop computer is still preparing your secure file. Tap Retry to check its status."
+          : "Your original print request is saved. Tap Retry to check its status. The file may need to be sent again from the beginning; SmartPrint will not create a duplicate print job."
         : batchCheckoutLocked
           ? "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file."
           : confirmedPreTicketRejection
