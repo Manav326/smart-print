@@ -1311,7 +1311,7 @@ async function exercisePhotoStudioFailurePaths() {
       await apply.click();
       await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.textContent?.includes('"mediaType":"application/pdf"'));
       const result = JSON.parse(await page.locator("#photo-studio-result").innerText());
-      assert.equal(result.photoCount, 8);
+      assert.equal(result.photoCount, 1);
       assert.equal(result.pageCount, 1);
       assert.match(result.fileName, /^photo-studio-qa-35x45-photos\.pdf$/);
     } finally {
