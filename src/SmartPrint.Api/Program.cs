@@ -5698,6 +5698,46 @@ agentApi.MapGet("/private-relays/pending", async (
     return Results.Ok(new AgentPrivateRelayPendingResponse(items));
 });
 
+agentApi.MapPost("/private-relays/{ticketId:guid}/stage", async (
+    Guid ticketId,
+    AgentPrivateRelayStageUpdateRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var requestedStage = request.Stage?.Trim().ToUpperInvariant();
+    if (string.IsNullOrWhiteSpace(requestedStage) ||
+        !PrivateRelayProgressRules.IsAgentStage(requestedStage))
+        return Results.BadRequest(new { code = "private_relay_stage_invalid" });
+
+    var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
+        item.Id == ticketId &&
+        item.TenantId == device.TenantId &&
+        item.AgentDeviceId == device.Id &&
+        item.PrivatePrinting, ct);
+    if (ticket is null) return Results.NotFound();
+    if (ticket.CompletedUtc is not null || ticket.PrivateRelayFailedUtc is not null)
+        return Results.Conflict(new { code = "private_relay_terminal_state" });
+    if (ticket.PrivateRelayUploadedUtc is null ||
+        string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
+        return Results.Conflict(new { code = "private_relay_payload_not_received" });
+
+    if (!PrivateRelayProgressRules.CanAdvance(ticket.PrivateRelayStage, requestedStage))
+    {
+        if (string.Equals(ticket.PrivateRelayStage, requestedStage, StringComparison.Ordinal))
+            return Results.Ok(new { ticket.Id, ticket.PrivateRelayStage, DuplicateRequest = true });
+        return Results.Conflict(new { code = "private_relay_stage_out_of_order", stage = ticket.PrivateRelayStage });
+    }
+
+    ticket.PrivateRelayStage = requestedStage;
+    ticket.PrivateRelayStageUpdatedUtc = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync(ct);
+    return Results.Ok(new { ticket.Id, ticket.PrivateRelayStage, ticket.PrivateRelayStageUpdatedUtc, DuplicateRequest = false });
+});
+
 agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     Guid ticketId,
     HttpContext context,
@@ -5939,6 +5979,8 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
 
     var now = DateTimeOffset.UtcNow;
     locked.CompletedUtc = now;
+    locked.PrivateRelayStage = PrivateRelayProgressRules.Ready;
+    locked.PrivateRelayStageUpdatedUtc = now;
     var job = new PrintJob
     {
         Id = locked.PrintJobId,
@@ -6069,6 +6111,8 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     ticket.PrivateRelayIv = null;
     ticket.PrivateRelayUploadedUtc = null;
     ticket.PrivateRelayFailedUtc = DateTimeOffset.UtcNow;
+    ticket.PrivateRelayStage = PrivateRelayProgressRules.Failed;
+    ticket.PrivateRelayStageUpdatedUtc = ticket.PrivateRelayFailedUtc;
     ticket.PrivateRelayFailureCode = request.Code;
     ticket.PrivateRelayFailureMessage = request.Message.Trim();
     ticket.ExpiresUtc = ticket.PrivateRelayFailedUtc.Value;
@@ -10569,6 +10613,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey) && ticket.PrivateRelayUploadedUtc is not null)
         return Results.Ok(new { Accepted = true, DuplicateRequest = true, ticket.PrintJobId, ticket.JobNumber });
 
+    ticket.PrivateRelayStage = PrivateRelayProgressRules.ReceivingEncryptedPayload;
+    ticket.PrivateRelayStageUpdatedUtc = now;
+    await db.SaveChangesAsync(ct);
+
     string storageKey;
     try
     {
@@ -10606,6 +10654,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     }
     catch (InvalidDataException exception)
     {
+        ticket.PrivateRelayStage = PrivateRelayProgressRules.WaitingForUpload;
+        ticket.PrivateRelayStageUpdatedUtc = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
         return Results.UnprocessableEntity(new { code = "private_relay_payload_invalid", message = exception.Message });
     }
 
@@ -10630,6 +10681,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         locked.PrivateRelayWrappedKey = wrappedKey;
         locked.PrivateRelayIv = isQsp2 ? null : ivText;
         locked.PrivateRelayUploadedUtc = now;
+        locked.PrivateRelayStage = PrivateRelayProgressRules.WaitingForAgent;
+        locked.PrivateRelayStageUpdatedUtc = now;
         locked.ExpiresUtc = now.AddHours(24);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
@@ -10711,9 +10764,23 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
         return Results.Unauthorized();
 
     if (ticket.PrivateRelayFailedUtc is not null)
-        return Results.Ok(new { State = "FAILED", Message = ticket.PrivateRelayFailureMessage ?? "The shop computer could not validate this file. Please select it again." });
+        return Results.Ok(new
+        {
+            State = "FAILED",
+            Stage = PrivateRelayProgressRules.Failed,
+            StageMessage = ticket.PrivateRelayFailureMessage ?? PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Failed),
+            StageUpdatedUtc = ticket.PrivateRelayStageUpdatedUtc,
+            Message = ticket.PrivateRelayFailureMessage ?? "The shop computer could not validate this file. Please select it again."
+        });
     if (ticket.CompletedUtc is null && ticket.ExpiresUtc <= now)
-        return Results.Ok(new { State = "EXPIRED", Message = "The shop computer did not receive this file in time. Please retry the same file." });
+        return Results.Ok(new
+        {
+            State = "EXPIRED",
+            Stage = PrivateRelayProgressRules.Expired,
+            StageMessage = PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Expired),
+            StageUpdatedUtc = ticket.PrivateRelayStageUpdatedUtc,
+            Message = "The shop computer did not receive this file in time. Please retry the same file."
+        });
 
     if (ticket.CompletedUtc is not null)
     {
@@ -10739,10 +10806,27 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
             }).SingleOrDefaultAsync(ct);
         if (result is null)
             return Results.Conflict(new { code = "private_relay_completion_missing", message = "The shop's validation result is being reconciled. Retry the same file." });
-        return Results.Ok(new { State = "READY", UploadResult = new { result.Job, result.Document, DuplicateRequest = false } });
+        return Results.Ok(new
+        {
+            State = "READY",
+            Stage = PrivateRelayProgressRules.Ready,
+            StageMessage = PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Ready),
+            StageUpdatedUtc = ticket.PrivateRelayStageUpdatedUtc,
+            UploadResult = new { result.Job, result.Document, DuplicateRequest = false }
+        });
     }
 
-    return Results.Ok(new { State = "PENDING", Message = "The shop computer is securely receiving and checking your document." });
+    var stage = string.IsNullOrWhiteSpace(ticket.PrivateRelayStage)
+        ? PrivateRelayProgressRules.WaitingForUpload
+        : ticket.PrivateRelayStage;
+    return Results.Ok(new
+    {
+        State = "PENDING",
+        Stage = stage,
+        StageMessage = PrivateRelayProgressRules.CustomerMessage(stage),
+        StageUpdatedUtc = ticket.PrivateRelayStageUpdatedUtc,
+        Message = PrivateRelayProgressRules.CustomerMessage(stage)
+    });
 }).RequireRateLimiting("public-api");
 
 publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-recovery", async (
