@@ -6111,9 +6111,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Unavailable</small></button>}
       {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Encrypted online transfer · print when ready</small></button>}
     </div>}
-    {!localAgent?.endpoints.length&&<small className="customer-upload-local-note">Shop connection details <InfoTooltip label="Shop connection unavailable"><span>The shop computer has no reachable local connection.</span></InfoTooltip></small>}
-    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload unavailable. <InfoTooltip label="Upload unavailable"><span>No file was uploaded. Ask the shop to reconnect its print service, then retry.</span></InfoTooltip></div>}
-    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<div className="customer-upload-local-note" role="status">Encrypted online relay in use. <InfoTooltip label="Secure relay details"><span>No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.</span></InfoTooltip></div>}
+    {!localAgent?.endpoints.length&&<CustomerInlineNotice kind="info" title="Shop connection unavailable">The shop computer has no reachable local connection.</CustomerInlineNotice>}
+    {customerUploadUnavailable&&<CustomerInlineNotice kind="warning" title="Secure upload unavailable">No file was uploaded. Ask the shop to reconnect its print service, then retry.</CustomerInlineNotice>}
+    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title="Encrypted online relay">No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.</CustomerInlineNotice>}
     <div className="customer-upload-picker-grid"
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
       onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
