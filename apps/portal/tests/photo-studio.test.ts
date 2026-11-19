@@ -425,7 +425,7 @@ test("Photo Studio contextual help is readable, dismissible and theme-aware inst
  assert.match(studio,/role="region" aria-label=\{panelTitle\+" guidance"\}/);
  assert.match(studio,/openHelpToolRef\.current !== null/);
  assert.match(studio,/dismissOnOutsidePointer/);
- for(const help of ["Drag directly on any photo","Balanced, true-to-life colour","A gentle warmer tone","Slightly clearer and brighter","Monochrome photo","Bold text","colour-key tool, not AI subject recognition","Name and date-of-birth captions are off by default"])
+ for(const help of ["Drag a photo to reframe it","Crop zoom changes the print","Balanced, true-to-life colour","A gentle warmer tone","Slightly clearer and brighter","Monochrome photo","Bold text","colour-key tool, not AI subject recognition","Name and DOB captions are optional"])
    assert.ok(studio.includes(help),"Missing contextual guidance: "+help);
  assert.match(css,/\.helpTooltipPanel\{[^}]*max-height:190px[^}]*overflow:auto/s);
  assert.match(css,/\.dark \.helpTooltipPanel/);
@@ -434,7 +434,7 @@ test("Photo Studio contextual help is readable, dismissible and theme-aware inst
 test("Photo Studio resolution warning is recomputed when crop zoom changes",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.match(studio,/sourceResolutionNote\(image, size, zoom\)/);
- assert.match(studio,/reduce the zoom/i);
+ assert.match(studio,/Crop zoom changes the print/);
 });
 
 
