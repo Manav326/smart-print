@@ -664,10 +664,13 @@ test("Photo Studio preview zoom is independent from crop zoom and print export",
  assert.ok(studio.includes("transform: `scale(${previewScale})`"));
  assert.ok(studio.includes('aria-label="Preview zoom in"'));
  assert.ok(studio.includes('id="photo-studio-reset-preview" onClick={() => setPreviewScale(1)}'));
- assert.match(studio,/id="photo-studio-zoom"[^\\n]*value=\\{zoom\\}/);
+ assert.ok(studio.includes('id="photo-studio-zoom"'));
+ assert.ok(studio.includes("value={zoom} onChange="));
  assert.ok(studio.includes("zoom,\n        focusX,\n        focusY,"));
- assert.match(studio,/id="photo-studio-reset-look"[^\\n]*selectLook\\("natural"\\)/);
- assert.match(studio,/id="photo-studio-reset-crop"[^\\n]*setZoom\\(1\\)/);
+ assert.ok(studio.includes('id="photo-studio-reset-look"'));
+ assert.ok(studio.includes('onClick={() => selectLook("natural")}'));
+ assert.ok(studio.includes('id="photo-studio-reset-crop"'));
+ assert.ok(studio.includes("setZoom(1); setFocusX(50); setFocusY(50)"));
 });
 
 test("Photo Studio explains copies, physical output, estimated price and true source quality",()=>{
@@ -681,6 +684,6 @@ test("Photo Studio explains copies, physical output, estimated price and true so
  assert.match(studio,/PDF output uses a 300-DPI target; it cannot add missing detail/);
  assert.match(studio,/outputPageCount>1/);
  assert.match(css,/toolRailSectionLabel/);
- assert.match(css,/max-height:min\\(30vh,230px\\)/);
+ assert.ok(css.includes("max-height:min(30vh,230px)"));
  assert.match(css,/sourceQualityWarning/);
 });
