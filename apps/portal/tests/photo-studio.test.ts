@@ -541,7 +541,7 @@ test("Photo Studio normalizes the live Number of copies input value on blur",()=
 test("Photo Studio prevents apply without a whole-number quantity or any shop photo rates",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.ok(studio.includes("const copiesInputValid = Number.isInteger(parsedCopiesInput) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies"));
- assert.ok(studio.includes("Enter a whole number from 1 to {maxCopies}"));
+ assert.ok(studio.includes("Enter a whole number of copies from 1 to {maxCopies}"));
  assert.match(studio,/Photo printing is not enabled for any size at this shop/);
  assert.ok(studio.includes("availableSizes.length === 0 || !copiesInputValid"));
 });
