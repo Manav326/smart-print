@@ -46,7 +46,7 @@ public sealed class WindowsPrinterDiscovery(ILogger<WindowsPrinterDiscovery> log
                         status,
                         isDefault,
                         outputMode,
-                        WindowsPrinterCapabilityDiscovery.DiscoverJson(name.Trim())));
+                        WindowsPrinterCapabilityDiscovery.DiscoverJson(name.Trim(), driver)));
                 }
             }
 
