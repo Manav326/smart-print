@@ -72,6 +72,28 @@ try {
     assert.match(chinaText, /L360/i, "Epson China support page did not identify the L360.");
     assert.match(chinaText, /Windows.*64.*打印驱动程序|Windows.*64.*driver/i,
       "Epson China page did not identify the L360 Windows x64 printer driver.");
+
+    // Epson China renders the "立即下载" control as a scripted element without
+    // a conventional anchor href in some regions. Activate the visible vendor
+    // control in the same page so the browser sends Epson's expected Referer.
+    const chinaDownloadControl = page.getByText("立即下载", { exact: true }).last();
+    if (await chinaDownloadControl.count() > 0) {
+      try {
+        const downloadPromise = page.waitForEvent("download", { timeout: 45000 });
+        await chinaDownloadControl.click({ timeout: 15000 });
+        const download = await downloadPromise;
+        await download.saveAs(target);
+        const downloadedFile = statSync(target);
+        assert.ok(downloadedFile.size >= expectedMinimumBytes,
+          "Epson China driver package is unexpectedly small: " + downloadedFile.size + " bytes");
+        console.log("[EPSON-L360-DOWNLOAD] Saved Epson China package using its visible 立即下载 control: " +
+          target + " (" + downloadedFile.size + " bytes).");
+        packageDownloaded = true;
+      } catch (error) {
+        console.log("[EPSON-L360-DOWNLOAD] Epson China visible download control did not emit a package download; checking its DOM link/action metadata. " + String(error));
+      }
+    }
+
     const chinaLink = await page.locator("a[href]").evaluateAll(anchors => {
       const candidates = anchors.map(anchor => ({
         text: (anchor.textContent ?? "").trim(),
@@ -83,7 +105,7 @@ try {
     });
     console.log("[EPSON-L360-DOWNLOAD] Epson China support page HTTP " + (chinaResponse?.status() ?? "unknown") +
       "; official driver link=" + (chinaLink?.href ?? "not exposed"));
-    if (chinaLink?.href) {
+    if (!packageDownloaded && chinaLink?.href) {
       try {
         const downloadPage = await context.newPage();
         const downloadPromise = downloadPage.waitForEvent("download", { timeout: 90000 });
