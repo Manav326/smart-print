@@ -6091,7 +6091,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
-    if (request.Code is not ("document_not_supported" or "private_document_integrity_failed" or "private_document_decryption_failed") ||
+    if (request.Code is not ("document_not_supported" or "document_content_type_mismatch" or "private_document_integrity_failed" or "private_document_decryption_failed") ||
         string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 400)
         return Results.BadRequest(new { code = "private_relay_rejection_invalid" });
 
@@ -10613,10 +10613,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey) && ticket.PrivateRelayUploadedUtc is not null)
         return Results.Ok(new { Accepted = true, DuplicateRequest = true, ticket.PrintJobId, ticket.JobNumber });
 
-    ticket.PrivateRelayStage = PrivateRelayProgressRules.ReceivingEncryptedPayload;
-    ticket.PrivateRelayStageUpdatedUtc = now;
-    await db.SaveChangesAsync(ct);
-
     string storageKey;
     try
     {
@@ -10633,6 +10629,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
                     message = "The QSP2 encrypted stream size does not match its original upload ticket."
                 });
 
+            ticket.PrivateRelayStage = PrivateRelayProgressRules.ReceivingEncryptedPayload;
+            ticket.PrivateRelayStageUpdatedUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
             storageKey = await storage.StoreOpaquePrivateQsp2RelayAsync(
                 ticket.TenantId, ticket.Id, context.Request.Body, encryptedSize, ticket.SizeBytes, ct);
         }
@@ -10648,6 +10647,9 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
                 file.Length > UploadLimits.MaxFileBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
                 return Results.UnprocessableEntity(new { code = "private_relay_size_mismatch", message = "The encrypted file size does not match its original upload ticket." });
             await using var input = file.OpenReadStream();
+            ticket.PrivateRelayStage = PrivateRelayProgressRules.ReceivingEncryptedPayload;
+            ticket.PrivateRelayStageUpdatedUtc = DateTimeOffset.UtcNow;
+            await db.SaveChangesAsync(ct);
             storageKey = await storage.StoreOpaquePrivateRelayAsync(
                 ticket.TenantId, ticket.Id, input, file.Length, ct);
         }
