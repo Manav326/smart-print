@@ -6343,7 +6343,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
               ? (entry.quote.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote.photoSizeCode)+" · "+(entry.quote.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote.pageCount+" A4 pages · "+formatMoney(entry.quote.photoUnitPriceMinor??0,entry.quote.currency)+" per photo"
               : entry.quote.printKind==="ID_DOCUMENT"
                 ? entry.quote.pageCount+" A4 portrait "+(entry.quote.pageCount===1?"sheet":"sheets")+" × "+entry.quote.copies+" copy · "+entry.quote.colourMode+" · Single-sided"
-                : entry.quote.pageCount+" source pages · "+customerDocumentOutputSummary(entry.quote.pageCount,entry.quote.copies,entry.quote.pagesPerSheet??1,entry.quote.isDuplex)+" · "+entry.quote.colourMode+" · "+(entry.quote.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote.paperSize+" · "+(entry.quote.orientation==="LANDSCAPE"?"Landscape":entry.quote.orientation==="PORTRAIT"?"Portrait":"Auto orientation")
+                : entry.quote.pageCount+" source pages · "+customerDocumentOutputSummary(entry.quote.pageCount,entry.quote.copies,entry.quote.pagesPerSheet??1,entry.quote.isDuplex)+" · "+entry.quote.colourMode+" · "+(entry.quote.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")
             : entry.item.job.pageCount+" source "+(entry.item.job.pageCount===1?"page":"pages")+" · "+entry.item.job.copies+" "+(entry.item.job.copies===1?"copy":"copies")+" · quote not available yet";
           const lineState=entry.excluded
             ?"Excluded"
