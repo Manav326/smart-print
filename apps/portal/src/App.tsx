@@ -3143,9 +3143,14 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   const quoteRefreshRequiredCount=acceptedJobs.filter(quoteExpired).length;
   const acceptedTotal=acceptedJobs.filter(job=>!quoteExpired(job))
     .reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
-  const acceptedRequestedPages=acceptedJobs.reduce((sum,job)=>sum+printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies),0);
-  const acceptedMonoPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
-  const acceptedColourPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
+  const acceptedDocumentJobs=acceptedJobs.filter(job=>job.printKind!=="PHOTO"&&job.printKind!=="ID_DOCUMENT");
+  const acceptedIdCardJobs=acceptedJobs.filter(job=>job.printKind==="ID_DOCUMENT");
+  const acceptedPhotoJobs=acceptedJobs.filter(job=>job.printKind==="PHOTO");
+  const acceptedOutputSides=acceptedDocumentJobs.reduce((sum,job)=>sum+printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies),0);
+  const acceptedIdSheets=acceptedIdCardJobs.reduce((sum,job)=>sum+job.pageCount,0);
+  const acceptedPhotoPages=acceptedPhotoJobs.reduce((sum,job)=>sum+job.pageCount,0);
+  const acceptedMonoPages=acceptedDocumentJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
+  const acceptedColourPages=acceptedDocumentJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
   const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
   return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Choose which files should be included in the customer's single batch checkout."} onClose={onClose}>
     <section className="batch-review-overview" aria-label="Batch review summary">
@@ -3153,10 +3158,12 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
       <div className="batch-review-stats">
         <span className="included"><b>{acceptedCount}</b> included</span>
         <span className="excluded"><b>{rejectedCount}</b> excluded</span>
-        <span className="output"><b>{acceptedRequestedPages}</b> output sides</span>
+        <span className="output"><b>{acceptedOutputSides}</b> document output sides</span>
+        {acceptedIdSheets>0&&<span className="id-cards"><b>{acceptedIdSheets}</b> ID-card A4 sheets</span>}
+        {acceptedPhotoPages>0&&<span className="photos"><b>{acceptedPhotoPages}</b> photo A4 pages</span>}
         {quoteRefreshRequiredCount>0&&<span className="refresh"><b>{quoteRefreshRequiredCount}</b> need a fresh quote</span>}
       </div>
-      <div className="batch-review-output-note"><span><i className="mono-dot"/> B&W <strong>{acceptedMonoPages}</strong></span><span><i className="colour-dot"/> Colour <strong>{acceptedColourPages}</strong></span></div>
+      <div className="batch-review-output-note"><span><strong>Document output mix</strong></span><span><i className="mono-dot"/> B&W <strong>{acceptedMonoPages}</strong></span><span><i className="colour-dot"/> Colour <strong>{acceptedColourPages}</strong></span></div>
     </section>
     <div className="batch-review-list">{folders.map(folderName=>{
       const folderJobs=jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName);
