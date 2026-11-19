@@ -260,8 +260,9 @@ async function assertEpsonDetails(page, label) {
   const details = card.locator(".printer-diagnostics");
   const summary = details.locator("summary");
   if (!(await details.getAttribute("open"))) await summary.click();
+  const driverIdentity = await card.locator(".printer-driver-identity").innerText();
+  assert.match(driverIdentity, /EPSON.*L360|L360.*EPSON/i);
   const facts = await details.locator(".printer-capability-facts").innerText();
-  assert.match(facts, /EPSON L360|Epson L360/i);
   assert.match(facts, /Photo media types/i);
   assert.match(facts, /Print Schema media/i);
   assert.match(facts, /gloss/i);
