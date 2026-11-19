@@ -1776,7 +1776,11 @@ async function uploadCustomerPrivateRelay(
   // A direct Agent claim already owns this ticket. Do not start a cloud relay
   // concurrently; reconcile that same local handoff first to prevent duplicate
   // queue staging after a lost LAN response.
-  if (existing.state === "PENDING" && existing.transferPath === "DIRECT_LAN") {
+  if (existing.state === "PENDING" &&
+      (existing.transferPath === "DIRECT_LAN" || existing.transferPath === "CLOUD_RELAY")) {
+    const activeTransferLabel = existing.transferPath === "DIRECT_LAN"
+      ? "direct shop-Wi-Fi"
+      : "encrypted cloud-relay";
     const deadline = Date.now() + 45_000;
     let lastStageMessage = existing.stageMessage ?? existing.message ?? "The shop computer is receiving the encrypted file";
     while (Date.now() < deadline) {
@@ -1815,10 +1819,9 @@ async function uploadCustomerPrivateRelay(
           status.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
         );
       }
-      if (status.transferPath !== "DIRECT_LAN") break;
     }
     throw new LocalUploadOutcomeUnknownError(
-      "The original direct shop-Wi-Fi transfer is still being reconciled: "+lastStageMessage+". Retry this same file to check its existing ticket; SmartPrint has not started a second encrypted transfer."
+      "The original "+activeTransferLabel+" transfer is still being reconciled: "+lastStageMessage+". Retry this same file to check its existing ticket; SmartPrint has not started a second encrypted transfer."
     );
   }
 
