@@ -4,6 +4,7 @@ import test from "node:test";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 const api = read("../../../src/SmartPrint.Api/Program.cs");
+const portalApi = read("../src/api.ts");
 const agentApi = read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
 const agentWorker = read("../../../src/SmartPrint.Agent/Worker.cs");
 const localAgentApi = read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
@@ -71,9 +72,9 @@ test("Private Printing never starts a second relay while the same ticket is clai
   assert.match(api, /ticket\.ClaimedUtc is not null[\s\S]{0,180}ticket\.ClaimLeaseExpiresUtc > now/);
   assert.match(api, /private_relay_direct_transfer_in_progress/);
   assert.match(api, /private_relay_cloud_transfer_in_progress/);
-  assert.match(api, /if \(privatePrinting\) break/);
   assert.match(api, /item\.PrivateRelayStage == PrivateRelayProgressRules\.WaitingForUpload[\s\S]{0,120}item\.PrivateRelayStage == PrivateRelayProgressRules\.ReceivingEncryptedPayload/);
-  const relay = api.slice(api.indexOf("async function uploadCustomerPrivateRelay"), api.indexOf("function createStreamingLocalMultipartBody"));
+  const relay = portalApi.slice(portalApi.indexOf("async function uploadCustomerPrivateRelay"), portalApi.indexOf("function createStreamingLocalMultipartBody"));
+  assert.match(relay, /if \(privatePrinting\) break/);
   assert.match(relay, /existing\.transferPath === "DIRECT_LAN"/);
   assert.match(relay, /existing\.transferPath === "CLOUD_RELAY"/);
   assert.match(relay, /has not started a second encrypted transfer/);
