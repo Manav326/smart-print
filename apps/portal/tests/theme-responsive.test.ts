@@ -970,6 +970,7 @@ test("customer upload page uses a consistent responsive layout for every conditi
 
   assert.match(css, /customer-print-flow \{\s*display:grid/);
   assert.match(css, /customer-print-flow > \* \{\s*min-width:0;\s*margin-block:0/);
+  assert.match(css, /customer-print-flow \{[\\s\\S]*width:min\(100%,1040px\)/);
   assert.match(css, /customer-upload-progress>div \{[\s\S]*height:auto;[\s\S]*background:transparent/);
   assert.match(css, /customer-folder-group-head \{\s*display:grid/);
   assert.match(css, /customer-folder-file-row \{\s*display:grid/);
