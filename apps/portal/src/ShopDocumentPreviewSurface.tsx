@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { FileText } from "lucide-react";
 import { currentBrowserSupportsInlinePdfPreview, type PreviewMediaType } from "./document-preview";
 
@@ -13,8 +13,16 @@ interface Props {
  * The single media surface used by the shop's document, ID and photo previews.
  * Every supported type shares the same frame; unsupported content never falls
  * back to a browser download/open action.
+ *
+ * Keep loading state in a source-keyed child. Resetting it in a passive effect
+ * can race a fast blob's load event and leave the customer staring at a
+ * permanent spinner after the preview has already loaded.
  */
-export default function ShopDocumentPreviewSurface({ name, url, mediaType, printKind }: Props) {
+export default function ShopDocumentPreviewSurface(props: Props) {
+  return <ShopDocumentPreviewFrame key={JSON.stringify([props.url, props.mediaType])} {...props} />;
+}
+
+function ShopDocumentPreviewFrame({ name, url, mediaType, printKind }: Props) {
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const isPdf = mediaType === "application/pdf";
@@ -24,11 +32,6 @@ export default function ShopDocumentPreviewSurface({ name, url, mediaType, print
   const canRender = !failed && supportedType !== null && (!isPdf || inlinePdfSupported);
   const showPhotoWatermark = printKind === "PHOTO" && isPdf && canRender;
   const showImageWatermark = isImage && canRender;
-
-  useEffect(() => {
-    setFailed(false);
-    setLoading(true);
-  }, [url, mediaType]);
 
   const unavailableMessage = failed
     ? "We could not load this preview. Its access link may have expired or the shop connection may have been interrupted. Refresh the order or ask the shop to retry the preview."
