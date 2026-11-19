@@ -85,7 +85,8 @@ public sealed class WindowsPrintExecutor
         AgentLocalQueueEntry entry,
         Stream documentStream,
         CancellationToken cancellationToken,
-        string? outputFilePath)
+        string? outputFilePath,
+        bool integrityAlreadyVerified = false)
     {
         ArgumentNullException.ThrowIfNull(documentStream);
         if (!documentStream.CanRead || !documentStream.CanSeek ||
@@ -100,7 +101,7 @@ public sealed class WindowsPrintExecutor
             return PrintQsp2Pdf(entry, qsp2, cancellationToken, outputFilePath);
 
         ValidatePrintOptions(entry);
-        if (!Sha256Matches(entry.Sha256, documentStream))
+        if (!integrityAlreadyVerified && !Sha256Matches(entry.Sha256, documentStream))
             throw new PrintExecutionBlockedException(
                 "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
                 "The local document does not match the verified upload.");
@@ -232,7 +233,12 @@ public sealed class WindowsPrintExecutor
         var outputDirectory = Path.GetDirectoryName(fullOutputPath)
             ?? throw new ArgumentException("The output path must include a directory.", nameof(outputFilePath));
         Directory.CreateDirectory(outputDirectory);
-        return PrintStream(entry, documentStream, cancellationToken, fullOutputPath);
+        if (!Sha256Matches(entry.Sha256, documentStream))
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                "The local document does not match the verified upload.");
+        documentStream.Position = 0;
+        return PrintStream(entry, documentStream, cancellationToken, fullOutputPath, integrityAlreadyVerified: true);
     }
 
     private SpoolerPrintReceipt PrintCore(
@@ -439,6 +445,10 @@ public sealed class WindowsPrintExecutor
             var brandedBytes = ReadStreamBytes(documentStream);
             try
             {
+                if (!Sha256Matches(entry.Sha256, Convert.ToHexString(SHA256.HashData(brandedBytes))))
+                    throw new PrintExecutionBlockedException(
+                        "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                        "The local document does not match the verified upload.");
                 var brandedReceipt = ExportPdf(entry, brandedBytes, exportDirectory, cancellationToken);
                 return new PdfExportExecutionResult(brandedReceipt, false, "SMARTPRINT_BRANDED_PDF_RENDERER", null);
             }
@@ -448,6 +458,10 @@ public sealed class WindowsPrintExecutor
         var fullOutputPath = Path.GetFullPath(outputPath);
         if (File.Exists(fullOutputPath))
         {
+            if (!Sha256Matches(entry.Sha256, documentStream))
+                throw new PrintExecutionBlockedException(
+                    "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                    "The local document does not match the verified upload.");
             var existing = ReadExistingPdfExport(fullOutputPath);
             return new PdfExportExecutionResult(existing, false, "EXISTING_VERIFIED_OUTPUT", null);
         }
@@ -1206,9 +1220,6 @@ public sealed class WindowsPrintExecutor
     private static bool Sha256Matches(string expectedHex, Stream stream)
     {
         if (!stream.CanRead || !stream.CanSeek) return false;
-        if (stream is Qsp2DocumentReadStream qsp2)
-            return Sha256Matches(expectedHex, qsp2.Sha256);
-
         byte[]? actual = null;
         try
         {
