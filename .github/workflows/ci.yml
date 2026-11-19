@@ -375,19 +375,24 @@ jobs:
         if: ${{ !cancelled() && steps.pdf_queue.outcome == 'success' }}
         with:
           node-version: 22
-      - name: Install Chromium for the official Epson driver download and owner browser test
+      - name: Install an isolated Playwright package and Chromium for Epson QA
         id: epson_l360_chromium
         if: ${{ !cancelled() && steps.pdf_queue.outcome == 'success' }}
         shell: pwsh
         run: |
-          npx --yes --package=playwright@1.56.1 playwright install chromium
+          $playwrightRoot = Join-Path $env:RUNNER_TEMP "smartprint-epson-playwright"
+          New-Item -ItemType Directory -Force -Path $playwrightRoot | Out-Null
+          npm install --prefix $playwrightRoot --no-save --no-package-lock playwright@1.56.1
+          if ($LASTEXITCODE -ne 0) { throw "Playwright npm package installation failed for Epson QA." }
+          $module = Join-Path $playwrightRoot "node_modules/playwright"
+          $entry = Join-Path $module "index.mjs"
+          $cli = Join-Path $module "cli.js"
+          if (-not (Test-Path -LiteralPath $entry) -or -not (Test-Path -LiteralPath $cli)) {
+            throw "The isolated Playwright install is missing its expected API or CLI entrypoint: $module"
+          }
+          node $cli install chromium
           if ($LASTEXITCODE -ne 0) { throw "Playwright Chromium installation failed for Epson driver acquisition." }
-          $cache = (npm config get cache).Trim()
-          $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\\.mjs$" } |
-            Select-Object -First 1
-          if (-not $module) { throw "Could not locate the isolated Playwright package after installation." }
-          "module_directory=$($module.DirectoryName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "module_directory=$module" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Validate official Epson L360 browser downloader
         if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' }}
         run: node --check scripts/qa/download-epson-l360-driver.browser.mjs
@@ -434,17 +439,12 @@ jobs:
         if: ${{ !cancelled() && steps.epson_l360_capability_probe.outcome == 'success' }}
         shell: pwsh
         env:
+          PLAYWRIGHT_MODULE_DIR: ${{ steps.epson_l360_chromium.outputs.module_directory }}
           SMARTPRINT_EPSON_L360_CAPABILITIES_PATH: artifacts/epson-l360/epson-l360-capabilities.json
           SMARTPRINT_EPSON_L360_PRINT_MANIFEST_PATH: artifacts/epson-l360/shop-owner-print-workflow.json
           SMARTPRINT_EPSON_L360_UI_ARTIFACT_DIR: artifacts/epson-l360-shop-owner
         run: |
-          $cache = (npm config get cache).Trim()
-          $module = Get-ChildItem -Path (Join-Path $cache "_npx") -Filter "index.mjs" -File -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "\\node_modules\\playwright\\index\\.mjs$" } |
-            Select-Object -First 1
-          if (-not $module) { throw "Could not locate the isolated Playwright package installed by npx." }
           New-Item -ItemType Directory -Force -Path "artifacts/epson-l360-shop-owner" | Out-Null
-          $env:PLAYWRIGHT_MODULE_DIR = $module.DirectoryName
           node apps/portal/tests/epson-l360-shop-owner.browser.mjs
           if ($LASTEXITCODE -ne 0) { throw "Shop-owner Epson L360 printer details and print dispatch acceptance failed." }
       - name: Run Windows Agent unit and real spooler integration tests
