@@ -1,3 +1,5 @@
+using System.Net.Http;
+
 namespace SmartPrint.Agent;
 
 public static class AgentCloudHttpTiming

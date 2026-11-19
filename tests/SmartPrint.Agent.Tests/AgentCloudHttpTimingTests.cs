@@ -1,3 +1,4 @@
+using System.Net.Http;
 using SmartPrint.Agent;
 
 namespace SmartPrint.Agent.Tests;
