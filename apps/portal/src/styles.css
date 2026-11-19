@@ -4679,7 +4679,6 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
 /* Reset the legacy direct-child progress-bar rule: the header and list are layout blocks, not bars. */
 .customer-entry .customer-upload-progress>div {
   position:static;
-  display:flex;
   width:auto;
   height:auto;
   min-height:0;
