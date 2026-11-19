@@ -404,10 +404,10 @@ jobs:
         run: node --check scripts/qa/download-epson-l360-driver.browser.mjs
       - name: Download supplied Epson L360 driver package from HTTPS URL
         id: epson_l360_supplied_package
-        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.epson_l360_driver_package_url != '' }}
+        if: ${{ !cancelled() && (inputs.epson_l360_driver_package_url != '' || vars.EPSON_L360_DRIVER_PACKAGE_URL != '') }}
         shell: pwsh
         env:
-          EPSON_DRIVER_URL: ${{ inputs.epson_l360_driver_package_url }}
+          EPSON_DRIVER_URL: ${{ inputs.epson_l360_driver_package_url || vars.EPSON_L360_DRIVER_PACKAGE_URL }}
           EPSON_PACKAGE_OUTPUT: ${{ runner.temp }}/smartprint-epson-l360-download/L360_x64_260JAHomeExportAsiaML.exe
         run: |
           $uri = [Uri]$env:EPSON_DRIVER_URL
@@ -421,7 +421,7 @@ jobs:
           "package_path=$env:EPSON_PACKAGE_OUTPUT" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Download the official Epson L360 driver through Epson Support
         id: epson_l360_package_download
-        if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' && !(github.event_name == 'workflow_dispatch' && inputs.epson_l360_driver_package_url != '') }}
+        if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' && inputs.epson_l360_driver_package_url == '' && vars.EPSON_L360_DRIVER_PACKAGE_URL == '' }}
         continue-on-error: true
         shell: pwsh
         env:
