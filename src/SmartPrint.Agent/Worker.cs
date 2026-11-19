@@ -162,9 +162,12 @@ public sealed class Worker(
 
                 await ReportPrivateRelayStageAsync(
                     client, credentials, ticket.TicketId, "DOWNLOADING_ENCRYPTED_PAYLOAD", cancellationToken);
+                using var transferTimeout = AgentCloudHttpTiming.CreateDocumentTransferCancellationSource(cancellationToken);
                 using var contentResponse = await SendAgentGetRequestAsync(
                     client, credentials,
-                    $"api/v1/agent/private-relays/{ticket.TicketId:D}/content", cancellationToken);
+                    $"api/v1/agent/private-relays/{ticket.TicketId:D}/content",
+                    transferTimeout.Token,
+                    AgentCloudHttpTiming.DocumentResponseCompletionOption);
                 if (!contentResponse.IsSuccessStatusCode)
                 {
                     logger.LogWarning("Encrypted relay payload for {JobNumber} returned HTTP {StatusCode}.", ticket.JobNumber, (int)contentResponse.StatusCode);
@@ -189,7 +192,7 @@ public sealed class Worker(
                             client, credentials, ticket.TicketId, "DECRYPTING_AND_AUTHENTICATING", cancellationToken);
                         qsp2Key = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
                         stagingPath = await localQueueStore.CreatePrivateUploadStagingPathAsync(cancellationToken);
-                        await using (var encryptedStream = await contentResponse.Content.ReadAsStreamAsync(cancellationToken))
+                        await using (var encryptedStream = await contentResponse.Content.ReadAsStreamAsync(transferTimeout.Token))
                         await using (var decryptedOutput = new FileStream(
                             stagingPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                             64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
@@ -201,11 +204,11 @@ public sealed class Worker(
                                 credentials.AgentDeviceId,
                                 ticket.PrintJobId,
                                 UploadLimits.MaxFileBytes,
-                                cancellationToken);
+                                transferTimeout.Token);
                             if (metadata.PlaintextLength != ticket.SizeBytes ||
                                 !string.Equals(metadata.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
                                 throw new InvalidDataException("The QSP2 private document failed its authorised size or SHA-256 check.");
-                            await decryptedOutput.FlushAsync(cancellationToken);
+                            await decryptedOutput.FlushAsync(transferTimeout.Token);
                         }
 
                         await using var qsp2Plaintext = new FileStream(
@@ -249,7 +252,7 @@ public sealed class Worker(
                         await ReportPrivateRelayStageAsync(
                             client, credentials, ticket.TicketId, "SECURING_LOCAL_QUEUE", cancellationToken);
                         await localQueueStore.EnqueueLocalUploadStreamingAsync(
-                            qsp2Job, credentials.AgentDeviceId, qsp2Plaintext, cancellationToken);
+                            qsp2Job, credentials.AgentDeviceId, qsp2Plaintext, transferTimeout.Token);
                         using var qsp2Completion = await SendAgentRequestAsync(
                             client, credentials,
                             $"api/v1/agent/private-relays/{ticket.TicketId:D}/complete",
@@ -281,7 +284,7 @@ public sealed class Worker(
                 if (string.IsNullOrWhiteSpace(ivText))
                     throw new InvalidDataException("The legacy encrypted relay envelope is incomplete.");
 
-                ciphertext = await contentResponse.Content.ReadAsByteArrayAsync(cancellationToken);
+                ciphertext = await contentResponse.Content.ReadAsByteArrayAsync(transferTimeout.Token);
                 if (ticket.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
                     ciphertext.LongLength != ticket.SizeBytes + UploadLimits.PrivateRelayEncryptionOverheadBytes)
                     throw new InvalidDataException("The encrypted relay payload size does not match its ticket.");
@@ -362,7 +365,7 @@ public sealed class Worker(
                 await using (var plaintextStream = new MemoryStream(plaintext, writable: false))
                 {
                     await localQueueStore.EnqueueLocalUploadStreamingAsync(
-                        job, credentials.AgentDeviceId, plaintextStream, cancellationToken);
+                        job, credentials.AgentDeviceId, plaintextStream, transferTimeout.Token);
                 }
                 using var completion = await SendAgentRequestAsync(
                     client, credentials,
@@ -837,6 +840,8 @@ public sealed class Worker(
         await ReconcilePendingPaymentLocalUploadsAsync(client, credentials, cancellationToken);
         await RetryPendingAcknowledgementsAsync(client, credentials, cancellationToken);
 
+        for (var claimBatchIndex = 0; claimBatchIndex < AgentCloudHttpTiming.MaxJobClaimBatchesPerCycle; claimBatchIndex++)
+        {
         using var claimResponse = await SendAgentRequestAsync(
             client,
             credentials,
@@ -890,11 +895,13 @@ public sealed class Worker(
                         continue;
                     }
 
+                    using var transferTimeout = AgentCloudHttpTiming.CreateDocumentTransferCancellationSource(cancellationToken);
                     using var documentResponse = await SendAgentGetRequestAsync(
                         client,
                         credentials,
                         $"api/v1/agent/jobs/{job.Id}/document",
-                        cancellationToken);
+                        transferTimeout.Token,
+                        AgentCloudHttpTiming.DocumentResponseCompletionOption);
                     if (!documentResponse.IsSuccessStatusCode)
                     {
                         logger.LogWarning("Job {JobNumber} document download returned HTTP {StatusCode}.", job.JobNumber, (int)documentResponse.StatusCode);
@@ -914,12 +921,12 @@ public sealed class Worker(
                         throw new InvalidDataException("The document response headers do not match the claimed job metadata.");
                     }
 
-                    await using var documentStream = await documentResponse.Content.ReadAsStreamAsync(cancellationToken);
+                    await using var documentStream = await documentResponse.Content.ReadAsStreamAsync(transferTimeout.Token);
                     await localQueueStore.EnqueueStreamingAsync(
                         job,
                         credentials.AgentDeviceId,
                         documentStream,
-                        cancellationToken);
+                        transferTimeout.Token);
                 }
 
                 await AcknowledgeLocalQueueReceiptAsync(
@@ -938,6 +945,7 @@ public sealed class Worker(
             {
                 logger.LogError(exception, "Could not secure paid job {JobNumber} in the local queue.", job.JobNumber);
             }
+        }
         }
     }
 
@@ -1278,14 +1286,12 @@ public sealed class Worker(
                     var exportEntry = entry with { OutputMode = PrinterOutputModeRules.PdfExport, RejectedPageNumbers = rejectedPages };
                     var destination = printExecutor.GetPdfExportPath(exportEntry, exportDirectory);
                     await localQueueStore.MarkPdfExportStartedAsync(job.Id, destination, ct);
-                    var documentBytes = localQueueStore.ReadDocument(job.Id);
                     PdfExportExecutionResult exportResult;
-                    try
+                    await using (var exportDocumentStream = localQueueStore.OpenDocumentReadStream(job.Id, credentials.AgentDeviceId))
                     {
                         exportResult = await printExecutor.ExportPdfUsingWindowsPrinterOrFallbackAsync(
-                            exportEntry, documentBytes, destination, exportDirectory, ct);
+                            exportEntry, exportDocumentStream, destination, exportDirectory, ct);
                     }
-                    finally { CryptographicOperations.ZeroMemory(documentBytes); }
 
                     var receipt = exportResult.Receipt;
                     await localQueueStore.MarkPdfExportedAsync(job.Id, receipt, ct);
@@ -1306,28 +1312,8 @@ public sealed class Worker(
                     SpoolerJobName = job.SpoolerJobName,
                     RejectedPageNumbers = rejectedPages
                 };
-                SpoolerPrintReceipt spoolerReceipt;
-                if (string.Equals(printEntry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Physical PDF jobs use the authenticated QSP2 random-access stream.
-                    // Legacy queue files are transparently handled by Print(Stream) with
-                    // the bounded compatibility buffer; current QSP2 jobs never materialise
-                    // the complete PDF in a byte array.
-                    using var documentStream = localQueueStore.OpenDocumentReadStream(job.Id, credentials.AgentDeviceId);
-                    spoolerReceipt = printExecutor.Print(printEntry, documentStream, ct);
-                }
-                else
-                {
-                    var bytes = localQueueStore.ReadDocument(job.Id);
-                    try
-                    {
-                        spoolerReceipt = printExecutor.Print(printEntry, bytes, ct);
-                    }
-                    finally
-                    {
-                        CryptographicOperations.ZeroMemory(bytes);
-                    }
-                }
+                using var documentStream = localQueueStore.OpenDocumentReadStream(job.Id, credentials.AgentDeviceId);
+                var spoolerReceipt = printExecutor.Print(printEntry, documentStream, ct);
 
                 await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
                 await ReportSpoolerAcceptedAsync(client, credentials, job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, "QUEUED", ct);
@@ -1722,12 +1708,13 @@ public sealed class Worker(
         HttpClient client,
         AgentCredentials credentials,
         string path,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, path);
         request.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
         request.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
-        return await client.SendAsync(request, cancellationToken);
+        return await client.SendAsync(request, completionOption, cancellationToken);
     }
 
     private static async Task<HttpResponseMessage> SendAgentRequestAsync<T>(

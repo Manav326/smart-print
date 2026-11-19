@@ -84,6 +84,51 @@ public sealed class WindowsPrintExecutorTests
         }
     }
 
+
+    [Fact]
+    public async Task OpensQsp2ImageFromTheVerifiedStreamWithoutMaterialisingSourceBytes()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        using var bitmap = new SkiaSharp.SKBitmap(64, 96);
+        bitmap.Erase(SkiaSharp.SKColors.White);
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        var imageBytes = encoded.ToArray();
+        var agentScopeId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+        try
+        {
+            await using var source = new MemoryStream(imageBytes, writable: false);
+            await using var encrypted = new MemoryStream();
+            var metadata = await Qsp2DocumentFormat.EncryptAsync(
+                source, encrypted, agentScopeId, jobId, imageBytes.LongLength, dataKey);
+
+            encrypted.Position = 0;
+            using var document = Qsp2DocumentFormat.OpenRead(
+                encrypted, dataKey, agentScopeId, jobId, 50L * 1024 * 1024, metadata.Sha256);
+            var now = DateTimeOffset.UtcNow;
+            var entry = new AgentLocalQueueEntry(
+                jobId, "SP-QSP2-IMAGE-STREAM", Guid.NewGuid(), "Missing SmartPrint Test Queue",
+                "SmartPrint-QSP2-Image-Streaming-Queue-That-Does-Not-Exist",
+                "qsp2-test.png", "image/png", metadata.Sha256, imageBytes.LongLength,
+                1, 1, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+                now, now.AddMinutes(3));
+
+            var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+                new WindowsPrintExecutor().Print(entry, document, CancellationToken.None));
+
+            Assert.Equal("PRINTER_OPEN_FAILED", exception.ReasonCode);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dataKey);
+            CryptographicOperations.ZeroMemory(imageBytes);
+        }
+    }
+
     [Theory]
     [InlineData(0x00000020u, "OFFLINE")]
     [InlineData(0x00000040u, "PAPEROUT")]

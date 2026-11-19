@@ -78,13 +78,16 @@ public sealed class WindowsPrintExecutor
     /// are authenticated only when requested, so a large encrypted document is never
     /// copied into a second whole-file buffer for physical printing.
     /// </summary>
-    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, Stream documentStream, CancellationToken cancellationToken)
+    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, Stream documentStream, CancellationToken cancellationToken) =>
+        PrintStream(entry, documentStream, cancellationToken, outputFilePath: null);
+
+    private SpoolerPrintReceipt PrintStream(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        CancellationToken cancellationToken,
+        string? outputFilePath)
     {
         ArgumentNullException.ThrowIfNull(documentStream);
-        if (documentStream is Qsp2DocumentReadStream qsp2 &&
-            string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
-            return PrintQsp2Pdf(entry, qsp2, cancellationToken);
-
         if (!documentStream.CanRead || !documentStream.CanSeek ||
             entry.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
             documentStream.Length != entry.SizeBytes)
@@ -92,32 +95,26 @@ public sealed class WindowsPrintExecutor
                 "LOCAL_DOCUMENT_STREAM_INVALID",
                 "The local document stream does not match the verified upload.");
 
-        var bytes = GC.AllocateUninitializedArray<byte>(checked((int)entry.SizeBytes));
-        try
-        {
-            documentStream.Position = 0;
-            var offset = 0;
-            while (offset < bytes.Length)
-            {
-                var read = documentStream.Read(bytes, offset, bytes.Length - offset);
-                if (read <= 0)
-                    throw new PrintExecutionBlockedException(
-                        "LOCAL_DOCUMENT_STREAM_INCOMPLETE",
-                        "The local document stream ended before the verified upload was complete.");
-                offset += read;
-            }
-            return PrintBytes(entry, bytes, cancellationToken, outputFilePath: null);
-        }
-        finally
-        {
-            CryptographicOperations.ZeroMemory(bytes);
-        }
+        if (documentStream is Qsp2DocumentReadStream qsp2 &&
+            string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+            return PrintQsp2Pdf(entry, qsp2, cancellationToken, outputFilePath);
+
+        ValidatePrintOptions(entry);
+        if (!Sha256Matches(entry.Sha256, documentStream))
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                "The local document does not match the verified upload.");
+
+        documentStream.Position = 0;
+        using var raster = OpenDocument(documentStream, entry.MediaType, entry.ColourMode == "Mono");
+        return PrintCore(entry, raster, cancellationToken, outputFilePath);
     }
 
     private SpoolerPrintReceipt PrintQsp2Pdf(
         AgentLocalQueueEntry entry,
         Qsp2DocumentReadStream documentStream,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? outputFilePath)
     {
         ValidatePrintOptions(entry);
         if (documentStream.Length != entry.SizeBytes ||
@@ -127,7 +124,7 @@ public sealed class WindowsPrintExecutor
                 "The authenticated QSP2 document does not match the verified upload.");
 
         using var raster = new PdfRasterDocument(documentStream, entry.ColourMode == "Mono");
-        return PrintCore(entry, raster, cancellationToken, outputFilePath: null);
+        return PrintCore(entry, raster, cancellationToken, outputFilePath);
     }
 
     private SpoolerPrintReceipt PrintBytes(
@@ -217,6 +214,25 @@ public sealed class WindowsPrintExecutor
         Directory.CreateDirectory(outputDirectory);
 
         return PrintBytes(entry, bytes, cancellationToken, fullOutputPath);
+    }
+
+    public SpoolerPrintReceipt PrintToFile(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        string outputFilePath,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(outputFilePath))
+            throw new ArgumentException("A fully qualified output file path is required.", nameof(outputFilePath));
+
+        var fullOutputPath = Path.GetFullPath(outputFilePath);
+        if (File.Exists(fullOutputPath))
+            throw new IOException("The requested spooler output path already exists.");
+
+        var outputDirectory = Path.GetDirectoryName(fullOutputPath)
+            ?? throw new ArgumentException("The output path must include a directory.", nameof(outputFilePath));
+        Directory.CreateDirectory(outputDirectory);
+        return PrintStream(entry, documentStream, cancellationToken, fullOutputPath);
     }
 
     private SpoolerPrintReceipt PrintCore(
@@ -395,13 +411,38 @@ public sealed class WindowsPrintExecutor
         string exportDirectory,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(bytes);
+        await using var source = new MemoryStream(bytes, writable: false);
+        return await ExportPdfUsingWindowsPrinterOrFallbackAsync(
+            entry, source, outputPath, exportDirectory, cancellationToken);
+    }
+
+    public async Task<PdfExportExecutionResult> ExportPdfUsingWindowsPrinterOrFallbackAsync(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        string outputPath,
+        string exportDirectory,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(documentStream);
+        if (!documentStream.CanRead || !documentStream.CanSeek ||
+            entry.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes || documentStream.Length != entry.SizeBytes)
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_STREAM_INVALID",
+                "The local document stream does not match the verified upload.");
+
         if (entry.PdfBrandingEnabled &&
             string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
         {
-            // Only the opt-in branded PDF route uses this renderer so footer placement
-            // can be guarded by a source-page blank-margin check before drawing.
-            var brandedReceipt = ExportPdf(entry, bytes, exportDirectory, cancellationToken);
-            return new PdfExportExecutionResult(brandedReceipt, false, "SMARTPRINT_BRANDED_PDF_RENDERER", null);
+            // The opt-in branded PDF renderer still needs random-access source bytes.
+            // Keep this compatibility path isolated; ordinary exports stay streamed.
+            var brandedBytes = ReadStreamBytes(documentStream);
+            try
+            {
+                var brandedReceipt = ExportPdf(entry, brandedBytes, exportDirectory, cancellationToken);
+                return new PdfExportExecutionResult(brandedReceipt, false, "SMARTPRINT_BRANDED_PDF_RENDERER", null);
+            }
+            finally { CryptographicOperations.ZeroMemory(brandedBytes); }
         }
 
         var fullOutputPath = Path.GetFullPath(outputPath);
@@ -414,9 +455,7 @@ public sealed class WindowsPrintExecutor
         SpoolerPrintReceipt spoolerReceipt;
         try
         {
-            // This is the same PrintToFile -> PrintCore GDI route exercised by the
-            // GitHub Windows integration test, but now it is the production path.
-            spoolerReceipt = PrintToFile(entry, bytes, fullOutputPath, cancellationToken);
+            spoolerReceipt = PrintToFile(entry, documentStream, fullOutputPath, cancellationToken);
         }
         catch (PrintExecutionBlockedException exception)
         {
@@ -428,17 +467,9 @@ public sealed class WindowsPrintExecutor
                     exception);
             }
 
-            var fallbackReceipt = ExportPdf(
-                entry with { OutputMode = PrinterOutputModeRules.PdfExport },
-                bytes,
-                exportDirectory,
-                cancellationToken);
-
-            return new PdfExportExecutionResult(
-                fallbackReceipt,
-                true,
-                $"SMARTPRINT_FALLBACK:{exception.ReasonCode}",
-                null);
+            return ExportPdfFromStreamFallback(
+                entry, documentStream, exportDirectory, cancellationToken,
+                $"SMARTPRINT_FALLBACK:{exception.ReasonCode}", null);
         }
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(45);
@@ -469,8 +500,6 @@ public sealed class WindowsPrintExecutor
             await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
         }
 
-        // StartDoc/EndDoc succeeded, but no complete PDF appeared. A job still
-        // present in the queue may yet produce output, so never duplicate it.
         WindowsSpoolerJob? remainingJob;
         try
         {
@@ -488,28 +517,63 @@ public sealed class WindowsPrintExecutor
 
         if (remainingJob is null && !File.Exists(fullOutputPath))
         {
-            // The Windows queue has removed the completed job without creating the
-            // requested file. This is a confirmed driver-output failure, so fallback
-            // is safe: there is no queued job and no PDF at the destination.
-            var fallbackReceipt = ExportPdf(
-                entry with { OutputMode = PrinterOutputModeRules.PdfExport },
-                bytes,
-                exportDirectory,
-                cancellationToken);
-            return new PdfExportExecutionResult(
-                fallbackReceipt,
-                true,
-                "SMARTPRINT_FALLBACK:MICROSOFT_DRIVER_PRODUCED_NO_FILE",
-                spoolerReceipt.JobId);
+            return ExportPdfFromStreamFallback(
+                entry, documentStream, exportDirectory, cancellationToken,
+                "SMARTPRINT_FALLBACK:MICROSOFT_DRIVER_PRODUCED_NO_FILE", spoolerReceipt.JobId);
         }
 
-        // The original job is still queued or an incomplete file exists. The owner
-        // must reconcile it before any second output is generated.
         throw new PrintSubmissionUncertainException(
             "MICROSOFT_PDF_OUTPUT_TIMEOUT",
             remainingJob is null
                 ? $"Windows accepted spooler job {spoolerReceipt.JobId}, but an incomplete PDF exists at the output path."
                 : $"Windows accepted spooler job {spoolerReceipt.JobId}, which remains in state {remainingJob.Status}; automatic fallback is disabled.");
+    }
+
+    private PdfExportExecutionResult ExportPdfFromStreamFallback(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        string exportDirectory,
+        CancellationToken cancellationToken,
+        string method,
+        int? spoolerJobId)
+    {
+        var bytes = ReadStreamBytes(documentStream);
+        try
+        {
+            var receipt = ExportPdf(
+                entry with { OutputMode = PrinterOutputModeRules.PdfExport },
+                bytes,
+                exportDirectory,
+                cancellationToken);
+            return new PdfExportExecutionResult(receipt, true, method, spoolerJobId);
+        }
+        finally { CryptographicOperations.ZeroMemory(bytes); }
+    }
+
+    private static byte[] ReadStreamBytes(Stream stream)
+    {
+        if (!stream.CanRead || !stream.CanSeek || stream.Length is <= 0 or > UploadLimits.MaxFileBytes)
+            throw new InvalidDataException("The document stream cannot be materialised within the supported file size.");
+        var bytes = GC.AllocateUninitializedArray<byte>(checked((int)stream.Length));
+        stream.Position = 0;
+        try
+        {
+            var offset = 0;
+            while (offset < bytes.Length)
+            {
+                var read = stream.Read(bytes, offset, bytes.Length - offset);
+                if (read <= 0)
+                    throw new InvalidDataException("The document stream ended before the verified file was complete.");
+                offset += read;
+            }
+            return bytes;
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            throw;
+        }
+        finally { stream.Position = 0; }
     }
 
     private static bool IsCompletePdfFile(string path)
@@ -1131,6 +1195,34 @@ public sealed class WindowsPrintExecutor
         throw new PrintExecutionBlockedException("DOCUMENT_TYPE_UNSUPPORTED", $"The document type '{mediaType}' cannot be printed by this agent.");
     }
 
+    private static IRasterDocument OpenDocument(Stream stream, string mediaType, bool mono)
+    {
+        if (mediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase)) return new PdfRasterDocument(stream, mono);
+        if (mediaType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) || mediaType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
+            return new ImageRasterDocument(stream, mono);
+        throw new PrintExecutionBlockedException("DOCUMENT_TYPE_UNSUPPORTED", $"The document type '{mediaType}' cannot be printed by this agent.");
+    }
+
+    private static bool Sha256Matches(string expectedHex, Stream stream)
+    {
+        if (!stream.CanRead || !stream.CanSeek) return false;
+        if (stream is Qsp2DocumentReadStream qsp2)
+            return Sha256Matches(expectedHex, qsp2.Sha256);
+
+        byte[]? actual = null;
+        try
+        {
+            stream.Position = 0;
+            actual = SHA256.HashData(stream);
+            return Sha256Matches(expectedHex, Convert.ToHexString(actual));
+        }
+        finally
+        {
+            if (actual is not null) CryptographicOperations.ZeroMemory(actual);
+            stream.Position = 0;
+        }
+    }
+
     private static int DrawPageAtPhysicalScale(IntPtr dc, RasterPage page, IdDocumentPagePlacement placement)
     {
         _ = SetStretchBltMode(dc, Halftone);
@@ -1279,13 +1371,13 @@ public sealed class WindowsPrintExecutor
             }
         }
 
-        public unsafe PdfRasterDocument(Qsp2DocumentReadStream stream, bool mono)
+        public unsafe PdfRasterDocument(Stream stream, bool mono)
         {
             _ = PdfiumInitialized.Value;
-            if (stream.Length is <= 0 or > UploadLimits.MaxFileBytes)
+            if (!stream.CanRead || !stream.CanSeek || stream.Length is <= 0 or > UploadLimits.MaxFileBytes)
                 throw new PrintExecutionBlockedException(
                     "PDF_RENDER_OPEN_FAILED",
-                    "The authenticated PDF stream has an unsupported size.");
+                    "The PDF stream has an unsupported size.");
 
             this.mono = mono;
             var context = new PdfiumStreamAccessContext(stream);
@@ -1413,9 +1505,9 @@ public sealed class WindowsPrintExecutor
         }
     }
 
-    private sealed class PdfiumStreamAccessContext(Qsp2DocumentReadStream stream)
+    private sealed class PdfiumStreamAccessContext(Stream stream)
     {
-        public Qsp2DocumentReadStream Stream { get; } = stream;
+        public Stream Stream { get; } = stream;
         public object Sync { get; } = new();
     }
 
@@ -1475,6 +1567,21 @@ public sealed class WindowsPrintExecutor
         {
             this.mono = mono;
             using var stream = new MemoryStream(bytes, false);
+            using var bitmap = SKBitmap.Decode(stream);
+            if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0 ||
+                (long)bitmap.Width * bitmap.Height > MaxRasterPixels ||
+                bitmap.Width > MaxRasterDimension || bitmap.Height > MaxRasterDimension)
+                throw new PrintExecutionBlockedException("IMAGE_RENDER_OPEN_FAILED", "The image is invalid or too large to print.");
+            image = SKImage.FromBitmap(bitmap) ?? throw new PrintExecutionBlockedException("IMAGE_RENDER_OPEN_FAILED", "Skia could not prepare the image.");
+            FirstPageLandscape = image.Width > image.Height;
+        }
+
+        public ImageRasterDocument(Stream stream, bool mono)
+        {
+            this.mono = mono;
+            if (!stream.CanRead || !stream.CanSeek)
+                throw new PrintExecutionBlockedException("IMAGE_RENDER_OPEN_FAILED", "The image stream is not seekable.");
+            stream.Position = 0;
             using var bitmap = SKBitmap.Decode(stream);
             if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0 ||
                 (long)bitmap.Width * bitmap.Height > MaxRasterPixels ||

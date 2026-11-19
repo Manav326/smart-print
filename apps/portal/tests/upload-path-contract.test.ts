@@ -8,6 +8,7 @@ const portalApi = read("../src/api.ts");
 const agentApi = read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
 const agentWorker = read("../../../src/SmartPrint.Agent/Worker.cs");
 const localAgentApi = read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
+const nginx = read("../nginx.conf");
 
 test("standard cloud multipart uploads enforce the per-file and aggregate batch limits", () => {
   assert.match(api, /file\.Length is <= 0 or > UploadLimits\.MaxFileBytes/);
@@ -81,4 +82,18 @@ test("Private Printing never starts a second relay while the same ticket is clai
   assert.match(relay, /has not started a second encrypted transfer/);
   const stageRules = read("../../../src/SmartPrint.Api/Domain/PrivateRelayProgressRules.cs");
   assert.match(stageRules, /Rank\(requestedStage\) > Rank\(currentStage\)/);
+});
+
+
+test("cloud document transfer routes stream through Nginx with the matching multipart ceiling", () => {
+  assert.match(nginx, /client_max_body_size 22m;/);
+  const transferLocation = nginx.match(/location ~ \\^\\/api\\/v1\\/[^\\{]+\\{[\\s\\S]*?\\n    \\}/)?.[0] ?? "";
+  assert.match(transferLocation, /sessions\\/current\\/jobs/);
+  assert.match(transferLocation, /private-relay\\|cloud-recovery/);
+  assert.match(transferLocation, /agent\\/jobs\\/\\[0-9a-fA-F-\\]\\{36\\}\\/document/);
+  assert.match(transferLocation, /agent\\/private-relays\\/\\[0-9a-fA-F-\\]\\{36\\}\\/content/);
+  assert.match(transferLocation, /client_max_body_size 51m;/);
+  assert.match(transferLocation, /proxy_request_buffering off;/);
+  assert.match(transferLocation, /proxy_buffering off;/);
+  assert.match(transferLocation, /proxy_read_timeout 10m;/);
 });
