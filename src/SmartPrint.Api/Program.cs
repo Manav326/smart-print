@@ -10638,6 +10638,16 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey) && ticket.PrivateRelayUploadedUtc is not null)
         return Results.Ok(new { Accepted = true, DuplicateRequest = true, ticket.PrintJobId, ticket.JobNumber });
 
+    if (ticket.PrivateRelayUploadedUtc is null &&
+        ticket.ClaimedUtc is not null &&
+        ticket.AgentUploadAttempts > 0 &&
+        ticket.ClaimLeaseExpiresUtc > now)
+        return Results.Conflict(new
+        {
+            code = "private_relay_direct_transfer_in_progress",
+            message = "The paired shop computer has already claimed this upload over local Wi-Fi. SmartPrint is checking that same transfer and will not accept a second encrypted relay."
+        });
+
     void AdvancePrivateRelayStage(string nextStage)
     {
         if (PrivateRelayProgressRules.Rank(ticket.PrivateRelayStage) >= PrivateRelayProgressRules.Rank(nextStage))
