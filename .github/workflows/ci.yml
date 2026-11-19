@@ -431,7 +431,7 @@ jobs:
         run: node --check apps/portal/tests/epson-l360-shop-owner.browser.mjs
       - name: Run the shop-owner Epson L360 printer details, assignment and dispatch workflow
         id: epson_l360_shop_owner_ui
-        if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.epson_l360_capability_probe.outcome == 'success' }}
         shell: pwsh
         env:
           SMARTPRINT_EPSON_L360_CAPABILITIES_PATH: artifacts/epson-l360/epson-l360-capabilities.json
