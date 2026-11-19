@@ -10636,6 +10636,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
     if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey) && ticket.PrivateRelayUploadedUtc is not null)
         return Results.Ok(new { Accepted = true, DuplicateRequest = true, ticket.PrintJobId, ticket.JobNumber });
 
+    void AdvancePrivateRelayStage(string nextStage)
+    {
+        if (PrivateRelayProgressRules.Rank(ticket.PrivateRelayStage) >= PrivateRelayProgressRules.Rank(nextStage))
+            return;
+        ticket.PrivateRelayStage = nextStage;
+        ticket.PrivateRelayStageUpdatedUtc = DateTimeOffset.UtcNow;
+    }
+
     string storageKey;
     try
     {
@@ -10652,8 +10660,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
                     message = "The QSP2 encrypted stream size does not match its original upload ticket."
                 });
 
-            ticket.PrivateRelayStage = PrivateRelayProgressRules.ReceivingEncryptedPayload;
-            ticket.PrivateRelayStageUpdatedUtc = DateTimeOffset.UtcNow;
+            AdvancePrivateRelayStage(PrivateRelayProgressRules.ReceivingEncryptedPayload);
             await db.SaveChangesAsync(ct);
             storageKey = await storage.StoreOpaquePrivateQsp2RelayAsync(
                 ticket.TenantId, ticket.Id, context.Request.Body, encryptedSize, ticket.SizeBytes, ct);
@@ -10706,8 +10713,12 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         locked.PrivateRelayWrappedKey = wrappedKey;
         locked.PrivateRelayIv = isQsp2 ? null : ivText;
         locked.PrivateRelayUploadedUtc = now;
-        locked.PrivateRelayStage = PrivateRelayProgressRules.WaitingForAgent;
-        locked.PrivateRelayStageUpdatedUtc = now;
+        if (PrivateRelayProgressRules.Rank(locked.PrivateRelayStage) <=
+            PrivateRelayProgressRules.Rank(PrivateRelayProgressRules.WaitingForAgent))
+        {
+            locked.PrivateRelayStage = PrivateRelayProgressRules.WaitingForAgent;
+            locked.PrivateRelayStageUpdatedUtc = now;
+        }
         locked.ExpiresUtc = now.AddHours(24);
         await db.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
