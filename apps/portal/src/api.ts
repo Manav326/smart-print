@@ -1691,7 +1691,8 @@ type CustomerPrivateRelayStatus =
 async function getCustomerPrivateRelayStatus(
   sessionToken: string,
   ticket: CustomerLocalUploadTicket,
-  grantToken: string
+  grantToken: string,
+  signal?: AbortSignal
 ): Promise<CustomerPrivateRelayStatus> {
   return apiRequest<CustomerPrivateRelayStatus>(
     `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/private-relay-status`,
@@ -1700,9 +1701,47 @@ async function getCustomerPrivateRelayStatus(
       headers: {
         "X-Print-Session": sessionToken,
         "X-Print-Upload-Grant": grantToken
-      }
+      },
+      signal
     }
   );
+}
+
+function waitForCustomerStagePoll(ms:number,signal:AbortSignal):Promise<void> {
+  return new Promise(resolve=>{
+    if(signal.aborted){resolve();return;}
+    const finish=()=>{
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort",finish);
+      resolve();
+    };
+    const timer=window.setTimeout(finish,ms);
+    signal.addEventListener("abort",finish,{once:true});
+  });
+}
+
+async function pollCustomerPrivateRelayStages(
+  sessionToken:string,
+  ticket:CustomerLocalUploadTicket,
+  grantToken:string,
+  onStage?:CustomerPrivateRelayStageCallback,
+  signal?:AbortSignal
+):Promise<void> {
+  if(!signal)return;
+  while(!signal.aborted){
+    try {
+      const status=await getCustomerPrivateRelayStatus(sessionToken,ticket,grantToken,signal);
+      onStage?.(
+        status.stage??(status.state==="PENDING"?"WAITING_FOR_AGENT":status.state),
+        status.stageMessage??status.message??"Checking the secure shop handoff",
+        status.stageUpdatedUtc
+      );
+      if(status.state!=="PENDING")return;
+    } catch {
+      if(signal.aborted)return;
+    }
+    await waitForCustomerStagePoll(1200,signal);
+  }
 }
 
 async function uploadCustomerPrivateRelay(
@@ -2106,6 +2145,12 @@ export async function uploadCustomerDocumentLocally(
         requestBody = multipart.body;
       }
 
+      const localStagePollController=privatePrinting?new AbortController():null;
+      const localStagePollPromise=localStagePollController
+        ?pollCustomerPrivateRelayStages(
+            sessionToken,ticket,grantToken,onStage,localStagePollController.signal
+          ).catch(()=>undefined)
+        :null;
       const response = await fetch(`${endpoint.origin}/api/v1/local/uploads/${encodeURIComponent(ticket.id)}`, {
         method: "POST",
         mode: "cors",
@@ -2135,6 +2180,9 @@ export async function uploadCustomerDocumentLocally(
         uploaded.document = { ...uploaded.document, originalFileName: "Private document" };
       }
       if (!uploaded?.job?.id || !uploaded?.document?.id) continue;
+      if(privatePrinting) {
+        onStage?.("READY","The shop computer authenticated, validated and secured the file in its local print queue");
+      }
       clearCustomerLocalUploadAttempt(sessionToken, file);
       return {
         ...uploaded,
@@ -2149,6 +2197,10 @@ export async function uploadCustomerDocumentLocally(
       // Try the next advertised shop address, then continue over HTTPS if enabled.
     } finally {
       window.clearTimeout(timeout);
+      if(localStagePollController) {
+        localStagePollController.abort();
+        await localStagePollPromise;
+      }
     }
     }
   }
