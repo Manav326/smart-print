@@ -4131,6 +4131,7 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 }
 .customer-batch-quote-chip b{font-size:11px;font-variant-numeric:tabular-nums}
 .customer-batch-quote-chip.included{border-color:color-mix(in srgb,var(--quote-green) 32%,var(--quote-border));background:color-mix(in srgb,var(--quote-green) 9%,var(--quote-surface));color:var(--quote-green)}
+.customer-batch-quote-chip.refresh{border-color:color-mix(in srgb,#b7791f 35%,var(--quote-border));background:color-mix(in srgb,#b7791f 9%,var(--quote-surface));color:#a56b12}
 .customer-batch-quote-chip.excluded{border-color:color-mix(in srgb,var(--quote-red) 32%,var(--quote-border));background:color-mix(in srgb,var(--quote-red) 8%,var(--quote-surface));color:var(--quote-red)}
 .customer-batch-quote-chip.document{color:var(--quote-accent)}
 .customer-batch-quote-chip.id-card{color:var(--quote-blue)}
@@ -4176,6 +4177,7 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
   font-weight:750;
 }
 .customer-batch-quote-line-state.included{background:color-mix(in srgb,var(--quote-green) 11%,var(--quote-surface));color:var(--quote-green)}
+.customer-batch-quote-line-state.refresh{background:color-mix(in srgb,#b7791f 11%,var(--quote-surface));color:#a56b12}
 .customer-batch-quote-line-state.excluded{background:color-mix(in srgb,var(--quote-red) 10%,var(--quote-surface));color:var(--quote-red)}
 .customer-batch-quote-lines strong.customer-batch-quote-line-amount{
   flex:0 0 auto;
@@ -4254,6 +4256,8 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 .customer-entry.smartprint-native .customer-batch-quote-title>small,
 .customer-entry.smartprint-native .customer-batch-quote-line-copy>small,
 .customer-entry.smartprint-native .customer-batch-quote-details .customer-batch-print-breakdown>div small{color:var(--native-muted)}
+html[data-theme="dark"] .customer-entry .customer-batch-quote-chip.refresh,
+html[data-theme="dark"] .customer-entry .customer-batch-quote-line-state.refresh{background:rgba(233,185,106,.12);color:#e9b96a;border-color:rgba(233,185,106,.32)}
 html[data-theme="dark"] .customer-entry .customer-batch-quote-card{
   --quote-text:#eef2fb;
   --quote-muted:#aab6ca;
