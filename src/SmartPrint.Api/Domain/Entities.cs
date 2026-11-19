@@ -411,6 +411,8 @@ public sealed class LocalPrintUploadTicket
     public DateTimeOffset? PrivateRelayFailedUtc { get; set; }
     public string? PrivateRelayFailureCode { get; set; }
     public string? PrivateRelayFailureMessage { get; set; }
+    public string PrivateRelayStage { get; set; } = "WAITING_FOR_UPLOAD";
+    public DateTimeOffset? PrivateRelayStageUpdatedUtc { get; set; }
 }
 
 
