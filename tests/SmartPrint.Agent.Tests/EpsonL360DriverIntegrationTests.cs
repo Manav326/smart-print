@@ -165,7 +165,7 @@ public sealed class EpsonL360DriverIntegrationTests
         using (var canvas = new SkiaSharp.SKCanvas(bitmap))
         using (var paint = new SkiaSharp.SKPaint
         {
-            Color = new SkiaSharp.SKColors().Blue,
+            Color = SkiaSharp.SKColors.Blue,
             IsAntialias = true
         })
         {
@@ -268,7 +268,7 @@ public sealed class EpsonL360DriverIntegrationTests
             Thread.Sleep(250);
         }
 
-        Assert.Fail(
+        Assert.True(false,
             $"Epson L360 accepted the StartDoc call for {scenario} (JobId={receipt.JobId}) but the isolated spooler file port did not receive output.");
     }
 
