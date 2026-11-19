@@ -259,14 +259,6 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     if ($LASTEXITCODE -ne 0) {
         throw "Could not grant the LocalService lifecycle harness access to its result directory."
     }
-    if (Test-Path -LiteralPath $serviceFixtureDirectory) {
-        throw "Refusing to overwrite an existing LocalService lifecycle runtime directory."
-    }
-    New-Item -ItemType Directory -Force -Path $serviceFixtureDirectory | Out-Null
-    & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureExecutableAcl /C /Q | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not grant LocalService read/execute access to the isolated lifecycle fixture runtime."
-    }
     $resultPath = Join-Path $resultDirectory "smartprint-localservice-fixture-$Mode.txt"
     $buildAssemblyPath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.dll"
     $buildExecutablePath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.exe"
@@ -278,7 +270,14 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     # Stage and secure the fixture binaries once; every subsequent mode reuses
     # the same immutable output instead of recopying the full .NET dependency set.
     if (-not $script:localServiceFixtureStaged) {
+        if (Test-Path -LiteralPath $serviceFixtureDirectory) {
+            throw "Refusing to overwrite an existing LocalService lifecycle runtime directory."
+        }
         New-Item -ItemType Directory -Force -Path $serviceFixtureDirectory | Out-Null
+        & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureExecutableAcl /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not grant LocalService read/execute access to the isolated lifecycle fixture runtime."
+        }
         Copy-Item -Path (Join-Path $buildOutputDirectory "*") -Destination $serviceFixtureDirectory -Recurse -Force
         # The fixture executable and its managed dependencies are protected
         # independently from the data/result directory; LocalService can read/execute
