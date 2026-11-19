@@ -5721,8 +5721,11 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/stage", async (
     if (ticket is null) return Results.NotFound();
     if (ticket.CompletedUtc is not null || ticket.PrivateRelayFailedUtc is not null)
         return Results.Conflict(new { code = "private_relay_terminal_state" });
-    if (ticket.PrivateRelayUploadedUtc is null ||
-        string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
+    var hasStoredCloudRelay = ticket.PrivateRelayUploadedUtc is not null &&
+        !string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey);
+    var hasClaimedDirectLanUpload = ticket.ClaimedUtc is not null &&
+        ticket.AgentUploadAttempts > 0 && ticket.ClaimLeaseExpiresUtc > DateTimeOffset.UtcNow;
+    if (!hasStoredCloudRelay && !hasClaimedDirectLanUpload)
         return Results.Conflict(new { code = "private_relay_payload_not_received" });
 
     if (!PrivateRelayProgressRules.CanAdvance(ticket.PrivateRelayStage, requestedStage))
@@ -6703,6 +6706,15 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         """).SingleOrDefaultAsync(ct);
     if (claimedAttemptNumber is null) return Results.Conflict();
     ticket.AgentUploadAttempts = claimedAttemptNumber.Value;
+    if (ticket.PrivatePrinting)
+    {
+        await db.LocalPrintUploadTickets
+            .Where(item => item.Id == ticket.Id && item.TenantId == device.TenantId &&
+                           item.AgentDeviceId == device.Id && item.CompletedUtc == null)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.PrivateRelayStage, PrivateRelayProgressRules.ReceivingEncryptedPayload)
+                .SetProperty(item => item.PrivateRelayStageUpdatedUtc, now), ct);
+    }
 
     await DataTransferRecorder.TryRecordAsync(db, app.Logger, new DataTransferEvent
     {
@@ -7060,6 +7072,17 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
                 DuplicateRequest = true
             }
         });
+    }
+
+
+    if (ticket.PrivatePrinting)
+    {
+        await db.LocalPrintUploadTickets
+            .Where(item => item.Id == ticket.Id && item.TenantId == device.TenantId &&
+                           item.AgentDeviceId == device.Id && item.CompletedUtc == now)
+            .ExecuteUpdateAsync(update => update
+                .SetProperty(item => item.PrivateRelayStage, PrivateRelayProgressRules.Ready)
+                .SetProperty(item => item.PrivateRelayStageUpdatedUtc, now), ct);
     }
 
     await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
