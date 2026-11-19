@@ -85,3 +85,27 @@ test("later fulfilment status remains more useful than an already verified payme
     paymentStatus: "VERIFIED"
   }), "Your print is in progress.");
 });
+
+
+test("all customer order lifecycle states have specific, actionable messages", () => {
+  const cases: Array<[string, string]> = [
+    ["VALIDATING", "checking your files"],
+    ["ANALYSING", "preparing the print options"],
+    ["AWAITING_CUSTOMER_APPROVAL", "Review your print settings and quote"],
+    ["QUEUED", "waiting in the shop's printer queue"],
+    ["SUBMITTING_TO_SPOOLER", "being sent to the printer"],
+    ["PDF_EXPORTING", "PDF is being prepared"],
+    ["PARTIALLY_COMPLETED", "Some files are complete"],
+    ["MIXED_OUTCOME", "Some files need attention"],
+    ["MIXED_PROGRESS", "still being processed"]
+  ];
+  for (const [jobStatus, expected] of cases) {
+    const message = resolveCustomerUploadStatusMessage({ jobStatus, uploadedFileCount: 1 });
+    assert.ok(message.includes(expected), jobStatus + " should not fall through to a generic uploaded-files message.");
+  }
+});
+
+test("partial refunds are described as partial rather than full refunds", () => {
+  assert.match(resolveCustomerUploadStatusMessage({ jobStatus: "PARTIALLY_REFUNDED" }), /partial refund/i);
+  assert.match(resolveCustomerUploadStatusMessage({ paymentStatus: "PARTIALLY_REFUNDED" }), /partial refund/i);
+});
