@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param(
     [string]$QueueName = "SmartPrint CI Epson L360",
-    [string]$PackageUrl = "https://download-center.epson.com/f/module/39ac0a8a-10f0-4760-8949-cd1dd0ad646c/L360_x64_260JAHomeExportAsiaML.exe"
+    [string]$PackageUrl = "https://download-center.epson.com/f/module/39ac0a8a-10f0-4760-8949-cd1dd0ad646c/L360_x64_260JAHomeExportAsiaML.exe",
+    [string]$PackagePath = $env:SMARTPRINT_EPSON_L360_PACKAGE_PATH
 )
 
 Set-StrictMode -Version Latest
@@ -27,17 +28,26 @@ $extractRoot = Join-Path $root "extracted"
 New-Item -ItemType Directory -Path $extractRoot -Force | Out-Null
 
 $packagePath = Join-Path $root "L360_x64_260JAHomeExportAsiaML.exe"
-Write-Host "[EPSON-L360] Downloading the official Epson L360 x64 2.60.00 driver package."
-$downloadHeaders = @{
-    "Accept" = "application/octet-stream, application/x-msdownload, */*"
+if (-not [string]::IsNullOrWhiteSpace($PackagePath)) {
+    if (-not (Test-Path -LiteralPath $PackagePath -PathType Leaf)) {
+        throw "The supplied official Epson L360 driver package does not exist: $PackagePath"
+    }
+    Write-Host "[EPSON-L360] Using the official Epson package downloaded through the browser session: $PackagePath"
+    Copy-Item -LiteralPath $PackagePath -Destination $packagePath -Force
 }
-try {
-    Invoke-WebRequest -Uri $PackageUrl -OutFile $packagePath -Headers $downloadHeaders `
-        -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36" `
-        -MaximumRedirection 10 -UseBasicParsing
-}
-catch {
-    throw "The official Epson L360 v2.60.00 download was blocked or unavailable. Source: $PackageUrl. $($_.Exception.Message)"
+else {
+    Write-Host "[EPSON-L360] Downloading the official Epson L360 x64 2.60.00 driver package."
+    $downloadHeaders = @{
+        "Accept" = "application/octet-stream, application/x-msdownload, */*"
+    }
+    try {
+        Invoke-WebRequest -Uri $PackageUrl -OutFile $packagePath -Headers $downloadHeaders `
+            -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36" `
+            -MaximumRedirection 10 -UseBasicParsing
+    }
+    catch {
+        throw "The official Epson L360 v2.60.00 download was blocked or unavailable. Source: $PackageUrl. $($_.Exception.Message)"
+    }
 }
 $package = Get-Item -LiteralPath $packagePath
 if ($package.Length -lt 5MB) {
