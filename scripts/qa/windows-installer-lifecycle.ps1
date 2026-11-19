@@ -433,7 +433,7 @@ function Set-LegacyAgentDataAclFixture {
 
     # Keep the lifecycle harness able to collect its test result while the
     # application-owned identity/queue data is deliberately reverted to legacy ACLs.
-    $fixtureDataDirectory = Join-Path $programDataRoot "Lifecycle"
+    $fixtureDataDirectory = $lifecycleDataRoot
     $fixtureAcl = @(
         "*S-1-5-18:(OI)(CI)F",
         "*S-1-5-32-544:(OI)(CI)F",
