@@ -311,13 +311,17 @@ async function exerciseShopOwnerPrintQueue(page) {
 
     const startButton = fileCard.getByRole("button", { name: "Start printing", exact: true });
     await startButton.waitFor({ state: "visible", timeout: 10000 });
-    await startButton.click();
-    const dialog = page.getByRole("dialog").last();
-    await dialog.waitFor({ state: "visible", timeout: 5000 });
+    const nativeConfirmation = page.waitForEvent("dialog", { timeout: 5000 });
     const dispatchResponse = page.waitForResponse(response =>
       response.request().method() === "POST" &&
       new URL(response.url()).pathname.endsWith(`/${job.id}/dispatch`));
-    await dialog.getByRole("button", { name: "Start printing", exact: true }).click();
+    await startButton.click();
+    const confirmation = await nativeConfirmation;
+    assert.equal(confirmation.type(), "confirm",
+      "Shop-owner print dispatch must use the product's explicit one-time confirmation.");
+    assert.match(confirmation.message(), new RegExp(job.jobNumber));
+    assert.match(confirmation.message(), /Start printing/i);
+    await confirmation.accept();
     const response = await dispatchResponse;
     assert.equal(response.status(), 200, `Shop owner dispatch failed for ${job.jobNumber}.`);
   }
