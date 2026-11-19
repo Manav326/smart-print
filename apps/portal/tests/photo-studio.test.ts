@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { UPLOAD_LIMITS } from "../src/upload-limits.generated.ts";
-import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
+import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, getPhotoCropFocusAfterDrag, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
 
 const UPLOAD_LIMITS_CONFIG = JSON.parse(readFileSync(new URL("../../../config/upload-limits.json", import.meta.url), "utf8"));
 
@@ -347,6 +347,14 @@ test("caption space shifts only the next grid row and never shrinks the photo ti
  assert.equal(size.heightMm,45);
 });
 
+test("direct crop dragging translates pointer movement into bounded inverse source focus",()=>{
+ const moved=getPhotoCropFocusAfterDrag(50,50,25,-10,100,100);
+ assert.deepEqual(moved,{focusX:25,focusY:60});
+ assert.deepEqual(getPhotoCropFocusAfterDrag(4,96,-200,200,100,100),{focusX:100,focusY:0});
+ assert.deepEqual(getPhotoCropFocusAfterDrag(35,65,50,50,0,100),{focusX:35,focusY:15});
+ assert.deepEqual(getPhotoCropFocusAfterDrag(Number.NaN,Number.POSITIVE_INFINITY,10,10,100,100),{focusX:40,focusY:40});
+});
+
 test("source resolution checks both cropped axes at the selected physical size",()=>{
  const size={widthMm:35,heightMm:45};
  assert.equal(hasSufficientPhotoResolution(800,1100,size,1),true);
@@ -384,6 +392,35 @@ test("A4 raster uses independent physical x and y scales before exact-A4 PDF pla
  const fullPageImage=A4_WIDTH_POINTS+" 0 0 "+A4_HEIGHT_POINTS+" 0 0 cm";
  assert.equal(value.split(pageBox).length-1,2);
  assert.equal(value.split(fullPageImage).length-1,2);
+});
+
+test("Photo Studio preview supports direct crop dragging with pointer capture and slider parity",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/function handleCropPointerDown\(/);
+ assert.match(studio,/function handleCropPointerMove\(/);
+ assert.match(studio,/getPhotoCropFocusAfterDrag\(/);
+ assert.match(studio,/canvas\.setPointerCapture\(event\.pointerId\)/);
+ assert.match(studio,/onPointerDown=\{handleCropPointerDown\}/);
+ assert.match(studio,/onPointerMove=\{handleCropPointerMove\}/);
+ assert.match(studio,/onPointerCancel=\{handleCropPointerUp\}/);
+ assert.match(studio,/getPhotoSheetPhotoPositions\(size,captionHeightMm,photosPerPage,previewPhotoCount\)/);
+ assert.match(studio,/setFocusX\(next\.focusX\)/);
+ assert.match(studio,/setFocusY\(next\.focusY\)/);
+ assert.match(studio,/touchAction:cropPanel\?"none":"pan-y"/);
+});
+
+test("Photo Studio contextual help is readable, dismissible and theme-aware instead of permanent panel copy",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
+ assert.match(studio,/aria-label=\{"Help: "\+panelTitle\}/);
+ assert.match(studio,/aria-expanded=\{openHelpTool===activeTool\}/);
+ assert.match(studio,/role="region" aria-label=\{panelTitle\+" guidance"\}/);
+ assert.match(studio,/openHelpToolRef\.current !== null/);
+ assert.match(studio,/dismissOnOutsidePointer/);
+ for(const help of ["Drag directly on any photo","Natural, Warm, Crisp","colour-key tool, not AI subject recognition","Name and date-of-birth captions are off by default"])
+   assert.ok(studio.includes(help),"Missing contextual guidance: "+help);
+ assert.match(css,/\.helpTooltipPanel\{[^}]*max-height:190px[^}]*overflow:auto/s);
+ assert.match(css,/\.dark \.helpTooltipPanel/);
 });
 
 test("Photo Studio resolution warning is recomputed when crop zoom changes",()=>{
