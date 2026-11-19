@@ -4198,7 +4198,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
       onUnavailable();
       setPermissionState("unknown");
       setCheckStatus("unavailable");
-      setMessage("The shop's paired print computer has not reported a reachable local connection. Direct shop Wi-Fi or hotspot transfer is temporarily unavailable. Use Secure queue · HTTPS below to submit your request when available.");
+      setMessage("The shop computer isn't reachable on this Wi-Fi. Choose Secure queue · HTTPS to continue.");
       return ()=>{checkGeneration.current++;};
     }
     onReady(false);
@@ -4278,7 +4278,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     </div>
     {!nativeAppMode&&<p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>}
     {!localAgent?.endpoints.length
-      ? <div className="entry-local-agent-message" role="status"><strong>Direct transfer is temporarily unavailable.</strong> {message}</div>
+      ? <div className="entry-local-agent-message" role="status"><strong>Local transfer unavailable.</strong> {message}</div>
       : checkStatus==="insecure"
       ? <div className="entry-local-agent-message">
           <small>{message}</small>
@@ -6111,7 +6111,6 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Unavailable</small></button>}
       {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Encrypted online transfer · print when ready</small></button>}
     </div>}
-    {!localAgent?.endpoints.length&&<CustomerInlineNotice kind="info" title="Shop connection unavailable">The shop computer has no reachable local connection.</CustomerInlineNotice>}
     {customerUploadUnavailable&&<CustomerInlineNotice kind="warning" title="Secure upload unavailable">No file was uploaded. Ask the shop to reconnect its print service, then retry.</CustomerInlineNotice>}
     {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title="Encrypted online relay">No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.</CustomerInlineNotice>}
     {batchLockedForPayment&&<CustomerInlineNotice kind="warning" title="This batch is locked">Payment has started. Add more documents in a new batch.</CustomerInlineNotice>}
