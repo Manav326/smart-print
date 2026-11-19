@@ -3383,8 +3383,8 @@ function prettyStatus(status:string) {
     AUTHORISED:"Approved",
     PAID_AUTHORISED:"Payment received",
     VERIFIED:"Payment received",
-    LOCAL_QUEUE_CLAIMED:"Preparing to print",
-    LOCAL_QUEUE_READY:"Preparing to print",
+    LOCAL_QUEUE_CLAIMED:"Shop computer preparing",
+    LOCAL_QUEUE_READY:"Ready for print",
     PRINT_AUTHORISED:"Ready to print",
     PRINT_SUBMITTING:"Sending to printer",
     SPOOLER_ACCEPTED:"Sent to printer",
@@ -5422,8 +5422,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       );
       if(canFallbackToCloud){setUploadModeManuallySelected(true);setUploadMode("CLOUD");}
       if(exception instanceof LocalUploadOutcomeUnknownError&&effectiveUploadMode==="LOCAL"&&!privatePrinting&&secureQueueFallbackEnabled) {
-        // Local ticket and grant are preserved. The next retry will resume that
-        // same PrintJob over HTTPS rather than creating a second cloud upload.
+        // Local ticket and grant are preserved. HTTPS recovery uses this same
+        // PrintJob; an incomplete file may need to be sent again from the start.
         setUploadModeManuallySelected(true);
         setUploadMode("CLOUD");
       }
