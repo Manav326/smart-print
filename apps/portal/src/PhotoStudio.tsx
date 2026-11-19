@@ -700,7 +700,7 @@ export default function PhotoStudio({
   async function createPrintSheets(){
     if(!image||busyRef.current)return;
     const parsedCopies=Number(copiesInput);
-    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" photos. The A4 page count is calculated automatically.");return;}
+    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose between 1 and "+maxCopies+" copies. The A4 page count is calculated automatically.");return;}
     busyRef.current=true;setBusy(true);setError("");
     try{
       const pages = Math.ceil(parsedCopies / outputPhotosPerPage);
@@ -954,7 +954,7 @@ export default function PhotoStudio({
               />
             </label>
             <small className={styles.fieldHint}>Copies of this same photo. For example, 4 means 4 identical prints.</small>
-            {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter a whole number from 1 to {maxCopies}. The sheet count is calculated automatically.</div>}
+            {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter a whole number of copies from 1 to {maxCopies}. The sheet count is calculated automatically.</div>}
             {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.</div>}
             <div className={styles.fieldLabel}>Paper and output
               <div className={styles.photoOutputChoices} role="group" aria-label="Photo output type">
@@ -1065,8 +1065,8 @@ export default function PhotoStudio({
           </div>
           <div className={styles.canvasFooter}>
             <span>{size.label} · {size.widthMm} × {size.heightMm} mm</span>
-            <span>{copies} photos · {isPhotoPaperLayout ? copies + " photo-paper sheets" : sheetCount + " A4 pages"}</span>
-            <small>{isPhotoPaperLayout ? `Photo ${previewPageIndex+1} of ${outputPageCount}` : `Page ${previewPageIndex+1}: ${previewPhotoCount} photos`}</small>
+            <span>{copies} copies · {isPhotoPaperLayout ? copies + " photo-paper sheets" : sheetCount + " A4 pages"}</span>
+            <small>{isPhotoPaperLayout ? `Photo ${previewPageIndex+1} of ${outputPageCount}` : `Page ${previewPageIndex+1}: ${previewPhotoCount} copies`}</small>
             {resolutionMessage && <small className={`${styles.sourceQuality} ${resolutionIsSufficient ? "" : styles.sourceQualityWarning}`} data-testid="photo-studio-source-quality" role="status"><strong>Source quality: </strong>{resolutionMessage} PDF output uses a 300-DPI target; it cannot add missing detail to the original.</small>}
           </div>
         </main>
