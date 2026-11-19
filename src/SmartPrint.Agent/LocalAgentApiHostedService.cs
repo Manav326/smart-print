@@ -900,6 +900,34 @@ public sealed class LocalAgentApiHostedService(
                             claim.Id, (int)rejectionResponse.StatusCode);
                 }
 
+                async Task ReportPrivateStageAsync(string stage)
+                {
+                    if (!claim.PrivatePrinting) return;
+                    try
+                    {
+                        using var stageRequest = new HttpRequestMessage(
+                            HttpMethod.Post, $"api/v1/agent/private-relays/{claim.Id:D}/stage")
+                        {
+                            Content = JsonContent.Create(new { stage })
+                        };
+                        AddAgentHeaders(stageRequest, credentials, uploadGrant);
+                        using var stageResponse = await client.SendAsync(stageRequest, ct);
+                        if (!stageResponse.IsSuccessStatusCode)
+                            logger.LogDebug("Could not report Private Printing stage {Stage} for ticket {TicketId} (HTTP {StatusCode}).",
+                                stage, claim.Id, (int)stageResponse.StatusCode);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception)
+                    {
+                        // Progress telemetry never blocks the encrypted file handoff.
+                        logger.LogDebug(exception, "Could not report Private Printing stage {Stage} for ticket {TicketId}.",
+                            stage, claim.Id);
+                    }
+                }
+
                 if (claim.AlreadyCompleted && claim.UploadResult is not null)
                 {
                     if (claim.PrivatePrinting && claim.UploadResult.Job.Status == "COMPLETED")
@@ -989,6 +1017,7 @@ public sealed class LocalAgentApiHostedService(
 
                     try
                     {
+                        await ReportPrivateStageAsync("VALIDATING_DOCUMENT");
                         using var stagedDocument = localQueueStore.OpenDocumentReadStream(
                             claim.PrintJobId, credentials.AgentDeviceId);
                         analysis = DocumentAnalyzer.Analyse(stagedDocument, claim.FileExtension);
@@ -1030,6 +1059,7 @@ public sealed class LocalAgentApiHostedService(
                                 encryptedSize != expectedEncryptedSize || (context.Request.ContentLength is long contentLength && contentLength != expectedEncryptedSize))
                                 return Results.BadRequest(new { code = "private_document_envelope_invalid", message = "The QSP2 encrypted stream does not match its authorised upload." });
 
+                            await ReportPrivateStageAsync("DECRYPTING_AND_AUTHENTICATING");
                             dataKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
                             stagingPath = await localQueueStore.CreatePrivateUploadStagingPathAsync(ct);
                             await using (var decryptedOutput = new FileStream(
@@ -1058,6 +1088,7 @@ public sealed class LocalAgentApiHostedService(
                                 64 * 1024, FileOptions.RandomAccess);
                             try
                             {
+                                await ReportPrivateStageAsync("VALIDATING_DOCUMENT");
                                 analysis = DocumentAnalyzer.Analyse(plaintextStream, claim.FileExtension);
                             }
                             catch (DocumentValidationException exception)
@@ -1075,6 +1106,7 @@ public sealed class LocalAgentApiHostedService(
                             }
 
                             plaintextStream.Position = 0;
+                            await ReportPrivateStageAsync("SECURING_LOCAL_QUEUE");
                             await localQueueStore.EnqueueLocalUploadStreamingAsync(
                                 CreateStagedJob(analysis), credentials.AgentDeviceId, plaintextStream, ct);
                         }
@@ -1151,6 +1183,7 @@ public sealed class LocalAgentApiHostedService(
 
                             try
                             {
+                                await ReportPrivateStageAsync("DECRYPTING_AND_AUTHENTICATING");
                                 aesKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
                                 iv = Convert.FromBase64String(ivText);
                             }
@@ -1182,6 +1215,7 @@ public sealed class LocalAgentApiHostedService(
                             using var plaintextStream = new MemoryStream(plaintext, writable: false);
                             try
                             {
+                                await ReportPrivateStageAsync("VALIDATING_DOCUMENT");
                                 analysis = DocumentAnalyzer.Analyse(plaintextStream, claim.FileExtension);
                             }
                             catch (DocumentValidationException exception)
@@ -1200,6 +1234,7 @@ public sealed class LocalAgentApiHostedService(
                             }
 
                             plaintextStream.Position = 0;
+                            await ReportPrivateStageAsync("SECURING_LOCAL_QUEUE");
                             await localQueueStore.EnqueueLocalUploadStreamingAsync(
                                 CreateStagedJob(analysis),
                                 credentials.AgentDeviceId,
