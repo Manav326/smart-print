@@ -836,7 +836,7 @@ async function exercisePhotoStudioBrowser() {
       for (let pageIndex = 0; pageIndex < 5; pageIndex += 1)
         await reopened.getByRole("button", { name: "Next A4 page" }).click();
       assert.equal(await reopened.getByText("Page 6 of 6").count(), 1);
-      assert.match(await reopened.locator("[class*='canvasFooter']").innerText(), /Page 6: 5 photos/);
+      assert.match(await reopened.locator("[class*='canvasFooter']").innerText(), /Page 6: 5 copies/);
     }
 
     const actionLabel = item.mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
@@ -1241,7 +1241,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     for(let index=0; index<5; index+=1) await nextPage.click();
     assert.equal(await dialog.getByText("Page 6 of 6",{exact:true}).count(),1);
     assert.equal(await nextPage.isDisabled(),true);
-    assert.match(await dialog.locator("[class*='canvasFooter']").innerText(),/Page 6: 5 photos/);
+    assert.match(await dialog.locator("[class*='canvasFooter']").innerText(),/Page 6: 5 copies/);
     await previousPage.click();
     assert.equal(await dialog.getByText("Page 5 of 6",{exact:true}).count(),1);
     await count.fill("8");
