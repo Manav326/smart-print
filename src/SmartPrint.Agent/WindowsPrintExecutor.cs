@@ -838,10 +838,16 @@ public sealed class WindowsPrintExecutor
             var isPhotoPaper = isPhoto && string.Equals(entry.PhotoOutputLayout, "PHOTO_PAPER", StringComparison.OrdinalIgnoreCase);
             if (isPhoto && entry.PhotoOutputLayout is not ("A4_SHEET" or "PHOTO_PAPER"))
                 throw new PrintExecutionBlockedException("PHOTO_OUTPUT_LAYOUT_INVALID", "The requested photo output layout is not supported.");
-            if (isPhoto && !isPhotoPaper && entry.PhotoPaperFinish != "PLAIN")
-                throw new PrintExecutionBlockedException("PHOTO_MEDIA_LAYOUT_MISMATCH", "A4 sheet orders use regular A4 paper. Choose individual photo paper prints to select glossy or matte stock.");
-            if (isPhotoPaper && entry.PhotoPaperFinish is not ("GLOSSY" or "MATTE"))
-                throw new PrintExecutionBlockedException("PHOTO_FINISH_INVALID", "Individual photo prints require glossy or matte photo paper.");
+            var requestsPhotoMediaType = isPhoto && entry.PhotoPaperFinish is "GLOSSY" or "MATTE";
+            if (isPhoto && !isPhotoPaper &&
+                entry.PhotoPaperFinish != "PLAIN" && !requestsPhotoMediaType)
+                throw new PrintExecutionBlockedException(
+                    "PHOTO_MEDIA_LAYOUT_MISMATCH",
+                    "Photo sheets support plain, glossy or matte A4 stock. Choose an advertised glossy/matte finish or use plain paper.");
+            if (isPhotoPaper && !requestsPhotoMediaType)
+                throw new PrintExecutionBlockedException(
+                    "PHOTO_FINISH_INVALID",
+                    "Individual photo-paper prints require glossy or matte stock.");
 
             var paper = PaperCode(entry.PaperSize);
             short photoPaperWidth = 0, photoPaperHeight = 0;
@@ -858,7 +864,23 @@ public sealed class WindowsPrintExecutor
                 mode.PaperWidth = photoPaperWidth;
                 mode.PaperLength = photoPaperHeight;
                 mode.Fields |= DmPaperSize | DmPaperWidth | DmPaperLength;
+            }
+            else
+            {
+                if (SupportsPaper(queueName, pointer, paper) is false && !isIdDocument)
+                    throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
+                // For ID sheets and A4 photo sheets, ask DocumentProperties to
+                // confirm the requested paper form before StartDoc.
+                mode.PaperSize = paper;
+                mode.Fields |= DmPaperSize;
+            }
 
+            if (requestsPhotoMediaType)
+            {
+                // Apply the actual driver's glossy/matte stock option for both
+                // individual photo paper (custom 4x6 etc.) and prepared A4 sheets.
+                // Photo dimensions on A4 sheets are encoded in the prepared PDF;
+                // the physical stock remains A4 and is validated as such below.
                 var schemaDevMode = WindowsPrinterCapabilityDiscovery.CreatePhotoMediaDevMode(
                     queueName,
                     entry.PhotoPaperFinish);
@@ -876,13 +898,21 @@ public sealed class WindowsPrintExecutor
                             throw new PrintExecutionBlockedException(
                                 "PHOTO_MEDIA_TYPE_REJECTED",
                                 "The validated Print Schema photo media option was not present in the converted Windows DEVMODE. No pages were sent.");
+
                         // PrintTicket conversion starts from the printer-default DEVMODE.
-                        // Reapply the requested custom dimensions because the conversion
-                        // may replace the DEVMODE buffer that carried them.
-                        mode.PaperSize = 0;
-                        mode.PaperWidth = photoPaperWidth;
-                        mode.PaperLength = photoPaperHeight;
-                        mode.Fields |= DmPaperSize | DmPaperWidth | DmPaperLength;
+                        // Restore the requested paper size after applying the stock type.
+                        if (isPhotoPaper)
+                        {
+                            mode.PaperSize = 0;
+                            mode.PaperWidth = photoPaperWidth;
+                            mode.PaperLength = photoPaperHeight;
+                            mode.Fields |= DmPaperSize | DmPaperWidth | DmPaperLength;
+                        }
+                        else
+                        {
+                            mode.PaperSize = paper;
+                            mode.Fields |= DmPaperSize;
+                        }
                         photoMediaType = unchecked((short)mode.MediaType);
                     }
                     finally
@@ -902,19 +932,10 @@ public sealed class WindowsPrintExecutor
                     if (photoMediaType is null)
                         throw new PrintExecutionBlockedException(
                             "PHOTO_MEDIA_TYPE_UNSUPPORTED",
-                            $"The selected printer driver does not expose a matching {entry.PhotoPaperFinish.ToLowerInvariant()} photo media type through Print Schema or an unambiguous legacy driver label. Choose a printer that supports it or change the requested finish. No pages were sent.");
+                            $"The selected printer driver does not expose a matching ${entry.PhotoPaperFinish.ToLowerInvariant()} photo media type through Print Schema or an unambiguous legacy driver label. Choose a printer that supports it or change the requested finish. No pages were sent.");
                     mode.MediaType = unchecked((ushort)photoMediaType.Value);
                     mode.Fields |= DmMediaType;
                 }
-            }
-            else
-            {
-                if (SupportsPaper(queueName, pointer, paper) is false && !isIdDocument)
-                    throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
-                // For ID sheets, a negative capability-list result is advisory. Ask
-                // DocumentProperties to apply A4 and verify its response below.
-                mode.PaperSize = paper;
-                mode.Fields |= DmPaperSize;
             }
 
             var orientationCapability = DeviceCapabilitiesW(queueName, null, DcOrientation, IntPtr.Zero, pointer);
