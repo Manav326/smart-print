@@ -541,7 +541,7 @@ test("Photo Studio normalizes the live Number of copies input value on blur",()=
 test("Photo Studio prevents apply without a whole-number quantity or any shop photo rates",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.ok(studio.includes("const copiesInputValid = Number.isInteger(parsedCopiesInput) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies"));
- assert.ok(studio.includes("Enter a whole number of copies from 1 to {maxCopies}"));
+ assert.ok(studio.includes("Enter 1–{maxCopies} whole copies."));
  assert.match(studio,/Photo printing is not enabled for any size at this shop/);
  assert.ok(studio.includes("availableSizes.length === 0 || !copiesInputValid"));
 });
@@ -677,11 +677,11 @@ test("Photo Studio explains copies, physical output, estimated price and true so
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
  assert.match(studio,/Number of copies/);
- assert.match(studio,/Copies of this same photo/);
- assert.match(studio,/Several copies arranged on A4 sheets/);
- assert.match(studio,/One print per sheet at the selected size/);
- assert.match(studio,/Estimated photo subtotal/);
- assert.match(studio,/PDF output uses a 300-DPI target; it cannot add missing detail/);
+ assert.match(studio,/Same photo, multiple copies/);
+ assert.match(studio,/Multiple copies per A4 sheet/);
+ assert.match(studio,/One print per sheet/);
+ assert.match(studio,/Est\. subtotal/);
+ assert.match(studio,/300-DPI output cannot restore detail missing from the source/);
  assert.match(studio,/outputPageCount>1/);
  assert.match(css,/toolRailSectionLabel/);
  assert.ok(css.includes("max-height:min(30vh,230px)"));
