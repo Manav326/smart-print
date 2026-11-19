@@ -4198,7 +4198,9 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
       onUnavailable();
       setPermissionState("unknown");
       setCheckStatus("unavailable");
-      setMessage("The shop computer isn't reachable on this Wi-Fi. Choose Secure queue · HTTPS to continue.");
+      setMessage(cloudAssistedPrintingEnabled
+        ? "The shop computer isn't reachable on this Wi-Fi. Choose Cloud-assisted · HTTPS to continue."
+        : "The shop computer isn't reachable on this Wi-Fi. Choose Secure queue · HTTPS to continue.");
       return ()=>{checkGeneration.current++;};
     }
     onReady(false);
