@@ -3941,3 +3941,41 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 @media(max-width:900px){.platform-data-metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:760px){.platform-data-intro{align-items:flex-start;flex-direction:column}.platform-data-actions{width:100%;justify-content:space-between}.platform-data-window{flex-direction:column;gap:4px}.platform-data-storage-grid{grid-template-columns:1fr}.platform-data-channel-row{grid-template-columns:minmax(120px,1.2fr) minmax(85px,.8fr);gap:7px}.platform-data-channel-row>span,.platform-data-channel-row>small{grid-column:2}.platform-data-table-panel{padding:12px}}
 @media(max-width:480px){.platform-data-metrics-grid{grid-template-columns:1fr}.platform-data-actions{align-items:flex-end}.platform-data-range{flex:1}.platform-data-range select{width:100%}.platform-data-metric{padding:13px}}
+
+/* Printer capability diagnostics: compact at-a-glance facts, expandable detail. */
+.printer-capability-panel{margin-top:13px;padding:12px;border:1px solid var(--border);border-radius:11px;background:var(--surface);min-width:0}
+.printer-capability-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;margin-bottom:9px}
+.printer-capability-heading strong{font:700 10px Manrope,sans-serif;color:var(--text)}
+.printer-capability-heading>span{font-size:8px;color:var(--faint);text-align:right}
+.printer-capability-tiles{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.printer-capability-tile{display:flex;flex-direction:column;gap:4px;min-width:0;padding:8px;border:1px solid var(--border-soft);border-radius:8px;background:var(--surface-2)}
+.printer-capability-tile>span,.printer-capability-facts>div>span,.printer-driver-identity>span{font-size:8px;color:var(--muted)}
+.printer-capability-tile>strong{font-size:9px;line-height:1.4;overflow-wrap:anywhere}
+.capability-state-supported{color:var(--green)!important}
+.capability-state-unsupported{color:var(--red)!important}
+.capability-state-unknown{color:var(--faint)!important}
+.printer-diagnostics{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
+.printer-diagnostics>summary{display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;color:var(--accent);font-size:9px;font-weight:700;outline-offset:4px}
+.printer-diagnostics>summary::-webkit-details-marker{display:none}
+.printer-diagnostics>summary:after{content:"⌄";margin-left:auto;font-size:14px;line-height:1}
+.printer-diagnostics[open]>summary:after{content:"⌃"}
+.printer-diagnostic-content{display:flex;flex-direction:column;gap:10px;padding-top:11px;min-width:0}
+.printer-driver-identity{display:flex;flex-direction:column;gap:4px;min-width:0}
+.printer-driver-identity strong{font-size:9px;color:var(--text);overflow-wrap:anywhere}
+.printer-driver-identity small,.printer-last-seen{font-size:8px;color:var(--faint)}
+.printer-capability-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.printer-capability-facts>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.printer-capability-facts>div>strong{font-size:8px;font-weight:600;color:var(--text);overflow-wrap:anywhere;line-height:1.45}
+.printer-diagnostic-advice{display:flex;flex-direction:column;gap:5px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2)}
+.printer-diagnostic-advice.warning{border-color:color-mix(in srgb,var(--amber) 35%,var(--border));background:color-mix(in srgb,var(--amber) 8%,var(--surface-2))}
+.printer-diagnostic-advice strong{font-size:8px;color:var(--text)}
+.printer-diagnostic-advice span{font-size:8px;line-height:1.55;color:var(--muted)}
+.printer-last-seen{line-height:1.4}
+.customer-advanced-help{grid-column:1/-1;margin:0;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface-2);font-size:9px;line-height:1.55;color:var(--muted)}
+@media(max-width:760px){
+  .printer-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:520px){
+  .printer-grid{grid-template-columns:minmax(0,1fr)}
+  .printer-capability-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
