@@ -868,3 +868,50 @@ test("shop PDF previews never leave an indefinite loading spinner when the brows
   assert.ok(preview.includes("setSlow(false); setLoading(false)"), "A late viewer load must still clear the advisory state.");
   assert.ok(css.includes(".shop-document-preview-slow{"));
 });
+
+
+test("customer batch quote separates the total, included files, excluded files and optional price details", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /aria-label="Batch quote summary"/);
+  assert.match(app, /Total for \{acceptedQuoteEntries\.length\} accepted/);
+  assert.match(app, /customer-batch-quote-chip included/);
+  assert.match(app, /customer-batch-quote-chip excluded/);
+  assert.match(app, /customer-batch-quote-chip document/);
+  assert.match(app, /customer-batch-quote-chip id-card/);
+  assert.match(app, /customer-batch-quote-chip photo/);
+  assert.match(app, /aria-label="File-by-file prices"/);
+  assert.match(app, /customer-batch-quote-line-amount/);
+  assert.match(app, /<details className="customer-batch-quote-details">/);
+  assert.match(app, /See price breakdown/);
+  assert.match(app, /This is a quote, not a payment/);
+  assert.match(css, /\.customer-batch-quote-lines>div\.customer-batch-quote-line\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\) auto/s);
+  assert.match(css, /\.customer-batch-quote-details\s*\{/);
+  assert.match(css, /@media\(max-width:650px\)\s*\{[^}]*\.customer-batch-quote-card/s);
+  assert.match(css, /@media\(max-width:380px\)\s*\{[^}]*\.customer-batch-quote-heading/s);
+});
+
+test("shop batch review communicates included and excluded choices, valid quotes and non-payment next steps", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /aria-label="Batch review summary"/);
+  assert.match(app, /Accepted value · valid quotes only/);
+  assert.match(app, /need a fresh quote/);
+  assert.match(app, /Include this file in the customer's batch checkout/);
+  assert.match(app, /Will be excluded/);
+  assert.match(app, /Not charged/);
+  assert.match(app, /source pages → \{outputSides\} output sides/);
+  assert.match(app, /Applying this review saves the file decisions\. It does not collect payment or send files to a printer\./);
+  assert.match(app, /Save batch review/);
+  assert.match(app, /<details className="batch-review-folder"/);
+  assert.match(css, /\.batch-review-overview\s*\{/);
+  assert.match(css, /\.batch-review-stats\s*>\.included/);
+  assert.match(css, /\.batch-review-stats\s*>\.excluded/);
+  assert.match(css, /\.batch-review-stats\s*>\.refresh/);
+  assert.match(css, /\.batch-review-file-finance/);
+  assert.match(css, /\.batch-review-next-step/);
+  assert.match(css, /@media\(max-width:650px\)\s*\{[^}]*\.batch-review-row\{grid-template-columns:minmax\(0,1fr\) auto\}/s);
+  assert.match(css, /html\[data-theme="dark"\] \.batch-review-overview/);
+});
