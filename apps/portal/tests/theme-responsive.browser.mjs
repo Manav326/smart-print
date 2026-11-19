@@ -805,7 +805,7 @@ async function exercisePhotoStudioBrowser() {
     if (item.mode === "customer") {
       assert.equal(await reopened.locator('input[type="date"]').count(), 0,
         "Customer name and DOB fields must be hidden until explicitly enabled.");
-      await reopened.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).check();
+      await reopened.getByRole("checkbox", { name: /Print name and date of birth below each photo/ }).check();
       await reopened.getByLabel("Name for form (optional)").fill("Browser QA Customer");
       await reopened.getByLabel("Date of birth (optional)").fill("2000-01-02");
       assert.equal(await reopened.locator('input[type="date"]').count(), 1);
@@ -814,13 +814,13 @@ async function exercisePhotoStudioBrowser() {
     const largePhotoBatch = item.mode === "shop" && item.width === 768;
     if (largePhotoBatch) {
       await activatePhotoTool(page, reopened, "Sheet", "Photos per A4 page");
-      const batchQuantity = reopened.getByLabel("Number of photos");
+      const batchQuantity = reopened.getByLabel("Number of copies");
       await batchQuantity.waitFor({ state: "visible" });
       assert.equal(await batchQuantity.count(),1,"Shop Photo Studio must show one number-of-photos input in Sheet settings.");
       await batchQuantity.fill("50");
       await batchQuantity.press("Tab");
       await page.waitForFunction(() => {
-        const input = document.querySelector('[role="dialog"] input[aria-label="Number of photos"]');
+        const input = document.querySelector('[role="dialog"] input[aria-label="Number of copies"]');
         const rows = Array.from(document.querySelectorAll("[class*='sheetSummary'] > div"));
         const pages = rows.find(row => row.textContent?.includes("A4 pages in this job"))?.querySelector("strong")?.textContent;
         return input instanceof HTMLInputElement && input.value === "50" && pages === "2";
@@ -1069,13 +1069,13 @@ async function exercisePhotoStudioFeatureMatrix() {
     await setPhotoRange(dialog, "Contrast", 140);
     await setPhotoRange(dialog, "Colour", 160);
     pixels = await readPhotoCanvasPixels(page);
-    await dialog.getByRole("button", { name: "Reset", exact: true }).click();
+    await dialog.getByRole("button", { name: "Reset look", exact: true }).click();
     assert.equal(await natural.getAttribute("aria-pressed"), "true");
     assert.notDeepEqual(await readPhotoCanvasPixels(page), pixels);
-    await dialog.getByRole("button", { name: "Zoom in" }).click();
-    assert.equal(await dialog.getByText("1.1×", { exact: true }).innerText(), "1.1×");
-    await dialog.getByRole("button", { name: "Zoom out" }).click();
-    assert.equal(await dialog.getByText("1.0×", { exact: true }).innerText(), "1.0×");
+    await dialog.getByRole("button", { name: "Preview zoom in" }).click();
+    assert.equal(await dialog.locator("[data-testid=\"photo-studio-preview-zoom\"]").innerText(), "1.1×");
+    await dialog.getByRole("button", { name: "Preview zoom out" }).click();
+    assert.equal(await dialog.locator("[data-testid=\"photo-studio-preview-zoom\"]").innerText(), "1.0×");
 
     // Edge-only sampled background replacement. A blank A4 margin must not be sampleable.
     await dialog.getByRole("button", { name: "Background", exact: true }).click();
@@ -1109,7 +1109,7 @@ async function exercisePhotoStudioFeatureMatrix() {
 
     // Optional form details, length/date constraints, font size and text colour.
     await dialog.getByRole("button", { name: "Sheet", exact: true }).click();
-    const captionToggle = dialog.getByRole("checkbox", { name: /Add name and DOB to each photo/ });
+    const captionToggle = dialog.getByRole("checkbox", { name: /Print name and date of birth below each photo/ });
     assert.equal(await captionToggle.isChecked(), false, "Captions must be disabled by default.");
     await captionToggle.check();
     const nameInput = dialog.getByLabel("Name for form (optional)");
@@ -1202,7 +1202,7 @@ async function exercisePhotoStudioFeatureMatrix() {
 
     // Quantity boundaries and explicit rejection of fractions.
     await dialog.getByRole("button", { name: "Sheet", exact: true }).click();
-    const count = dialog.getByLabel("Number of photos");
+    const count = dialog.getByLabel("Number of copies");
     await count.waitFor({ state: "visible" });
     assert.equal(await count.count(),1,"Photo Studio must expose one quantity input.");
     await count.fill("101");
