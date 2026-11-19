@@ -6710,7 +6710,9 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
     {
         await db.LocalPrintUploadTickets
             .Where(item => item.Id == ticket.Id && item.TenantId == device.TenantId &&
-                           item.AgentDeviceId == device.Id && item.CompletedUtc == null)
+                           item.AgentDeviceId == device.Id && item.CompletedUtc == null &&
+                           (item.PrivateRelayStage == PrivateRelayProgressRules.WaitingForUpload ||
+                            item.PrivateRelayStage == PrivateRelayProgressRules.ReceivingEncryptedPayload))
             .ExecuteUpdateAsync(update => update
                 .SetProperty(item => item.PrivateRelayStage, PrivateRelayProgressRules.ReceivingEncryptedPayload)
                 .SetProperty(item => item.PrivateRelayStageUpdatedUtc, now), ct);
