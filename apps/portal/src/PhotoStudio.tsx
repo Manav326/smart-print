@@ -805,7 +805,7 @@ export default function PhotoStudio({
           <button type="button" id="photo-studio-tool-sheet" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
           <button type="button" id="photo-studio-tool-crop" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
           <button type="button" id="photo-studio-tool-looks" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
-          <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} title="Add, select and position text on the A4 sheet"><Type size={17}/><span>Text</span></button>
+          <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"}><Type size={17}/><span>Text</span></button>
           <button type="button" id="photo-studio-tool-background" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"}><PaintBucket size={17}/><span>Background</span></button>
         </nav>
 
@@ -829,11 +829,12 @@ export default function PhotoStudio({
                 <p>The 300-DPI check warns when the selected crop may look soft. Your original photo is never changed, and facial features are not reshaped or retouched.</p>
               </>}
               {lookPanel&&<>
-                <p>Natural, Warm, Crisp and Black &amp; white are print-oriented starting points. Choose one, then fine-tune brightness, contrast and colour.</p>
-                <p>Reset restores the original framing and Natural look. Adjustments are applied to the prepared output, not to your source file.</p>
+                <p>Choose a print-friendly starting point, then fine-tune brightness, contrast and colour. Reset restores the original framing and Natural look.</p>
+                {LOOKS.map(item=><p key={item.id}><strong>{item.label}:</strong> {item.note}</p>)}
+                <p>Adjustments are applied to the prepared output, not to your source file.</p>
               </>}
               {textPanel&&<>
-                <p>Add a text layer, select it on the preview, and drag it into position. Use the controls to change its wording, size, colour and weight.</p>
+                <p>Add a text layer, select it on the preview, and drag it into position. Use the controls to change its wording, size, colour and weight, or switch on Bold text.</p>
                 <p>Text layers are included in the prepared PDF. Name and date-of-birth captions are separate, optional fields and are only printed when enabled in Sheet.</p>
               </>}
               {backgroundPanel&&<>
