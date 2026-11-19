@@ -2238,7 +2238,7 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   ).filter(Boolean);
   const status=printer.status.toLowerCase();
   const statusIssue=status.includes("offline")||status.includes("stale")||status.includes("revoked")||
-    status.includes("paused")||status==="unknown";
+    status.includes("paused")||status.includes("error")||status==="unknown";
   const diagnostic=status.includes("revoked")
     ?"The paired Print Agent has been revoked. Re-enrol the shop computer before using this queue."
     :status.includes("offline")
@@ -2247,8 +2247,10 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
         ?"The last Windows printer inventory is stale. Reconnect the Agent or refresh printer discovery on the shop computer."
         :status.includes("paused")
           ?"Windows reports this queue as paused. Resume it in Windows Settings → Printers & scanners, then refresh discovery."
-          :status==="unknown"
-            ?"Windows could not confirm the live queue state. Check the printer, cable/network and Windows queue before retrying."
+          :status.includes("error")
+            ?"Windows reports a printer error. Open the queue in Windows, clear the blocked document or resolve the displayed driver/device warning, then reconnect the printer."
+            :status==="unknown"
+              ?"Windows could not confirm the live queue state. Check the printer, cable/network and Windows queue before retrying."
             :!snapshot
               ?"No capability snapshot has been received yet. Confirm the Agent is connected, then reconnect or rediscover this printer."
               :nupState==="unknown"||colourState==="unknown"||duplexState==="unknown"
