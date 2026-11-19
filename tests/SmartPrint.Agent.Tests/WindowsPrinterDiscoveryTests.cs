@@ -95,13 +95,18 @@ public sealed class WindowsPrinterDiscoveryTests
         var root = document.RootElement;
 
         Assert.Equal(JsonValueKind.Object, root.ValueKind);
-        Assert.Equal(1, root.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("WINDOWS_DRIVER", root.GetProperty("source").GetString());
+        Assert.Equal("Microsoft Print To PDF", root.GetProperty("driverName").GetString());
         Assert.True(root.GetProperty("discoveredAtUtc").ValueKind is JsonValueKind.String);
         Assert.True(root.GetProperty("orientation").ValueKind is JsonValueKind.Object);
         Assert.True(root.GetProperty("paperSizes").ValueKind is JsonValueKind.Array);
         Assert.True(root.GetProperty("mediaTypes").ValueKind is JsonValueKind.Array);
         Assert.True(root.GetProperty("resolutions").ValueKind is JsonValueKind.Array);
+        Assert.Contains(root.GetProperty("colorStatus").GetString(), new[] { "supported", "unsupported", "unknown" });
+        Assert.Contains(root.GetProperty("duplexStatus").GetString(), new[] { "supported", "unsupported", "unknown" });
+        Assert.Contains(root.GetProperty("pagesPerSheetStatus").GetString(), new[] { "supported", "unsupported", "unknown" });
+        Assert.Contains(root.GetProperty("pagesPerSheetDirectionStatus").GetString(), new[] { "supported", "unsupported", "unknown" });
 
         var paperSizes = root.GetProperty("paperSizes");
         Assert.NotEmpty(paperSizes.EnumerateArray());
