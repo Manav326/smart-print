@@ -90,7 +90,7 @@ public sealed class WindowsPrinterDiscoveryTests
         if (!OperatingSystem.IsWindows())
             return;
 
-        var json = WindowsPrinterCapabilityDiscovery.DiscoverJson("Microsoft Print to PDF");
+        var json = WindowsPrinterCapabilityDiscovery.DiscoverJson("Microsoft Print to PDF", "Microsoft Print To PDF");
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
 
