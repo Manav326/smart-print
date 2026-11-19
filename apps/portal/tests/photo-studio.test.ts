@@ -124,7 +124,7 @@ test("customer Photo Studio cannot turn an already uploaded original into a seco
  assert.match(app,/Already sent to shop/);
  assert.match(app,/Photo already sent/);
  assert.match(app,/No second upload is needed/);
- assert.match(app,/without creating another print job/);
+ assert.match(app,/reopening it here would create a duplicate print request/);
 });
 
 test("customer photo preparation depends on configured shop pricing, not the current printer capability",()=>{
