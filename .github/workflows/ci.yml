@@ -9,6 +9,12 @@ on:
     branches: [main, "feature/**", "feat/**"]
   pull_request:
     branches: [main, "feature/**", "feat/**"]
+  workflow_dispatch:
+    inputs:
+      epson_l360_driver_package_url:
+        description: "Public HTTPS URL for the official Epson L360 x64 2.60.00 EXE. It is verified for Epson Authenticode signing before install."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -396,24 +402,42 @@ jobs:
       - name: Validate official Epson L360 browser downloader
         if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' }}
         run: node --check scripts/qa/download-epson-l360-driver.browser.mjs
+      - name: Download supplied Epson L360 driver package from HTTPS URL
+        id: epson_l360_supplied_package
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' && inputs.epson_l360_driver_package_url != '' }}
+        shell: pwsh
+        env:
+          EPSON_DRIVER_URL: ${{ inputs.epson_l360_driver_package_url }}
+          EPSON_PACKAGE_OUTPUT: ${{ runner.temp }}/smartprint-epson-l360-download/L360_x64_260JAHomeExportAsiaML.exe
+        run: |
+          $uri = [Uri]$env:EPSON_DRIVER_URL
+          if ($uri.Scheme -ne "https") { throw "The supplied Epson driver URL must use HTTPS." }
+          $directory = Split-Path -Parent $env:EPSON_PACKAGE_OUTPUT
+          New-Item -ItemType Directory -Force -Path $directory | Out-Null
+          Invoke-WebRequest -Uri $env:EPSON_DRIVER_URL -OutFile $env:EPSON_PACKAGE_OUTPUT -MaximumRedirection 10 -UseBasicParsing
+          $package = Get-Item -LiteralPath $env:EPSON_PACKAGE_OUTPUT
+          if ($package.Length -lt 5MB) { throw "The supplied Epson package is unexpectedly small ($($package.Length) bytes)." }
+          Write-Host "Downloaded supplied Epson L360 candidate: $($package.Length) bytes. The installer will reject it unless Authenticode identifies Epson as the valid signer."
+          "package_path=$env:EPSON_PACKAGE_OUTPUT" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Download the official Epson L360 driver through Epson Support
         id: epson_l360_package_download
-        if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.epson_l360_chromium.outcome == 'success' && !(github.event_name == 'workflow_dispatch' && inputs.epson_l360_driver_package_url != '') }}
+        continue-on-error: true
         shell: pwsh
         env:
           PLAYWRIGHT_MODULE_DIR: ${{ steps.epson_l360_chromium.outputs.module_directory }}
           SMARTPRINT_EPSON_L360_PACKAGE_OUTPUT: ${{ runner.temp }}/smartprint-epson-l360-download/L360_x64_260JAHomeExportAsiaML.exe
         run: |
           node scripts/qa/download-epson-l360-driver.browser.mjs
-          if ($LASTEXITCODE -ne 0) { throw "The official Epson Support browser download did not produce the L360 driver package." }
+          if ($LASTEXITCODE -ne 0) { throw "Epson's Download Center blocked or did not return the L360 package. Supply a public HTTPS Epson-signed package URL through workflow_dispatch to run the vendor-driver qualification." }
           "package_path=$env:SMARTPRINT_EPSON_L360_PACKAGE_OUTPUT" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - name: Install the official Epson L360 driver in an isolated file-port queue
         id: epson_l360_setup
-        if: ${{ !cancelled() && steps.epson_l360_package_download.outcome == 'success' }}
+        if: ${{ !cancelled() && (steps.epson_l360_supplied_package.outcome == 'success' || steps.epson_l360_package_download.outcome == 'success') }}
         shell: pwsh
         env:
-          SMARTPRINT_EPSON_L360_PACKAGE_PATH: ${{ steps.epson_l360_package_download.outputs.package_path }}
-        run: ./scripts/qa/install-epson-l360-driver.ps1 -QueueName "SmartPrint CI Epson L360" -PackagePath $env:SMARTPRINT_EPSON_L360_PACKAGE_PATH
+          SMARTPRINT_EPSON_L360_PACKAGE_PATH: ${{ steps.epson_l360_supplied_package.outputs.package_path || steps.epson_l360_package_download.outputs.package_path }}
+        run: ./scripts/qa/install-epson-l360-driver.ps1 -QueueName "SmartPrint CI Epson L360" -SuppliedPackagePath $env:SMARTPRINT_EPSON_L360_PACKAGE_PATH
       - name: Install Portal workspace for the real shop-owner browser flow
         id: epson_l360_portal_dependencies
         if: ${{ !cancelled() && steps.epson_l360_setup.outcome == 'success' }}
