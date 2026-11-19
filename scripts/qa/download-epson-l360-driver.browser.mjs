@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, statSync } from "node:fs";
+import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, resolve, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -16,6 +16,10 @@ const officialSupportUrl =
   "https://www.epson.co.in/Support/Printers/All-In-One/L-Series/Epson-L360/s/SPT_C11CE55501?review-filter=Windows+10+64-bit";
 const officialChinaSupportUrl =
   "https://www.epson.com.cn/drive/393e7b3d407c4b5c88679fe6a037d0dc.html?productId=d1fcffbb64ab41f7a970e57c2fda4613";
+// Resolved from the visible "立即下载" link (link 61) on Epson's official L360
+// x64 2.60.00 product support page. This is the vendor's binary URL, not a mirror.
+const officialChinaBinaryUrl =
+  "https://download-center.epson.com/f/module/1335e8df-d703-40da-884b-c7cea22d34ee/L360_x64_260JAHomeExportAsiaML.exe";
 // Global Download Center is the India support page's official 2.60.00 module.
 // The China support page is an official region-specific alternative for the same
 // L360 x64 2.60.00 driver; either package must pass the Epson Authenticode check.
@@ -73,24 +77,36 @@ try {
     assert.match(chinaText, /Windows.*64.*打印驱动程序|Windows.*64.*driver/i,
       "Epson China page did not identify the L360 Windows x64 printer driver.");
 
-    // Epson China renders the "立即下载" control as a scripted element without
-    // a conventional anchor href in some regions. Activate the visible vendor
-    // control in the same page so the browser sends Epson's expected Referer.
-    const chinaDownloadControl = page.getByText("立即下载", { exact: true }).last();
-    if (await chinaDownloadControl.count() > 0) {
-      try {
-        const downloadPromise = page.waitForEvent("download", { timeout: 45000 });
-        await chinaDownloadControl.click({ timeout: 15000 });
-        const download = await downloadPromise;
-        await download.saveAs(target);
-        const downloadedFile = statSync(target);
-        assert.ok(downloadedFile.size >= expectedMinimumBytes,
-          "Epson China driver package is unexpectedly small: " + downloadedFile.size + " bytes");
-        console.log("[EPSON-L360-DOWNLOAD] Saved Epson China package using its visible 立即下载 control: " +
-          target + " (" + downloadedFile.size + " bytes).");
+    // The published support-page link resolves to the direct executable URL.
+    // Use Playwright's cookie-aware request context with the official product
+    // page as Referer; this avoids relying on a JavaScript control to emit a
+    // browser download event.
+    if (!packageDownloaded) {
+      const response = await context.request.get(officialChinaBinaryUrl, {
+        headers: {
+          "Accept": "application/octet-stream, application/x-msdownload, */*",
+          "Referer": officialChinaSupportUrl,
+          "Origin": "https://www.epson.com.cn",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131.0.0.0 Safari/537.36"
+        },
+        timeout: 90000,
+        maxRedirects: 10
+      });
+      console.log("[EPSON-L360-DOWNLOAD] Official Epson China binary request HTTP " + response.status() +
+        "; content-type=" + (response.headers()["content-type"] ?? "unknown") +
+        "; content-disposition=" + (response.headers()["content-disposition"] ?? "unknown"));
+      if (response.ok()) {
+        const body = await response.body();
+        assert.ok(body.length >= expectedMinimumBytes,
+          "Epson China driver package is unexpectedly small: " + body.length + " bytes");
+        writeFileSync(target, body);
+        console.log("[EPSON-L360-DOWNLOAD] Saved the official Epson L360 binary from the resolved support-page link: " +
+          target + " (" + body.length + " bytes).");
         packageDownloaded = true;
-      } catch (error) {
-        console.log("[EPSON-L360-DOWNLOAD] Epson China visible download control did not emit a package download; checking its DOM link/action metadata. " + String(error));
+      } else {
+        const responseText = (await response.text()).slice(0, 1000);
+        console.log("[EPSON-L360-DOWNLOAD] Direct Epson package request was blocked: HTTP " +
+          response.status() + "; response=" + responseText);
       }
     }
 
