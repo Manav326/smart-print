@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FileText } from "lucide-react";
 import { currentBrowserSupportsInlinePdfPreview, type PreviewMediaType } from "./document-preview";
 
@@ -25,6 +25,7 @@ export default function ShopDocumentPreviewSurface(props: Props) {
 function ShopDocumentPreviewFrame({ name, url, mediaType, printKind }: Props) {
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [slow, setSlow] = useState(false);
   const isPdf = mediaType === "application/pdf";
   const isImage = mediaType === "image/jpeg" || mediaType === "image/png";
   const supportedType = (isPdf || isImage) ? mediaType as PreviewMediaType : null;
@@ -32,6 +33,16 @@ function ShopDocumentPreviewFrame({ name, url, mediaType, printKind }: Props) {
   const canRender = !failed && supportedType !== null && (!isPdf || inlinePdfSupported);
   const showPhotoWatermark = printKind === "PHOTO" && isPdf && canRender;
   const showImageWatermark = isImage && canRender;
+
+  // Some browser PDF viewers attach the iframe but do not emit a reliable
+  // load event (notably in headless/embedded Chromium). Stop the spinner after
+  // a bounded period without tearing down the iframe: a late PDF render can
+  // still complete and clear this advisory state.
+  useEffect(() => {
+    if (!isPdf || !inlinePdfSupported || !loading) return;
+    const timer = window.setTimeout(() => setSlow(true), 8_000);
+    return () => window.clearTimeout(timer);
+  }, [isPdf, inlinePdfSupported, loading, url]);
 
   const unavailableMessage = failed
     ? "We could not load this preview. Its access link may have expired or the shop connection may have been interrupted. Refresh the order or ask the shop to retry the preview."
@@ -44,7 +55,7 @@ function ShopDocumentPreviewFrame({ name, url, mediaType, printKind }: Props) {
       className="shop-document-preview"
       data-testid="shop-document-preview"
       data-preview-type={supportedType ?? "unsupported"}
-      data-preview-state={failed ? "failed" : !supportedType || (isPdf && !inlinePdfSupported) ? "unsupported" : loading ? "loading" : "ready"}
+      data-preview-state={failed ? "failed" : !supportedType || (isPdf && !inlinePdfSupported) ? "unsupported" : loading ? (slow ? "slow" : "loading") : "ready"}
       aria-label={name + " preview"}
       onContextMenu={event => {
         if (isImage || printKind === "PHOTO") event.preventDefault();
@@ -57,7 +68,7 @@ function ShopDocumentPreviewFrame({ name, url, mediaType, printKind }: Props) {
         <iframe
           src={url + "#toolbar=0&navpanes=0&scrollbar=0"}
           title={name + " PDF preview"}
-          onLoad={() => setLoading(false)}
+          onLoad={() => { setSlow(false); setLoading(false); }}
           onError={() => { setFailed(true); setLoading(false); }}
         />
       )}
@@ -70,11 +81,17 @@ function ShopDocumentPreviewFrame({ name, url, mediaType, printKind }: Props) {
           onError={() => { setFailed(true); setLoading(false); }}
         />
       )}
-      {canRender && loading && (
+      {canRender && loading && !slow && (
         <div className="shop-document-preview-loading" role="status" aria-live="polite">
           <span className="button-spinner" />
           <strong>Loading preview</strong>
           <small>Large documents may take a moment to appear.</small>
+        </div>
+      )}
+      {canRender && loading && slow && (
+        <div className="shop-document-preview-slow" role="status" aria-live="polite">
+          <strong>Preview is taking longer than expected</strong>
+          <span>The PDF viewer has not responded yet. You can continue reviewing the order; the preview may still appear.</span>
         </div>
       )}
       {!canRender && (
