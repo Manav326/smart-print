@@ -614,7 +614,7 @@ if (args.Length > 0 && string.Equals(args[0], "--service-fixture", StringCompari
     serviceBuilder.Services.AddSingleton(fixtureArguments);
     serviceBuilder.Services.AddWindowsService(options =>
     {
-        options.ServiceName = "SmartPrint Lifecycle QA LocalService Probe";
+        options.ServiceName = "SmartPrintLifecycleLocalServiceProbe";
     });
     serviceBuilder.Services.AddHostedService<LifecycleFixtureService>();
     await serviceBuilder.Build().RunAsync();
