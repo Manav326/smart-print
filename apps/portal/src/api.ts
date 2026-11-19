@@ -2222,7 +2222,10 @@ export async function uploadCustomerDocumentLocally(
         try { payload = JSON.parse(raw); } catch { payload = raw; }
       }
       if (!response.ok) {
-        // Continue to the next advertised shop address before using HTTPS recovery.
+        // The Agent may have claimed this same ticket before returning an error.
+        // Private Printing therefore reconciles the original path instead of
+        // posting the same payload to another advertised address.
+        if (privatePrinting) break;
         continue;
       }
 
@@ -2247,7 +2250,9 @@ export async function uploadCustomerDocumentLocally(
         }
       };
     } catch {
-      // Try the next advertised shop address, then continue over HTTPS if enabled.
+      // A failed private request may already have reached the paired Agent.
+      // Leave its ticket untouched and reconcile before trying another transport.
+      if (privatePrinting) break;
     } finally {
       window.clearTimeout(timeout);
       if(localStagePollController) {
