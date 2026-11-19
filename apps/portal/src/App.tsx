@@ -6093,7 +6093,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         </button>
       </div>
       <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted on your device. The protected test PDF stays on this computer for up to 24 hours; it is not a physical print. Your original stays on your device.":"Encrypted on your device and decrypted only by the paired Windows Agent. The shop-side copy is erased after confirmed output. Your original stays on your device."}</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Uses the shop's normal print queue. The shop-side copy is deleted 7 days after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
-      {!canOfferPrivatePrinting&&<small className="customer-privacy-unavailable">Private Printing unavailable. <InfoTooltip label="Why Private Printing is unavailable"><span>{!hasAssignedPrinter?"This QR station needs an active printer assignment.":!localAgent?.agentDeviceId||!localAgent.documentEncryptionPublicKey?"The paired Windows Agent must be online and publish its encryption key.":!privateQueueReady?"The assigned printer queue must report Ready or Busy.":privateVirtualTestMode?"Virtual test output is blocked until the Company Main Admin enables it in non-production.":"Private Printing requires an eligible physical printer or an approved non-production test printer."}</span></InfoTooltip></small>}
+      {!canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title="Private Printing unavailable">{!hasAssignedPrinter
+        ?"The shop needs to assign an active printer."
+        :!localAgent?.agentDeviceId||!localAgent.documentEncryptionPublicKey
+          ?"The paired shop computer must be online and publish its encryption key."
+          :!privateQueueReady
+            ?"The assigned printer queue must be Ready or Busy."
+            :privateVirtualTestMode
+              ?"The Company Main Admin must enable virtual test output."
+              :"The shop needs an eligible physical printer."}</CustomerInlineNotice>}
       {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on.</strong></span></div>}
       {files.some(isSmartPrintPhotoDocument)&&<div className="customer-private-confirmation" role="status">
         <ShieldCheck size={16}/>
