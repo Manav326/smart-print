@@ -981,7 +981,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     await cropHelp.click();
     assert.equal(await cropHelp.getAttribute("aria-expanded"), "true");
     const cropGuidance = dialog.getByRole("region", { name: "Crop & position guidance" });
-    assert.match(await cropGuidance.innerText(), /Drag directly on any photo/);
+    assert.match(await cropGuidance.innerText(), /Drag a photo to reframe it/);
     await page.keyboard.press("Escape");
     assert.equal(await cropHelp.getAttribute("aria-expanded"), "false",
       "Escape closes the help panel before the Photo Studio dialog.");
@@ -992,7 +992,7 @@ async function exercisePhotoStudioFeatureMatrix() {
       { tool: "Looks", title: "Photo look", expected: /Balanced, true-to-life colour/ },
       { tool: "Text", title: "Text layers", expected: /Bold text/ },
       { tool: "Background", title: "Photo background", expected: /colour-key tool, not AI subject recognition/ },
-      { tool: "Sheet", title: "Photo sheet & form details", expected: /assigned printer driver/ }
+      { tool: "Sheet", title: "Photo sheet & form details", expected: /printer compatibility before printing/ }
     ];
     for (const item of helpCases) {
       await dialog.getByRole("button", { name: item.tool, exact: true }).click();
