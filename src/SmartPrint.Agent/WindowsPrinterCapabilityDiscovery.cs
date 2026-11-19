@@ -324,7 +324,7 @@ public static class WindowsPrinterCapabilityDiscovery
                 requestedTicket,
                 PrintTicketScope.JobScope);
             if (validation.ValidatedPrintTicket.PageMediaType != requestedType)
-                throw new PrintQueueException(
+                throw new InvalidOperationException(
                     "The printer changed the requested photo media finish while validating its PrintTicket.");
 
             using var converter = new System.Printing.Interop.PrintTicketConverter(
