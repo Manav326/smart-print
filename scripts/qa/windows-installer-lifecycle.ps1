@@ -71,6 +71,9 @@ $programDataRoot = Join-Path $env:ProgramData "QRtoPrint"
 # Keep QA executables, result files and fingerprints outside the old SYSTEM-only
 # product tree. LocalService must be able to execute fixtures before ACL migration.
 $lifecycleDataRoot = Join-Path $env:ProgramData "SmartPrintLifecycleQA"
+# Keep executable test payloads in a dedicated Program Files QA folder.
+# LocalService receives read/execute only; mutable results remain in ProgramData.
+$lifecycleFixtureRuntimeRoot = Join-Path $env:ProgramFiles "SmartPrintLifecycleQA"
 $identityPath = Join-Path $programDataRoot "agent.identity"
 $queueManifest = Join-Path $programDataRoot "LocalQueue\11111111111141118111111111111111.json"
 $networkPreferencePath = Join-Path $programDataRoot "local-network.preference"
@@ -229,25 +232,42 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     Write-Host "[QA-ACTION] Run protected Agent data-preservation fixture as LocalService: mode=$Mode" -ForegroundColor Cyan
     $taskName = "SmartPrintLifecycleLocalServicePrinterProbe"
     $fixtureDataDirectory = $lifecycleDataRoot
-    New-Item -ItemType Directory -Force -Path $fixtureDataDirectory | Out-Null
+    $resultDirectory = Join-Path $fixtureDataDirectory "Results"
+    $serviceFixtureDirectory = $lifecycleFixtureRuntimeRoot
+    New-Item -ItemType Directory -Force -Path $fixtureDataDirectory, $resultDirectory | Out-Null
     $script:ownsLifecycleDataRoot = $true
     $buildOutputDirectory = Join-Path $fixtureProject "bin\Release\net10.0-windows"
-    $serviceFixtureDirectory = Join-Path $fixtureDataDirectory "Fixture"
-    # The first LocalService probe runs before legacy ACL migration. Do not rely
-    # on whatever inherited DACL the interactive seed happened to leave behind:
-    # make the isolated lifecycle directory explicitly writable by the service
-    # identity before either the task or its result file is created.
+    # Execute the QA apphost from Program Files rather than ProgramData. The
+    # latter is intended for data and may be subject to endpoint execution policy.
+    # Keep only LocalService read/execute rights on the fixture payload.
     $fixtureDataAcl = @(
         "*S-1-5-18:(OI)(CI)F",
         "*S-1-5-32-544:(OI)(CI)F",
         "*S-1-5-19:(OI)(CI)F"
+    )
+    $fixtureExecutableAcl = @(
+        "*S-1-5-18:(OI)(CI)F",
+        "*S-1-5-32-544:(OI)(CI)F",
+        "*S-1-5-19:(OI)(CI)RX"
     )
     $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
     & $icaclsPath $fixtureDataDirectory /inheritance:r /grant:r @fixtureDataAcl /C /Q | Out-Null
     if ($LASTEXITCODE -ne 0) {
         throw "Could not grant the LocalService lifecycle harness access to its isolated data directory."
     }
-    $resultPath = Join-Path $serviceFixtureDirectory "smartprint-localservice-fixture-$Mode.txt"
+    & $icaclsPath $resultDirectory /inheritance:r /grant:r @fixtureDataAcl /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not grant the LocalService lifecycle harness access to its result directory."
+    }
+    if (Test-Path -LiteralPath $serviceFixtureDirectory) {
+        throw "Refusing to overwrite an existing LocalService lifecycle runtime directory."
+    }
+    New-Item -ItemType Directory -Force -Path $serviceFixtureDirectory | Out-Null
+    & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureExecutableAcl /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not grant LocalService read/execute access to the isolated lifecycle fixture runtime."
+    }
+    $resultPath = Join-Path $resultDirectory "smartprint-localservice-fixture-$Mode.txt"
     $buildAssemblyPath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.dll"
     $buildExecutablePath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.exe"
     $fixtureExecutablePath = Join-Path $serviceFixtureDirectory "SmartPrintLifecycleFixture.exe"
@@ -261,8 +281,9 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
         New-Item -ItemType Directory -Force -Path $serviceFixtureDirectory | Out-Null
         Copy-Item -Path (Join-Path $buildOutputDirectory "*") -Destination $serviceFixtureDirectory -Recurse -Force
         # The fixture executable and its managed dependencies are protected
-        # independently from the data/result directory.
-        & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureDataAcl /T /C /Q | Out-Null
+        # independently from the data/result directory; LocalService can read/execute
+        # but cannot change the staged QA binary payload.
+        & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureExecutableAcl /T /C /Q | Out-Null
         if ($LASTEXITCODE -ne 0) {
             throw "Could not grant the LocalService lifecycle fixture access to its test-only binaries."
         }
@@ -549,6 +570,7 @@ try {
     Assert-True ($existingRules.Count -eq 0) "Refusing to alter existing SmartPrint firewall rules."
     Assert-True (-not (Test-Path -LiteralPath $identityPath)) "Refusing to overwrite an existing machine Agent identity fixture."
     Assert-True (-not (Test-Path -LiteralPath $lifecycleDataRoot)) "Refusing to overwrite an existing lifecycle QA data directory."
+    Assert-True (-not (Test-Path -LiteralPath $lifecycleFixtureRuntimeRoot)) "Refusing to overwrite an existing lifecycle QA runtime directory."
     Assert-True (-not (Test-Path -LiteralPath $networkPreferencePath)) "Refusing to overwrite an existing shop network preference."
     Assert-True (-not (Test-Path -LiteralPath $queueManifest)) "Refusing to overwrite an existing local print queue fixture."
 
@@ -1100,6 +1122,9 @@ finally {
     if ($script:ownsLifecycleDataRoot -and (Test-Path -LiteralPath $lifecycleDataRoot)) {
         Remove-Item -LiteralPath $lifecycleDataRoot -Recurse -Force -ErrorAction SilentlyContinue
         $script:ownsLifecycleDataRoot = $false
+    }
+    if (Test-Path -LiteralPath $lifecycleFixtureRuntimeRoot) {
+        Remove-Item -LiteralPath $lifecycleFixtureRuntimeRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
     if ($ownsPrinter) {
         Remove-Printer -Name $testPrinterName -ErrorAction SilentlyContinue
