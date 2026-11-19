@@ -68,11 +68,11 @@ test("Private Printing publishes durable, authenticated stage updates for direct
 
 test("Private Printing never starts a second relay while the same ticket is claimed for direct LAN transfer", () => {
   assert.match(api, /TransferPath = transferPath/);
-  assert.match(api, /ticket\.ClaimedUtc is not null[\\s\\S]{0,180}ticket\.ClaimLeaseExpiresUtc > now/);
+  assert.match(api, /ticket\.ClaimedUtc is not null[\s\S]{0,180}ticket\.ClaimLeaseExpiresUtc > now/);
   assert.match(api, /private_relay_direct_transfer_in_progress/);
   assert.match(api, /private_relay_cloud_transfer_in_progress/);
   assert.match(api, /if \(privatePrinting\) break/);
-  assert.match(api, /item\.PrivateRelayStage == PrivateRelayProgressRules\.WaitingForUpload[\\s\\S]{0,120}item\.PrivateRelayStage == PrivateRelayProgressRules\.ReceivingEncryptedPayload/);
+  assert.match(api, /item\.PrivateRelayStage == PrivateRelayProgressRules\.WaitingForUpload[\s\S]{0,120}item\.PrivateRelayStage == PrivateRelayProgressRules\.ReceivingEncryptedPayload/);
   const relay = api.slice(api.indexOf("async function uploadCustomerPrivateRelay"), api.indexOf("function createStreamingLocalMultipartBody"));
   assert.match(relay, /existing\.transferPath === "DIRECT_LAN"/);
   assert.match(relay, /existing\.transferPath === "CLOUD_RELAY"/);
