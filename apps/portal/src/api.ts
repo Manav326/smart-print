@@ -1798,6 +1798,7 @@ async function uploadCustomerPrivateRelay(
   }
 
   const deadline = Date.now() + 45_000;
+  let lastStageMessage=existing.stageMessage??existing.message??"Waiting for the shop computer";
   while (Date.now() < deadline) {
     let status: CustomerPrivateRelayStatus;
     try {
@@ -1807,9 +1808,10 @@ async function uploadCustomerPrivateRelay(
       await new Promise(resolve => window.setTimeout(resolve, 5_000));
       continue;
     }
+    lastStageMessage=status.stageMessage??status.message??lastStageMessage;
     onStage?.(
       status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state),
-      status.stageMessage ?? status.message ?? "Checking the secure shop handoff",
+      lastStageMessage,
       status.stageUpdatedUtc
     );
     if (status.state === "READY") {
@@ -1837,7 +1839,7 @@ async function uploadCustomerPrivateRelay(
   }
 
   throw new LocalUploadOutcomeUnknownError(
-    "Your file is still being prepared. Tap Retry to check its status."
+    "The shop computer is at this stage: "+lastStageMessage+". Processing may still be active. Retry this same file to refresh the original ticket; SmartPrint will not create a duplicate upload."
   );
 }
 
@@ -1846,7 +1848,7 @@ function createStreamingLocalMultipartBody(
   onProgress?: CustomerUploadProgressCallback
 ): { body: ReadableStream<Uint8Array>; contentType: string; totalBytes: number } {
   const boundary = "SmartPrint-" + crypto.randomUUID().replace(/-/g, "");
-  const safeName = file.name.replace(/[\r\n"]/g, "_").slice(0, 240) || "document";
+  const safeName = file.name.replace(/[\r\n"]/g, "_").replace(/[^\x20-\x7E]/g, "_").slice(0, 120) || "document";
   const encodedName = encodeURIComponent(file.name).replace(/['()]/g, character =>
     "%" + character.charCodeAt(0).toString(16).toUpperCase()
   );
