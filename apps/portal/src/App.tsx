@@ -6000,6 +6000,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     (!entry.quote||quoteExpiredForBatchItem(entry.item))
   ).length;
   const batchQuoteCurrency=quoteEntries[0]?.quote?.currency??quoteItems[0]?.job.currency??"INR";
+  const batchQuoteTotalDisplay=acceptedQuoteEntries.length>0
+    ?formatMoney(batchQuoteTotal,batchQuoteCurrency)
+    :quoteRows.some(entry=>!entry.excluded)?"Pending":formatMoney(0,batchQuoteCurrency);
   const batchQuoteCounts={
     documents:acceptedQuoteEntries.filter(entry=>normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="DOCUMENT").length,
     idCards:acceptedQuoteEntries.filter(entry=>normalizedCustomerPrintKind(entry.quote!.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="ID_DOCUMENT").length,
@@ -6318,7 +6321,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {error&&<div className="customer-flow-error" role="alert">{error}</div>}
     {(quoteEntries.length>0||batchQuoteNeedsRefresh>0)&&<section className="customer-quote-card customer-batch-quote-card" aria-label="Batch quote summary">
       <div className="customer-batch-quote-heading">
-        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,batchQuoteCurrency)}</strong><small>{acceptedQuoteEntries.length} {acceptedQuoteEntries.length===1?"file has":"files have"} a current quote. {batchQuoteNeedsRefresh>0?batchQuoteNeedsRefresh+" need a fresh quote. ":""}Excluded files are not charged.</small></div>
+        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{batchQuoteTotalDisplay}</strong><small>{acceptedQuoteEntries.length} {acceptedQuoteEntries.length===1?"file has":"files have"} a current quote. {batchQuoteNeedsRefresh>0?batchQuoteNeedsRefresh+" need a fresh quote. ":""}Excluded files are not charged.</small></div>
         <span className="customer-batch-quote-validity">{batchQuoteNeedsRefresh>0?"Review required":"Quote for review"}</span>
       </div>
       <div className="customer-batch-quote-categories" aria-label="Files included in this quote">
