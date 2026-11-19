@@ -520,18 +520,18 @@ test("Photo Studio identifies custom manual image adjustments instead of marking
  assert.ok(studio.includes("aria-pressed={look === item.id}"));
 });
 
-test("Photo Studio normalizes the live Number of photos input value on blur",()=>{
+test("Photo Studio normalizes the live Number of copies input value on blur",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const quantityId=studio.indexOf('id="photo-studio-photo-count"');
  const quantityStart=studio.lastIndexOf("<input",quantityId);
  const quantityEnd=studio.indexOf("/>",quantityId);
  const quantityField=quantityStart>=0 && quantityEnd>=0 ? studio.slice(quantityStart,quantityEnd+2) : "";
- assert.ok(quantityField,"Number of photos input must exist by its stable ID.");
+ assert.ok(quantityField,"Number of copies input must exist by its stable ID.");
  assert.match(quantityField,/type="number"/);
- assert.match(quantityField,/aria-label="Number of photos"/);
- assert.ok(quantityField,"Number of photos input must exist by its stable ID.");
+ assert.match(quantityField,/aria-label="Number of copies"/);
+ assert.ok(quantityField,"Number of copies input must exist by its stable ID.");
  assert.match(quantityField,/type="number"/);
- assert.match(quantityField,/aria-label="Number of photos"/);
+ assert.match(quantityField,/aria-label="Number of copies"/);
  assert.match(quantityField,/onBlur=\{event\s*=>/);
  assert.match(quantityField,/event\.currentTarget\.value/);
  assert.doesNotMatch(quantityField,/Number\(copiesInput\)/,
@@ -568,8 +568,8 @@ test("Photo Studio browser fixture inspects generated PDF page boxes and rendere
 test("Photo Studio browser acceptance covers every editor tool and failure recovery path",()=>{
  const browser=readFileSync(new URL("./theme-responsive.browser.mjs",import.meta.url),"utf8");
  for(const label of [
-  "Crop","Looks","Background","Sheet","Text","Zoom in","Zoom out","Reset crop","Reset background",
-  "Photo size","Number of photos","Photos per A4 page","Caption font size","Caption colour",
+  "Crop","Looks","Background","Sheet","Text","Preview zoom in","Preview zoom out","Reset preview","Reset look","Reset crop","Reset background",
+  "Photo size","Number of copies","Photos per A4 page","Caption font size","Caption colour",
   "Replacement background","Background tolerance","Pick background from photo","Prepare A4 sheet"
  ]) assert.ok(browser.includes(label),"Missing browser coverage for Photo Studio control: "+label);
  assert.ok(browser.includes("exercisePhotoStudioFeatureMatrix()"));
@@ -656,3 +656,31 @@ test("one processed 300-DPI crop is reused across all copies and every A4 page",
 
 
 
+
+
+test("Photo Studio preview zoom is independent from crop zoom and print export",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.ok(studio.includes("const [previewScale,setPreviewScale]=useState(1)"));
+ assert.ok(studio.includes("transform: `scale(${previewScale})`"));
+ assert.ok(studio.includes('aria-label="Preview zoom in"'));
+ assert.ok(studio.includes('id="photo-studio-reset-preview" onClick={() => setPreviewScale(1)}'));
+ assert.match(studio,/id="photo-studio-zoom"[^\\n]*value=\\{zoom\\}/);
+ assert.ok(studio.includes("zoom,\n        focusX,\n        focusY,"));
+ assert.match(studio,/id="photo-studio-reset-look"[^\\n]*selectLook\\("natural"\\)/);
+ assert.match(studio,/id="photo-studio-reset-crop"[^\\n]*setZoom\\(1\\)/);
+});
+
+test("Photo Studio explains copies, physical output, estimated price and true source quality",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
+ assert.match(studio,/Number of copies/);
+ assert.match(studio,/Copies of this same photo/);
+ assert.match(studio,/Several copies arranged on A4 sheets/);
+ assert.match(studio,/One print per sheet at the selected size/);
+ assert.match(studio,/Estimated photo subtotal/);
+ assert.match(studio,/PDF output uses a 300-DPI target; it cannot add missing detail/);
+ assert.match(studio,/outputPageCount>1/);
+ assert.match(css,/toolRailSectionLabel/);
+ assert.match(css,/max-height:min\\(30vh,230px\\)/);
+ assert.match(css,/sourceQualityWarning/);
+});
