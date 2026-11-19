@@ -268,11 +268,11 @@ async function exerciseComponentFullFlow(browser, scenario) {
     await assertNoPageOverflow(page, scenario.mode + " " + sizeCode);
   }
 
-  const quantityInput = page.getByLabel("Number of photos");
+  const quantityInput = page.getByLabel("Number of copies");
   await quantityInput.fill("100");
   await quantityInput.press("Tab");
   await page.waitForFunction(() => {
-    const input = document.querySelector('[role="dialog"] input[aria-label="Number of photos"]');
+    const input = document.querySelector('[role="dialog"] input[aria-label="Number of copies"]');
     const rows = Array.from(document.querySelectorAll('[data-testid="photo-studio-sheet-summary"] > div'));
     const pages = rows.find(row => row.textContent?.includes("A4 pages in this job"))?.querySelector("strong")?.textContent;
     return input instanceof HTMLInputElement && input.value === "100" && pages === "4";
@@ -280,12 +280,12 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await page.getByLabel("Photos per A4 page").selectOption("25");
   let quantitySummary = await page.locator('[data-testid="photo-studio-sheet-summary"]').innerText();
   assert.match(quantitySummary, /A4 pages in this job\s+4/, "100 photos at 25 per page must produce four A4 pages.");
-  await page.getByLabel("Number of photos").fill("1");
+  await page.getByLabel("Number of copies").fill("1");
   await page.getByLabel("Photos per A4 page").selectOption("1");
   quantitySummary = await page.locator('[data-testid="photo-studio-sheet-summary"]').innerText();
   assert.match(quantitySummary, /A4 pages in this job\s+1/, "One requested photo must produce one page.");
-  await page.getByLabel("Number of photos").fill("17");
-  await page.getByLabel("Number of photos").press("Tab");
+  await page.getByLabel("Number of copies").fill("17");
+  await page.getByLabel("Number of copies").press("Tab");
   await page.getByLabel("Photos per A4 page").selectOption("9");
   await assertNoPageOverflow(page, scenario.mode + " quantity-17");
   await samplePhotoBackground(page);
@@ -324,7 +324,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await setControlValue(page, "Text colour", "#c02020");
   await page.getByRole("button", { name: "Sheet", exact: true }).click();
 
-  const captionToggle = page.getByRole("checkbox", { name: /Add name and DOB to each photo/ });
+  const captionToggle = page.getByRole("checkbox", { name: /Print name and date of birth below each photo/ });
   await captionToggle.check();
   await page.getByLabel("Name for form (optional)").fill("Photo Studio QA");
   await page.getByLabel("Date of birth (optional)").fill("2000-01-02");
@@ -334,8 +334,8 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await activatePhotoTool(page, "Sheet", "Photos per A4 page");
 
   await size.selectOption("35x45");
-  await page.getByLabel("Number of photos").fill("17");
-  await page.getByLabel("Number of photos").press("Tab");
+  await page.getByLabel("Number of copies").fill("17");
+  await page.getByLabel("Number of copies").press("Tab");
   await page.getByLabel("Photos per A4 page").selectOption("9");
 
   const summary = await page.locator('[data-testid="photo-studio-sheet-summary"]').innerText();
@@ -380,7 +380,7 @@ async function exercisePhotoSizeOutputs(browser) {
     await activatePhotoTool(page, "Sheet", "Photos per A4 page");
     await page.getByLabel("Photo size").selectOption(sizeCode);
     assert.equal(await page.getByLabel("Photo size").inputValue(), sizeCode, "The requested photo size must be selected before export.");
-    await setControlValue(page, "Number of photos", "3");
+    await setControlValue(page, "Number of copies", "3");
     await page.getByLabel("Photos per A4 page").selectOption("auto");
     const summary = await page.locator('[data-testid="photo-studio-sheet-summary"]').innerText();
     const expectedPerPage = Number(summary.match(/Photos per A4 page\s+(\d+)/)?.[1] ?? 0);
@@ -655,10 +655,10 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
   await assertNoPageOverflow(page, "real-shop-owner-edited-preview");
   await activatePhotoTool(page, "Sheet", "Photos per A4 page");
   await page.getByLabel("Photo size").selectOption("35x45");
-  await page.getByLabel("Number of photos").fill("17");
-  await page.getByLabel("Number of photos").press("Tab");
+  await page.getByLabel("Number of copies").fill("17");
+  await page.getByLabel("Number of copies").press("Tab");
   await page.getByLabel("Photos per A4 page").selectOption("9");
-  await page.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).check();
+  await page.getByRole("checkbox", { name: /Print name and date of birth below each photo/ }).check();
   await page.getByLabel("Name for form (optional)").fill("Shop Owner QA");
   await page.getByLabel("Date of birth (optional)").fill("1998-05-17");
   await page.getByRole("button", { name: "Text", exact: true }).click();
@@ -695,9 +695,9 @@ async function exerciseRealShopOwnerFlow(browser, scenario) {
   assert.equal(sourcePhotoPreviewRequests.length, 2,
     "The shop editor must retrieve the retained original source for the repeat edit.");
   assert.equal(await page.getByLabel("Photo size").inputValue(), "35x45");
-  assert.equal(await page.getByLabel("Number of photos").inputValue(), "17");
+  assert.equal(await page.getByLabel("Number of copies").inputValue(), "17");
   assert.equal(await page.getByLabel("Photos per A4 page").inputValue(), "9");
-  assert.equal(await page.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).isChecked(), true);
+  assert.equal(await page.getByRole("checkbox", { name: /Print name and date of birth below each photo/ }).isChecked(), true);
   assert.equal(await page.getByLabel("Name for form (optional)").inputValue(), "Shop Owner QA");
   assert.equal(await page.getByLabel("Date of birth (optional)").inputValue(), "1998-05-17");
   await activatePhotoTool(page, "Crop", "Zoom");
