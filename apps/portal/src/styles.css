@@ -4050,7 +4050,7 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 .qr-poster-actions-controls label{display:grid;gap:6px;min-width:0;color:var(--muted);font-size:10px;font-weight:750}
 .qr-poster-actions-controls select{width:100%;height:39px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:0 9px;font:600 11px "DM Sans",sans-serif}
 .qr-poster-actions-controls .secondary-button{min-width:0;min-height:39px;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:normal}
-.qr-share-export-help,.qr-share-paused-note,.qr-share-feedback{display:block;margin:0 13px 11px;color:var(--muted);font-size:10px;line-height:1.5}
+.qr-poster-actions-help,.qr-share-paused-note,.qr-share-feedback{display:block;margin:0 13px 11px;color:var(--muted);font-size:10px;line-height:1.5}
 .qr-share-paused-note{color:#a65a16}
 .qr-share-feedback.success{color:var(--green)}
 .qr-share-feedback.error{color:var(--red)}
