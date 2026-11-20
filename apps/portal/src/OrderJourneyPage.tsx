@@ -41,7 +41,6 @@ function paymentLabel(payment:ShopPayment|null,stage:OrderJourneyStage){
     default:return "Payment update";
   }
 }
-function isAgentOnline(agent:AgentDevice){return !agent.revokedUtc&&agent.status==="Online"&&!!agent.lastSeenUtc&&Date.parse(agent.lastSeenUtc)>Date.now()-120000;}
 function printerSummary(jobs:ShopPrintJob[],printers:PrinterDevice[],agents:AgentDevice[]){
   const active=jobs.filter(job=>!["REJECTED","REFUNDED","CANCELLED"].includes(job.status));
   const ids=new Set(active.map(job=>job.printerDeviceId).filter((id):id is string=>!!id));
