@@ -113,6 +113,25 @@ public static class AgentPrinterSyncRules
         (status is "Ready" or "Busy") &&
         (maximum is null || selectedCount < maximum.Value);
 
+    public static string ResolveCapabilitiesJson(
+        string? existing,
+        string? discovered,
+        bool driverChanged)
+    {
+        var discoveredKnown = HasKnownCapabilitiesJson(discovered);
+        if (driverChanged)
+            return discoveredKnown ? discovered! : "{}";
+
+        if (discoveredKnown)
+            return discovered!;
+
+        return HasKnownCapabilitiesJson(existing) ? existing! : "{}";
+    }
+
+    private static bool HasKnownCapabilitiesJson(string? value) =>
+        HasValidCapabilitiesJson(value) &&
+        !string.Equals(value!.Trim(), "{}", StringComparison.Ordinal);
+
     private static bool HasValidCapabilitiesJson(string? value)
     {
         if (string.IsNullOrWhiteSpace(value) || value.Length > MaximumCapabilitiesJsonLength)
