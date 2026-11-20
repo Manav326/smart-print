@@ -269,6 +269,7 @@ jobs:
   agent_dotnet:
     outputs:
       agent_package_ready: ${{ steps.agent_package_upload.outcome == 'success' }}
+      epson_l360_qa_required: ${{ inputs.epson_l360_driver_package_url != '' || vars.EPSON_L360_DRIVER_PACKAGE_URL != '' || steps.epson_l360_setup.outcome == 'success' }}
       epson_l360_qa_ready: ${{ steps.epson_l360_setup.outcome == 'success' && steps.epson_l360_capability_probe.outcome == 'success' && steps.epson_l360_shop_owner_ui.outcome == 'success' && steps.agent_tests.outcome == 'success' && steps.epson_l360_capture.outcome == 'success' && steps.epson_l360_artifact_upload.outcome == 'success' }}
     runs-on: windows-latest
     timeout-minutes: 30
@@ -933,6 +934,7 @@ jobs:
         env:
           API_RESULT: ${{ needs.api_dotnet.result }}
           AGENT_RESULT: ${{ needs.agent_dotnet.result }}
+          EPSON_L360_REQUIRED: ${{ needs.agent_dotnet.outputs.epson_l360_qa_required }}
           EPSON_L360_RESULT: ${{ needs.agent_dotnet.outputs.epson_l360_qa_ready }}
           DESKTOP_RESULT: ${{ needs.windows_desktop.result }}
           INSTALLER_RESULT: ${{ needs.windows_installer.result }}
@@ -942,7 +944,11 @@ jobs:
             "$API_RESULT" "$AGENT_RESULT" "$EPSON_L360_RESULT" "$DESKTOP_RESULT" "$INSTALLER_RESULT"
           test "$API_RESULT" = "success"
           test "$AGENT_RESULT" = "success"
-          test "$EPSON_L360_RESULT" = "true"
+          if [[ "$EPSON_L360_REQUIRED" == "true" ]]; then
+            test "$EPSON_L360_RESULT" = "true"
+          else
+            echo "Epson L360 hardware qualification not run: no verified package was supplied or installed."
+          fi
           test "$DESKTOP_RESULT" = "success"
           test "$INSTALLER_RESULT" = "success"
 
