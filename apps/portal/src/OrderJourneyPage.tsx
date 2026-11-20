@@ -5,6 +5,7 @@ import { formatIstDateTime } from "./date-time";
 import { buildShopOrderJourneys, filterShopOrderJourneys, isActiveOrderWork, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
 import styles from "./OrderJourney.module.css";
 import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
+import { getPrinterAvailabilityReason, isPrinterAvailableForShop } from "./printer-availability";
 
 type ShopDestination = "Print Queue" | "Payments" | "Print Agent";
 interface Props {
@@ -47,12 +48,13 @@ function printerSummary(jobs:ShopPrintJob[],printers:PrinterDevice[],agents:Agen
   if(!ids.size)return {name:"Printer not assigned",detail:"Assign one before dispatch",ready:false};
   if(ids.size>1)return {name:"Multiple printers assigned",detail:"Use one printer for this batch before dispatch",ready:false};
   const assigned=printers.filter(printer=>ids.has(printer.id));
-  const online=new Set(agents.filter(isAgentOnline).map(agent=>agent.id));
-  const connected=assigned.filter(printer=>printer.isActive&&!!printer.agentDeviceId&&online.has(printer.agentDeviceId));
+  const connected=assigned.filter(printer=>isPrinterAvailableForShop(printer,agents));
   const names=Array.from(new Set(assigned.map(printer=>printer.displayName).filter(Boolean)));
-  return connected.length
-    ? {name:names.join(", ")||"Assigned printer",detail:"Connected · shop computer online",ready:true}
-    : {name:names.join(", ")||"Assigned printer",detail:"Assigned · waiting for shop computer",ready:false};
+  if(connected.length)
+    return {name:names.join(", ")||"Assigned printer",detail:"Windows queue ready · shop computer online",ready:true};
+  const unavailable=assigned[0];
+  const reason=unavailable?getPrinterAvailabilityReason(unavailable,agents):"Assigned printer is no longer registered";
+  return {name:names.join(", ")||"Assigned printer",detail:reason??"Printer availability is not confirmed",ready:false};
 }
 function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,onAssignPrinter,onDispatch,onConfirmOutput,onRetryPdfExport,onHistory,onOpenPhotoStudio}:{
   job:ShopPrintJob;printers:PrinterDevice[];agents:AgentDevice[];
@@ -217,7 +219,7 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
     ready:journeys.filter(j=>j.stage==="ready").length
   }),[journeys]);
   const agentsOnline=agents.filter(isAgentOnline).length;
-  const reachable=printers.filter(p=>p.isActive&&!!p.agentDeviceId&&agents.some(a=>a.id===p.agentDeviceId&&isAgentOnline(a))).length;
+  const reachable=printers.filter(printer=>isPrinterAvailableForShop(printer,agents)).length;
   const inMotion=journeys.filter(isActiveOrderWork).length;
   const readyForCollection=journeys.filter(j=>j.stage==="ready").length;
   const paymentsToVerify=journeys.filter(j=>j.canVerifyPayment).length;
