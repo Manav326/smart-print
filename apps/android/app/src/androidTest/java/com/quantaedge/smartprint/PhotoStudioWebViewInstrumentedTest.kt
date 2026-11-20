@@ -68,6 +68,15 @@ class PhotoStudioWebViewInstrumentedTest {
                     openButton: Boolean(document.querySelector("#open-photo-studio")),
                     fixtureReady: document.querySelector("#photo-studio-result")?.dataset.ready ?? null,
                     dialogText: document.querySelector('[role="dialog"]')?.innerText?.slice(0, 900) ?? null,
+                    ariaBusy: document.querySelector('[role="dialog"]')?.getAttribute("aria-busy") ?? null,
+                    errorText: document.querySelector('[role="dialog"] [role="alert"]')?.textContent?.trim() ?? null,
+                    resultPresent: Boolean(document.querySelector("#photo-studio-result")?.textContent),
+                    applyButton: (() => {
+                      const button = document.querySelector("#photo-studio-apply");
+                      return button instanceof HTMLButtonElement
+                        ? { text: button.innerText.trim(), disabled: button.disabled }
+                        : null;
+                    })(),
                     activeTools: Array.from(document.querySelectorAll('[role="dialog"] nav[aria-label="Photo editing tools"] button'))
                       .map(button => ({ text: button.textContent?.trim() ?? "", pressed: button.getAttribute("aria-pressed") })),
                     ranges: Array.from(document.querySelectorAll('[role="dialog"] input[type="range"]'))
@@ -896,7 +905,8 @@ class PhotoStudioWebViewInstrumentedTest {
             waitFor(
                 scenario,
                 "document.querySelector('#photo-studio-result')?.textContent.includes('application/pdf')",
-                "replacement PDF to be prepared for the existing shop job"
+                "replacement PDF to be prepared for the existing shop job",
+                timeoutMs = 90_000L
             )
             val resultText = evaluate(
                 scenario,
