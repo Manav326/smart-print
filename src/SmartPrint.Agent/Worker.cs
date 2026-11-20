@@ -26,6 +26,7 @@ public sealed class Worker(
     IConfiguration configuration) : BackgroundService
 {
     private readonly SemaphoreSlim printWorkWakeSignal = new(0, 1);
+    private readonly SemaphoreSlim outputProcessingGate = new(1, 1);
     private readonly SemaphoreSlim capabilityEnrichmentGate = new(1, 1);
     private readonly TimeSpan printWorkPollInterval = TimeSpan.FromSeconds(
         AgentLoopIntervals.ResolvePrintWorkPollIntervalSeconds(
@@ -58,6 +59,7 @@ public sealed class Worker(
             RunHeartbeatLoopAsync(stoppingToken),
             RunPrinterInventoryLoopAsync(stoppingToken),
             RunPrintWorkLoopAsync(stoppingToken),
+            RunAuthorizedPrintDispatchLoopAsync(stoppingToken),
             RunPrivateRelayLoopAsync(stoppingToken),
             RunPrivateDocumentPurgeLoopAsync(stoppingToken),
             RunPrivateSpoolerCleanupLoopAsync(stoppingToken));
@@ -858,13 +860,13 @@ public sealed class Worker(
                 exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
             {
                 logger.LogError(exception, "The saved Agent identity could not be read. Print processing is paused until the owner repairs the local pairing.");
-                await WaitForPrintWorkOrDelayAsync(cancellationToken);
+                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
                 continue;
             }
 
             if (credentials is null)
             {
-                await WaitForPrintWorkOrDelayAsync(cancellationToken);
+                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
                 continue;
             }
 
@@ -877,13 +879,27 @@ public sealed class Worker(
                 // intentionally run separately so an upload or spooler wait cannot
                 // make a healthy Agent appear offline.
                 await ProcessLocalQueueHandoffAsync(client, credentials, cancellationToken);
+                // The local queue may now contain newly acknowledged documents.
+                // Wake the dedicated dispatch loop without waiting for its fallback poll.
+                SignalPrintWork();
                 await ReconcileLegacyPdfQueueJobsAsync(client, credentials, cancellationToken);
-                await ReconcileInterruptedPdfExportsAsync(client, credentials, cancellationToken);
-                await RetryPendingPdfExportReceiptsAsync(client, credentials, cancellationToken);
-                await ReconcileInterruptedSubmissionsAsync(client, credentials, cancellationToken);
-                await RetrySpoolerReceiptsAsync(client, credentials, cancellationToken);
-                await ProcessAuthorizedPrintJobsAsync(client, credentials, cancellationToken);
-                await MonitorSpoolerJobsAsync(client, credentials, cancellationToken);
+
+                // Reconciliation and spooler observation share the output gate with
+                // active submissions. They must not mistake a live StartDoc operation
+                // for an interrupted submission or race its local receipt.
+                await outputProcessingGate.WaitAsync(cancellationToken);
+                try
+                {
+                    await ReconcileInterruptedPdfExportsAsync(client, credentials, cancellationToken);
+                    await RetryPendingPdfExportReceiptsAsync(client, credentials, cancellationToken);
+                    await ReconcileInterruptedSubmissionsAsync(client, credentials, cancellationToken);
+                    await RetrySpoolerReceiptsAsync(client, credentials, cancellationToken);
+                    await MonitorSpoolerJobsAsync(client, credentials, cancellationToken);
+                }
+                finally
+                {
+                    outputProcessingGate.Release();
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -903,12 +919,98 @@ public sealed class Worker(
             }
 
             runtimeReadiness.MarkPrintWorkCycle();
-            await WaitForPrintWorkOrDelayAsync(cancellationToken);
+            await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
             }
         }
         finally
         {
             runtimeReadiness.SetPrintWorkerRunning(false);
+        }
+    }
+
+    private async Task RunAuthorizedPrintDispatchLoopAsync(CancellationToken cancellationToken)
+    {
+        var initializationDelay = TimeSpan.FromSeconds(5);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await localQueueStore.InitializeAsync(cancellationToken);
+                break;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                logger.LogCritical(exception, "The protected local queue is not ready for print dispatch. The dispatcher will retry automatically.");
+                try { await Task.Delay(initializationDelay, cancellationToken); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+                initializationDelay = TimeSpan.FromSeconds(Math.Min(initializationDelay.TotalSeconds * 2, 60));
+            }
+        }
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var claimedAndProcessedWork = false;
+            try
+            {
+                var credentials = LoadSecureCredentials();
+                if (credentials is not null)
+                {
+                    using var client = httpClientFactory.CreateClient("cloud");
+                    client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+
+                    await outputProcessingGate.WaitAsync(cancellationToken);
+                    try
+                    {
+                        claimedAndProcessedWork = await ProcessAuthorizedPrintJobsAsync(
+                            client, credentials, cancellationToken);
+                    }
+                    finally
+                    {
+                        outputProcessingGate.Release();
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (HttpRequestException exception)
+            {
+                logger.LogWarning(exception, "The print dispatcher could not reach SmartPrint. It will retry automatically.");
+            }
+            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning("The print dispatch request timed out. It will retry automatically.");
+            }
+            catch (Exception exception) when (
+                exception is CryptographicException or IOException or JsonException or
+                    UnauthorizedAccessException or InvalidOperationException)
+            {
+                logger.LogError(exception, "The saved Agent identity could not be read. Print dispatch is paused until the local pairing is repaired.");
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Unexpected authorised print dispatch failure. The protected queue and output safeguards remain in place.");
+            }
+
+            // Drain full claim batches immediately; only wait when no authorised
+            // local document is currently claimable. A wake or 5-second fallback
+            // causes a fresh durable claim, so missed notifications cannot strand work.
+            if (claimedAndProcessedWork)
+                continue;
+
+            try
+            {
+                await WaitForPrintWorkOrDelayAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
         }
     }
 
@@ -1350,20 +1452,20 @@ public sealed class Worker(
         }
     }
 
-    private async Task ProcessAuthorizedPrintJobsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
+    private async Task<bool> ProcessAuthorizedPrintJobsAsync(HttpClient client, AgentCredentials credentials, CancellationToken ct)
     {
         var acknowledgedJobs = localQueueStore.GetAcknowledgedJobs();
         var batch = AgentLocalQueueBatchSelector.SelectNext(acknowledgedJobs, ref printClaimBatchOffset, 100);
         var proofs = batch.Select(x => new AgentLocalQueueProof(x.JobId, x.Sha256, x.SizeBytes)).ToArray();
-        if (proofs.Length == 0) return;
+        if (proofs.Length == 0) return false;
         using var response = await SendAgentRequestAsync(client, credentials, "api/v1/agent/jobs/print-claim", new AgentPrintClaimRequest(proofs), ct);
         if (!response.IsSuccessStatusCode)
         {
             logger.LogWarning("Print dispatch claim returned HTTP {StatusCode}.", (int)response.StatusCode);
-            return;
+            return false;
         }
         var result = await response.Content.ReadFromJsonAsync<AgentPrintClaimResponse>(ct);
-        if (result?.Jobs is null || result.Jobs.Count == 0) return;
+        if (result?.Jobs is null || result.Jobs.Count == 0) return false;
 
         // Preserve FIFO order within each Windows queue while independent printers
         // submit concurrently. This limit protects the shop computer and spooler.
@@ -1387,6 +1489,7 @@ public sealed class Worker(
         }).ToArray();
 
         await Task.WhenAll(laneTasks);
+        return true;
     }
 
     private async Task ProcessAuthorizedPrintJobAsync(
