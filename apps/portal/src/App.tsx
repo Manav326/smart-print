@@ -2371,7 +2371,7 @@ function PrintersPage({
           </div>
           <div className="printer-discovery-guidance" role="note">
             <strong>Adding a new printer</strong>
-            <span>Install its manufacturer driver in Windows, connect it by USB or the shop network, then confirm Windows shows it as Ready. The connected Print Agent discovers and registers Windows queues automatically, normally within 30 seconds. You do not need to add a duplicate here.</span>
+            <span>Connect the printer by USB or to the shop network. In Windows Settings → Printers &amp; scanners, choose Add device and install the manufacturer's driver if Windows asks. Keep the SmartPrint Print Agent running; it lists the queue automatically, usually within 30 seconds. If the printer is connected to another PC, pair that PC's SmartPrint Print Agent to this shop from the Print Agent page. You do not manually register the printer here.</span>
           </div>
         </div>
         <div className="printer-selection-summary" role="status">
@@ -2397,7 +2397,7 @@ function PrintersPage({
           <EmptyModule
             icon={<Printer size={24}/>}
             title="No Windows printer queues reported yet"
-            text="Install the printer driver in Windows, connect the printer, and make sure Windows reports it as Ready. Keep the SmartPrint Print Agent online; new queues appear automatically after the next scan. Check the Agent status if nothing appears."
+            text="Connect the printer and add it in Windows Settings → Printers & scanners. Install its driver if Windows asks, then keep the SmartPrint Print Agent running. If the printer is on another PC, pair that PC's Print Agent to this shop from the Print Agent page. New queues appear automatically after the next scan."
             actionLabel="Check Print Agent"
             onAction={onOpenAgent}
           />
