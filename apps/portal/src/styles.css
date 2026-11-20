@@ -2662,6 +2662,21 @@ html[data-theme="light"] .auth-screen {
     font: 800 4.7pt/1 "DM Sans", Arial, sans-serif !important;
     letter-spacing: 1.2pt !important;
   }
+
+  /* The print document is the same canonical vector poster used for PNG/JPG. */
+  .qr-print-document img.qr-print-poster {
+    display: block !important;
+    width: 210mm !important;
+    height: 148mm !important;
+    min-width: 210mm !important;
+    min-height: 148mm !important;
+    max-width: 210mm !important;
+    max-height: 148mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    object-fit: fill !important;
+  }
 }
 
 
