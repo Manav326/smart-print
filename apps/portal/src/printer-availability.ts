@@ -15,8 +15,8 @@ export function isAgentOnlineForShop(agent: AgentDevice, now = Date.now()): bool
 }
 
 /**
- * Mirrors assignment eligibility: a physical queue needs a recent Windows
- * heartbeat and Ready/Busy state; PDF export only needs its live paired Agent.
+ * Mirrors the server's selection contract: both physical and PDF queues need a
+ * fresh Agent heartbeat plus a fresh Ready/Busy Windows queue report.
  */
 export function getPrinterAvailabilityReason(
   printer: PrinterDevice,
@@ -30,8 +30,8 @@ export function getPrinterAvailabilityReason(
   const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
   if (!agent || !isAgentOnlineForShop(agent, now)) return "Shop computer offline";
 
-  if (printer.outputMode === "PDF_EXPORT") return null;
-  if (printer.outputMode !== "PHYSICAL") return "Unsupported Windows output queue";
+  if (printer.outputMode !== "PHYSICAL" && printer.outputMode !== "PDF_EXPORT")
+    return "Unsupported Windows output queue";
   if (!hasRecentHeartbeat(printer.lastSeenUtc, now)) return "Windows printer queue has not reported recently";
   if (printer.status === "Ready" || printer.status === "Busy") return null;
   return "Windows queue reports " + printer.status.toLowerCase();
