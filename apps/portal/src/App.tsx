@@ -591,20 +591,38 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
   }
 
-  async function togglePrinter(printer: PrinterDevice) {
-    if (busyResourceId) return;
+  async function togglePrinter(printer: PrinterDevice, replacePrinterId?: string): Promise<boolean> {
+    if (busyResourceId) return false;
+    const replacedPrinter = replacePrinterId
+      ? printers.find(candidate => candidate.id === replacePrinterId)
+      : undefined;
+    if (replacePrinterId && !replacedPrinter) {
+      setError("The selected printer list changed. Refresh and choose the replacement again.");
+      return false;
+    }
+    if (replacedPrinter && !(await confirmInApp(
+      `Replace ${replacedPrinter.displayName} with ${printer.displayName}? QR stations using the old default will move to the new queue. Existing files stay in their orders and may need reassignment before dispatch. Jobs already handed to Windows are never moved or cancelled.`,
+      "Replace selected printer?", "Replace printer"
+    ))) return false;
     if (printer.isActive && !(await confirmInApp(
-      `Disable ${printer.displayName}? New jobs can no longer be assigned to it. A Windows job already accepted by the spooler is not cancelled; an active job may prevent disabling until it is resolved.`,
-      "Disable this printer?", "Disable printer"
-    ))) return;
+      `Deselect ${printer.displayName}? New jobs will no longer be assigned to it. Existing Windows output is not cancelled; an active or uncertain job must be resolved first.`,
+      "Deselect this printer?", "Deselect printer"
+    ))) return false;
+
     setBusyResourceId(printer.id);
     setError("");
     try {
-      await updatePrinterActive(tokens.accessToken, printer.id, !printer.isActive);
-      setToast(printer.isActive ? "Printer disabled. Existing Windows output is not cancelled." : "Printer enabled for new assignments.");
+      await updatePrinterActive(tokens.accessToken, printer.id, !printer.isActive, replacePrinterId);
+      setToast(replacedPrinter
+        ? `${printer.displayName} selected instead of ${replacedPrinter.displayName}. QR station defaults were updated; review pending orders for reassignment.`
+        : printer.isActive
+          ? "Printer deselected. Existing files and Windows output were not deleted."
+          : "Printer selected for new assignments.");
       await reload();
+      return true;
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not update printer.");
+      return false;
     } finally {
       setBusyResourceId(null);
     }
@@ -1682,7 +1700,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onOpenPhotoStudio={job=>void openShopPhotoStudioForJob(job)}
           />}
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
-          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
+          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} maxPrinters={subscription?.entitlements.maxPrinters} subscriptionActive={subscription?.entitlements.isAccessActive} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
@@ -1700,7 +1718,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       {ownerAccountOpen && profile && <ShopOwnerAccountModal profile={profile} busy={busy} onClose={() => setOwnerAccountOpen(false)} onSave={saveOwnerAccount}/>}
       {helpOpen && <HelpSupportModal onClose={() => setHelpOpen(false)} onNavigate={section => { setHelpOpen(false); navAction(section); }}/>}
       {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
-      {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
+      {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => isPrinterAvailable(printer, onlineAgentIds))} onClose={() => setModal(null)} onSubmit={submitStation}/>}
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={(acceptedIds,pdfBrandingEnabled)=>void applyBatchReview(batchReviewJobs,acceptedIds,pdfBrandingEnabled)}/>} 
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} isSavedOutput={preview.isSavedOutput} focusEditOnMount={focusShopPhotoEdit} onEditPhoto={preview.job.photoSourceAvailable&&!preview.job.privatePrinting&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); setFocusShopPhotoEdit(false); }}/>} 
       {shopPhotoStudio && <PhotoStudio source={shopPhotoStudio.source} mode="shop" dark={dark} initialSettings={shopPhotoStudio.initialSettings} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={cancelShopPhotoStudio} onApply={applyShopPhotoStudio}/>} 
@@ -2123,7 +2141,9 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   agentDevices: AgentDevice[]; paymentSettings: ShopPaymentSettings | null;
   onNavigate: (section: Section) => void;
 }) {
-  const activePrinters = printers.filter(printer => printer.isActive);
+  const activePrinters = printers.filter(printer =>
+    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT")
+  );
   const todayKey = istDateKey(new Date());
   const jobsToday = printJobs.filter(job => istDateKey(job.createdUtc) === todayKey);
   const quotesAwaiting = printJobs.filter(job => job.status === "AWAITING_SHOP_APPROVAL");
@@ -2138,7 +2158,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
       !!paymentSettings.upiId?.trim() && !!paymentSettings.payeeName?.trim());
   const setupChecks: { complete: boolean; title: string; detail: string; target: Section }[] = [
     { complete: !!profile?.displayName, title: "Create your shop identity", detail: "Your shop name and customer-facing brand.", target: "Settings" },
-    { complete: activePrinters.length > 0, title: "Register your printers", detail: "Add and enable the printers available at your counter.", target: "Printers" },
+    { complete: activePrinters.length > 0, title: "Select your printers", detail: "Windows queues are discovered automatically; choose which ones to use within your plan.", target: "Printers" },
     { complete: hasOnlineAgent, title: "Connect the shop computer", detail: "The Windows Agent must be paired and recently online.", target: "Print Agent" },
     { complete: hasReachablePrinter, title: "Verify a live printer", detail: "At least one enabled output must be visible to the connected computer.", target: "Printers" },
     { complete: stations.some(station => station.isEnabled), title: "Enable a QR station", detail: "At least one customer-facing QR station must be enabled.", target: "QR Stations" },
@@ -2148,7 +2168,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   return (
     <>
       <div className="stat-grid">
-        <Metric icon={<Printer size={18}/>} label="Registered printers" value={String(printers.length)} note={`${activePrinters.length} enabled for use`} accent="blue"/>
+        <Metric icon={<Printer size={18}/>} label="Detected printer queues" value={String(printers.length)} note={`${activePrinters.length} selected for use`} accent="blue"/>
         <Metric icon={<QrCode size={18}/>} label="QR stations" value={String(stations.length)} note={`${stations.filter(station=>station.isEnabled).length} currently enabled`} accent="violet"/>
         <Metric icon={<FileText size={18}/>} label="Print jobs today" value={String(jobsToday.length)} note="Real customer uploads" accent="amber"/>
         <Metric icon={<Wallet size={18}/>} label="Quotes awaiting review" value={String(quotesAwaiting.length)} note="Quotes are not collected payments" accent="mint"/>
@@ -2321,39 +2341,187 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   );
 }
 
-function PrintersPage({ printers, agents, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; agents:AgentDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
+function PrintersPage({
+  printers, agents, maxPrinters, subscriptionActive, busyResourceId, onAdd, onToggle
+}: {
+  printers: PrinterDevice[];
+  agents: AgentDevice[];
+  maxPrinters?: number | null;
+  subscriptionActive?: boolean;
+  busyResourceId: string | null;
+  onAdd: () => void;
+  onToggle: (printer: PrinterDevice, replacePrinterId?: string) => Promise<boolean>;
+}) {
+  const [pendingReplacement, setPendingReplacement] = useState<PrinterDevice | null>(null);
+  const [replacePrinterId, setReplacePrinterId] = useState("");
+  const selectedPrinters = printers.filter(printer =>
+    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT")
+  );
+  const selectablePrinters = printers.filter(printer =>
+    !printer.isActive &&
+    printer.outputMode !== "UNSUPPORTED_VIRTUAL" &&
+    !!printer.agentDeviceId
+  );
+  const detectedCount = printers.filter(printer =>
+    printer.connectionType === "WindowsQueue" && !!printer.agentDeviceId
+  ).length;
+  const quotaFull = maxPrinters != null && selectedPrinters.length >= maxPrinters;
+  const canUseSelection = subscriptionActive !== false;
+
+  async function confirmReplacement() {
+    if (!pendingReplacement || !replacePrinterId) return;
+    const success = await onToggle(pendingReplacement, replacePrinterId);
+    if (success) {
+      setPendingReplacement(null);
+      setReplacePrinterId("");
+    }
+  }
+
   return (
-    <section className="panel collection-panel">
-      <div className="collection-header"><div><h2>Your printers</h2><p>Each Windows queue stays separate. Microsoft Print to PDF is the supported virtual test destination; other virtual/document drivers remain visible but cannot be assigned for output.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
-      {printers.length===0 ? <EmptyModule icon={<Printer size={24}/>} title="No printers registered yet" text="Add your first printer. It will appear here as awaiting local-agent discovery until the Windows Print Agent reports its capabilities and live status." actionLabel="Add your first printer" onAction={onAdd}/> :
-      <div className="printer-grid">{printers.map(printer=>{
-        const agent=agents.find(candidate=>candidate.id===printer.agentDeviceId);
-        const isUnsupportedVirtual=printer.outputMode==="UNSUPPORTED_VIRTUAL";
-        const possibleDuplicates=printer.outputMode==="PHYSICAL"&&printer.agentDeviceId&&printer.connectionAddress
-          ?printers.filter(other=>other.id!==printer.id&&other.outputMode==="PHYSICAL"&&other.agentDeviceId===printer.agentDeviceId&&
-            !!other.connectionAddress&&other.connectionAddress.trim().toLowerCase()===printer.connectionAddress!.trim().toLowerCase())
-          :[];
-        return <article className="printer-card" key={printer.id}>
-          <div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={isUnsupportedVirtual?"Unsupported virtual":printer.status} tone={isUnsupportedVirtual?"red":printer.status.toLowerCase()==="ready"?"green":"slate"}/></div>
-          <h3>{isUnsupportedVirtual?"Unsupported virtual · ":printer.outputMode==="PDF_EXPORT"?"PDF test destination · ":""}{printer.displayName}</h3>
-          <p>{isUnsupportedVirtual?"This virtual/document driver is not approved for SmartPrint output.":printer.outputMode==="PDF_EXPORT"?"Supported Microsoft Print to PDF test route · no Windows Save As dialog":printer.manufacturer+" · "+printer.model}</p>
-          <div className="printer-meta">
-            <span>{isUnsupportedVirtual?"Not available for print dispatch":printer.outputMode==="PDF_EXPORT"?"PDF test destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span>
-            <span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span>
-            <span>Print Agent · {agent?.deviceName||"Not linked"}</span>
+    <>
+      <section className="panel collection-panel">
+        <div className="collection-header">
+          <div>
+            <h2>Windows printer queues</h2>
+            <p>Queues are discovered automatically by your connected Print Agent. Every discovered queue stays visible; your plan limit applies only to the queues you select for use.</p>
           </div>
-          <PrinterCapabilityPanel printer={printer}/>
-          {possibleDuplicates.length>0&&<div className="printer-duplicate-warning" role="note">
-            <strong>Possible duplicate printer</strong>
-            <span>{possibleDuplicates.map(item=>item.displayName).join(", ")} uses the same Windows port. SmartPrint keeps both queues separate; confirm whether they are alternate queues for one physical printer.</span>
-          </div>}
-          <div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(printer)}>{busyResourceId===printer.id?<span className="button-spinner"/>:printer.isActive?"Disable":"Enable"}</button></div>
-        </article>;
-      })}</div>}
-    </section>
+          <button className="secondary-button" onClick={onAdd}><Plus size={15}/> Add manually</button>
+        </div>
+        <div className="printer-selection-summary" role="status">
+          <div>
+            <strong>{detectedCount} detected Windows queues</strong>
+            <span>{selectedPrinters.length} selected{maxPrinters == null ? " · no configured selection limit" : ` of ${maxPrinters} plan slots`}</span>
+          </div>
+          <p>At the plan limit? Select any other available queue and replace one of your current selections. The other discovered queues remain available; nothing is removed from Windows.</p>
+        </div>
+        {!canUseSelection && (
+          <div className="printer-selection-warning" role="alert">
+            Your shop subscription is inactive. Your queues and files remain visible, but new printer selections are paused until shop access is restored.
+          </div>
+        )}
+        {printers.length === 0 ? (
+          <EmptyModule
+            icon={<Printer size={24}/>}
+            title="Waiting for Windows printer discovery"
+            text="Connect the SmartPrint Print Agent on the Windows computer. SmartPrint will list its installed printer queues here automatically; you do not need to enter driver names or queue names."
+            actionLabel="Register manually (advanced)"
+            onAction={onAdd}
+          />
+        ) : (
+          <div className="printer-grid">
+            {printers.map(printer => {
+              const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
+              const isUnsupportedVirtual = printer.outputMode === "UNSUPPORTED_VIRTUAL";
+              const isSelected = printer.isActive && !isUnsupportedVirtual;
+              const canSelect = !isUnsupportedVirtual && !!printer.agentDeviceId;
+              const possibleDuplicates = printer.outputMode === "PHYSICAL" && printer.agentDeviceId && printer.connectionAddress
+                ? printers.filter(other => other.id !== printer.id && other.outputMode === "PHYSICAL" &&
+                    other.agentDeviceId === printer.agentDeviceId && !!other.connectionAddress &&
+                    other.connectionAddress.trim().toLowerCase() === printer.connectionAddress!.trim().toLowerCase())
+                : [];
+              const ownerStatus = !printer.agentDeviceId
+                ? "Waiting for Print Agent discovery"
+                : !agent || agent.revokedUtc || agent.status !== "Online"
+                  ? "Windows computer not currently connected"
+                  : printer.status === "Ready" || printer.status === "Busy"
+                    ? "Windows queue reported ready"
+                    : `Windows queue reports ${printer.status.toLowerCase()}`;
+              return (
+                <article className="printer-card" key={printer.id}>
+                  <div className="printer-card-top">
+                    <div className="printer-card-icon"><Printer size={20}/></div>
+                    <Status
+                      label={isUnsupportedVirtual ? "Not supported" : isSelected ? "Selected" : canSelect ? "Available" : "Waiting for Agent"}
+                      tone={isUnsupportedVirtual ? "red" : isSelected ? "green" : canSelect ? "slate" : "amber"}
+                    />
+                  </div>
+                  <h3>{isUnsupportedVirtual ? "Unsupported virtual · " : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : ""}{printer.displayName}</h3>
+                  <p>{isUnsupportedVirtual
+                    ? "This Windows driver is visible but is not approved for SmartPrint print output."
+                    : printer.outputMode === "PDF_EXPORT"
+                      ? "Supported Microsoft Print to PDF destination."
+                      : printer.manufacturer === "Windows"
+                        ? `Installed Windows driver · ${printer.model}`
+                        : `${printer.manufacturer} · ${printer.model}`}</p>
+                  <div className="printer-meta">
+                    <span>{ownerStatus}{printer.isDefault ? " · Default Windows queue" : ""}</span>
+                    <span>{printer.queueName || printer.connectionAddress || "Connection details not reported"}</span>
+                    <span>Print Agent · {agent?.deviceName || "Not linked"}</span>
+                  </div>
+                  <PrinterCapabilityPanel printer={printer}/>
+                  {possibleDuplicates.length > 0 && (
+                    <div className="printer-duplicate-warning" role="note">
+                      <strong>Same Windows port</strong>
+                      <span>{possibleDuplicates.map(item => item.displayName).join(", ")} use the same Windows port. These are separate queues and can have different driver settings or output behaviour.</span>
+                    </div>
+                  )}
+                  <div className="printer-card-footer">
+                    <span className={isSelected ? "enabled-label" : "disabled-label"}>
+                      {isSelected ? "Selected for new jobs" : isUnsupportedVirtual ? "Visible · not selectable" : "Not selected"}
+                    </span>
+                    {isSelected ? (
+                      <button
+                        className="subtle-button"
+                        disabled={!!busyResourceId}
+                        onClick={() => void onToggle(printer)}
+                      >
+                        {busyResourceId === printer.id ? <span className="button-spinner"/> : "Deselect"}
+                      </button>
+                    ) : (
+                      <button
+                        className="subtle-button"
+                        disabled={!!busyResourceId || !canSelect || !canUseSelection}
+                        title={!canSelect ? "The Agent must discover and link this Windows queue before it can be selected." : !canUseSelection ? "Restore the shop subscription to select a printer." : undefined}
+                        onClick={() => {
+                          if (!canSelect || !canUseSelection) return;
+                          if (quotaFull) {
+                            setPendingReplacement(printer);
+                            setReplacePrinterId(selectedPrinters[0]?.id ?? "");
+                          } else {
+                            void onToggle(printer);
+                          }
+                        }}
+                      >
+                        {busyResourceId === printer.id ? <span className="button-spinner"/> : "Select"}
+                      </button>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+      {pendingReplacement && (
+        <Modal
+          title="Replace a selected printer"
+          subtitle={`Select which current queue to replace with ${pendingReplacement.displayName}.`}
+          onClose={() => { if (!busyResourceId) { setPendingReplacement(null); setReplacePrinterId(""); } }}
+        >
+          <div className="modal-form">
+            <label>
+              Queue to replace
+              <select value={replacePrinterId} onChange={event => setReplacePrinterId(event.target.value)}>
+                <option value="">Choose a selected queue</option>
+                {selectedPrinters.map(printer => <option key={printer.id} value={printer.id}>{printer.displayName}</option>)}
+              </select>
+            </label>
+            <div className="modal-note">
+              <ShieldCheck size={15}/>
+              <span>The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Private files stay on their original Windows computer.</span>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" disabled={!!busyResourceId} onClick={() => { setPendingReplacement(null); setReplacePrinterId(""); }}>Cancel</button>
+              <button type="button" className="primary-button" disabled={!!busyResourceId || !replacePrinterId} onClick={() => void confirmReplacement()}>
+                {busyResourceId === pendingReplacement.id ? <span className="button-spinner"/> : "Replace selected queue"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }
-
 function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGenerate }: {
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
@@ -3566,7 +3734,7 @@ function PrinterModal({ busy, onClose, onSubmit }: {
   const [connectionType,setConnectionType]=useState("WindowsQueue");
   const [connectionAddress,setConnectionAddress]=useState("");
   const [queueName,setQueueName]=useState("");
-  return <Modal title="Add a printer" subtitle="Register its identity first. Live discovery will be handled by the local Print Agent." onClose={onClose}>
+  return <Modal title="Register a printer manually" subtitle="Windows queues normally appear here automatically when the Print Agent is connected. Use this advanced option only for a queue that has not been discovered yet." onClose={onClose}>
     <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,manufacturer,model,connectionType,connectionAddress:connectionAddress||undefined,queueName:queueName||undefined});}}>
       <label>Display name<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="e.g. Front counter printer" required maxLength={160}/></label>
       <div className="form-two-col"><label>Manufacturer<select value={manufacturer} onChange={e=>setManufacturer(e.target.value)}>{["HP","Canon","Ricoh","Epson","Brother","Kyocera","Xerox","Other"].map(item=><option key={item}>{item}</option>)}</select></label><label>Model<input value={model} onChange={e=>setModel(e.target.value)} placeholder="Model name" required maxLength={120}/></label></div>
@@ -3684,7 +3852,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
           <span className="subscription-updated">Updated {formatIstTime(summary.generatedUtc)}</span>
         </div>
         <div className="subscription-usage-grid">
-          <UsageMeter label="Registered printers" used={usage.printerCount} maximum={entitlements.maxPrinters}/>
+          <UsageMeter label="Selected printers" used={usage.printerCount} maximum={entitlements.maxPrinters}/>
           <UsageMeter label="Paired computers" used={usage.agentDeviceCount} maximum={entitlements.maxAgentDevices}/>
           <UsageMeter label="QR stations" used={usage.qrStationCount} maximum={entitlements.maxQrStations}/>
           <UsageMeter label="Print jobs this month" used={usage.monthlyPrintJobCount} maximum={entitlements.maxMonthlyPrintJobs}/>
@@ -3693,7 +3861,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
           <span>Maximum cloud document size</span>
           <strong>{entitlements.maxDocumentBytes == null ? "No configured cap" : `${(entitlements.maxDocumentBytes / (1024 * 1024)).toLocaleString("en-IN", { maximumFractionDigits: 2 })} MB`}</strong>
         </div>
-        <div className="subscription-usage-footnote">Disabled printers, QR stations and offline agents still count as registered resources unless removed or revoked. Revoked agent computers are excluded.</div>
+        <div className="subscription-usage-footnote">Printer quota applies only to selected supported output queues. All Windows queues discovered by your Print Agent remain visible, including unselected alternatives, and you can replace a selected queue without losing its discovery record. QR stations and paired computers follow their own plan limits.</div>
       </section>
     </section>
   );

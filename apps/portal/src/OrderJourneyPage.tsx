@@ -54,8 +54,8 @@ function printerSummary(jobs:ShopPrintJob[],printers:PrinterDevice[],agents:Agen
     ? {name:names.join(", ")||"Assigned printer",detail:"Connected · shop computer online",ready:true}
     : {name:names.join(", ")||"Assigned printer",detail:"Assigned · waiting for shop computer",ready:false};
 }
-function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssignPrinter,onDispatch,onConfirmOutput,onRetryPdfExport,onHistory,onOpenPhotoStudio}:{
-  job:ShopPrintJob;printers:PrinterDevice[];
+function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,onAssignPrinter,onDispatch,onConfirmOutput,onRetryPdfExport,onHistory,onOpenPhotoStudio}:{
+  job:ShopPrintJob;printers:PrinterDevice[];agents:AgentDevice[];
   onPreview:(job:ShopPrintJob)=>void;onApprove:(job:ShopPrintJob)=>void;onReject:(job:ShopPrintJob)=>void;
   onRefund:(job:ShopPrintJob)=>void;onAssignPrinter:(job:ShopPrintJob,printerId:string)=>void;
   onDispatch:(job:ShopPrintJob)=>void;onConfirmOutput:(job:ShopPrintJob)=>void;
@@ -64,6 +64,19 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
   const canEditPhoto=job.photoSourceAvailable===true&&!job.privatePrinting&&job.status==="AWAITING_SHOP_APPROVAL";
   const canRefund=(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&["VERIFIED","PARTIALLY_REFUNDED"].includes(job.payment?.status??"")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId;
   const assignable=["PAID_AUTHORISED","LOCAL_QUEUE_READY"].includes(job.status);
+  const currentPrinter=printers.find(printer=>printer.id===job.printerDeviceId);
+  const assignableAgentIds=new Set(agents.filter(agent=>
+    !agent.revokedUtc&&!!agent.lastSeenUtc&&Number.isFinite(Date.parse(agent.lastSeenUtc))&&
+    Date.parse(agent.lastSeenUtc)>=Date.now()-120000
+  ).map(agent=>agent.id));
+  const assignablePrinters=printers.filter(printer=>
+    printer.isActive&&!!printer.agentDeviceId&&assignableAgentIds.has(printer.agentDeviceId)&&
+    (printer.outputMode==="PDF_EXPORT"
+      ?!job.privatePrinting
+      :printer.outputMode==="PHYSICAL"&&!!printer.lastSeenUtc&&
+        Number.isFinite(Date.parse(printer.lastSeenUtc))&&Date.parse(printer.lastSeenUtc)>=Date.now()-120000&&
+        (printer.status==="Ready"||printer.status==="Busy"))
+  );
   const confirmable=isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT");
   const spoolerRetained=isRetainedSpoolerJob(job.spoolerStatus);
   const manualQueueReconciliationAvailable=canManuallyReconcileUncertainOutput(
@@ -88,9 +101,11 @@ function FileActions({job,printers,onPreview,onApprove,onReject,onRefund,onAssig
     {assignable&&<label className={styles.printerAssignment}>Printer
       <select aria-label={"Assign printer for "+job.jobNumber} value={job.printerDeviceId??""} onChange={event=>onAssignPrinter(job,event.currentTarget.value)}>
         <option value="">Choose printer</option>
-        {printers.filter(printer=>printer.isActive).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save as PDF · ":""}{printer.displayName}</option>)}
+        {currentPrinter&&!assignablePrinters.some(printer=>printer.id===currentPrinter.id)&&<option value={currentPrinter.id} disabled>{currentPrinter.displayName} · currently unavailable</option>}
+        {assignablePrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save as PDF · ":""}{printer.displayName}</option>)}
       </select>
     </label>}
+    {assignable&&assignablePrinters.length===0&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>No selected printer is ready right now. This file stays in its order; reconnect the Windows computer or select another ready queue in Printers. You do not need to upload the file again.</span></div>}
     {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
     {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canConfirmOutput} title={manualQueueReconciliationAvailable?"The Agent restarted before Windows returned a spooler ID. Check the exact job in the selected Windows queue and inspect the paper output before confirming.":confirmationBlockedMessage} onClick={()=>onConfirmOutput(job)}><Check size={12}/> {manualQueueReconciliationAvailable?"Reconcile & confirm":"Confirm output"}</button>}
     {confirmable&&manualQueueReconciliationAvailable&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>The Agent could not identify this Windows job. Manually check the {job.queueName} queue for {job.spoolerJobName}, then inspect every printed page before reconciling.</span></div>}
@@ -158,7 +173,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
             </strong>
             <span>{job.pageCount} page(s) · {job.copies} {job.copies===1?"copy":"copies"} · {orderJourneyStatusLabel(job.status)}</span>
           </div>
-          <FileActions job={job} printers={printers} {...actions}/>
+          <FileActions job={job} printers={printers} agents={agents} {...actions}/>
         </div>)}
       </div>}
     </div>

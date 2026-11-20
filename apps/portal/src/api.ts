@@ -1118,9 +1118,11 @@ export function updateStationEnabled(token: string, stationId: string, isEnabled
   );
 }
 
-export function updatePrinterActive(token: string, printerId: string, isActive: boolean) {
-  return apiRequest<{ id: string; isActive: boolean }>(
-    `/api/v1/shop/printers/${printerId}/active?isActive=${isActive}`,
+export function updatePrinterActive(token: string, printerId: string, isActive: boolean, replacePrinterId?: string) {
+  const query = new URLSearchParams({ isActive: String(isActive) });
+  if (replacePrinterId) query.set("replacePrinterId", replacePrinterId);
+  return apiRequest<{ id: string; isActive: boolean; replacedPrinterDeviceId?: string | null }>(
+    `/api/v1/shop/printers/${printerId}/active?${query.toString()}`,
     { method: "PATCH" },
     token
   );
