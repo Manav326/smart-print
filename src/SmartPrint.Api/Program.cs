@@ -3723,7 +3723,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
     if (printer.AgentDeviceId is Guid assignedAgentId)
-        await relayWakeups.NotifyAgentAsync(assignedAgentId);
+        _ = relayWakeups.NotifyAgentAsync(assignedAgentId);
 
     return Results.Ok(new
     {
@@ -4002,7 +4002,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
     });
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
-    await relayWakeups.NotifyAgentAsync(ready.AgentId);
+    _ = relayWakeups.NotifyAgentAsync(ready.AgentId);
     return Results.Ok(new
     {
         job.Id, job.JobNumber, job.Status, PrinterName = ready.DisplayName,
