@@ -1061,6 +1061,14 @@ test("shop owners can only select online ready printer queues and new printers r
   const orderJourney = read("../src/OrderJourneyPage.tsx");
   assert.match(orderJourney, /awaitingAgentDispatchCanBeReassigned/);
   assert.match(orderJourney, /has not been submitted to Windows yet/);
+  assert.match(orderJourney, /localDocumentNeedsOriginalAgent/);
+  assert.match(orderJourney, /printer\.agentDeviceId===localDocumentAgentId/);
+  assert.match(orderJourney, /printers on other computers cannot receive this local-only file/);
+  assert.match(app, /Files stored only on the original Windows computer stay there/);
+  assert.equal((api.match(/var queueJobsUnderLock = await db\.PrintJobs\.FromSqlInterpolated/g) ?? []).length, 2,
+    "Both replacement and deselection must serialize against Agent queue claims.");
+  assert.equal((api.match(/FOR UPDATE/g) ?? []).length >= 4, true,
+    "Printer swaps and job reassignment must use row locks before changing printer ownership.");
   assert.equal((api.match(/var partiallyCompletedBatchJobNumber/g) ?? []).length, 2,
     "Both replacement and ordinary deselection must protect partially completed batches.");
   assert.equal((api.match(/code = "printer_batch_output_locked"/g) ?? []).length, 2);
