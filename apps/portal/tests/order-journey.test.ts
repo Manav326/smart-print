@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ShopPayment, ShopPrintJob } from "../src/api.ts";
-import { buildShopOrderJourneys, filterShopOrderJourneys, isActiveOrderWork } from "../src/order-journey.ts";
+import { buildShopOrderJourneys, filterShopOrderJourneys, isActiveOrderWork, orderJourneyStatusLabel } from "../src/order-journey.ts";
 function job(v: Partial<ShopPrintJob> & Pick<ShopPrintJob,"id"|"jobNumber"|"status">): ShopPrintJob {
   return {
     id:v.id, jobNumber:v.jobNumber, status:v.status, batchId:v.batchId??null,
@@ -71,6 +71,14 @@ test("a verified payment advances the journey into printing preparation",()=>{
   const pay=payment({id:"pay",printJobId:"a",status:"VERIFIED"});
   const order=buildShopOrderJourneys([job({id:"a",jobNumber:"SP-1",status:"PAID_AUTHORISED"})],[pay])[0];
   assert.equal(order.stage,"printing");
+});
+
+test("authorised dispatch waits for the shop computer rather than claiming printing has started", () => {
+  const order = buildShopOrderJourneys([
+    job({id:"dispatch",jobNumber:"SP-DISPATCH",status:"PRINT_AUTHORISED"})
+  ], [])[0];
+  assert.equal(order.stage, "printing");
+  assert.equal(orderJourneyStatusLabel("PRINT_AUTHORISED"), "Waiting for shop computer");
 });
 
 test("stage filters and search cover batch, order, original file and folder names", () => {
