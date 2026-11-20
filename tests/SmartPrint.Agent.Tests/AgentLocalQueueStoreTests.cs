@@ -580,12 +580,15 @@ public sealed class AgentLocalQueueStoreTests
             await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
             Assert.Equal("OUTPUT_UNCONFIRMED", store.Find(job.Id)!.State);
             Assert.Equal(123, store.Find(job.Id)!.SpoolerJobId);
-            Assert.Empty(store.GetAcknowledgedJobs());
+            // The local selector includes this as a proof candidate so the Agent
+            // can ask the API whether a shop-authorised retry exists. The persisted
+            // manifest remains OUTPUT_UNCONFIRMED and cannot print on its own.
+            Assert.Single(store.GetAcknowledgedJobs());
             Assert.Single(store.GetSpoolerTrackingJobs());
 
             // Keep the original Windows job identity and page evidence after a
-            // verified absence. It is not acknowledged for printing again until
-            // the shop explicitly authorises a zero-page retry on the server.
+            // verified absence. A local proof candidate is not print authorisation;
+            // the API must explicitly authorise the zero-page retry for this batch.
             await store.MarkSpoolerJobAbsentAsync(job.Id, CancellationToken.None);
             var absent = store.Find(job.Id)!;
             Assert.Equal("OUTPUT_UNCONFIRMED", absent.State);
@@ -594,7 +597,7 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal(123, absent.SpoolerJobId);
             Assert.Equal(0, absent.SpoolerPagesPrinted);
             Assert.Equal(8, absent.SpoolerTotalPages);
-            Assert.Empty(store.GetAcknowledgedJobs());
+            Assert.Single(store.GetAcknowledgedJobs());
             Assert.Single(store.GetSpoolerTrackingJobs());
 
             await store.PreparePhysicalOutputRetryAsync(
