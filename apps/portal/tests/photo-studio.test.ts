@@ -658,7 +658,7 @@ test("Photo Studio browser fixture resolves selected page geometry before its PD
  assert.match(fixture,/getPhotoPaperPageGeometry\(photoSize\)/);
 });
 
-test("one processed 300-DPI crop is reused across all copies and every A4 page",()=>{
+test("Photo Studio reuses one processed 300-DPI tile and one page canvas across all output pages",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const helperStart=studio.indexOf("function createPhotoTile(");
  const rendererStart=studio.indexOf("function drawPhotoSheetPage(");
@@ -679,14 +679,21 @@ test("one processed 300-DPI crop is reused across all copies and every A4 page",
  assert.match(renderer,/sharedPhotoTile\?\?createPhotoTile\(/);
 
  const exporter=studio.slice(saveStart);
- const tileCreate=exporter.indexOf("const sharedPhotoTile=createPhotoTile(");
+ const tileCreate=exporter.indexOf("sharedPhotoTile=createPhotoTile(");
+ const canvasCreate=exporter.indexOf("outputCanvas=document.createElement(\"canvas\")");
  const pageLoopMatch=/for\s*\(\s*let\s+page\s*=\s*0;\s*page\s*<\s*pages;\s*page\+\+\s*\)/.exec(exporter);
  const pageLoop=pageLoopMatch?.index??-1;
  const pageDraw=exporter.indexOf("textLayers,sharedPhotoTile)",pageLoop);
- const tileDispose=exporter.indexOf("sharedPhotoTile.width=0",pageLoop);
- assert.ok(tileCreate>=0&&pageLoop>tileCreate&&pageDraw>pageLoop&&tileDispose>pageDraw,
-  "The export must create one tile before page rendering, pass it into every page, and release it afterwards.");
- assert.match(exporter,/finally\{\s*sharedPhotoTile\.width=0;\s*sharedPhotoTile\.height=0;/);
+ const jpegEncode=exporter.indexOf("canvasToBlob(outputCanvas",pageLoop);
+ const tileDispose=exporter.indexOf("if(sharedPhotoTile){sharedPhotoTile.width=0;sharedPhotoTile.height=0;}",pageLoop);
+ const canvasDispose=exporter.indexOf("if(outputCanvas){outputCanvas.width=0;outputCanvas.height=0;}",pageLoop);
+ assert.ok(tileCreate>=0&&canvasCreate>tileCreate&&pageLoop>canvasCreate&&pageDraw>pageLoop&&jpegEncode>pageDraw,
+  "The export must create one tile and one reusable page canvas before sequential rendering.");
+ assert.equal(exporter.split("outputCanvas=document.createElement(\"canvas\")").length-1,1,
+  "Only one high-resolution output canvas may be allocated per export.");
+ assert.ok(tileDispose>jpegEncode&&canvasDispose>tileDispose,
+  "The export must release both large canvases deterministically in finally.");
+ assert.match(exporter,/finally\{\s*if\(sharedPhotoTile\)\{sharedPhotoTile\.width=0;sharedPhotoTile\.height=0;\}\s*if\(outputCanvas\)\{outputCanvas\.width=0;outputCanvas\.height=0;\}/);
 });
 
 
