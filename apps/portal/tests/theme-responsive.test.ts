@@ -1051,4 +1051,7 @@ test("shop owners can only select online ready printer queues and new printers r
 
   assert.match(api, /PrinterSelectionRules\.CanSelect/);
   assert.match(api, /No selected printer is being replaced/);
+  assert.equal((api.match(/var partiallyCompletedBatchJobNumber/g) ?? []).length, 2,
+    "Both replacement and ordinary deselection must protect partially completed batches.");
+  assert.equal((api.match(/code = "printer_batch_output_locked"/g) ?? []).length, 2);
 });
