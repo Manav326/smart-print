@@ -1941,7 +1941,13 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                               ((job.Status == "LOCAL_QUEUE_CLAIMED" &&
                                 job.AgentLeaseExpiresUtc != null &&
                                 job.AgentLeaseExpiresUtc > DateTimeOffset.UtcNow) ||
-                               job.Status == "PRINT_AUTHORISED" ||
+                               (job.Status == "PRINT_AUTHORISED" &&
+                                (job.SpoolerStatus != "AWAITING_AGENT" ||
+                                 job.SpoolerJobId != null ||
+                                 job.PrintDispatchLeaseExpiresUtc != null ||
+                                 job.SpoolerSubmittedUtc != null ||
+                                 job.SpoolerObservedUtc != null ||
+                                 job.OutputConfirmedUtc != null)) ||
                                job.Status == "PRINT_SUBMITTING" ||
                                job.Status == "SPOOLER_ACCEPTED" ||
                                job.Status == "PRINTING" ||
@@ -3489,8 +3495,20 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
         selectedJob.SpoolerJobId == null &&
         string.IsNullOrWhiteSpace(selectedJob.SpoolerJobName) &&
         selectedJob.OutputConfirmedUtc == null;
+    var awaitingAgentDispatchCanBeReassigned =
+        PrintDispatchReassignmentRules.CanReassignBeforeSpoolerSubmission(
+            selectedJob.Status,
+            selectedJob.SpoolerStatus,
+            selectedJob.SpoolerJobId,
+            selectedJob.PrintDispatchLeaseExpiresUtc,
+            selectedJob.SpoolerSubmittedUtc,
+            selectedJob.SpoolerObservedUtc,
+            selectedJob.OutputConfirmedUtc);
     var canAssign = hasVerifiedPayment &&
-        (selectedJob.Status == "PAID_AUTHORISED" || expiredAgentLease || readyQueueCanBeReassigned);
+        (selectedJob.Status == "PAID_AUTHORISED" ||
+         expiredAgentLease ||
+         readyQueueCanBeReassigned ||
+         awaitingAgentDispatchCanBeReassigned);
     if (!canAssign)
     {
         await transaction.RollbackAsync(ct);
@@ -3560,8 +3578,17 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     var states = activeJobs.Select(item =>
     {
         documentsByJob.TryGetValue(item.Id, out var document);
-        var outputLocked = item.Status is "PRINT_AUTHORISED" or "PRINT_SUBMITTING" or
-            "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "COMPLETED";
+        var outputLocked = item.Status is "PRINT_SUBMITTING" or
+            "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED" or "COMPLETED" ||
+            (item.Status == "PRINT_AUTHORISED" &&
+             !PrintDispatchReassignmentRules.CanReassignBeforeSpoolerSubmission(
+                 item.Status,
+                 item.SpoolerStatus,
+                 item.SpoolerJobId,
+                 item.PrintDispatchLeaseExpiresUtc,
+                 item.SpoolerSubmittedUtc,
+                 item.SpoolerObservedUtc,
+                 item.OutputConfirmedUtc));
         var activeAgentLease = item.Status == "LOCAL_QUEUE_CLAIMED" &&
             item.AgentLeaseExpiresUtc is DateTimeOffset lease && lease > now;
         return new BatchPrinterAssignmentState(
@@ -3605,11 +3632,20 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     var assigned = 0;
     foreach (var batchJob in activeJobs)
     {
-        var needsQueueReset =
-            (batchJob.Status == "LOCAL_QUEUE_READY" && batchJob.PrinterDeviceId != printer.Id) ||
-            (batchJob.Status == "LOCAL_QUEUE_CLAIMED" &&
-             (batchJob.AgentLeaseExpiresUtc == null || batchJob.AgentLeaseExpiresUtc <= now));
         var printerChanged = batchJob.PrinterDeviceId != printer.Id;
+        var safeAwaitingAgentDispatch = PrintDispatchReassignmentRules.CanReassignBeforeSpoolerSubmission(
+            batchJob.Status,
+            batchJob.SpoolerStatus,
+            batchJob.SpoolerJobId,
+            batchJob.PrintDispatchLeaseExpiresUtc,
+            batchJob.SpoolerSubmittedUtc,
+            batchJob.SpoolerObservedUtc,
+            batchJob.OutputConfirmedUtc);
+        var needsQueueReset =
+            (batchJob.Status == "LOCAL_QUEUE_READY" && printerChanged) ||
+            (batchJob.Status == "LOCAL_QUEUE_CLAIMED" &&
+             (batchJob.AgentLeaseExpiresUtc == null || batchJob.AgentLeaseExpiresUtc <= now)) ||
+            (safeAwaitingAgentDispatch && printerChanged);
         if (!printerChanged && !needsQueueReset)
         {
             assigned++;
@@ -3626,7 +3662,24 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
             batchJob.AgentClaimedUtc = null;
             batchJob.LocalQueueReceivedUtc = null;
             batchJob.FailureCode = null;
+            batchJob.SpoolerJobId = null;
+            batchJob.SpoolerJobName = null;
             batchJob.SpoolerStatus = null;
+            batchJob.PrintDispatchLeaseExpiresUtc = null;
+            batchJob.SpoolerPagesPrinted = 0;
+            batchJob.SpoolerTotalPages = 0;
+            batchJob.SpoolerSubmittedUtc = null;
+            batchJob.SpoolerObservedUtc = null;
+            batchJob.PrinterNameSnapshot = null;
+            batchJob.PrinterQueueNameSnapshot = null;
+            batchJob.PrinterAgentNameSnapshot = null;
+            batchJob.PrinterSnapshotUtc = null;
+            batchJob.OutputType = "PHYSICAL";
+            batchJob.OutputFilePath = null;
+            batchJob.OutputFileName = null;
+            batchJob.OutputSha256 = null;
+            batchJob.OutputSizeBytes = null;
+            batchJob.OutputCompletedUtc = null;
         }
         batchJob.UpdatedUtc = now;
         db.PrintJobEvents.Add(new PrintJobEvent
