@@ -1042,9 +1042,13 @@ test("shop owners can only select online ready printer queues and new printers r
   const api = read("../../../src/SmartPrint.Api/Program.cs");
 
   assert.match(app, /function isPrinterReadyForSelection/);
-  assert.match(app, /agent\.status !== "Online"/);
-  assert.match(app, /printer\.status === "Ready" \|\| printer\.status === "Busy"/);
+  assert.match(app, /getPrinterReadinessReason\(printer, agents, now\)/);
   assert.match(app, /!printer\.isActive && isPrinterReadyForSelection\(printer, agents\)/);
+  const printerAvailability = read("../src/printer-availability.ts");
+  assert.match(printerAvailability, /agent\.status === "Online"/);
+  assert.match(printerAvailability, /queueStatus === "ready" \|\| queueStatus === "busy"/);
+  assert.match(printerAvailability, /hasRecentHeartbeat\(printer\.lastSeenUtc, now\)/);
+  assert.match(printerAvailability, /if \(!printer\.isActive\) return "Not selected for new jobs"/);
   assert.match(app, /Adding a new printer/);
   assert.match(app, /Printers &amp; scanners, choose Add device/);
   assert.match(app, /pair that PC's SmartPrint Print Agent to this shop/);
