@@ -34,7 +34,7 @@ import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./p
 import {
   ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob,
-  createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
+  createAgentEnrollmentCode, createCustomerSession, createStation,
   createShopPhotoJob, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
@@ -61,7 +61,7 @@ import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDate
 import { getSubscriptionReminderState } from "./subscription-checkout-state";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
-type Modal = "printer" | "station" | null;
+type Modal = "station" | null;
 
 type CustomerUploadFileProgress = {
   name: string;
@@ -558,23 +558,6 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     try { await logout(tokens.accessToken); } catch { /* Local sign-out still clears the session. */ }
     try { await onSignOut(); }
     catch (exception) { setError(exception instanceof Error ? exception.message : "Could not clear the secure desktop session."); }
-  }
-
-  async function submitPrinter(values: {
-    displayName: string; manufacturer: string; model: string; connectionType: string;
-    connectionAddress?: string; queueName?: string;
-  }) {
-    setBusy(true);
-    try {
-      await createPrinter(tokens.accessToken, values);
-      setModal(null);
-      setToast("Printer added to your shop.");
-      await reload();
-    } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not add printer.");
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function submitStation(values: { displayName: string; printerDeviceId?: string }) {
@@ -1700,7 +1683,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onOpenPhotoStudio={job=>void openShopPhotoStudioForJob(job)}
           />}
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
-          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} maxPrinters={subscription?.entitlements.maxPrinters} subscriptionActive={subscription?.entitlements.isAccessActive} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
+          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} maxPrinters={subscription?.entitlements.maxPrinters} subscriptionActive={subscription?.entitlements.isAccessActive} busyResourceId={busyResourceId} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
@@ -1717,7 +1700,6 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
       {ownerAccountOpen && profile && <ShopOwnerAccountModal profile={profile} busy={busy} onClose={() => setOwnerAccountOpen(false)} onSave={saveOwnerAccount}/>}
       {helpOpen && <HelpSupportModal onClose={() => setHelpOpen(false)} onNavigate={section => { setHelpOpen(false); navAction(section); }}/>}
-      {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
       {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => isPrinterAvailable(printer, onlineAgentIds))} onClose={() => setModal(null)} onSubmit={submitStation}/>}
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={(acceptedIds,pdfBrandingEnabled)=>void applyBatchReview(batchReviewJobs,acceptedIds,pdfBrandingEnabled)}/>} 
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} isSavedOutput={preview.isSavedOutput} focusEditOnMount={focusShopPhotoEdit} onEditPhoto={preview.job.photoSourceAvailable&&!preview.job.privatePrinting&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); setFocusShopPhotoEdit(false); }}/>} 
@@ -2500,6 +2482,37 @@ function PrintersPage({
           </div>
         )}
       </section>
+      {pendingReplacement && (
+        <Modal
+          title="Replace a selected printer"
+          subtitle={`Select which current queue to replace with ${pendingReplacement.displayName}.`}
+          onClose={() => { if (!busyResourceId) { setPendingReplacement(null); setReplacePrinterId(""); } }}
+        >
+          <div className="modal-form">
+            <label>
+              Queue to replace
+              <select value={replacePrinterId} onChange={event => setReplacePrinterId(event.target.value)}>
+                <option value="">Choose a selected queue</option>
+                {selectedPrinters.map(printer => <option key={printer.id} value={printer.id}>{printer.displayName}</option>)}
+              </select>
+            </label>
+            <div className="modal-note">
+              <ShieldCheck size={15}/>
+              <span>The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Private files stay on their original Windows computer.</span>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" disabled={!!busyResourceId} onClick={() => { setPendingReplacement(null); setReplacePrinterId(""); }}>Cancel</button>
+              <button type="button" className="primary-button" disabled={!!busyResourceId || !replacePrinterId} onClick={() => void confirmReplacement()}>
+                {busyResourceId === pendingReplacement.id ? <span className="button-spinner"/> : "Replace selected queue"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+on>
       {pendingReplacement && (
         <Modal
           title="Replace a selected printer"
@@ -3679,6 +3692,18 @@ function printBlockMessage(code:string):string {
   }
 }
 
+function isPrinterReadyForSelection(printer: PrinterDevice, agents: readonly AgentDevice[], now = Date.now()) {
+  if (!printer.agentDeviceId || printer.outputMode === "UNSUPPORTED_VIRTUAL") return false;
+  const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
+  if (!agent || agent.revokedUtc || agent.status !== "Online") return false;
+  const agentLastSeen = agent.lastSeenUtc ? Date.parse(agent.lastSeenUtc) : Number.NaN;
+  const printerLastSeen = printer.lastSeenUtc ? Date.parse(printer.lastSeenUtc) : Number.NaN;
+  return Number.isFinite(agentLastSeen) && agentLastSeen > now - 2 * 60 * 1000 &&
+    Number.isFinite(printerLastSeen) && printerLastSeen > now - 2 * 60 * 1000 &&
+    (printer.status === "Ready" || printer.status === "Busy") &&
+    (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT");
+}
+
 function isPrinterAvailable(printer: PrinterDevice, onlineAgentIds: ReadonlySet<string>, now = Date.now()) {
   if (!printer.isActive || !printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId)) return false;
   if (printer.outputMode === "UNSUPPORTED_VIRTUAL") return false;
@@ -3797,28 +3822,6 @@ function HelpSupportModal({ onClose, onNavigate }: { onClose: () => void; onNavi
       <p className="help-modal-note">These shortcuts open the existing shop tools. They do not change your settings or print jobs.</p>
     </Modal>
   );
-}
-
-function PrinterModal({ busy, onClose, onSubmit }: {
-  busy:boolean; onClose:()=>void; onSubmit:(v:{displayName:string;manufacturer:string;model:string;connectionType:string;connectionAddress?:string;queueName?:string})=>void;
-}) {
-  const [displayName,setDisplayName]=useState("");
-  const [manufacturer,setManufacturer]=useState("HP");
-  const [model,setModel]=useState("");
-  const [connectionType,setConnectionType]=useState("WindowsQueue");
-  const [connectionAddress,setConnectionAddress]=useState("");
-  const [queueName,setQueueName]=useState("");
-  return <Modal title="Register a printer manually" subtitle="Windows queues normally appear here automatically when the Print Agent is connected. Use this advanced option only for a queue that has not been discovered yet." onClose={onClose}>
-    <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,manufacturer,model,connectionType,connectionAddress:connectionAddress||undefined,queueName:queueName||undefined});}}>
-      <label>Display name<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="e.g. Front counter printer" required maxLength={160}/></label>
-      <div className="form-two-col"><label>Manufacturer<select value={manufacturer} onChange={e=>setManufacturer(e.target.value)}>{["HP","Canon","Ricoh","Epson","Brother","Kyocera","Xerox","Other"].map(item=><option key={item}>{item}</option>)}</select></label><label>Model<input value={model} onChange={e=>setModel(e.target.value)} placeholder="Model name" required maxLength={120}/></label></div>
-      <label>Connection type<select value={connectionType} onChange={e=>setConnectionType(e.target.value)}><option value="WindowsQueue">Windows installed queue</option><option value="USB">USB</option><option value="LAN">LAN / Network</option><option value="IPP">IPP</option></select></label>
-      {(connectionType==="LAN"||connectionType==="IPP")&&<label>Network address<input value={connectionAddress} onChange={e=>setConnectionAddress(e.target.value)} placeholder="192.168.1.100 or ipp://printer/ipp/print"/></label>}
-      {connectionType==="WindowsQueue"&&<label>Windows queue name <span className="field-hint">Optional until the agent discovers installed queues</span><input value={queueName} onChange={e=>setQueueName(e.target.value)} placeholder="Exact Windows printer queue name"/></label>}
-      <div className="modal-note"><ShieldCheck size={15}/> The printer will be listed as Unknown until a trusted local agent confirms its status and capabilities.</div>
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!displayName.trim()||!model.trim()}>{busy?<span className="button-spinner"/>:"Add printer"}</button></div>
-    </form>
-  </Modal>;
 }
 
 function StationModal({ busy, printers, onClose, onSubmit }: {
