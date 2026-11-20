@@ -575,20 +575,69 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Single(store.GetSpoolerTrackingJobs());
             Assert.Empty(store.GetInterruptedSubmissions());
 
-            await store.UpdateSpoolerStatusAsync(job.Id, "PRINTING", CancellationToken.None);
+            await store.UpdateSpoolerStatusAsync(job.Id, "PRINTING", CancellationToken.None, pagesPrinted: 0, totalPages: 8);
             Assert.Equal("PRINTING", store.Find(job.Id)!.SpoolerStatus);
             await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
             Assert.Equal("OUTPUT_UNCONFIRMED", store.Find(job.Id)!.State);
+            Assert.Equal(123, store.Find(job.Id)!.SpoolerJobId);
             Assert.Empty(store.GetAcknowledgedJobs());
             Assert.Single(store.GetSpoolerTrackingJobs());
 
-            // Keep checking the same Windows spooler ID until the Agent verifies it is absent.
-            await store.UpdateSpoolerStatusAsync(job.Id, "RETAINED", CancellationToken.None);
-            Assert.Equal("RETAINED", store.Find(job.Id)!.SpoolerStatus);
-            Assert.Single(store.GetSpoolerTrackingJobs());
+            // Keep the original Windows job identity and page evidence after a
+            // verified absence. It is not acknowledged for printing again until
+            // the shop explicitly authorises a zero-page retry on the server.
             await store.MarkSpoolerJobAbsentAsync(job.Id, CancellationToken.None);
-            Assert.Null(store.Find(job.Id)!.SpoolerJobId);
+            var absent = store.Find(job.Id)!;
+            Assert.Equal("OUTPUT_UNCONFIRMED", absent.State);
+            Assert.Equal("OUTPUT_UNCONFIRMED", absent.SpoolerStatus);
+            Assert.Equal("SPOOLER_JOB_NO_LONGER_VISIBLE", absent.FailureCode);
+            Assert.Equal(123, absent.SpoolerJobId);
+            Assert.Equal(0, absent.SpoolerPagesPrinted);
+            Assert.Equal(8, absent.SpoolerTotalPages);
+            Assert.Empty(store.GetAcknowledgedJobs());
+            Assert.Single(store.GetSpoolerTrackingJobs());
+
+            await store.PreparePhysicalOutputRetryAsync(
+                job.Id, "SmartPrint-Test-StableName-R2", CancellationToken.None);
+            var retry = store.Find(job.Id)!;
+            Assert.Equal("ACKNOWLEDGED", retry.State);
+            Assert.Equal("SmartPrint-Test-StableName-R2", retry.SpoolerJobName);
+            Assert.Null(retry.SpoolerJobId);
+            Assert.Equal(0, retry.SpoolerPagesPrinted);
+            Assert.Equal(0, retry.SpoolerTotalPages);
+            Assert.Single(store.GetAcknowledgedJobs());
             Assert.Empty(store.GetSpoolerTrackingJobs());
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task PartiallyPrintedPhysicalJobCannotBePreparedForAutomaticRetry()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Partially printed source document"u8.ToArray();
+            var job = CreateJob(bytes);
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-Partial-Page-Test", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 456, "SmartPrint-Partial-Page-Test", CancellationToken.None);
+            await store.UpdateSpoolerStatusAsync(job.Id, "PRINTING", CancellationToken.None, pagesPrinted: 1, totalPages: 8);
+            await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
+            await store.MarkSpoolerJobAbsentAsync(job.Id, CancellationToken.None);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.PreparePhysicalOutputRetryAsync(job.Id, "SmartPrint-Partial-Page-Test-R2", CancellationToken.None));
+
+            var unresolved = store.Find(job.Id)!;
+            Assert.Equal("OUTPUT_UNCONFIRMED", unresolved.State);
+            Assert.Equal(456, unresolved.SpoolerJobId);
+            Assert.Equal(1, unresolved.SpoolerPagesPrinted);
+            Assert.Equal(8, unresolved.SpoolerTotalPages);
+            Assert.Empty(store.GetAcknowledgedJobs());
         }
         finally { Directory.Delete(root, recursive: true); }
     }
