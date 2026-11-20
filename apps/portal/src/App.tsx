@@ -604,6 +604,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       await reload();
       return true;
     } catch (exception) {
+      if (exception instanceof ApiError && exception.status === 409) {
+        try { await reload(); } catch { /* Keep the original action error visible. */ }
+      }
       setError(exception instanceof Error ? exception.message : "Could not update printer.");
       return false;
     } finally {
