@@ -2,9 +2,30 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { UPLOAD_LIMITS } from "../src/upload-limits.generated.ts";
+import { isValidCustomerPhotoSettings } from "../src/customer-photo-settings.ts";
 import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, getPhotoCropFocusAfterDrag, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
 
 const UPLOAD_LIMITS_CONFIG = JSON.parse(readFileSync(new URL("../../../config/upload-limits.json", import.meta.url), "utf8"));
+
+test("customer photo settings preserve every stock finish supported by the Agent",()=>{
+ const base={sizeCode:"35x45",photoCount:17,photosPerPage:9};
+ for(const finish of ["PLAIN","GLOSSY","MATTE"]){
+  assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"A4_SHEET",photoPaperFinish:finish}),true,
+   "A4 sheets must allow "+finish+" stock.");
+ }
+ for(const finish of ["GLOSSY","MATTE"]){
+  assert.equal(isValidCustomerPhotoSettings({...base,photosPerPage:1,photoOutputLayout:"PHOTO_PAPER",photoPaperFinish:finish}),true,
+   "Individual photo paper must allow "+finish+" stock.");
+ }
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"A4_SHEET"}),true,
+  "Legacy A4 drafts without finish metadata keep their plain-paper default.");
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"PHOTO_PAPER",photoPaperFinish:"PLAIN",photosPerPage:1}),false);
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"PHOTO_PAPER",photoPaperFinish:"GLOSSY",photosPerPage:2}),false);
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"A4_SHEET",photoPaperFinish:"SATIN"}),false,
+  "Unknown finishes must not be silently relabeled.");
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"A4_SHEET",photoPaperFinish:"GLOSSY",photosPerPage:0}),false);
+ assert.equal(isValidCustomerPhotoSettings({...base,sizeCode:"4x6",photoOutputLayout:"A4_SHEET",photoPaperFinish:"MATTE",photosPerPage:2}),false);
+});
 
 test("customer upload limits are generated from the shared policy",()=>{
  assert.equal(UPLOAD_LIMITS.maxFileBytes,UPLOAD_LIMITS_CONFIG.maxFileBytes);
