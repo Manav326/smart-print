@@ -37,6 +37,7 @@ using SmartPrint.Api.Modules.ShopOperations.Registration;
 using SmartPrint.Api.Modules.ShopPayments.Registration;
 using SmartPrint.Api.Modules.ShopProfile.Registration;
 using SmartPrint.Api.Modules.ShopAccount.Registration;
+using SmartPrint.Api.Modules.ShopDevices.Registration;
 using SmartPrint.Documents;
 
 const string bootstrapPlatformAdminArgument = "--bootstrap-platform-admin";
@@ -121,6 +122,7 @@ builder.Services.AddPlatformOperationalSettingsModule();
 builder.Services.AddShopPaymentsModule();
 builder.Services.AddShopProfileModule();
 builder.Services.AddShopAccountModule();
+builder.Services.AddShopDevicesModule();
 builder.Services.AddPlatformTenantsModule();
 builder.Services.AddSingleton<GoogleIdentityService>();
 builder.Services.AddSingleton<GoogleLoginNonceStore>();
@@ -598,6 +600,7 @@ shop.MapShopPaymentsModule();
 
 
 shop.MapShopAccountModule();
+shop.MapShopDevicesModule();
 
 
 
@@ -605,290 +608,17 @@ shop.MapShopAccountModule();
 
 
 
-shop.MapPost("/printers", async (
-    CreatePrinterRequest request,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    TenantEntitlementService entitlements,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var connectionTypes = new[] { "USB", "LAN", "IPP", "WindowsQueue" };
-    if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 160 ||
-        string.IsNullOrWhiteSpace(request.Manufacturer) || request.Manufacturer.Trim().Length > 80 ||
-        string.IsNullOrWhiteSpace(request.Model) || request.Model.Trim().Length > 120 ||
-        !connectionTypes.Contains(request.ConnectionType, StringComparer.OrdinalIgnoreCase))
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["printer"] = ["A name, manufacturer, model and supported connection type are required."]
-        });
-    }
-
-    var capabilities = request.CapabilitiesJson ?? "{}";
-    try
-    {
-        using var parsed = JsonDocument.Parse(capabilities);
-        if (parsed.RootElement.ValueKind != JsonValueKind.Object || capabilities.Length > 16000)
-        {
-            throw new JsonException();
-        }
-    }
-    catch (JsonException)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["capabilitiesJson"] = ["Printer capabilities must be a valid JSON object under 16 KB."]
-        });
-    }
-
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.Printer, ct);
-    var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.Printer, ct);
-    if (!quota.Allowed)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-    }
-
-    var printer = new PrinterDevice
-    {
-        TenantId = tenantId,
-        DisplayName = request.DisplayName.Trim(),
-        Manufacturer = request.Manufacturer.Trim(),
-        Model = request.Model.Trim(),
-        ConnectionType = connectionTypes.Single(value => value.Equals(request.ConnectionType, StringComparison.OrdinalIgnoreCase)),
-        ConnectionAddress = string.IsNullOrWhiteSpace(request.ConnectionAddress) ? null : request.ConnectionAddress.Trim(),
-        QueueName = string.IsNullOrWhiteSpace(request.QueueName) ? null : request.QueueName.Trim(),
-        CapabilitiesJson = capabilities,
-        Status = "Unknown",
-        IsActive = true
-    };
-    db.PrinterDevices.Add(printer);
-    await db.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
-    return Results.Created($"/api/v1/shop/printers/{printer.Id}", new
-    {
-        printer.Id,
-        printer.DisplayName,
-        printer.Manufacturer,
-        printer.Model,
-        printer.ConnectionType,
-        printer.OutputMode,
-        printer.ConnectionAddress,
-        printer.QueueName,
-        printer.CapabilitiesJson,
-        printer.Status,
-        printer.IsActive
-    });
-});
-
-shop.MapPatch("/printers/{printerId:guid}/active", async (
-    Guid printerId,
-    bool isActive,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var printer = await db.PrinterDevices.SingleOrDefaultAsync(x => x.Id == printerId && x.TenantId == tenantId, ct);
-    if (printer is null)
-    {
-        return Results.NotFound();
-    }
-
-    if (!isActive)
-    {
-        var activeJobNumber = await db.PrintJobs.AsNoTracking()
-            .Where(job => job.TenantId == tenantId &&
-                          job.PrinterDeviceId == printerId &&
-                          (job.Status == "LOCAL_QUEUE_CLAIMED" ||
-                           job.Status == "LOCAL_QUEUE_READY" ||
-                           job.Status == "PRINT_AUTHORISED" ||
-                           job.Status == "PRINT_SUBMITTING" ||
-                           job.Status == "SPOOLER_ACCEPTED" ||
-                           job.Status == "PRINTING"))
-            .OrderByDescending(job => job.CreatedUtc)
-            .Select(job => job.JobNumber)
-            .FirstOrDefaultAsync(ct);
-
-        if (!string.IsNullOrWhiteSpace(activeJobNumber))
-        {
-            return Results.Conflict(new
-            {
-                code = "printer_has_active_output",
-                message = $"Printer cannot be disabled while job {activeJobNumber} is active in the Windows Agent or spooler. Resolve that same job first; disabling it does not cancel Windows output."
-            });
-        }
-    }
-
-    printer.IsActive = isActive;
-    printer.UpdatedUtc = DateTimeOffset.UtcNow;
-    await db.SaveChangesAsync(ct);
-    return Results.Ok(new { printer.Id, printer.IsActive, printer.UpdatedUtc });
-});
 
 
 
-shop.MapPost("/qr-stations", async (
-    CreateQrStationRequest request,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    IConfiguration configuration,
-    TenantEntitlementService entitlements,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
 
-    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-    if (!Uri.TryCreate(portalBase, UriKind.Absolute, out var portalUri) ||
-        portalUri.Scheme != Uri.UriSchemeHttps || portalUri.AbsolutePath != "/" ||
-        !string.IsNullOrEmpty(portalUri.Query) || !string.IsNullOrEmpty(portalUri.Fragment) ||
-        !string.IsNullOrEmpty(portalUri.UserInfo))
-    {
-        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The canonical public HTTPS URL is not configured.");
-    }
 
-    if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 120)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["displayName"] = ["A station name of up to 120 characters is required."]
-        });
-    }
 
-    if (request.PrinterDeviceId is Guid printerId)
-    {
-        var selectedPrinterOutputMode = await db.PrinterDevices.AsNoTracking()
-            .Where(printer => printer.Id == printerId && printer.TenantId == tenantId && printer.IsActive)
-            .Select(printer => printer.OutputMode)
-            .SingleOrDefaultAsync(ct);
-        if (selectedPrinterOutputMode is null)
-        {
-            return Results.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["printerDeviceId"] = ["Select an active printer that belongs to this shop."]
-            });
-        }
-        if (selectedPrinterOutputMode is not ("PHYSICAL" or "PDF_EXPORT"))
-        {
-            return Results.ValidationProblem(new Dictionary<string, string[]>
-            {
-                ["printerDeviceId"] = ["This virtual/document driver is not supported for SmartPrint output. Select a physical printer or Microsoft Print to PDF for non-production testing."]
-            });
-        }
-    }
 
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.QrStation, ct);
-    var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.QrStation, ct);
-    if (!quota.Allowed)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-    }
 
-    var publicCode = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
-    var station = new QrStation
-    {
-        TenantId = tenantId,
-        PrinterDeviceId = request.PrinterDeviceId,
-        DisplayName = request.DisplayName.Trim(),
-        PublicCodeHash = HashOpaqueToken(publicCode),
-        PublicCode = publicCode,
-        PublicCodeHint = publicCode[^4..]
-    };
-    db.QrStations.Add(station);
-    await db.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
 
-    return Results.Created($"/api/v1/shop/qr-stations/{station.Id}", new
-    {
-        station.Id,
-        station.DisplayName,
-        station.PrinterDeviceId,
-        station.PublicCodeHint,
-        station.IsEnabled,
-        PublicUrl = $"{portalBase}/s/{publicCode}"
-    });
-});
 
-shop.MapPost("/qr-stations/{stationId:guid}/rotate-code", async (
-    Guid stationId,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    IConfiguration configuration,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
 
-    var portalBase = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-    if (!Uri.TryCreate(portalBase, UriKind.Absolute, out var portalUri) ||
-        portalUri.Scheme != Uri.UriSchemeHttps || portalUri.AbsolutePath != "/" ||
-        !string.IsNullOrEmpty(portalUri.Query) || !string.IsNullOrEmpty(portalUri.Fragment) ||
-        !string.IsNullOrEmpty(portalUri.UserInfo))
-    {
-        return Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "The canonical public HTTPS URL is not configured.");
-    }
-
-    var station = await db.QrStations.SingleOrDefaultAsync(
-        item => item.Id == stationId && item.TenantId == tenantId, ct);
-    if (station is null)
-    {
-        return Results.NotFound();
-    }
-
-    var publicCode = Microsoft.AspNetCore.WebUtilities.WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
-    station.PublicCodeHash = HashOpaqueToken(publicCode);
-    station.PublicCode = publicCode;
-    station.PublicCodeHint = publicCode[^4..];
-    await db.SaveChangesAsync(ct);
-
-    return Results.Ok(new
-    {
-        station.Id,
-        station.PublicCodeHint,
-        PublicUrl = $"{portalBase}/s/{publicCode}"
-    });
-});
-
-shop.MapPatch("/qr-stations/{stationId:guid}/enabled", async (
-    Guid stationId,
-    bool isEnabled,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
-
-    var station = await db.QrStations.SingleOrDefaultAsync(
-        item => item.Id == stationId && item.TenantId == tenantId, ct);
-    if (station is null)
-    {
-        return Results.NotFound();
-    }
-
-    station.IsEnabled = isEnabled;
-    await db.SaveChangesAsync(ct);
-    return Results.Ok(new { station.Id, station.IsEnabled });
-});
 
 
 
@@ -11208,7 +10938,7 @@ static string Slugify(string value)
 }
 
 static string HashOpaqueToken(string token) =>
-    Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))).ToLowerInvariant();
+    OpaqueTokenHasher.Hash(token);
 
 await app.RunAsync();
 
