@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { AgentDevice, PrinterDevice } from "../src/api.ts";
-import { getPrinterAvailabilityReason, isPrinterAvailableForShop } from "../src/printer-availability.ts";
+import { getPrinterAvailabilityReason, getPrinterReadinessReason, isPrinterAvailableForShop } from "../src/printer-availability.ts";
 
 const now = Date.parse("2026-11-20T12:00:00Z");
 const recent = new Date(now - 15_000).toISOString();
@@ -38,9 +38,15 @@ test("an online shop computer does not make a stale or revoked Agent look availa
   assert.equal(getPrinterAvailabilityReason(printer(), [agent({ revokedUtc: recent })], now), "Shop computer offline");
 });
 
-test("only selected supported queues are reported as available", () => {
-  assert.equal(getPrinterAvailabilityReason(printer({ isActive: false }), [agent()], now), "Not selected for new jobs");
-  assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "UNSUPPORTED_VIRTUAL" }), [agent()], now), "Unsupported Windows output queue");
+test("unselected but ready queues remain eligible for the owner to select", () => {
+  const candidate = printer({ isActive: false });
+  assert.equal(getPrinterAvailabilityReason(candidate, [agent()], now), "Not selected for new jobs");
+  assert.equal(getPrinterReadinessReason(candidate, [agent()], now), null);
+  assert.equal(isPrinterAvailableForShop(candidate, [agent()], now), false);
+});
+
+test("unsupported virtual queues remain visible but cannot be selected or assigned", () => {
+  assert.equal(getPrinterReadinessReason(printer({ outputMode: "UNSUPPORTED_VIRTUAL" }), [agent()], now), "Unsupported Windows output queue");
 });
 
 test("PDF export queues follow the same fresh queue and Agent readiness contract as server selection", () => {
