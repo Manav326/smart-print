@@ -1116,7 +1116,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     const resolvedJobs=selectedJobs.filter((job):job is ShopPrintJob=>job!==undefined);
     if(resolvedJobs.length!==jobIds.length){
       setError("The selected files changed in the latest order refresh. Refresh the order and select the files again.");
-      await reload();
+      try{await reload();}catch{/* Keep the stale-selection message visible. */}
       return false;
     }
     let privateFileIndex=0;
@@ -1134,7 +1134,13 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     try{
       const result=await resumeShopUnprintedBatch(tokens.accessToken,batchId,jobIds);
       setToast(`${result.resumedCount} verified-unprinted file(s) authorised to resume on ${result.printerName}.`);
-      await reload();
+      try{
+        await reload();
+      }catch{
+        setError("The resume was authorised, but the order view could not refresh. Use Refresh to check the latest status; do not submit the same files again.");
+      }
+      // The server has committed the authorisation. Return success even when
+      // refreshing the view fails, so the selected files cannot be submitted twice.
       return true;
     }catch(exception){
       setError(exception instanceof Error?exception.message:"Could not resume the selected files.");
