@@ -13,7 +13,7 @@ public sealed class WindowsPrinterCapabilityProbeRunner
     private static readonly TimeSpan SuccessCacheLifetime = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan UnknownCacheLifetime = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan FailureBackoff = TimeSpan.FromMinutes(2);
-    private const int MaximumCapabilityJsonCharacters = 512 * 1024;
+    private const int MaximumCapabilityJsonCharacters = 15_000;
 
     private readonly ILogger<WindowsPrinterCapabilityProbeRunner> logger;
     private readonly IAgentChildProcessRunner childProcessRunner;

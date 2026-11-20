@@ -34,6 +34,9 @@ internal static class AgentChildCommands
             case "--discover-printers":
                 Environment.ExitCode = await RunDiscoveryAsync();
                 return true;
+            case "--discover-printers-winspool":
+                Environment.ExitCode = RunWinspoolDiscovery();
+                return true;
             case "--print-job":
                 Environment.ExitCode = await RunPrintJobAsync();
                 return true;
@@ -90,6 +93,21 @@ internal static class AgentChildCommands
         catch (Exception exception)
         {
             Console.Error.WriteLine("Capability probe failed: " + exception.GetType().Name);
+            return 2;
+        }
+    }
+
+    private static int RunWinspoolDiscovery()
+    {
+        try
+        {
+            var printers = WindowsPrinterDiscovery.DiscoverWinspoolQueues();
+            Console.Out.WriteLine(JsonSerializer.Serialize(printers, JsonOptions));
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine("Windows spooler queue enumeration failed: " + exception.GetType().Name);
             return 2;
         }
     }
