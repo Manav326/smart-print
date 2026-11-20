@@ -1219,7 +1219,7 @@ public sealed class Worker(
                     await ReportOutputUnconfirmedAsync(client, credentials, entry.JobId, "INTERRUPTED_PRINT_METADATA_MISSING", "The local manifest is missing its printer queue or spooler name.", ct);
                     continue;
                 }
-                var found = printExecutor.FindJobByDocumentName(entry.QueueName, entry.SpoolerJobName);
+                var found = await isolatedWindowsPrintExecutor.FindJobByDocumentNameAsync(entry.QueueName, entry.SpoolerJobName, ct);
                 if (found is null)
                 {
                     await localQueueStore.MarkOutputUnconfirmedAsync(entry.JobId, "AGENT_RESTART_DURING_PRINT_SUBMISSION", ct);

@@ -4,13 +4,18 @@ using System.Reflection;
 
 namespace SmartPrint.Agent;
 
-internal sealed record AgentChildProcessResult(
+public interface IAgentChildProcessRunner
+{
+    Task<AgentChildProcessResult> ExecuteAsync(string command, string standardInput, TimeSpan timeout, CancellationToken cancellationToken);
+}
+
+public sealed record AgentChildProcessResult(
     int ExitCode,
     string StandardOutput,
     string StandardError,
     bool TimedOut);
 
-internal sealed class AgentChildProcessStartException(string message, Exception? inner = null)
+public sealed class AgentChildProcessStartException(string message, Exception? inner = null)
     : Exception(message, inner);
 
 /// <summary>
@@ -18,9 +23,9 @@ internal sealed class AgentChildProcessStartException(string message, Exception?
 /// inherits the service token, so LocalService retains the same protected-queue
 /// and Windows printer access without passing credentials or plaintext files.
 /// </summary>
-internal static class AgentChildProcess
+public sealed class AgentChildProcessRunner : IAgentChildProcessRunner
 {
-    public static async Task<AgentChildProcessResult> ExecuteAsync(
+    public async Task<AgentChildProcessResult> ExecuteAsync(
         string command,
         string standardInput,
         TimeSpan timeout,
@@ -109,7 +114,10 @@ internal static class AgentChildProcess
             CreateNoWindow = true,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
-            RedirectStandardError = true
+            RedirectStandardError = true,
+            StandardInputEncoding = System.Text.Encoding.UTF8,
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8
         };
 
         // Framework-dependent development runs are hosted by dotnet.exe. Published

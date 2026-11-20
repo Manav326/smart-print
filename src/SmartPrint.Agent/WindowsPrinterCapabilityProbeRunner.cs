@@ -10,12 +10,13 @@ namespace SmartPrint.Agent;
 public sealed class WindowsPrinterCapabilityProbeRunner
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
-    private static readonly TimeSpan SuccessCacheLifetime = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan SuccessCacheLifetime = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan UnknownCacheLifetime = TimeSpan.FromMinutes(5);
-    private static readonly TimeSpan FailureBackoff = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan FailureBackoff = TimeSpan.FromMinutes(2);
     private const int MaximumCapabilityJsonCharacters = 512 * 1024;
 
     private readonly ILogger<WindowsPrinterCapabilityProbeRunner> logger;
+    private readonly IAgentChildProcessRunner childProcessRunner;
     private readonly bool executeInCurrentProcess;
     private readonly TimeSpan probeTimeout;
     private readonly SemaphoreSlim concurrencyGate = new(2, 2);
@@ -25,9 +26,11 @@ public sealed class WindowsPrinterCapabilityProbeRunner
     public WindowsPrinterCapabilityProbeRunner(
         ILogger<WindowsPrinterCapabilityProbeRunner> logger,
         IConfiguration? configuration = null,
-        bool executeInCurrentProcess = false)
+        bool executeInCurrentProcess = false,
+        IAgentChildProcessRunner? childProcessRunner = null)
     {
         this.logger = logger;
+        this.childProcessRunner = childProcessRunner ?? new AgentChildProcessRunner();
         this.executeInCurrentProcess = executeInCurrentProcess;
         probeTimeout = TimeSpan.FromSeconds(Math.Clamp(
             configuration?.GetValue<int?>("Agent:PrinterCapabilityProbeTimeoutSeconds") ?? 8, 2, 30));
@@ -58,7 +61,7 @@ public sealed class WindowsPrinterCapabilityProbeRunner
             {
                 var request = JsonSerializer.Serialize(
                     new PrinterCapabilityProbeRequest(queueName, driverName), JsonOptions);
-                var child = await AgentChildProcess.ExecuteAsync(
+                var child = await childProcessRunner.ExecuteAsync(
                     "--probe-printer-capabilities", request, probeTimeout, cancellationToken);
 
                 if (child.TimedOut || child.ExitCode != 0 ||

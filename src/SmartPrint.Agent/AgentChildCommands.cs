@@ -8,6 +8,8 @@ namespace SmartPrint.Agent;
 /// the Agent. Requests contain queue/job identifiers, never pairing credentials.
 /// Protected document bytes are reopened from the LocalService/SYSTEM-only queue.
 /// </summary>
+public sealed record SpoolerDocumentChildRequest(string QueueName, string DocumentName);
+
 internal static class AgentChildCommands
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -39,6 +41,9 @@ internal static class AgentChildCommands
                 return true;
             case "--release-retained-job":
                 Environment.ExitCode = await RunReleaseRetainedJobAsync();
+                return true;
+            case "--find-spooler-job-by-document-name":
+                Environment.ExitCode = await RunFindSpoolerJobByDocumentNameAsync();
                 return true;
             case "--verify-printer-discovery":
                 Environment.ExitCode = await VerifyPrinterDiscoveryAsync();
@@ -231,6 +236,25 @@ internal static class AgentChildCommands
         catch (Exception exception)
         {
             Console.Error.WriteLine("Spooler status worker failed: " + exception.GetType().Name);
+            return 2;
+        }
+    }
+
+    private static async Task<int> RunFindSpoolerJobByDocumentNameAsync()
+    {
+        try
+        {
+            var request = await ReadInputAsync<SpoolerDocumentChildRequest>();
+            if (string.IsNullOrWhiteSpace(request.QueueName) || request.QueueName.Length > 256 ||
+                string.IsNullOrWhiteSpace(request.DocumentName) || request.DocumentName.Length > 180)
+                throw new InvalidDataException("The spooler document lookup request is invalid.");
+            var job = new WindowsPrintExecutor().FindJobByDocumentName(request.QueueName, request.DocumentName);
+            WriteProtocol("RESULT", job);
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine("Spooler document lookup worker failed: " + exception.GetType().Name);
             return 2;
         }
     }

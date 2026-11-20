@@ -11,15 +11,18 @@ public sealed class IsolatedWindowsPrintExecutor
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ILogger<IsolatedWindowsPrintExecutor> logger;
+    private readonly IAgentChildProcessRunner childProcessRunner;
     private readonly TimeSpan printTimeout;
     private readonly TimeSpan exportTimeout;
     private readonly TimeSpan spoolerOperationTimeout;
 
     public IsolatedWindowsPrintExecutor(
         ILogger<IsolatedWindowsPrintExecutor> logger,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        IAgentChildProcessRunner? childProcessRunner = null)
     {
         this.logger = logger;
+        this.childProcessRunner = childProcessRunner ?? new AgentChildProcessRunner();
         printTimeout = TimeSpan.FromMinutes(Math.Clamp(
             configuration?.GetValue<int?>("Agent:PrintWorkerTimeoutMinutes") ?? 20, 2, 120));
         exportTimeout = TimeSpan.FromMinutes(Math.Clamp(
@@ -39,7 +42,7 @@ public sealed class IsolatedWindowsPrintExecutor
         AgentChildProcessResult child;
         try
         {
-            child = await AgentChildProcess.ExecuteAsync(
+            child = await childProcessRunner.ExecuteAsync(
                 "--print-job", request, printTimeout, cancellationToken);
         }
         catch (AgentChildProcessStartException exception)
@@ -103,7 +106,7 @@ public sealed class IsolatedWindowsPrintExecutor
         AgentChildProcessResult child;
         try
         {
-            child = await AgentChildProcess.ExecuteAsync(
+            child = await childProcessRunner.ExecuteAsync(
                 "--export-pdf", request, exportTimeout, cancellationToken);
         }
         catch (AgentChildProcessStartException exception)
@@ -152,11 +155,25 @@ public sealed class IsolatedWindowsPrintExecutor
         CancellationToken cancellationToken)
     {
         var request = JsonSerializer.Serialize(new SpoolerJobChildRequest(queueName, jobId), JsonOptions);
-        var child = await AgentChildProcess.ExecuteAsync(
+        var child = await childProcessRunner.ExecuteAsync(
             "--get-spooler-job", request, spoolerOperationTimeout, cancellationToken);
         EnsureSpoolerWorkerSucceeded(child, "read");
         var resultLine = FindLine(ReadLines(child.StandardOutput), "RESULT|")
             ?? throw new IOException("The isolated spooler worker returned no job-status result.");
+        return DeserializePayload<WindowsSpoolerJob?>(resultLine);
+    }
+
+    public async Task<WindowsSpoolerJob?> FindJobByDocumentNameAsync(
+        string queueName,
+        string documentName,
+        CancellationToken cancellationToken)
+    {
+        var request = JsonSerializer.Serialize(new SpoolerDocumentChildRequest(queueName, documentName), JsonOptions);
+        var child = await childProcessRunner.ExecuteAsync(
+            "--find-spooler-job-by-document-name", request, spoolerOperationTimeout, cancellationToken);
+        EnsureSpoolerWorkerSucceeded(child, "find by document name");
+        var resultLine = FindLine(ReadLines(child.StandardOutput), "RESULT|")
+            ?? throw new IOException("The isolated spooler worker returned no document lookup result.");
         return DeserializePayload<WindowsSpoolerJob?>(resultLine);
     }
 
@@ -166,7 +183,7 @@ public sealed class IsolatedWindowsPrintExecutor
         CancellationToken cancellationToken)
     {
         var request = JsonSerializer.Serialize(new SpoolerJobChildRequest(queueName, jobId), JsonOptions);
-        var child = await AgentChildProcess.ExecuteAsync(
+        var child = await childProcessRunner.ExecuteAsync(
             "--release-retained-job", request, spoolerOperationTimeout, cancellationToken);
         EnsureSpoolerWorkerSucceeded(child, "release");
         var resultLine = FindLine(ReadLines(child.StandardOutput), "RESULT|")

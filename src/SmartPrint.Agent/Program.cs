@@ -39,6 +39,7 @@ builder.Services.AddHttpClient("cloud", client =>
 builder.Services.AddSingleton<AgentCredentialStore>();
 builder.Services.AddSingleton<AgentDocumentEncryptionKeyStore>();
 builder.Services.AddSingleton<IAgentEnrollmentHandler, AgentEnrollmentHandler>();
+builder.Services.AddSingleton<IAgentChildProcessRunner, AgentChildProcessRunner>();
 builder.Services.AddSingleton<WindowsPrinterCapabilityProbeRunner>();
 builder.Services.AddSingleton<WindowsPrinterDiscovery>();
 builder.Services.AddSingleton<IsolatedWindowsPrintExecutor>();
