@@ -958,11 +958,16 @@ public sealed class Worker(
                 {
                     using var client = httpClientFactory.CreateClient("cloud");
                     client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+                    var acknowledgedBefore = localQueueStore.GetAcknowledgedJobs()
+                        .Select(entry => entry.JobId)
+                        .ToHashSet();
                     await ProcessLocalQueueHandoffAsync(client, credentials, cancellationToken);
 
-                    // Local queue receipts/acknowledgements are now durable. Wake the
-                    // print dispatcher without waiting for its 5-second recovery poll.
-                    SignalPrintDispatch();
+                    // Wake dispatch only when this handoff added new protected queue
+                    // entries. Idle shops do not generate needless print-claim requests.
+                    if (localQueueStore.GetAcknowledgedJobs()
+                        .Any(entry => !acknowledgedBefore.Contains(entry.JobId)))
+                        SignalPrintDispatch();
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1109,7 +1114,6 @@ public sealed class Worker(
     private async Task WaitForLocalQueueHandoffOrDelayAsync(CancellationToken cancellationToken)
     {
         await WaitForSignalOrDelayAsync(
-            localQueueHandoffWakeSignal,
             localQueueHandoffWakeSignal.WaitAsync,
             cancellationToken);
     }
@@ -1117,13 +1121,11 @@ public sealed class Worker(
     private async Task WaitForPrintWorkOrDelayAsync(CancellationToken cancellationToken)
     {
         await WaitForSignalOrDelayAsync(
-            printWorkWakeSignal,
             printWorkWakeSignal.WaitAsync,
             cancellationToken);
     }
 
     private async Task WaitForSignalOrDelayAsync(
-        SemaphoreSlim signal,
         Func<CancellationToken, Task> waitForSignal,
         CancellationToken cancellationToken)
     {
