@@ -3,6 +3,7 @@ using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Modules.ShopAccount.Contracts;
+using SmartPrint.Api.Modules.ShopAccount.Abstractions;
 
 namespace SmartPrint.Api.Modules.ShopAccount.Services;
 
