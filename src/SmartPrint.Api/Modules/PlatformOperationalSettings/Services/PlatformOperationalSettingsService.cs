@@ -16,7 +16,7 @@ public sealed class PlatformOperationalSettingsService(SmartPrintDbContext db)
     public async Task<PlatformOperationalSettingsResponse?> GetAsync(CancellationToken ct)
     {
         var settings = await db.PlatformOperationalSettings.AsNoTracking()
-            .SingleOrDefaultAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, ct);
+            .SingleOrDefaultAsync(item => item.Id == OperationalSettingsEntity.SingletonIdValue, ct);
         return settings is null ? null : ToResponse(settings);
     }
 
@@ -105,6 +105,6 @@ public sealed class PlatformOperationalSettingsService(SmartPrintDbContext db)
 }
 
 public sealed record PlatformOperationalSettingsUpdateResult(
-    IReadOnlyDictionary<string, string[]> ValidationErrors,
+    Dictionary<string, string[]> ValidationErrors,
     bool SettingsNotInitialized,
     PlatformOperationalSettingsResponse? Response);
