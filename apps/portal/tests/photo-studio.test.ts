@@ -25,6 +25,8 @@ test("customer photo settings preserve every stock finish supported by the Agent
   "Unknown finishes must not be silently relabeled.");
  assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"A4_SHEET",photoPaperFinish:"GLOSSY",photosPerPage:0}),false);
  assert.equal(isValidCustomerPhotoSettings({...base,sizeCode:"4x6",photoOutputLayout:"A4_SHEET",photoPaperFinish:"MATTE",photosPerPage:2}),false);
+ assert.equal(isValidCustomerPhotoSettings({...base,sizeCode:"toString",photoOutputLayout:"A4_SHEET",photoPaperFinish:"PLAIN"}),false,
+  "Unknown object-property names are not supported photo sizes.");
 });
 
 test("customer upload limits are generated from the shared policy",()=>{
