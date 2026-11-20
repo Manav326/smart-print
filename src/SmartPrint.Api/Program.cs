@@ -1949,6 +1949,36 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                 });
             }
 
+            // Batch assignment is locked after any file has completed output. If a
+            // batch is only partly complete, replacing the queue here would leave
+            // its remaining files impossible to move as a group. Keep the old
+            // printer selected until that whole batch is resolved.
+            var partiallyCompletedBatchJobNumber = await db.PrintJobs.AsNoTracking()
+                .Where(job => job.TenantId == tenantId &&
+                              job.PrinterDeviceId == previousId &&
+                              job.BatchId != null &&
+                              job.Status == "COMPLETED" &&
+                              db.PrintJobs.Any(remaining =>
+                                  remaining.TenantId == tenantId &&
+                                  remaining.BatchId == job.BatchId &&
+                                  remaining.Status != "REJECTED" &&
+                                  remaining.Status != "REFUNDED" &&
+                                  remaining.Status != "CANCELLED" &&
+                                  remaining.Status != "COMPLETED" &&
+                                  remaining.Status != "PDF_EXPORTED"))
+                .OrderByDescending(job => job.CreatedUtc)
+                .Select(job => job.JobNumber)
+                .FirstOrDefaultAsync(ct);
+            if (!string.IsNullOrWhiteSpace(partiallyCompletedBatchJobNumber))
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
+                {
+                    code = "printer_batch_output_locked",
+                    message = $"A file in batch containing {partiallyCompletedBatchJobNumber} has already completed on {replacedPrinter.DisplayName}, while other files in that batch are still pending. Finish or resolve the remaining files on that same printer before replacing it; the batch will not be split or silently moved."
+                });
+            }
+
             var privateDocumentOnAnotherComputer = await (
                 from job in db.PrintJobs.AsNoTracking()
                 join document in db.PrintDocuments.AsNoTracking()
