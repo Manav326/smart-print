@@ -1869,7 +1869,42 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
             return Results.Conflict(new
             {
                 code = "printer_not_ready_for_selection",
-                message = "This queue is not linked to a Windows Print Agent yet, or its driver is not supported for SmartPrint output. Keep it visible and select it after discovery confirms the queue."
+                message = "This queue is not linked to a Windows Print Agent yet, or its driver is not supported for SmartPrint output. Keep it visible while the Agent discovers the installed Windows queue."
+            });
+        }
+
+        var selectionNow = DateTimeOffset.UtcNow;
+        var selectionAgent = await db.AgentDevices.AsNoTracking()
+            .Where(agent => agent.Id == printer.AgentDeviceId && agent.TenantId == tenantId)
+            .Select(agent => new
+            {
+                agent.Status,
+                agent.LastSeenUtc,
+                agent.RevokedUtc
+            })
+            .SingleOrDefaultAsync(ct);
+        var agentOnline = selectionAgent is not null &&
+            selectionAgent.Status == "Online" &&
+            selectionAgent.RevokedUtc is null &&
+            selectionAgent.LastSeenUtc is DateTimeOffset agentLastSeen &&
+            agentLastSeen >= selectionNow.AddMinutes(-2);
+        if (!PrinterSelectionRules.CanSelect(
+                printer.OutputMode,
+                printer.Status,
+                printer.LastSeenUtc,
+                agentOnline,
+                selectionAgent?.RevokedUtc is not null,
+                selectionAgent?.LastSeenUtc,
+                selectionNow))
+        {
+            var nextStep = !agentOnline
+                ? "Reconnect the shop Windows computer and wait for its Print Agent to report online."
+                : $"Windows currently reports this queue as {printer.Status}. Clear its printer error, paper or connection issue, then wait for the next automatic scan.";
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "printer_not_ready_for_selection",
+                message = $"{printer.DisplayName} remains visible, but it cannot use a plan slot yet. {nextStep} No selected printer is being replaced."
             });
         }
 
