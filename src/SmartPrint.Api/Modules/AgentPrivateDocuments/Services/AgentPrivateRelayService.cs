@@ -7,6 +7,22 @@ using SmartPrint.Api.Services;
 
 namespace SmartPrint.Api.Modules.AgentPrivateDocuments.Services;
 
+public enum AgentPrivateRelayStageResultKind
+{
+    InvalidStage,
+    NotFound,
+    Conflict,
+    Duplicate,
+    Updated
+}
+
+public sealed record AgentPrivateRelayStageResult(
+    AgentPrivateRelayStageResultKind Kind,
+    Guid Id = default,
+    string? Stage = null,
+    DateTimeOffset? StageUpdatedUtc = null,
+    string? Code = null);
+
 /// <summary>
 /// Reads the durable private-relay queue and waits for Agent-specific wake-up signals.
 /// PostgreSQL remains the source of truth; notifications only reduce polling latency.
@@ -15,6 +31,80 @@ public sealed class AgentPrivateRelayService(
     SmartPrintDbContext db,
     PrivateRelayWakeupService relayWakeups)
 {
+    public async Task<AgentPrivateRelayStageResult> UpdateStageAsync(
+        Guid tenantId,
+        Guid agentDeviceId,
+        Guid ticketId,
+        string? requestedStage,
+        CancellationToken ct)
+    {
+        var normalizedStage = AgentPrivateRelayStageRules.NormalizeRequestedStage(requestedStage);
+        if (normalizedStage is null || !PrivateRelayProgressRules.IsAgentStage(normalizedStage))
+        {
+            return new AgentPrivateRelayStageResult(
+                AgentPrivateRelayStageResultKind.InvalidStage,
+                Code: "private_relay_stage_invalid");
+        }
+
+        var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
+            item.Id == ticketId &&
+            item.TenantId == tenantId &&
+            item.AgentDeviceId == agentDeviceId &&
+            item.PrivatePrinting, ct);
+        if (ticket is null)
+            return new AgentPrivateRelayStageResult(AgentPrivateRelayStageResultKind.NotFound);
+
+        if (ticket.CompletedUtc is not null || ticket.PrivateRelayFailedUtc is not null)
+        {
+            return new AgentPrivateRelayStageResult(
+                AgentPrivateRelayStageResultKind.Conflict,
+                ticket.Id,
+                Code: "private_relay_terminal_state");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (!AgentPrivateRelayStageRules.HasReceivedPayload(
+                ticket.PrivateRelayUploadedUtc,
+                ticket.PrivateRelayStorageKey,
+                ticket.ClaimedUtc,
+                ticket.AgentUploadAttempts,
+                ticket.ClaimLeaseExpiresUtc,
+                now))
+        {
+            return new AgentPrivateRelayStageResult(
+                AgentPrivateRelayStageResultKind.Conflict,
+                ticket.Id,
+                Code: "private_relay_payload_not_received");
+        }
+
+        if (!PrivateRelayProgressRules.CanAdvance(ticket.PrivateRelayStage, normalizedStage))
+        {
+            if (string.Equals(ticket.PrivateRelayStage, normalizedStage, StringComparison.Ordinal))
+            {
+                return new AgentPrivateRelayStageResult(
+                    AgentPrivateRelayStageResultKind.Duplicate,
+                    ticket.Id,
+                    ticket.PrivateRelayStage);
+            }
+
+            return new AgentPrivateRelayStageResult(
+                AgentPrivateRelayStageResultKind.Conflict,
+                ticket.Id,
+                ticket.PrivateRelayStage,
+                Code: "private_relay_stage_out_of_order");
+        }
+
+        ticket.PrivateRelayStage = normalizedStage;
+        ticket.PrivateRelayStageUpdatedUtc = now;
+        await db.SaveChangesAsync(ct);
+
+        return new AgentPrivateRelayStageResult(
+            AgentPrivateRelayStageResultKind.Updated,
+            ticket.Id,
+            ticket.PrivateRelayStage,
+            ticket.PrivateRelayStageUpdatedUtc);
+    }
+
     public async Task<AgentPrivateRelayPendingResponse> GetPendingAsync(
         AgentDevice device,
         IHostEnvironment environment,

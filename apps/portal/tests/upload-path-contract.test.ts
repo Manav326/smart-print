@@ -4,6 +4,9 @@ import test from "node:test";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf8");
 const api = read("../../../src/SmartPrint.Api/Program.cs");
+const privateRelayEndpoints = read("../../../src/SmartPrint.Api/Modules/AgentPrivateDocuments/Endpoints/AgentPrivateRelayEndpoints.cs");
+const privateRelayService = read("../../../src/SmartPrint.Api/Modules/AgentPrivateDocuments/Services/AgentPrivateRelayService.cs");
+const privateRelayStageRules = read("../../../src/SmartPrint.Api/Modules/AgentPrivateDocuments/Domain/AgentPrivateRelayStageRules.cs");
 const portalApi = read("../src/api.ts");
 const agentApi = read("../../../src/SmartPrint.Agent/LocalAgentApiHostedService.cs");
 const agentWorker = read("../../../src/SmartPrint.Agent/Worker.cs");
@@ -59,8 +62,10 @@ test("per-session upload rate budget can carry a complete 20-file Private Printi
   assert.match(api, /PermitLimit = UploadLimits\.MaxBatchFiles \* 3/);
 });
 test("Private Printing publishes durable, authenticated stage updates for direct LAN and cloud relay processing", () => {
-  assert.match(api, /MapPost\("\/private-relays\/\{ticketId:guid\}\/stage"/);
-  assert.match(api, /hasClaimedDirectLanUpload/);
+  assert.match(privateRelayEndpoints, /MapPost\("\/private-relays\/\{ticketId:guid\}\/stage"/);
+  assert.match(privateRelayService, /AgentPrivateRelayStageRules\.HasReceivedPayload/);
+  assert.match(privateRelayService, /PrivateRelayProgressRules\.CanAdvance/);
+  assert.match(privateRelayStageRules, /claimLeaseExpiresUtc > now/);
   assert.match(api, /PrivateRelayProgressRules\.ReceivingEncryptedPayload/);
   assert.match(api, /StageMessage = PrivateRelayProgressRules\.CustomerMessage\(stage\)/);
   assert.match(agentWorker, /ReportPrivateRelayStageAsync\([\s\S]{0,250}DECRYPTING_AND_AUTHENTICATING/);
