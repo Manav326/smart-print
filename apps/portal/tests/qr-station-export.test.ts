@@ -21,9 +21,12 @@ test("canonical QR artwork matches the print poster and carries the shop journey
   assert.match(svg, /North Street Prints/);
   assert.match(svg, /YOUR PRINTING, MADE SIMPLE/);
   assert.match(svg, /How it works/);
-  assert.match(svg, /Scan, save &amp; send/);
-  assert.match(svg, /We review your files/);
-  assert.match(svg, /Print &amp; pick up/);
+  assert.match(svg, /Scan this QR code/);
+  assert.match(svg, /Open the link, then choose or photograph your documents\./);
+  assert.match(svg, /Send for shop review/);
+  assert.match(svg, /Your shop checks the files before printing\./);
+  assert.match(svg, /Collect your printouts/);
+  assert.match(svg, /Visit the counter when your copies are ready\./);
   assert.match(svg, /QuantaEdge/);
   assert.match(svg, /Smarter Decisions\. Greater Growth\./);
   assert.match(svg, /START HERE/);
