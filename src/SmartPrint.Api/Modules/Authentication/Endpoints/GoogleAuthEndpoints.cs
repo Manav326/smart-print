@@ -1,11 +1,11 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
-using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Security;
 using SmartPrint.Api.Services;
+using SmartPrint.Api.Modules.Authentication.Services;
 
-namespace SmartPrint.Api.Endpoints;
+namespace SmartPrint.Api.Modules.Authentication.Endpoints;
 
 public static class GoogleAuthEndpoints
 {
@@ -45,8 +45,7 @@ public static class GoogleAuthEndpoints
             GoogleIdentityService google,
             GoogleLoginNonceStore nonces,
             UserManager<AppUser> userManager,
-            SmartPrintDbContext db,
-            TokenIssuer tokenIssuer,
+            GoogleAuthSessionService sessions,
             CancellationToken ct) =>
         {
             try
@@ -89,7 +88,7 @@ public static class GoogleAuthEndpoints
                         "This Google account does not have a SmartPrint shop-owner or shop-manager identity.");
                 }
 
-                return Results.Ok(await CreateSessionAsync(user, db, tokenIssuer, ct));
+                return Results.Ok(await sessions.CreateAsync(user, ct));
             }
             catch (GoogleIdentityException exception)
             {
@@ -102,8 +101,7 @@ public static class GoogleAuthEndpoints
             GoogleIdentityService google,
             GoogleLoginNonceStore nonces,
             UserManager<AppUser> userManager,
-            SmartPrintDbContext db,
-            TokenIssuer tokenIssuer,
+            GoogleAuthSessionService sessions,
             CancellationToken ct) =>
         {
             try
@@ -174,7 +172,7 @@ public static class GoogleAuthEndpoints
                         "This Google identity is not linked to a SmartPrint customer account.");
                 }
 
-                return Results.Ok(await CreateSessionAsync(user, db, tokenIssuer, ct));
+                return Results.Ok(await sessions.CreateAsync(user, ct));
             }
             catch (GoogleIdentityException exception)
             {
@@ -213,32 +211,6 @@ public static class GoogleAuthEndpoints
                 StatusCodes.Status409Conflict,
                 "google_account_link_conflict",
                 "This Google account is already linked to another SmartPrint identity. Contact support if you believe this is an error.");
-    }
-
-    private static async Task<object> CreateSessionAsync(
-        AppUser user,
-        SmartPrintDbContext db,
-        TokenIssuer tokenIssuer,
-        CancellationToken ct)
-    {
-        var tokens = await tokenIssuer.CreateAsync(user);
-        var now = DateTimeOffset.UtcNow;
-        db.RefreshTokens.Add(new RefreshToken
-        {
-            UserId = user.Id,
-            TokenHash = TokenIssuer.HashRefreshToken(tokens.RefreshToken),
-            CreatedUtc = now,
-            ExpiresUtc = now.AddDays(30)
-        });
-        await db.SaveChangesAsync(ct);
-
-        return new
-        {
-            tokenType = "Bearer",
-            accessToken = tokens.AccessToken,
-            refreshToken = tokens.RefreshToken,
-            accessTokenExpiresUtc = tokens.AccessTokenExpiresUtc
-        };
     }
 
     private static IResult GoogleProblem(GoogleIdentityException exception) =>

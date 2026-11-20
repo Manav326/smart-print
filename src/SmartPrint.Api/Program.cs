@@ -21,6 +21,7 @@ using SmartPrint.Api.Security;
 using SmartPrint.Api.Storage;
 using SmartPrint.Api.Services;
 using SmartPrint.Api.Modules.Health.Registration;
+using SmartPrint.Api.Modules.Authentication.Registration;
 using SmartPrint.Api.Modules.PlatformDataTransfer.Registration;
 using SmartPrint.Api.Modules.ShopSubscriptionPayments.Registration;
 using SmartPrint.Documents;
@@ -102,6 +103,7 @@ builder.Services.AddAuthorization(options =>
         policy.RequireAssertion(context => PlatformAdminAuthorization.IsPlatformAdmin(context.User)));
 });
 builder.Services.AddScoped<TokenIssuer>();
+builder.Services.AddAuthenticationModule();
 builder.Services.AddSingleton<GoogleIdentityService>();
 builder.Services.AddSingleton<GoogleLoginNonceStore>();
 builder.Services.AddScoped<TenantEntitlementService>();
@@ -603,7 +605,7 @@ platform.MapGet("/tenants/{tenantId:guid}/status-history", async (
 });
 
 var auth = app.MapGroup("/api/v1/auth").RequireRateLimiting("authentication");
-auth.MapGoogleAuthEndpoints();
+auth.MapGoogleAuthModule();
 auth.MapPost("/register-shop", async (
     RegisterShopRequest request,
     UserManager<AppUser> userManager,
