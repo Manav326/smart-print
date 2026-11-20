@@ -15,4 +15,16 @@ public sealed class AgentLoopIntervalsTests
     {
         Assert.Equal(expected, AgentLoopIntervals.ResolveHealthSyncIntervalSeconds(configured));
     }
+
+    [Theory]
+    [InlineData(null, 5)]
+    [InlineData(1, 2)]
+    [InlineData(2, 2)]
+    [InlineData(5, 5)]
+    [InlineData(15, 15)]
+    [InlineData(300, 30)]
+    public void PrintWorkFallbackPollStaysBoundedWhenNotificationsAreUnavailable(int? configured, int expected)
+    {
+        Assert.Equal(expected, AgentLoopIntervals.ResolvePrintWorkPollIntervalSeconds(configured));
+    }
 }
