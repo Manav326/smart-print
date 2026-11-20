@@ -63,7 +63,7 @@ public static class PrinterOutputModeRules
             (portName?.StartsWith("ipps://", StringComparison.OrdinalIgnoreCase) ?? false) ||
             (driverName?.Contains("IPP", StringComparison.OrdinalIgnoreCase) ?? false);
         var hasStandaloneVirtualToken = identity.Split(
-                [' ', '\\t', '-', '_', '(', ')', '[', ']'],
+                [' ', '\t', '-', '_', '(', ')', '[', ']'],
                 StringSplitOptions.RemoveEmptyEntries)
             .Any(token => token.Equals("virtual", StringComparison.OrdinalIgnoreCase));
         if (hasStandaloneVirtualToken && !isIppQueue)

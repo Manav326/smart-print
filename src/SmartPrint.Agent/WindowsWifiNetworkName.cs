@@ -43,7 +43,7 @@ internal static class WindowsWifiNetworkName
             if (!result.TimedOut && result.ExitCode == 0)
             {
                 var line = result.StandardOutput
-                    .Split(['\\r', '\\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                     .LastOrDefault(value => value.StartsWith("RESULT|", StringComparison.Ordinal));
                 if (line is not null)
                 {
