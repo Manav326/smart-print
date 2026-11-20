@@ -60,15 +60,16 @@ public sealed class AgentDocumentEncryptionKeyStore
         if (applyWindowsAcl && OperatingSystem.IsWindows())
         {
             var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+            var localServiceSid = new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null);
             using var identity = WindowsIdentity.GetCurrent();
             var ownerSid = identity.User
                 ?? throw new InvalidOperationException("The current Windows identity has no user SID.");
             var security = new DirectorySecurity();
             security.SetAccessRuleProtection(true, false);
             security.SetOwner(ownerSid);
-            // The production Agent service runs as LocalSystem, so the key folder
-            // remains SYSTEM-owned and SYSTEM-only. Interactive diagnostics and
-            // lifecycle QA retain access only through their own identity.
+            // The production Agent runs as LocalService. Keep the key folder
+            // private to that service identity and SYSTEM; retain the current owner
+            // only for controlled lifecycle fixtures and diagnostics.
             security.AddAccessRule(new FileSystemAccessRule(
                 systemSid,
                 FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
@@ -77,6 +78,13 @@ public sealed class AgentDocumentEncryptionKeyStore
             {
                 security.AddAccessRule(new FileSystemAccessRule(
                     ownerSid,
+                    FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                    PropagationFlags.None, AccessControlType.Allow));
+            }
+            if (!ownerSid.Equals(localServiceSid))
+            {
+                security.AddAccessRule(new FileSystemAccessRule(
+                    localServiceSid,
                     FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                     PropagationFlags.None, AccessControlType.Allow));
             }

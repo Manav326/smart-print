@@ -44,7 +44,7 @@ public sealed class WindowsPrintExecutor
     private const int DcOrientation = 17;
     private const int DcColorDevice = 32;
     private const int DcNup = 33;
-    private const uint PrinterAccessAdminister = 0x00000004;
+    private const uint PrinterAccessUse = 0x00000008;
     private const uint JobStatusPrinting = 0x00000010;
     private const uint JobStatusSpooling = 0x00000008;
     private const uint JobStatusPrinted = 0x00000080;
@@ -78,15 +78,21 @@ public sealed class WindowsPrintExecutor
     /// are authenticated only when requested, so a large encrypted document is never
     /// copied into a second whole-file buffer for physical printing.
     /// </summary>
-    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, Stream documentStream, CancellationToken cancellationToken) =>
-        PrintStream(entry, documentStream, cancellationToken, outputFilePath: null);
+    public SpoolerPrintReceipt Print(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        CancellationToken cancellationToken,
+        Action? beforeSpoolerSubmission = null) =>
+        PrintStream(entry, documentStream, cancellationToken, outputFilePath: null,
+            beforeSpoolerSubmission: beforeSpoolerSubmission);
 
     private SpoolerPrintReceipt PrintStream(
         AgentLocalQueueEntry entry,
         Stream documentStream,
         CancellationToken cancellationToken,
         string? outputFilePath,
-        bool integrityAlreadyVerified = false)
+        bool integrityAlreadyVerified = false,
+        Action? beforeSpoolerSubmission = null)
     {
         ArgumentNullException.ThrowIfNull(documentStream);
         if (!documentStream.CanRead || !documentStream.CanSeek ||
@@ -98,7 +104,7 @@ public sealed class WindowsPrintExecutor
 
         if (documentStream is Qsp2DocumentReadStream qsp2 &&
             string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
-            return PrintQsp2Pdf(entry, qsp2, cancellationToken, outputFilePath);
+            return PrintQsp2Pdf(entry, qsp2, cancellationToken, outputFilePath, beforeSpoolerSubmission);
 
         ValidatePrintOptions(entry);
         if (!integrityAlreadyVerified && !Sha256Matches(entry.Sha256, documentStream))
@@ -108,14 +114,15 @@ public sealed class WindowsPrintExecutor
 
         documentStream.Position = 0;
         using var raster = OpenDocument(documentStream, entry.MediaType, entry.ColourMode == "Mono");
-        return PrintCore(entry, raster, cancellationToken, outputFilePath);
+        return PrintCore(entry, raster, cancellationToken, outputFilePath, beforeSpoolerSubmission);
     }
 
     private SpoolerPrintReceipt PrintQsp2Pdf(
         AgentLocalQueueEntry entry,
         Qsp2DocumentReadStream documentStream,
         CancellationToken cancellationToken,
-        string? outputFilePath)
+        string? outputFilePath,
+        Action? beforeSpoolerSubmission = null)
     {
         ValidatePrintOptions(entry);
         if (documentStream.Length != entry.SizeBytes ||
@@ -125,7 +132,7 @@ public sealed class WindowsPrintExecutor
                 "The authenticated QSP2 document does not match the verified upload.");
 
         using var raster = new PdfRasterDocument(documentStream, entry.ColourMode == "Mono");
-        return PrintCore(entry, raster, cancellationToken, outputFilePath);
+        return PrintCore(entry, raster, cancellationToken, outputFilePath, beforeSpoolerSubmission);
     }
 
     private SpoolerPrintReceipt PrintBytes(
@@ -245,7 +252,8 @@ public sealed class WindowsPrintExecutor
         AgentLocalQueueEntry entry,
         IRasterDocument raster,
         CancellationToken cancellationToken,
-        string? outputFilePath)
+        string? outputFilePath,
+        Action? beforeSpoolerSubmission = null)
     {
         ValidatePrintOptions(entry);
         var queueName = entry.QueueName!;
@@ -333,6 +341,7 @@ public sealed class WindowsPrintExecutor
                 DocumentName = documentName,
                 OutputFile = outputFilePath
             };
+            beforeSpoolerSubmission?.Invoke();
             var spoolerId = StartDocW(dc, ref info);
             if (spoolerId <= 0) throw Blocked("SPOOLER_START_FAILED", "Windows did not accept the print document.");
             docStarted = true;
@@ -885,7 +894,7 @@ public sealed class WindowsPrintExecutor
     public void ReleaseRetainedJob(string queueName, int jobId)
     {
         if (jobId <= 0) throw new ArgumentOutOfRangeException(nameof(jobId));
-        using var handle = OpenQueueForJobAdministration(queueName);
+        using var handle = OpenQueueForRetainedJobCleanup(queueName);
         if (SetJobW(handle.Value, jobId, 0, IntPtr.Zero, JobControlRelease)) return;
 
         var error = Marshal.GetLastWin32Error();
@@ -916,10 +925,16 @@ public sealed class WindowsPrintExecutor
             var isPhotoPaper = isPhoto && string.Equals(entry.PhotoOutputLayout, "PHOTO_PAPER", StringComparison.OrdinalIgnoreCase);
             if (isPhoto && entry.PhotoOutputLayout is not ("A4_SHEET" or "PHOTO_PAPER"))
                 throw new PrintExecutionBlockedException("PHOTO_OUTPUT_LAYOUT_INVALID", "The requested photo output layout is not supported.");
-            if (isPhoto && !isPhotoPaper && entry.PhotoPaperFinish != "PLAIN")
-                throw new PrintExecutionBlockedException("PHOTO_MEDIA_LAYOUT_MISMATCH", "A4 sheet orders use regular A4 paper. Choose individual photo paper prints to select glossy or matte stock.");
-            if (isPhotoPaper && entry.PhotoPaperFinish is not ("GLOSSY" or "MATTE"))
-                throw new PrintExecutionBlockedException("PHOTO_FINISH_INVALID", "Individual photo prints require glossy or matte photo paper.");
+            var requestsPhotoMediaType = isPhoto && entry.PhotoPaperFinish is ("GLOSSY" or "MATTE");
+            if (isPhoto && !isPhotoPaper &&
+                entry.PhotoPaperFinish != "PLAIN" && !requestsPhotoMediaType)
+                throw new PrintExecutionBlockedException(
+                    "PHOTO_MEDIA_LAYOUT_MISMATCH",
+                    "Photo sheets support plain, glossy or matte A4 stock. Choose an advertised glossy/matte finish or use plain paper.");
+            if (isPhotoPaper && !requestsPhotoMediaType)
+                throw new PrintExecutionBlockedException(
+                    "PHOTO_FINISH_INVALID",
+                    "Individual photo-paper prints require glossy or matte stock.");
 
             var paper = PaperCode(entry.PaperSize);
             short photoPaperWidth = 0, photoPaperHeight = 0;
@@ -936,23 +951,78 @@ public sealed class WindowsPrintExecutor
                 mode.PaperWidth = photoPaperWidth;
                 mode.PaperLength = photoPaperHeight;
                 mode.Fields |= DmPaperSize | DmPaperWidth | DmPaperLength;
-
-                photoMediaType = WindowsPrinterCapabilityDiscovery.ResolvePhotoMediaTypeCode(queueName, pointer, entry.PhotoPaperFinish);
-                if (photoMediaType is null)
-                    throw new PrintExecutionBlockedException(
-                        "PHOTO_MEDIA_TYPE_UNSUPPORTED",
-                        $"The selected printer driver does not expose one unambiguous {entry.PhotoPaperFinish.ToLowerInvariant()} photo media type. Choose a printer that supports it or change the requested finish. No pages were sent.");
-                mode.MediaType = unchecked((ushort)photoMediaType.Value);
-                mode.Fields |= DmMediaType;
             }
             else
             {
                 if (SupportsPaper(queueName, pointer, paper) is false && !isIdDocument)
                     throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
-                // For ID sheets, a negative capability-list result is advisory. Ask
-                // DocumentProperties to apply A4 and verify its response below.
+                // For ID sheets and A4 photo sheets, ask DocumentProperties to
+                // confirm the requested paper form before StartDoc.
                 mode.PaperSize = paper;
                 mode.Fields |= DmPaperSize;
+            }
+
+            if (requestsPhotoMediaType)
+            {
+                // Apply the actual driver's glossy/matte stock option for both
+                // individual photo paper (custom 4x6 etc.) and prepared A4 sheets.
+                // Photo dimensions on A4 sheets are encoded in the prepared PDF;
+                // the physical stock remains A4 and is validated as such below.
+                var schemaDevMode = WindowsPrinterCapabilityDiscovery.CreatePhotoMediaDevMode(
+                    queueName,
+                    entry.PhotoPaperFinish);
+                if (schemaDevMode is not null)
+                {
+                    try
+                    {
+                        if (schemaDevMode.Length != size)
+                            throw new PrintExecutionBlockedException(
+                                "PRINTER_SETTINGS_REJECTED",
+                                "Windows returned a photo PrintTicket DEVMODE with an unexpected size. No pages were sent.");
+                        Marshal.Copy(schemaDevMode, 0, pointer, schemaDevMode.Length);
+                        mode = Marshal.PtrToStructure<DevModeW>(pointer);
+                        if ((mode.Fields & DmMediaType) == 0)
+                            throw new PrintExecutionBlockedException(
+                                "PHOTO_MEDIA_TYPE_REJECTED",
+                                "The validated Print Schema photo media option was not present in the converted Windows DEVMODE. No pages were sent.");
+
+                        // PrintTicket conversion starts from the printer-default DEVMODE.
+                        // Restore the requested paper size after applying the stock type.
+                        if (isPhotoPaper)
+                        {
+                            mode.PaperSize = 0;
+                            mode.PaperWidth = photoPaperWidth;
+                            mode.PaperLength = photoPaperHeight;
+                            mode.Fields |= DmPaperSize | DmPaperWidth | DmPaperLength;
+                        }
+                        else
+                        {
+                            mode.PaperSize = paper;
+                            mode.Fields |= DmPaperSize;
+                        }
+                        photoMediaType = unchecked((short)mode.MediaType);
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(schemaDevMode);
+                    }
+                }
+                else
+                {
+                    // Legacy drivers sometimes expose only DeviceCapabilities media
+                    // codes/names. Match a small alias set only when it identifies
+                    // one unambiguous code; otherwise refuse before StartDoc.
+                    photoMediaType = WindowsPrinterCapabilityDiscovery.ResolvePhotoMediaTypeCode(
+                        queueName,
+                        pointer,
+                        entry.PhotoPaperFinish);
+                    if (photoMediaType is null)
+                        throw new PrintExecutionBlockedException(
+                            "PHOTO_MEDIA_TYPE_UNSUPPORTED",
+                            $"The selected printer driver does not expose a matching {entry.PhotoPaperFinish.ToLowerInvariant()} photo media type through Print Schema or an unambiguous legacy driver label. Choose a printer that supports it or change the requested finish. No pages were sent.");
+                    mode.MediaType = unchecked((ushort)photoMediaType.Value);
+                    mode.Fields |= DmMediaType;
+                }
             }
 
             var orientationCapability = DeviceCapabilitiesW(queueName, null, DcOrientation, IntPtr.Zero, pointer);
@@ -1325,11 +1395,16 @@ public sealed class WindowsPrintExecutor
         return new SafePrinterHandle(handle);
     }
 
-    private static SafePrinterHandle OpenQueueForJobAdministration(string queueName)
+    private static SafePrinterHandle OpenQueueForRetainedJobCleanup(string queueName)
     {
-        var defaults = new PrinterDefaultsW { DesiredAccess = PrinterAccessAdminister };
+        // The Agent releases only jobs submitted under its own LocalService
+        // identity. Request standard print-use access rather than administrative
+        // queue access; the spooler authorizes control against the job's own
+        // security descriptor. This avoids requiring Manage Printers on a shop
+        // printer or changing its existing security settings.
+        var defaults = new PrinterDefaultsW { DesiredAccess = PrinterAccessUse };
         if (!OpenPrinterW(queueName, out var handle, ref defaults))
-            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not open printer '{queueName}' for retained-job management.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not open printer '{queueName}' for its own retained-job cleanup with standard print access.");
         return new SafePrinterHandle(handle);
     }
 

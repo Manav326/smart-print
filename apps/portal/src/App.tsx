@@ -1,11 +1,13 @@
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
+import { isValidCustomerPhotoSettings, type CustomerPhotoSettings } from "./customer-photo-settings";
+import { resolvePhotoMediaCapabilities } from "./photo-media-capabilities";
 import { validateCustomerUploadBatchLimits } from "./upload-batch-policy";
 import { CUSTOMER_UPLOAD_CONCURRENCY, mapConcurrentSettled } from "./upload-concurrency";
 import { identifySupportedDocument, type SupportedDocumentType } from "./document-content-policy";
 import { calculateBatchQuoteBreakdown } from "./batch-quote-breakdown.js";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
-  Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
+  Activity, ArrowRight, Check, Clock3, Copy, CreditCard, Download, FileText, FileUp, FolderOpen, LayoutDashboard,
   ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound, Share2,
   ShieldCheck, AlertTriangle, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, RefreshCw, Zap, Info, Lock
 } from "lucide-react";
@@ -17,13 +19,14 @@ import CustomerUpiQr from "./CustomerUpiQr";
 import ShopDocumentPreviewSurface from "./ShopDocumentPreviewSurface";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
+import { getPrinterReadinessReason, isPrinterAvailableForShop } from "./printer-availability";
 import { shouldBlockBatchCheckoutForExpiredQuote, shouldBlockQuoteRefreshForStatus } from "./batch-checkout-state";
 import { isCustomerBatchFinished } from "./customer-session-state";
 import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "./local-upload-routing";
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
 import QrStationPrintDocument from "./QrStationPrintDocument";
-import { createQrStationImageFile, downloadQrStationImage, loadQrStationLogoDataUri, shareQrStationImage, type QrStationImageFormat } from "./qr-station-export";
+import { buildQrStationArtworkSvg, createQrStationImageFile, downloadQrStationImage, loadQrStationLogoDataUri, shareQrStationImage, type QrStationArtworkSource, type QrStationImageFormat } from "./qr-station-export";
 import { resolveCustomerUploadStatusMessage } from "./customer-upload-status";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import PlatformAdminConsole from "./PlatformAdminConsole";
@@ -31,8 +34,8 @@ import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
 import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./portal-routing";
 import {
   ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
-  confirmShopPrintOutput, dispatchShopPrintJob,
-  createAgentEnrollmentCode, createCustomerSession, createPrinter, createStation,
+  confirmShopPrintOutput, dispatchShopPrintJob, resumeShopUnprintedBatch,
+  createAgentEnrollmentCode, createCustomerSession, createStation,
   createShopPhotoJob, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
   reportCustomerBatchPayment, reportCustomerUpiPayment, renewCustomerPrintSession, getNativeCustomerPrintSession, saveNativeCustomerPrintSession, saveNativeCustomerShopProfile, clearNativeCustomerPrintSession, resumeCustomerSession, rotateStationCode, startCustomerBatchPayment, startCustomerPayment, storeTokens,
@@ -49,7 +52,7 @@ import {
 } from "./desktop-bridge";
 import { identifyDocumentPreviewMediaType } from "./document-preview";
 import { verifiedPdfExportPath } from "./print-output";
-import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
+import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasIncompleteSpoolerPageProgress, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
@@ -59,7 +62,7 @@ import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDate
 import { getSubscriptionReminderState } from "./subscription-checkout-state";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
-type Modal = "printer" | "station" | null;
+type Modal = "station" | null;
 
 type CustomerUploadFileProgress = {
   name: string;
@@ -546,9 +549,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
   ).map(agent => agent.id));
   const onlineAgentCount = onlineAgentIds.size;
-  const usablePrinterCount = printers.filter(printer => isPrinterAvailable(printer, onlineAgentIds)).length;
+  const usablePrinterCount = printers.filter(printer => isPrinterAvailableForShop(printer, agentDevices)).length;
   const offlinePrinterCount = printers.filter(printer =>
-    printer.isActive && !isPrinterAvailable(printer, onlineAgentIds)
+    printer.isActive && !isPrinterAvailableForShop(printer, agentDevices)
   ).length;
   const today = new Intl.DateTimeFormat("en-IN", { timeZone: IST_TIME_ZONE, weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
@@ -556,23 +559,6 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     try { await logout(tokens.accessToken); } catch { /* Local sign-out still clears the session. */ }
     try { await onSignOut(); }
     catch (exception) { setError(exception instanceof Error ? exception.message : "Could not clear the secure desktop session."); }
-  }
-
-  async function submitPrinter(values: {
-    displayName: string; manufacturer: string; model: string; connectionType: string;
-    connectionAddress?: string; queueName?: string;
-  }) {
-    setBusy(true);
-    try {
-      await createPrinter(tokens.accessToken, values);
-      setModal(null);
-      setToast("Printer added to your shop.");
-      await reload();
-    } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not add printer.");
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function submitStation(values: { displayName: string; printerDeviceId?: string }) {
@@ -589,20 +575,39 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
   }
 
-  async function togglePrinter(printer: PrinterDevice) {
-    if (busyResourceId) return;
+  async function togglePrinter(printer: PrinterDevice, replacePrinterId?: string): Promise<boolean> {
+    if (busyResourceId) return false;
+    const replacedPrinter = replacePrinterId
+      ? printers.find(candidate => candidate.id === replacePrinterId)
+      : undefined;
+    if (replacePrinterId && !replacedPrinter) {
+      setError("The selected printer list changed. Refresh and choose the replacement again.");
+      return false;
+    }
+    // The PrintersPage replacement dialog is the explicit owner confirmation.
+    // Do not ask for a second confirmation after that dialog has already been accepted.
     if (printer.isActive && !(await confirmInApp(
-      `Disable ${printer.displayName}? New jobs can no longer be assigned to it. A Windows job already accepted by the spooler is not cancelled; an active job may prevent disabling until it is resolved.`,
-      "Disable this printer?", "Disable printer"
-    ))) return;
+      `Deselect ${printer.displayName}? New jobs will no longer be assigned to it. Existing Windows output is not cancelled; an active or uncertain job must be resolved first.`,
+      "Deselect this printer?", "Deselect printer"
+    ))) return false;
+
     setBusyResourceId(printer.id);
     setError("");
     try {
-      await updatePrinterActive(tokens.accessToken, printer.id, !printer.isActive);
-      setToast(printer.isActive ? "Printer disabled. Existing Windows output is not cancelled." : "Printer enabled for new assignments.");
+      await updatePrinterActive(tokens.accessToken, printer.id, !printer.isActive, replacePrinterId);
+      setToast(replacedPrinter
+        ? `${printer.displayName} selected instead of ${replacedPrinter.displayName}. QR station defaults were updated; review pending orders for reassignment.`
+        : printer.isActive
+          ? "Printer deselected. Existing files and Windows output were not deleted."
+          : "Printer selected for new assignments.");
       await reload();
+      return true;
     } catch (exception) {
+      if (exception instanceof ApiError && exception.status === 409) {
+        try { await reload(); } catch { /* Keep the original action error visible. */ }
+      }
       setError(exception instanceof Error ? exception.message : "Could not update printer.");
+      return false;
     } finally {
       setBusyResourceId(null);
     }
@@ -1041,7 +1046,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         ? "Private test PDF authorised. The Agent will save a protected local test artifact; no physical print is recorded."
         : pdfExport
           ? "PDF export authorised. The Windows Agent will create the PDF in the shop's export folder."
-          : "Printing has started. Check the printed pages before marking the order complete.");
+          : "Print authorised. Waiting for the shop computer to receive this job; SmartPrint will update the order automatically.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not start printing.");
@@ -1076,6 +1081,10 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   }
 
   async function confirmPrintedOutput(job: ShopPrintJob) {
+    if (hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)) {
+      setError(`Windows recorded ${job.spoolerPagesPrinted??0} of ${job.spoolerTotalPages} pages for ${job.jobNumber}. Finish and reconcile the remaining pages separately before marking this file complete.`);
+      return;
+    }
     const manualQueueReconciliation=canManuallyReconcileUncertainOutput(
       job.status, job.spoolerStatus, job.failureCode, job.spoolerJobId, job.queueName, job.spoolerJobName
     );
@@ -1098,6 +1107,48 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not confirm physical output.");
     } finally { setBusyJobId(null); }
+  }
+
+
+  async function resumeUnprintedBatch(batchId:string,jobIds:string[]):Promise<boolean>{
+    if(!jobIds.length||busyJobId)return false;
+    const selectedJobs=jobIds.map(id=>journeyJobs.find(job=>job.id===id));
+    const resolvedJobs=selectedJobs.filter((job):job is ShopPrintJob=>job!==undefined);
+    if(resolvedJobs.length!==jobIds.length){
+      setError("The selected files changed in the latest order refresh. Refresh the order and select the files again.");
+      try{await reload();}catch{/* Keep the stale-selection message visible. */}
+      return false;
+    }
+    let privateFileIndex=0;
+    const labels=resolvedJobs.map(job=>job.privatePrinting
+      ?`Private file ${++privateFileIndex}`
+      :job.document.originalFileName);
+    const ok=await confirmInApp(
+      `Only continue after checking the ORIGINAL Windows queue and physical output tray for every selected file and verifying that none produced paper. Selected files: ${labels.join("; ")}. Any file that printed even one page must not be retried here.`,
+      "Confirm no physical pages were produced",
+      "I checked; resume selected files"
+    );
+    if(!ok)return false;
+    setBusyJobId(`resume-unprinted-${batchId}`);
+    setError("");
+    try{
+      const result=await resumeShopUnprintedBatch(tokens.accessToken,batchId,jobIds);
+      setToast(`${result.resumedCount} verified-unprinted file(s) authorised to resume on ${result.printerName}.`);
+      try{
+        await reload();
+      }catch{
+        setError("The resume was authorised, but the order view could not refresh. Use Refresh to check the latest status; do not submit the same files again.");
+      }
+      // The server has committed the authorisation. Return success even when
+      // refreshing the view fails, so the selected files cannot be submitted twice.
+      return true;
+    }catch(exception){
+      setError(exception instanceof Error?exception.message:"Could not resume the selected files.");
+      try{await reload();}catch{/* Preserve the original action error. */}
+      return false;
+    }finally{
+      setBusyJobId(null);
+    }
   }
 
   async function savePaymentSettings(values: {
@@ -1372,7 +1423,8 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
     setShopPhotoStudio(null);
     setFocusShopPhotoEdit(false);
-    setToast(sheet.photoOutputLayout==="PHOTO_PAPER"?"The individual photo-paper prints are saved to the same job. Printer compatibility will be checked before dispatch.":"The enhanced multi-page A4 photo PDF is saved to the same print job and its photo price has been recalculated.");
+    const finishLabel=sheet.photoPaperFinish==="GLOSSY"?"glossy":sheet.photoPaperFinish==="MATTE"?"matte":"plain";
+    setToast(sheet.photoOutputLayout==="PHOTO_PAPER"?"The individual "+finishLabel+" photo-paper prints are saved to the same job. Printer compatibility will be checked before dispatch.":"The enhanced multi-page A4 photo PDF is saved to the same print job; its "+finishLabel+" stock and photo price are updated.");
     try{
       await reload();
       const blob=await downloadShopDocument(tokens.accessToken,editor.job.id,"original");
@@ -1649,7 +1701,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         <div className="content-wrap">
           <div className="page-heading">
             <div><div className="eyebrow"><span className="eyebrow-line"/>SHOP WORKSPACE</div><h1>{active === "Overview" ? `Welcome, ${(profile?.ownerName || "there").split(" ")[0]}` : activePageTitle}</h1><p>{active === "Overview" ? "Your shop setup and operations, all in one place." : pageDescription(active)}</p></div>
-            <div className="heading-actions"><span className="date-chip"><Clock3 size={15}/>{today}</span>{active === "Printers" && <button className="primary-button" onClick={() => setModal("printer")}><Plus size={16}/> Add printer</button>}{active === "QR Stations" && <button className="primary-button" onClick={() => setModal("station")}><Plus size={16}/> Create QR station</button>}</div>
+            <div className="heading-actions"><span className="date-chip"><Clock3 size={15}/>{today}</span>{active === "QR Stations" && <button className="primary-button" onClick={() => setModal("station")}><Plus size={16}/> Create QR station</button>}</div>
           </div>
 
           {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X size={15}/></button></div>}
@@ -1674,12 +1726,13 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onAssignPrinter={assignPrinter}
             onDispatch={dispatchPrintJob}
             onConfirmOutput={confirmPrintedOutput}
+            onResumeUnprintedBatch={resumeUnprintedBatch}
             onRetryPdfExport={retryPdfExport}
             onHistory={viewJobHistory}
             onOpenPhotoStudio={job=>void openShopPhotoStudioForJob(job)}
           />}
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
-          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
+          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} maxPrinters={subscription?.entitlements.maxPrinters} subscriptionActive={subscription?.entitlements.isAccessActive} busyResourceId={busyResourceId} onToggle={togglePrinter} onOpenAgent={() => navAction("Print Agent")}/>} 
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
@@ -1696,8 +1749,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
       {ownerAccountOpen && profile && <ShopOwnerAccountModal profile={profile} busy={busy} onClose={() => setOwnerAccountOpen(false)} onSave={saveOwnerAccount}/>}
       {helpOpen && <HelpSupportModal onClose={() => setHelpOpen(false)} onNavigate={section => { setHelpOpen(false); navAction(section); }}/>}
-      {modal === "printer" && <PrinterModal busy={busy} onClose={() => setModal(null)} onSubmit={submitPrinter}/>}
-      {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => printer.isActive)} onClose={() => setModal(null)} onSubmit={submitStation}/>}
+      {modal === "station" && <StationModal busy={busy} printers={printers.filter(printer => isPrinterAvailableForShop(printer, agentDevices))} onClose={() => setModal(null)} onSubmit={submitStation}/>}
             {batchReviewJobs && <BatchReviewModal jobs={batchReviewJobs} busy={busyJobId==="batch-review"} decisions={batchReviewDecisions} retrying={batchReviewRetry} onDecision={(jobId,accepted)=>setBatchReviewDecisions(current=>({...current,[jobId]:accepted}))} onClose={()=>setBatchReviewJobs(null)} onPreview={job=>void previewJob(job,true)} onApply={(acceptedIds,pdfBrandingEnabled)=>void applyBatchReview(batchReviewJobs,acceptedIds,pdfBrandingEnabled)}/>} 
       {preview && <DocumentPreviewModal name={preview.name} url={preview.url} mediaType={preview.mediaType} job={preview.job} readOnly={preview.readOnly} isSavedOutput={preview.isSavedOutput} focusEditOnMount={focusShopPhotoEdit} onEditPhoto={preview.job.photoSourceAvailable&&!preview.job.privatePrinting&&(preview.job.storageMode==="CLOUD"||preview.job.storageMode==="LOCAL_AGENT")&&preview.job.status==="AWAITING_SHOP_APPROVAL"&&[pricing?.photo35x45Minor,pricing?.photo25x35Minor,pricing?.photo2x2Minor,pricing?.photo4x6Minor].some(rate=>(rate??0)>0)?openShopPhotoStudio:undefined} onApprove={()=>void approveJob(preview.job)} onReject={()=>void rejectJob(preview.job)} onRefund={()=>setRefundJob(preview.job)} onClose={() => { URL.revokeObjectURL(preview.url); setPreview(null); setFocusShopPhotoEdit(false); }}/>} 
       {shopPhotoStudio && <PhotoStudio source={shopPhotoStudio.source} mode="shop" dark={dark} initialSettings={shopPhotoStudio.initialSettings} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={cancelShopPhotoStudio} onApply={applyShopPhotoStudio}/>} 
@@ -2120,7 +2172,9 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   agentDevices: AgentDevice[]; paymentSettings: ShopPaymentSettings | null;
   onNavigate: (section: Section) => void;
 }) {
-  const activePrinters = printers.filter(printer => printer.isActive);
+  const activePrinters = printers.filter(printer =>
+    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT")
+  );
   const todayKey = istDateKey(new Date());
   const jobsToday = printJobs.filter(job => istDateKey(job.createdUtc) === todayKey);
   const quotesAwaiting = printJobs.filter(job => job.status === "AWAITING_SHOP_APPROVAL");
@@ -2129,13 +2183,13 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
       !!agent.lastSeenUtc && Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000)
     .map(agent => agent.id));
   const hasOnlineAgent = onlineAgentIds.size > 0;
-  const hasReachablePrinter = printers.some(printer => isPrinterAvailable(printer, onlineAgentIds));
+  const hasReachablePrinter = printers.some(printer => isPrinterAvailableForShop(printer, agentDevices));
   const hasPaymentMethod = paymentSettings?.cashEnabled === true ||
     (paymentSettings?.upiEnabled === true &&
       !!paymentSettings.upiId?.trim() && !!paymentSettings.payeeName?.trim());
   const setupChecks: { complete: boolean; title: string; detail: string; target: Section }[] = [
     { complete: !!profile?.displayName, title: "Create your shop identity", detail: "Your shop name and customer-facing brand.", target: "Settings" },
-    { complete: activePrinters.length > 0, title: "Register your printers", detail: "Add and enable the printers available at your counter.", target: "Printers" },
+    { complete: activePrinters.length > 0, title: "Select your printers", detail: "Windows queues are discovered automatically; choose which ones to use within your plan.", target: "Printers" },
     { complete: hasOnlineAgent, title: "Connect the shop computer", detail: "The Windows Agent must be paired and recently online.", target: "Print Agent" },
     { complete: hasReachablePrinter, title: "Verify a live printer", detail: "At least one enabled output must be visible to the connected computer.", target: "Printers" },
     { complete: stations.some(station => station.isEnabled), title: "Enable a QR station", detail: "At least one customer-facing QR station must be enabled.", target: "QR Stations" },
@@ -2145,7 +2199,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   return (
     <>
       <div className="stat-grid">
-        <Metric icon={<Printer size={18}/>} label="Registered printers" value={String(printers.length)} note={`${activePrinters.length} enabled for use`} accent="blue"/>
+        <Metric icon={<Printer size={18}/>} label="Detected printer queues" value={String(printers.length)} note={`${activePrinters.length} selected for use`} accent="blue"/>
         <Metric icon={<QrCode size={18}/>} label="QR stations" value={String(stations.length)} note={`${stations.filter(station=>station.isEnabled).length} currently enabled`} accent="violet"/>
         <Metric icon={<FileText size={18}/>} label="Print jobs today" value={String(jobsToday.length)} note="Real customer uploads" accent="amber"/>
         <Metric icon={<Wallet size={18}/>} label="Quotes awaiting review" value={String(quotesAwaiting.length)} note="Quotes are not collected payments" accent="mint"/>
@@ -2192,6 +2246,9 @@ type PrinterCapabilitySnapshot = {
   pagesPerSheetDirection?: string | null;
   pagesPerSheetDirectionStatus?: string;
   mediaTypes?: Array<{ name?: string | null; code?: number }> | null;
+  mediaTypesStatus?: string;
+  pageMediaTypes?: string[] | null;
+  pageMediaTypesStatus?: string;
   resolutions?: Array<{ xDpi?: number; yDpi?: number }> | null;
 };
 
@@ -2235,6 +2292,11 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   );
   const paperSizes=(snapshot?.paperSizes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
   const mediaTypes=(snapshot?.mediaTypes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
+  const pageMediaTypes=(snapshot?.pageMediaTypes??[]).map(value=>value?.trim()).filter((value):value is string=>!!value);
+  const photoMedia=resolvePhotoMediaCapabilities(pageMediaTypes,mediaTypes,snapshot?.pageMediaTypesStatus,snapshot?.mediaTypesStatus);
+  const photoMediaTypes=photoMedia.mediaTypes;
+  const photoMediaLabels=photoMedia.labels;
+  const photoMediaState=photoMedia.state;
   const resolutions=(snapshot?.resolutions??[]).map(item=>
     item.xDpi&&item.yDpi?item.xDpi+" × "+item.yDpi+" dpi":""
   ).filter(Boolean);
@@ -2262,6 +2324,7 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
     {label:"Colour",value:snapshot?.color===true?"Colour":snapshot?.color===false?"Mono only":"Not reported",state:colourState},
     {label:"Duplex",value:snapshot?.duplex===true?"Available":snapshot?.duplex===false?"Simplex only":"Not reported",state:duplexState},
     {label:"N-up",value:nupValues.length?nupValues.map(value=>value+"-up").join(" · "):capabilityStateLabel(nupState),state:nupState},
+    {label:"Photo media",value:photoMediaLabels.length?photoMediaLabels.join(" · "):capabilityStateLabel(photoMediaState),state:photoMediaState},
     {label:"Paper sizes",value:paperSizes.length?paperSizes.length+" reported":"Not reported",state:paperSizes.length?"supported" as const:"unknown" as const}
   ];
   return (
@@ -2293,7 +2356,9 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
               snapshot.orientation.landscape===true?"Landscape":null
             ].filter(Boolean).join(" · ")||"Not reported":"Not reported"}</strong></div>
             <div><span>Paper sizes</span><strong>{paperSizes.length?paperSizes.slice(0,10).join(", ")+(paperSizes.length>10?" +"+(paperSizes.length-10)+" more":""):"Not reported"}</strong></div>
-            <div><span>Media types</span><strong>{mediaTypes.length?mediaTypes.slice(0,8).join(", ")+(mediaTypes.length>8?" +"+(mediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>Photo media types</span><strong>{photoMediaTypes.length?photoMediaTypes.slice(0,8).join(", ")+(photoMediaTypes.length>8?" +"+(photoMediaTypes.length-8)+" more":""):photoMediaState==="unsupported"?"No matching glossy/matte stock":"Not reported"}</strong></div>
+            <div><span>Print Schema media</span><strong>{pageMediaTypes.length?pageMediaTypes.slice(0,8).join(", ")+(pageMediaTypes.length>8?" +"+(pageMediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>All driver media types</span><strong>{mediaTypes.length?mediaTypes.slice(0,8).join(", ")+(mediaTypes.length>8?" +"+(mediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
             <div><span>Resolutions</span><strong>{resolutions.length?resolutions.slice(0,8).join(", ")+(resolutions.length>8?" +"+(resolutions.length-8)+" more":""):"Not reported"}</strong></div>
           </div>
           <div className={"printer-diagnostic-advice"+(statusIssue||!snapshot?" warning":"")} role="note">
@@ -2307,52 +2372,279 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   );
 }
 
-function PrintersPage({ printers, agents, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; agents:AgentDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
-  return (
-    <section className="panel collection-panel">
-      <div className="collection-header"><div><h2>Your printers</h2><p>Each Windows queue stays separate. Microsoft Print to PDF is the supported virtual test destination; other virtual/document drivers remain visible but cannot be assigned for output.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
-      {printers.length===0 ? <EmptyModule icon={<Printer size={24}/>} title="No printers registered yet" text="Add your first printer. It will appear here as awaiting local-agent discovery until the Windows Print Agent reports its capabilities and live status." actionLabel="Add your first printer" onAction={onAdd}/> :
-      <div className="printer-grid">{printers.map(printer=>{
-        const agent=agents.find(candidate=>candidate.id===printer.agentDeviceId);
-        const isUnsupportedVirtual=printer.outputMode==="UNSUPPORTED_VIRTUAL";
-        const possibleDuplicates=printer.outputMode==="PHYSICAL"&&printer.agentDeviceId&&printer.connectionAddress
-          ?printers.filter(other=>other.id!==printer.id&&other.outputMode==="PHYSICAL"&&other.agentDeviceId===printer.agentDeviceId&&
-            !!other.connectionAddress&&other.connectionAddress.trim().toLowerCase()===printer.connectionAddress!.trim().toLowerCase())
-          :[];
-        return <article className="printer-card" key={printer.id}>
-          <div className="printer-card-top"><div className="printer-card-icon"><Printer size={20}/></div><Status label={isUnsupportedVirtual?"Unsupported virtual":printer.status} tone={isUnsupportedVirtual?"red":printer.status.toLowerCase()==="ready"?"green":"slate"}/></div>
-          <h3>{isUnsupportedVirtual?"Unsupported virtual · ":printer.outputMode==="PDF_EXPORT"?"PDF test destination · ":""}{printer.displayName}</h3>
-          <p>{isUnsupportedVirtual?"This virtual/document driver is not approved for SmartPrint output.":printer.outputMode==="PDF_EXPORT"?"Supported Microsoft Print to PDF test route · no Windows Save As dialog":printer.manufacturer+" · "+printer.model}</p>
-          <div className="printer-meta">
-            <span>{isUnsupportedVirtual?"Not available for print dispatch":printer.outputMode==="PDF_EXPORT"?"PDF test destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span>
-            <span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span>
-            <span>Print Agent · {agent?.deviceName||"Not linked"}</span>
-          </div>
-          <PrinterCapabilityPanel printer={printer}/>
-          {possibleDuplicates.length>0&&<div className="printer-duplicate-warning" role="note">
-            <strong>Possible duplicate printer</strong>
-            <span>{possibleDuplicates.map(item=>item.displayName).join(", ")} uses the same Windows port. SmartPrint keeps both queues separate; confirm whether they are alternate queues for one physical printer.</span>
-          </div>}
-          <div className="printer-card-footer"><span className={printer.isActive?"enabled-label":"disabled-label"}>{printer.isActive?"Enabled":"Disabled"}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(printer)}>{busyResourceId===printer.id?<span className="button-spinner"/>:printer.isActive?"Disable":"Enable"}</button></div>
-        </article>;
-      })}</div>}
-    </section>
+function PrintersPage({
+  printers, agents, maxPrinters, subscriptionActive, busyResourceId, onToggle, onOpenAgent
+}: {
+  printers: PrinterDevice[];
+  agents: AgentDevice[];
+  maxPrinters?: number | null;
+  subscriptionActive?: boolean;
+  busyResourceId: string | null;
+  onToggle: (printer: PrinterDevice, replacePrinterId?: string) => Promise<boolean>;
+  onOpenAgent: () => void;
+}) {
+  const [pendingReplacement, setPendingReplacement] = useState<PrinterDevice | null>(null);
+  const [replacePrinterId, setReplacePrinterId] = useState("");
+  const selectedPrinters = printers.filter(printer =>
+    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT")
   );
+  const selectablePrinters = printers.filter(printer =>
+    !printer.isActive && isPrinterReadyForSelection(printer, agents)
+  );
+  const detectedCount = printers.filter(printer =>
+    printer.connectionType === "WindowsQueue" && !!printer.agentDeviceId
+  ).length;
+  const quotaFull = maxPrinters != null && selectedPrinters.length >= maxPrinters;
+  const canUseSelection = subscriptionActive === true;
+  const canReplaceSelection = selectedPrinters.length > 0 && selectablePrinters.length > 0;
+
+  async function confirmReplacement() {
+    if (!pendingReplacement || !replacePrinterId) return;
+    const success = await onToggle(pendingReplacement, replacePrinterId);
+    if (success) {
+      setPendingReplacement(null);
+      setReplacePrinterId("");
+    }
+  }
+
+  return (
+    <>
+      <section className="panel collection-panel">
+        <div className="collection-header">
+          <div>
+            <h2>Windows printer queues</h2>
+            <p>Queues are discovered automatically by your connected Print Agent. Every discovered queue stays visible; your plan limit applies only to the queues you select for use.</p>
+          </div>
+          <div className="printer-discovery-guidance" role="note">
+            <strong>Adding a new printer</strong>
+            <span>Connect the printer by USB or to the shop network. In Windows Settings → Printers &amp; scanners, choose Add device and install the manufacturer's driver if Windows asks. Keep the SmartPrint Print Agent running; it lists the queue automatically, usually within 30 seconds. If the printer is connected to another PC, pair that PC's SmartPrint Print Agent to this shop from the Print Agent page. You do not manually register the printer here.</span>
+          </div>
+        </div>
+        <div className="printer-selection-summary" role="status">
+          <div>
+            <strong>{detectedCount} detected Windows queues</strong>
+            <span>{selectedPrinters.length} selected{maxPrinters == null ? " · no configured selection limit" : ` of ${maxPrinters} plan slots`}</span>
+          </div>
+          <p>At the plan limit, choose another ready queue and replace any selected one. You can also replace a queue before the limit is reached; use Select to add a queue without replacing anything. The other discovered queues remain visible.</p>
+        </div>
+        {!canUseSelection && (
+          <div className="printer-selection-warning" role={subscriptionActive === false ? "alert" : "status"}>
+            {subscriptionActive === false
+              ? "Your shop subscription is inactive. Your queues and files remain visible, but new printer selections are paused until shop access is restored."
+              : "Checking your shop plan before allowing printer selection. Your detected queues remain visible."}
+          </div>
+        )}
+        {maxPrinters === 0 && selectedPrinters.length === 0 && (
+          <div className="printer-selection-warning" role="status">
+            This plan currently has no printer selection slots. All discovered queues remain visible, but selecting one requires a plan with at least one printer slot.
+          </div>
+        )}
+        {printers.length === 0 ? (
+          <EmptyModule
+            icon={<Printer size={24}/>}
+            title="No Windows printer queues reported yet"
+            text="Connect the printer and add it in Windows Settings → Printers & scanners. Install its driver if Windows asks, then keep the SmartPrint Print Agent running. If the printer is on another PC, pair that PC's Print Agent to this shop from the Print Agent page. New queues appear automatically after the next scan."
+            actionLabel="Check Print Agent"
+            onAction={onOpenAgent}
+          />
+        ) : (
+          <div className="printer-grid">
+            {printers.map(printer => {
+              const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
+              const isUnsupportedVirtual = printer.outputMode === "UNSUPPORTED_VIRTUAL";
+              const isSelected = printer.isActive && !isUnsupportedVirtual;
+              const canSelect = isPrinterReadyForSelection(printer, agents);
+              const agentLastSeen = agent?.lastSeenUtc ? Date.parse(agent.lastSeenUtc) : Number.NaN;
+              const agentOnline = !!agent && !agent.revokedUtc && agent.status === "Online" &&
+                Number.isFinite(agentLastSeen) && agentLastSeen > Date.now() - 2 * 60 * 1000;
+              const printerLastSeen = printer.lastSeenUtc ? Date.parse(printer.lastSeenUtc) : Number.NaN;
+              const queueFresh = Number.isFinite(printerLastSeen) && printerLastSeen > Date.now() - 2 * 60 * 1000;
+              const queueReady = printer.status === "Ready" || printer.status === "Busy";
+              const selectionBlockReason = isUnsupportedVirtual
+                ? "This virtual/document driver is visible but is not supported for SmartPrint output."
+                : !printer.agentDeviceId
+                  ? "Keep the Print Agent connected. This Windows queue has not been linked yet."
+                  : !agentOnline
+                    ? "Connect the shop Windows computer and wait for its Print Agent to report online."
+                    : !queueFresh
+                      ? "The Agent is online, but this queue has not reported recently. Wait for the next automatic printer scan."
+                      : !queueReady
+                        ? "This Windows queue is not ready. Clear its Windows printer error or paper/connection issue, then wait for the next automatic scan."
+                        : undefined;
+              const possibleDuplicates = printer.outputMode === "PHYSICAL" && printer.agentDeviceId && printer.connectionAddress
+                ? printers.filter(other => other.id !== printer.id && other.outputMode === "PHYSICAL" &&
+                    other.agentDeviceId === printer.agentDeviceId && !!other.connectionAddress &&
+                    other.connectionAddress.trim().toLowerCase() === printer.connectionAddress!.trim().toLowerCase())
+                : [];
+              const ownerStatus = !printer.agentDeviceId
+                ? "Waiting for Print Agent discovery"
+                : !agentOnline
+                  ? "Windows computer not currently connected"
+                  : !queueFresh
+                    ? "Waiting for a fresh Windows printer scan"
+                    : printer.status === "Ready" || printer.status === "Busy"
+                      ? "Windows queue reported ready"
+                      : `Windows queue reports ${printer.status.toLowerCase()}`;
+              return (
+                <article className="printer-card" key={printer.id}>
+                  <div className="printer-card-top">
+                    <div className="printer-card-icon"><Printer size={20}/></div>
+                    <Status
+                      label={isUnsupportedVirtual ? "Not supported" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? "Available" : !agentOnline ? "Computer offline" : "Queue not ready"}
+                      tone={isUnsupportedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
+                    />
+                  </div>
+                  <h3>{isUnsupportedVirtual ? "Unsupported virtual · " : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : ""}{printer.displayName}</h3>
+                  <p>{isUnsupportedVirtual
+                    ? "This Windows driver is visible but is not approved for SmartPrint print output."
+                    : printer.outputMode === "PDF_EXPORT"
+                      ? "Supported Microsoft Print to PDF destination."
+                      : printer.manufacturer === "Windows"
+                        ? `Installed Windows driver · ${printer.model}`
+                        : `${printer.manufacturer} · ${printer.model}`}</p>
+                  <div className="printer-meta">
+                    <span>{ownerStatus}{printer.isDefault ? " · Default Windows queue" : ""}</span>
+                    <span>{printer.queueName || printer.connectionAddress || "Connection details not reported"}</span>
+                    <span>Print Agent · {agent?.deviceName || "Not linked"}</span>
+                  </div>
+                  <PrinterCapabilityPanel printer={printer}/>
+                  {possibleDuplicates.length > 0 && (
+                    <div className="printer-duplicate-warning" role="note">
+                      <strong>Same Windows port</strong>
+                      <span>{possibleDuplicates.map(item => item.displayName).join(", ")} use the same Windows port. These are separate queues and can have different driver settings or output behaviour.</span>
+                    </div>
+                  )}
+                  <div className="printer-card-footer">
+                    <span className={isSelected ? "enabled-label" : "disabled-label"}>
+                      {isSelected ? "Selected for new jobs" : isUnsupportedVirtual ? "Visible · not selectable" : "Not selected"}
+                    </span>
+                    {isSelected ? (
+                      <button
+                        className="subtle-button"
+                        disabled={!!busyResourceId}
+                        onClick={() => void onToggle(printer)}
+                      >
+                        {busyResourceId === printer.id ? <span className="button-spinner"/> : "Deselect"}
+                      </button>
+                    ) : (
+                      <div className="printer-card-actions">
+                        {!quotaFull && selectedPrinters.length > 0 && canSelect && canUseSelection && (
+                          <button
+                            className="subtle-button"
+                            disabled={!!busyResourceId}
+                            onClick={() => {
+                              setPendingReplacement(printer);
+                              setReplacePrinterId("");
+                            }}
+                          >
+                            Replace
+                          </button>
+                        )}
+                        <button
+                          className="subtle-button"
+                          disabled={!!busyResourceId || !canSelect || !canUseSelection || (quotaFull && !canReplaceSelection)}
+                          title={!canSelect ? selectionBlockReason : !canUseSelection ? "Shop plan access must be confirmed before selecting a printer." : quotaFull && !canReplaceSelection ? "No other ready queue is available to replace a selected printer. Connect and ready another printer, or upgrade your plan for another slot." : undefined}
+                          onClick={() => {
+                            if (!canSelect || !canUseSelection) return;
+                            if (quotaFull && canReplaceSelection) {
+                              setPendingReplacement(printer);
+                              setReplacePrinterId("");
+                            } else if (!quotaFull) {
+                              void onToggle(printer);
+                            }
+                          }}
+                        >
+                          {busyResourceId === printer.id ? <span className="button-spinner"/> : quotaFull ? "Replace" : "Select"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+      {pendingReplacement && (
+        <Modal
+          title="Replace a selected printer"
+          subtitle={`Select which current queue to replace with ${pendingReplacement.displayName}.`}
+          onClose={() => { if (!busyResourceId) { setPendingReplacement(null); setReplacePrinterId(""); } }}
+        >
+          <div className="modal-form">
+            <label>
+              Queue to replace
+              <select value={replacePrinterId} onChange={event => setReplacePrinterId(event.target.value)}>
+                <option value="">Choose a selected queue</option>
+                {selectedPrinters.map(printer => <option key={printer.id} value={printer.id}>{printer.displayName}</option>)}
+              </select>
+            </label>
+            <div className="modal-note">
+              <ShieldCheck size={15}/>
+              <span>The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Files stored only on the original Windows computer stay there; choose another queue on that same PC or finish those files before replacing the computer.</span>
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="secondary-button" disabled={!!busyResourceId} onClick={() => { setPendingReplacement(null); setReplacePrinterId(""); }}>Cancel</button>
+              <button type="button" className="primary-button" disabled={!!busyResourceId || !replacePrinterId} onClick={() => void confirmReplacement()}>
+                {busyResourceId === pendingReplacement.id ? <span className="button-spinner"/> : "Replace selected queue"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+function QrStationArtworkPreview({station,profile}:{station:QrStation;profile:ShopProfile|null}) {
+  const [posterSrc,setPosterSrc]=useState<string|null>(null);
+  const previewQrHostRef=useRef<HTMLDivElement|null>(null);
+
+  useEffect(()=>{
+    let cancelled=false;
+    const qrSvg=previewQrHostRef.current?.querySelector<SVGSVGElement>(".qr-code-frame svg");
+    if(!qrSvg){setPosterSrc(null);return;}
+    const qrSvgMarkup=new XMLSerializer().serializeToString(qrSvg);
+    void loadQrStationLogoDataUri(profile?.logoUrl).then(logoDataUri=>{
+      if(cancelled)return;
+      try{
+        const poster=buildQrStationArtworkSvg({
+          shopName:profile?.displayName?.trim()||station.displayName,
+          stationName:station.displayName,
+          isEnabled:station.isEnabled,
+          logoDataUri
+        },qrSvgMarkup);
+        setPosterSrc("data:image/svg+xml;charset=utf-8,"+encodeURIComponent(poster));
+      }catch{
+        setPosterSrc(null);
+      }
+    });
+    return ()=>{cancelled=true;};
+  },[station.id,station.publicUrl,station.displayName,station.isEnabled,profile?.displayName,profile?.logoUrl]);
+
+  return <div id={`qr-station-${station.id}`} className="station-qr-area qr-station-preview">
+    {posterSrc
+      ?<img className="station-poster-preview" src={posterSrc} alt={`${station.displayName} QR poster preview for ${profile?.displayName?.trim()||station.displayName}`}/>
+      :<div className="station-poster-preview-loading" role="status">Preparing the matching QR poster preview…</div>}
+    <div className="qr-preview-source" ref={previewQrHostRef} aria-hidden="true">
+      <div className="qr-code-frame"><QRCode value={station.publicUrl??""} size={172} level="H" fgColor="#101c35" bgColor="#ffffff"/></div>
+    </div>
+  </div>;
 }
 
 function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGenerate }: {
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
   const [printingStationId,setPrintingStationId]=useState<string|null>(null);
+  const [printingArtwork,setPrintingArtwork]=useState<{stationId:string;artwork:QrStationArtworkSource}|null>(null);
   const [formatByStation,setFormatByStation]=useState<Record<string,QrStationImageFormat>>({});
   const [exportingStationId,setExportingStationId]=useState<string|null>(null);
   const [copyFeedback,setCopyFeedback]=useState<Record<string,{kind:"success"|"error";message:string}>>({});
   const [exportFeedback,setExportFeedback]=useState<Record<string,{kind:"success"|"info"|"error";message:string}>>({});
   const [preparedShareImage,setPreparedShareImage]=useState<{stationId:string;signature:string;file:File}|null>(null);
   const imageFormatFor=(station:QrStation)=>formatByStation[station.id]??"png";
-  const stationImageSignature=(station:QrStation)=>JSON.stringify([
+  const stationImageSignature=(station:QrStation,format=imageFormatFor(station))=>JSON.stringify([
     station.publicUrl??"",station.displayName,station.isEnabled,
-    profile?.displayName??"",profile?.logoUrl??"",imageFormatFor(station)
+    profile?.displayName??"",profile?.logoUrl??"",format
   ]);
   const copyStationUrl=async(station:QrStation)=>{
     if(!station.publicUrl)return;
@@ -2361,40 +2653,64 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
       ?{kind:"success",message:"Station link copied."}
       :{kind:"error",message:"Could not copy automatically. Open the link and copy it manually."}}));
   };
-  const createStationImage=async(station:QrStation)=>{
+  const createStationArtwork=async(station:QrStation):Promise<QrStationArtworkSource>=>{
     if(!station.publicUrl)throw new Error("This station does not have a public QR link yet.");
     const root=document.getElementById("qr-station-"+station.id);
     const qrSvg=root?.querySelector<SVGSVGElement>(".qr-code-frame svg");
     if(!qrSvg)throw new Error("The station QR code is not ready. Refresh the page and try again.");
     const logoDataUri=await loadQrStationLogoDataUri(profile?.logoUrl);
-    return createQrStationImageFile({
-      shopName:profile?.displayName?.trim()||station.displayName,
-      stationName:station.displayName,
-      isEnabled:station.isEnabled,
-      logoDataUri
-    },new XMLSerializer().serializeToString(qrSvg),imageFormatFor(station));
+    return {
+      options:{
+        shopName:profile?.displayName?.trim()||station.displayName,
+        stationName:station.displayName,
+        isEnabled:station.isEnabled,
+        logoDataUri
+      },
+      qrSvgMarkup:new XMLSerializer().serializeToString(qrSvg)
+    };
+  };
+  const createStationImage=async(station:QrStation,format=imageFormatFor(station))=>{
+    const artwork=await createStationArtwork(station);
+    return createQrStationImageFile(artwork.options,artwork.qrSvgMarkup,format);
+  };
+  const prepareStationPrint=async(station:QrStation)=>{
+    setPrintingStationId(station.id);
+    setPrintingArtwork(null);
+    try{
+      const artwork=await createStationArtwork(station);
+      setPrintingArtwork({stationId:station.id,artwork});
+    }catch(exception){
+      setPrintingStationId(null);
+      setExportFeedback(current=>({...current,[station.id]:{
+        kind:"error",
+        message:exception instanceof Error?exception.message:"Could not prepare this QR poster."
+      }}));
+    }
   };
   const exportStationImage=async(station:QrStation)=>{
     setExportingStationId(station.id);
-    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing a sharp, scan-ready QR image…"}}));
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing your QR poster download…"}}));
     try{
       const file=await createStationImage(station);
       downloadQrStationImage(file);
-      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Your "+imageFormatFor(station).toUpperCase()+" QR image is ready."}}));
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Your "+imageFormatFor(station).toUpperCase()+" poster is ready."}}));
     }catch(exception){
-      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR poster."}}));
     }finally{setExportingStationId(null);}
   };
-  const prepareStationShare=async(station:QrStation)=>{
+  const prepareStationShare=async(station:QrStation,format=imageFormatFor(station))=>{
+    const signature=stationImageSignature(station,format);
+    if(preparedShareImage?.stationId===station.id&&preparedShareImage.signature===signature)return;
     setExportingStationId(station.id);
-    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing the QR image for sharing…"}}));
+    setPreparedShareImage(null);
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing the poster so it is ready to share…"}}));
     try{
-      const file=await createStationImage(station);
-      setPreparedShareImage({stationId:station.id,signature:stationImageSignature(station),file});
-      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Image ready. Tap “Share image now” to open your device’s share options."}}));
+      const file=await createStationImage(station,format);
+      setPreparedShareImage({stationId:station.id,signature,file});
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Poster ready. Share will open your device’s sharing options."}}));
     }catch(exception){
       setPreparedShareImage(null);
-      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR poster for sharing."}}));
     }finally{setExportingStationId(null);}
   };
   const sharePreparedStationImage=(station:QrStation)=>{
@@ -2411,31 +2727,29 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
     void shareQrStationImage(file).then(result=>{
       if(result==="shared"){
         setPreparedShareImage(null);
-        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR image shared successfully."}}));
+        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR poster shared successfully."}}));
       }else if(result==="cancelled"){
         setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Sharing was cancelled. The image was not sent."}}));
       }else{
         downloadQrStationImage(file);
         setPreparedShareImage(null);
-        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"File sharing is not supported here, so the QR image was downloaded instead."}}));
+        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"File sharing is not supported here, so the QR poster was downloaded instead."}}));
       }
     }).catch(exception=>{
       setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not share this QR image."}}));
     }).finally(()=>setExportingStationId(null));
   };
   useEffect(()=>{
-    if(!printingStationId)return;
+    if(!printingStationId||!printingArtwork||printingArtwork.stationId!==printingStationId)return;
     let cancelled=false;
-    const onAfterPrint=()=>setPrintingStationId(null);
+    const onAfterPrint=()=>{
+      setPrintingStationId(null);
+      setPrintingArtwork(null);
+    };
     const printSelectedStation=async()=>{
-      const images=Array.from(document.querySelectorAll<HTMLImageElement>(".qr-print-document img"));
-      await Promise.all(images.map(async image=>{
-        try {
-          if(!image.complete) await image.decode();
-        } catch {
-          // Shop name and the text wordmark remain available if a brand image fails.
-        }
-      }));
+      const image=document.querySelector<HTMLImageElement>(".qr-print-document img.qr-print-poster");
+      if(!image)throw new Error("The QR poster is not ready to print.");
+      await image.decode();
       await document.fonts.ready.catch(()=>undefined);
       await new Promise<void>(resolve=>{
         window.requestAnimationFrame(()=>window.requestAnimationFrame(()=>resolve()));
@@ -2443,53 +2757,60 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
       if(!cancelled)window.print();
     };
     window.addEventListener("afterprint",onAfterPrint);
-    void printSelectedStation();
+    void printSelectedStation().catch(exception=>{
+      if(cancelled)return;
+      setExportFeedback(current=>({...current,[printingStationId]:{
+        kind:"error",
+        message:exception instanceof Error?exception.message:"Could not print this QR poster."
+      }}));
+      setPrintingStationId(null);
+      setPrintingArtwork(null);
+    });
     return ()=>{
       cancelled=true;
       window.removeEventListener("afterprint",onAfterPrint);
     };
-  },[printingStationId]);
+  },[printingStationId,printingArtwork]);
 
   return (
     <>
     <section className="panel collection-panel">
       <div className="collection-header"><div><h2>Customer QR stations</h2><p>Each station has a permanent public link. Every scan creates a separate short-lived customer session.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Create station</button></div>
       {stations.length===0 ? <EmptyModule icon={<QrCode size={24}/>} title="Your first QR station starts here" text="Create a station for a counter or printer. The QR code identifies the station; every scan gets a separate expiring customer session." actionLabel="Create QR station" onAction={onAdd}/> :
-      <div className="station-grid">{stations.map(station=><article id={`qr-station-${station.id}`} className="station-card" key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
-        <div className="station-qr-area">{station.publicUrl ? <div className="qr-paper">
-          <div className="qr-shop-brand">{profile?.logoUrl?<img src={profile.logoUrl} alt={profile.displayName+" logo"}/>:<img src="/smartprint-mark.svg" alt="Smart Print"/>}<div><strong>{profile?.displayName||station.displayName}</strong><small>DOCUMENT PRINTING STATION</small></div></div>
-          <div className="qr-code-frame"><QRCode value={station.publicUrl} size={172} level="H" fgColor="#101c35" bgColor="#ffffff"/></div>
-          <span className="qr-scan-label">SCAN TO PRINT</span>
-          <span className="qr-scan-hint">Scan to upload documents and send them to this shop</span>
-          <div className="qr-shop-station">{station.displayName}</div>
-          <div className="qr-powered"><small>POWERED BY</small><div className="qr-powered-lockup" aria-label="QuantaEdge, Smarter Decisions. Greater Growth."><img className="qr-quantaedge-mark" src="/branding/quantaedge-mark.png" alt="" onError={event=>{event.currentTarget.hidden=true;const fallback=event.currentTarget.nextElementSibling;if(fallback instanceof HTMLElement)fallback.hidden=false;}}/><span className="qr-quantaedge-mark-fallback" hidden aria-hidden="true">Q</span><div className="qr-powered-wordmark"><strong>Quanta<span>Edge</span></strong><small>Smarter Decisions. Greater Growth.</small></div></div></div>
-        </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div>}</div>
+      <div className="station-grid">{stations.map(station=><article className="station-card" key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
+        {station.publicUrl
+          ?<QrStationArtworkPreview station={station} profile={profile}/>
+          :<div className="station-qr-area"><div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div></div>}
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:station.isEnabled?"Disable station":"Enable station"}</button></div>
         {station.publicUrl && <>
-           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print / download QR poster</button></div>
+           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button></div>
            {copyFeedback[station.id]&&<small className={"qr-share-feedback "+copyFeedback[station.id].kind} role="status" aria-live="polite">{copyFeedback[station.id].message}</small>}
-           <details className="qr-share-export">
-             <summary><Share2 size={15}/> Download or share QR image <span>PNG / JPG</span></summary>
-             <div className="qr-share-export-controls">
-               <label>Image format
-                 <select value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));}} disabled={!!exportingStationId}>
+           <details className="qr-poster-actions" onToggle={event=>{if(event.currentTarget.open)void prepareStationShare(station);}}>
+             <summary><Printer size={15}/> Print / download QR poster <span>Print · PNG / JPG · Share</span></summary>
+             <div className="qr-poster-format-row">
+               <label htmlFor={`qr-poster-format-${station.id}`}>
+                 <span>File format <small>Download and Share only · Print uses the poster as shown</small></span>
+                 <select id={`qr-poster-format-${station.id}`} value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));setPreparedShareImage(current=>current?.stationId===station.id?null:current);void prepareStationShare(station,format);}} disabled={!!exportingStationId}>
                    <option value="png">PNG · best QR clarity</option>
                    <option value="jpg">JPG · smaller file</option>
                  </select>
                </label>
-               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<ImageIcon size={14}/>} Download image</button>
-               {preparedShareImage?.stationId===station.id&&preparedShareImage.signature===stationImageSignature(station)
-                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Share image now</button>
-                 :<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Prepare to share</button>}
              </div>
-             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The exported image is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
+             <div className="qr-poster-action-buttons">
+               <button className="primary-button" disabled={!!printingStationId||!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationPrint(station)}>{printingStationId===station.id?<span className="button-spinner"/>:<Printer size={15}/>} Print poster</button>
+               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Download size={15}/>} Download poster</button>
+               {preparedShareImage?.stationId===station.id&&preparedShareImage.signature===stationImageSignature(station)
+                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}><Share2 size={15}/> Share poster</button>
+                 :<button className="secondary-button" disabled={!!busyResourceId||exportingStationId===station.id} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:exportFeedback[station.id]?.kind==="error"?<RefreshCw size={15}/>:<Share2 size={15}/>} {exportingStationId===station.id?"Preparing share…":exportFeedback[station.id]?.kind==="error"?"Retry share preparation":"Refresh share"}</button>}
+             </div>
+             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The poster is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
              {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
-             <small className="qr-share-export-help">Prepare the image first, then tap “Share image now” to open your device’s share sheet. If file sharing is unavailable, SmartPrint downloads the same image instead. The QR contains this station’s current public link, never a customer session token.</small>
+             <small className="qr-poster-actions-help">The preview above is the exact poster used for printing, downloading and sharing. We prepare the selected file format when you open this panel, so Share is ready as a single action. The QR uses this station’s permanent public link, not a customer session token. If your device cannot share files, SmartPrint downloads the poster instead.</small>
            </details>
          </>}
       </article>)}</div>}
     </section>
-    <QrStationPrintDocument station={stations.find(station => station.id === printingStationId) ?? null} profile={profile}/>
+    <QrStationPrintDocument artwork={printingArtwork?.stationId===printingStationId?printingArtwork.artwork:null}/>
     </>
   );
 }
@@ -2919,12 +3240,8 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
 
   const reviewableBatchFileStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED","REJECTED"]);
   const reviewBatches=Array.from(new Map(jobs.filter(job=>job.batchId&&reviewableBatchFileStatuses.has(job.status)).map(job=>[job.batchId!,job])).keys());
-  const onlineAgentIds = new Set(agentDevices.filter(agent =>
-    !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
-    Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
-  ).map(agent => agent.id));
   const dispatchablePrinters = printers.filter(printer =>
-    isPrinterAvailable(printer, onlineAgentIds)
+    isPrinterAvailableForShop(printer, agentDevices)
   );
   const batchMap=new Map<string,{key:string;batchId:string|null;jobs:ShopPrintJob[]}>();
   for(const job of jobs) {
@@ -3040,7 +3357,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)} · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.photoPaperFinish==="GLOSSY"?"Glossy":job.photoPaperFinish==="MATTE"?"Matte":"Plain"} · ${job.photoOutputLayout==="PHOTO_PAPER"?"individual photo paper":"A4 photo paper"} · ${job.pageCount} ${job.photoOutputLayout==="PHOTO_PAPER"?"photo-paper pages":"A4 pages"}` : `${job.batchGroupName??"Loose files"} · ${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)} · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
@@ -3083,7 +3400,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>{job.status==="REJECTED"?"Refund rejected file":"Review pages / refund"}</button>}
                 {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.privatePrinting&&job.outputMode==="PDF_EXPORT"?"Create test PDF":job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
                 {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>{job.privatePrinting&&job.outputType==="TEST_VIRTUAL"?"Retry test PDF":"Save PDF again"}</button>}
-                {isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT")&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||!(canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId)||canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName))} title={canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"The Agent restarted before Windows returned a spooler ID. Check the selected Windows queue for this exact job name and physically inspect all paper output before continuing.":!canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId)?(isRetainedSpoolerJob(job.spoolerStatus)?"Windows still holds this job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared.":!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for a fresh Agent observation from after submission before confirming output.":(["QUEUED","SPOOLING","PRINTING"].includes((job.spoolerStatus??"").toUpperCase())?"Windows still reports this job in its queue or printing. Wait for a terminal state before confirming output.":spoolerStatusWarning(job.spoolerStatus,job.printerStatus)||"Confirm output only after Windows reports that the job printed or its queue entry was verified absent.")):undefined} onClick={()=>onConfirmOutput(job)}>{canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"Reconcile & confirm":"Confirm output"}</button>}
+                {isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT")&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)||!(canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId,Date.now(),job.spoolerPagesPrinted??0,job.spoolerTotalPages??0)||canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName))} title={hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)?`Windows recorded ${job.spoolerPagesPrinted??0} of ${job.spoolerTotalPages} pages. Do not complete the file until the remainder is accounted for.`:canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"The Agent restarted before Windows returned a spooler ID. Check the selected Windows queue for this exact job name and physically inspect all paper output before continuing.":!canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId,Date.now(),job.spoolerPagesPrinted??0,job.spoolerTotalPages??0)?(isRetainedSpoolerJob(job.spoolerStatus)?"Windows still holds this job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared.":!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for a fresh Agent observation from after submission before confirming output.":(["QUEUED","SPOOLING","PRINTING"].includes((job.spoolerStatus??"").toUpperCase())?"Windows still reports this job in its queue or printing. Wait for a terminal state before confirming output.":spoolerStatusWarning(job.spoolerStatus,job.printerStatus)||"Confirm output only after Windows reports that the job printed or its queue entry was verified absent.")):undefined} onClick={()=>onConfirmOutput(job)}>{canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"Reconcile & confirm":"Confirm output"}</button>}
               </div>
               {editingSettingsJobId===job.id&&editingPrintSettings&&<div className="queue-settings-editor">
                 <div><strong>Review print options</strong><small>The revised quote must be approved by the customer before payment or printing.</small></div>
@@ -3385,7 +3702,7 @@ function prettyStatus(status:string) {
     VERIFIED:"Payment received",
     LOCAL_QUEUE_CLAIMED:"Shop computer preparing",
     LOCAL_QUEUE_READY:"Ready for print",
-    PRINT_AUTHORISED:"Ready to print",
+    PRINT_AUTHORISED:"Waiting for shop computer",
     PRINT_SUBMITTING:"Sending to printer",
     SPOOLER_ACCEPTED:"Sent to printer",
     SUBMITTING_TO_SPOOLER:"Sent to printer",
@@ -3423,13 +3740,8 @@ function printBlockMessage(code:string):string {
   }
 }
 
-function isPrinterAvailable(printer: PrinterDevice, onlineAgentIds: ReadonlySet<string>, now = Date.now()) {
-  if (!printer.isActive || !printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId)) return false;
-  if (printer.outputMode === "UNSUPPORTED_VIRTUAL") return false;
-  if (printer.outputMode === "PDF_EXPORT") return true;
-  const lastSeen = printer.lastSeenUtc ? Date.parse(printer.lastSeenUtc) : Number.NaN;
-  return Number.isFinite(lastSeen) && lastSeen > now - 2 * 60 * 1000 &&
-    (printer.status === "Ready" || printer.status === "Busy");
+function isPrinterReadyForSelection(printer: PrinterDevice, agents: readonly AgentDevice[], now = Date.now()) {
+  return getPrinterReadinessReason(printer, agents, now) === null;
 }
 
 function formatMoney(minor:number,currency:string) {
@@ -3543,28 +3855,6 @@ function HelpSupportModal({ onClose, onNavigate }: { onClose: () => void; onNavi
   );
 }
 
-function PrinterModal({ busy, onClose, onSubmit }: {
-  busy:boolean; onClose:()=>void; onSubmit:(v:{displayName:string;manufacturer:string;model:string;connectionType:string;connectionAddress?:string;queueName?:string})=>void;
-}) {
-  const [displayName,setDisplayName]=useState("");
-  const [manufacturer,setManufacturer]=useState("HP");
-  const [model,setModel]=useState("");
-  const [connectionType,setConnectionType]=useState("WindowsQueue");
-  const [connectionAddress,setConnectionAddress]=useState("");
-  const [queueName,setQueueName]=useState("");
-  return <Modal title="Add a printer" subtitle="Register its identity first. Live discovery will be handled by the local Print Agent." onClose={onClose}>
-    <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,manufacturer,model,connectionType,connectionAddress:connectionAddress||undefined,queueName:queueName||undefined});}}>
-      <label>Display name<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="e.g. Front counter printer" required maxLength={160}/></label>
-      <div className="form-two-col"><label>Manufacturer<select value={manufacturer} onChange={e=>setManufacturer(e.target.value)}>{["HP","Canon","Ricoh","Epson","Brother","Kyocera","Xerox","Other"].map(item=><option key={item}>{item}</option>)}</select></label><label>Model<input value={model} onChange={e=>setModel(e.target.value)} placeholder="Model name" required maxLength={120}/></label></div>
-      <label>Connection type<select value={connectionType} onChange={e=>setConnectionType(e.target.value)}><option value="WindowsQueue">Windows installed queue</option><option value="USB">USB</option><option value="LAN">LAN / Network</option><option value="IPP">IPP</option></select></label>
-      {(connectionType==="LAN"||connectionType==="IPP")&&<label>Network address<input value={connectionAddress} onChange={e=>setConnectionAddress(e.target.value)} placeholder="192.168.1.100 or ipp://printer/ipp/print"/></label>}
-      {connectionType==="WindowsQueue"&&<label>Windows queue name <span className="field-hint">Optional until the agent discovers installed queues</span><input value={queueName} onChange={e=>setQueueName(e.target.value)} placeholder="Exact Windows printer queue name"/></label>}
-      <div className="modal-note"><ShieldCheck size={15}/> The printer will be listed as Unknown until a trusted local agent confirms its status and capabilities.</div>
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!displayName.trim()||!model.trim()}>{busy?<span className="button-spinner"/>:"Add printer"}</button></div>
-    </form>
-  </Modal>;
-}
-
 function StationModal({ busy, printers, onClose, onSubmit }: {
   busy:boolean; printers:PrinterDevice[]; onClose:()=>void; onSubmit:(v:{displayName:string;printerDeviceId?:string})=>void;
 }) {
@@ -3670,7 +3960,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
           <span className="subscription-updated">Updated {formatIstTime(summary.generatedUtc)}</span>
         </div>
         <div className="subscription-usage-grid">
-          <UsageMeter label="Registered printers" used={usage.printerCount} maximum={entitlements.maxPrinters}/>
+          <UsageMeter label="Selected printers" used={usage.printerCount} maximum={entitlements.maxPrinters}/>
           <UsageMeter label="Paired computers" used={usage.agentDeviceCount} maximum={entitlements.maxAgentDevices}/>
           <UsageMeter label="QR stations" used={usage.qrStationCount} maximum={entitlements.maxQrStations}/>
           <UsageMeter label="Print jobs this month" used={usage.monthlyPrintJobCount} maximum={entitlements.maxMonthlyPrintJobs}/>
@@ -3679,7 +3969,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
           <span>Maximum cloud document size</span>
           <strong>{entitlements.maxDocumentBytes == null ? "No configured cap" : `${(entitlements.maxDocumentBytes / (1024 * 1024)).toLocaleString("en-IN", { maximumFractionDigits: 2 })} MB`}</strong>
         </div>
-        <div className="subscription-usage-footnote">Disabled printers, QR stations and offline agents still count as registered resources unless removed or revoked. Revoked agent computers are excluded.</div>
+        <div className="subscription-usage-footnote">Printer quota applies only to selected supported output queues. All Windows queues discovered by your Print Agent remain visible, including unselected alternatives, and you can replace a selected queue without losing its discovery record. QR stations and paired computers follow their own plan limits.</div>
       </section>
     </section>
   );
@@ -4314,7 +4604,6 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
   return Array.isArray(groups)?groups:undefined;
 }
 type CustomerSavedPrintSettings = CustomerPrintRequestSettings & { advancedEnabled?: boolean };
-type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" };
 function customerPhotoSizeLabel(sizeCode?:string|null):string {
   switch(sizeCode){
     case "35x45": return "35 × 45 mm";
@@ -4434,18 +4723,7 @@ function customerStatusTone(status:string):"green"|"red"|"amber"|"blue"|"slate" 
 function customerStatusLabel(status:string):string {
   return status==="AWAITING_SHOP_APPROVAL"?"Waiting for shop review":prettyStatus(status);
 }
-function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSettings {
-  if(!value||typeof value!=="object")return false;
-  const settings=value as CustomerPhotoSettings;
-  const maximumBySize:Record<string,number>={"35x45":25,"25x35":49,"2x2":15,"4x6":1};
-  const maximum=maximumBySize[settings.sizeCode];
-  const outputLayout=settings.photoOutputLayout??"A4_SHEET";
-  const finish=settings.photoPaperFinish??"PLAIN";
-  return maximum!==undefined&&Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
-    Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum&&
-    (outputLayout==="A4_SHEET"||outputLayout==="PHOTO_PAPER")&&
-    (outputLayout==="A4_SHEET"?finish==="PLAIN":finish==="GLOSSY"||finish==="MATTE");
-}
+const isValidNativePhotoSettings = isValidCustomerPhotoSettings;
 
 function parseCustomerPagesPerSheetDirection(
   capabilitiesJson?:string|null
@@ -4593,7 +4871,7 @@ function smartPrintNativeHeadline(status:string):string {
     case "PAID_AUTHORISED": return "Payment received";
     case "LOCAL_QUEUE_CLAIMED":
     case "LOCAL_QUEUE_READY": return "Preparing your print";
-    case "PRINT_AUTHORISED": return "Ready to print";
+    case "PRINT_AUTHORISED": return "Waiting for shop computer";
     case "PRINT_SUBMITTING": return "Starting print";
     case "SPOOLER_ACCEPTED":
     case "PRINTING": return "Printing in progress";
@@ -6434,7 +6712,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
     {jobStatus&&<div className="customer-job-state" role="status" aria-live="polite"><div className="customer-job-state-top"><Status label={customerStatusLabel(jobStatus.status)} tone={customerStatusTone(jobStatus.status)}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
-      <strong>{jobStatus.status==="TEST_OUTPUT_READY"?"Development test PDF generated · no physical print was made":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Shop computer is preparing your file":jobStatus.status==="LOCAL_QUEUE_READY"?"Your file is ready for printing":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
+      <strong>{jobStatus.status==="TEST_OUTPUT_READY"?"Development test PDF generated · no physical print was made":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Shop computer is preparing your file":jobStatus.status==="LOCAL_QUEUE_READY"?"Your file is ready for printing":jobStatus.status==="PRINT_AUTHORISED"?"Waiting for the shop computer":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
       <small className="customer-job-updated">Last updated · {formatIstDateTime(jobStatus.updatedUtc)}</small>
       <p>{jobStatus.status==="TEST_OUTPUT_READY"?"This was a test only. No physical pages were printed."
         :jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop is reviewing your files. No payment has been collected."
@@ -6446,7 +6724,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         :jobStatus.status==="PAID_AUTHORISED"?"Payment received. The shop is preparing your print."
         :jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"The shop computer has picked up your request and is preparing the file."
          :jobStatus.status==="LOCAL_QUEUE_READY"?"Your file is safely stored on the shop computer and ready for printing."
-        :jobStatus.status==="PRINT_AUTHORISED"?"The shop approved your print. Printing will start shortly.":["PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus.status)?"Your print is in progress. The shop will confirm when the pages are ready."
+        :jobStatus.status==="PRINT_AUTHORISED"?"The shop approved your print. The shop computer will receive it shortly.":["PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus.status)?"Your print is in progress. The shop will confirm when the pages are ready."
         :jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and will confirm whether your pages were printed. Please do not pay or upload the same file again."
         :jobStatus.status==="COMPLETED"?"Your pages are printed and ready for collection."
         :jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready."

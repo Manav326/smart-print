@@ -2,9 +2,33 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { UPLOAD_LIMITS } from "../src/upload-limits.generated.ts";
+import { isValidCustomerPhotoSettings } from "../src/customer-photo-settings.ts";
+import { resolvePhotoMediaCapabilities } from "../src/photo-media-capabilities.ts";
 import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, getPhotoCropFocusAfterDrag, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
 
 const UPLOAD_LIMITS_CONFIG = JSON.parse(readFileSync(new URL("../../../config/upload-limits.json", import.meta.url), "utf8"));
+
+test("customer photo settings preserve every stock finish supported by the Agent",()=>{
+ const base={sizeCode:"35x45",photoCount:17,photosPerPage:9};
+ for(const finish of ["PLAIN","GLOSSY","MATTE"]){
+  assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"A4_SHEET",photoPaperFinish:finish}),true,
+   "A4 sheets must allow "+finish+" stock.");
+ }
+ for(const finish of ["GLOSSY","MATTE"]){
+  assert.equal(isValidCustomerPhotoSettings({...base,photosPerPage:1,photoOutputLayout:"PHOTO_PAPER",photoPaperFinish:finish}),true,
+   "Individual photo paper must allow "+finish+" stock.");
+ }
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"A4_SHEET"}),true,
+  "Legacy A4 drafts without finish metadata keep their plain-paper default.");
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"PHOTO_PAPER",photoPaperFinish:"PLAIN",photosPerPage:1}),false);
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"PHOTO_PAPER",photoPaperFinish:"GLOSSY",photosPerPage:2}),false);
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"A4_SHEET",photoPaperFinish:"SATIN"}),false,
+  "Unknown finishes must not be silently relabeled.");
+ assert.equal(isValidCustomerPhotoSettings({...base,photoOutputLayout:"A4_SHEET",photoPaperFinish:"GLOSSY",photosPerPage:0}),false);
+ assert.equal(isValidCustomerPhotoSettings({...base,sizeCode:"4x6",photoOutputLayout:"A4_SHEET",photoPaperFinish:"MATTE",photosPerPage:2}),false);
+ assert.equal(isValidCustomerPhotoSettings({...base,sizeCode:"toString",photoOutputLayout:"A4_SHEET",photoPaperFinish:"PLAIN"}),false,
+  "Unknown object-property names are not supported photo sizes.");
+});
 
 test("customer upload limits are generated from the shared policy",()=>{
  assert.equal(UPLOAD_LIMITS.maxFileBytes,UPLOAD_LIMITS_CONFIG.maxFileBytes);
@@ -624,7 +648,18 @@ test("ID Studio remains Private Printing only",()=>{
 
 
 
-test("one processed 300-DPI crop is reused across all copies and every A4 page",()=>{
+test("Photo Studio browser fixture resolves selected page geometry before its PDF checks",()=>{
+ const fixture=readFileSync(new URL("./photo-studio.browser.tsx",import.meta.url),"utf8");
+ const geometryDeclaration=fixture.indexOf("const pageGeometry = isPhotoPaperOutput");
+ const imageTransform=fixture.indexOf("const imageTransform = pageGeometry.widthPoints");
+ const firstBitmap=fixture.indexOf("createImageBitmap(jpegPages[pageIndex]");
+ assert.ok(geometryDeclaration>=0&&imageTransform>geometryDeclaration&&firstBitmap>imageTransform,
+  "Selected A4 or photo-paper geometry must be initialized before transform counts and raster probes use it.");
+ assert.match(fixture,/const isPhotoPaperOutput = sheet\.photoOutputLayout === "PHOTO_PAPER"/);
+ assert.match(fixture,/getPhotoPaperPageGeometry\(photoSize\)/);
+});
+
+test("Photo Studio reuses one processed 300-DPI tile and one page canvas across all output pages",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const helperStart=studio.indexOf("function createPhotoTile(");
  const rendererStart=studio.indexOf("function drawPhotoSheetPage(");
@@ -645,14 +680,21 @@ test("one processed 300-DPI crop is reused across all copies and every A4 page",
  assert.match(renderer,/sharedPhotoTile\?\?createPhotoTile\(/);
 
  const exporter=studio.slice(saveStart);
- const tileCreate=exporter.indexOf("const sharedPhotoTile=createPhotoTile(");
+ const tileCreate=exporter.indexOf("sharedPhotoTile=createPhotoTile(");
+ const canvasCreate=exporter.indexOf("outputCanvas=document.createElement(\"canvas\")");
  const pageLoopMatch=/for\s*\(\s*let\s+page\s*=\s*0;\s*page\s*<\s*pages;\s*page\+\+\s*\)/.exec(exporter);
  const pageLoop=pageLoopMatch?.index??-1;
  const pageDraw=exporter.indexOf("textLayers,sharedPhotoTile)",pageLoop);
- const tileDispose=exporter.indexOf("sharedPhotoTile.width=0",pageLoop);
- assert.ok(tileCreate>=0&&pageLoop>tileCreate&&pageDraw>pageLoop&&tileDispose>pageDraw,
-  "The export must create one tile before page rendering, pass it into every page, and release it afterwards.");
- assert.match(exporter,/finally\{\s*sharedPhotoTile\.width=0;\s*sharedPhotoTile\.height=0;/);
+ const jpegEncode=exporter.indexOf("canvasToBlob(outputCanvas",pageLoop);
+ const tileDispose=exporter.indexOf("if(sharedPhotoTile){sharedPhotoTile.width=0;sharedPhotoTile.height=0;}",pageLoop);
+ const canvasDispose=exporter.indexOf("if(outputCanvas){outputCanvas.width=0;outputCanvas.height=0;}",pageLoop);
+ assert.ok(tileCreate>=0&&canvasCreate>tileCreate&&pageLoop>canvasCreate&&pageDraw>pageLoop&&jpegEncode>pageDraw,
+  "The export must create one tile and one reusable page canvas before sequential rendering.");
+ assert.equal(exporter.split("outputCanvas=document.createElement(\"canvas\")").length-1,1,
+  "Only one high-resolution output canvas may be allocated per export.");
+ assert.ok(tileDispose>jpegEncode&&canvasDispose>tileDispose,
+  "The export must release both large canvases deterministically in finally.");
+ assert.match(exporter,/finally\{\s*if\(sharedPhotoTile\)\{sharedPhotoTile\.width=0;sharedPhotoTile\.height=0;\}\s*if\(outputCanvas\)\{outputCanvas\.width=0;outputCanvas\.height=0;\}/);
 });
 
 
@@ -687,4 +729,47 @@ test("Photo Studio explains copies, physical output, estimated price and true so
  assert.match(css,/toolRailSectionLabel/);
  assert.ok(css.includes("max-height:min(30vh,230px)"));
  assert.match(css,/sourceQualityWarning/);
+});
+
+
+test("printer capability display does not conflate glossy and matte with other photo finishes", () => {
+  const printSchema = resolvePhotoMediaCapabilities(
+    ["PhotographicGlossy", "PhotographicHighGloss", "PhotographicMatte", "PhotographicSemiGloss", "Plain"],
+    [],
+    "supported",
+    "unknown"
+  );
+  assert.equal(printSchema.state, "supported");
+  assert.deepEqual(printSchema.labels, ["Glossy", "Matte"]);
+  assert.deepEqual(printSchema.mediaTypes, [
+    "PhotographicGlossy",
+    "PhotographicHighGloss",
+    "PhotographicMatte"
+  ]);
+
+  const legacyDriver = resolvePhotoMediaCapabilities(
+    [],
+    ["Glossy Photo Paper", "Photo Matt Paper", "Semi-Gloss Photo Paper", "Satin Photo Paper", "Lustre Paper"],
+    "unknown",
+    "supported"
+  );
+  assert.equal(legacyDriver.state, "supported");
+  assert.deepEqual(legacyDriver.labels, ["Glossy", "Matte"]);
+  assert.deepEqual(legacyDriver.mediaTypes, ["Glossy Photo Paper", "Photo Matt Paper"]);
+});
+
+test("printer capability display does not claim generic or non-matching media can satisfy glossy/matte jobs", () => {
+  for (const [schema, legacy] of [
+    [["Plain", "Photographic"], []],
+    [["PhotographicSemiGloss"], ["Satin Photo Paper"]],
+    [[], ["Lustre Photo Paper", "Luster Photo Paper"]]
+  ] as const) {
+    const result = resolvePhotoMediaCapabilities(schema, legacy, "supported", legacy.length ? "supported" : "unknown");
+    assert.equal(result.state, "unsupported");
+    assert.deepEqual(result.labels, []);
+    assert.deepEqual(result.mediaTypes, []);
+  }
+
+  const notReported = resolvePhotoMediaCapabilities([], [], "unknown", "unknown");
+  assert.equal(notReported.state, "unknown");
 });

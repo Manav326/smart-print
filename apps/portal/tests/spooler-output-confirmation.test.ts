@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   canConfirmPhysicalOutput,
   canManuallyReconcileUncertainOutput,
+  canResumeUnprintedPhysicalJob,
+  hasIncompleteSpoolerPageProgress,
   hasVerifiedAgentSpoolerObservation,
   isFreshSpoolerObservation,
   isVerifiedSpoolerAbsenceReport,
@@ -64,6 +66,45 @@ test("verified queue absence retains manual physical-page resolution", () => {
   assert.equal(isVerifiedSpoolerAbsenceReport("SPOOLER_JOB_NO_LONGER_VISIBLE", 17), true);
   assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", submittedUtc, observedUtc, "Ready", "SPOOLER_JOB_NO_LONGER_VISIBLE", 17, nowUtc), true);
   assert.equal(canConfirmPhysicalOutput("SPOOLER_ACCEPTED", "OUTPUT_UNCONFIRMED", submittedUtc, observedUtc, "Ready", "SPOOLER_JOB_NO_LONGER_VISIBLE", 17, nowUtc), false);
+  assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", submittedUtc, observedUtc, "Ready", "SPOOLER_JOB_NO_LONGER_VISIBLE", 17, nowUtc, 0, 8), false);
+  assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED", submittedUtc, observedUtc, "Ready", "SPOOLER_JOB_NO_LONGER_VISIBLE", 17, nowUtc, 3, 8), false);
+  assert.equal(hasIncompleteSpoolerPageProgress(0, 8), true);
+  assert.equal(hasIncompleteSpoolerPageProgress(3, 8), true);
+  assert.equal(hasIncompleteSpoolerPageProgress(8, 8), false);
+});
+
+test("only fresh zero-page physical queue absences with a local copy can be resumed", () => {
+  const eligible = [
+    "OUTPUT_UNCONFIRMED","PHYSICAL","PHYSICAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",true,nowUtc
+  ] as const;
+  assert.equal(canResumeUnprintedPhysicalJob(...eligible), true);
+  assert.equal(canResumeUnprintedPhysicalJob(
+    "OUTPUT_UNCONFIRMED","PHYSICAL","PHYSICAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,1,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",true,nowUtc
+  ), false);
+  assert.equal(canResumeUnprintedPhysicalJob(
+    "OUTPUT_UNCONFIRMED","PDF_EXPORT","PHYSICAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",true,nowUtc
+  ), false);
+  assert.equal(canResumeUnprintedPhysicalJob(
+    "OUTPUT_UNCONFIRMED","PHYSICAL","PHYSICAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    null,true,nowUtc
+  ), false);
+  assert.equal(canResumeUnprintedPhysicalJob(
+    "OUTPUT_UNCONFIRMED","PHYSICAL","PHYSICAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",false,nowUtc
+  ), false);
+  assert.equal(canResumeUnprintedPhysicalJob(
+    "OUTPUT_UNCONFIRMED","PHYSICAL","PHYSICAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,"2026-11-16T08:50:59.000Z",null,null,
+    "2026-11-16T09:00:05.000Z",true,nowUtc
+  ), false);
 });
 
 test("an Agent restart without a spooler ID is uncertain and requires manual queue reconciliation", () => {
@@ -90,7 +131,7 @@ test("printer warnings still block routine confirmation, but verified queue abse
 test("Order Journey and Print Queue use the same physical-output eligibility and manual-reconciliation helpers", () => {
   const orderJourney = read("../src/OrderJourneyPage.tsx");
   const printQueue = read("../src/App.tsx");
-  const expected = /canConfirmPhysicalOutput\(\s*job\.status,\s*job\.spoolerStatus,\s*job\.spoolerSubmittedUtc,\s*job\.spoolerObservedUtc,\s*job\.printerStatus,\s*job\.failureCode,\s*job\.spoolerJobId\s*\)/;
+  const expected = /canConfirmPhysicalOutput\(\s*job\.status,\s*job\.spoolerStatus,\s*job\.spoolerSubmittedUtc,\s*job\.spoolerObservedUtc,\s*job\.printerStatus,\s*job\.failureCode,\s*job\.spoolerJobId,\s*Date\.now\(\),\s*job\.spoolerPagesPrinted\s*\?\?\s*0,\s*job\.spoolerTotalPages\s*\?\?\s*0\s*\)/;
   for (const source of [orderJourney, printQueue]) {
     assert.match(source, /isPhysicalOutputConfirmationStatus\(job\.status\)/);
     assert.match(source, expected);

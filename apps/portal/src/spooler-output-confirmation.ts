@@ -74,6 +74,28 @@ export function canManuallyReconcileUncertainOutput(
     spoolerJobId == null && !!queueName?.trim() && !!spoolerJobName?.trim();
 }
 
+export function hasIncompleteSpoolerPageProgress(pagesPrinted?: number | null, totalPages?: number | null): boolean {
+  return (totalPages ?? 0) > 0 && (pagesPrinted ?? 0) < (totalPages ?? 0);
+}
+
+export function canResumeUnprintedPhysicalJob(
+  jobStatus?: string | null, outputMode?: string | null, outputType?: string | null,
+  spoolerStatus?: string | null, failureCode?: string | null, spoolerJobId?: number | null,
+  pagesPrinted?: number | null, totalPages?: number | null,
+  spoolerSubmittedUtc?: string | null, spoolerObservedUtc?: string | null,
+  outputConfirmedUtc?: string | null, dispatchLeaseExpiresUtc?: string | null,
+  localQueueReceivedUtc?: string | null, originalQueueReady = false, nowUtcMs = Date.now()
+): boolean {
+  return normalizeStatus(jobStatus) === "OUTPUT_UNCONFIRMED" &&
+    normalizeStatus(outputMode) === "PHYSICAL" &&
+    normalizeStatus(outputType) === "PHYSICAL" &&
+    normalizeStatus(spoolerStatus) === "OUTPUT_UNCONFIRMED" &&
+    isVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId) &&
+    (pagesPrinted ?? 0) === 0 && (totalPages ?? 0) > 0 &&
+    isFreshSpoolerObservation(spoolerSubmittedUtc, spoolerObservedUtc, nowUtcMs) &&
+    !outputConfirmedUtc && !dispatchLeaseExpiresUtc && !!localQueueReceivedUtc && originalQueueReady;
+}
+
 export function canConfirmPhysicalOutput(
   jobStatus?: string | null,
   spoolerStatus?: string | null,
@@ -82,7 +104,9 @@ export function canConfirmPhysicalOutput(
   printerStatus?: string | null,
   failureCode?: string | null,
   spoolerJobId?: number | null,
-  nowUtcMs = Date.now()
+  nowUtcMs = Date.now(),
+  pagesPrinted = 0,
+  totalPages = 0
 ): boolean {
   const normalizedJobStatus = normalizeStatus(jobStatus);
   const normalizedSpoolerStatus = normalizeStatus(spoolerStatus);
@@ -94,7 +118,8 @@ export function canConfirmPhysicalOutput(
 
   if (normalizedSpoolerStatus === "OUTPUT_UNCONFIRMED") {
     return normalizedJobStatus === "OUTPUT_UNCONFIRMED" &&
-      isVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId);
+      isVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId) &&
+      !hasIncompleteSpoolerPageProgress(pagesPrinted, totalPages);
   }
   if (normalizedSpoolerStatus !== "PRINTED") return false;
   return !printerWarningStatuses.has(normalizeStatus(printerStatus));

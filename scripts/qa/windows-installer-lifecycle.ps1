@@ -68,6 +68,12 @@ $testPrinterName = "SmartPrint Lifecycle QA Queue"
 $fixtureProject = Join-Path $env:RUNNER_TEMP "SmartPrintLifecycleFixture"
 $brokenProject = Join-Path $env:RUNNER_TEMP "SmartPrintBrokenAgent"
 $programDataRoot = Join-Path $env:ProgramData "QRtoPrint"
+# Keep QA executables, result files and fingerprints outside the old SYSTEM-only
+# product tree. LocalService must be able to execute fixtures before ACL migration.
+$lifecycleDataRoot = Join-Path $env:ProgramData "SmartPrintLifecycleQA"
+# Keep executable test payloads in a dedicated Program Files QA folder.
+# LocalService receives read/execute only; mutable results remain in ProgramData.
+$lifecycleFixtureRuntimeRoot = Join-Path $env:ProgramFiles "SmartPrintLifecycleQA"
 $identityPath = Join-Path $programDataRoot "agent.identity"
 $queueManifest = Join-Path $programDataRoot "LocalQueue\11111111111141118111111111111111.json"
 $networkPreferencePath = Join-Path $programDataRoot "local-network.preference"
@@ -76,11 +82,15 @@ $expectedNetworkId = "LIFECYCLE-QA-SHOP-NETWORK"
 $results = [System.Collections.Generic.List[object]]::new()
 $identityHash = $null
 $originalDefaultPrinter = $null
+$originalPrinterInventory = @()
+$originalSpoolerProcessId = $null
 $fixturePrinter = $null
 $installRoot = Join-Path $env:ProgramFiles "SmartPrint"
 $ownsInstall = $false
 $ownsPrinter = $false
-$ownsTask = $false
+$script:ownsLocalServiceProbe = $false
+$script:localServiceFixtureStaged = $false
+$script:ownsLifecycleDataRoot = $false
 
 $script:caseNumber = 0
 function Add-Result([string]$Name, [string]$Status, [string]$Detail) {
@@ -151,7 +161,20 @@ function Invoke-Setup([string]$Path) {
     if ($process.ExitCode -ne 0) {
         throw "Installer exited with code $($process.ExitCode): $Path"
     }
-    Wait-Service "Running"
+    try {
+        Wait-Service "Running"
+    }
+    catch {
+        $diagnosticPath = Join-Path ([System.IO.Path]::GetTempPath()) "SmartPrint-Agent-Service-Install.log"
+        if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
+            Write-Host "[QA-INSTALL-DIAGNOSTICS] Hidden service-install script output:" -ForegroundColor Yellow
+            Get-Content -LiteralPath $diagnosticPath | ForEach-Object { Write-Host "[QA-INSTALL-DIAGNOSTICS] $_" }
+        }
+        else {
+            Write-Host "[QA-INSTALL-DIAGNOSTICS] No service-install diagnostic log was created." -ForegroundColor Yellow
+        }
+        throw
+    }
 }
 
 function Invoke-Uninstall {
@@ -203,6 +226,8 @@ function Wait-LocalApiReady([int]$TimeoutSeconds = 45) {
 
 function Assert-ServiceVersion([string]$ExpectedVersion) {
     Wait-Service "Running"
+    $serviceIdentity = (Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'").StartName
+    Assert-True ($serviceIdentity -match 'LocalService$') "SmartPrint Agent must run as NT AUTHORITY\LocalService, not $serviceIdentity."
     $path = Get-ServiceBinaryPath
     Assert-True (-not [string]::IsNullOrWhiteSpace($path)) "Windows service registration is missing."
     Assert-True ($path -match [regex]::Escape("\agent\$ExpectedVersion-")) "Service points to the wrong Agent payload: $path"
@@ -216,68 +241,375 @@ function Invoke-Fixture([string]$Mode) {
     if ($LASTEXITCODE -ne 0) { throw "Lifecycle fixture '$Mode' failed with exit code $LASTEXITCODE." }
 }
 
-function Invoke-FixtureAsSystem([string]$Mode, [string[]]$AdditionalArguments = @()) {
-    Write-Host "[QA-ACTION] Run protected Agent data-preservation fixture as LocalSystem: mode=$Mode" -ForegroundColor Cyan
-    $taskName = "SmartPrintLifecycleSystemPrinterProbe"
-    $resultPath = Join-Path $env:RUNNER_TEMP "smartprint-system-fixture-$Mode.txt"
-    $assemblyPath = Join-Path $fixtureProject "bin\Release\net10.0-windows\SmartPrintLifecycleFixture.dll"
-    $dotnetPath = (Get-Command dotnet -ErrorAction Stop).Source
-    Assert-True (Test-Path -LiteralPath $assemblyPath) "The Agent lifecycle fixture assembly was not built."
+function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArguments = @()) {
+    Write-Host "[QA-ACTION] Run protected Agent data-preservation fixture as LocalService Windows service: mode=$Mode" -ForegroundColor Cyan
+    $probeServiceName = "SmartPrintLifecycleLocalServiceProbe"
+    $fixtureDataDirectory = $lifecycleDataRoot
+    $resultDirectory = Join-Path $fixtureDataDirectory "Results"
+    $serviceFixtureDirectory = $lifecycleFixtureRuntimeRoot
+    New-Item -ItemType Directory -Force -Path $fixtureDataDirectory, $resultDirectory | Out-Null
+    $script:ownsLifecycleDataRoot = $true
+    $buildOutputDirectory = Join-Path $fixtureProject "bin\Release\net10.0-windows"
+    # The service executable and immutable dependencies live under Program Files.
+    # Its child worker inherits the actual LocalService service token.
+    $fixtureDataAcl = @(
+        "*S-1-5-18:(OI)(CI)F",
+        "*S-1-5-32-544:(OI)(CI)F",
+        "*S-1-5-19:(OI)(CI)F"
+    )
+    $fixtureExecutableAcl = @(
+        "*S-1-5-18:(OI)(CI)F",
+        "*S-1-5-32-544:(OI)(CI)F",
+        "*S-1-5-19:(OI)(CI)RX"
+    )
+    $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
+    & $icaclsPath $fixtureDataDirectory /inheritance:r /grant:r @fixtureDataAcl /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not grant the LocalService lifecycle harness access to its isolated data directory."
+    }
+    & $icaclsPath $resultDirectory /inheritance:r /grant:r @fixtureDataAcl /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not grant the LocalService lifecycle harness access to its result directory."
+    }
 
-    Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
-    $extraArguments = @($AdditionalArguments | ForEach-Object { '"' + ($_ -replace '"', '\"') + '"' })
-    $arguments = '"' + $assemblyPath + '" ' + $Mode + ' "' + $resultPath + '"'
-    if ($extraArguments.Count -gt 0) { $arguments += ' ' + ($extraArguments -join ' ') }
-    $action = New-ScheduledTaskAction -Execute $dotnetPath -Argument $arguments
-    $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    try {
-        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal | Out-Null
-        $script:ownsTask = $true
-        Start-ScheduledTask -TaskName $taskName
-        $deadline = (Get-Date).AddSeconds(45)
-        $poll = 0
-        while (-not (Test-Path -LiteralPath $resultPath) -and (Get-Date) -lt $deadline) {
-            $poll++
-            if ($poll -eq 1 -or $poll % 10 -eq 0) {
-                Write-Host "[QA-PROGRESS] LocalSystem fixture | mode=$Mode | poll=$poll | elapsed=$([Math]::Round($poll / 2, 1))s." -ForegroundColor DarkCyan
-            }
-            Start-Sleep -Milliseconds 500
+    # The fingerprint is a test-only preservation oracle, not part of the
+    # encrypted production queue. Apply and verify its file DACL explicitly:
+    # files created before the directory ACL migration do not necessarily pick
+    # up the new inherited LocalService ACE.
+    $keyFingerprintPath = Join-Path $fixtureDataDirectory "document-key.sha256"
+    if (Test-Path -LiteralPath $keyFingerprintPath -PathType Leaf) {
+        $fingerprintAcl = @(
+            "*S-1-5-18:R",
+            "*S-1-5-32-544:F",
+            "*S-1-5-19:R"
+        )
+        & $icaclsPath $keyFingerprintPath /inheritance:r /grant:r @fingerprintAcl /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not grant LocalService read-only access to the lifecycle document-key fingerprint."
         }
-        Assert-True (Test-Path -LiteralPath $resultPath) "The LocalSystem lifecycle fixture '$Mode' did not produce a result."
-        return (Get-Content -LiteralPath $resultPath -Raw).Trim()
+        $fingerprintSecurity = Get-Acl -LiteralPath $keyFingerprintPath
+        $localServiceFingerprintRead = @(
+            $fingerprintSecurity.Access | Where-Object {
+                $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+                $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -eq "S-1-5-19" -and
+                (($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -eq [System.Security.AccessControl.FileSystemRights]::ReadData)
+            }
+        )
+        Assert-True ($localServiceFingerprintRead.Count -gt 0) "LocalService does not have read access to the lifecycle fingerprint file."
+    }
+
+    $resultPath = Join-Path $resultDirectory "smartprint-localservice-fixture-$Mode.txt"
+    $buildAssemblyPath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.dll"
+    $buildExecutablePath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.exe"
+    $fixtureExecutablePath = Join-Path $serviceFixtureDirectory "SmartPrintLifecycleFixture.exe"
+    Assert-True (Test-Path -LiteralPath $buildAssemblyPath) "The Agent lifecycle fixture assembly was not built."
+    Assert-True (Test-Path -LiteralPath $buildExecutablePath) "The Agent lifecycle fixture apphost was not built."
+
+    # Stage and secure fixture binaries once; every service invocation reuses
+    # this immutable payload instead of recopying the .NET dependency set.
+    if (-not $script:localServiceFixtureStaged) {
+        if (Test-Path -LiteralPath $serviceFixtureDirectory) {
+            throw "Refusing to overwrite an existing LocalService lifecycle runtime directory."
+        }
+        New-Item -ItemType Directory -Force -Path $serviceFixtureDirectory | Out-Null
+        & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureExecutableAcl /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not grant LocalService read/execute access to the isolated lifecycle fixture runtime."
+        }
+        Copy-Item -Path (Join-Path $buildOutputDirectory "*") -Destination $serviceFixtureDirectory -Recurse -Force
+        & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureExecutableAcl /T /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not grant the LocalService lifecycle fixture access to its test-only runtime directories."
+        }
+
+        # Build outputs can arrive with protected file DACLs. Directory
+        # inheritance alone is not enough for SCM to launch the apphost under
+        # LocalService, so give every staged binary an explicit file-level DACL.
+        $fixtureFileAcl = @(
+            "*S-1-5-18:F",
+            "*S-1-5-32-544:F",
+            "*S-1-5-19:RX"
+        )
+        $fixtureFiles = @(Get-ChildItem -LiteralPath $serviceFixtureDirectory -File -Recurse)
+        Assert-True ($fixtureFiles.Count -gt 0) "The LocalService lifecycle runtime contains no staged files."
+        foreach ($fixtureFile in $fixtureFiles) {
+            & $icaclsPath $fixtureFile.FullName /inheritance:r /grant:r @fixtureFileAcl /C /Q | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not grant LocalService read/execute access to staged runtime file '$($fixtureFile.Name)'."
+            }
+            $fileAcl = Get-Acl -LiteralPath $fixtureFile.FullName
+            $localServiceFileAccess = @(
+                $fileAcl.Access | Where-Object {
+                    $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+                    $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -eq "S-1-5-19" -and
+                    (($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadAndExecute) -eq [System.Security.AccessControl.FileSystemRights]::ReadAndExecute)
+                }
+            )
+            Assert-True ($localServiceFileAccess.Count -gt 0) "LocalService does not have effective read/execute access to staged runtime file '$($fixtureFile.Name)'."
+        }
+        $script:localServiceFixtureStaged = $true
+    }
+
+    if (Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue) {
+        throw "Refusing to replace an existing LocalService lifecycle probe service."
+    }
+    Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
+    $serviceArguments = @("--service-fixture", $Mode, $resultPath) + @($AdditionalArguments)
+    $quotedArguments = @($serviceArguments | ForEach-Object { '"' + [string]$_ + '"' })
+    $binaryPath = '"' + $fixtureExecutablePath + '" ' + ($quotedArguments -join " ")
+
+    try {
+        & sc.exe create $probeServiceName binPath= $binaryPath start= demand obj= "NT AUTHORITY\LocalService" password= "" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not create the disposable LocalService fixture Windows service."
+        }
+        $script:ownsLocalServiceProbe = $true
+        $probeConfiguration = Get-CimInstance -ClassName Win32_Service -Filter "Name='$probeServiceName'"
+        Assert-True ($probeConfiguration.StartName -match 'LocalService$') "The lifecycle fixture service is not configured as LocalService: $($probeConfiguration.StartName)"
+
+        $startOutput = (& sc.exe start $probeServiceName 2>&1 | Out-String).Trim()
+        $startExitCode = $LASTEXITCODE
+        if ($startExitCode -ne 0) {
+            $serviceDetails = (& sc.exe queryex $probeServiceName 2>&1 | Out-String).Trim()
+            $serviceConfiguration = (& sc.exe qc $probeServiceName 2>&1 | Out-String).Trim()
+            $serviceSecurityDescriptor = (& sc.exe sdshow $probeServiceName 2>&1 | Out-String).Trim()
+            $fixtureExecutableAcl = (& $icaclsPath $fixtureExecutablePath 2>&1 | Out-String).Trim()
+            $fixtureDirectoryAcl = (& $icaclsPath $serviceFixtureDirectory 2>&1 | Out-String).Trim()
+            $currentIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+            $currentPrincipal = [System.Security.Principal.WindowsPrincipal]::new($currentIdentity)
+            $isAdministrator = $currentPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+            $serviceLogonRights = "unavailable"
+            $securityPolicyPath = Join-Path $env:RUNNER_TEMP "smartprint-lifecycle-user-rights.inf"
+            try {
+                & (Join-Path $env:SystemRoot "System32\secedit.exe") /export /cfg $securityPolicyPath /areas USER_RIGHTS /quiet | Out-Null
+                if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $securityPolicyPath)) {
+                    $rights = Get-Content -LiteralPath $securityPolicyPath |
+                        Where-Object { $_ -match '^Se(ServiceLogonRight|DenyServiceLogonRight)\s*=' }
+                    $serviceLogonRights = ($rights -join " | ")
+                }
+            }
+            catch {
+                $serviceLogonRights = "export failed: $($_.Exception.Message)"
+            }
+            finally {
+                Remove-Item -LiteralPath $securityPolicyPath -Force -ErrorAction SilentlyContinue
+            }
+
+            $relevantSystemEvents = @()
+            try {
+                $relevantSystemEvents = @(
+                    Get-WinEvent -FilterHashtable @{
+                        LogName = "System"
+                        Id = @(7000, 7001, 7009, 7011, 7023, 7024, 7038, 7041, 7045)
+                        StartTime = (Get-Date).AddMinutes(-10)
+                    } -ErrorAction Stop |
+                    Select-Object -First 20 |
+                    ForEach-Object {
+                        "$($_.TimeCreated.ToString('o')) EventId=$($_.Id): $(($_.Message -replace '\s+', ' ').Trim())"
+                    }
+                )
+            }
+            catch {
+                $relevantSystemEvents = @("System event query unavailable: $($_.Exception.Message)")
+            }
+            $failedLogons = @()
+            try {
+                $failedLogons = @(
+                    Get-WinEvent -FilterHashtable @{
+                        LogName = "Security"
+                        Id = 4625
+                        StartTime = (Get-Date).AddMinutes(-10)
+                    } -ErrorAction Stop |
+                    Select-Object -First 10 |
+                    ForEach-Object {
+                        "$($_.TimeCreated.ToString('o')) EventId=$($_.Id): $(($_.Message -replace '\s+', ' ').Trim())"
+                    }
+                )
+            }
+            catch {
+                $failedLogons = @("Security event query unavailable: $($_.Exception.Message)")
+            }
+            throw "Windows could not start the disposable LocalService fixture service. ExitCode=$startExitCode; StartOutput=$startOutput; ServiceDetails=$serviceDetails; ServiceConfiguration=$serviceConfiguration; ServiceSecurityDescriptor=$serviceSecurityDescriptor; FixtureExecutableAcl=$fixtureExecutableAcl; FixtureDirectoryAcl=$fixtureDirectoryAcl; Caller=$($currentIdentity.Name); CallerIsAdministrator=$isAdministrator; ServiceLogonRights=$serviceLogonRights; RelevantSystemEvents=$($relevantSystemEvents -join ' || '); FailedLogons=$($failedLogons -join ' || ')"
+        }
+
+        $deadline = [DateTime]::UtcNow.AddSeconds(45)
+        do {
+            if (Test-Path -LiteralPath $resultPath -PathType Leaf) { break }
+            $currentProbe = Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue
+            if (-not $currentProbe -or $currentProbe.Status -eq "Stopped") { break }
+            Start-Sleep -Milliseconds 500
+        } while ([DateTime]::UtcNow -lt $deadline)
+
+        if (-not (Test-Path -LiteralPath $resultPath -PathType Leaf)) {
+            $currentProbe = Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue
+            $probeStatus = if ($currentProbe) { [string]$currentProbe.Status } else { "unavailable" }
+            $serviceDetails = (& sc.exe queryex $probeServiceName 2>&1 | Out-String).Trim()
+            throw "LocalService fixture '$Mode' produced no result. ServiceState=$probeStatus; ServiceDetails=$serviceDetails"
+        }
+
+        $serviceStopDeadline = [DateTime]::UtcNow.AddSeconds(15)
+        do {
+            $currentProbe = Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue
+            if (-not $currentProbe -or $currentProbe.Status -eq "Stopped") { break }
+            Start-Sleep -Milliseconds 250
+        } while ([DateTime]::UtcNow -lt $serviceStopDeadline)
+
+        $result = (Get-Content -LiteralPath $resultPath -Raw).Trim()
+        if ($result.StartsWith("ERROR:", [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "LocalService fixture '$Mode' failed: $result"
+        }
+        return $result
     }
     finally {
-        if ($script:ownsTask) {
-            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
-            $script:ownsTask = $false
+        if ($script:ownsLocalServiceProbe) {
+            $currentProbe = Get-Service -Name $probeServiceName -ErrorAction SilentlyContinue
+            if ($currentProbe -and $currentProbe.Status -ne "Stopped") {
+                Stop-Service -Name $probeServiceName -Force -ErrorAction SilentlyContinue
+                try { (Get-Service -Name $probeServiceName).WaitForStatus("Stopped", [TimeSpan]::FromSeconds(15)) } catch { }
+            }
+            & sc.exe delete $probeServiceName | Out-Null
+            $script:ownsLocalServiceProbe = $false
         }
         Remove-Item -LiteralPath $resultPath -Force -ErrorAction SilentlyContinue
     }
 }
 
+function Assert-AllowSidSet([string]$Path, [string[]]$ExpectedSids, [string]$Label) {
+    $security = Get-Acl -LiteralPath $Path
+    $actualSids = @(
+        $security.Access |
+            Where-Object { $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow } |
+            ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } |
+            Sort-Object -Unique
+    )
+    $expected = @($ExpectedSids | Sort-Object -Unique)
+    Assert-True (($actualSids -join ",") -eq ($expected -join ",")) "$Label has unexpected allow principals. Expected '$($expected -join ', ')'; actual '$($actualSids -join ', ')'."
+}
+
+function Assert-MachineDataAcl {
+    $expectedMachineDataSids = @("S-1-5-18", "S-1-5-19", "S-1-5-32-544")
+    Assert-AllowSidSet $programDataRoot $expectedMachineDataSids "SmartPrint machine-data root"
+    Assert-AllowSidSet $identityPath $expectedMachineDataSids "SmartPrint machine identity"
+    Assert-AllowSidSet $networkPreferencePath $expectedMachineDataSids "SmartPrint local-network preference"
+}
+
+function Assert-PrivateQueueAcl {
+    # Administrators are intentionally excluded from the encrypted queue DACL.
+    # Inspect every effective queue/file ACL as the authorized LocalService
+    # identity instead of opening the production queue from the runner token.
+    $fixtureResult = Invoke-FixtureAsLocalService "verify"
+    Assert-True ($fixtureResult -eq "VERIFIED") "The LocalService private-queue ACL/content verification returned an unexpected result: $fixtureResult"
+}
+
 function Assert-PreservedFixtures {
+    Assert-MachineDataAcl
+    Assert-PrivateQueueAcl
     Assert-True (Test-Path -LiteralPath $identityPath -PathType Leaf) "The machine Agent identity was removed."
     $currentHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
     Assert-True ($currentHash -eq $identityHash) "The machine Agent identity changed during install/uninstall."
     Assert-True (Test-Path -LiteralPath $networkPreferencePath -PathType Leaf) "The shop's saved local-network selection was removed."
-    $fixtureResult = Invoke-FixtureAsSystem "verify"
-    Assert-True ($fixtureResult -eq "VERIFIED") "The protected queue fixture verification returned an unexpected result: $fixtureResult"
 }
 
 function Add-QueueFixture {
     $default = Get-CimInstance Win32_Printer | Where-Object { $_.Default } | Select-Object -First 1
     $script:originalDefaultPrinter = if ($default) { $default.Name } else { $null }
+    $script:originalPrinterInventory = @(
+        Get-Printer | Select-Object Name, DriverName, PortName | Sort-Object Name
+    )
 
     $source = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction Stop
     Add-Printer -Name $testPrinterName -DriverName $source.DriverName -PortName $source.PortName -ErrorAction Stop
     $script:ownsPrinter = $true
     $script:fixturePrinter = Get-Printer -Name $testPrinterName -ErrorAction Stop
+    $spooler = Get-CimInstance -ClassName Win32_Service -Filter "Name='Spooler'"
+    Assert-True ($spooler.State -eq "Running" -and $spooler.ProcessId -gt 0) "The Windows Print Spooler must be running before the lifecycle test."
+    $script:originalSpoolerProcessId = [uint32]$spooler.ProcessId
 }
 
-function Assert-SystemCanDiscoverFixturePrinter {
-    Write-Host "[QA-ACTION] Verify Agent printer discovery as LocalSystem using the temporary lifecycle queue." -ForegroundColor Cyan
-    $result = Invoke-FixtureAsSystem "discover-printer" @($testPrinterName)
-    Assert-True ($result -eq "FOUND") "The Agent's LocalSystem printer-discovery result was unexpected: $result"
+function Set-LegacyAgentDataAclFixture {
+    Write-Host "[QA-ACTION] Simulate the previous release's SYSTEM/Administrators data ACL and SYSTEM-only encrypted queue." -ForegroundColor Cyan
+    $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
+    $legacyRootAcl = @(
+        "*S-1-5-18:(OI)(CI)F",      # LocalSystem
+        "*S-1-5-32-544:(OI)(CI)F" # Built-in Administrators
+    )
+    & $icaclsPath $programDataRoot /reset /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not reset the SmartPrint tree before creating the legacy ACL fixture."
+    }
+    & $icaclsPath $programDataRoot /inheritance:r /grant:r @legacyRootAcl /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not create the legacy SmartPrint root ACL fixture."
+    }
+
+    $legacyQueueRoot = Join-Path $programDataRoot "LocalQueue"
+    $systemOnlyQueueAcl = "*S-1-5-18:(OI)(CI)F"
+    & $icaclsPath $legacyQueueRoot /inheritance:r /grant:r $systemOnlyQueueAcl /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not create the legacy SYSTEM-only encrypted queue ACL fixture."
+    }
+    & $icaclsPath $legacyQueueRoot /setowner "*S-1-5-18" /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not recreate SYSTEM ownership on the legacy encrypted queue fixture."
+    }
+
+    # Keep the lifecycle harness able to collect its test result while the
+    # application-owned identity/queue data is deliberately reverted to legacy ACLs.
+    $fixtureDataDirectory = $lifecycleDataRoot
+    $fixtureAcl = @(
+        "*S-1-5-18:(OI)(CI)F",
+        "*S-1-5-32-544:(OI)(CI)F",
+        "*S-1-5-19:(OI)(CI)F"
+    )
+    & $icaclsPath $fixtureDataDirectory /inheritance:r /grant:r @fixtureAcl /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not preserve the isolated LocalService lifecycle result directory."
+    }
+}
+
+function Assert-LocalServiceIdentityIsNotElevated {
+    Write-Host "[QA-ACTION] Verify LocalService identity and absence of local Administrators membership." -ForegroundColor Cyan
+    $result = Invoke-FixtureAsLocalService "verify-service-identity"
+    Assert-True ($result -eq "LOCAL_SERVICE_NON_ADMIN") "The Agent service identity is not the expected non-administrative LocalService account: $result"
+}
+
+function Assert-LocalServiceCanOpenQueueForRetainedCleanup {
+    $outputPath = Join-Path $lifecycleDataRoot "localservice-retained-spooler-output.pdf"
+    Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+    Write-Host "[QA-ACTION] Submit, retain and release a real LocalService-owned Windows spooler job using standard Print access." -ForegroundColor Cyan
+    try {
+        $result = Invoke-FixtureAsLocalService "release-retained-job" @($testPrinterName, $outputPath)
+        Assert-True ($result -eq "RELEASED") "LocalService could not release its real retained spooler job using standard Print access: $result"
+        Assert-True (Test-Path -LiteralPath $outputPath -PathType Leaf) "The real retained-job test did not produce its PDF output."
+    }
+    finally {
+        Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Assert-LocalServiceCanDiscoverFixturePrinter {
+    Write-Host "[QA-ACTION] Verify Agent printer discovery as LocalService using the temporary lifecycle queue." -ForegroundColor Cyan
+    $result = Invoke-FixtureAsLocalService "discover-printer" @($testPrinterName)
+    Assert-True ($result -eq "FOUND") "The Agent's LocalService printer-discovery result was unexpected: $result"
+}
+
+function Assert-LocalServiceCanPrintFixture {
+    $outputPath = Join-Path $lifecycleDataRoot "localservice-spooler-output.pdf"
+    Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
+    Write-Host "[QA-ACTION] Submit a synthetic GDI document to the temporary Microsoft Print to PDF queue as LocalService." -ForegroundColor Cyan
+    $result = Invoke-FixtureAsLocalService "print-printer" @($testPrinterName, $outputPath)
+    Assert-True ($result -eq "PRINTED") "LocalService could not produce a verified PDF through the selected Windows printer queue: $result"
+    Assert-True (Test-Path -LiteralPath $outputPath -PathType Leaf) "The LocalService spooler test did not create its PDF output."
+    $pdfBytes = [System.IO.File]::ReadAllBytes($outputPath)
+    try {
+        Assert-True ($pdfBytes.Length -gt 1000) "The LocalService spooler output PDF is empty or truncated."
+        Assert-True ([System.Text.Encoding]::ASCII.GetString($pdfBytes, 0, 5) -eq "%PDF-") "The LocalService spooler output is not a PDF."
+        Assert-True ([System.Text.Encoding]::ASCII.GetString($pdfBytes).Contains("%%EOF")) "The LocalService spooler output PDF is incomplete."
+    }
+    finally {
+        [System.Security.Cryptography.CryptographicOperations]::ZeroMemory($pdfBytes)
+    }
+    Remove-Item -LiteralPath $outputPath -Force -ErrorAction SilentlyContinue
 }
 
 function Assert-QueueUntouched {
@@ -288,6 +620,26 @@ function Assert-QueueUntouched {
     $default = Get-CimInstance Win32_Printer | Where-Object { $_.Default } | Select-Object -First 1
     $currentDefault = if ($default) { $default.Name } else { $null }
     Assert-True ($currentDefault -eq $originalDefaultPrinter) "SmartPrint changed the Windows default printer."
+
+    $expectedPrinterInventory = @($originalPrinterInventory) + @([PSCustomObject]@{
+        Name = $fixturePrinter.Name
+        DriverName = $fixturePrinter.DriverName
+        PortName = $fixturePrinter.PortName
+    })
+    $expectedPrinterKeys = @($expectedPrinterInventory | ForEach-Object { "$($_.Name)|$($_.DriverName)|$($_.PortName)" } | Sort-Object)
+    $actualPrinterKeys = @(Get-Printer | Select-Object Name, DriverName, PortName |
+        ForEach-Object { "$($_.Name)|$($_.DriverName)|$($_.PortName)" } | Sort-Object)
+    $printerChanges = @(Compare-Object -ReferenceObject $expectedPrinterKeys -DifferenceObject $actualPrinterKeys)
+    Assert-True ($printerChanges.Count -eq 0) "SmartPrint added, removed or modified an existing Windows printer queue, driver or port."
+
+    $spooler = Get-CimInstance -ClassName Win32_Service -Filter "Name='Spooler'"
+    Assert-True ($spooler.State -eq "Running") "SmartPrint stopped the Windows Print Spooler."
+    Assert-True ([uint32]$spooler.ProcessId -eq $originalSpoolerProcessId) "SmartPrint restarted the Windows Print Spooler."
+    $rules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
+    if ($rules.Count -gt 0) {
+        $unexpectedProfiles = @($rules | Where-Object { [string]$_.Profile -ne "Any" })
+        Assert-True ($unexpectedProfiles.Count -eq 0) "The LocalService migration must preserve the existing local-subnet firewall profile behaviour."
+    }
 }
 
 function Write-StepSummary {
@@ -314,10 +666,12 @@ try {
     Assert-True (-not (Get-Service -Name $serviceName -ErrorAction SilentlyContinue)) "Refusing to test on a runner that already has the SmartPrint Agent service."
     Assert-True (-not (Test-Path -LiteralPath $installRoot)) "Refusing to test on a runner that already has a SmartPrint installation directory."
     Assert-True (-not (Get-Printer -Name $testPrinterName -ErrorAction SilentlyContinue)) "Refusing to overwrite an existing printer queue named '$testPrinterName'."
-    Assert-True (-not (Get-ScheduledTask -TaskName "SmartPrintLifecycleSystemPrinterProbe" -ErrorAction SilentlyContinue)) "Refusing to replace an existing lifecycle printer-probe task."
+    Assert-True (-not (Get-Service -Name "SmartPrintLifecycleLocalServiceProbe" -ErrorAction SilentlyContinue)) "Refusing to replace an existing LocalService lifecycle probe service."
     $existingRules = @(Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "$firewallPrefix*" })
     Assert-True ($existingRules.Count -eq 0) "Refusing to alter existing SmartPrint firewall rules."
     Assert-True (-not (Test-Path -LiteralPath $identityPath)) "Refusing to overwrite an existing machine Agent identity fixture."
+    Assert-True (-not (Test-Path -LiteralPath $lifecycleDataRoot)) "Refusing to overwrite an existing lifecycle QA data directory."
+    Assert-True (-not (Test-Path -LiteralPath $lifecycleFixtureRuntimeRoot)) "Refusing to overwrite an existing lifecycle QA runtime directory."
     Assert-True (-not (Test-Path -LiteralPath $networkPreferencePath)) "Refusing to overwrite an existing shop network preference."
     Assert-True (-not (Test-Path -LiteralPath $queueManifest)) "Refusing to overwrite an existing local print queue fixture."
 
@@ -339,8 +693,16 @@ try {
     $fixtureProjectXml | Set-Content -LiteralPath (Join-Path $fixtureProject "SmartPrintLifecycleFixture.csproj") -Encoding utf8
 
     @'
+using System.ComponentModel;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Agent;
 
@@ -348,10 +710,31 @@ const string expectedIdentityId = "22222222-2222-4222-8222-222222222222";
 const string expectedNetworkId = "LIFECYCLE-QA-SHOP-NETWORK";
 const string expectedJobId = "11111111-1111-4111-8111-111111111111";
 const string expectedDocument = "SmartPrint lifecycle queue fixture - preserve me.";
+if (args.Length > 0 && string.Equals(args[0], "--service-fixture", StringComparison.Ordinal))
+{
+    var fixtureArguments = args.Skip(1).ToArray();
+    var serviceBuilder = Host.CreateApplicationBuilder(Array.Empty<string>());
+    serviceBuilder.Services.AddSingleton(fixtureArguments);
+    serviceBuilder.Services.AddWindowsService(options =>
+    {
+        options.ServiceName = "SmartPrintLifecycleLocalServiceProbe";
+    });
+    serviceBuilder.Services.AddHostedService<LifecycleFixtureService>();
+    await serviceBuilder.Build().RunAsync();
+    return;
+}
+
 var mode = args.FirstOrDefault() ?? "verify";
 var credentialStore = new AgentCredentialStore();
 var queueStore = new AgentLocalQueueStore();
 var networkPreferenceStore = new LocalNetworkPreferenceStore();
+var lifecycleDataDirectory = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+    "SmartPrintLifecycleQA");
+var keyFingerprintPath = Path.Combine(lifecycleDataDirectory, "document-key.sha256");
+var documentKeyPath = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+    "QRtoPrint", "LocalQueue", "document-encryption-key.dpapi");
 
 if (mode == "seed")
 {
@@ -362,6 +745,16 @@ if (mode == "seed")
         DateTimeOffset.UtcNow));
     networkPreferenceStore.SetPreferredNetworkId(expectedNetworkId);
     await queueStore.InitializeAsync(CancellationToken.None);
+    Directory.CreateDirectory(lifecycleDataDirectory);
+    var originalPublicKey = new AgentDocumentEncryptionKeyStore().GetOrCreatePublicKey();
+    var originalKeyBytes = Convert.FromBase64String(originalPublicKey);
+    try
+    {
+        var originalFingerprint = SHA256.HashData(originalKeyBytes);
+        try { await File.WriteAllTextAsync(keyFingerprintPath, Convert.ToHexString(originalFingerprint)); }
+        finally { CryptographicOperations.ZeroMemory(originalFingerprint); }
+    }
+    finally { CryptographicOperations.ZeroMemory(originalKeyBytes); }
     var bytes = Encoding.UTF8.GetBytes(expectedDocument);
     var job = new AgentClaimedJob(
         Guid.Parse(expectedJobId),
@@ -387,6 +780,53 @@ if (mode == "seed")
 }
 else if (mode == "verify")
 {
+    // The encrypted queue intentionally denies access to the elevated runner.
+    // Verify its complete effective DACL from this LocalService worker context.
+    var queueRootPath = Path.GetDirectoryName(documentKeyPath)
+        ?? throw new InvalidOperationException("The Agent queue root could not be resolved.");
+    if (!Directory.Exists(queueRootPath))
+        throw new InvalidOperationException("The protected Agent queue directory is missing.");
+
+    var queuePaths = new List<string> { queueRootPath };
+    queuePaths.AddRange(Directory.EnumerateFileSystemEntries(
+        queueRootPath, "*", SearchOption.AllDirectories));
+    foreach (var queuePath in queuePaths)
+    {
+        var attributes = File.GetAttributes(queuePath);
+        FileSystemSecurity security = (attributes & FileAttributes.Directory) != 0
+            ? FileSystemAclExtensions.GetAccessControl(
+                new DirectoryInfo(queuePath), AccessControlSections.Access)
+            : FileSystemAclExtensions.GetAccessControl(
+                new FileInfo(queuePath), AccessControlSections.Access);
+
+        if (string.Equals(
+                Path.GetFullPath(queuePath),
+                Path.GetFullPath(queueRootPath),
+                StringComparison.OrdinalIgnoreCase) &&
+            !security.AreAccessRulesProtected)
+        {
+            throw new InvalidOperationException("The encrypted Agent queue root DACL is not protected.");
+        }
+
+        var allowedSids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(
+                     includeExplicit: true,
+                     includeInherited: true,
+                     targetType: typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType == AccessControlType.Allow)
+                allowedSids.Add(((SecurityIdentifier)rule.IdentityReference).Value);
+        }
+
+        if (!allowedSids.Contains("S-1-5-18") || !allowedSids.Contains("S-1-5-19"))
+            throw new InvalidOperationException($"SYSTEM or LocalService allow access is missing from protected queue item '{queuePath}'.");
+        var unexpectedSids = allowedSids
+            .Where(sid => sid is not "S-1-5-18" and not "S-1-5-19")
+            .ToArray();
+        if (unexpectedSids.Length > 0)
+            throw new InvalidOperationException($"Unexpected principals have allow access to protected queue item '{queuePath}': {string.Join(", ", unexpectedSids)}");
+    }
+
     var credentials = credentialStore.Load()
         ?? throw new InvalidOperationException("The synthetic machine identity is missing.");
     if (credentials.AgentDeviceId != Guid.Parse(expectedIdentityId))
@@ -395,6 +835,51 @@ else if (mode == "verify")
         throw new InvalidOperationException("The synthetic Agent API address changed.");
     if (networkPreferenceStore.GetPreferredNetworkId() != expectedNetworkId)
         throw new InvalidOperationException("The shop's saved local-network selection changed or was removed.");
+    // Never use GetOrCreate as the only preservation assertion: it can silently
+    // generate a replacement key when the original file has been lost.
+    if (!File.Exists(documentKeyPath))
+        throw new InvalidOperationException("The original Agent document-encryption key file is missing.");
+    if (!File.Exists(keyFingerprintPath))
+        throw new InvalidOperationException("The original Agent document-encryption key fingerprint fixture is missing.");
+    var expectedKeyFingerprint = Convert.FromHexString((await File.ReadAllTextAsync(keyFingerprintPath)).Trim());
+    if (expectedKeyFingerprint.Length != 32)
+        throw new InvalidDataException("The original Agent document-encryption key fingerprint is invalid.");
+    var publicKey = new AgentDocumentEncryptionKeyStore().GetOrCreatePublicKey();
+    var currentKeyBytes = Convert.FromBase64String(publicKey);
+    try
+    {
+        var currentFingerprint = SHA256.HashData(currentKeyBytes);
+        try
+        {
+            if (!CryptographicOperations.FixedTimeEquals(expectedKeyFingerprint, currentFingerprint))
+                throw new InvalidOperationException("The Agent document-encryption key changed; queued uploads may no longer be decryptable.");
+        }
+        finally { CryptographicOperations.ZeroMemory(currentFingerprint); }
+    }
+    finally
+    {
+        CryptographicOperations.ZeroMemory(currentKeyBytes);
+        CryptographicOperations.ZeroMemory(expectedKeyFingerprint);
+    }
+
+    // Exercise the same DPAPI identity Save/Load path used during Agent pairing
+    // while running under LocalService, without overwriting the preserved fixture.
+    var roundTripPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+        "SmartPrintLifecycleQA", "LocalServiceCredentialProbe", "agent.identity");
+    var roundTripCredentials = new AgentCredentials(
+        "https://127.0.0.1:1",
+        Guid.Parse("33333333-3333-4333-8333-333333333333"),
+        "localservice-lifecycle-only-secret",
+        DateTimeOffset.UtcNow);
+    var roundTripStore = new AgentCredentialStore(roundTripPath);
+    roundTripStore.Save(roundTripCredentials);
+    var roundTripLoaded = roundTripStore.Load();
+    if (roundTripLoaded is null ||
+        roundTripLoaded.AgentDeviceId != roundTripCredentials.AgentDeviceId ||
+        roundTripLoaded.AgentSecret != roundTripCredentials.AgentSecret)
+        throw new InvalidOperationException("The LocalService DPAPI identity save/read round-trip failed.");
+    roundTripStore.Delete();
 
     var entry = queueStore.Find(Guid.Parse(expectedJobId))
         ?? throw new InvalidOperationException("The staged local queue manifest is missing.");
@@ -419,22 +904,316 @@ else if (mode == "verify")
     if (args.Length > 1)
         await File.WriteAllTextAsync(args[1], "VERIFIED");
 }
+else if (mode == "verify-service-identity")
+{
+    using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+    if (!string.Equals(identity.User?.Value, "S-1-5-19", StringComparison.Ordinal))
+        throw new InvalidOperationException($"Expected LocalService SID S-1-5-19, but the current SID is '{identity.User?.Value}'.");
+    var principal = new System.Security.Principal.WindowsPrincipal(identity);
+    var administratorsSid = new System.Security.Principal.SecurityIdentifier("S-1-5-32-544");
+    if (principal.IsInRole(administratorsSid))
+        throw new InvalidOperationException("The LocalService Agent unexpectedly has local Administrators membership.");
+    await File.WriteAllTextAsync(args[1], "LOCAL_SERVICE_NON_ADMIN");
+    Console.WriteLine("Verified the Windows LocalService SID and confirmed it is not a local administrator.");
+}
+else if (mode == "release-retained-job")
+{
+    if (args.Length < 4)
+        throw new ArgumentException("release-retained-job requires a result path, queue name and PDF output path.");
+    var queueName = args[2];
+    var outputPath = args[3];
+    Directory.CreateDirectory(Path.GetDirectoryName(outputPath)!);
+    if (File.Exists(outputPath)) File.Delete(outputPath);
+
+    // Create a real GDI spooler job as LocalService and mark it retained before
+    // completing it. This proves that ordinary Print access can release a job
+    // actually owned by the Agent, not merely tolerate an absent job ID.
+    var jobId = RetainedSpoolerJobProbe.SubmitRetainedJob(queueName, outputPath);
+    var executor = new WindowsPrintExecutor();
+    var deadline = DateTime.UtcNow.AddSeconds(30);
+    WindowsSpoolerJob? retainedJob = null;
+    while (DateTime.UtcNow < deadline)
+    {
+        retainedJob = executor.GetJob(queueName, jobId);
+        if (retainedJob?.Status == "RETAINED") break;
+        await Task.Delay(250);
+    }
+    if (retainedJob?.Status != "RETAINED")
+        throw new InvalidOperationException($"The test print job {jobId} was not retained by the Windows spooler (observed '{retainedJob?.Status ?? "missing"}').");
+
+    executor.ReleaseRetainedJob(queueName, jobId);
+    deadline = DateTime.UtcNow.AddSeconds(30);
+    while (DateTime.UtcNow < deadline && executor.GetJob(queueName, jobId) is not null)
+        await Task.Delay(250);
+    if (executor.GetJob(queueName, jobId) is not null)
+        throw new InvalidOperationException($"The retained Windows spooler job {jobId} remained in the queue after release.");
+
+    var pdf = await File.ReadAllBytesAsync(outputPath);
+    try
+    {
+        if (pdf.Length <= 1000 ||
+            !pdf.AsSpan(0, 5).SequenceEqual("%PDF-"u8) ||
+            !Encoding.ASCII.GetString(pdf).Contains("%%EOF", StringComparison.Ordinal))
+            throw new InvalidOperationException("The retained-job print did not produce a complete PDF.");
+    }
+    finally { CryptographicOperations.ZeroMemory(pdf); }
+
+    await File.WriteAllTextAsync(args[1], "RELEASED");
+    Console.WriteLine($"LocalService retained and released actual Windows spooler job {jobId} using standard Print access.");
+}
 else if (mode == "discover-printer")
 {
     if (args.Length < 3)
         throw new ArgumentException("discover-printer requires an output path and expected queue name.");
-    var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
+    // This disposable fixture executable is not SmartPrint.Agent.exe, so the
+    // production child-process runner would relaunch the fixture with Agent-only
+    // command-line switches. Exercise the discovery and driver APIs in this
+    // LocalService process; the packaged Agent child-worker path has a separate smoke test.
+    var capabilityProbe = new WindowsPrinterCapabilityProbeRunner(
+        NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+        executeInCurrentProcess: true);
+    var discovery = new WindowsPrinterDiscovery(
+        NullLogger<WindowsPrinterDiscovery>.Instance,
+        capabilityProbe: capabilityProbe,
+        executeInCurrentProcess: true);
     if (!discovery.TryDiscover(out var printers))
-        throw new InvalidOperationException("The Agent's Windows WMI printer discovery failed under LocalSystem.");
+        throw new InvalidOperationException("The Agent's Windows WMI printer discovery failed under LocalService.");
     var expectedQueue = args[2];
     if (!printers.Any(printer => string.Equals(printer.QueueName, expectedQueue, StringComparison.OrdinalIgnoreCase)))
-        throw new InvalidOperationException($"The Agent's LocalSystem discovery did not find machine-wide printer queue '{expectedQueue}'.");
+        throw new InvalidOperationException($"The Agent's LocalService discovery did not find machine-wide printer queue '{expectedQueue}'.");
+
+    // Exercise the same Windows driver capability query used during inventory:
+    // colour, duplex, media sizes/types, resolutions and N-up Print Schema data.
+    // Unknown capabilities are valid, but a failed/empty driver query is not.
+    using (var capabilities = System.Text.Json.JsonDocument.Parse(
+               WindowsPrinterCapabilityDiscovery.DiscoverJson(expectedQueue)))
+    {
+        var capabilityRoot = capabilities.RootElement;
+        var requiredCapabilityFields = new[]
+        {
+            "schemaVersion", "source", "queueName", "color", "duplex",
+            "orientation", "paperSizes", "pagesPerSheet",
+            "pagesPerSheetDirection", "mediaTypes", "resolutions"
+        };
+        if (capabilityRoot.ValueKind != System.Text.Json.JsonValueKind.Object ||
+            !capabilityRoot.TryGetProperty("schemaVersion", out var schemaVersion) ||
+            schemaVersion.GetInt32() != 2 ||
+            !capabilityRoot.TryGetProperty("source", out var capabilitySource) ||
+            capabilitySource.GetString() != "WINDOWS_DRIVER" ||
+            !capabilityRoot.TryGetProperty("queueName", out var capabilityQueue) ||
+            !string.Equals(capabilityQueue.GetString(), expectedQueue, StringComparison.OrdinalIgnoreCase) ||
+            requiredCapabilityFields.Any(field => !capabilityRoot.TryGetProperty(field, out _)))
+            throw new InvalidOperationException($"The LocalService printer-driver capability query did not return the complete Windows driver schema for '{expectedQueue}'.");
+    }
+
     await File.WriteAllTextAsync(args[1], "FOUND");
-    Console.WriteLine($"LocalSystem Agent discovery found '{expectedQueue}'.");
+    Console.WriteLine($"LocalService Agent discovered '{expectedQueue}' and queried its installed Windows driver capabilities.");
+}
+else if (mode == "print-printer")
+{
+    if (args.Length < 4)
+        throw new ArgumentException("print-printer requires a result path, queue name and PDF output path.");
+    var expectedQueue = args[2];
+    var outputPath = args[3];
+    using var bitmap = new SkiaSharp.SKBitmap(180, 240);
+    bitmap.Erase(SkiaSharp.SKColors.White);
+    using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+    using (var paint = new SkiaSharp.SKPaint { Color = new SkiaSharp.SKColor(32, 96, 180), IsAntialias = true })
+        canvas.DrawRect(new SkiaSharp.SKRect(18, 18, 162, 222), paint);
+    using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+    using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+    var bytes = encoded.ToArray();
+    var entry = new AgentLocalQueueEntry(
+        Guid.NewGuid(), "SP-LOCAL-SERVICE-PRINT", Guid.NewGuid(), expectedQueue, expectedQueue,
+        "localservice-printer-probe.png", "image/png",
+        Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(), bytes.LongLength,
+        1, 1, "Colour", "A4", false, "INR", 100,
+        "SmartPrint-LocalService-Printer-Probe", "ACKNOWLEDGED",
+        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3));
+    try
+    {
+        var receipt = new WindowsPrintExecutor().PrintToFile(
+            entry, bytes, outputPath, CancellationToken.None);
+        var deadline = DateTime.UtcNow.AddSeconds(45);
+        var outputVerified = false;
+        while (DateTime.UtcNow < deadline && !outputVerified)
+        {
+            if (File.Exists(outputPath))
+            {
+                try
+                {
+                    var pdf = await File.ReadAllBytesAsync(outputPath);
+                    try
+                    {
+                        outputVerified = pdf.Length > 1000 &&
+                            pdf.AsSpan(0, 5).SequenceEqual("%PDF-"u8) &&
+                            System.Text.Encoding.ASCII.GetString(pdf).Contains("%%EOF", StringComparison.Ordinal);
+                    }
+                    finally { CryptographicOperations.ZeroMemory(pdf); }
+                }
+                catch (IOException) { /* The Windows print processor may still be writing. */ }
+            }
+            if (!outputVerified) await Task.Delay(500);
+        }
+        if (!outputVerified)
+            throw new InvalidOperationException("The LocalService Windows printer did not produce a complete PDF.");
+        await File.WriteAllTextAsync(args[1], "PRINTED");
+        Console.WriteLine($"LocalService submitted spooler job {receipt.JobId} and verified its PDF output.");
+    }
+    finally { CryptographicOperations.ZeroMemory(bytes); }
 }
 else
 {
     throw new ArgumentException($"Unknown fixture mode: {mode}");
+}
+
+internal sealed class LifecycleFixtureService(
+    string[] fixtureArguments,
+    IHostApplicationLifetime applicationLifetime) : BackgroundService
+{
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        var resultPath = fixtureArguments.Length > 1 ? fixtureArguments[1] : null;
+        try
+        {
+            var executablePath = Environment.ProcessPath
+                ?? throw new InvalidOperationException("The LocalService fixture executable path is unavailable.");
+            var startInfo = new ProcessStartInfo(executablePath)
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WorkingDirectory = AppContext.BaseDirectory,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            foreach (var argument in fixtureArguments)
+                startInfo.ArgumentList.Add(argument);
+
+            using var process = Process.Start(startInfo)
+                ?? throw new InvalidOperationException("Could not launch the LocalService fixture worker process.");
+            var standardOutput = process.StandardOutput.ReadToEndAsync();
+            var standardError = process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync(stoppingToken);
+            var output = await standardOutput;
+            var error = await standardError;
+            if (process.ExitCode != 0)
+            {
+                throw new InvalidOperationException(
+                    $"The LocalService fixture worker exited with code {process.ExitCode}. " +
+                    $"stdout: {output} stderr: {error}");
+            }
+        }
+        catch (Exception exception)
+        {
+            if (!string.IsNullOrWhiteSpace(resultPath))
+            {
+                try
+                {
+                    await File.WriteAllTextAsync(
+                        resultPath,
+                        "ERROR: " + exception,
+                        CancellationToken.None);
+                }
+                catch
+                {
+                    // The PowerShell harness reports a missing result if the
+                    // LocalService result-directory ACL itself is incorrect.
+                }
+            }
+        }
+        finally
+        {
+            applicationLifetime.StopApplication();
+        }
+    }
+}
+
+internal static class RetainedSpoolerJobProbe
+{
+    private const uint JobControlRetain = 8;
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DocInfoW
+    {
+        public int Size;
+        [MarshalAs(UnmanagedType.LPWStr)] public string DocumentName;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? OutputFile;
+        [MarshalAs(UnmanagedType.LPWStr)] public string? DataType;
+        public uint Type;
+    }
+
+    public static int SubmitRetainedJob(string queueName, string outputPath)
+    {
+        var dc = CreateDCW("WINSPOOL", queueName, null, IntPtr.Zero);
+        if (dc == IntPtr.Zero)
+            throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not create a GDI device context for '{queueName}'.");
+
+        var documentStarted = false;
+        try
+        {
+            var info = new DocInfoW
+            {
+                Size = Marshal.SizeOf<DocInfoW>(),
+                DocumentName = "SmartPrint-LocalService-Retained-Job-Probe",
+                OutputFile = outputPath,
+                DataType = null,
+                Type = 0
+            };
+            var jobId = StartDocW(dc, ref info);
+            if (jobId <= 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "The Windows spooler did not accept the retained-job test document.");
+            documentStarted = true;
+
+            if (!OpenPrinterW(queueName, out var printer, IntPtr.Zero))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), $"Could not open '{queueName}' to retain the test print job.");
+            try
+            {
+                if (!SetJobW(printer, jobId, 0, IntPtr.Zero, JobControlRetain))
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), $"The spooler refused to retain test job {jobId}.");
+            }
+            finally { _ = ClosePrinter(printer); }
+
+            if (StartPage(dc) <= 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not start the retained-job test page.");
+            const string sample = "SmartPrint LocalService retained-job test";
+            if (!TextOutW(dc, 120, 120, sample, sample.Length))
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not render the retained-job test page.");
+            if (EndPage(dc) <= 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not finish the retained-job test page.");
+            if (EndDoc(dc) <= 0)
+                throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not submit the retained-job test document.");
+            documentStarted = false;
+            return jobId;
+        }
+        finally
+        {
+            if (documentStarted) _ = AbortDoc(dc);
+            _ = DeleteDC(dc);
+        }
+    }
+
+    [DllImport("winspool.drv", EntryPoint = "OpenPrinterW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool OpenPrinterW(string name, out IntPtr printer, IntPtr defaults);
+    [DllImport("winspool.drv", EntryPoint = "ClosePrinter", SetLastError = true)]
+    private static extern bool ClosePrinter(IntPtr printer);
+    [DllImport("winspool.drv", EntryPoint = "SetJobW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool SetJobW(IntPtr printer, int jobId, uint level, IntPtr job, uint command);
+    [DllImport("gdi32.dll", EntryPoint = "CreateDCW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateDCW(string driver, string device, string? output, IntPtr devMode);
+    [DllImport("gdi32.dll", EntryPoint = "DeleteDC", SetLastError = true)]
+    private static extern bool DeleteDC(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "StartDocW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern int StartDocW(IntPtr dc, ref DocInfoW info);
+    [DllImport("gdi32.dll", EntryPoint = "StartPage", SetLastError = true)]
+    private static extern int StartPage(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "EndPage", SetLastError = true)]
+    private static extern int EndPage(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "EndDoc", SetLastError = true)]
+    private static extern int EndDoc(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "AbortDoc", SetLastError = true)]
+    private static extern int AbortDoc(IntPtr dc);
+    [DllImport("gdi32.dll", EntryPoint = "TextOutW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool TextOutW(IntPtr dc, int x, int y, string text, int length);
 }
 '@ | Set-Content -LiteralPath (Join-Path $fixtureProject "Program.cs") -Encoding utf8
 
@@ -444,10 +1223,20 @@ else
         $script:identityHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
         Assert-True (Test-Path -LiteralPath $queueManifest) "The staged queue manifest was not created."
         Add-QueueFixture
-        Assert-SystemCanDiscoverFixturePrinter
+        Assert-LocalServiceIdentityIsNotElevated
+        Assert-LocalServiceCanOpenQueueForRetainedCleanup
+        Assert-LocalServiceCanDiscoverFixturePrinter
+        Assert-LocalServiceCanPrintFixture
     }
 
+    $legacyAclOk = $false
     if ($seedOk) {
+        $legacyAclOk = Invoke-Check "Simulate legacy SYSTEM-only Agent data ACLs" {
+            Set-LegacyAgentDataAclFixture
+        }
+    }
+
+    if ($seedOk -and $legacyAclOk) {
         $firstInstallOk = Invoke-Check "Fresh Windows installation (N)" {
             $script:ownsInstall = $true
             Invoke-Setup $InstallerV1
@@ -565,9 +1354,17 @@ finally {
     if ($ownsInstall) {
         try { Invoke-Uninstall } catch { Write-Warning "Final uninstall cleanup: $($_.Exception.Message)" }
     }
-    if ($ownsTask) {
-        Unregister-ScheduledTask -TaskName "SmartPrintLifecycleSystemPrinterProbe" -Confirm:$false -ErrorAction SilentlyContinue
-        $script:ownsTask = $false
+    if ($script:ownsLocalServiceProbe) {
+        Stop-Service -Name "SmartPrintLifecycleLocalServiceProbe" -Force -ErrorAction SilentlyContinue
+        & sc.exe delete "SmartPrintLifecycleLocalServiceProbe" | Out-Null
+        $script:ownsLocalServiceProbe = $false
+    }
+    if ($script:ownsLifecycleDataRoot -and (Test-Path -LiteralPath $lifecycleDataRoot)) {
+        Remove-Item -LiteralPath $lifecycleDataRoot -Recurse -Force -ErrorAction SilentlyContinue
+        $script:ownsLifecycleDataRoot = $false
+    }
+    if (Test-Path -LiteralPath $lifecycleFixtureRuntimeRoot) {
+        Remove-Item -LiteralPath $lifecycleFixtureRuntimeRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
     if ($ownsPrinter) {
         Remove-Printer -Name $testPrinterName -ErrorAction SilentlyContinue

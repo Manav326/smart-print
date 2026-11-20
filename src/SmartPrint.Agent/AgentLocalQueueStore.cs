@@ -327,7 +327,14 @@ public sealed class AgentLocalQueueStore
             entry.State == "ACKNOWLEDGED" ||
             (entry.State == "OUTPUT_UNCONFIRMED" &&
              (entry.OutputMode == PrinterOutputModeRules.PdfExport ||
-              PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName))))
+              PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName) ||
+              (entry.OutputMode != PrinterOutputModeRules.PdfExport &&
+               !PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName) &&
+               entry.FailureCode == "SPOOLER_JOB_NO_LONGER_VISIBLE" &&
+               entry.SpoolerStatus == "OUTPUT_UNCONFIRMED" &&
+               entry.SpoolerJobId is > 0 &&
+               entry.SpoolerPagesPrinted == 0 &&
+               entry.SpoolerTotalPages > 0))))
         .ToArray();
 
     public IReadOnlyList<AgentLocalQueueEntry> GetLegacyPdfQueueJobs() =>
@@ -1443,7 +1450,8 @@ public sealed class AgentLocalQueueStore
         {
             State = "SPOOLER_ACCEPTED", SpoolerJobId = spoolerJobId,
             SpoolerJobName = spoolerJobName, SpoolerSubmittedUtc = DateTimeOffset.UtcNow,
-            SpoolerStatus = "QUEUED", FailureCode = null
+            SpoolerStatus = "QUEUED", FailureCode = null,
+            SpoolerPagesPrinted = 0, SpoolerTotalPages = 0
         }, ct);
         if (entry.PrivatePrinting && !entry.PrivateSpoolerCleanupCompleted)
             await EnsurePrivateSpoolerCleanupTrackedAsync(jobId, entry.QueueName, spoolerJobId, ct);
@@ -1473,7 +1481,19 @@ public sealed class AgentLocalQueueStore
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
         if (entry.State == "OUTPUT_UNCONFIRMED" &&
             (outputMode is null || entry.OutputMode == outputMode))
+        {
+            // A later queue lookup may turn an earlier uncertain state into a
+            // verified absence. Preserve the spooler ID and page evidence so the
+            // owner can inspect this exact Windows job before authorising a retry.
+            if (reasonCode == "SPOOLER_JOB_NO_LONGER_VISIBLE" &&
+                (entry.FailureCode != reasonCode || entry.SpoolerStatus != "OUTPUT_UNCONFIRMED"))
+                await SaveManifestAsync(entry with
+                {
+                    SpoolerStatus = "OUTPUT_UNCONFIRMED",
+                    FailureCode = reasonCode
+                }, ct);
             return;
+        }
         if (entry.State is not ("SUBMITTING" or "SPOOLER_ACCEPTED" or "PDF_EXPORTING" or "OUTPUT_UNCONFIRMED"))
             throw new InvalidOperationException($"Cannot reconcile a local job from state {entry.State}.");
         await SaveManifestAsync(entry with
@@ -1602,18 +1622,65 @@ public sealed class AgentLocalQueueStore
         }
     }
 
-    public async Task UpdateSpoolerStatusAsync(Guid jobId, string status, CancellationToken ct)
+    public async Task UpdateSpoolerStatusAsync(
+        Guid jobId,
+        string status,
+        CancellationToken ct,
+        int pagesPrinted = 0,
+        int totalPages = 0)
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
         if (entry.State is not ("SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED")) return;
-        await SaveManifestAsync(entry with { SpoolerStatus = status }, ct);
+        await SaveManifestAsync(entry with
+        {
+            SpoolerStatus = status,
+            SpoolerPagesPrinted = Math.Max(entry.SpoolerPagesPrinted, Math.Max(0, pagesPrinted)),
+            SpoolerTotalPages = Math.Max(entry.SpoolerTotalPages, Math.Max(0, totalPages))
+        }, ct);
     }
 
     public async Task MarkSpoolerJobAbsentAsync(Guid jobId, CancellationToken ct)
     {
         var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
         if (entry.State != "OUTPUT_UNCONFIRMED" || entry.SpoolerJobId is null) return;
-        await SaveManifestAsync(entry with { SpoolerJobId = null, SpoolerStatus = "OUTPUT_UNCONFIRMED" }, ct);
+        // Retain the last Windows ID locally. Rechecking the same absent ID refreshes
+        // the server's bounded observation window until the owner resolves the file.
+        await SaveManifestAsync(entry with
+        {
+            SpoolerStatus = "OUTPUT_UNCONFIRMED",
+            FailureCode = "SPOOLER_JOB_NO_LONGER_VISIBLE"
+        }, ct);
+    }
+
+    public async Task PreparePhysicalOutputRetryAsync(
+        Guid jobId,
+        string newSpoolerJobName,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(newSpoolerJobName) || newSpoolerJobName.Length > 180)
+            throw new ArgumentException("A new Windows spooler document name is required.", nameof(newSpoolerJobName));
+        var entry = Find(jobId) ?? throw new FileNotFoundException("The local print job does not exist.");
+        if (entry.State != "OUTPUT_UNCONFIRMED" ||
+            entry.OutputMode == PrinterOutputModeRules.PdfExport ||
+            PrinterOutputModeRules.IsPdfExport(entry.QueueName, entry.PrinterName) ||
+            entry.FailureCode != "SPOOLER_JOB_NO_LONGER_VISIBLE" ||
+            entry.SpoolerStatus != "OUTPUT_UNCONFIRMED" ||
+            entry.SpoolerJobId is not > 0 ||
+            entry.SpoolerPagesPrinted != 0 ||
+            entry.SpoolerTotalPages <= 0)
+            throw new InvalidOperationException("Only a verified, zero-page physical spooler absence can be resumed after explicit shop authorisation.");
+
+        await SaveManifestAsync(entry with
+        {
+            State = "ACKNOWLEDGED",
+            SpoolerJobName = newSpoolerJobName,
+            SpoolerJobId = null,
+            SpoolerSubmittedUtc = null,
+            SpoolerStatus = null,
+            FailureCode = null,
+            SpoolerPagesPrinted = 0,
+            SpoolerTotalPages = 0
+        }, ct);
     }
 
     public async Task ReplaceStagedPhotoDocumentAsync(
@@ -2094,16 +2161,16 @@ public sealed class AgentLocalQueueStore
     private static void SecureDirectory(string directory)
     {
         var systemSid = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        var localServiceSid = new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null);
         using var identity = WindowsIdentity.GetCurrent();
         var ownerSid = identity.User
             ?? throw new InvalidOperationException("The current Windows identity has no user SID.");
         var security = new DirectorySecurity();
         security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
         security.SetOwner(ownerSid);
-        // The production Agent service runs as LocalSystem, so its queue remains
-        // SYSTEM-owned and SYSTEM-only. Interactive diagnostics and the installer
-        // lifecycle fixture run under their own account; grant only that current
-        // identity access rather than making the directory writable by Administrators.
+        // The production Agent runs as LocalService. Keep the encrypted queue
+        // private to that service identity and SYSTEM; retain the current owner only
+        // for controlled lifecycle fixtures and diagnostics.
         security.AddAccessRule(new FileSystemAccessRule(
             systemSid,
             FileSystemRights.FullControl,
@@ -2114,6 +2181,15 @@ public sealed class AgentLocalQueueStore
         {
             security.AddAccessRule(new FileSystemAccessRule(
                 ownerSid,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+        }
+        if (!ownerSid.Equals(localServiceSid))
+        {
+            security.AddAccessRule(new FileSystemAccessRule(
+                localServiceSid,
                 FileSystemRights.FullControl,
                 InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                 PropagationFlags.None,
