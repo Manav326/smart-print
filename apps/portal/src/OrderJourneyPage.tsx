@@ -18,7 +18,7 @@ interface Props {
   onDispatch: (job: ShopPrintJob) => void; onConfirmOutput: (job: ShopPrintJob) => void;
   onRetryPdfExport: (job: ShopPrintJob) => void; onHistory: (job: ShopPrintJob) => void;
   onOpenPhotoStudio: (job: ShopPrintJob) => void;
-  onResumeUnprintedBatch: (batchId: string, jobIds: string[]) => Promise<void>;
+  onResumeUnprintedBatch: (batchId: string, jobIds: string[]) => Promise<boolean>;
 }
 const readyStatuses = new Set(["COMPLETED","PDF_EXPORTED"]);
 const flowSteps: Array<{id:OrderJourneyStage;title:string;detail:string;icon:typeof Inbox}> = [
@@ -181,8 +181,8 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
     if(!journey.batchId||effectiveSelectedResumeJobIds.length===0||resumeBusy)return;
     setResumeBusy(true);
     try{
-      await actions.onResumeUnprintedBatch(journey.batchId,effectiveSelectedResumeJobIds);
-      setSelectedResumeJobIds([]);
+      const succeeded=await actions.onResumeUnprintedBatch(journey.batchId,effectiveSelectedResumeJobIds);
+      if(succeeded)setSelectedResumeJobIds([]);
     }finally{setResumeBusy(false);}
   }
   return <article className={styles.orderCard}>
@@ -234,9 +234,12 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
               const fileLabel=job.privatePrinting?"Private file "+privateIndex:job.document.originalFileName;
               const checked=effectiveSelectedResumeJobIds.includes(job.id);
               return <label className={styles.resumeCandidate} key={job.id}>
-                <input type="checkbox" checked={checked} disabled={resumeBusy} onChange={event=>setSelectedResumeJobIds(current=>
-                  event.currentTarget.checked?[...current.filter(id=>id!==job.id),job.id]:current.filter(id=>id!==job.id)
-                )}/>
+                <input type="checkbox" checked={checked} disabled={resumeBusy} onChange={event=>{
+                  const isChecked=event.currentTarget.checked;
+                  setSelectedResumeJobIds(current=>
+                    isChecked?[...current.filter(id=>id!==job.id),job.id]:current.filter(id=>id!==job.id)
+                  );
+                }}/>
                 <span><strong>{fileLabel}</strong><small>0 of {job.spoolerTotalPages} pages recorded</small></span>
               </label>;
             })}

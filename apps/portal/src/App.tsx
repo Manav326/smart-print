@@ -1110,14 +1110,14 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   }
 
 
-  async function resumeUnprintedBatch(batchId:string,jobIds:string[]):Promise<void>{
-    if(!jobIds.length||busyJobId)return;
+  async function resumeUnprintedBatch(batchId:string,jobIds:string[]):Promise<boolean>{
+    if(!jobIds.length||busyJobId)return false;
     const selectedJobs=jobIds.map(id=>printJobs.find(job=>job.id===id));
     const resolvedJobs=selectedJobs.filter((job):job is ShopPrintJob=>job!==undefined);
     if(resolvedJobs.length!==jobIds.length){
       setError("The selected files changed in the latest order refresh. Refresh the order and select the files again.");
       await reload();
-      return;
+      return false;
     }
     let privateFileIndex=0;
     const labels=resolvedJobs.map(job=>job.privatePrinting
@@ -1128,16 +1128,18 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       "Confirm no physical pages were produced",
       "I checked; resume selected files"
     );
-    if(!ok)return;
+    if(!ok)return false;
     setBusyJobId(`resume-unprinted-${batchId}`);
     setError("");
     try{
       const result=await resumeShopUnprintedBatch(tokens.accessToken,batchId,jobIds);
       setToast(`${result.resumedCount} verified-unprinted file(s) authorised to resume on ${result.printerName}.`);
       await reload();
+      return true;
     }catch(exception){
       setError(exception instanceof Error?exception.message:"Could not resume the selected files.");
       try{await reload();}catch{/* Preserve the original action error. */}
+      return false;
     }finally{
       setBusyJobId(null);
     }
