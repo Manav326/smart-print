@@ -6,13 +6,14 @@ using SmartPrint.Api.Modules.ShopDevices.Services;
 namespace SmartPrint.Api.Modules.ShopDevices.Registration;
 
 /// <summary>
-/// DI and route registration for printer and QR-station lifecycle workflows.
+/// DI and route registration for shop printers, paired Agents and QR stations.
 /// </summary>
 public static class ShopDevicesModule
 {
     public static IServiceCollection AddShopDevicesModule(this IServiceCollection services)
     {
         services.AddScoped<ShopDevicesService>();
+        services.AddScoped<ShopAgentDevicesService>();
         return services;
     }
 
@@ -20,5 +21,14 @@ public static class ShopDevicesModule
     {
         ShopDevicesEndpoints.MapShopDevicesEndpoints(shop);
         return shop;
+    }
+
+    /// <summary>
+    /// Maps the paired-Agent management routes onto the existing shop route group.
+    /// </summary>
+    public static RouteGroupBuilder MapShopAgentDevicesModule(this RouteGroupBuilder shopAgents)
+    {
+        ShopAgentDevicesEndpoints.MapShopAgentDevicesEndpoints(shopAgents);
+        return shopAgents;
     }
 }
