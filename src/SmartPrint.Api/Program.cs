@@ -21,6 +21,8 @@ using SmartPrint.Api.Security;
 using SmartPrint.Api.Storage;
 using SmartPrint.Api.Services;
 using SmartPrint.Api.Modules.Health.Registration;
+using SmartPrint.Api.Modules.PlatformDataTransfer.Registration;
+using SmartPrint.Api.Modules.ShopSubscriptionPayments.Registration;
 using SmartPrint.Documents;
 
 const string bootstrapPlatformAdminArgument = "--bootstrap-platform-admin";
@@ -284,7 +286,7 @@ platform.MapSubscriptionPlanEndpoints();
 platform.MapPlatformSubscriptionEndpoints();
 platform.MapPlatformOperationalSettingsEndpoints();
 platform.MapPlatformAdvertisingEndpoints();
-platform.MapPlatformDataTransferEndpoints();
+platform.MapPlatformDataTransferModule();
 
 platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct) =>
 {
@@ -1398,7 +1400,7 @@ customerApi.MapGet("/orders/{orderKey:guid}/tracking", async (
 var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
 
-shop.MapShopSubscriptionPaymentEndpoints();
+shop.MapShopSubscriptionPaymentsModule();
 
 shop.MapGet("/subscription", async (
     ClaimsPrincipal principal,
