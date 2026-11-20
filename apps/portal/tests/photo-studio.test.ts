@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { UPLOAD_LIMITS } from "../src/upload-limits.generated.ts";
 import { isValidCustomerPhotoSettings } from "../src/customer-photo-settings.ts";
+import { resolvePhotoMediaCapabilities } from "../src/photo-media-capabilities.ts";
 import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, getPhotoCropFocusAfterDrag, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
 
 const UPLOAD_LIMITS_CONFIG = JSON.parse(readFileSync(new URL("../../../config/upload-limits.json", import.meta.url), "utf8"));
@@ -728,4 +729,47 @@ test("Photo Studio explains copies, physical output, estimated price and true so
  assert.match(css,/toolRailSectionLabel/);
  assert.ok(css.includes("max-height:min(30vh,230px)"));
  assert.match(css,/sourceQualityWarning/);
+});
+
+
+test("printer capability display does not conflate glossy and matte with other photo finishes", () => {
+  const printSchema = resolvePhotoMediaCapabilities(
+    ["PhotographicGlossy", "PhotographicHighGloss", "PhotographicMatte", "PhotographicSemiGloss", "Plain"],
+    [],
+    "supported",
+    "unknown"
+  );
+  assert.equal(printSchema.state, "supported");
+  assert.deepEqual(printSchema.labels, ["Glossy", "Matte"]);
+  assert.deepEqual(printSchema.mediaTypes, [
+    "PhotographicGlossy",
+    "PhotographicHighGloss",
+    "PhotographicMatte"
+  ]);
+
+  const legacyDriver = resolvePhotoMediaCapabilities(
+    [],
+    ["Glossy Photo Paper", "Photo Matt Paper", "Semi-Gloss Photo Paper", "Satin Photo Paper", "Lustre Paper"],
+    "unknown",
+    "supported"
+  );
+  assert.equal(legacyDriver.state, "supported");
+  assert.deepEqual(legacyDriver.labels, ["Glossy", "Matte"]);
+  assert.deepEqual(legacyDriver.mediaTypes, ["Glossy Photo Paper", "Photo Matt Paper"]);
+});
+
+test("printer capability display does not claim generic or non-matching media can satisfy glossy/matte jobs", () => {
+  for (const [schema, legacy] of [
+    [["Plain", "Photographic"], []],
+    [["PhotographicSemiGloss"], ["Satin Photo Paper"]],
+    [[], ["Lustre Photo Paper", "Luster Photo Paper"]]
+  ] as const) {
+    const result = resolvePhotoMediaCapabilities(schema, legacy, "supported", legacy.length ? "supported" : "unknown");
+    assert.equal(result.state, "unsupported");
+    assert.deepEqual(result.labels, []);
+    assert.deepEqual(result.mediaTypes, []);
+  }
+
+  const notReported = resolvePhotoMediaCapabilities([], [], "unknown", "unknown");
+  assert.equal(notReported.state, "unknown");
 });

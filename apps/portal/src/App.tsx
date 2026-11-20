@@ -1,5 +1,6 @@
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { isValidCustomerPhotoSettings, type CustomerPhotoSettings } from "./customer-photo-settings";
+import { resolvePhotoMediaCapabilities } from "./photo-media-capabilities";
 import { validateCustomerUploadBatchLimits } from "./upload-batch-policy";
 import { CUSTOMER_UPLOAD_CONCURRENCY, mapConcurrentSettled } from "./upload-concurrency";
 import { identifySupportedDocument, type SupportedDocumentType } from "./document-content-policy";
@@ -2194,6 +2195,7 @@ type PrinterCapabilitySnapshot = {
   pagesPerSheetDirection?: string | null;
   pagesPerSheetDirectionStatus?: string;
   mediaTypes?: Array<{ name?: string | null; code?: number }> | null;
+  mediaTypesStatus?: string;
   pageMediaTypes?: string[] | null;
   pageMediaTypesStatus?: string;
   resolutions?: Array<{ xDpi?: number; yDpi?: number }> | null;
@@ -2240,9 +2242,10 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   const paperSizes=(snapshot?.paperSizes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
   const mediaTypes=(snapshot?.mediaTypes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
   const pageMediaTypes=(snapshot?.pageMediaTypes??[]).map(value=>value?.trim()).filter((value):value is string=>!!value);
-  const photoMediaTypes=[...new Set([...pageMediaTypes,...mediaTypes.filter(value=>/(gloss|matt|satin|lustre|luster)/i.test(value))])];
-  const photoMediaLabels=[...new Set(photoMediaTypes.map(value=>/gloss/i.test(value)?"Glossy":/matt/i.test(value)?"Matte":/satin/i.test(value)?"Satin":/lustre|luster/i.test(value)?"Lustre":value))];
-  const photoMediaState=photoMediaLabels.length>0?"supported" as const:capabilityState(undefined,snapshot?.pageMediaTypesStatus);
+  const photoMedia=resolvePhotoMediaCapabilities(pageMediaTypes,mediaTypes,snapshot?.pageMediaTypesStatus,snapshot?.mediaTypesStatus);
+  const photoMediaTypes=photoMedia.mediaTypes;
+  const photoMediaLabels=photoMedia.labels;
+  const photoMediaState=photoMedia.state;
   const resolutions=(snapshot?.resolutions??[]).map(item=>
     item.xDpi&&item.yDpi?item.xDpi+" × "+item.yDpi+" dpi":""
   ).filter(Boolean);
@@ -2302,7 +2305,7 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
               snapshot.orientation.landscape===true?"Landscape":null
             ].filter(Boolean).join(" · ")||"Not reported":"Not reported"}</strong></div>
             <div><span>Paper sizes</span><strong>{paperSizes.length?paperSizes.slice(0,10).join(", ")+(paperSizes.length>10?" +"+(paperSizes.length-10)+" more":""):"Not reported"}</strong></div>
-            <div><span>Photo media types</span><strong>{photoMediaTypes.length?photoMediaTypes.slice(0,8).join(", ")+(photoMediaTypes.length>8?" +"+(photoMediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>Photo media types</span><strong>{photoMediaTypes.length?photoMediaTypes.slice(0,8).join(", ")+(photoMediaTypes.length>8?" +"+(photoMediaTypes.length-8)+" more":""):photoMediaState==="unsupported"?"No matching glossy/matte stock":"Not reported"}</strong></div>
             <div><span>Print Schema media</span><strong>{pageMediaTypes.length?pageMediaTypes.slice(0,8).join(", ")+(pageMediaTypes.length>8?" +"+(pageMediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
             <div><span>All driver media types</span><strong>{mediaTypes.length?mediaTypes.slice(0,8).join(", ")+(mediaTypes.length>8?" +"+(mediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
             <div><span>Resolutions</span><strong>{resolutions.length?resolutions.slice(0,8).join(", ")+(resolutions.length>8?" +"+(resolutions.length-8)+" more":""):"Not reported"}</strong></div>
