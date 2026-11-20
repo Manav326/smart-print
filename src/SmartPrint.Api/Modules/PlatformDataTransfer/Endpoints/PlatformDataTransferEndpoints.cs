@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using OperationalSettingsEntity = SmartPrint.Api.Domain.PlatformOperationalSettings;
 using SmartPrint.Api.Services;
 
 namespace SmartPrint.Api.Modules.PlatformDataTransfer.Endpoints;
@@ -52,7 +53,7 @@ public static class PlatformDataTransferEndpoints
             var generatedUtc = DateTimeOffset.UtcNow;
             var requestedFromUtc = generatedUtc.AddDays(-windowDays);
             var settings = await db.PlatformOperationalSettings.AsNoTracking()
-                .SingleOrDefaultAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, ct);
+                .SingleOrDefaultAsync(item => item.Id == OperationalSettingsEntity.SingletonIdValue, ct);
             var measurementStartedUtc = settings?.DataTransferMeasurementStartedUtc ?? generatedUtc;
             // Daily aggregates cannot be split at an arbitrary clock time. Align a requested
             // window to UTC midnight, but never report earlier than telemetry collection began.

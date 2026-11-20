@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
 using SmartPrint.Api.Modules.ShopSubscriptionPayments.Endpoints;
 
@@ -12,5 +13,11 @@ public static class ShopSubscriptionPaymentsModule
     {
         ShopSubscriptionPaymentEndpoints.MapShopSubscriptionPaymentEndpoints(shop);
         return shop;
+    }
+
+    public static WebApplication MapRazorpaySubscriptionWebhookModule(this WebApplication app)
+    {
+        ShopSubscriptionPaymentEndpoints.MapRazorpaySubscriptionWebhookEndpoint(app);
+        return app;
     }
 }

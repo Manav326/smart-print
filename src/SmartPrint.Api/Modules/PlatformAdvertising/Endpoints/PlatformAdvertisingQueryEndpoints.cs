@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Data;
+using SmartPrint.Api.Domain;
 using SmartPrint.Api.Storage;
 using SmartPrint.Api.Modules.PlatformAdvertising.Services;
 
@@ -30,7 +31,7 @@ public static class PlatformAdvertisingQueryEndpoints
                 creatives.TryGetValue(x.CreativeId,out var c);
                 var views=events.Where(e=>e.CampaignId==x.Id&&e.EventType=="IMPRESSION").Select(e=>e.Count).FirstOrDefault();
                 var clicks=events.Where(e=>e.CampaignId==x.Id&&e.EventType=="CLICK").Select(e=>e.Count).FirstOrDefault();
-                return ToResponse(x,c,views,clicks,now);
+                return PlatformAdvertisingResponseMapper.ToResponse(x,c,views,clicks,now);
             }));
         });
 
