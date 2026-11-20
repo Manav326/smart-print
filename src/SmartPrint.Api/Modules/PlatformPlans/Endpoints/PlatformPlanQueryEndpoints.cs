@@ -25,7 +25,8 @@ public static class PlatformPlanQueryEndpoints
                 .OrderByDescending(version => version.Version)
                 .ToListAsync(ct);
 
-            var response = plans.Select(plan => new PlatformPlanResponse(
+            var response = plans.Select(plan => new
+            {
                 plan.Id,
                 plan.Code,
                 plan.Name,
@@ -34,10 +35,29 @@ public static class PlatformPlanQueryEndpoints
                 plan.IsSystemPlan,
                 plan.CreatedUtc,
                 plan.UpdatedUtc,
-                versions.Where(version => version.PlanId == plan.Id)
-                    .Select(ToResponse)
-                    .ToArray()))
-                .ToArray();
+                Versions = versions.Where(version => version.PlanId == plan.Id)
+                    .Select(version => new
+                    {
+                        version.Id,
+                        version.Version,
+                        version.Status,
+                        version.Currency,
+                        version.MonthlyPriceMinor,
+                        version.AnnualPriceMinor,
+                        version.MaxPrinters,
+                        version.MaxAgentDevices,
+                        version.MaxQrStations,
+                        version.MaxMonthlyPrintJobs,
+                        version.MaxDocumentBytes,
+                        version.CloudAssistedPrintingEnabled,
+                        version.WhiteLabelEnabled,
+                        version.AdvancedReportsEnabled,
+                        version.CreatedUtc,
+                        version.UpdatedUtc,
+                        version.PublishedUtc
+                    })
+                    .ToArray()
+            }).ToArray();
 
             return Results.Ok(response);
         });
