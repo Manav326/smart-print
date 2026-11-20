@@ -329,7 +329,7 @@ test("photo studio's selected photo quantity creates one multi-page file with on
  const app=read("../src/App.tsx");
  const studio=read("../src/PhotoStudio.tsx");
  assert.match(studio,/const pages\s*=\s*Math\.ceil\(parsedCopies\s*\/\s*outputPhotosPerPage\)/);
- assert.match(studio,/(?:await\s+)?onApply\(\[\{[\s\S]*?file:\s*output,[\s\S]*?photoCount:\s*parsedCopies,[\s\S]*?photoOutputLayout,[\s\S]*?photoPaperFinish:[\s\S]*?previewPages:\s*jpegPages\.map/);
+ assert.match(studio,/(?:await\s+)?onApply\(\[\{[\s\S]*?file:\s*output,[\s\S]*?photoCount:\s*parsedCopies,[\s\S]*?photoOutputLayout,[\s\S]*?photoPaperFinish\b[\s\S]*?previewPages:\s*jpegPages\.map/);
  assert.match(studio,/buildPhotoPdfBlob\(jpegPages, photoOutputLayout, isPhotoPaperLayout \? size : undefined\)/);
  assert.match(studio,/export type PreparedPhotoSheet = \{/);
  assert.match(studio,/resolutionDpi\?: number/);
