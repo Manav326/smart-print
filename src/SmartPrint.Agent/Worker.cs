@@ -60,6 +60,7 @@ public sealed class Worker(
             RunHeartbeatLoopAsync(stoppingToken),
             RunPrinterInventoryLoopAsync(stoppingToken),
             RunPrintWorkLoopAsync(stoppingToken),
+            RunLocalQueueHandoffLoopAsync(stoppingToken),
             RunAuthorizedPrintDispatchLoopAsync(stoppingToken),
             RunPrivateRelayLoopAsync(stoppingToken),
             RunPrivateDocumentPurgeLoopAsync(stoppingToken),
@@ -861,13 +862,13 @@ public sealed class Worker(
                 exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
             {
                 logger.LogError(exception, "The saved Agent identity could not be read. Print processing is paused until the owner repairs the local pairing.");
-                await WaitForLocalQueueHandoffOrDelayAsync(cancellationToken);
+                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
                 continue;
             }
 
             if (credentials is null)
             {
-                await WaitForLocalQueueHandoffOrDelayAsync(cancellationToken);
+                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
                 continue;
             }
 
@@ -879,10 +880,6 @@ public sealed class Worker(
                 // These operations can take longer than a heartbeat interval. They
                 // intentionally run separately so an upload or spooler wait cannot
                 // make a healthy Agent appear offline.
-                await ProcessLocalQueueHandoffAsync(client, credentials, cancellationToken);
-                // The local queue may now contain newly acknowledged documents.
-                // Wake the dedicated dispatch loop without waiting for its fallback poll.
-                SignalPrintWork();
                 await ReconcileLegacyPdfQueueJobsAsync(client, credentials, cancellationToken);
 
                 // Reconciliation and spooler observation share the output gate with
@@ -920,12 +917,85 @@ public sealed class Worker(
             }
 
             runtimeReadiness.MarkPrintWorkCycle();
-            await WaitForLocalQueueHandoffOrDelayAsync(cancellationToken);
+            await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
             }
         }
         finally
         {
             runtimeReadiness.SetPrintWorkerRunning(false);
+        }
+    }
+
+    private async Task RunLocalQueueHandoffLoopAsync(CancellationToken cancellationToken)
+    {
+        var retryDelay = TimeSpan.FromSeconds(5);
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await localQueueStore.InitializeAsync(cancellationToken);
+                break;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                logger.LogCritical(exception, "The protected local queue is not ready for cloud-document handoff. The Agent will retry automatically.");
+                try { await Task.Delay(retryDelay, cancellationToken); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { return; }
+                retryDelay = TimeSpan.FromSeconds(Math.Min(retryDelay.TotalSeconds * 2, 60));
+            }
+        }
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                var credentials = LoadSecureCredentials();
+                if (credentials is not null)
+                {
+                    using var client = httpClientFactory.CreateClient("cloud");
+                    client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+                    await ProcessLocalQueueHandoffAsync(client, credentials, cancellationToken);
+
+                    // Local queue receipts/acknowledgements are now durable. Wake the
+                    // print dispatcher without waiting for its 5-second recovery poll.
+                    SignalPrintDispatch();
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (HttpRequestException exception)
+            {
+                logger.LogWarning(exception, "The Agent could not hand off cloud-held documents. The local handoff loop will retry automatically.");
+            }
+            catch (TaskCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning("The cloud-document handoff request timed out. The Agent will retry automatically.");
+            }
+            catch (Exception exception) when (
+                exception is CryptographicException or IOException or JsonException or
+                    UnauthorizedAccessException or InvalidOperationException)
+            {
+                logger.LogError(exception, "The saved Agent identity could not be read. Cloud-document handoff is paused until local pairing is repaired.");
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "Unexpected cloud-document handoff failure. The protected local queue is retained.");
+            }
+
+            try
+            {
+                await WaitForLocalQueueHandoffOrDelayAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
         }
     }
 
@@ -1017,9 +1087,15 @@ public sealed class Worker(
 
     private void SignalPrintWork()
     {
-        SignalSemaphore(localQueueHandoffWakeSignal);
-        SignalSemaphore(printWorkWakeSignal);
+        SignalLocalQueueHandoff();
+        SignalPrintDispatch();
     }
+
+    private void SignalLocalQueueHandoff() =>
+        SignalSemaphore(localQueueHandoffWakeSignal);
+
+    private void SignalPrintDispatch() =>
+        SignalSemaphore(printWorkWakeSignal);
 
     private static void SignalSemaphore(SemaphoreSlim signal)
     {
