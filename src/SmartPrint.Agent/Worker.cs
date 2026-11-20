@@ -26,6 +26,7 @@ public sealed class Worker(
     IConfiguration configuration) : BackgroundService
 {
     private readonly SemaphoreSlim printWorkWakeSignal = new(0, 1);
+    private readonly SemaphoreSlim localQueueHandoffWakeSignal = new(0, 1);
     private readonly SemaphoreSlim outputProcessingGate = new(1, 1);
     private readonly SemaphoreSlim capabilityEnrichmentGate = new(1, 1);
     private readonly TimeSpan printWorkPollInterval = TimeSpan.FromSeconds(
@@ -860,13 +861,13 @@ public sealed class Worker(
                 exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
             {
                 logger.LogError(exception, "The saved Agent identity could not be read. Print processing is paused until the owner repairs the local pairing.");
-                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
+                await WaitForLocalQueueHandoffOrDelayAsync(cancellationToken);
                 continue;
             }
 
             if (credentials is null)
             {
-                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
+                await WaitForLocalQueueHandoffOrDelayAsync(cancellationToken);
                 continue;
             }
 
@@ -919,7 +920,7 @@ public sealed class Worker(
             }
 
             runtimeReadiness.MarkPrintWorkCycle();
-            await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
+            await WaitForLocalQueueHandoffOrDelayAsync(cancellationToken);
             }
         }
         finally
@@ -1016,17 +1017,42 @@ public sealed class Worker(
 
     private void SignalPrintWork()
     {
-        if (printWorkWakeSignal.CurrentCount == 0)
+        SignalSemaphore(localQueueHandoffWakeSignal);
+        SignalSemaphore(printWorkWakeSignal);
+    }
+
+    private static void SignalSemaphore(SemaphoreSlim signal)
+    {
+        if (signal.CurrentCount == 0)
         {
-            try { printWorkWakeSignal.Release(); }
+            try { signal.Release(); }
             catch (SemaphoreFullException) { /* A pending wake already covers this notification. */ }
         }
     }
 
+    private async Task WaitForLocalQueueHandoffOrDelayAsync(CancellationToken cancellationToken)
+    {
+        await WaitForSignalOrDelayAsync(
+            localQueueHandoffWakeSignal,
+            localQueueHandoffWakeSignal.WaitAsync,
+            cancellationToken);
+    }
+
     private async Task WaitForPrintWorkOrDelayAsync(CancellationToken cancellationToken)
     {
+        await WaitForSignalOrDelayAsync(
+            printWorkWakeSignal,
+            printWorkWakeSignal.WaitAsync,
+            cancellationToken);
+    }
+
+    private async Task WaitForSignalOrDelayAsync(
+        SemaphoreSlim signal,
+        Func<CancellationToken, Task> waitForSignal,
+        CancellationToken cancellationToken)
+    {
         using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var wakeTask = printWorkWakeSignal.WaitAsync(waitCancellation.Token);
+        var wakeTask = waitForSignal(waitCancellation.Token);
         var networkOrFallbackTask = localNetworkManager.WaitForSelectionChangeOrDelayAsync(
             printWorkPollInterval, waitCancellation.Token);
 
