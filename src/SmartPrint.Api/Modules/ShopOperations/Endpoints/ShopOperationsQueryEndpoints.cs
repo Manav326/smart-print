@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Security;
+using SmartPrint.Api.Services;
 
 namespace SmartPrint.Api.Modules.ShopOperations.Endpoints;
 
