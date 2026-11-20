@@ -18,6 +18,7 @@ public sealed class Worker(
     WindowsPrinterDiscovery printerDiscovery,
     AgentLocalQueueStore localQueueStore,
     WindowsPrintExecutor printExecutor,
+    IsolatedWindowsPrintExecutor isolatedWindowsPrintExecutor,
     LocalAgentApiState localAgentApiState,
     LocalNetworkManager localNetworkManager,
     AgentRuntimeReadiness runtimeReadiness,
@@ -678,12 +679,15 @@ public sealed class Worker(
             runtimeReadiness.MarkPrinterInventoryFailure("printer_agent_unpaired");
             return;
         }
-        if (!printerDiscovery.TryDiscover(out var printers))
+        var discovery = await printerDiscovery.TryDiscoverAsync(cancellationToken);
+        if (!discovery.Success)
         {
             runtimeReadiness.MarkPrinterInventoryFailure("printer_discovery_failed");
-            logger.LogWarning("Skipping this printer inventory sync because Windows discovery failed; the server's last known queues are retained.");
+            logger.LogWarning("Skipping this printer inventory sync because the isolated Windows discovery worker failed; the server's last known queues are retained.");
             return;
         }
+
+        var printers = discovery.Printers;
 
         using var client = httpClientFactory.CreateClient("cloud");
         client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
@@ -1287,11 +1291,8 @@ public sealed class Worker(
                     var destination = printExecutor.GetPdfExportPath(exportEntry, exportDirectory);
                     await localQueueStore.MarkPdfExportStartedAsync(job.Id, destination, ct);
                     PdfExportExecutionResult exportResult;
-                    await using (var exportDocumentStream = localQueueStore.OpenDocumentReadStream(job.Id, credentials.AgentDeviceId))
-                    {
-                        exportResult = await printExecutor.ExportPdfUsingWindowsPrinterOrFallbackAsync(
-                            exportEntry, exportDocumentStream, destination, exportDirectory, ct);
-                    }
+                    exportResult = await isolatedWindowsPrintExecutor.ExportPdfAsync(
+                        job.Id, credentials.AgentDeviceId, destination, exportDirectory, ct);
 
                     var receipt = exportResult.Receipt;
                     await localQueueStore.MarkPdfExportedAsync(job.Id, receipt, ct);
@@ -1312,8 +1313,8 @@ public sealed class Worker(
                     SpoolerJobName = job.SpoolerJobName,
                     RejectedPageNumbers = rejectedPages
                 };
-                using var documentStream = localQueueStore.OpenDocumentReadStream(job.Id, credentials.AgentDeviceId);
-                var spoolerReceipt = printExecutor.Print(printEntry, documentStream, ct);
+                var spoolerReceipt = await isolatedWindowsPrintExecutor.PrintAsync(
+                    printEntry, credentials.AgentDeviceId, ct);
 
                 await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
                 await ReportSpoolerAcceptedAsync(client, credentials, job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, "QUEUED", ct);
@@ -1463,7 +1464,7 @@ public sealed class Worker(
 
             try
             {
-                var found = printExecutor.GetJob(entry.QueueName, entry.SpoolerJobId.Value);
+                var found = await isolatedWindowsPrintExecutor.GetJobAsync(entry.QueueName, entry.SpoolerJobId.Value, ct);
                 if (found is null)
                 {
                     await localQueueStore.MarkOutputUnconfirmedAsync(entry.JobId, "SPOOLER_JOB_NO_LONGER_VISIBLE", ct);
@@ -1563,7 +1564,7 @@ public sealed class Worker(
             var attemptRecorded = false;
             try
             {
-                var found = printExecutor.GetJob(cleanup.QueueName, cleanup.SpoolerJobId);
+                var found = await isolatedWindowsPrintExecutor.GetJobAsync(cleanup.QueueName, cleanup.SpoolerJobId, ct);
                 if (found is null)
                 {
                     // The spooler no longer exposes this job. This is the only
@@ -1577,7 +1578,7 @@ public sealed class Worker(
 
                 await localQueueStore.RecordPrivateSpoolerCleanupAttemptAsync(cleanup.JobId, ct);
                 attemptRecorded = true;
-                printExecutor.ReleaseRetainedJob(cleanup.QueueName, cleanup.SpoolerJobId);
+                await isolatedWindowsPrintExecutor.ReleaseRetainedJobAsync(cleanup.QueueName, cleanup.SpoolerJobId, ct);
 
                 var remaining = printExecutor.GetJob(cleanup.QueueName, cleanup.SpoolerJobId);
                 if (remaining is null)

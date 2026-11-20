@@ -151,8 +151,16 @@ public sealed class WindowsPrinterDiscoveryTests
             return;
 
         Assert.True(OperatingSystem.IsWindows(), "The live Windows queue discovery check requires Windows.");
-        var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
-        Assert.True(discovery.TryDiscover(out var discovered), "Windows WMI printer discovery failed.");
+        var probe = new WindowsPrinterCapabilityProbeRunner(
+            NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+            executeInCurrentProcess: true);
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            probe,
+            executeInCurrentProcess: true);
+        var result = discovery.DiscoverInProcessAsync(CancellationToken.None).GetAwaiter().GetResult();
+        Assert.True(result.Success, "Windows WMI printer discovery failed.");
+        var discovered = result.Printers;
 
         var primary = Assert.Single(discovered, item => item.QueueName == "Microsoft Print to PDF");
         var secondary = Assert.Single(discovered, item => item.QueueName == "SmartPrint CI Secondary Queue");

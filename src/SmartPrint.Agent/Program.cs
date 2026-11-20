@@ -1,3 +1,6 @@
+if (await AgentChildCommands.TryHandleAsync(args))
+    return;
+
 using System.Net.Http;
 using System.IO;
 using SmartPrint.Agent;
@@ -35,7 +38,9 @@ builder.Services.AddHttpClient("cloud", client =>
 builder.Services.AddSingleton<AgentCredentialStore>();
 builder.Services.AddSingleton<AgentDocumentEncryptionKeyStore>();
 builder.Services.AddSingleton<IAgentEnrollmentHandler, AgentEnrollmentHandler>();
+builder.Services.AddSingleton<WindowsPrinterCapabilityProbeRunner>();
 builder.Services.AddSingleton<WindowsPrinterDiscovery>();
+builder.Services.AddSingleton<IsolatedWindowsPrintExecutor>();
 builder.Services.AddSingleton<AgentLocalQueueStore>();
 builder.Services.AddSingleton<WindowsPrintExecutor>();
 builder.Services.AddSingleton<LocalAgentApiState>();

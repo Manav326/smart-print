@@ -78,15 +78,21 @@ public sealed class WindowsPrintExecutor
     /// are authenticated only when requested, so a large encrypted document is never
     /// copied into a second whole-file buffer for physical printing.
     /// </summary>
-    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, Stream documentStream, CancellationToken cancellationToken) =>
-        PrintStream(entry, documentStream, cancellationToken, outputFilePath: null);
+    public SpoolerPrintReceipt Print(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        CancellationToken cancellationToken,
+        Action? beforeSpoolerSubmission = null) =>
+        PrintStream(entry, documentStream, cancellationToken, outputFilePath: null,
+            beforeSpoolerSubmission: beforeSpoolerSubmission);
 
     private SpoolerPrintReceipt PrintStream(
         AgentLocalQueueEntry entry,
         Stream documentStream,
         CancellationToken cancellationToken,
         string? outputFilePath,
-        bool integrityAlreadyVerified = false)
+        bool integrityAlreadyVerified = false,
+        Action? beforeSpoolerSubmission = null)
     {
         ArgumentNullException.ThrowIfNull(documentStream);
         if (!documentStream.CanRead || !documentStream.CanSeek ||
@@ -98,7 +104,7 @@ public sealed class WindowsPrintExecutor
 
         if (documentStream is Qsp2DocumentReadStream qsp2 &&
             string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
-            return PrintQsp2Pdf(entry, qsp2, cancellationToken, outputFilePath);
+            return PrintQsp2Pdf(entry, qsp2, cancellationToken, outputFilePath, beforeSpoolerSubmission);
 
         ValidatePrintOptions(entry);
         if (!integrityAlreadyVerified && !Sha256Matches(entry.Sha256, documentStream))
@@ -108,14 +114,15 @@ public sealed class WindowsPrintExecutor
 
         documentStream.Position = 0;
         using var raster = OpenDocument(documentStream, entry.MediaType, entry.ColourMode == "Mono");
-        return PrintCore(entry, raster, cancellationToken, outputFilePath);
+        return PrintCore(entry, raster, cancellationToken, outputFilePath, beforeSpoolerSubmission);
     }
 
     private SpoolerPrintReceipt PrintQsp2Pdf(
         AgentLocalQueueEntry entry,
         Qsp2DocumentReadStream documentStream,
         CancellationToken cancellationToken,
-        string? outputFilePath)
+        string? outputFilePath,
+        Action? beforeSpoolerSubmission = null)
     {
         ValidatePrintOptions(entry);
         if (documentStream.Length != entry.SizeBytes ||
@@ -125,7 +132,7 @@ public sealed class WindowsPrintExecutor
                 "The authenticated QSP2 document does not match the verified upload.");
 
         using var raster = new PdfRasterDocument(documentStream, entry.ColourMode == "Mono");
-        return PrintCore(entry, raster, cancellationToken, outputFilePath);
+        return PrintCore(entry, raster, cancellationToken, outputFilePath, beforeSpoolerSubmission);
     }
 
     private SpoolerPrintReceipt PrintBytes(
@@ -245,7 +252,8 @@ public sealed class WindowsPrintExecutor
         AgentLocalQueueEntry entry,
         IRasterDocument raster,
         CancellationToken cancellationToken,
-        string? outputFilePath)
+        string? outputFilePath,
+        Action? beforeSpoolerSubmission = null)
     {
         ValidatePrintOptions(entry);
         var queueName = entry.QueueName!;
@@ -333,6 +341,7 @@ public sealed class WindowsPrintExecutor
                 DocumentName = documentName,
                 OutputFile = outputFilePath
             };
+            beforeSpoolerSubmission?.Invoke();
             var spoolerId = StartDocW(dc, ref info);
             if (spoolerId <= 0) throw Blocked("SPOOLER_START_FAILED", "Windows did not accept the print document.");
             docStarted = true;
