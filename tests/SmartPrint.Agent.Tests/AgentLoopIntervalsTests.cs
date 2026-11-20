@@ -27,4 +27,17 @@ public sealed class AgentLoopIntervalsTests
     {
         Assert.Equal(expected, AgentLoopIntervals.ResolvePrintWorkPollIntervalSeconds(configured));
     }
+
+    [Theory]
+    [InlineData(null, 2)]
+    [InlineData(0, 1)]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(4, 4)]
+    [InlineData(8, 8)]
+    [InlineData(20, 8)]
+    public void PrinterLaneConcurrencyIsBounded(int? configured, int expected)
+    {
+        Assert.Equal(expected, AgentLoopIntervals.ResolvePrinterLaneConcurrency(configured));
+    }
 }
