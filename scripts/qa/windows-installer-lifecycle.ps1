@@ -279,7 +279,33 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
         Copy-Item -Path (Join-Path $buildOutputDirectory "*") -Destination $serviceFixtureDirectory -Recurse -Force
         & $icaclsPath $serviceFixtureDirectory /inheritance:r /grant:r @fixtureExecutableAcl /T /C /Q | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            throw "Could not grant the LocalService lifecycle fixture access to its test-only binaries."
+            throw "Could not grant the LocalService lifecycle fixture access to its test-only runtime directories."
+        }
+
+        # Build outputs can arrive with protected file DACLs. Directory
+        # inheritance alone is not enough for SCM to launch the apphost under
+        # LocalService, so give every staged binary an explicit file-level DACL.
+        $fixtureFileAcl = @(
+            "*S-1-5-18:F",
+            "*S-1-5-32-544:F",
+            "*S-1-5-19:RX"
+        )
+        $fixtureFiles = @(Get-ChildItem -LiteralPath $serviceFixtureDirectory -File -Recurse)
+        Assert-True ($fixtureFiles.Count -gt 0) "The LocalService lifecycle runtime contains no staged files."
+        foreach ($fixtureFile in $fixtureFiles) {
+            & $icaclsPath $fixtureFile.FullName /inheritance:r /grant:r @fixtureFileAcl /C /Q | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not grant LocalService read/execute access to staged runtime file '$($fixtureFile.Name)'."
+            }
+            $fileAcl = Get-Acl -LiteralPath $fixtureFile.FullName
+            $localServiceFileAccess = @(
+                $fileAcl.Access | Where-Object {
+                    $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+                    $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -eq "S-1-5-19" -and
+                    (($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadAndExecute) -eq [System.Security.AccessControl.FileSystemRights]::ReadAndExecute)
+                }
+            )
+            Assert-True ($localServiceFileAccess.Count -gt 0) "LocalService does not have effective read/execute access to staged runtime file '$($fixtureFile.Name)'."
         }
         $script:localServiceFixtureStaged = $true
     }
