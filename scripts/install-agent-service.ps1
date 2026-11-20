@@ -17,6 +17,23 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# The installer invokes this script hidden. Keep a small diagnostic trail in the
+# current user's temp directory so failures can be investigated without changing
+# service identity, production data ACLs, or printer configuration.
+$installDiagnosticPath = Join-Path ([System.IO.Path]::GetTempPath()) "SmartPrint-Agent-Service-Install.log"
+Remove-Item -LiteralPath $installDiagnosticPath -Force -ErrorAction SilentlyContinue
+function Write-InstallDiagnostic {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    $entry = "{0} | {1}" -f (Get-Date -Format "o"), $Message
+    try {
+        Add-Content -LiteralPath $installDiagnosticPath -Value $entry -Encoding utf8 -ErrorAction Stop
+    }
+    catch {
+        # Diagnostics must never change installer success or rollback behaviour.
+    }
+}
+Write-InstallDiagnostic "Started service installation script."
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -24,6 +41,8 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 $resolvedExe = (Resolve-Path -LiteralPath $AgentExePath).Path
+Write-InstallDiagnostic "Resolved Agent executable: $resolvedExe"
+Write-InstallDiagnostic "Installer process identity: $($identity.Name)"
 $portalUri = $null
 if (-not [Uri]::TryCreate($CustomerPortalOrigin.TrimEnd('/'), [UriKind]::Absolute, [ref]$portalUri)) {
     throw "Provide the canonical HTTPS customer portal origin without a path, query string, fragment, or credentials."
@@ -125,6 +144,7 @@ if ($previousService) {
 # tree while the Agent is stopped, then grant only SYSTEM, Administrators and
 # LocalService. No printer, driver, port, default-printer or Spooler state is changed.
 function Set-AgentDataPermissions {
+    Write-InstallDiagnostic "Starting machine-data ACL migration at $agentDataRoot"
     New-Item -ItemType Directory -Force -Path $agentDataRoot | Out-Null
     $takeownPath = Join-Path $env:SystemRoot "System32\takeown.exe"
     $icaclsPath = Join-Path $env:SystemRoot "System32\icacls.exe"
@@ -155,6 +175,7 @@ function Set-AgentDataPermissions {
     # The encrypted document queue is more sensitive than pairing metadata.
     # Keep it private to SYSTEM and the LocalService Agent, excluding even the
     # Administrators group from its normal DACL.
+    Write-InstallDiagnostic "Completed machine-data ACL migration."
     $privateQueueRoot = Join-Path $agentDataRoot "LocalQueue"
     if (Test-Path -LiteralPath $privateQueueRoot -PathType Container) {
         $privateQueueAcl = @(
@@ -207,6 +228,7 @@ try {
     & sc.exe failureflag $serviceName 1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not enable QRtoPrint service failure recovery." }
 
+    Write-InstallDiagnostic "Starting $serviceName as $localServiceAccount."
     Start-Service -Name $serviceName
     (Get-Service -Name $serviceName).WaitForStatus("Running", [TimeSpan]::FromSeconds(30))
     if ((Get-Service -Name $serviceName).Status -ne "Running") {
@@ -219,8 +241,10 @@ try {
 
     # Preserve the existing customer LAN behaviour; the service identity change
     # must not silently narrow which Windows network profiles can reach the Agent.
+    Write-InstallDiagnostic "Creating the LocalSubnet firewall rule for TCP 17842."
     $newFirewallRule = New-NetFirewallRule -DisplayName $firewallRuleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort 17842 -Program $resolvedExe -Profile Any -RemoteAddress LocalSubnet -Description "Allows same-local-subnet devices to reach the SmartPrint local Agent endpoints."
 
+    Write-InstallDiagnostic "Created firewall rule $($newFirewallRule.Name)."
     # The new version is running and reachable. Old version-specific rules are
     # now safe to remove; any cleanup failure must not roll back a healthy Agent.
     Get-NetFirewallRule -ErrorAction SilentlyContinue |
@@ -239,6 +263,7 @@ try {
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
     }
 
+    Write-InstallDiagnostic "Install completed successfully."
     Write-Host "Configured the local Agent API CORS origin: $allowedOrigin"
     Write-Host "QRtoPrint Smart Print Agent $AgentVersion is installed and running." -ForegroundColor Green
     Write-Host "The local Agent accepts connections only from devices on the connected local subnet."
@@ -247,6 +272,35 @@ try {
 catch {
     $installationFailure = $_.Exception.Message
     $rollbackFailure = $null
+    Write-InstallDiagnostic "INSTALL FAILURE: $installationFailure"
+    if ($_.ScriptStackTrace) {
+        Write-InstallDiagnostic "Failure stack: $($_.ScriptStackTrace)"
+    }
+    try {
+        $failedService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+        $failedController = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+        $failedState = if ($failedController) { [string]$failedController.Status } else { "Absent" }
+        $failedStartName = if ($failedService) { [string]$failedService.StartName } else { "Unavailable" }
+        $failedPath = if ($failedService) { [string]$failedService.PathName } else { "Unavailable" }
+        Write-InstallDiagnostic "Service state at failure: $failedState; account: $failedStartName; path: $failedPath"
+        $scQuery = (& sc.exe queryex $serviceName 2>&1 | Out-String).Trim()
+        if ($scQuery) { Write-InstallDiagnostic "SCM query at failure: $scQuery" }
+        $recentEvents = @(
+            Get-WinEvent -FilterHashtable @{
+                LogName = "System"
+                Id = @(7000, 7001, 7009, 7011, 7023, 7024, 7038, 7041, 7036)
+                StartTime = (Get-Date).AddMinutes(-10)
+            } -ErrorAction SilentlyContinue |
+            Select-Object -First 12 |
+            ForEach-Object { "EventId=$($_.Id): $(($_.Message -replace '\s+', ' ').Trim())" }
+        )
+        foreach ($event in $recentEvents) {
+            Write-InstallDiagnostic "Recent SCM event: $event"
+        }
+    }
+    catch {
+        Write-InstallDiagnostic "Could not collect service failure details: $($_.Exception.Message)"
+    }
 
     try {
         if ($newFirewallRule) {
@@ -295,6 +349,7 @@ catch {
         $rollbackFailure = $_.Exception.Message
     }
 
+    Write-InstallDiagnostic "Rollback finished. Rollback failure: $(if ($rollbackFailure) { $rollbackFailure } else { 'none' })"
     if ($rollbackFailure) {
         throw "SmartPrint update failed: $installationFailure. Automatic rollback also failed: $rollbackFailure. Keep the old version folder and run setup again."
     }
