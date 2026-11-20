@@ -63,6 +63,8 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
 }){
   const canEditPhoto=job.photoSourceAvailable===true&&!job.privatePrinting&&job.status==="AWAITING_SHOP_APPROVAL";
   const canRefund=(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&["VERIFIED","PARTIALLY_REFUNDED"].includes(job.payment?.status??"")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId;
+  const expiredAgentLease = job.status==="LOCAL_QUEUE_CLAIMED" &&
+    (!job.agentLeaseExpiresUtc || Date.parse(job.agentLeaseExpiresUtc)<=Date.now());
   const awaitingAgentDispatchCanBeReassigned =
     job.status==="PRINT_AUTHORISED" &&
     job.spoolerStatus==="AWAITING_AGENT" &&
@@ -72,6 +74,7 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
     !job.spoolerObservedUtc &&
     !job.outputConfirmedUtc;
   const assignable=["PAID_AUTHORISED","LOCAL_QUEUE_READY"].includes(job.status) ||
+    expiredAgentLease ||
     awaitingAgentDispatchCanBeReassigned;
   const currentPrinter=printers.find(printer=>printer.id===job.printerDeviceId);
   const localDocumentNeedsOriginalAgent=job.storageMode==="LOCAL_AGENT";
@@ -115,6 +118,10 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
         {assignablePrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save as PDF · ":""}{printer.displayName}</option>)}
       </select>
     </label>}
+    {expiredAgentLease&&<div className={styles.attentionLine} role="status">
+      <AlertTriangle size={13}/>
+      <span>The previous computer's Agent lease expired before it finished receiving this file. Choose another ready printer to release the paid job; the file remains saved and does not need to be uploaded again.</span>
+    </div>}
     {awaitingAgentDispatchCanBeReassigned&&<div className={styles.attentionLine} role="status">
       <AlertTriangle size={13}/>
       <span>This job has not been submitted to Windows yet. Choose another ready printer to safely reroute it; no pages have been sent to the old queue.</span>
