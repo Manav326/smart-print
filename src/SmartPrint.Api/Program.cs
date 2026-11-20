@@ -23,6 +23,8 @@ using SmartPrint.Api.Services;
 using SmartPrint.Api.Modules.Health.Registration;
 using SmartPrint.Api.Modules.Authentication.Registration;
 using SmartPrint.Api.Modules.PlatformOperationalSettings.Registration;
+using SmartPrint.Api.Modules.PlatformSubscriptions.Registration;
+using SmartPrint.Api.Modules.PlatformPlans.Registration;
 using SmartPrint.Api.Modules.PlatformDataTransfer.Registration;
 using SmartPrint.Api.Modules.ShopSubscriptionPayments.Registration;
 using SmartPrint.Documents;
@@ -286,7 +288,9 @@ app.MapGet("/downloads/{version}/{assetName}", async (
 var platform = app.MapGroup("/api/v1/platform")
     .RequireAuthorization(PlatformAdminAuthorization.PolicyName);
 
+platform.MapPlatformPlansQueryModule();
 platform.MapSubscriptionPlanEndpoints();
+platform.MapPlatformSubscriptionsQueryModule();
 platform.MapPlatformSubscriptionEndpoints();
 platform.MapPlatformOperationalSettingsModule();
 platform.MapPlatformAdvertisingEndpoints();
