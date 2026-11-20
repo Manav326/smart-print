@@ -593,8 +593,8 @@ test("local shop Photo Studio revision authorization and completion enforce the 
   const authorizeStart=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize"');
   const authorizeEnd=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"',authorizeStart);
   const completeStart=authorizeEnd;
-  const nextAgentRoute=program.indexOf("\\nagentApi.",completeStart+30);
-  const nextShopRoute=program.indexOf("\\nshop.",completeStart+30);
+  const nextAgentRoute=program.indexOf("\nagentApi.",completeStart+30);
+  const nextShopRoute=program.indexOf("\nshop.",completeStart+30);
   const completeEnd=[nextAgentRoute,nextShopRoute].filter(index=>index>completeStart).sort((a,b)=>a-b)[0] ?? -1;
   assert.ok(authorizeStart>=0&&authorizeEnd>authorizeStart);
   assert.ok(completeStart>=0&&completeEnd>completeStart);
