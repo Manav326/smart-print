@@ -74,9 +74,13 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
   const assignable=["PAID_AUTHORISED","LOCAL_QUEUE_READY"].includes(job.status) ||
     awaitingAgentDispatchCanBeReassigned;
   const currentPrinter=printers.find(printer=>printer.id===job.printerDeviceId);
+  const localDocumentNeedsOriginalAgent=job.storageMode==="LOCAL_AGENT";
+  const localDocumentAgentId=job.documentAgentDeviceId??job.claimedByAgentDeviceId??null;
   const assignableAgentIds=new Set(agents.filter(isAgentOnline).map(agent=>agent.id));
   const assignablePrinters=printers.filter(printer=>
     printer.isActive&&!!printer.agentDeviceId&&assignableAgentIds.has(printer.agentDeviceId)&&
+    (!localDocumentNeedsOriginalAgent||
+      (!!localDocumentAgentId&&printer.agentDeviceId===localDocumentAgentId))&&
     (printer.outputMode==="PDF_EXPORT"
       ?!job.privatePrinting
       :printer.outputMode==="PHYSICAL"&&!!printer.lastSeenUtc&&
@@ -115,7 +119,11 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
       <AlertTriangle size={13}/>
       <span>This job has not been submitted to Windows yet. Choose another ready printer to safely reroute it; no pages have been sent to the old queue.</span>
     </div>}
-    {assignable&&assignablePrinters.length===0&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>No selected printer is ready right now. This file stays in its order; reconnect the Windows computer or select another ready queue in Printers. You do not need to upload the file again.</span></div>}
+    {assignable&&assignablePrinters.length===0&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>{localDocumentNeedsOriginalAgent
+      ?localDocumentAgentId
+        ?"This file is stored only on its original Windows computer. Reconnect that computer or ready another printer on the same PC; printers on other computers cannot receive this local-only file."
+        :"This file is stored locally, but its original Windows computer is not identified. Reconnect the computer that received it before changing its printer."
+      :"No selected printer is ready right now. This file stays in its order; reconnect a Windows computer or select another ready queue in Printers. You do not need to upload the file again."}</span></div>}
     {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
     {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canConfirmOutput} title={manualQueueReconciliationAvailable?"The Agent restarted before Windows returned a spooler ID. Check the exact job in the selected Windows queue and inspect the paper output before confirming.":confirmationBlockedMessage} onClick={()=>onConfirmOutput(job)}><Check size={12}/> {manualQueueReconciliationAvailable?"Reconcile & confirm":"Confirm output"}</button>}
     {confirmable&&manualQueueReconciliationAvailable&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>The Agent could not identify this Windows job. Manually check the {job.queueName} queue for {job.spoolerJobName}, then inspect every printed page before reconciling.</span></div>}
