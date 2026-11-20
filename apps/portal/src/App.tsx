@@ -2423,11 +2423,11 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
   };
   const prepareStationShare=async(station:QrStation)=>{
     setExportingStationId(station.id);
-    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing the QR image for sharing…"}}));
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing the poster for sharing…"}}));
     try{
       const file=await createStationImage(station);
       setPreparedShareImage({stationId:station.id,signature:stationImageSignature(station),file});
-      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Image ready. Tap “Share image now” to open your device’s share options."}}));
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Poster ready. Tap “Share poster now” to open your device’s share options."}}));
     }catch(exception){
       setPreparedShareImage(null);
       setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
@@ -2447,7 +2447,7 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
     void shareQrStationImage(file).then(result=>{
       if(result==="shared"){
         setPreparedShareImage(null);
-        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR image shared successfully."}}));
+        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR poster shared successfully."}}));
       }else if(result==="cancelled"){
         setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Sharing was cancelled. The image was not sent."}}));
       }else{
@@ -2508,25 +2508,26 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
         </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div>}</div>
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:station.isEnabled?"Disable station":"Enable station"}</button></div>
         {station.publicUrl && <>
-           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>void prepareStationPrint(station)} disabled={!!printingStationId||!!exportingStationId||!!busyResourceId}>{printingStationId===station.id?"Preparing poster…":"Print / download QR poster"}</button></div>
+           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button></div>
            {copyFeedback[station.id]&&<small className={"qr-share-feedback "+copyFeedback[station.id].kind} role="status" aria-live="polite">{copyFeedback[station.id].message}</small>}
-           <details className="qr-share-export">
-             <summary><Share2 size={15}/> Download or share QR image <span>PNG / JPG</span></summary>
-             <div className="qr-share-export-controls">
-               <label>Image format
-                 <select value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));}} disabled={!!exportingStationId}>
+           <details className="qr-poster-actions">
+             <summary><Printer size={15}/> Print / download QR poster <span>Print · PNG / JPG · Share</span></summary>
+             <div className="qr-poster-actions-controls">
+               <label>Download / share format
+                 <select value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));setPreparedShareImage(current=>current?.stationId===station.id?null:current);}} disabled={!!exportingStationId}>
                    <option value="png">PNG · best QR clarity</option>
                    <option value="jpg">JPG · smaller file</option>
                  </select>
                </label>
-               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<ImageIcon size={14}/>} Download image</button>
+               <button className="secondary-button" disabled={!!printingStationId||!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationPrint(station)}>{printingStationId===station.id?<span className="button-spinner"/>:<Printer size={14}/>} Print poster</button>
+               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Download size={14}/>} Download poster</button>
                {preparedShareImage?.stationId===station.id&&preparedShareImage.signature===stationImageSignature(station)
-                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Share image now</button>
-                 :<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Prepare to share</button>}
+                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Share poster now</button>
+                 :<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Prepare to share poster</button>}
              </div>
-             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The shared poster is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
+             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The poster is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
              {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
-             <small className="qr-share-export-help">Prepare the image first, then tap “Share image now” to open your device’s share sheet. If file sharing is unavailable, SmartPrint downloads the same image instead. The QR contains this station’s current public link, never a customer session token.</small>
+             <small className="qr-share-export-help">Print, download and share all use the same poster artwork and station QR. PNG or JPG changes only the downloaded/shared file format. If file sharing is unavailable, SmartPrint downloads the selected image instead.</small>
            </details>
          </>}
       </article>)}</div>}
