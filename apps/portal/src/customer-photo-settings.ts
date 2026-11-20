@@ -23,7 +23,9 @@ export function isValidCustomerPhotoSettings(value: unknown): value is CustomerP
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
 
   const settings = value as CustomerPhotoSettings;
-  const maximum = maximumPhotosPerA4Page[settings.sizeCode];
+  const maximum = Object.prototype.hasOwnProperty.call(maximumPhotosPerA4Page, settings.sizeCode)
+    ? maximumPhotosPerA4Page[settings.sizeCode]
+    : undefined;
   const outputLayout = settings.photoOutputLayout ?? "A4_SHEET";
   const finish = settings.photoPaperFinish ?? (outputLayout === "A4_SHEET" ? "PLAIN" : undefined);
 
