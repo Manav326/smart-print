@@ -1388,36 +1388,49 @@ public sealed class Worker(
         AgentCredentials credentials,
         CancellationToken cancellationToken)
     {
-        foreach (var entry in localQueueStore.GetStagedLocalUploads())
+        var entries = localQueueStore.GetStagedLocalUploads();
+        foreach (var batch in entries.Chunk(AgentCloudHttpTiming.LocalUploadStatusBatchSize))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                using var response = await SendAgentGetRequestAsync(
+                using var response = await SendAgentRequestAsync(
                     client,
                     credentials,
-                    $"api/v1/agent/local-uploads/{entry.JobId}/status",
+                    "api/v1/agent/local-uploads/status-batch",
+                    new AgentLocalUploadStatusBatchRequest(batch.Select(entry => entry.JobId).ToArray()),
                     cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
-                    logger.LogWarning("Local upload status for {JobNumber} returned HTTP {StatusCode}; keeping the protected file.", entry.JobNumber, (int)response.StatusCode);
+                    logger.LogWarning(
+                        "Batch status for {Count} staged local uploads returned HTTP {StatusCode}; all protected files are retained.",
+                        batch.Length, (int)response.StatusCode);
                     continue;
                 }
 
-                var status = await response.Content.ReadFromJsonAsync<AgentLocalUploadStatusResponse>(cancellationToken);
-                if (status is null)
+                var result = await response.Content.ReadFromJsonAsync<AgentLocalUploadStatusBatchResponse>(cancellationToken);
+                var statuses = result?.Items?.ToDictionary(item => item.JobId);
+                if (statuses is null)
                 {
-                    logger.LogWarning("Local upload status for {JobNumber} was empty; keeping the protected file.", entry.JobNumber);
+                    logger.LogWarning("Batch status response for staged local uploads was empty; all protected files are retained.");
                     continue;
                 }
 
-                if (status.Completed)
+                foreach (var entry in batch)
                 {
-                    await localQueueStore.MarkLocalUploadFinalizedAsync(entry.JobId, cancellationToken);
-                }
-                else if (status.ExpiresUtc <= DateTimeOffset.UtcNow)
-                {
-                    if (await localQueueStore.DeleteExpiredLocalUploadAsync(entry.JobId, DateTimeOffset.UtcNow, cancellationToken))
+                    if (!statuses.TryGetValue(entry.JobId, out var status))
+                    {
+                        logger.LogWarning("No batch status was returned for staged upload {JobNumber}; its protected file is retained.", entry.JobNumber);
+                        continue;
+                    }
+
+                    if (status.Completed)
+                    {
+                        await localQueueStore.MarkLocalUploadFinalizedAsync(entry.JobId, cancellationToken);
+                    }
+                    else if (status.ExpiresUtc <= DateTimeOffset.UtcNow &&
+                             await localQueueStore.DeleteExpiredLocalUploadAsync(
+                                 entry.JobId, DateTimeOffset.UtcNow, cancellationToken))
                     {
                         logger.LogInformation("Removed expired unfinalised local upload {JobNumber} from the protected queue.", entry.JobNumber);
                     }
@@ -1429,7 +1442,9 @@ public sealed class Worker(
             }
             catch (Exception exception)
             {
-                logger.LogWarning(exception, "Could not reconcile staged local upload {JobNumber}; keeping its protected file.", entry.JobNumber);
+                logger.LogWarning(exception,
+                    "Could not reconcile a batch of {Count} staged local uploads; their protected files are retained.",
+                    batch.Length);
             }
         }
     }
@@ -1439,29 +1454,49 @@ public sealed class Worker(
         AgentCredentials credentials,
         CancellationToken cancellationToken)
     {
-        foreach (var entry in localQueueStore.GetPendingPaymentLocalUploads())
+        var entries = localQueueStore.GetPendingPaymentLocalUploads();
+        foreach (var batch in entries.Chunk(AgentCloudHttpTiming.LocalUploadStatusBatchSize))
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                using var response = await SendAgentGetRequestAsync(
+                using var response = await SendAgentRequestAsync(
                     client,
                     credentials,
-                    $"api/v1/agent/local-uploads/{entry.JobId}/status",
+                    "api/v1/agent/local-uploads/status-batch",
+                    new AgentLocalUploadStatusBatchRequest(batch.Select(entry => entry.JobId).ToArray()),
                     cancellationToken);
                 if (!response.IsSuccessStatusCode)
                 {
-                    logger.LogWarning("Pending local upload status for {JobNumber} returned HTTP {StatusCode}; keeping its protected file.", entry.JobNumber, (int)response.StatusCode);
+                    logger.LogWarning(
+                        "Batch status for {Count} pending-payment local uploads returned HTTP {StatusCode}; all protected files are retained.",
+                        batch.Length, (int)response.StatusCode);
                     continue;
                 }
 
-                var status = await response.Content.ReadFromJsonAsync<AgentLocalUploadStatusResponse>(cancellationToken);
-                if (status?.SafeToDelete == true && status.DeleteAfterUtc is DateTimeOffset deleteAfterUtc &&
-                    deleteAfterUtc <= DateTimeOffset.UtcNow)
+                var result = await response.Content.ReadFromJsonAsync<AgentLocalUploadStatusBatchResponse>(cancellationToken);
+                var statuses = result?.Items?.ToDictionary(item => item.JobId);
+                if (statuses is null)
                 {
-                    await localQueueStore.DeleteExpiredPendingPaymentUploadAsync(
-                        entry.JobId, deleteAfterUtc, DateTimeOffset.UtcNow, cancellationToken);
-                    logger.LogInformation("Removed terminal pending-payment local upload {JobNumber} after the platform retention deadline.", entry.JobNumber);
+                    logger.LogWarning("Batch status response for pending-payment uploads was empty; all protected files are retained.");
+                    continue;
+                }
+
+                foreach (var entry in batch)
+                {
+                    if (!statuses.TryGetValue(entry.JobId, out var status))
+                    {
+                        logger.LogWarning("No batch status was returned for pending-payment upload {JobNumber}; its protected file is retained.", entry.JobNumber);
+                        continue;
+                    }
+
+                    if (status.SafeToDelete && status.DeleteAfterUtc is DateTimeOffset deleteAfterUtc &&
+                        deleteAfterUtc <= DateTimeOffset.UtcNow)
+                    {
+                        await localQueueStore.DeleteExpiredPendingPaymentUploadAsync(
+                            entry.JobId, deleteAfterUtc, DateTimeOffset.UtcNow, cancellationToken);
+                        logger.LogInformation("Removed terminal pending-payment local upload {JobNumber} after the platform retention deadline.", entry.JobNumber);
+                    }
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -1470,7 +1505,9 @@ public sealed class Worker(
             }
             catch (Exception exception)
             {
-                logger.LogWarning(exception, "Could not reconcile pending-payment local upload {JobNumber}; keeping its protected file.", entry.JobNumber);
+                logger.LogWarning(exception,
+                    "Could not reconcile a batch of {Count} pending-payment local uploads; their protected files are retained.",
+                    batch.Length);
             }
         }
     }
@@ -2073,10 +2110,26 @@ public sealed class Worker(
         CancellationToken cancellationToken,
         HttpCompletionOption completionOption = HttpCompletionOption.ResponseContentRead)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, path);
-        request.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
-        request.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
-        return await client.SendAsync(request, completionOption, cancellationToken);
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, path);
+            request.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
+            request.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
+            var response = await client.SendAsync(request, completionOption, cancellationToken);
+            var retryDelay = GetRateLimitRetryDelay(response);
+            if (attempt == 0 && retryDelay is TimeSpan delay)
+            {
+                // The Agent API filter returns 429 before the endpoint handler runs.
+                // Retrying this specific response is safe and does not repeat a write.
+                response.Dispose();
+                await Task.Delay(delay, cancellationToken);
+                continue;
+            }
+
+            return response;
+        }
+
+        throw new InvalidOperationException("The Agent GET retry loop ended without a response.");
     }
 
     private static async Task<HttpResponseMessage> SendAgentRequestAsync<T>(
@@ -2086,12 +2139,42 @@ public sealed class Worker(
         T payload,
         CancellationToken cancellationToken)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, path)
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            Content = JsonContent.Create(payload)
-        };
-        request.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
-        request.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
-        return await client.SendAsync(request, cancellationToken);
+            using var request = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = JsonContent.Create(payload)
+            };
+            request.Headers.Add("X-Print-Agent-Id", credentials.AgentDeviceId.ToString());
+            request.Headers.Add("X-Print-Agent-Secret", credentials.AgentSecret);
+            var response = await client.SendAsync(request, cancellationToken);
+            var retryDelay = GetRateLimitRetryDelay(response);
+            if (attempt == 0 && retryDelay is TimeSpan delay)
+            {
+                // Rate limiting is checked in the authenticated Agent endpoint
+                // filter before the handler executes, so this POST was not applied.
+                response.Dispose();
+                await Task.Delay(delay, cancellationToken);
+                continue;
+            }
+
+            return response;
+        }
+
+        throw new InvalidOperationException("The Agent POST retry loop ended without a response.");
+    }
+
+    private static TimeSpan? GetRateLimitRetryDelay(HttpResponseMessage response)
+    {
+        if (response.StatusCode != HttpStatusCode.TooManyRequests)
+            return null;
+
+        var retryAfter = response.Headers.RetryAfter;
+        var delay = retryAfter?.Delta ??
+            (retryAfter?.Date is DateTimeOffset retryAt
+                ? retryAt - DateTimeOffset.UtcNow
+                : TimeSpan.FromSeconds(1));
+        delay = TimeSpan.FromMilliseconds(Math.Clamp(delay.TotalMilliseconds, 250, 60_000));
+        return delay + TimeSpan.FromMilliseconds(Random.Shared.Next(50, 200));
     }
 }

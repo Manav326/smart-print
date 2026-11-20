@@ -49,6 +49,7 @@ public sealed class PlatformOperationalSettings
     public DateTimeOffset DataTransferMeasurementStartedUtc { get; set; } = DateTimeOffset.UtcNow;
     public bool AllowPaidJobClaimsWhenSuspended { get; set; } = true;
     public bool AllowPrivatePrintingVirtualOutput { get; set; }
+    public bool TreatWorkingVirtualQueuesAsPhysicalForTesting { get; set; }
     public Guid? UpdatedByUserId { get; set; }
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
@@ -213,6 +214,7 @@ public sealed class PrinterDevice
     public string Model { get; set; } = string.Empty;
     public string ConnectionType { get; set; } = "WindowsQueue";
     public string OutputMode { get; set; } = "PHYSICAL";
+    public bool IsTestModeOverride { get; set; }
     public string? ConnectionAddress { get; set;}
     public string? QueueName { get; set; }
     public string CapabilitiesJson { get; set; } = "{}";

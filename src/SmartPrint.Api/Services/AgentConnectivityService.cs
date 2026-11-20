@@ -49,7 +49,8 @@ public sealed record AgentPrinterSyncResult(
 
 public sealed class AgentConnectivityService(
     SmartPrintDbContext db,
-    TenantEntitlementService entitlements)
+    TenantEntitlementService entitlements,
+    IHostEnvironment environment)
 {
     public async Task<AgentHeartbeatResult> HeartbeatAsync(
         AgentDevice device,
@@ -100,7 +101,29 @@ public sealed class AgentConnectivityService(
                     : AgentPrinterSyncFailure.InvalidPrinterMetadata);
         }
 
-        var normalized = validation.Printers;
+        var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
+            .SingleAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, cancellationToken);
+        var allowVirtualQueueTestMode = PrinterTypePolicy.IsTestModeEnabled(
+            operationalSettings.TreatWorkingVirtualQueuesAsPhysicalForTesting,
+            environment.IsProduction());
+        var normalized = validation.Printers.Select(discovered =>
+        {
+            var effectiveMode = PrinterTypePolicy.ResolveOutputMode(
+                discovered.OutputMode,
+                discovered.Status,
+                allowVirtualQueueTestMode,
+                discovered.PortName);
+            return discovered with
+            {
+                OutputMode = effectiveMode,
+                TestModeOverride = PrinterTypePolicy.IsTestModeOverride(
+                    discovered.OutputMode,
+                    effectiveMode,
+                    discovered.Status,
+                    allowVirtualQueueTestMode,
+                    discovered.PortName)
+            };
+        }).ToArray();
         var now = DateTimeOffset.UtcNow;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.Printer, cancellationToken);
@@ -155,8 +178,9 @@ public sealed class AgentConnectivityService(
                     DisplayName = discovered.QueueName.Trim(),
                     Manufacturer = "Windows",
                     Model = discovered.DriverName.Trim(),
-                    ConnectionType = "WindowsQueue",
+                    ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName),
                     OutputMode = discovered.OutputMode,
+                    IsTestModeOverride = discovered.TestModeOverride,
                     ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim(),
                     QueueName = discovered.QueueName.Trim(),
                     IsDefault = discovered.IsDefault,
@@ -180,8 +204,9 @@ public sealed class AgentConnectivityService(
                 printer.DisplayName = discovered.QueueName.Trim();
                 printer.Manufacturer = "Windows";
                 printer.Model = discovered.DriverName.Trim();
-                printer.ConnectionType = "WindowsQueue";
+                printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName);
                 printer.OutputMode = discovered.OutputMode;
+                printer.IsTestModeOverride = discovered.TestModeOverride;
                 printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim();
                 printer.IsDefault = discovered.IsDefault;
                 printer.CapabilitiesJson = discovered.CapabilitiesJson;
@@ -234,7 +259,7 @@ public sealed class AgentConnectivityService(
         return new AgentPrinterSyncResult(
             AgentPrinterSyncFailure.None,
             AgentDeviceId: device.Id,
-            Discovered: normalized.Count,
+            Discovered: normalized.Length,
             Created: created,
             Updated: updated,
             Unavailable: unavailable,

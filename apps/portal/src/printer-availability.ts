@@ -29,7 +29,14 @@ export function getPrinterReadinessReason(
   const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
   if (!agent || !isAgentOnlineForShop(agent, now)) return "Shop computer offline";
 
-  if (printer.outputMode !== "PHYSICAL" && printer.outputMode !== "PDF_EXPORT")
+  if (printer.outputMode === "PDF_EXPORT") {
+    // SmartPrint creates the PDF directly in the paired Agent's protected
+    // export folder. Microsoft Print to PDF queue freshness/status is not a
+    // physical-printer readiness dependency.
+    return null;
+  }
+
+  if (printer.outputMode !== "PHYSICAL")
     return "Unsupported Windows output queue";
   if (!hasRecentHeartbeat(printer.lastSeenUtc, now)) return "Windows printer queue has not reported recently";
   const queueStatus = printer.status.toLowerCase();

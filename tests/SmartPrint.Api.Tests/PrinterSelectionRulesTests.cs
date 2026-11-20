@@ -11,7 +11,7 @@ public sealed class PrinterSelectionRulesTests
     [InlineData("PHYSICAL", "Busy")]
     [InlineData("PDF_EXPORT", "Ready")]
     [InlineData("PDF_EXPORT", "Busy")]
-    public void AllowsOnlyFreshReadyQueuesOnAnOnlineAgent(string outputMode, string status)
+    public void AllowsReadyOutputsOnAnOnlineAgent(string outputMode, string status)
     {
         Assert.True(PrinterSelectionRules.CanSelect(
             outputMode,
@@ -61,10 +61,32 @@ public sealed class PrinterSelectionRulesTests
     }
 
     [Fact]
-    public void RejectsAQueueReportOlderThanTwoMinutes()
+    public void RejectsAPhysicalQueueReportOlderThanTwoMinutes()
     {
         Assert.False(PrinterSelectionRules.CanSelect(
             "PHYSICAL", "Ready", Now.AddMinutes(-2).AddTicks(-1), true, false, Now, Now));
+    }
+
+    [Theory]
+    [InlineData("Ready")]
+    [InlineData("Busy")]
+    [InlineData("Offline")]
+    [InlineData("Unknown")]
+    public void PdfExportDoesNotDependOnWindowsQueueStatusOrInventoryTimestamp(string status)
+    {
+        Assert.True(PrinterSelectionRules.CanSelect(
+            "PDF_EXPORT", status, null, true, false, Now, Now));
+        Assert.True(PrinterSelectionRules.CanSelect(
+            "PDF_EXPORT", status, Now.AddMinutes(-30), true, false, Now, Now));
+    }
+
+    [Fact]
+    public void PdfExportStillRequiresItsPairedAgentToBeOnline()
+    {
+        Assert.False(PrinterSelectionRules.CanSelect(
+            "PDF_EXPORT", "Ready", null, false, false, Now, Now));
+        Assert.False(PrinterSelectionRules.CanSelect(
+            "PDF_EXPORT", "Ready", null, true, false, Now.AddMinutes(-3), Now));
     }
 
     [Fact]

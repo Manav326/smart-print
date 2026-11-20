@@ -238,6 +238,8 @@ export interface PrinterDevice {
   isDefault: boolean;
   agentDeviceId?: string | null;
   lastSeenUtc?: string | null;
+  /** True only while the platform admin test policy temporarily treats a virtual queue as physical. */
+  isTestModeOverride?: boolean;
 }
 
 export interface QrStation {
@@ -3125,6 +3127,7 @@ export interface PlatformOperationalSettings {
   agentRetentionSweepHours: number;
   allowPaidJobClaimsWhenSuspended: boolean;
   allowPrivatePrintingVirtualOutput: boolean;
+  treatWorkingVirtualQueuesAsPhysicalForTesting: boolean;
   updatedByUserId: string | null;
   updatedUtc: string;
 }
@@ -3142,6 +3145,7 @@ export interface PlatformOperationalSettingsInput {
   agentRetentionSweepHours: number;
   allowPaidJobClaimsWhenSuspended: boolean;
   allowPrivatePrintingVirtualOutput: boolean;
+  treatWorkingVirtualQueuesAsPhysicalForTesting: boolean;
   reason: string;
 }
 

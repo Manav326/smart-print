@@ -163,6 +163,16 @@ public sealed record AgentLocalUploadStatusResponse(
     bool SafeToDelete = false,
     DateTimeOffset? DeleteAfterUtc = null);
 
+public sealed record AgentLocalUploadStatusBatchRequest(IReadOnlyList<Guid> JobIds);
+public sealed record AgentLocalUploadStatusBatchItem(
+    Guid JobId,
+    bool Completed,
+    DateTimeOffset ExpiresUtc,
+    bool SafeToDelete,
+    DateTimeOffset? DeleteAfterUtc);
+public sealed record AgentLocalUploadStatusBatchResponse(
+    IReadOnlyList<AgentLocalUploadStatusBatchItem> Items);
+
 public sealed record LocalAgentPhotoRevisionRequest(
     string ExpectedOriginalSha256,
     long ExpectedOriginalSizeBytes,

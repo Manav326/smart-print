@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "name": "SmartPrint printer type and readiness matrix",
+  "principles": {
+    "connectionIsNotOutputKind": true,
+    "discoveredQueuesRemainVisibleOutsidePlanQuota": true,
+    "agentConnectivityIsSeparateFromDestinationReadiness": true,
+    "pdfExportNeverUsesPhysicalQueueReadiness": true,
+    "testOverridesNeverRewriteConnectionType": true
+  },
+  "connectionTypes": [
+    { "id": "USB", "label": "USB", "detectedFrom": "Windows USB port name" },
+    { "id": "LAN", "label": "Network / LAN", "detectedFrom": "Windows TCP/IP, WSD or shared-port metadata" },
+    { "id": "IPP", "label": "IPP", "detectedFrom": "ipp, ipps, http or https printer port URI" },
+    { "id": "WindowsQueue", "label": "Windows queue", "detectedFrom": "Other installed Windows queue ports" }
+  ],
+  "outputProfiles": [
+    {
+      "id": "PHYSICAL",
+      "label": "Physical print",
+      "description": "A Windows queue that submits output to a physical or network print destination.",
+      "selectionAllowed": true,
+      "consumesPlanPrinterSlot": true,
+      "requiresAgentOnline": true,
+      "requiresFreshQueueStatus": true,
+      "queueReadyStatuses": ["Ready", "Busy"],
+      "shopStatuses": {
+        "ready": "Ready",
+        "busy": "Busy",
+        "offline": "Offline",
+        "paused": "Paused",
+        "error": "Needs attention",
+        "stale": "Waiting for printer scan",
+        "agentOffline": "Computer offline"
+      },
+      "execution": "Windows spooler queue"
+    },
+    {
+      "id": "PDF_EXPORT",
+      "label": "PDF export",
+      "description": "SmartPrint generates a PDF into the paired computer's protected export folder.",
+      "selectionAllowed": true,
+      "consumesPlanPrinterSlot": true,
+      "requiresAgentOnline": true,
+      "requiresFreshQueueStatus": false,
+      "queueReadyStatuses": [],
+      "shopStatuses": {
+        "agentOnline": "Ready",
+        "agentOffline": "Computer offline"
+      },
+      "execution": "Agent-side managed PDF export; not physical fulfilment"
+    },
+    {
+      "id": "UNSUPPORTED_VIRTUAL",
+      "label": "Unsupported virtual",
+      "description": "Visible for diagnosis but not available for SmartPrint output unless the platform test override is enabled and Windows reports the queue Ready or Busy.",
+      "selectionAllowed": false,
+      "consumesPlanPrinterSlot": false,
+      "requiresAgentOnline": false,
+      "requiresFreshQueueStatus": false,
+      "queueReadyStatuses": ["Ready", "Busy"],
+      "shopStatuses": {
+        "default": "Not supported",
+        "testOverrideWhenWorking": "Test mode · treated as physical",
+        "notWorking": "Queue not ready"
+      },
+      "execution": "No dispatch unless explicitly promoted by platform test policy"
+    }
+  ],
+  "platformSettings": {
+    "treatWorkingVirtualQueuesAsPhysicalForTesting": {
+      "default": false,
+      "scope": "Platform-wide",
+      "auditReasonRequired": true,
+      "appliesTo": ["UNSUPPORTED_VIRTUAL"],
+      "workingWindowsStatuses": ["Ready", "Busy"],
+      "effectiveOutputMode": "PHYSICAL",
+      "preservedConnectionType": true,
+      "preservedWindowsQueueNameAndPort": true,
+      "doesNotApplyTo": ["PDF_EXPORT"],
+      "whenDisabled": "The next successful inventory sync returns the queue to UNSUPPORTED_VIRTUAL and non-selectable."
+    }
+  }
+}
