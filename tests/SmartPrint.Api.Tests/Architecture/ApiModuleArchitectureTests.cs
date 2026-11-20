@@ -44,6 +44,32 @@ public sealed class ApiModuleArchitectureTests
         RegexOptions.Compiled);
 
     [Fact]
+    public void EveryCapabilityModuleHasSourceRegistrationAndOwnershipDocumentation()
+    {
+        var modulesRoot = Path.Combine(FindRepositoryRoot(), "src", "SmartPrint.Api", "Modules");
+        var moduleDirectories = Directory.GetDirectories(modulesRoot);
+        Assert.NotEmpty(moduleDirectories);
+
+        var errors = new List<string>();
+        foreach (var moduleDirectory in moduleDirectories)
+        {
+            var moduleName = new DirectoryInfo(moduleDirectory).Name;
+            if (!File.Exists(Path.Combine(moduleDirectory, "README.md")))
+                errors.Add($"{moduleName}: add a README.md describing ownership and invariants.");
+
+            if (!Directory.EnumerateFiles(moduleDirectory, "*.cs", SearchOption.AllDirectories).Any())
+                errors.Add($"{moduleName}: the module must contain at least one C# source file.");
+
+            var registrationDirectory = Path.Combine(moduleDirectory, "Registration");
+            if (!Directory.Exists(registrationDirectory) ||
+                !Directory.EnumerateFiles(registrationDirectory, "*.cs", SearchOption.AllDirectories).Any())
+                errors.Add($"{moduleName}: add an explicit Registration entry point.");
+        }
+
+        Assert.True(errors.Count == 0, string.Join(Environment.NewLine, errors));
+    }
+
+    [Fact]
     public void ModuleSourceFilesUseTheRequiredFolderAndNamespaceConvention()
     {
         var repositoryRoot = FindRepositoryRoot();
