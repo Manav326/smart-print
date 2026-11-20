@@ -150,7 +150,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
   onRefund:(job:ShopPrintJob)=>void;onAssignPrinter:(job:ShopPrintJob,printerId:string)=>void;
   onDispatch:(job:ShopPrintJob)=>void;onConfirmOutput:(job:ShopPrintJob)=>void;
   onRetryPdfExport:(job:ShopPrintJob)=>void;onHistory:(job:ShopPrintJob)=>void;onOpenPhotoStudio:(job:ShopPrintJob)=>void;
-  onResumeUnprintedBatch:(batchId:string,jobIds:string[])=>Promise<void>;
+  onResumeUnprintedBatch:(batchId:string,jobIds:string[])=>Promise<boolean>;
 }){
   const printer=printerSummary(journey.jobs,printers,agents);
   const canReview=journey.canReview&&!!journey.batchId;
