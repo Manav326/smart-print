@@ -1495,7 +1495,8 @@ shop.MapGet("/subscription", async (
     var periodEnd = periodStart.AddMonths(1);
 
     var printerCount = await db.PrinterDevices.AsNoTracking()
-        .LongCountAsync(item => item.TenantId == tenantId, ct);
+        .LongCountAsync(item => item.TenantId == tenantId && item.IsActive &&
+            (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT"), ct);
     var agentDeviceCount = await db.AgentDevices.AsNoTracking()
         .LongCountAsync(item => item.TenantId == tenantId &&
                                 item.RevokedUtc == null && item.Status != "Revoked", ct);
@@ -8392,100 +8393,49 @@ agentApi.MapPost("/printers/sync", async (
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
-    if (device is null)
-    {
-        return Results.Unauthorized();
-    }
+    if (device is null) return Results.Unauthorized();
 
-    if (request.Printers is null || request.Printers.Count > 100)
+    var validation = AgentPrinterSyncRules.Validate(request.Printers);
+    if (validation.Failure != AgentPrinterSyncValidationFailure.None)
     {
         return Results.ValidationProblem(new Dictionary<string, string[]>
         {
-            ["printers"] = ["A maximum of 100 discovered printer queues can be synchronized."]
+            ["printers"] = ["Windows can report at most 100 installed printer queues in one inventory update."]
         });
     }
 
-    var invalidCapabilitiesJson = request.Printers.Any(printer =>
-    {
-        if (printer is null) return true;
-        var json = string.IsNullOrWhiteSpace(printer.CapabilitiesJson) ? "{}" : printer.CapabilitiesJson;
-        if (json.Length > 16000) return true;
-        try
-        {
-            using var parsed = JsonDocument.Parse(json);
-            return parsed.RootElement.ValueKind != JsonValueKind.Object;
-        }
-        catch (JsonException)
-        {
-            return true;
-        }
-    });
-    if (invalidCapabilitiesJson)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["capabilitiesJson"] = ["Each printer capability report must be a valid JSON object under 16 KB."]
-        });
-    }
-
-    var validStatuses = new[] { "Ready", "Busy", "Offline", "Paused", "Error", "Unknown" };
-    var normalized = request.Printers
-        .Where(printer => printer is not null &&
-                          !string.IsNullOrWhiteSpace(printer.QueueName) &&
-                          printer.QueueName.Length <= 160 &&
-                          !string.IsNullOrWhiteSpace(printer.DriverName) &&
-                          printer.DriverName.Length <= 160 &&
-                          (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT" or "UNSUPPORTED_VIRTUAL") &&
-                          (printer.PortName?.Length ?? 0) <= 255 &&
-                          (printer.CapabilitiesJson?.Length ?? 0) <= 16000 && validStatuses.Contains(printer.Status, StringComparer.Ordinal))
-        .GroupBy(printer => printer.QueueName.Trim(), StringComparer.OrdinalIgnoreCase)
-        .Select(group => group.First())
+    // Prefer usable physical queues, then document export; default queues win ties.
+    // Unsupported virtual/document drivers remain visible but never consume a slot.
+    var normalized = validation.Printers
+        .OrderBy(printer => printer.OutputMode == "PHYSICAL" ? 0 : printer.OutputMode == "PDF_EXPORT" ? 1 : 2)
+        .ThenByDescending(printer => printer.Status is "Ready" or "Busy")
+        .ThenByDescending(printer => printer.IsDefault)
+        .ThenBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
         .ToList();
-
-    if (normalized.Count != request.Printers.Count)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["printers"] = ["Each discovered queue must have a unique name, supported status and valid driver/port metadata."]
-        });
-    }
 
     var now = DateTimeOffset.UtcNow;
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.Printer, ct);
 
+    // Discovery is independent of plan capacity. Every valid queue is persisted;
+    // IsActive represents the owner's selected/usable set.
+    var entitlement = await entitlements.GetForTenantAsync(device.TenantId, ct);
     var tenantPrinters = await db.PrinterDevices.AsNoTracking()
         .Where(printer => printer.TenantId == device.TenantId)
-        .Select(printer => new { printer.QueueName, printer.AgentDeviceId })
+        .Select(printer => new { printer.QueueName, printer.IsActive, printer.OutputMode })
         .ToListAsync(ct);
-    var revokedAgentIds = await db.AgentDevices.AsNoTracking()
-        .Where(agent => agent.TenantId == device.TenantId && agent.RevokedUtc != null)
-        .Select(agent => agent.Id)
-        .ToListAsync(ct);
-    var additionalPrinters = normalized.LongCount(discovered =>
-        !tenantPrinters.Any(printer =>
-            string.Equals(printer.QueueName, discovered.QueueName, StringComparison.OrdinalIgnoreCase) &&
-            (printer.AgentDeviceId == device.Id ||
-             printer.AgentDeviceId == null ||
-             (printer.AgentDeviceId is Guid previousAgentId && revokedAgentIds.Contains(previousAgentId)))));
-    if (additionalPrinters > 0)
-    {
-        var quota = await entitlements.CheckCapacityAsync(
-            device.TenantId, TenantQuotaResource.Printer, ct, additionalPrinters);
-        if (!quota.Allowed)
-        {
-            await transaction.RollbackAsync(ct);
-            return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-        }
-    }
+    var selectedPrinterCount = tenantPrinters.LongCount(printer =>
+        printer.IsActive && (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT"));
 
     var existing = await db.PrinterDevices
         .Where(printer => printer.TenantId == device.TenantId &&
                           printer.AgentDeviceId == device.Id)
         .ToListAsync(ct);
-    var seenQueues = normalized.Select(printer => printer.QueueName).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var seenQueues = normalized.Select(printer => printer.QueueName)
+        .ToHashSet(StringComparer.OrdinalIgnoreCase);
     var created = 0;
     var updated = 0;
+    var autoSelected = 0;
 
     foreach (var discovered in normalized)
     {
@@ -8505,36 +8455,55 @@ agentApi.MapPost("/printers/sync", async (
 
         if (printer is null)
         {
+            var selectQueue = AgentPrinterSyncRules.ShouldAutoSelectQueue(
+                discovered.OutputMode,
+                discovered.Status,
+                entitlement.IsAccessActive,
+                selectedPrinterCount,
+                entitlement.MaxPrinters);
             printer = new PrinterDevice
             {
                 TenantId = device.TenantId,
                 AgentDeviceId = device.Id,
-                DisplayName = discovered.QueueName.Trim(),
+                DisplayName = discovered.QueueName,
                 Manufacturer = "Windows",
-                Model = discovered.DriverName.Trim(),
+                Model = discovered.DriverName,
                 ConnectionType = "WindowsQueue",
                 OutputMode = discovered.OutputMode,
-                ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim(),
-                QueueName = discovered.QueueName.Trim(),
+                ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName,
+                QueueName = discovered.QueueName,
                 IsDefault = discovered.IsDefault,
-                CapabilitiesJson = string.IsNullOrWhiteSpace(discovered.CapabilitiesJson) ? "{}" : discovered.CapabilitiesJson,
-                IsActive = true,
+                CapabilitiesJson = discovered.CapabilitiesJson,
+                IsActive = selectQueue,
                 CreatedUtc = now
             };
             db.PrinterDevices.Add(printer);
+            if (selectQueue)
+            {
+                selectedPrinterCount++;
+                autoSelected++;
+            }
             created++;
         }
         else
         {
+            // Rescans never override the owner's active/inactive selection.
+            var wasQuotaSelected = printer.IsActive &&
+                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT");
             printer.AgentDeviceId = device.Id;
-            printer.DisplayName = discovered.QueueName.Trim();
+            printer.DisplayName = discovered.QueueName;
             printer.Manufacturer = "Windows";
-            printer.Model = discovered.DriverName.Trim();
+            printer.Model = discovered.DriverName;
             printer.ConnectionType = "WindowsQueue";
             printer.OutputMode = discovered.OutputMode;
-            printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim();
+            printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName;
             printer.IsDefault = discovered.IsDefault;
-            printer.CapabilitiesJson = string.IsNullOrWhiteSpace(discovered.CapabilitiesJson) ? "{}" : discovered.CapabilitiesJson;
+            printer.CapabilitiesJson = discovered.CapabilitiesJson;
+            if (discovered.OutputMode == "UNSUPPORTED_VIRTUAL")
+            {
+                printer.IsActive = false;
+                if (wasQuotaSelected) selectedPrinterCount--;
+            }
             updated++;
         }
 
@@ -8543,17 +8512,38 @@ agentApi.MapPost("/printers/sync", async (
         printer.UpdatedUtc = now;
     }
 
-    foreach (var printer in existing.Where(printer => !seenQueues.Contains(printer.QueueName ?? string.Empty)))
+    // Do not mark old queues unavailable from a partial or malformed inventory.
+    var unavailable = 0;
+    if (validation.RejectedCount == 0)
     {
-        printer.Status = "Unavailable";
-        printer.UpdatedUtc = now;
+        foreach (var printer in existing.Where(printer =>
+                     !seenQueues.Contains(printer.QueueName ?? string.Empty)))
+        {
+            printer.Status = "Unavailable";
+            printer.UpdatedUtc = now;
+            unavailable++;
+        }
     }
 
     device.Status = "Online";
     device.LastSeenUtc = now;
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
-    return Results.Ok(new { device.Id, Discovered = normalized.Count, Created = created, Updated = updated, Unavailable = existing.Count(printer => !seenQueues.Contains(printer.QueueName ?? string.Empty)), SyncedUtc = now });
+    return Results.Ok(new
+    {
+        device.Id,
+        Discovered = normalized.Count,
+        Created = created,
+        Updated = updated,
+        Unavailable = unavailable,
+        Rejected = validation.RejectedCount,
+        CapabilitiesUnknown = validation.CapabilitiesUnknownCount,
+        Partial = validation.RejectedCount > 0 || validation.CapabilitiesUnknownCount > 0,
+        AutoSelected = autoSelected,
+        Selected = selectedPrinterCount,
+        MaximumSelected = entitlement.MaxPrinters,
+        SyncedUtc = now
+    });
 });
 
 

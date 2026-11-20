@@ -6,18 +6,18 @@ namespace SmartPrint.Api.Domain;
 public enum AgentPrinterSyncValidationFailure
 {
     None,
-    PrinterLimitExceeded,
-    InvalidCapabilitiesJson,
-    InvalidPrinterMetadata
+    PrinterLimitExceeded
 }
 
 public sealed record AgentPrinterSyncValidationResult(
     AgentPrinterSyncValidationFailure Failure,
-    IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
+    IReadOnlyList<AgentPrinterDiscoveryRequest> Printers,
+    int RejectedCount = 0,
+    int CapabilitiesUnknownCount = 0);
 
 /// <summary>
-/// Applies the same bounds and metadata checks used by the public Agent printer-sync endpoint
-/// before a discovered queue set is persisted.
+/// Validates discovered Windows queues independently. A single bad driver capability
+/// report or malformed queue must not hide the other installed queues from the owner.
 /// </summary>
 public static class AgentPrinterSyncRules
 {
@@ -35,47 +35,92 @@ public static class AgentPrinterSyncRules
     {
         if (printers is null || printers.Count > MaximumPrinters)
         {
-            return Invalid(AgentPrinterSyncValidationFailure.PrinterLimitExceeded);
+            return new AgentPrinterSyncValidationResult(
+                AgentPrinterSyncValidationFailure.PrinterLimitExceeded,
+                Array.Empty<AgentPrinterDiscoveryRequest>());
         }
 
-        if (printers.Any(printer =>
-                printer is null || !HasValidCapabilitiesJson(printer.CapabilitiesJson)))
-        {
-            return Invalid(AgentPrinterSyncValidationFailure.InvalidCapabilitiesJson);
-        }
+        var normalized = new List<AgentPrinterDiscoveryRequest>(printers.Count);
+        var queueNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var rejectedCount = 0;
+        var capabilitiesUnknownCount = 0;
 
-        var normalized = printers
-            .Where(printer =>
-                !string.IsNullOrWhiteSpace(printer.QueueName) &&
-                printer.QueueName.Length <= MaximumQueueNameLength &&
-                !string.IsNullOrWhiteSpace(printer.DriverName) &&
-                printer.DriverName.Length <= MaximumDriverNameLength &&
-                (printer.OutputMode is "PHYSICAL" or "PDF_EXPORT" or "UNSUPPORTED_VIRTUAL") &&
-                (printer.PortName?.Length ?? 0) <= MaximumPortNameLength &&
-                (printer.CapabilitiesJson?.Length ?? 0) <= MaximumCapabilitiesJsonLength &&
-                ValidStatuses.Contains(printer.Status))
-            .GroupBy(printer => printer.QueueName.Trim(), StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .ToList();
-
-        if (normalized.Count != printers.Count)
+        foreach (var printer in printers)
         {
-            return Invalid(AgentPrinterSyncValidationFailure.InvalidPrinterMetadata);
+            if (printer is null)
+            {
+                rejectedCount++;
+                continue;
+            }
+
+            var queueName = printer.QueueName?.Trim();
+            var driverName = printer.DriverName?.Trim();
+            var portName = printer.PortName?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(queueName) ||
+                queueName.Length > MaximumQueueNameLength ||
+                string.IsNullOrWhiteSpace(driverName) ||
+                driverName.Length > MaximumDriverNameLength ||
+                portName.Length > MaximumPortNameLength ||
+                !ValidStatuses.Contains(printer.Status) ||
+                printer.OutputMode is not ("PHYSICAL" or "PDF_EXPORT" or "UNSUPPORTED_VIRTUAL"))
+            {
+                rejectedCount++;
+                continue;
+            }
+
+            if (!queueNames.Add(queueName))
+            {
+                rejectedCount++;
+                continue;
+            }
+
+            var capabilitiesJson = printer.CapabilitiesJson;
+            if (!HasValidCapabilitiesJson(capabilitiesJson))
+            {
+                // Queue identity is still useful: keep it visible and mark capabilities unknown.
+                capabilitiesJson = "{}";
+                capabilitiesUnknownCount++;
+            }
+
+            normalized.Add(printer with
+            {
+                QueueName = queueName,
+                DriverName = driverName,
+                PortName = portName,
+                CapabilitiesJson = capabilitiesJson
+            });
         }
 
         return new AgentPrinterSyncValidationResult(
             AgentPrinterSyncValidationFailure.None,
-            normalized);
+            normalized,
+            rejectedCount,
+            capabilitiesUnknownCount);
     }
+
+    /// <summary>
+    /// Decides whether a newly discovered queue can take an unused plan slot.
+    /// Existing owner selections are preserved by the sync endpoint.
+    /// </summary>
+    public static bool ShouldAutoSelectQueue(
+        string outputMode,
+        string status,
+        bool subscriptionActive,
+        long selectedCount,
+        int? maximum) =>
+        subscriptionActive &&
+        (outputMode is "PHYSICAL" or "PDF_EXPORT") &&
+        (status is "Ready" or "Busy") &&
+        (maximum is null || selectedCount < maximum.Value);
 
     private static bool HasValidCapabilitiesJson(string? value)
     {
-        var json = string.IsNullOrWhiteSpace(value) ? "{}" : value;
-        if (json.Length > MaximumCapabilitiesJsonLength) return false;
+        if (string.IsNullOrWhiteSpace(value) || value.Length > MaximumCapabilitiesJsonLength)
+            return false;
 
         try
         {
-            using var parsed = JsonDocument.Parse(json);
+            using var parsed = JsonDocument.Parse(value);
             return parsed.RootElement.ValueKind == JsonValueKind.Object;
         }
         catch (JsonException)
@@ -83,8 +128,4 @@ public static class AgentPrinterSyncRules
             return false;
         }
     }
-
-    private static AgentPrinterSyncValidationResult Invalid(
-        AgentPrinterSyncValidationFailure failure) =>
-        new(failure, Array.Empty<AgentPrinterDiscoveryRequest>());
 }
