@@ -170,8 +170,14 @@ test("light and dark palettes cover authentication, customer QR and public landi
   assert.match(css, /html\[data-theme="dark"\] \.auth-card-footer,[\s\S]*?color:\s*#aab6ca/s,
     "Dark authentication helper text must not use the legacy low-contrast footer colour.");
   const photoStudio = read("../src/PhotoStudio.module.css");
-  assert.match(photoStudio, /\.panelHeading\s*>\s*div\s*\{[^}]*display:grid[^}]*\}/s,
-    "Photo Studio title and helper copy must render on separate lines.");
+  const photoStudioComponent = read("../src/PhotoStudio.tsx");
+  assert.match(photoStudio, /\.panelHeadingRow\s*\{[^}]*display:flex[^}]*\}/s,
+    "Photo Studio title and help control must remain aligned in a dedicated header row.");
+  assert.match(photoStudio, /\.helpTooltipPanel\s*\{[^}]*display:grid[^}]*line-height:1\.65/s,
+    "Photo Studio guidance must use readable line spacing in its contextual panel.");
+  assert.match(photoStudioComponent, /aria-label=\{"Help: "\+panelTitle\}/);
+  assert.match(photoStudioComponent, /role="region" aria-label=\{panelTitle\+" guidance"\}/,
+    "Photo Studio helper content must be available in the accessible contextual-help region.");
 });
 
 test("web shell keeps navigation, header and workspace independently usable at desktop and mobile sizes", () => {
@@ -285,8 +291,9 @@ test("batch routing enforces local-computer ownership and preserves print-time a
   assert.match(app, /Shop computer:/);
   assert.match(app, /Paper output manually confirmed by/);
   assert.match(app, /Cloud-assisted upload is now selected/);
-  assert.match(app, /attached to its original job/);
-  assert.match(app, /resume that same upload without creating another print job/);
+  assert.match(app, /Your original print request is saved/);
+  assert.match(app, /will not create a duplicate print job/);
+  assert.doesNotMatch(app, /resume that same upload without creating another print job/);
   assert.match(api, /local-upload-tickets.*cloud-recovery/);
   assert.doesNotMatch(app, /aria-label=\{"Assign printer for "\+job\.jobNumber\}/);
   assert.match(api, /printerAgentName\?: string \| null/);
@@ -353,7 +360,7 @@ test("customer local-upload recovery explains shop Wi-Fi and hotspot without add
   const app = read("../src/App.tsx");
   assert.match(app, /same Wi-Fi or hotspot as the shop computer/);
   assert.match(app, /same shop Wi-Fi or hotspot/);
-  assert.match(app, /Direct shop Wi-Fi or hotspot transfer is temporarily unavailable/);
+  assert.match(app, /The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue/);
   assert.match(app, /Shop connection ready/);
 });
 
@@ -433,7 +440,7 @@ test("native customer UI follows explicit SmartPrint theme and marks selected up
 });
 
 
-test("customer print settings are preserved independently of printer capability reports", () => {
+test("customer N-up choices come only from the assigned printer driver while other settings remain independent", () => {
   const app = read("../src/App.tsx");
   const flowStart = app.indexOf("function CustomerPrintFlow(");
   const flowEnd = app.indexOf("function UploadIcon()", flowStart);
@@ -443,16 +450,18 @@ test("customer print settings are preserved independently of printer capability 
 
   assert.ok(flow.includes("Private Printing is available only with a live paired Agent/key and a ready"));
   assert.ok(flow.includes("const privateQueueReady = localAgent?.printerStatus === \"Ready\""));
-  assert.ok(flow.includes("void printerCapabilitiesJson;"));
+  assert.ok(flow.includes("const supportedPagesPerSheet=hasAssignedPrinter"));
+  assert.ok(flow.includes("parseCustomerPagesPerSheetCapabilities(printerCapabilitiesJson)"));
+  assert.ok(flow.includes("const pagesPerSheetDirection=hasAssignedPrinter"));
+  assert.ok(flow.includes("const nupOptions=pagesPerSheetDirection"));
+  assert.ok(flow.includes("nupOptions.includes(selected.pagesPerSheet??1)"));
   assert.doesNotMatch(flow, /disabled=\{!supportsColour\}|disabled=\{!supportsDuplex\}|a4NotConfirmed/);
-  // Settings are derived from the selected file/group defaults. ID Studio keeps
-  // A4 portrait, one copy and single-sided output while preserving the chosen B&W/Colour mode.
-  assert.ok(flow.includes("colourMode:selected.colourMode"));
-  assert.ok(flow.includes("isDuplex:selected.isDuplex"));
-  assert.ok(flow.includes('paperSize:selected.advancedEnabled?selected.paperSize:"A4"'));
-  assert.ok(flow.includes('orientation:selected.advancedEnabled?selected.orientation:"AUTO"'));
+  // The output-density choice is opt-in and available only for reported PDF options.
+  assert.ok(flow.includes("pagesPerSheet:selected.advancedEnabled&&isCustomerPdf(candidate)"));
+  assert.ok(flow.includes("pagesPerSheet:1"));
+  // ID Studio keeps A4 portrait, one copy and single-sided output.
   assert.ok(flow.includes("if(isSmartPrintIdDocument(candidate)) {"));
-  assert.ok(flow.includes("copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:\"A4\",orientation:\"PORTRAIT\""));
+  assert.ok(flow.includes("copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:\"A4\",orientation:\"PORTRAIT\",pagesPerSheet:1"));
 });
 
 test("folder defaults inherit to files and advanced paper options are opt-in", () => {
@@ -641,7 +650,9 @@ test("session renewal refreshes customer payment choices and explains unavailabl
   assert.match(api, /paymentOptions: \{ upiEnabled: boolean; upiId\?: string \| null; payeeName\?: string \| null; cashEnabled: boolean; instantPaymentEnabled: boolean \}/);
   assert.match(app, /paymentOptions:session\.paymentOptions/);
   assert.match(backend, /PaymentOptions = paymentOptions/);
-  assert.equal((app.match(/The shop has not enabled UPI or cash payment/g) ?? []).length, 2);
+  assert.equal((app.match(/Ask the shop to enable UPI or cash at the counter/g) ?? []).length, 2);
+  assert.equal((app.match(/title="No payment method available"/g) ?? []).length, 2);
+  assert.equal((app.match(/title="Cash at counter unavailable"/g) ?? []).length, 2);
 });
 
 test("contextual help supports outside-click and Escape dismissal", () => {
@@ -770,4 +781,240 @@ test("customer upload controls and selected-document preview reflow cleanly on n
   assert.match(css, /\.customer-file-label > span\s*\{[^}]*overflow-wrap:\s*anywhere/s);
   assert.match(css, /\.customer-file-studio-button\s*\{[^}]*grid-column:\s*2/s);
   assert.match(css, /\.customer-file-preview iframe\s*\{[^}]*height:\s*clamp\(240px,60vh,480px\)/s);
+});
+
+
+test("QR station image sharing keeps the canonical station QR and offers PNG/JPG file actions", () => {
+  const app = read("../src/App.tsx");
+  const exporter = read("../src/qr-station-export.ts");
+  const printPoster = read("../src/QrStationPrintDocument.tsx");
+  assert.ok(app.includes("Download or share QR image"));
+  assert.ok(app.includes("PNG · best QR clarity"));
+  assert.ok(app.includes("JPG · smaller file"));
+  assert.ok(app.includes("shareQrStationImage(file)"));
+  assert.ok(app.includes("File sharing is not supported here"));
+  assert.ok(app.includes("The QR contains this station’s current public link"));
+  assert.ok(app.includes("The image was not sent"));
+  assert.ok(app.includes("Station link copied."));
+  assert.ok(app.includes("Could not copy automatically"));
+  assert.ok(app.includes("downloadQrStationImage(file)"));
+  assert.ok(app.includes('document.getElementById("qr-station-"+station.id)'));
+  assert.ok(app.includes('QRCode value={station.publicUrl}'));
+  assert.ok(exporter.includes('width="1080" height="1350"'));
+  assert.ok(exporter.includes("TEMPORARILY PAUSED"));
+  assert.ok(exporter.includes("shareNavigator.canShare"));
+  assert.ok(exporter.includes("image/jpeg"));
+  assert.ok(printPoster.includes("<QRCode value={station.publicUrl}"),
+    "The existing A5 print poster must remain available.");
+});
+
+test("customer QR session recovery is tab-scoped and the previous order is explicitly read-only", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../../../src/SmartPrint.Api/Program.cs");
+  assert.ok(app.includes("qrtoprint.customer-previous-session:"));
+  assert.ok(app.includes("qrtoprint.customer-previous-job:"));
+  assert.ok(app.includes("From your earlier QR session"));
+  assert.ok(app.includes("Read only"));
+  assert.ok(app.includes("read-only"));
+  const routeStart = api.indexOf('publicApi.MapGet("/jobs/{jobId:guid}/status"');
+  assert.ok(routeStart >= 0, "The public per-job status route must exist.");
+  const routeEnd = api.indexOf("publicApi.Map", routeStart + 20);
+  const route = api.slice(routeStart, routeEnd > routeStart ? routeEnd : undefined);
+  assert.ok(route.includes("CustomerSessionHistoryRules.CanReadStatus"));
+  assert.ok(route.includes("item.CustomerSessionId == session.Id"));
+  assert.ok(!route.includes("MapPost"), "The history grace period must not add write actions.");
+});
+
+test("customer status footer differentiates selected, uploading and previously uploaded files", () => {
+  const app = read("../src/App.tsx");
+  const status = read("../src/customer-upload-status.ts");
+  assert.ok(app.includes("resolveCustomerUploadStatusMessage({"));
+  assert.ok(status.includes("Uploading your documents"));
+  assert.ok(status.includes("Files uploaded successfully"));
+  assert.ok(status.includes("Review your selected files and upload"));
+  assert.ok(status.includes("Choose documents or images to begin"));
+});
+
+test("shop order journey exposes single-file decisions and separates ready work from active work", () => {
+  const page = read("../src/OrderJourneyPage.tsx");
+  const css = read("../src/OrderJourney.module.css");
+  assert.ok(page.includes('singleFileReviewJob?.status==="AWAITING_SHOP_APPROVAL"'));
+  assert.ok(page.includes("Accept file"));
+  assert.ok(page.includes("Reject file"));
+  assert.ok(page.includes("readyForCollection"));
+  assert.ok(css.includes(".miniAction{min-height:40px"));
+  assert.ok(css.includes(".signalRow small{font-size:9px"));
+});
+
+test("shop media preview distinguishes loading, unsupported and failed media states", () => {
+  const preview = read("../src/ShopDocumentPreviewSurface.tsx");
+  assert.ok(preview.includes('data-preview-state={failed ? "failed"'));
+  assert.ok(preview.includes("Loading preview"));
+  assert.ok(preview.includes("access link may have expired"));
+});
+
+
+test("QR image sharing prepares the file before a separate user-activated share action", () => {
+  const app = read("../src/App.tsx");
+  const handlerStart = app.indexOf("const sharePreparedStationImage=(station:QrStation)=>{");
+  assert.ok(handlerStart >= 0, "The ready-to-share file must have a dedicated click handler.");
+  const handlerEnd = app.indexOf("\n  useEffect(()=>{", handlerStart);
+  const handler = app.slice(handlerStart, handlerEnd > handlerStart ? handlerEnd : undefined);
+  assert.ok(handler.includes("void shareQrStationImage(file)"));
+  assert.ok(!handler.includes("await "), "Image generation must finish before the share click to preserve browser user activation.");
+  assert.ok(app.includes("Prepare to share"));
+  assert.ok(app.includes("Share image now"));
+  assert.ok(app.includes("stationImageSignature(station)"), "Stale prepared artwork must not be shared after station details change.");
+});
+
+
+test("shop PDF previews never leave an indefinite loading spinner when the browser viewer is slow", () => {
+  const preview = read("../src/ShopDocumentPreviewSurface.tsx");
+  const css = read("../src/styles.css");
+  assert.ok(preview.includes("setTimeout(() => setSlow(true), 8_000)"));
+  assert.ok(preview.includes('slow ? "slow" : "loading"'));
+  assert.ok(preview.includes("Preview is taking longer than expected"));
+  assert.ok(preview.includes("setSlow(false); setLoading(false)"), "A late viewer load must still clear the advisory state.");
+  assert.ok(css.includes(".shop-document-preview-slow{"));
+});
+
+
+test("customer batch quote separates the total, included files, excluded files and optional price details", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /aria-label="Batch quote summary"/);
+  assert.match(app, /batchQuoteSummary/);
+  assert.match(app, /customer-batch-quote-chip included/);
+  assert.match(app, /customer-batch-quote-chip excluded/);
+  assert.match(app, /customer-batch-quote-chip document/);
+  assert.match(app, /customer-batch-quote-chip id-card/);
+  assert.match(app, /customer-batch-quote-chip photo/);
+  assert.match(app, /aria-label="File-by-file prices"/);
+  assert.match(app, /customer-batch-quote-line-amount/);
+  assert.match(app, /quoteRows\.map\(entry=>/);
+  assert.match(app, /batchQuoteNeedsRefresh/);
+  assert.match(app, /batchQuoteTotalDisplay/);
+  assert.match(app, /hasAcceptedQuoteLocked/);
+  assert.match(app, /No accepted files have a current quote yet/);
+  assert.match(app, /acceptedBatchRows/);
+  assert.match(app, /Quote expired/);
+  assert.match(app, /Quote needed/);
+  assert.match(app, /<details className="customer-batch-quote-details">/);
+  assert.match(app, /See price breakdown/);
+  assert.match(app, /This is a quote, not a payment/);
+  assert.match(css, /\.customer-batch-quote-lines>div\.customer-batch-quote-line\s*\{[^}]*grid-template-columns:\s*minmax\(0,1fr\) auto/s);
+  assert.match(css, /\.customer-batch-quote-details\s*\{/);
+  assert.match(css, /@media\(max-width:650px\)\s*\{[^}]*\.customer-batch-quote-card/s);
+  assert.match(css, /@media\(max-width:380px\)\s*\{[^}]*\.customer-batch-quote-heading/s);
+});
+
+test("shop batch review communicates included and excluded choices, valid quotes and non-payment next steps", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /aria-label="Batch review summary"/);
+  assert.match(app, /Accepted value · valid quotes only/);
+  assert.match(app, /Included files stay in one checkout/);
+  assert.match(app, /See order status/);
+  assert.match(app, /need a fresh quote/);
+  assert.match(app, /Include this file in the customer's batch checkout/);
+  assert.match(app, /Will be excluded/);
+  assert.match(app, /Not charged/);
+  assert.match(app, /source pages → \$\{outputSides\} output sides/);
+  assert.match(app, /acceptedOutputSides/);
+  assert.match(app, /ID-card A4 sheets/);
+  assert.match(app, /photo A4 pages/);
+  assert.match(app, /Document output mix/);
+  assert.match(app, /Applying this review saves the file decisions\. It does not collect payment or send files to a printer\./);
+  assert.match(app, /Save batch review/);
+  assert.match(app, /<details className="batch-review-folder"/);
+  assert.match(css, /\.batch-review-overview\s*\{/);
+  assert.match(css, /\.batch-review-stats\s*>\.included/);
+  assert.match(css, /\.batch-review-stats\s*>\.excluded/);
+  assert.match(css, /\.batch-review-stats\s*>\.refresh/);
+  assert.match(css, /\.batch-review-stats\s*>\.id-cards/);
+  assert.match(css, /\.batch-review-stats\s*>\.photos/);
+  assert.match(css, /\.batch-review-file-finance/);
+  assert.match(css, /\.batch-review-next-step/);
+  assert.match(css, /\.batch-review-toggle\{[^}]*min-height:40px/);
+  assert.match(css, /\.batch-review-folder-head\{[^}]*min-height:44px/);
+  assert.match(css, /\.batch-review-preview\{min-height:40px/);
+  assert.ok(css.includes("@media(max-width:650px){"));
+  assert.ok(css.includes(".batch-review-row{grid-template-columns:minmax(0,1fr) auto;"));
+  assert.match(css, /html\[data-theme="dark"\] \.batch-review-overview/);
+});
+
+
+test("customer warnings and info use concise accessible notices with toolkit icons", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(app, /function CustomerInlineNotice/);
+  assert.match(app, /AlertTriangle:Info/);
+  assert.match(app, /role=\{kind==="warning"\?"alert":"status"\}/);
+  assert.match(app, /Files inside nested folders aren't included/);
+  assert.match(app, /Only PDF, JPG and PNG files are supported/);
+  assert.match(app, /identified by content\. Original filenames were kept/);
+  assert.match(app, /Local transfer is not encrypted/);
+  assert.match(app, /Tap Check shop Wi-Fi above and allow local-network access/);
+  assert.match(css, /\.customer-inline-notice\.warning/);
+  assert.match(css, /\.customer-inline-notice\.info/);
+  assert.match(css, /\.customer-inline-notices \.customer-inline-notice/);
+});
+
+
+test("customer upload page uses a consistent responsive layout for every conditional panel", () => {
+  const app = read("../src/App.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(css, /customer-print-flow \{\s*display:grid/);
+  assert.match(css, /customer-print-flow > \* \{\s*min-width:0;\s*margin-block:0/);
+  assert.match(css, /customer-print-flow \{[\s\S]*width:min\(100%,1040px\)/);
+  assert.match(css, /customer-upload-progress>div \{[\s\S]*height:auto;[\s\S]*background:transparent/);
+  assert.match(css, /customer-folder-group-head \{\s*display:grid/);
+  assert.match(css, /customer-folder-file-row \{\s*display:grid/);
+  assert.match(css, /customer-file-overrides \{\s*display:grid/);
+  assert.match(css, /customer-upload-picker-grid \{\s*display:grid/);
+  assert.match(css, /customer-file-preview iframe \{[\s\S]*max-width:100%/);
+  assert.match(css, /@media\(max-width:760px\)/);
+  assert.match(css, /@media\(max-width:650px\)/);
+  assert.match(css, /@media\(max-width:420px\)/);
+  assert.match(css, /@media\(prefers-reduced-motion:reduce\)/);
+  assert.match(app, /aria-label="Selected files and print settings"/);
+  assert.match(app, /role="progressbar"/);
+  assert.match(app, /aria-pressed=\{selectedFileIndex===index\}/);
+  assert.match(app, /Local transfer unavailable\./);
+  assert.match(app, /cloudAssistedPrintingEnabled\s*\?\s*"The shop computer isn't reachable on this Wi-Fi\. Choose Cloud-assisted · HTTPS to continue\."/);
+  assert.match(app, /"The shop computer isn't reachable on this Wi-Fi\. Choose Secure queue · HTTPS to continue\."/);
+  assert.match(app, /cloudAssistedPrintingEnabled\?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"/);
+  assert.match(app, /Boolean\(localAgent\?\.endpoints\.length\)&&message&&checkStatus/);
+  assert.doesNotMatch(app, /title="Shop connection unavailable"/);
+  assert.match(app, /CustomerInlineNotice kind="info" title="Private Printing unavailable"/);
+  assert.match(app, /The paired shop computer must be online and publish its encryption key/);
+  assert.doesNotMatch(app, /className="customer-privacy-unavailable"/);
+  assert.doesNotMatch(css, /customer-privacy-unavailable/);
+});
+
+
+test("native customer upload and nested payment states retain spacing and fit phone widths", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /customer-entry\.smartprint-native \.customer-print-flow \{\s*display:grid/);
+  assert.match(css, /customer-entry \.customer-state-timeline>div>span \{[^}]*min-width:0/s);
+  assert.match(css, /customer-upi-qr svg,[\s\S]*max-width:min\(100%,280px\)/);
+  assert.match(css, /customer-batch-checkout-lines>div,[\s\S]*grid-template-columns:minmax\(0,1fr\) auto/);
+  assert.match(css, /customer-batch-print-breakdown>div strong/);
+  assert.match(css, /customer-session-complete \{\s*align-items:stretch;\s*flex-direction:column/);
+});
+
+ 
+test("customer upload progress counts confirmed files separately from failed and waiting transfers", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /const uploadConfirmedCount=uploadProgress\?\.files\.filter\(file=>file\.status==="COMPLETED"\)\.length\?\?0;/);
+  assert.match(app, /const uploadFailedCount=uploadProgress\?\.files\.filter\(file=>file\.status==="FAILED"\)\.length\?\?0;/);
+  assert.match(app, /const uploadWaitingCount=uploadProgress\?\.files\.filter\(file=>file\.status==="WAITING_FOR_SHOP"\)\.length\?\?0;/);
+  assert.match(app, /\{uploadConfirmedCount\} of \{uploadProgress\.total\} files uploaded/);
+  assert.match(app, /Retry only failed files/);
+  assert.doesNotMatch(app, /\{uploadProgress\.completed\} of \{uploadProgress\.total\} files complete/);
 });

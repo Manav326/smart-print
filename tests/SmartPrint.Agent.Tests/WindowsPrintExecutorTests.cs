@@ -1,5 +1,8 @@
 using System.Security.Cryptography;
 using SmartPrint.Agent;
+using SmartPrint.Documents;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Writer;
 
 namespace SmartPrint.Agent.Tests;
 
@@ -19,6 +22,111 @@ public sealed class WindowsPrintExecutorTests
             new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None));
 
         Assert.Equal("DOCUMENT_TYPE_UNSUPPORTED", exception.ReasonCode);
+    }
+
+    [Fact]
+    public async Task OpensQsp2PdfThroughPdfiumRandomAccessCallbacksWithoutDocumentByteArray()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var builder = new PdfDocumentBuilder();
+        builder.AddPage(PageSize.A4);
+        var pdfBytes = builder.Build();
+        var agentScopeId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+        try
+        {
+            await using var source = new MemoryStream(pdfBytes, writable: false);
+            await using var encrypted = new MemoryStream();
+            var metadata = await Qsp2DocumentFormat.EncryptAsync(
+                source, encrypted, agentScopeId, jobId, pdfBytes.LongLength, dataKey);
+
+            encrypted.Position = 0;
+            using var document = Qsp2DocumentFormat.OpenRead(
+                encrypted, dataKey, agentScopeId, jobId, 50L * 1024 * 1024, metadata.Sha256);
+
+            var now = DateTimeOffset.UtcNow;
+            var entry = new AgentLocalQueueEntry(
+                jobId,
+                "SP-QSP2-PDFIUM",
+                Guid.NewGuid(),
+                "Missing SmartPrint Test Queue",
+                "SmartPrint-QSP2-Random-Access-Queue-That-Does-Not-Exist",
+                "qsp2-test.pdf",
+                "application/pdf",
+                metadata.Sha256,
+                pdfBytes.LongLength,
+                1,
+                1,
+                "Mono",
+                "A4",
+                false,
+                "INR",
+                100,
+                "unused",
+                "ACKNOWLEDGED",
+                now,
+                now.AddMinutes(3));
+
+            var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+                new WindowsPrintExecutor().Print(entry, document, CancellationToken.None));
+
+            // Reaching the missing queue proves PDFium opened and read the QSP2
+            // stream successfully through FPDF_LoadCustomDocument first.
+            Assert.Equal("PRINTER_OPEN_FAILED", exception.ReasonCode);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dataKey);
+            CryptographicOperations.ZeroMemory(pdfBytes);
+        }
+    }
+
+
+    [Fact]
+    public async Task OpensQsp2ImageFromTheVerifiedStreamWithoutMaterialisingSourceBytes()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        using var bitmap = new SkiaSharp.SKBitmap(64, 96);
+        bitmap.Erase(SkiaSharp.SKColors.White);
+        using var image = SkiaSharp.SKImage.FromBitmap(bitmap);
+        using var encoded = image.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+        var imageBytes = encoded.ToArray();
+        var agentScopeId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+        try
+        {
+            await using var source = new MemoryStream(imageBytes, writable: false);
+            await using var encrypted = new MemoryStream();
+            var metadata = await Qsp2DocumentFormat.EncryptAsync(
+                source, encrypted, agentScopeId, jobId, imageBytes.LongLength, dataKey);
+
+            encrypted.Position = 0;
+            using var document = Qsp2DocumentFormat.OpenRead(
+                encrypted, dataKey, agentScopeId, jobId, 50L * 1024 * 1024, metadata.Sha256);
+            var now = DateTimeOffset.UtcNow;
+            var entry = new AgentLocalQueueEntry(
+                jobId, "SP-QSP2-IMAGE-STREAM", Guid.NewGuid(), "Missing SmartPrint Test Queue",
+                "SmartPrint-QSP2-Image-Streaming-Queue-That-Does-Not-Exist",
+                "qsp2-test.png", "image/png", metadata.Sha256, imageBytes.LongLength,
+                1, 1, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+                now, now.AddMinutes(3));
+
+            var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+                new WindowsPrintExecutor().Print(entry, document, CancellationToken.None));
+
+            Assert.Equal("PRINTER_OPEN_FAILED", exception.ReasonCode);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dataKey);
+            CryptographicOperations.ZeroMemory(imageBytes);
+        }
     }
 
     [Theory]
@@ -87,6 +195,61 @@ public sealed class WindowsPrintExecutorTests
             new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None));
 
         Assert.Equal("LOCAL_DOCUMENT_INTEGRITY_MISMATCH", exception.ReasonCode);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(501)]
+    public void RejectsInvalidPagesPerSheetBeforeOpeningPrinter(int pagesPerSheet)
+    {
+        var bytes = "%PDF-1.7"u8.ToArray();
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-INVALID-NUP", Guid.NewGuid(), "Test printer", "Missing Windows queue",
+            "test.pdf", "application/pdf", Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            bytes.LongLength, 1, 1, "Mono", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            PagesPerSheet: pagesPerSheet);
+
+        var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+            new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None));
+
+        Assert.Equal("PAGES_PER_SHEET_INVALID", exception.ReasonCode);
+    }
+
+    [Fact]
+    public void RejectsNupForNonPdfDocumentsBeforeOpeningPrinter()
+    {
+        var bytes = "not a PNG payload"u8.ToArray();
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-NUP-NON-PDF", Guid.NewGuid(), "Test printer", "Missing Windows queue",
+            "photo.png", "image/png", Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            bytes.LongLength, 1, 1, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            PagesPerSheet: 4);
+
+        var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+            new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None));
+
+        Assert.Equal("PAGES_PER_SHEET_PDF_REQUIRED", exception.ReasonCode);
+    }
+
+    [Theory]
+    [InlineData("PHOTO")]
+    [InlineData("ID_DOCUMENT")]
+    public void RejectsNupForPreparedPrintKindsBeforeOpeningPrinter(string printKind)
+    {
+        var bytes = "%PDF-1.7"u8.ToArray();
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(), "SP-NUP-PREPARED", Guid.NewGuid(), "Test printer", "Missing Windows queue",
+            "prepared.pdf", "application/pdf", Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            bytes.LongLength, 1, 1, "Colour", "A4", false, "INR", 100, "unused", "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow.AddMinutes(3),
+            PrintKind: printKind, PagesPerSheet: 4);
+
+        var exception = Assert.Throws<PrintExecutionBlockedException>(() =>
+            new WindowsPrintExecutor().Print(entry, bytes, CancellationToken.None));
+
+        Assert.Equal("PAGES_PER_SHEET_PDF_REQUIRED", exception.ReasonCode);
     }
 }
 
@@ -326,6 +489,171 @@ public sealed class WindowsPrintToPdfSpoolerIntegrationTests
         {
             CryptographicOperations.ZeroMemory(sourceBytes);
             if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
+    }
+}
+
+public sealed class WindowsPrinterNupIntegrationTests
+{
+    [Fact]
+    public async Task DriverBackedFourUpProducesNineSheetsOrBlocksBeforeSubmissionWhenUnsupported()
+    {
+        // CI provides a dedicated clone of its virtual PDF queue. The test runs only
+        // when the installed driver actually reports 4-up; it never sends paper to
+        // a physical printer and never substitutes a software-imposed PDF.
+        if (!OperatingSystem.IsWindows() ||
+            !string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        var queueName = Environment.GetEnvironmentVariable("SMARTPRINT_NUP_TEST_QUEUE");
+        if (string.IsNullOrWhiteSpace(queueName))
+            return;
+
+        bool supportsFourUp;
+        bool supportsStandardDirection;
+        using (var capabilities = System.Text.Json.JsonDocument.Parse(
+                   WindowsPrinterCapabilityDiscovery.DiscoverJson(queueName)))
+        {
+            supportsFourUp = capabilities.RootElement.TryGetProperty("pagesPerSheet", out var values) &&
+                             values.ValueKind == System.Text.Json.JsonValueKind.Array &&
+                             values.EnumerateArray().Any(value =>
+                                 value.ValueKind == System.Text.Json.JsonValueKind.Number &&
+                                 value.TryGetInt32(out var pagesPerSheet) &&
+                                 pagesPerSheet == 4);
+            supportsStandardDirection =
+                capabilities.RootElement.TryGetProperty("pagesPerSheetDirection", out var directionValue) &&
+                directionValue.ValueKind == System.Text.Json.JsonValueKind.String &&
+                directionValue.GetString() is
+                    "RightBottom" or "BottomRight" or "LeftBottom" or "BottomLeft" or
+                    "RightTop" or "TopRight" or "LeftTop" or "TopLeft";
+        }
+
+        using var source = new MemoryStream();
+        using (var pdf = SkiaSharp.SKDocument.CreatePdf(source))
+        {
+            using var typeface = SkiaSharp.SKTypeface.FromFamilyName(
+                "Arial",
+                SkiaSharp.SKFontStyle.Normal);
+            using var font = new SkiaSharp.SKFont(typeface, 14);
+            using var paint = new SkiaSharp.SKPaint
+            {
+                Color = SkiaSharp.SKColors.Black,
+                IsAntialias = true
+            };
+
+            for (var pageNumber = 1; pageNumber <= 33; pageNumber++)
+            {
+                var canvas = pdf.BeginPage(595.276f, 841.89f);
+                canvas.DrawText(
+                    $"SOURCE PAGE {pageNumber:D2}",
+                    48,
+                    72,
+                    SkiaSharp.SKTextAlign.Left,
+                    font,
+                    paint);
+                pdf.EndPage();
+            }
+
+            pdf.Close();
+        }
+
+        var bytes = source.ToArray();
+        var outputDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "smartprint-nup-spooler-" + Guid.NewGuid().ToString("N"));
+        var outputPath = Path.Combine(outputDirectory, "33-pages-four-up.pdf");
+        var entry = new AgentLocalQueueEntry(
+            Guid.NewGuid(),
+            "SP-DRIVER-NUP-33-TO-9",
+            Guid.NewGuid(),
+            queueName,
+            queueName,
+            "thirty-three-pages.pdf",
+            "application/pdf",
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            bytes.LongLength,
+            33,
+            1,
+            "Mono",
+            "A4",
+            false,
+            "INR",
+            900,
+            "SmartPrint-Nup-Driver-Integration",
+            "ACKNOWLEDGED",
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddMinutes(3),
+            Orientation: "PORTRAIT",
+            PrintKind: "DOCUMENT",
+            PagesPerSheet: 4);
+
+        try
+        {
+            var executor = new WindowsPrintExecutor();
+            if (!supportsFourUp || !supportsStandardDirection)
+            {
+                var blocked = Assert.Throws<PrintExecutionBlockedException>(() =>
+                    executor.PrintToFile(entry, bytes, outputPath, CancellationToken.None));
+                var expectedReason = supportsFourUp
+                    ? "PAGES_PER_SHEET_DIRECTION_UNSUPPORTED"
+                    : "PAGES_PER_SHEET_UNSUPPORTED";
+                Assert.Equal(expectedReason, blocked.ReasonCode);
+                Assert.False(
+                    File.Exists(outputPath),
+                    "An N-up request without both a supported page count and presentation direction must be rejected before Windows receives a spooler job.");
+                Console.WriteLine(
+                    $"N-up integration verified fail-closed behavior: '{queueName}' does not advertise the complete 4-up Print Schema capability and no spooler output was created.");
+                return;
+            }
+
+            var receipt = executor.PrintToFile(
+                entry,
+                bytes,
+                outputPath,
+                CancellationToken.None);
+            Assert.True(receipt.JobId > 0, "Windows did not accept the N-up spooler job.");
+
+            var deadline = DateTime.UtcNow.AddSeconds(45);
+            var outputReady = false;
+            while (DateTime.UtcNow < deadline)
+            {
+                if (File.Exists(outputPath))
+                {
+                    try
+                    {
+                        var candidate = await File.ReadAllBytesAsync(outputPath);
+                        if (candidate.Length > 1000 &&
+                            candidate.AsSpan(0, 5).SequenceEqual("%PDF-"u8) &&
+                            System.Text.Encoding.ASCII.GetString(candidate)
+                                .Contains("%%EOF", StringComparison.Ordinal))
+                        {
+                            outputReady = true;
+                            break;
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        // The virtual print processor may still be finalising the output.
+                    }
+                }
+
+                await Task.Delay(500);
+            }
+
+            Assert.True(outputReady, "The configured virtual printer did not complete its PDF output.");
+            using var rendered = UglyToad.PdfPig.PdfDocument.Open(outputPath);
+            Assert.Equal(
+                9,
+                rendered.NumberOfPages);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            if (Directory.Exists(outputDirectory))
+                Directory.Delete(outputDirectory, recursive: true);
         }
     }
 }

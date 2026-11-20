@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { readFileSync } from "node:fs";
 import { UPLOAD_LIMITS } from "../src/upload-limits.generated.ts";
-import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
+import { A4_HEIGHT_POINTS, A4_WIDTH_POINTS, buildPhotoPdf, getPhotoSheetLayout, getPhotoSheetPhotoPositions, getPhotoCropFocusAfterDrag, hasSufficientPhotoResolution } from "../src/photo-studio-layout.ts";
 
 const UPLOAD_LIMITS_CONFIG = JSON.parse(readFileSync(new URL("../../../config/upload-limits.json", import.meta.url), "utf8"));
 
@@ -120,9 +120,11 @@ test("customer Photo Studio cannot turn an already uploaded original into a seco
  assert.match(app,/if\(uploadedFileFingerprints\.includes\(fingerprint\)\)/);
  assert.match(app,/const photoAlreadyUploaded=Boolean\(file&&uploadedFileFingerprints\.includes\(customerFileFingerprint\(file\)\)\)/);
  assert.match(app,/disabled=\{busy\|\|batchLockedForPayment\|\|photoAlreadyUploaded\}/);
- assert.match(app,/Photo already sent\./);
- assert.match(app,/InfoTooltip label="Photo already sent"/);
- assert.match(app,/without creating another print job/);
+ assert.match(app,/This photo has already been sent to the shop\./);
+ assert.match(app,/Already sent to shop/);
+ assert.match(app,/Photo already sent/);
+ assert.match(app,/No second upload is needed/);
+ assert.match(app,/reopening it here would create a duplicate print request/);
 });
 
 test("customer photo preparation depends on configured shop pricing, not the current printer capability",()=>{
@@ -165,7 +167,7 @@ test("Photo Studio locks background scroll and supports accessible keyboard dism
 test("a successful shop photo PDF save is not misreported as failed when refreshing the queue fails",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/The enhanced multi-page A4 photo PDF is saved to the same print job/);
- assert.match(app,/The A4 photo PDF was saved to the existing print job, but the queue could not refresh/);
+ assert.match(app,/The prepared photo output was saved to the existing print job, but the queue could not refresh/);
 });
 
 
@@ -234,9 +236,8 @@ test("Photo Studio restores focus to the customer or shop control after it close
 test("customers are told when the shop has not enabled photo printing",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/Photo printing unavailable/);
- assert.match(app,/InfoTooltip label="Photo printing details"/);
- assert.match(app,/Photo printing unavailable\. Contact shop\./);
- assert.match(app,/This shop must enable photo printing and configure its photo sizes and rates/);
+ assert.match(app,/CustomerInlineNotice kind="info" title="Photo printing unavailable"/);
+ assert.match(app,/Ask the shop to enable photo printing and set its rates/);
 });
 
 test("50 photos can be laid out as nine per A4 page with a partially filled final page",()=>{
@@ -347,6 +348,14 @@ test("caption space shifts only the next grid row and never shrinks the photo ti
  assert.equal(size.heightMm,45);
 });
 
+test("direct crop dragging translates pointer movement into bounded inverse source focus",()=>{
+ const moved=getPhotoCropFocusAfterDrag(50,50,25,-10,100,100);
+ assert.deepEqual(moved,{focusX:25,focusY:60});
+ assert.deepEqual(getPhotoCropFocusAfterDrag(4,96,-200,200,100,100),{focusX:100,focusY:0});
+ assert.deepEqual(getPhotoCropFocusAfterDrag(35,65,50,50,0,100),{focusX:35,focusY:15});
+ assert.deepEqual(getPhotoCropFocusAfterDrag(Number.NaN,Number.POSITIVE_INFINITY,10,10,100,100),{focusX:40,focusY:40});
+});
+
 test("source resolution checks both cropped axes at the selected physical size",()=>{
  const size={widthMm:35,heightMm:45};
  assert.equal(hasSufficientPhotoResolution(800,1100,size,1),true);
@@ -386,10 +395,47 @@ test("A4 raster uses independent physical x and y scales before exact-A4 PDF pla
  assert.equal(value.split(fullPageImage).length-1,2);
 });
 
+test("interactive Photo Studio previews use a smaller raster while exports retain print resolution",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/const PHOTO_PREVIEW_DPI = 120/);
+ assert.match(studio,/sharedPhotoTile\?\?createPhotoTile\(image,size,zoom,focusX,focusY,adjustments,background,PHOTO_PREVIEW_DPI\)/);
+ assert.match(studio,/sharedPhotoTile \?\? createPhotoTile\(image, size, zoom, focusX, focusY, adjustments, background, PHOTO_PREVIEW_DPI\)/);
+ assert.match(studio,/targetColor:targetBackgroundColor,tolerance:backgroundTolerance\},300\)/);
+});
+
+test("Photo Studio preview supports direct crop dragging with pointer capture and slider parity",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.match(studio,/function handleCropPointerDown\(/);
+ assert.match(studio,/function handleCropPointerMove\(/);
+ assert.match(studio,/getPhotoCropFocusAfterDrag\(/);
+ assert.match(studio,/canvas\.setPointerCapture\(event\.pointerId\)/);
+ assert.match(studio,/onPointerDown=\{handleCropPointerDown\}/);
+ assert.match(studio,/onPointerMove=\{handleCropPointerMove\}/);
+ assert.match(studio,/onPointerCancel=\{handleCropPointerUp\}/);
+ assert.match(studio,/getPhotoSheetPhotoPositions\(size,captionHeightMm,photosPerPage,previewPhotoCount\)/);
+ assert.match(studio,/setFocusX\(next\.focusX\)/);
+ assert.match(studio,/setFocusY\(next\.focusY\)/);
+ assert.match(studio,/touchAction:cropPanel\?"none":"pan-y"/);
+});
+
+test("Photo Studio contextual help is readable, dismissible and theme-aware instead of permanent panel copy",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
+ assert.match(studio,/aria-label=\{"Help: "\+panelTitle\}/);
+ assert.match(studio,/aria-expanded=\{openHelpTool===activeTool\}/);
+ assert.match(studio,/role="region" aria-label=\{panelTitle\+" guidance"\}/);
+ assert.match(studio,/openHelpToolRef\.current !== null/);
+ assert.match(studio,/dismissOnOutsidePointer/);
+ for(const help of ["Drag a photo to reframe it","Crop zoom changes the print","Balanced, true-to-life colour","A gentle warmer tone","Slightly clearer and brighter","Monochrome photo","Bold text","colour-key tool, not AI subject recognition","Name and DOB captions are optional"])
+   assert.ok(studio.includes(help),"Missing contextual guidance: "+help);
+ assert.match(css,/\.helpTooltipPanel\{[^}]*max-height:190px[^}]*overflow:auto/s);
+ assert.match(css,/\.dark \.helpTooltipPanel/);
+});
+
 test("Photo Studio resolution warning is recomputed when crop zoom changes",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.match(studio,/sourceResolutionNote\(image, size, zoom\)/);
- assert.match(studio,/reduce the zoom/i);
+ assert.match(studio,/Crop zoom changes the print/);
 });
 
 
@@ -475,18 +521,18 @@ test("Photo Studio identifies custom manual image adjustments instead of marking
  assert.ok(studio.includes("aria-pressed={look === item.id}"));
 });
 
-test("Photo Studio normalizes the live Number of photos input value on blur",()=>{
+test("Photo Studio normalizes the live Number of copies input value on blur",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const quantityId=studio.indexOf('id="photo-studio-photo-count"');
  const quantityStart=studio.lastIndexOf("<input",quantityId);
  const quantityEnd=studio.indexOf("/>",quantityId);
  const quantityField=quantityStart>=0 && quantityEnd>=0 ? studio.slice(quantityStart,quantityEnd+2) : "";
- assert.ok(quantityField,"Number of photos input must exist by its stable ID.");
+ assert.ok(quantityField,"Number of copies input must exist by its stable ID.");
  assert.match(quantityField,/type="number"/);
- assert.match(quantityField,/aria-label="Number of photos"/);
- assert.ok(quantityField,"Number of photos input must exist by its stable ID.");
+ assert.match(quantityField,/aria-label="Number of copies"/);
+ assert.ok(quantityField,"Number of copies input must exist by its stable ID.");
  assert.match(quantityField,/type="number"/);
- assert.match(quantityField,/aria-label="Number of photos"/);
+ assert.match(quantityField,/aria-label="Number of copies"/);
  assert.match(quantityField,/onBlur=\{event\s*=>/);
  assert.match(quantityField,/event\.currentTarget\.value/);
  assert.doesNotMatch(quantityField,/Number\(copiesInput\)/,
@@ -496,7 +542,7 @@ test("Photo Studio normalizes the live Number of photos input value on blur",()=
 test("Photo Studio prevents apply without a whole-number quantity or any shop photo rates",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.ok(studio.includes("const copiesInputValid = Number.isInteger(parsedCopiesInput) && parsedCopiesInput >= 1 && parsedCopiesInput <= maxCopies"));
- assert.ok(studio.includes("Enter a whole number from 1 to {maxCopies}"));
+ assert.ok(studio.includes("Enter 1–{maxCopies} whole copies."));
  assert.match(studio,/Photo printing is not enabled for any size at this shop/);
  assert.ok(studio.includes("availableSizes.length === 0 || !copiesInputValid"));
 });
@@ -523,8 +569,8 @@ test("Photo Studio browser fixture inspects generated PDF page boxes and rendere
 test("Photo Studio browser acceptance covers every editor tool and failure recovery path",()=>{
  const browser=readFileSync(new URL("./theme-responsive.browser.mjs",import.meta.url),"utf8");
  for(const label of [
-  "Crop","Looks","Background","Sheet","Text","Zoom in","Zoom out","Reset crop","Reset background",
-  "Photo size","Number of photos","Photos per A4 page","Caption font size","Caption colour",
+  "Crop","Looks","Background","Sheet","Text","Preview zoom in","Preview zoom out","Reset preview","Reset look","Reset crop","Reset background",
+  "Photo size","Number of copies","Photos per A4 page","Caption font size","Caption colour",
   "Replacement background","Background tolerance","Pick background from photo","Prepare A4 sheet"
  ]) assert.ok(browser.includes(label),"Missing browser coverage for Photo Studio control: "+label);
  assert.ok(browser.includes("exercisePhotoStudioFeatureMatrix()"));
@@ -600,7 +646,8 @@ test("one processed 300-DPI crop is reused across all copies and every A4 page",
 
  const exporter=studio.slice(saveStart);
  const tileCreate=exporter.indexOf("const sharedPhotoTile=createPhotoTile(");
- const pageLoop=exporter.indexOf("for(let page=0;page<pages;page++)");
+ const pageLoopMatch=/for\s*\(\s*let\s+page\s*=\s*0;\s*page\s*<\s*pages;\s*page\+\+\s*\)/.exec(exporter);
+ const pageLoop=pageLoopMatch?.index??-1;
  const pageDraw=exporter.indexOf("textLayers,sharedPhotoTile)",pageLoop);
  const tileDispose=exporter.indexOf("sharedPhotoTile.width=0",pageLoop);
  assert.ok(tileCreate>=0&&pageLoop>tileCreate&&pageDraw>pageLoop&&tileDispose>pageDraw,
@@ -610,3 +657,34 @@ test("one processed 300-DPI crop is reused across all copies and every A4 page",
 
 
 
+
+
+test("Photo Studio preview zoom is independent from crop zoom and print export",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ assert.ok(studio.includes("const [previewScale,setPreviewScale]=useState(1)"));
+ assert.ok(studio.includes("transform: `scale(${previewScale})`"));
+ assert.ok(studio.includes('aria-label="Preview zoom in"'));
+ assert.ok(studio.includes('id="photo-studio-reset-preview" onClick={() => setPreviewScale(1)}'));
+ assert.ok(studio.includes('id="photo-studio-zoom"'));
+ assert.ok(studio.includes("value={zoom} onChange="));
+ assert.ok(studio.includes("zoom,\n        focusX,\n        focusY,"));
+ assert.ok(studio.includes('id="photo-studio-reset-look"'));
+ assert.ok(studio.includes('onClick={() => selectLook("natural")}'));
+ assert.ok(studio.includes('id="photo-studio-reset-crop"'));
+ assert.ok(studio.includes("setZoom(1); setFocusX(50); setFocusY(50)"));
+});
+
+test("Photo Studio explains copies, physical output, estimated price and true source quality",()=>{
+ const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
+ const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
+ assert.match(studio,/Number of copies/);
+ assert.match(studio,/Same photo, multiple copies/);
+ assert.match(studio,/Multiple copies per A4 sheet/);
+ assert.match(studio,/One print per sheet/);
+ assert.match(studio,/Est\. subtotal/);
+ assert.match(studio,/300-DPI output cannot restore detail missing from the source/);
+ assert.match(studio,/outputPageCount>1/);
+ assert.match(css,/toolRailSectionLabel/);
+ assert.ok(css.includes("max-height:min(30vh,230px)"));
+ assert.match(css,/sourceQualityWarning/);
+});

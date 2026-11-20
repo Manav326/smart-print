@@ -232,6 +232,74 @@ public sealed class DocumentStorageTests
         finally { Directory.Delete(root, recursive: true); }
     }
 
+    [Fact]
+    public async Task StoresQsp2CloudObjectsWithBoundedMemoryAndSupportsSeekableReads()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            using var storage = CreateStorage(root);
+            var tenantId = Guid.NewGuid();
+            var documentId = Guid.NewGuid();
+            await using var input = new MemoryStream(ValidPng, writable: false);
+
+            var stored = await storage.ValidateAndStoreStreamingAsync(
+                tenantId, documentId, "invoice.png", input, ValidPng.LongLength, CancellationToken.None);
+
+            var path = Path.Combine(root, stored.StorageKey.Replace('/', Path.DirectorySeparatorChar));
+            var encrypted = await File.ReadAllBytesAsync(path);
+            Assert.Equal("QSE2", System.Text.Encoding.ASCII.GetString(encrypted, 0, 4));
+            Assert.Equal("QSP2", System.Text.Encoding.ASCII.GetString(encrypted, 65, 4));
+            Assert.NotEqual(ValidPng, encrypted);
+
+            using var document = storage.OpenReadStream(stored.StorageKey, tenantId, documentId, stored.Sha256);
+            Assert.True(document.CanSeek);
+            Assert.Equal(ValidPng.LongLength, document.Length);
+            Assert.Equal(stored.Sha256, ((Qsp2DocumentReadStream)document).Sha256);
+
+            var analysis = DocumentAnalyzer.Analyse(document, ".png");
+            Assert.Equal(stored.Analysis.PageSizesJson, analysis.PageSizesJson);
+            Assert.Equal(0, document.Position);
+
+            document.Position = 3;
+            var actual = new byte[12];
+            var read = document.Read(actual, 0, actual.Length);
+            Assert.Equal(actual.Length, read);
+            Assert.Equal(ValidPng.AsSpan(3, actual.Length).ToArray(), actual);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public async Task Qsp2CloudReaderBindsTenantAndDocumentAndAuthenticatesRecordsOnDemand()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            using var storage = CreateStorage(root);
+            var tenantId = Guid.NewGuid();
+            var documentId = Guid.NewGuid();
+            await using var input = new MemoryStream(ValidPng, writable: false);
+            var stored = await storage.ValidateAndStoreStreamingAsync(
+                tenantId, documentId, "identity.png", input, ValidPng.LongLength, CancellationToken.None);
+
+            Assert.Throws<InvalidDataException>(() =>
+                storage.OpenReadStream(stored.StorageKey, Guid.NewGuid(), documentId, stored.Sha256));
+
+            var path = Path.Combine(root, stored.StorageKey.Replace('/', Path.DirectorySeparatorChar));
+            var encrypted = await File.ReadAllBytesAsync(path);
+            var qsp2RecordCipherOffset = 65 + Qsp2DocumentFormat.HeaderSizeBytes +
+                Qsp2DocumentFormat.HeaderMacSizeBytes + sizeof(uint);
+            encrypted[qsp2RecordCipherOffset] ^= 0x20;
+            await File.WriteAllBytesAsync(path, encrypted);
+
+            using var document = storage.OpenReadStream(stored.StorageKey, tenantId, documentId, stored.Sha256);
+            var buffer = new byte[ValidPng.Length];
+            Assert.Throws<InvalidDataException>(() => document.Read(buffer, 0, buffer.Length));
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
     private static async Task<StoredDocument> StorePngAsync(DocumentStorage storage)
     {
         await using var input = new MemoryStream(ValidPng);

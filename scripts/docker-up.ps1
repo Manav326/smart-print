@@ -108,6 +108,7 @@ if (-not (Test-Path -LiteralPath $envPath)) {
         "PUBLIC_BASE_URL=$defaultBaseUrl",
         "IMAGE_NAMESPACE=$imageNamespace",
         "GITHUB_REPOSITORY=$(Get-RepositoryFullName)",
+        "PUBLIC_DOWNLOAD_BASE_URL=",
         "IMAGE_TAG=latest"
     )
     Write-Host "Created .env with fresh production secrets and repository-derived GHCR and release configuration." -ForegroundColor Green
@@ -142,6 +143,17 @@ if (-not [string]::IsNullOrWhiteSpace($configuredRepository) -and
     throw "GITHUB_REPOSITORY in .env must match the checked-out repository origin ($repositoryFullName)."
 }
 $lines = Set-EnvValue $lines "GITHUB_REPOSITORY" $repositoryFullName
+$downloadBaseUrl = Get-EnvValue $lines "PUBLIC_DOWNLOAD_BASE_URL"
+if (-not [string]::IsNullOrWhiteSpace($downloadBaseUrl)) {
+    $downloadUri = $null
+    if (-not [Uri]::TryCreate($downloadBaseUrl, [UriKind]::Absolute, [ref]$downloadUri) -or
+        $downloadUri.Scheme -ne "https" -or $downloadUri.AbsolutePath -ne "/" -or
+        $downloadUri.Query -or $downloadUri.Fragment -or $downloadUri.UserInfo) {
+        throw "PUBLIC_DOWNLOAD_BASE_URL must be a canonical HTTPS origin without a path, query string, fragment, or credentials."
+    }
+    $downloadBaseUrl = $downloadUri.GetLeftPart([UriPartial]::Authority).TrimEnd("/")
+}
+$lines = Set-EnvValue $lines "PUBLIC_DOWNLOAD_BASE_URL" $downloadBaseUrl
 $uri = $null
 if (-not [Uri]::TryCreate($currentBaseUrl, [UriKind]::Absolute, [ref]$uri) -or
     $uri.Scheme -ne "https" -or $uri.AbsolutePath -ne "/" -or

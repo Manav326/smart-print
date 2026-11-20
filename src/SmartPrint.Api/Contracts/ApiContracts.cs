@@ -36,14 +36,15 @@ public sealed record ShopPricingRequest(
     long Photo4x6Minor = 0,
     long? IdDocumentPriceMinor = null);
 
-public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies, string? PrintKind = "DOCUMENT", string? PhotoSizeCode = null, int? PhotoCount = null, string Orientation = "AUTO", int? PhotosPerPage = null);
+public sealed record PrintQuoteRequest(string ColourMode, string PaperSize, bool IsDuplex, int Copies, string? PrintKind = "DOCUMENT", string? PhotoSizeCode = null, int? PhotoCount = null, string Orientation = "AUTO", int? PhotosPerPage = null, int PagesPerSheet = 1, string PhotoOutputLayout = "A4_SHEET", string PhotoPaperFinish = "PLAIN");
 
 public sealed record UpdatePrintJobSettingsRequest(
     string ColourMode,
     string PaperSize,
     bool IsDuplex,
     int Copies,
-    string Orientation = "AUTO");
+    string Orientation = "AUTO",
+    int? PagesPerSheet = null);
 
 public sealed record TokenResponse(
     string TokenType,
@@ -65,11 +66,20 @@ public sealed record AgentEnrollmentRequest(string Code, string Fingerprint, str
 
 public sealed record AgentEnrollmentResponse(Guid AgentDeviceId, string AgentSecret, DateTimeOffset CreatedUtc);
 
+public sealed record AgentStorageSnapshotRequest(
+    long DocumentCount,
+    long LogicalDocumentBytes,
+    long QueueDiskBytes,
+    long OutputFileCount,
+    long OutputFileBytes,
+    DateTimeOffset MeasuredUtc);
+
 public sealed record AgentHeartbeatRequest(
     string Version,
     string OperatingSystem,
     IReadOnlyList<string>? LocalEndpoints = null,
-    string? DocumentEncryptionPublicKey = null);
+    string? DocumentEncryptionPublicKey = null,
+    AgentStorageSnapshotRequest? StorageSnapshot = null);
 
 public sealed record AgentPrinterDiscoveryRequest(
     string QueueName,
@@ -81,6 +91,8 @@ public sealed record AgentPrinterDiscoveryRequest(
     string CapabilitiesJson = "{}");
 
 public sealed record AgentPrinterSyncRequest(IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
+
+public sealed record AgentPrivateRelayStageUpdateRequest(string Stage);
 
 
 public sealed record ShopPaymentSettingsRequest(
@@ -124,7 +136,10 @@ public sealed record CreateLocalPrintUploadTicketRequest(
     string? PhotoSizeCode = null,
     int? PhotoCount = null,
     int? PhotosPerPage = null,
-    string? DetectedFileExtension = null);
+    string? DetectedFileExtension = null,
+    int PagesPerSheet = 1,
+    string PhotoPaperFinish = "PLAIN",
+    string PhotoOutputLayout = "A4_SHEET");
 
 public sealed record RecordPrintRefundRequest(
     string RefundMethod,
@@ -142,7 +157,10 @@ public sealed record LocalPrintUploadCompletionRequest(
     string FileExtension,
     string MediaType,
     long SizeBytes,
-    string Sha256);
+    string Sha256,
+    long ReceivedBytes = 0,
+    long DurationMilliseconds = 0,
+    int AttemptNumber = 0);
 
 public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);
 
@@ -163,7 +181,8 @@ public sealed record AgentPrivateRelayItem(
     string PrinterName, string QueueName, string FileExtension, string MediaType,
     long SizeBytes, string Sha256, string ColourMode, string PaperSize,
     bool IsDuplex, int Copies, string Orientation, DateTimeOffset ExpiresUtc,
-    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL");
+    string PrintKind = "DOCUMENT", string OutputMode = "PHYSICAL", int PagesPerSheet = 1,
+    string PhotoPaperFinish = "PLAIN", string PhotoOutputLayout = "A4_SHEET", string? PhotoSizeCode = null);
 
 public sealed record AgentPrivateTestOutputRequest(string FileName, long SizeBytes, string Sha256);
 

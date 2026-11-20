@@ -775,10 +775,37 @@ async function exercisePhotoStudioBrowser() {
     await openButton.click();
     const reopened = page.getByRole("dialog", { name: "Photo Studio" });
     await reopened.waitFor({ state: "visible" });
+
+    // The Sheet guidance must remain readable and use the correct theme at every viewport.
+    const sheetHelp = reopened.getByRole("button", { name: "Help: Photo sheet & form details" });
+    await sheetHelp.click();
+    const sheetGuidance = reopened.getByRole("region", { name: "Photo sheet & form details guidance" });
+    assert.equal(await sheetGuidance.isVisible(), true);
+    const helpMetrics = await sheetGuidance.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      const panel = element.closest("[class*='toolPanel']");
+      const panelRect = panel?.getBoundingClientRect();
+      return {
+        width: rect.width,
+        height: rect.height,
+        right: rect.right,
+        panelRight: panelRect?.right ?? 0,
+        background: getComputedStyle(element).backgroundColor,
+        scrollHeight: panel?.scrollHeight ?? 0,
+        clientHeight: panel?.clientHeight ?? 0
+      };
+    });
+    assert.ok(helpMetrics.width > 0 && helpMetrics.height > 0 && helpMetrics.right <= helpMetrics.panelRight + 1,
+      `Photo Studio help overflows the tool panel at ${item.width}x${item.height}: ${JSON.stringify(helpMetrics)}`);
+    assert.equal(helpMetrics.background, item.theme === "dark" ? "rgb(34, 45, 62)" : "rgb(244, 246, 251)",
+      "Contextual help must use the requested light/dark palette.");
+    await sheetHelp.click();
+    assert.equal(await sheetHelp.getAttribute("aria-expanded"), "false");
+
     if (item.mode === "customer") {
       assert.equal(await reopened.locator('input[type="date"]').count(), 0,
         "Customer name and DOB fields must be hidden until explicitly enabled.");
-      await reopened.getByRole("checkbox", { name: /Add name and DOB to each photo/ }).check();
+      await reopened.getByRole("checkbox", { name: /Print name and date of birth below each photo/ }).check();
       await reopened.getByLabel("Name for form (optional)").fill("Browser QA Customer");
       await reopened.getByLabel("Date of birth (optional)").fill("2000-01-02");
       assert.equal(await reopened.locator('input[type="date"]').count(), 1);
@@ -787,13 +814,13 @@ async function exercisePhotoStudioBrowser() {
     const largePhotoBatch = item.mode === "shop" && item.width === 768;
     if (largePhotoBatch) {
       await activatePhotoTool(page, reopened, "Sheet", "Photos per A4 page");
-      const batchQuantity = reopened.getByLabel("Number of photos");
+      const batchQuantity = reopened.getByLabel("Number of copies");
       await batchQuantity.waitFor({ state: "visible" });
-      assert.equal(await batchQuantity.count(),1,"Shop Photo Studio must show one number-of-photos input in Sheet settings.");
+      assert.equal(await batchQuantity.count(),1,"Shop Photo Studio must show one copies input in Sheet settings.");
       await batchQuantity.fill("50");
       await batchQuantity.press("Tab");
       await page.waitForFunction(() => {
-        const input = document.querySelector('[role="dialog"] input[aria-label="Number of photos"]');
+        const input = document.querySelector('[role="dialog"] input[aria-label="Number of copies"]');
         const rows = Array.from(document.querySelectorAll("[class*='sheetSummary'] > div"));
         const pages = rows.find(row => row.textContent?.includes("A4 pages in this job"))?.querySelector("strong")?.textContent;
         return input instanceof HTMLInputElement && input.value === "50" && pages === "2";
@@ -809,7 +836,7 @@ async function exercisePhotoStudioBrowser() {
       for (let pageIndex = 0; pageIndex < 5; pageIndex += 1)
         await reopened.getByRole("button", { name: "Next A4 page" }).click();
       assert.equal(await reopened.getByText("Page 6 of 6").count(), 1);
-      assert.match(await reopened.locator("[class*='canvasFooter']").innerText(), /Page 6: 5 photos/);
+      assert.match(await reopened.locator("[class*='canvasFooter']").innerText(), /Page 6: 5 copies/);
     }
 
     const actionLabel = item.mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
@@ -821,7 +848,7 @@ async function exercisePhotoStudioBrowser() {
     const output = JSON.parse(await page.locator("#photo-studio-result").innerText());
     assert.equal(output.mode, item.mode);
     assert.equal(output.mediaType, "application/pdf");
-    assert.equal(output.photoCount, largePhotoBatch ? 50 : 8);
+    assert.equal(output.photoCount, largePhotoBatch ? 50 : 1);
     assert.equal(output.photosPerPage, largePhotoBatch ? 9 : 25);
     assert.equal(output.previewPageCount, output.pageCount, "Every PDF page must have a matching inspected source raster.");
     assert.ok(output.embeddedPreviewPages.length === output.pageCount && output.embeddedPreviewPages.every(Boolean),
@@ -948,8 +975,46 @@ async function exercisePhotoStudioFeatureMatrix() {
     const preview = dialog.locator("canvas");
     await preview.waitFor({ state: "visible" });
 
-    // Crop, framing, focus boundaries and reset.
+    // Crop help opens as a readable panel, closes on Escape, and leaves the editor open.
     await dialog.getByRole("button", { name: "Crop", exact: true }).click();
+    const cropHelp = dialog.getByRole("button", { name: "Help: Crop & position" });
+    await cropHelp.click();
+    assert.equal(await cropHelp.getAttribute("aria-expanded"), "true");
+    const cropGuidance = dialog.getByRole("region", { name: "Crop & position guidance" });
+    assert.match(await cropGuidance.innerText(), /Drag a photo to reframe it/);
+    await page.keyboard.press("Escape");
+    assert.equal(await cropHelp.getAttribute("aria-expanded"), "false",
+      "Escape closes the help panel before the Photo Studio dialog.");
+    assert.equal(await dialog.isVisible(), true, "Dismissing help must leave Photo Studio open.");
+
+    // Each tool keeps its guidance in the same accessible panel rather than a permanent paragraph.
+    const helpCases = [
+      { tool: "Looks", title: "Photo look", expected: /Balanced, true-to-life colour/ },
+      { tool: "Text", title: "Text layers", expected: /Bold text/ },
+      { tool: "Background", title: "Photo background", expected: /colour-key tool, not AI subject recognition/ },
+      { tool: "Sheet", title: "Photo sheet & form details", expected: /printer compatibility before printing/ }
+    ];
+    for (const item of helpCases) {
+      await dialog.getByRole("button", { name: item.tool, exact: true }).click();
+      const trigger = dialog.getByRole("button", { name: "Help: " + item.title });
+      await trigger.click();
+      const guidance = dialog.getByRole("region", { name: item.title + " guidance" });
+      assert.match(await guidance.innerText(), item.expected);
+      const bounds = await guidance.boundingBox();
+      assert.ok(bounds && bounds.height > 0 && bounds.width > 0, item.title + " help must render.");
+      await trigger.click();
+      assert.equal(await trigger.getAttribute("aria-expanded"), "false");
+    }
+    await dialog.getByRole("button", { name: "Crop", exact: true }).click();
+
+    // Preview magnification changes the editor view, not the saved print crop.
+    const cropZoomInput = dialog.locator("#photo-studio-zoom");
+    await dialog.getByRole("button", { name: "Preview zoom in" }).click();
+    assert.equal(await cropZoomInput.inputValue(), "1");
+    assert.equal(await dialog.locator('[data-testid="photo-studio-preview-zoom"]').innerText(), "1.1×");
+    await dialog.getByRole("button", { name: "Reset preview" }).click();
+    assert.equal(await dialog.locator('[data-testid="photo-studio-preview-zoom"]').innerText(), "1.0×");
+
     let pixels = await readPhotoCanvasPixels(page);
     await setPhotoRange(dialog, "Zoom", 3);
     assert.equal(await dialog.getByText(/This crop may look soft at the selected size/).count(), 1,
@@ -966,6 +1031,26 @@ async function exercisePhotoStudioFeatureMatrix() {
     assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Zoom\b/ }).locator('input[type="range"]').inputValue()), 1);
     assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Horizontal position\b/ }).locator('input[type="range"]').inputValue()), 50);
     assert.equal(Number(await dialog.locator("label").filter({ hasText: /^Vertical position\b/ }).locator('input[type="range"]').inputValue()), 50);
+
+    // Direct manipulation of a photo tile must update the same focus controls used by export.
+    await setPhotoRange(dialog, "Zoom", 2);
+    const cropBounds = await preview.boundingBox();
+    assert.ok(cropBounds, "Photo preview must be measurable for direct framing.");
+    const beforeDragPixels = await readPhotoCanvasPixels(page);
+    const dragStartX = cropBounds.x + cropBounds.width * 16 / 210;
+    const dragStartY = cropBounds.y + cropBounds.height * 20 / 297;
+    await page.mouse.move(dragStartX, dragStartY);
+    await page.mouse.down();
+    await page.mouse.move(dragStartX + 2, dragStartY + 12, { steps: 5 });
+    await page.mouse.up();
+    await page.waitForFunction(() => {
+      const input = document.querySelector("#photo-studio-vertical-position");
+      return input instanceof HTMLInputElement && Number(input.value) !== 50;
+    });
+    assert.notDeepEqual(await readPhotoCanvasPixels(page), beforeDragPixels,
+      "Dragging a photo must reframe the live preview, not just move a UI overlay.");
+    await dialog.getByRole("button", { name: "Reset crop" }).click();
+    assert.equal(Number(await dialog.locator("#photo-studio-vertical-position").inputValue()), 50);
 
     // Named looks, monochrome output and custom manual adjustments.
     await dialog.getByRole("button", { name: "Looks", exact: true }).click();
@@ -992,13 +1077,13 @@ async function exercisePhotoStudioFeatureMatrix() {
     await setPhotoRange(dialog, "Contrast", 140);
     await setPhotoRange(dialog, "Colour", 160);
     pixels = await readPhotoCanvasPixels(page);
-    await dialog.getByRole("button", { name: "Reset", exact: true }).click();
+    await dialog.getByRole("button", { name: "Reset look", exact: true }).click();
     assert.equal(await natural.getAttribute("aria-pressed"), "true");
     assert.notDeepEqual(await readPhotoCanvasPixels(page), pixels);
-    await dialog.getByRole("button", { name: "Zoom in" }).click();
-    assert.equal(await dialog.getByText("1.1×", { exact: true }).innerText(), "1.1×");
-    await dialog.getByRole("button", { name: "Zoom out" }).click();
-    assert.equal(await dialog.getByText("1.0×", { exact: true }).innerText(), "1.0×");
+    await dialog.getByRole("button", { name: "Preview zoom in" }).click();
+    assert.equal(await dialog.locator("[data-testid=\"photo-studio-preview-zoom\"]").innerText(), "1.1×");
+    await dialog.getByRole("button", { name: "Preview zoom out" }).click();
+    assert.equal(await dialog.locator("[data-testid=\"photo-studio-preview-zoom\"]").innerText(), "1.0×");
 
     // Edge-only sampled background replacement. A blank A4 margin must not be sampleable.
     await dialog.getByRole("button", { name: "Background", exact: true }).click();
@@ -1032,7 +1117,7 @@ async function exercisePhotoStudioFeatureMatrix() {
 
     // Optional form details, length/date constraints, font size and text colour.
     await dialog.getByRole("button", { name: "Sheet", exact: true }).click();
-    const captionToggle = dialog.getByRole("checkbox", { name: /Add name and DOB to each photo/ });
+    const captionToggle = dialog.getByRole("checkbox", { name: /Print name and date of birth below each photo/ });
     assert.equal(await captionToggle.isChecked(), false, "Captions must be disabled by default.");
     await captionToggle.check();
     const nameInput = dialog.getByLabel("Name for form (optional)");
@@ -1119,13 +1204,13 @@ async function exercisePhotoStudioFeatureMatrix() {
     await sizeSelect.selectOption("35x45");
     const density = dialog.getByLabel("Photos per A4 page");
     await density.selectOption("1");
-    assert.equal(await readSummary("A4 pages in this job"),"8");
+    assert.equal(await readSummary("A4 pages in this job"),"1");
     await density.selectOption("25");
     assert.equal(await readSummary("A4 pages in this job"),"1");
 
     // Quantity boundaries and explicit rejection of fractions.
     await dialog.getByRole("button", { name: "Sheet", exact: true }).click();
-    const count = dialog.getByLabel("Number of photos");
+    const count = dialog.getByLabel("Number of copies");
     await count.waitFor({ state: "visible" });
     assert.equal(await count.count(),1,"Photo Studio must expose one quantity input.");
     await count.fill("101");
@@ -1141,7 +1226,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     // specific stepMismatch blur behaviour for input[type=number].
     await count.fill("1.5");
     assert.equal(await count.inputValue(),"1.5");
-    assert.equal(await dialog.getByText(/Enter a whole number from 1 to 100/).count(),1);
+    assert.equal(await dialog.getByText(/Enter 1–100 whole copies/).count(),1);
     assert.equal(await dialog.getByRole("button",{name:"Prepare A4 sheet"}).isDisabled(),true);
 
     // Manual density, ceil(N/q), navigation boundaries and partial last page.
@@ -1156,7 +1241,7 @@ async function exercisePhotoStudioFeatureMatrix() {
     for(let index=0; index<5; index+=1) await nextPage.click();
     assert.equal(await dialog.getByText("Page 6 of 6",{exact:true}).count(),1);
     assert.equal(await nextPage.isDisabled(),true);
-    assert.match(await dialog.locator("[class*='canvasFooter']").innerText(),/Page 6: 5 photos/);
+    assert.match(await dialog.locator("[class*='canvasFooter']").innerText(),/Page 6: 5 copies/);
     await previousPage.click();
     assert.equal(await dialog.getByText("Page 5 of 6",{exact:true}).count(),1);
     await count.fill("8");
@@ -1226,7 +1311,7 @@ async function exercisePhotoStudioFailurePaths() {
       await apply.click();
       await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.textContent?.includes('"mediaType":"application/pdf"'));
       const result = JSON.parse(await page.locator("#photo-studio-result").innerText());
-      assert.equal(result.photoCount, 8);
+      assert.equal(result.photoCount, 1);
       assert.equal(result.pageCount, 1);
       assert.match(result.fileName, /^photo-studio-qa-35x45-photos\.pdf$/);
     } finally {

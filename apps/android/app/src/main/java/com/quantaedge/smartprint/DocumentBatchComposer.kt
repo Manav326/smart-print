@@ -1,5 +1,6 @@
 package com.quantaedge.smartprint
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -10,23 +11,61 @@ import android.graphics.RectF
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.io.MemoryUsageSetting
+import com.tom_roush.pdfbox.multipdf.PDFMergerUtility
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 
 data class PdfPageEdit(val sourceIndex: Int, val rotationDegrees: Int = 0)
 
+/**
+ * Prepares local print PDFs without rasterizing existing PDF pages.
+ *
+ * PDF sources are merged as PDF page objects (page content, fonts and vector
+ * resources remain intact). JPEGs are embedded in their original compressed
+ * form; PNGs are downsampled only when their longest edge exceeds the bounded
+ * image size. All PDFBox scratch data uses temporary files so large batches do
+ * not need to be materialized in heap memory.
+ */
 object DocumentBatchComposer {
-    const val MAX_SOURCE_BYTES = 100L * 1024L * 1024L
+    const val MAX_SOURCE_BYTES = 50L * 1024L * 1024L
+    private const val MAX_EDIT_SOURCE_BYTES = 100L * 1024L * 1024L
     const val MAX_PRINT_PDF_BYTES = UploadLimits.MAX_FILE_BYTES
     const val MAX_PAGES = 500
     private const val MAX_RENDER_EDGE = 2000
+    private const val MAX_COMBINE_IMAGE_EDGE = 2400
+    private const val MAX_COMBINE_IMAGE_PIXELS = 50_000_000L
     private const val PAGE_WIDTH = 595
     private const val PAGE_HEIGHT = 842
     private const val PAGE_MARGIN = 20f
 
+    @Volatile
+    private var pdfBoxInitialized = false
+
+    private fun ensurePdfBoxInitialized(context: Context) {
+        if (pdfBoxInitialized) return
+        synchronized(this) {
+            if (!pdfBoxInitialized) {
+                PDFBoxResourceLoader.init(context.applicationContext)
+                pdfBoxInitialized = true
+            }
+        }
+    }
+
     fun pageEdits(source: File): List<PdfPageEdit> {
         require(source.isFile && DocumentNamePolicy.isPdf(source)) {
             "Choose a saved PDF document."
+        }
+        require(source.length() in 1..MAX_EDIT_SOURCE_BYTES) {
+            "The source PDF must be no larger than 100 MB."
         }
         ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
             PdfRenderer(descriptor).use { renderer ->
@@ -58,58 +97,117 @@ object DocumentBatchComposer {
     }
 
     /**
-     * Makes one ordered print-ready PDF from PDF and image sources. PDF page order is
-     * preserved; images become pages. Original files are never modified or deleted.
+     * Merges 2–20 source files in their selected order. Combined source bytes are
+     * checked before parsing; a batch over 50 MiB is rejected with an explicit
+     * message. PDFs stay vector PDFs instead of expanding into page-sized bitmaps.
      */
-    fun compose(files: List<File>, output: File): Int {
+    fun compose(context: Context, files: List<File>, output: File): Int {
         validateSources(files)
-        val document = PdfDocument()
-        var pageNumber = 0
+        ensurePdfBoxInitialized(context)
+
+        val totalPages = files.sumOf { file ->
+            if (DocumentNamePolicy.mimeType(file) == "application/pdf") pdfPageCount(file) else 1
+        }
+        require(totalPages in 1..MAX_PAGES) {
+            "A combined print PDF can contain up to $MAX_PAGES pages."
+        }
+
+        val generatedImagePdfs = mutableListOf<File>()
         try {
+            val merger = PDFMergerUtility()
+            merger.setDocumentMergeMode(PDFMergerUtility.DocumentMergeMode.OPTIMIZE_RESOURCES_MODE)
+
             files.forEach { file ->
                 when (DocumentNamePolicy.mimeType(file)) {
-                    "application/pdf" -> {
-                        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-                            PdfRenderer(descriptor).use { renderer ->
-                                require(renderer.pageCount > 0 && pageNumber + renderer.pageCount <= MAX_PAGES) {
-                                    "A print batch can contain up to $MAX_PAGES pages."
-                                }
-                                for (index in 0 until renderer.pageCount) {
-                                    renderer.openPage(index).use { page ->
-                                        val size = renderDimensions(page.width, page.height)
-                                        val bitmap = renderPdfPage(page, size.first, size.second)
-                                        try {
-                                            appendPage(document, bitmap, ++pageNumber)
-                                        } finally {
-                                            bitmap.recycle()
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    "application/pdf" -> merger.addSource(file)
                     "image/jpeg", "image/png" -> {
-                        val bitmap = decodeImage(file)
-                        try {
-                            require(pageNumber < MAX_PAGES) {
-                                "A print batch can contain up to $MAX_PAGES pages."
-                            }
-                            appendPage(document, bitmap, ++pageNumber)
-                        } finally {
-                            bitmap.recycle()
-                        }
+                        val imagePdf = createImagePdf(context, file)
+                        generatedImagePdfs.add(imagePdf)
+                        merger.addSource(imagePdf)
                     }
                     else -> error("Unsupported batch file: ${file.name}. Use PDF, JPG, JPEG or PNG.")
                 }
             }
-            require(pageNumber > 0) { "The selected files contain no printable pages." }
-            writeDocument(document, output)
-            return pageNumber
+
+            output.parentFile?.let {
+                check(it.exists() || it.mkdirs()) { "The PDF output folder could not be created." }
+            }
+            merger.destinationFileName = output.absolutePath
+            merger.mergeDocuments(MemoryUsageSetting.setupTempFileOnly())
+
+            val outputBytes = output.length()
+            require(outputBytes in 1..MAX_PRINT_PDF_BYTES) {
+                "The combined PDF output is ${formatMegabytes(outputBytes)}; the maximum output size is 50 MB. Reduce image resolution or split the batch."
+            }
+            return totalPages
         } catch (error: Exception) {
             output.delete()
             throw error
         } finally {
-            document.close()
+            generatedImagePdfs.forEach { it.delete() }
+        }
+    }
+
+    /**
+     * Applies display rotation metadata to selected PDF pages without rasterizing
+     * page contents. Text, vector paths, fonts and embedded images remain intact.
+     */
+    fun rotatePages(
+        context: Context,
+        source: File,
+        rotations: Map<Int, Int>,
+        output: File
+    ): Int {
+        require(source.isFile && DocumentNamePolicy.isPdf(source)) {
+            "Choose a saved PDF document."
+        }
+        require(source.length() > 0L) {
+            "The source PDF is empty."
+        }
+        require(rotations.isNotEmpty() && rotations.size <= MAX_PAGES) {
+            "Select at least one rotated page."
+        }
+        require(rotations.all { (index, degrees) ->
+            index >= 0 && degrees in setOf(90, 180, 270)
+        }) {
+            "A page rotation contains an invalid page or angle."
+        }
+
+        ensurePdfBoxInitialized(context)
+        output.parentFile?.let {
+            check(it.exists() || it.mkdirs()) { "The rotated PDF output folder could not be created." }
+        }
+        val outputDirectory = output.parentFile ?: error("The rotated PDF output folder is unavailable.")
+        val scratchEstimate = source.length().coerceAtMost(Long.MAX_VALUE / 2) * 2L
+        require(outputDirectory.usableSpace > scratchEstimate + 16L * 1024L * 1024L) {
+            "There is not enough free storage to create a high-quality rotated PDF. Free space and try again."
+        }
+
+        try {
+            PDDocument.load(source, MemoryUsageSetting.setupTempFileOnly()).use { document ->
+                require(document.numberOfPages in 1..MAX_PAGES) {
+                    "The PDF must contain between 1 and $MAX_PAGES pages."
+                }
+                require(rotations.keys.all { it in 0 until document.numberOfPages }) {
+                    "The PDF changed while it was being edited. Reopen it and try again."
+                }
+                rotations.forEach { (index, degrees) ->
+                    val page = document.getPage(index)
+                    page.rotation = ((page.rotation + degrees) % 360 + 360) % 360
+                }
+                // The operation changes page rotation metadata only. It does not
+                // render or re-encode PDF text, vector paths, fonts or embedded images.
+                // PDFBox uses disk-backed scratch files; free storage, not a print
+                // batch size ceiling, bounds this derived-document operation.
+                document.save(output)
+                require(output.isFile && output.length() > 0L && DocumentNamePolicy.isPdf(output)) {
+                    "The rotated PDF could not be validated."
+                }
+                return document.numberOfPages
+            }
+        } catch (error: Exception) {
+            output.delete()
+            throw error
         }
     }
 
@@ -121,8 +219,8 @@ object DocumentBatchComposer {
         require(source.isFile && DocumentNamePolicy.isPdf(source)) {
             "Choose a saved PDF document."
         }
-        require(source.length() in 1..MAX_SOURCE_BYTES) {
-            "The source PDF must be between 1 byte and 100 MB."
+        require(source.length() in 1..MAX_EDIT_SOURCE_BYTES) {
+            "The source PDF must be no larger than 100 MB."
         }
         require(edits.isNotEmpty() && edits.size <= MAX_PAGES) {
             "Keep between 1 and $MAX_PAGES pages in the edited PDF."
@@ -174,10 +272,118 @@ object DocumentBatchComposer {
         require(files.all(DocumentNamePolicy::isBatchSource)) {
             "Print batches support PDF, JPG, JPEG and PNG files."
         }
-        require(files.sumOf { it.length() } in 1..MAX_SOURCE_BYTES) {
-            "The selected files must total no more than 100 MB."
+        require(files.all { it.length() in 1..MAX_PRINT_PDF_BYTES }) {
+            "Each selected file must be no larger than 50 MB."
+        }
+        val totalBytes = files.sumOf { it.length() }
+        require(totalBytes in 1..MAX_SOURCE_BYTES) {
+            "The selected files total ${formatMegabytes(totalBytes)}. The combined source limit is 50 MB. Remove files or choose smaller files to continue."
         }
     }
+
+    private fun pdfPageCount(file: File): Int =
+        ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+            PdfRenderer(descriptor).use { renderer ->
+                require(renderer.pageCount > 0) { "The PDF ${file.name} has no pages." }
+                renderer.pageCount
+            }
+        }
+
+    private fun createImagePdf(context: Context, imageFile: File): File {
+        val temporaryPdf = File.createTempFile("smartprint-combine-image-", ".pdf", context.cacheDir)
+        try {
+            PDDocument(MemoryUsageSetting.setupTempFileOnly()).use { document ->
+                val image = when (DocumentNamePolicy.mimeType(imageFile)) {
+                    "image/jpeg" -> {
+                        validateJpegForCombine(imageFile)
+                        PDImageXObject.createFromFileByContent(imageFile, document)
+                    }
+                    "image/png" -> {
+                        val bounds = readCombineImageBounds(imageFile)
+                        require(bounds.outWidth.toLong() * bounds.outHeight.toLong() <= MAX_COMBINE_IMAGE_PIXELS) {
+                            "The image ${imageFile.name} exceeds the 50-megapixel image limit."
+                        }
+                        var sample = 1
+                        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > MAX_COMBINE_IMAGE_EDGE) {
+                            sample *= 2
+                        }
+                        val bitmap = BitmapFactory.decodeFile(
+                            imageFile.absolutePath,
+                            BitmapFactory.Options().apply {
+                                inSampleSize = sample
+                                inPreferredConfig = Bitmap.Config.ARGB_8888
+                            }
+                        ) ?: error("Could not decode ${imageFile.name}.")
+                        try {
+                            LosslessFactory.createFromImage(document, bitmap)
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    }
+                    else -> error("Unsupported image: ${imageFile.name}.")
+                }
+
+                val landscape = image.width > image.height
+                val pageWidth = if (landscape) PAGE_HEIGHT.toFloat() else PAGE_WIDTH.toFloat()
+                val pageHeight = if (landscape) PAGE_WIDTH.toFloat() else PAGE_HEIGHT.toFloat()
+                val page = PDPage(PDRectangle(pageWidth, pageHeight))
+                document.addPage(page)
+
+                val availableWidth = pageWidth - PAGE_MARGIN * 2
+                val availableHeight = pageHeight - PAGE_MARGIN * 2
+                val scale = minOf(
+                    availableWidth / image.width.toFloat(),
+                    availableHeight / image.height.toFloat()
+                )
+                val width = image.width * scale
+                val height = image.height * scale
+                val left = (pageWidth - width) / 2f
+                val bottom = (pageHeight - height) / 2f
+                PDPageContentStream(document, page).use { stream ->
+                    stream.drawImage(image, left, bottom, width, height)
+                }
+                document.save(temporaryPdf)
+            }
+            return temporaryPdf
+        } catch (error: Exception) {
+            temporaryPdf.delete()
+            throw error
+        }
+    }
+
+    private fun readCombineImageBounds(imageFile: File): BitmapFactory.Options {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(imageFile.absolutePath, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
+            "Could not read image dimensions for ${imageFile.name}."
+        }
+        return bounds
+    }
+
+    /**
+     * JPEG bytes remain compressed and are embedded without re-encoding, but a
+     * small sampled decode first validates that the source is decodable and
+     * enforces the same pixel ceiling as the upload analyzer.
+     */
+    private fun validateJpegForCombine(imageFile: File) {
+        val bounds = readCombineImageBounds(imageFile)
+        require(bounds.outWidth.toLong() * bounds.outHeight.toLong() <= MAX_COMBINE_IMAGE_PIXELS) {
+            "The image ${imageFile.name} exceeds the 50-megapixel image limit."
+        }
+        var sample = 1
+        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > 256) sample *= 2
+        val validationBitmap = BitmapFactory.decodeFile(
+            imageFile.absolutePath,
+            BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+        ) ?: error("Could not decode ${imageFile.name}.")
+        validationBitmap.recycle()
+    }
+
+    private fun formatMegabytes(bytes: Long): String =
+        String.format(Locale.ROOT, "%.1f MB", bytes.toDouble() / (1024.0 * 1024.0))
 
     private fun renderDimensions(width: Int, height: Int): Pair<Int, Int> {
         val scale = MAX_RENDER_EDGE.toFloat() / maxOf(width, height).coerceAtLeast(1)
@@ -198,22 +404,6 @@ object DocumentBatchComposer {
             bitmap.recycle()
             throw error
         }
-    }
-
-    private fun decodeImage(file: File): Bitmap {
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, bounds)
-        require(bounds.outWidth > 0 && bounds.outHeight > 0) {
-            "Could not read ${file.name}."
-        }
-        var sample = 1
-        while (maxOf(bounds.outWidth / sample, bounds.outHeight / sample) > MAX_RENDER_EDGE) {
-            sample *= 2
-        }
-        return BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply {
-            inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }) ?: error("Could not decode ${file.name}.")
     }
 
     private fun rotate(bitmap: Bitmap, degrees: Int): Bitmap {
@@ -256,7 +446,7 @@ object DocumentBatchComposer {
             stream.fd.sync()
         }
         require(output.length() in 1..MAX_PRINT_PDF_BYTES) {
-            "The prepared PDF exceeds the current ${MAX_PRINT_PDF_BYTES / (1024L * 1024L)} MB per-document print limit. Remove pages or prepare a smaller batch."
+            "The prepared PDF exceeds the 50 MB per-document print limit. Remove pages or prepare a smaller batch."
         }
     }
 }

@@ -352,11 +352,12 @@ class MainActivityInstrumentedTest {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
                     val viewer = SmartPrintDocumentViewer(
-                        activity,
-                        firstImage,
-                        listOf(firstImage, secondImage),
-                        0
-                    ) {}
+                        context = activity,
+                        startFile = firstImage,
+                        imageSiblings = listOf(firstImage, secondImage),
+                        startPosition = 0,
+                        onNavigateImage = {}
+                    )
                     try {
                         val counterField = SmartPrintDocumentViewer::class.java
                             .getDeclaredField("pageCounter")
@@ -1737,6 +1738,11 @@ class QrScannerPermissionInstrumentedTest {
         val store = LocalDocumentStore(context.filesDir)
         val suffix = System.currentTimeMillis().toString()
         val source = store.createFolder("", "bulk-move-source-$suffix")
+        // Deliberately create enough destinations to require the option list to
+        // scroll, including the target folder near the end of the list.
+        val spacerFolders = (1..18).map { index ->
+            store.createFolder("", "bulk-move-spacer-$suffix-$index")
+        }
         val destination = store.createFolder("", "bulk-move-target-$suffix")
         val first = store.importFile(ByteArrayInputStream(byteArrayOf(1, 2, 3)), "first.pdf", store.pathOf(source))
         val second = store.importFile(ByteArrayInputStream(byteArrayOf(4, 5, 6)), "second.pdf", store.pathOf(source))
@@ -1756,18 +1762,19 @@ class QrScannerPermissionInstrumentedTest {
                         .apply { isAccessible = true }.invoke(activity)
                 }
                 onView(withText("Move")).perform(click())
-                onView(withText("My Files  /  ${destination.name}")).perform(click())
+                val destinationLabel = "My Files  /  ${destination.name}"
+                onView(withText(destinationLabel)).perform(scrollTo(), click())
                 assertTrue(File(destination, first.name).isFile)
                 assertTrue(File(destination, second.name).isFile)
                 assertFalse(first.exists())
                 assertFalse(second.exists())
             }
         } finally {
+            spacerFolders.forEach { store.delete(it) }
             store.delete(source)
             store.delete(destination)
         }
     }
-
 
     @Test
     fun orientationAndWindowSizeChangesKeepTheActiveWebViewAndCurrentScreen() {

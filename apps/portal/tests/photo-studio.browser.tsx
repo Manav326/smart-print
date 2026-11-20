@@ -125,7 +125,7 @@ function PhotoStudioBrowserFixture() {
       if (!(target instanceof HTMLInputElement)) return;
       const dialog = document.querySelector('[role="dialog"]');
       const label = Array.from(dialog?.querySelectorAll("label") ?? [])
-        .find(item => item.textContent?.trim().startsWith("Number of photos"));
+        .find(item => item.textContent?.trim().startsWith("Number of copies"));
       if (label?.contains(target)) setDraftPhotoCount(target.value);
     };
     // Let React's delegated onChange handler update the controlled field first.

@@ -19,6 +19,9 @@ permissions:
 
 env:
   SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL }}
+  PUBLIC_DOWNLOAD_BASE_URL: ${{ vars.PUBLIC_DOWNLOAD_BASE_URL }}
+  CLOUDFLARE_R2_ACCOUNT_ID: ${{ vars.CLOUDFLARE_R2_ACCOUNT_ID }}
+  CLOUDFLARE_R2_BUCKET: ${{ vars.CLOUDFLARE_R2_BUCKET }}
   RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
 
 jobs:
@@ -345,6 +348,223 @@ jobs:
           overwrite_files: false
           fail_on_unmatched_files: true
           files: artifacts/*
+      - name: Publish immutable release binaries to Cloudflare R2 when configured
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: "true"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          any_r2_setting=0
+          for value in \
+            "$CLOUDFLARE_R2_ACCOUNT_ID" \
+            "$CLOUDFLARE_R2_BUCKET" \
+            "$PUBLIC_DOWNLOAD_BASE_URL" \
+            "$AWS_ACCESS_KEY_ID" \
+            "$AWS_SECRET_ACCESS_KEY"; do
+            if [[ -n "$value" ]]; then any_r2_setting=1; fi
+          done
+
+          if (( any_r2_setting == 0 )); then
+            echo "Cloudflare R2 is not configured; the verified GitHub release remains the download origin."
+            exit 0
+          fi
+
+          required=(
+            CLOUDFLARE_R2_ACCOUNT_ID
+            CLOUDFLARE_R2_BUCKET
+            PUBLIC_DOWNLOAD_BASE_URL
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::R2 publishing is partially configured; missing $name."
+              exit 1
+            fi
+          done
+
+          if [[ ! "$CLOUDFLARE_R2_ACCOUNT_ID" =~ ^[[:xdigit:]]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_R2_ACCOUNT_ID must be a 32-character Cloudflare account ID."
+            exit 1
+          fi
+
+          export R2_PUBLIC_ORIGIN
+          R2_PUBLIC_ORIGIN="$(python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+
+          value = os.environ["PUBLIC_DOWNLOAD_BASE_URL"].strip()
+          parsed = urlsplit(value)
+          try:
+              port = parsed.port
+          except ValueError as error:
+              raise SystemExit("PUBLIC_DOWNLOAD_BASE_URL has an invalid port.") from error
+          if (
+              parsed.scheme != "https"
+              or not parsed.hostname
+              or (port is not None and port != 443)
+              or parsed.username
+              or parsed.password
+              or parsed.path not in ("", "/")
+              or parsed.query
+              or parsed.fragment
+              or parsed.hostname.lower().endswith(".r2.dev")
+          ):
+              raise SystemExit(
+                  "PUBLIC_DOWNLOAD_BASE_URL must be an HTTPS R2 custom-domain origin "
+                  "(not r2.dev), without credentials, path, query or fragment."
+              )
+          print(f"{parsed.scheme}://{parsed.netloc}")
+          PY
+          )"
+          export SMARTPRINT_PORTAL_ORIGIN
+          SMARTPRINT_PORTAL_ORIGIN="$(python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          value = os.environ["SMARTPRINT_PUBLIC_BASE_URL"].strip()
+          parsed = urlsplit(value)
+          print(f"{parsed.scheme}://{parsed.netloc}")
+          PY
+          )"
+
+          if ! command -v aws >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes awscli
+          fi
+          aws --version
+
+          endpoint="https://$CLOUDFLARE_R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          object_prefix="$RELEASE_TAG"
+
+          # CORS is configured once in the dedicated bucket's Cloudflare
+          # dashboard. The GitHub token intentionally has object-only scope;
+          # the public-domain probe below verifies the configured policy.
+
+          upload_binary() {
+            local filename="$1"
+            local digest
+            digest="$(awk -v wanted="$filename" '$2 == wanted || $2 == "*" wanted { print $1; exit }' artifacts/SHA256SUMS.txt)"
+            if [[ ! "$digest" =~ ^[[:xdigit:]]{64}$ ]]; then
+              echo "::error::No verified SHA-256 entry found for $filename."
+              return 1
+            fi
+            aws s3 cp "artifacts/$filename" "s3://$CLOUDFLARE_R2_BUCKET/$object_prefix/$filename" \
+              --endpoint-url "$endpoint" \
+              --region auto \
+              --only-show-errors \
+              --content-type "application/octet-stream" \
+              --content-disposition "attachment; filename=\"$filename\"" \
+              --cache-control "public, max-age=31536000, immutable" \
+              --metadata "sha256=$digest"
+          }
+
+          upload_binary "SmartPrint-Windows-Setup.exe"
+          if [[ "$ANDROID_RELEASE_AVAILABLE" == "true" ]]; then
+            upload_binary "SmartPrint-Android.apk"
+          fi
+          aws s3 cp artifacts/SHA256SUMS.txt "s3://$CLOUDFLARE_R2_BUCKET/$object_prefix/SHA256SUMS.txt" \
+            --endpoint-url "$endpoint" \
+            --region auto \
+            --only-show-errors \
+            --content-type "text/plain; charset=utf-8" \
+            --content-disposition 'attachment; filename="SHA256SUMS.txt"' \
+            --cache-control "public, max-age=31536000, immutable"
+
+          # Verify stored object size, cache policy and SHA-256 metadata before
+          # publishing a stable release or exposing the version URL to customers.
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import tempfile
+          from pathlib import Path
+
+          bucket = os.environ["CLOUDFLARE_R2_BUCKET"]
+          prefix = os.environ["RELEASE_TAG"]
+          endpoint = f"https://{os.environ['CLOUDFLARE_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
+          artifacts = Path("artifacts")
+          files = ["SmartPrint-Windows-Setup.exe"]
+          if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
+              files.append("SmartPrint-Android.apk")
+
+          def sha256_file(path: Path) -> str:
+              with path.open("rb") as stream:
+                  return hashlib.file_digest(stream, "sha256").hexdigest()
+
+          with tempfile.TemporaryDirectory(prefix="smartprint-r2-verify-") as temporary:
+              for filename in files:
+                  source = artifacts / filename
+                  digest = sha256_file(source)
+                  result = subprocess.run([
+                      "aws", "s3api", "head-object",
+                      "--bucket", bucket,
+                      "--key", f"{prefix}/{filename}",
+                      "--endpoint-url", endpoint,
+                      "--region", "auto",
+                      "--output", "json",
+                  ], check=True, capture_output=True, text=True)
+                  metadata = json.loads(result.stdout)
+                  if metadata.get("ContentLength") != source.stat().st_size:
+                      raise SystemExit(f"R2 object size mismatch for {filename}.")
+                  if metadata.get("Metadata", {}).get("sha256") != digest:
+                      raise SystemExit(f"R2 object SHA-256 metadata mismatch for {filename}.")
+                  cache_control = metadata.get("CacheControl", "")
+                  if "immutable" not in cache_control or "31536000" not in cache_control:
+                      raise SystemExit(f"R2 object cache policy is incorrect for {filename}.")
+
+                  # Verify the stored object bytes, not just the user metadata.
+                  downloaded = Path(temporary) / filename
+                  subprocess.run([
+                      "aws", "s3", "cp",
+                      f"s3://{bucket}/{prefix}/{filename}",
+                      str(downloaded),
+                      "--endpoint-url", endpoint,
+                      "--region", "auto",
+                      "--only-show-errors",
+                  ], check=True)
+                  if downloaded.stat().st_size != source.stat().st_size or sha256_file(downloaded) != digest:
+                      raise SystemExit(f"R2 stored object SHA-256 verification failed for {filename}.")
+          PY
+
+          # Probe the actual public custom domain, including byte ranges and CORS.
+          python - <<'PY'
+          import os
+          from urllib.request import Request, urlopen
+
+          base = os.environ["R2_PUBLIC_ORIGIN"].rstrip("/")
+          portal_origin = os.environ["SMARTPRINT_PORTAL_ORIGIN"]
+          tag = os.environ["RELEASE_TAG"]
+          files = ["SmartPrint-Windows-Setup.exe"]
+          if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
+              files.append("SmartPrint-Android.apk")
+
+          for filename in files:
+              url = f"{base}/{tag}/{filename}"
+              request = Request(url, headers={
+                  "Origin": portal_origin,
+                  "Range": "bytes=0-0",
+              })
+              with urlopen(request, timeout=45) as response:
+                  if response.status != 206:
+                      raise SystemExit(f"R2 public range probe for {filename} returned HTTP {response.status}, expected 206.")
+                  if response.headers.get("Access-Control-Allow-Origin") != portal_origin:
+                      raise SystemExit(f"R2 CORS did not allow the SmartPrint portal for {filename}.")
+                  if not response.headers.get("Content-Range", "").startswith("bytes 0-0/"):
+                      raise SystemExit(f"R2 public range response was invalid for {filename}.")
+                  if "immutable" not in response.headers.get("Cache-Control", ""):
+                      raise SystemExit(f"R2 public cache policy is missing for {filename}.")
+                  if len(response.read()) != 1:
+                      raise SystemExit(f"R2 public range body was invalid for {filename}.")
+              print(f"Verified public R2 custom-domain range/CORS delivery: {filename}")
+          PY
+
+          echo "Published and verified immutable R2 objects under $object_prefix/."
+          echo "Set PublicDownloads:PublicBaseUrl to $R2_PUBLIC_ORIGIN in the SmartPrint API deployment to activate direct edge delivery."
       - name: Verify uploaded assets and publish the stable release
         env:
           GH_TOKEN: ${{ github.token }}

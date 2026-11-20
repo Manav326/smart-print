@@ -13,17 +13,51 @@ public sealed class PrintBatchCapacityRulesTests
     }
 
     [Fact]
-    public void AllowsTheTwentiethFileAndRejectsTheTwentyFirst()
+    public void AllowsExactlyFiftyMegabytesPerFileAndRejectsOneByteOver()
     {
-        Assert.True(PrintBatchCapacityRules.CanAdd(19, 19, 1));
-        Assert.False(PrintBatchCapacityRules.CanAdd(20, 20, 1));
+        Assert.True(PrintBatchCapacityRules.CanAdd(0, 0, UploadLimits.MaxFileBytes));
+        Assert.False(PrintBatchCapacityRules.CanAdd(0, 0, UploadLimits.MaxFileBytes + 1));
     }
 
     [Fact]
-    public void AllowsExactlyFiveHundredMegabytesAndRejectsAnyByteOver()
+    public void AllowsTwentyFilesAtFiveHundredMegabytesAndRejectsTheTwentyFirst()
     {
-        Assert.True(PrintBatchCapacityRules.CanAdd(0, 0, PrintBatchCapacityRules.MaximumTotalBytes));
-        Assert.False(PrintBatchCapacityRules.CanAdd(1, PrintBatchCapacityRules.MaximumTotalBytes, 1));
+        const long fileBytes = 25L * 1024 * 1024;
+        long currentBytes = 0;
+        for (var index = 0; index < UploadLimits.MaxBatchFiles; index++)
+        {
+            Assert.True(PrintBatchCapacityRules.CanAdd(index, currentBytes, fileBytes));
+            currentBytes += fileBytes;
+        }
+
+        Assert.Equal(UploadLimits.MaxBatchBytes, currentBytes);
+        Assert.False(PrintBatchCapacityRules.CanAdd(UploadLimits.MaxBatchFiles, currentBytes, 1));
+    }
+
+    [Fact]
+    public void AllowsTenFiftyMegabyteFilesAtExactlyFiveHundredMegabytes()
+    {
+        long currentBytes = 0;
+        for (var index = 0; index < 10; index++)
+        {
+            Assert.True(PrintBatchCapacityRules.CanAdd(index, currentBytes, UploadLimits.MaxFileBytes));
+            currentBytes += UploadLimits.MaxFileBytes;
+        }
+
+        Assert.Equal(UploadLimits.MaxBatchBytes, currentBytes);
+        Assert.False(PrintBatchCapacityRules.CanAdd(10, currentBytes, 1));
+    }
+
+    [Fact]
+    public void RejectsOneByteAboveTheFiveHundredMegabyteBatchLimit()
+    {
+        Assert.False(PrintBatchCapacityRules.CanAdd(19, UploadLimits.MaxBatchBytes - 1, 2));
+    }
+
+    [Fact]
+    public void RejectsFiveHundredMegabytesAsOneOversizedFile()
+    {
+        Assert.False(PrintBatchCapacityRules.CanAdd(0, 0, UploadLimits.MaxBatchBytes));
     }
 
     [Fact]

@@ -33,7 +33,68 @@ public sealed class PublicDownloadServiceTests
         Assert.Equal("v1.2.3", status.Version);
         Assert.True(status.WindowsAvailable);
         Assert.False(status.AndroidAvailable);
+        Assert.Null(status.DownloadBaseUrl);
         Assert.Equal("https://api.github.com/repos/Manav326/QRtoPrint/releases/latest", handler.RequestedUris[0].AbsoluteUri);
+    }
+
+    [Fact]
+    public async Task StatusExposesOnlyAValidatedHttpsDownloadOrigin()
+    {
+        var handler = new QueueMessageHandler(
+            _ => JsonResponse("""
+                {
+                  "tag_name": "v1.2.3",
+                  "assets": [
+                    {
+                      "name": "SmartPrint-Windows-Setup.exe",
+                      "browser_download_url": "https://github.com/Manav326/QRtoPrint/releases/download/v1.2.3/SmartPrint-Windows-Setup.exe"
+                    }
+                  ]
+                }
+                """));
+
+        var service = CreateService(handler, "https://downloads.smartprint.example");
+        var status = await service.GetStatusAsync(CancellationToken.None);
+
+        Assert.Equal("https://downloads.smartprint.example", status.DownloadBaseUrl);
+    }
+
+    [Theory]
+    [InlineData("http://downloads.smartprint.example")]
+    [InlineData("https://downloads.smartprint.example/path")]
+    [InlineData("https://user:password@downloads.smartprint.example")]
+    [InlineData("https://downloads.smartprint.example?token=secret")]
+    public async Task StatusDisablesUnsafeConfiguredDownloadOriginsAndKeepsApiFallback(string downloadBaseUrl)
+    {
+        var handler = new QueueMessageHandler(
+            _ => JsonResponse("""
+                {
+                  "tag_name": "v1.2.3",
+                  "assets": []
+                }
+                """));
+
+        var service = CreateService(handler, downloadBaseUrl);
+
+        var status = await service.GetStatusAsync(CancellationToken.None);
+        Assert.Null(status.DownloadBaseUrl);
+    }
+
+    [Fact]
+    public async Task StatusDisablesThrottledR2DevelopmentDomain()
+    {
+        var handler = new QueueMessageHandler(
+            _ => JsonResponse("""
+                {
+                  "tag_name": "v1.2.3",
+                  "assets": []
+                }
+                """));
+
+        var service = CreateService(handler, "https://public-bucket.r2.dev");
+        var status = await service.GetStatusAsync(CancellationToken.None);
+
+        Assert.Null(status.DownloadBaseUrl);
     }
 
     [Fact]
@@ -108,6 +169,110 @@ public sealed class PublicDownloadServiceTests
 
         Assert.False(status.WindowsAvailable);
         Assert.Equal("v1.2.3", status.Version);
+    }
+
+    [Fact]
+    public async Task VersionedDownloadUsesExactTagAndCachesAtCloudflareWithoutBrowserCaching()
+    {
+        var fileBytes = Encoding.UTF8.GetBytes("immutable-installer");
+        var handler = new QueueMessageHandler(
+            _ => new HttpResponseMessage(HttpStatusCode.MovedPermanently)
+            {
+                Headers = { Location = new Uri("https://api.github.com/repositories/1439868781/releases/tags/v1.2.3") }
+            },
+            _ => JsonResponse("""
+                {
+                  "url": "https://api.github.com/repos/Manav326/QRtoPrint/releases/437206158",
+                  "tag_name": "v1.2.3",
+                  "assets": [
+                    {
+                      "name": "SmartPrint-Windows-Setup.exe",
+                      "browser_download_url": "https://github.com/Manav326/QRtoPrint/releases/download/v1.2.3/SmartPrint-Windows-Setup.exe"
+                    }
+                  ]
+                }
+                """),
+            _ => new HttpResponseMessage(HttpStatusCode.Redirect)
+            {
+                Headers = { Location = new Uri("https://release-assets.githubusercontent.com/signed-installer") }
+            },
+            _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(fileBytes)
+            });
+
+        var service = CreateService(handler);
+        var context = new DefaultHttpContext();
+        await using var output = new MemoryStream();
+        context.Response.Body = output;
+
+        await service.StreamVersionedDownloadAsync(
+            "v1.2.3", "SmartPrint-Windows-Setup.exe", context, CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status200OK, context.Response.StatusCode);
+        Assert.Equal("private, no-store", context.Response.Headers["Cache-Control"].ToString());
+        Assert.Equal(
+            "public, max-age=31536000, immutable",
+            context.Response.Headers["Cloudflare-CDN-Cache-Control"].ToString());
+        Assert.Contains("SmartPrint-Windows-Setup.exe", context.Response.Headers["Content-Disposition"].ToString(), StringComparison.Ordinal);
+        Assert.True(string.IsNullOrEmpty(context.Response.Headers["Location"].ToString()));
+        Assert.Equal(fileBytes, output.ToArray());
+        Assert.Equal(
+            "https://api.github.com/repos/Manav326/QRtoPrint/releases/tags/v1.2.3",
+            handler.RequestedUris[0].AbsoluteUri);
+        Assert.Equal(
+            "https://api.github.com/repositories/1439868781/releases/tags/v1.2.3",
+            handler.RequestedUris[1].AbsoluteUri);
+        Assert.Equal(4, handler.RequestedUris.Count);
+    }
+
+    [Fact]
+    public async Task VersionedDownloadRejectsUnknownAssetOrNonStableVersionBeforeNetworkAccess()
+    {
+        var handler = new QueueMessageHandler();
+        var service = CreateService(handler);
+
+        var invalidVersionContext = new DefaultHttpContext();
+        await service.StreamVersionedDownloadAsync(
+            "latest", "SmartPrint-Windows-Setup.exe", invalidVersionContext, CancellationToken.None);
+
+        var invalidAssetContext = new DefaultHttpContext();
+        await service.StreamVersionedDownloadAsync(
+            "v1.2.3", "other.exe", invalidAssetContext, CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status404NotFound, invalidVersionContext.Response.StatusCode);
+        Assert.Equal(StatusCodes.Status404NotFound, invalidAssetContext.Response.StatusCode);
+        Assert.Empty(handler.RequestedUris);
+    }
+
+    [Fact]
+    public async Task VersionedDownloadDoesNotServeDifferentTagThanRequested()
+    {
+        var handler = new QueueMessageHandler(
+            _ => JsonResponse("""
+                {
+                  "url": "https://api.github.com/repos/Manav326/QRtoPrint/releases/437206159",
+                  "tag_name": "v1.2.4",
+                  "assets": [
+                    {
+                      "name": "SmartPrint-Windows-Setup.exe",
+                      "browser_download_url": "https://github.com/Manav326/QRtoPrint/releases/download/v1.2.4/SmartPrint-Windows-Setup.exe"
+                    }
+                  ]
+                }
+                """));
+
+        var service = CreateService(handler);
+        var context = new DefaultHttpContext();
+        await using var output = new MemoryStream();
+        context.Response.Body = output;
+
+        await service.StreamVersionedDownloadAsync(
+            "v1.2.3", "SmartPrint-Windows-Setup.exe", context, CancellationToken.None);
+
+        Assert.Equal(StatusCodes.Status404NotFound, context.Response.StatusCode);
+        Assert.Empty(output.ToArray());
+        Assert.Single(handler.RequestedUris);
     }
 
     [Fact]
@@ -205,7 +370,9 @@ public sealed class PublicDownloadServiceTests
         Assert.True(string.IsNullOrEmpty(context.Response.Headers["Location"].ToString()));
     }
 
-    private static PublicDownloadService CreateService(QueueMessageHandler handler)
+    private static PublicDownloadService CreateService(
+        QueueMessageHandler handler,
+        string? downloadBaseUrl = null)
     {
         var client = new HttpClient(handler, disposeHandler: true)
         {
@@ -214,7 +381,8 @@ public sealed class PublicDownloadServiceTests
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["PublicDownloads:GitHubRepository"] = Repository
+                ["PublicDownloads:GitHubRepository"] = Repository,
+                ["PublicDownloads:PublicBaseUrl"] = downloadBaseUrl
             })
             .Build();
         return new PublicDownloadService(client, configuration, new MemoryCache(new MemoryCacheOptions()));

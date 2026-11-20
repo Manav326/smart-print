@@ -1,8 +1,13 @@
+using System.Net.Http;
+using System.IO;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Printing;
+using System.Printing.Interop;
 using PDFiumCore;
 using SkiaSharp;
+using SmartPrint.Documents;
 
 namespace SmartPrint.Agent;
 
@@ -29,12 +34,16 @@ public sealed class WindowsPrintExecutor
 {
     private const int DmOrientation = 0x00000001;
     private const int DmPaperSize = 0x00000002;
+    private const int DmPaperLength = 0x00000004;
+    private const int DmPaperWidth = 0x00000008;
+    private const int DmMediaType = 0x02000000;
     private const int DmColor = 0x00000800;
     private const int DmDuplex = 0x00001000;
     private const int DcPapers = 2;
     private const int DcDuplex = 7;
     private const int DcOrientation = 17;
     private const int DcColorDevice = 32;
+    private const int DcNup = 33;
     private const uint PrinterAccessAdminister = 0x00000004;
     private const uint JobStatusPrinting = 0x00000010;
     private const uint JobStatusSpooling = 0x00000008;
@@ -62,7 +71,126 @@ public sealed class WindowsPrintExecutor
     });
 
     public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, byte[] bytes, CancellationToken cancellationToken) =>
-        PrintCore(entry, bytes, cancellationToken, outputFilePath: null);
+        PrintBytes(entry, bytes, cancellationToken, outputFilePath: null);
+
+    /// <summary>
+    /// Opens a protected local PDF through PDFium random-access callbacks. QSP2 records
+    /// are authenticated only when requested, so a large encrypted document is never
+    /// copied into a second whole-file buffer for physical printing.
+    /// </summary>
+    public SpoolerPrintReceipt Print(AgentLocalQueueEntry entry, Stream documentStream, CancellationToken cancellationToken) =>
+        PrintStream(entry, documentStream, cancellationToken, outputFilePath: null);
+
+    private SpoolerPrintReceipt PrintStream(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        CancellationToken cancellationToken,
+        string? outputFilePath,
+        bool integrityAlreadyVerified = false)
+    {
+        ArgumentNullException.ThrowIfNull(documentStream);
+        if (!documentStream.CanRead || !documentStream.CanSeek ||
+            entry.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
+            documentStream.Length != entry.SizeBytes)
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_STREAM_INVALID",
+                "The local document stream does not match the verified upload.");
+
+        if (documentStream is Qsp2DocumentReadStream qsp2 &&
+            string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+            return PrintQsp2Pdf(entry, qsp2, cancellationToken, outputFilePath);
+
+        ValidatePrintOptions(entry);
+        if (!integrityAlreadyVerified && !Sha256Matches(entry.Sha256, documentStream))
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                "The local document does not match the verified upload.");
+
+        documentStream.Position = 0;
+        using var raster = OpenDocument(documentStream, entry.MediaType, entry.ColourMode == "Mono");
+        return PrintCore(entry, raster, cancellationToken, outputFilePath);
+    }
+
+    private SpoolerPrintReceipt PrintQsp2Pdf(
+        AgentLocalQueueEntry entry,
+        Qsp2DocumentReadStream documentStream,
+        CancellationToken cancellationToken,
+        string? outputFilePath)
+    {
+        ValidatePrintOptions(entry);
+        if (documentStream.Length != entry.SizeBytes ||
+            !Sha256Matches(entry.Sha256, documentStream.Sha256))
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                "The authenticated QSP2 document does not match the verified upload.");
+
+        using var raster = new PdfRasterDocument(documentStream, entry.ColourMode == "Mono");
+        return PrintCore(entry, raster, cancellationToken, outputFilePath);
+    }
+
+    private SpoolerPrintReceipt PrintBytes(
+        AgentLocalQueueEntry entry,
+        byte[] bytes,
+        CancellationToken cancellationToken,
+        string? outputFilePath)
+    {
+        ValidatePrintOptions(entry);
+        if (bytes.LongLength != entry.SizeBytes || !Sha256Matches(entry.Sha256, Convert.ToHexString(SHA256.HashData(bytes))))
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                "The local document does not match the verified upload.");
+
+        using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
+        return PrintCore(entry, raster, cancellationToken, outputFilePath);
+    }
+
+    private static void ValidatePrintOptions(AgentLocalQueueEntry entry)
+    {
+        EnsureWindowsPrintTarget(entry);
+        // Reject unsupported persisted/replayed settings before document parsing or
+        // any printer handle is opened. This keeps invalid N-up requests fail-fast.
+        if (entry.PagesPerSheet is < 1 or > 500)
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_INVALID",
+                "Pages per sheet must be between 1 and 500.");
+        if (entry.PagesPerSheet > 1 &&
+            (!string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+             !string.Equals(entry.PrintKind, "DOCUMENT", StringComparison.OrdinalIgnoreCase)))
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_PDF_REQUIRED",
+                "Driver-backed N-up is available only for unprepared PDF documents.");
+    }
+
+    private static void EnsureWindowsPrintTarget(AgentLocalQueueEntry entry)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PrintExecutionBlockedException("WINDOWS_REQUIRED", "Physical printing is available only on the Windows Print Agent.");
+        if (string.IsNullOrWhiteSpace(entry.QueueName))
+            throw new PrintExecutionBlockedException("PRINTER_QUEUE_MISSING", "The assigned Windows printer queue name is missing.");
+    }
+
+    private static bool Sha256Matches(string expectedHex, string actualHex)
+    {
+        byte[]? expected = null;
+        byte[]? actual = null;
+        try
+        {
+            if (expectedHex.Length != 64 || actualHex.Length != 64)
+                return false;
+            expected = Convert.FromHexString(expectedHex);
+            actual = Convert.FromHexString(actualHex);
+            return CryptographicOperations.FixedTimeEquals(expected, actual);
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
+        finally
+        {
+            if (expected is not null) CryptographicOperations.ZeroMemory(expected);
+            if (actual is not null) CryptographicOperations.ZeroMemory(actual);
+        }
+    }
 
     /// <summary>
     /// Submits a real Windows GDI print job to the selected printer queue, directing
@@ -86,24 +214,41 @@ public sealed class WindowsPrintExecutor
             ?? throw new ArgumentException("The output path must include a directory.", nameof(outputFilePath));
         Directory.CreateDirectory(outputDirectory);
 
-        return PrintCore(entry, bytes, cancellationToken, fullOutputPath);
+        return PrintBytes(entry, bytes, cancellationToken, fullOutputPath);
+    }
+
+    public SpoolerPrintReceipt PrintToFile(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        string outputFilePath,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(outputFilePath))
+            throw new ArgumentException("A fully qualified output file path is required.", nameof(outputFilePath));
+
+        var fullOutputPath = Path.GetFullPath(outputFilePath);
+        if (File.Exists(fullOutputPath))
+            throw new IOException("The requested spooler output path already exists.");
+
+        var outputDirectory = Path.GetDirectoryName(fullOutputPath)
+            ?? throw new ArgumentException("The output path must include a directory.", nameof(outputFilePath));
+        Directory.CreateDirectory(outputDirectory);
+        if (!Sha256Matches(entry.Sha256, documentStream))
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                "The local document does not match the verified upload.");
+        documentStream.Position = 0;
+        return PrintStream(entry, documentStream, cancellationToken, fullOutputPath, integrityAlreadyVerified: true);
     }
 
     private SpoolerPrintReceipt PrintCore(
         AgentLocalQueueEntry entry,
-        byte[] bytes,
+        IRasterDocument raster,
         CancellationToken cancellationToken,
         string? outputFilePath)
     {
-        if (!OperatingSystem.IsWindows())
-            throw new PrintExecutionBlockedException("WINDOWS_REQUIRED", "Physical printing is available only on the Windows Print Agent.");
-        if (string.IsNullOrWhiteSpace(entry.QueueName))
-            throw new PrintExecutionBlockedException("PRINTER_QUEUE_MISSING", "The assigned Windows printer queue name is missing.");
-        if (bytes.LongLength != entry.SizeBytes ||
-            !CryptographicOperations.FixedTimeEquals(SHA256.HashData(bytes), Convert.FromHexString(entry.Sha256)))
-            throw new PrintExecutionBlockedException("LOCAL_DOCUMENT_INTEGRITY_MISMATCH", "The local document does not match the verified upload.");
-
-        using var raster = OpenDocument(bytes, entry.MediaType, entry.ColourMode == "Mono");
+        ValidatePrintOptions(entry);
+        var queueName = entry.QueueName!;
         if (raster.PageCount is <= 0 or > 500)
             throw new PrintExecutionBlockedException("INVALID_PAGE_COUNT", "The document contains an unsupported number of pages.");
         if (string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase) &&
@@ -124,12 +269,12 @@ public sealed class WindowsPrintExecutor
         var docStarted = false;
         try
         {
-            if (!OpenPrinterW(entry.QueueName, out printer, IntPtr.Zero))
+            if (!OpenPrinterW(queueName, out printer, IntPtr.Zero))
                 throw Blocked("PRINTER_OPEN_FAILED", "Windows could not open the assigned printer queue.");
 
-            devMode = CreateDevMode(printer, entry.QueueName, entry,
+            devMode = CreateDevMode(printer, queueName, entry,
                 ResolveLandscape(entry.Orientation, raster.FirstPageLandscape));
-            dc = CreateDCW("WINSPOOL", entry.QueueName, null, devMode);
+            dc = CreateDCW("WINSPOOL", queueName, null, devMode);
             if (dc == IntPtr.Zero)
                 throw Blocked("PRINTER_CONTEXT_FAILED", "Windows could not create a print context for this printer.");
 
@@ -272,18 +417,51 @@ public sealed class WindowsPrintExecutor
         string exportDirectory,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(bytes);
+        await using var source = new MemoryStream(bytes, writable: false);
+        return await ExportPdfUsingWindowsPrinterOrFallbackAsync(
+            entry, source, outputPath, exportDirectory, cancellationToken);
+    }
+
+    public async Task<PdfExportExecutionResult> ExportPdfUsingWindowsPrinterOrFallbackAsync(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        string outputPath,
+        string exportDirectory,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(documentStream);
+        if (!documentStream.CanRead || !documentStream.CanSeek ||
+            entry.SizeBytes is <= 0 or > UploadLimits.MaxFileBytes || documentStream.Length != entry.SizeBytes)
+            throw new PrintExecutionBlockedException(
+                "LOCAL_DOCUMENT_STREAM_INVALID",
+                "The local document stream does not match the verified upload.");
+
         if (entry.PdfBrandingEnabled &&
             string.Equals(entry.MediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
         {
-            // Only the opt-in branded PDF route uses this renderer so footer placement
-            // can be guarded by a source-page blank-margin check before drawing.
-            var brandedReceipt = ExportPdf(entry, bytes, exportDirectory, cancellationToken);
-            return new PdfExportExecutionResult(brandedReceipt, false, "SMARTPRINT_BRANDED_PDF_RENDERER", null);
+            // The opt-in branded PDF renderer still needs random-access source bytes.
+            // Keep this compatibility path isolated; ordinary exports stay streamed.
+            var brandedBytes = ReadStreamBytes(documentStream);
+            try
+            {
+                if (!Sha256Matches(entry.Sha256, Convert.ToHexString(SHA256.HashData(brandedBytes))))
+                    throw new PrintExecutionBlockedException(
+                        "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                        "The local document does not match the verified upload.");
+                var brandedReceipt = ExportPdf(entry, brandedBytes, exportDirectory, cancellationToken);
+                return new PdfExportExecutionResult(brandedReceipt, false, "SMARTPRINT_BRANDED_PDF_RENDERER", null);
+            }
+            finally { CryptographicOperations.ZeroMemory(brandedBytes); }
         }
 
         var fullOutputPath = Path.GetFullPath(outputPath);
         if (File.Exists(fullOutputPath))
         {
+            if (!Sha256Matches(entry.Sha256, documentStream))
+                throw new PrintExecutionBlockedException(
+                    "LOCAL_DOCUMENT_INTEGRITY_MISMATCH",
+                    "The local document does not match the verified upload.");
             var existing = ReadExistingPdfExport(fullOutputPath);
             return new PdfExportExecutionResult(existing, false, "EXISTING_VERIFIED_OUTPUT", null);
         }
@@ -291,9 +469,7 @@ public sealed class WindowsPrintExecutor
         SpoolerPrintReceipt spoolerReceipt;
         try
         {
-            // This is the same PrintToFile -> PrintCore GDI route exercised by the
-            // GitHub Windows integration test, but now it is the production path.
-            spoolerReceipt = PrintToFile(entry, bytes, fullOutputPath, cancellationToken);
+            spoolerReceipt = PrintToFile(entry, documentStream, fullOutputPath, cancellationToken);
         }
         catch (PrintExecutionBlockedException exception)
         {
@@ -305,17 +481,9 @@ public sealed class WindowsPrintExecutor
                     exception);
             }
 
-            var fallbackReceipt = ExportPdf(
-                entry with { OutputMode = PrinterOutputModeRules.PdfExport },
-                bytes,
-                exportDirectory,
-                cancellationToken);
-
-            return new PdfExportExecutionResult(
-                fallbackReceipt,
-                true,
-                $"SMARTPRINT_FALLBACK:{exception.ReasonCode}",
-                null);
+            return ExportPdfFromStreamFallback(
+                entry, documentStream, exportDirectory, cancellationToken,
+                $"SMARTPRINT_FALLBACK:{exception.ReasonCode}", null);
         }
 
         var deadline = DateTimeOffset.UtcNow.AddSeconds(45);
@@ -346,8 +514,6 @@ public sealed class WindowsPrintExecutor
             await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
         }
 
-        // StartDoc/EndDoc succeeded, but no complete PDF appeared. A job still
-        // present in the queue may yet produce output, so never duplicate it.
         WindowsSpoolerJob? remainingJob;
         try
         {
@@ -365,28 +531,63 @@ public sealed class WindowsPrintExecutor
 
         if (remainingJob is null && !File.Exists(fullOutputPath))
         {
-            // The Windows queue has removed the completed job without creating the
-            // requested file. This is a confirmed driver-output failure, so fallback
-            // is safe: there is no queued job and no PDF at the destination.
-            var fallbackReceipt = ExportPdf(
-                entry with { OutputMode = PrinterOutputModeRules.PdfExport },
-                bytes,
-                exportDirectory,
-                cancellationToken);
-            return new PdfExportExecutionResult(
-                fallbackReceipt,
-                true,
-                "SMARTPRINT_FALLBACK:MICROSOFT_DRIVER_PRODUCED_NO_FILE",
-                spoolerReceipt.JobId);
+            return ExportPdfFromStreamFallback(
+                entry, documentStream, exportDirectory, cancellationToken,
+                "SMARTPRINT_FALLBACK:MICROSOFT_DRIVER_PRODUCED_NO_FILE", spoolerReceipt.JobId);
         }
 
-        // The original job is still queued or an incomplete file exists. The owner
-        // must reconcile it before any second output is generated.
         throw new PrintSubmissionUncertainException(
             "MICROSOFT_PDF_OUTPUT_TIMEOUT",
             remainingJob is null
                 ? $"Windows accepted spooler job {spoolerReceipt.JobId}, but an incomplete PDF exists at the output path."
                 : $"Windows accepted spooler job {spoolerReceipt.JobId}, which remains in state {remainingJob.Status}; automatic fallback is disabled.");
+    }
+
+    private PdfExportExecutionResult ExportPdfFromStreamFallback(
+        AgentLocalQueueEntry entry,
+        Stream documentStream,
+        string exportDirectory,
+        CancellationToken cancellationToken,
+        string method,
+        int? spoolerJobId)
+    {
+        var bytes = ReadStreamBytes(documentStream);
+        try
+        {
+            var receipt = ExportPdf(
+                entry with { OutputMode = PrinterOutputModeRules.PdfExport },
+                bytes,
+                exportDirectory,
+                cancellationToken);
+            return new PdfExportExecutionResult(receipt, true, method, spoolerJobId);
+        }
+        finally { CryptographicOperations.ZeroMemory(bytes); }
+    }
+
+    private static byte[] ReadStreamBytes(Stream stream)
+    {
+        if (!stream.CanRead || !stream.CanSeek || stream.Length is <= 0 or > UploadLimits.MaxFileBytes)
+            throw new InvalidDataException("The document stream cannot be materialised within the supported file size.");
+        var bytes = GC.AllocateUninitializedArray<byte>(checked((int)stream.Length));
+        stream.Position = 0;
+        try
+        {
+            var offset = 0;
+            while (offset < bytes.Length)
+            {
+                var read = stream.Read(bytes, offset, bytes.Length - offset);
+                if (read <= 0)
+                    throw new InvalidDataException("The document stream ended before the verified file was complete.");
+                offset += read;
+            }
+            return bytes;
+        }
+        catch
+        {
+            CryptographicOperations.ZeroMemory(bytes);
+            throw;
+        }
+        finally { stream.Position = 0; }
     }
 
     private static bool IsCompletePdfFile(string path)
@@ -710,21 +911,56 @@ public sealed class WindowsPrintExecutor
                 throw new PrintExecutionBlockedException("PRINTER_DEVMODE_READ_FAILED", "The default printer settings could not be read.");
 
             var mode = Marshal.PtrToStructure<DevModeW>(pointer);
-            var paper = PaperCode(entry.PaperSize);
             var isIdDocument = string.Equals(entry.PrintKind, "ID_DOCUMENT", StringComparison.OrdinalIgnoreCase);
-            if (SupportsPaper(queueName, pointer, paper) is false && !isIdDocument)
-                throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
-            // For ID sheets, a negative capability-list result is advisory. Ask
-            // DocumentProperties to apply A4 and verify its response below rather
-            // than refusing the job solely from a possibly stale capability list.
+            var isPhoto = string.Equals(entry.PrintKind, "PHOTO", StringComparison.OrdinalIgnoreCase);
+            var isPhotoPaper = isPhoto && string.Equals(entry.PhotoOutputLayout, "PHOTO_PAPER", StringComparison.OrdinalIgnoreCase);
+            if (isPhoto && entry.PhotoOutputLayout is not ("A4_SHEET" or "PHOTO_PAPER"))
+                throw new PrintExecutionBlockedException("PHOTO_OUTPUT_LAYOUT_INVALID", "The requested photo output layout is not supported.");
+            if (isPhoto && !isPhotoPaper && entry.PhotoPaperFinish != "PLAIN")
+                throw new PrintExecutionBlockedException("PHOTO_MEDIA_LAYOUT_MISMATCH", "A4 sheet orders use regular A4 paper. Choose individual photo paper prints to select glossy or matte stock.");
+            if (isPhotoPaper && entry.PhotoPaperFinish is not ("GLOSSY" or "MATTE"))
+                throw new PrintExecutionBlockedException("PHOTO_FINISH_INVALID", "Individual photo prints require glossy or matte photo paper.");
+
+            var paper = PaperCode(entry.PaperSize);
+            short photoPaperWidth = 0, photoPaperHeight = 0;
+            short? photoMediaType = null;
+            if (isPhotoPaper)
+            {
+                if (entry.PhotoSizeCode is null ||
+                    !PrinterCapabilityRules.TryGetPhotoPaperDimensions(entry.PhotoSizeCode, out photoPaperWidth, out photoPaperHeight))
+                    throw new PrintExecutionBlockedException("PHOTO_PAPER_SIZE_INVALID", "The selected photo size is not supported for individual photo-paper printing.");
+
+                // The Windows DEVMODE uses tenths of a millimetre for custom media.
+                // The driver must retain the exact size or no job is submitted.
+                mode.PaperSize = 0;
+                mode.PaperWidth = photoPaperWidth;
+                mode.PaperLength = photoPaperHeight;
+                mode.Fields |= DmPaperSize | DmPaperWidth | DmPaperLength;
+
+                photoMediaType = WindowsPrinterCapabilityDiscovery.ResolvePhotoMediaTypeCode(queueName, pointer, entry.PhotoPaperFinish);
+                if (photoMediaType is null)
+                    throw new PrintExecutionBlockedException(
+                        "PHOTO_MEDIA_TYPE_UNSUPPORTED",
+                        $"The selected printer driver does not expose one unambiguous {entry.PhotoPaperFinish.ToLowerInvariant()} photo media type. Choose a printer that supports it or change the requested finish. No pages were sent.");
+                mode.MediaType = unchecked((ushort)photoMediaType.Value);
+                mode.Fields |= DmMediaType;
+            }
+            else
+            {
+                if (SupportsPaper(queueName, pointer, paper) is false && !isIdDocument)
+                    throw new PrintExecutionBlockedException("PAPER_SIZE_UNSUPPORTED", $"The installed driver explicitly reports that {entry.PaperSize} paper is unsupported.");
+                // For ID sheets, a negative capability-list result is advisory. Ask
+                // DocumentProperties to apply A4 and verify its response below.
+                mode.PaperSize = paper;
+                mode.Fields |= DmPaperSize;
+            }
 
             var orientationCapability = DeviceCapabilitiesW(queueName, null, DcOrientation, IntPtr.Zero, pointer);
             if (landscape && orientationCapability == 0)
                 throw new PrintExecutionBlockedException("LANDSCAPE_UNSUPPORTED", "The installed printer driver reports that landscape orientation is not supported.");
 
-            mode.Fields |= DmOrientation | DmPaperSize;
+            mode.Fields |= DmOrientation;
             mode.Orientation = landscape ? (short)2 : (short)1;
-            mode.PaperSize = paper;
 
             if (entry.ColourMode == "Colour")
             {
@@ -754,9 +990,33 @@ public sealed class WindowsPrintExecutor
             if (DocumentPropertiesW(IntPtr.Zero, printer, queueName, pointer, pointer, 10) != 1)
                 throw new PrintExecutionBlockedException("PRINTER_SETTINGS_REJECTED", "The printer driver rejected the requested print settings.");
 
+            if (entry.PagesPerSheet > 1)
+                ApplyDriverPagesPerSheet(printer, queueName, pointer, size, entry.PagesPerSheet);
+
             var validated = Marshal.PtrToStructure<DevModeW>(pointer);
-            if ((validated.Fields & DmPaperSize) == 0 || validated.PaperSize != paper)
+            if (isPhotoPaper)
+            {
+                if (!PrinterCapabilityRules.IsRequestedPhotoPaperSizeAccepted(
+                    (validated.Fields & DmPaperSize) != 0,
+                    (validated.Fields & DmPaperWidth) != 0,
+                    (validated.Fields & DmPaperLength) != 0,
+                    validated.PaperSize, validated.PaperWidth, validated.PaperLength,
+                    photoPaperWidth, photoPaperHeight))
+                    throw new PrintExecutionBlockedException(
+                        "PHOTO_PAPER_SIZE_REJECTED",
+                        "The printer driver did not accept the selected photo's exact physical dimensions. No pages were sent.");
+            }
+            else if ((validated.Fields & DmPaperSize) == 0 || validated.PaperSize != paper)
                 throw new PrintExecutionBlockedException("PAPER_SIZE_REJECTED", "The printer driver did not accept the requested paper size.");
+
+            if (photoMediaType is short requestedMediaType &&
+                !PrinterCapabilityRules.IsRequestedPhotoMediaTypeAccepted(
+                    (validated.Fields & DmMediaType) != 0,
+                    validated.MediaType,
+                    requestedMediaType))
+                throw new PrintExecutionBlockedException(
+                    "PHOTO_MEDIA_TYPE_REJECTED",
+                    "The printer driver did not retain the requested photo paper finish. No pages were sent.");
             var expectedOrientation = landscape ? (short)2 : (short)1;
             if (!PrinterCapabilityRules.IsRequestedOrientationAccepted(
                     (validated.Fields & DmOrientation) != 0, validated.Orientation, expectedOrientation))
@@ -771,6 +1031,132 @@ public sealed class WindowsPrintExecutor
         {
             Marshal.FreeHGlobal(pointer);
             throw;
+        }
+    }
+
+    private static void ApplyDriverPagesPerSheet(
+        IntPtr printer,
+        string queueName,
+        IntPtr devMode,
+        int devModeSize,
+        int requestedPagesPerSheet)
+    {
+        try
+        {
+            using var server = new LocalPrintServer();
+            using var queue = server.GetPrintQueue(queueName);
+            queue.Refresh();
+
+            var schemaCapabilities = queue.GetPrintCapabilities();
+            var printSchemaSupportsNup = schemaCapabilities.PagesPerSheetCapability
+                .Contains(requestedPagesPerSheet);
+            var driverSupportsNup = IsReportedByDcNup(queueName, devMode, requestedPagesPerSheet);
+            if (!printSchemaSupportsNup && !driverSupportsNup)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_UNSUPPORTED",
+                    $"The selected printer driver does not report support for {requestedPagesPerSheet} pages per sheet.");
+            }
+
+            var presentationDirection = WindowsPrinterCapabilityDiscovery.ResolvePagesPerSheetDirection(
+                queue,
+                schemaCapabilities);
+            if (presentationDirection is null)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_DIRECTION_UNSUPPORTED",
+                    "The selected printer driver does not report a standard page-presentation direction for N-up. No pages were submitted.");
+            }
+
+            var sourceDevMode = new byte[devModeSize];
+            Marshal.Copy(devMode, sourceDevMode, 0, devModeSize);
+            using var converter = new PrintTicketConverter(queueName, 1);
+            var currentTicket = converter.ConvertDevModeToPrintTicket(sourceDevMode);
+            var requestedTicket = new PrintTicket
+            {
+                PagesPerSheet = requestedPagesPerSheet,
+                PagesPerSheetDirection = presentationDirection
+            };
+
+            // Merge against the current ticket so paper size, orientation, colour and
+            // duplex settings remain intact. The driver is the authority on viable options.
+            var validation = queue.MergeAndValidatePrintTicket(currentTicket, requestedTicket);
+            var validatedTicket = validation.ValidatedPrintTicket;
+            if (validatedTicket.PagesPerSheet != requestedPagesPerSheet ||
+                validatedTicket.PagesPerSheetDirection != presentationDirection)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_REJECTED",
+                    "The printer driver changed the requested N-up page count or presentation direction during validation. No pages were submitted.");
+            }
+
+            var convertedDevMode = converter.ConvertPrintTicketToDevMode(
+                validatedTicket, BaseDevModeType.UserDefault);
+            if (convertedDevMode.Length != devModeSize)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_DEVMODE_INVALID",
+                    "The driver returned an unexpected DEVMODE size for the selected N-up setting.");
+            }
+
+            Marshal.Copy(convertedDevMode, 0, devMode, convertedDevMode.Length);
+            if (DocumentPropertiesW(IntPtr.Zero, printer, queueName, devMode, devMode, 10) != 1)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_DRIVER_VALIDATION_FAILED",
+                    "Windows could not validate the driver's N-up settings. No pages were submitted.");
+            }
+
+            var finalDevMode = new byte[devModeSize];
+            Marshal.Copy(devMode, finalDevMode, 0, devModeSize);
+            var finalTicket = converter.ConvertDevModeToPrintTicket(finalDevMode);
+            if (finalTicket.PagesPerSheet != requestedPagesPerSheet ||
+                finalTicket.PagesPerSheetDirection != presentationDirection)
+            {
+                throw new PrintExecutionBlockedException(
+                    "PAGES_PER_SHEET_NOT_APPLIED",
+                    "The selected printer driver did not retain the requested N-up page count and presentation direction. No pages were submitted.");
+            }
+        }
+        catch (PrintExecutionBlockedException)
+        {
+            throw;
+        }
+        catch (Exception exception) when (
+            exception is PrintQueueException or InvalidOperationException or
+                ArgumentException or ExternalException or UnauthorizedAccessException)
+        {
+            throw new PrintExecutionBlockedException(
+                "PAGES_PER_SHEET_DRIVER_CONFIGURATION_FAILED",
+                "SmartPrint could not configure and verify N-up through the selected Windows printer driver. No pages were submitted.",
+                exception);
+        }
+    }
+
+    private static bool IsReportedByDcNup(string queueName, IntPtr devMode, int requestedPagesPerSheet)
+    {
+        var count = DeviceCapabilitiesW(queueName, null, DcNup, IntPtr.Zero, devMode);
+        if (count is <= 0 or > 128)
+            return false;
+
+        // DC_NUP supplies a DWORD array. Never reinterpret it as a WORD list.
+        var buffer = Marshal.AllocHGlobal(checked(count * sizeof(uint)));
+        try
+        {
+            var actual = DeviceCapabilitiesW(queueName, null, DcNup, buffer, devMode);
+            if (actual <= 0 || actual > count)
+                return false;
+
+            for (var index = 0; index < actual; index++)
+            {
+                if (Marshal.ReadInt32(buffer, checked(index * sizeof(uint))) == requestedPagesPerSheet)
+                    return true;
+            }
+            return false;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
         }
     }
 
@@ -821,6 +1207,31 @@ public sealed class WindowsPrintExecutor
         if (mediaType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) || mediaType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
             return new ImageRasterDocument(bytes, mono);
         throw new PrintExecutionBlockedException("DOCUMENT_TYPE_UNSUPPORTED", $"The document type '{mediaType}' cannot be printed by this agent.");
+    }
+
+    private static IRasterDocument OpenDocument(Stream stream, string mediaType, bool mono)
+    {
+        if (mediaType.Equals("application/pdf", StringComparison.OrdinalIgnoreCase)) return new PdfRasterDocument(stream, mono);
+        if (mediaType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) || mediaType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
+            return new ImageRasterDocument(stream, mono);
+        throw new PrintExecutionBlockedException("DOCUMENT_TYPE_UNSUPPORTED", $"The document type '{mediaType}' cannot be printed by this agent.");
+    }
+
+    private static bool Sha256Matches(string expectedHex, Stream stream)
+    {
+        if (!stream.CanRead || !stream.CanSeek) return false;
+        byte[]? actual = null;
+        try
+        {
+            stream.Position = 0;
+            actual = SHA256.HashData(stream);
+            return Sha256Matches(expectedHex, Convert.ToHexString(actual));
+        }
+        finally
+        {
+            if (actual is not null) CryptographicOperations.ZeroMemory(actual);
+            stream.Position = 0;
+        }
     }
 
     private static int DrawPageAtPhysicalScale(IntPtr dc, RasterPage page, IdDocumentPagePlacement placement)
@@ -936,39 +1347,110 @@ public sealed class WindowsPrintExecutor
 
     private sealed class PdfRasterDocument : IRasterDocument
     {
-        private readonly IntPtr documentMemory;
-        private readonly int documentMemoryLength;
-        private readonly FpdfDocumentT document;
+        private IntPtr documentMemory;
+        private int documentMemoryLength;
+        private FpdfDocumentT? document;
         private readonly bool mono;
+        private FPDF_FILEACCESS? fileAccess;
+        private GCHandle streamContextHandle;
+        private PDFiumCore.Delegates.Func_int___IntPtr_ulong_bytePtr_ulong? streamReadCallback;
+
         public PdfRasterDocument(byte[] bytes, bool mono)
         {
             _ = PdfiumInitialized.Value;
+            this.mono = mono;
             documentMemoryLength = bytes.Length;
             documentMemory = Marshal.AllocHGlobal(documentMemoryLength);
             Marshal.Copy(bytes, 0, documentMemory, documentMemoryLength);
-            this.mono = mono;
             document = fpdfview.FPDF_LoadMemDocument64(documentMemory, (ulong)bytes.Length, string.Empty);
             if (document is null)
             {
-                Marshal.FreeHGlobal(documentMemory);
-                throw new PrintExecutionBlockedException("PDF_RENDER_OPEN_FAILED", $"PDFium could not open the PDF (error {fpdfview.FPDF_GetLastError()}).");
+                ClearAndFreeDocumentMemory();
+                throw new PrintExecutionBlockedException(
+                    "PDF_RENDER_OPEN_FAILED",
+                    $"PDFium could not open the PDF (error {fpdfview.FPDF_GetLastError()}).");
             }
-            HasDigitalSignatures = fpdf_signature.FPDF_GetSignatureCount(document) != 0;
-            HasInteractiveForms = fpdf_formfill.FPDF_GetFormType(document) != 0;
-            PageCount = fpdfview.FPDF_GetPageCount(document);
-            if (PageCount is <= 0 or > 500)
+
+            try
             {
-                fpdfview.FPDF_CloseDocument(document);
-                Marshal.FreeHGlobal(documentMemory);
-                throw new PrintExecutionBlockedException("PDF_PAGE_COUNT_INVALID", "The PDF page count is not supported.");
+                InitializeMetadata();
             }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        public unsafe PdfRasterDocument(Stream stream, bool mono)
+        {
+            _ = PdfiumInitialized.Value;
+            if (!stream.CanRead || !stream.CanSeek || stream.Length is <= 0 or > UploadLimits.MaxFileBytes)
+                throw new PrintExecutionBlockedException(
+                    "PDF_RENDER_OPEN_FAILED",
+                    "The PDF stream has an unsupported size.");
+
+            this.mono = mono;
+            // PDFium's file-access wrapper can dispose its callback context after a
+            // render attempt. Give it a non-owning view so a rejected driver attempt
+            // can still rewind and read the same source for the existing PDF fallback.
+            var context = new PdfiumStreamAccessContext(stream);
+            var contextHandle = GCHandle.Alloc(context, GCHandleType.Normal);
+            var access = new FPDF_FILEACCESS();
+            var callback = new PDFiumCore.Delegates.Func_int___IntPtr_ulong_bytePtr_ulong(ReadPdfiumStreamBlock);
+            FpdfDocumentT? loadedDocument;
+            try
+            {
+                access.MFileLen = checked((ulong)stream.Length);
+                access.MParam = GCHandle.ToIntPtr(contextHandle);
+                access.MGetBlock = callback;
+                loadedDocument = fpdfview.FPDF_LoadCustomDocument(access, string.Empty);
+                if (loadedDocument is null)
+                    throw new PrintExecutionBlockedException(
+                        "PDF_RENDER_OPEN_FAILED",
+                        $"PDFium could not open the document stream (error {fpdfview.FPDF_GetLastError()}).");
+            }
+            catch
+            {
+                access.Dispose();
+                if (contextHandle.IsAllocated)
+                    contextHandle.Free();
+                throw;
+            }
+
+            document = loadedDocument;
+            fileAccess = access;
+            streamContextHandle = contextHandle;
+            streamReadCallback = callback;
+            try
+            {
+                InitializeMetadata();
+            }
+            catch
+            {
+                Dispose();
+                throw;
+            }
+        }
+
+        public int PageCount { get; private set; }
+        public bool FirstPageLandscape { get; private set; }
+        public bool HasDigitalSignatures { get; private set; }
+        public bool HasInteractiveForms { get; private set; }
+
+        private void InitializeMetadata()
+        {
+            var activeDocument = document
+                ?? throw new PrintExecutionBlockedException("PDF_RENDER_OPEN_FAILED", "PDFium did not retain the opened document.");
+            HasDigitalSignatures = fpdf_signature.FPDF_GetSignatureCount(activeDocument) != 0;
+            HasInteractiveForms = fpdf_formfill.FPDF_GetFormType(activeDocument) != 0;
+            PageCount = fpdfview.FPDF_GetPageCount(activeDocument);
+            if (PageCount is <= 0 or > 500)
+                throw new PrintExecutionBlockedException("PDF_PAGE_COUNT_INVALID", "The PDF page count is not supported.");
             using var page = LoadPage(0);
             FirstPageLandscape = fpdfview.FPDF_GetPageWidthF(page.Value) > fpdfview.FPDF_GetPageHeightF(page.Value);
         }
-        public int PageCount { get; }
-        public bool FirstPageLandscape { get; }
-        public bool HasDigitalSignatures { get; }
-        public bool HasInteractiveForms { get; }
+
         public RasterPage RenderPage(int pageIndex, int dpi)
         {
             using var page = LoadPage(pageIndex);
@@ -997,17 +1479,126 @@ public sealed class WindowsPrintExecutor
             }
             finally { fpdfview.FPDFBitmapDestroy(bitmap); }
         }
+
         public void Dispose()
         {
-            fpdfview.FPDF_CloseDocument(document);
-            Marshal.Copy(new byte[documentMemoryLength], 0, documentMemory, documentMemoryLength);
-            Marshal.FreeHGlobal(documentMemory);
+            if (document is not null)
+            {
+                fpdfview.FPDF_CloseDocument(document);
+                document = null;
+            }
+
+            ClearAndFreeDocumentMemory();
+            fileAccess?.Dispose();
+            fileAccess = null;
+            if (streamContextHandle.IsAllocated)
+            {
+                if (streamContextHandle.Target is PdfiumStreamAccessContext context)
+                    context.Dispose();
+                streamContextHandle.Free();
+            }
+            streamReadCallback = null;
         }
+
+        private void ClearAndFreeDocumentMemory()
+        {
+            if (documentMemory == IntPtr.Zero)
+                return;
+            unsafe
+            {
+                new Span<byte>((void*)documentMemory, documentMemoryLength).Clear();
+            }
+            Marshal.FreeHGlobal(documentMemory);
+            documentMemory = IntPtr.Zero;
+            documentMemoryLength = 0;
+        }
+
         private LoadedPage LoadPage(int index)
         {
-            var page = fpdfview.FPDF_LoadPage(document, index);
+            var activeDocument = document
+                ?? throw new ObjectDisposedException(nameof(PdfRasterDocument));
+            var page = fpdfview.FPDF_LoadPage(activeDocument, index);
             if (page is null) throw new PrintExecutionBlockedException("PDF_PAGE_LOAD_FAILED", $"Could not load PDF page {index + 1}.");
             return new LoadedPage(page);
+        }
+    }
+
+    private sealed class PdfiumStreamAccessContext(Stream stream) : IDisposable
+    {
+        public Stream Stream { get; } = new NonOwningReadStream(stream);
+        public object Sync { get; } = new();
+        public void Dispose() => Stream.Dispose();
+    }
+
+    /// <summary>
+    /// Gives PDFium a seekable view without transferring ownership of the source
+    /// stream. PDFium can dispose this adapter when it closes a document; the caller
+    /// may still need the original stream for an authorised fallback path.
+    /// </summary>
+    private sealed class NonOwningReadStream(Stream source) : Stream
+    {
+        public override bool CanRead => source.CanRead;
+        public override bool CanSeek => source.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length => source.Length;
+        public override long Position
+        {
+            get => source.Position;
+            set => source.Position = value;
+        }
+
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => source.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => source.Read(buffer);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            source.ReadAsync(buffer, cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin) => source.Seek(offset, origin);
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        // Deliberately do not dispose source; ownership remains with the print/worker caller.
+        protected override void Dispose(bool disposing) => base.Dispose(disposing);
+    }
+
+    private static unsafe int ReadPdfiumStreamBlock(IntPtr parameter, ulong position, byte* destination, ulong size)
+    {
+        if (parameter == IntPtr.Zero)
+            return 0;
+        if (size == 0)
+            return 1;
+        if (destination == null || size > int.MaxValue)
+            return 0;
+
+        try
+        {
+            var handle = GCHandle.FromIntPtr(parameter);
+            if (handle.Target is not PdfiumStreamAccessContext context)
+                return 0;
+
+            lock (context.Sync)
+            {
+                var stream = context.Stream;
+                var length = checked((ulong)stream.Length);
+                if (position > length || size > length - position)
+                    return 0;
+
+                stream.Position = checked((long)position);
+                var output = new Span<byte>(destination, checked((int)size));
+                var offset = 0;
+                while (offset < output.Length)
+                {
+                    var read = stream.Read(output[offset..]);
+                    if (read <= 0)
+                        return 0;
+                    offset += read;
+                }
+            }
+            return 1;
+        }
+        catch (Exception)
+        {
+            // No managed exception may cross the unmanaged PDFium callback boundary.
+            return 0;
         }
     }
 
@@ -1015,6 +1606,28 @@ public sealed class WindowsPrintExecutor
     {
         public FpdfPageT Value { get; } = value;
         public void Dispose() => fpdfview.FPDF_ClosePage(Value);
+    }
+
+    private sealed class NonClosingStream(Stream inner) : Stream
+    {
+        public override bool CanRead => inner.CanRead;
+        public override bool CanSeek => inner.CanSeek;
+        public override bool CanWrite => false;
+        public override long Length => inner.Length;
+        public override long Position { get => inner.Position; set => inner.Position = value; }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => inner.Read(buffer, offset, count);
+        public override int Read(Span<byte> buffer) => inner.Read(buffer);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            inner.ReadAsync(buffer, cancellationToken);
+        public override long Seek(long offset, SeekOrigin origin) => inner.Seek(offset, origin);
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        // Deliberately do not dispose the underlying queue stream. Its owner is
+        // the Worker, which must retain it until the full print/export operation
+        // (including a possible fallback) is complete.
+        protected override void Dispose(bool disposing) => base.Dispose(disposing);
     }
 
     private sealed class ImageRasterDocument : IRasterDocument
@@ -1026,6 +1639,26 @@ public sealed class WindowsPrintExecutor
             this.mono = mono;
             using var stream = new MemoryStream(bytes, false);
             using var bitmap = SKBitmap.Decode(stream);
+            if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0 ||
+                (long)bitmap.Width * bitmap.Height > MaxRasterPixels ||
+                bitmap.Width > MaxRasterDimension || bitmap.Height > MaxRasterDimension)
+                throw new PrintExecutionBlockedException("IMAGE_RENDER_OPEN_FAILED", "The image is invalid or too large to print.");
+            image = SKImage.FromBitmap(bitmap) ?? throw new PrintExecutionBlockedException("IMAGE_RENDER_OPEN_FAILED", "Skia could not prepare the image.");
+            FirstPageLandscape = image.Width > image.Height;
+        }
+
+        public ImageRasterDocument(Stream stream, bool mono)
+        {
+            this.mono = mono;
+            if (!stream.CanRead || !stream.CanSeek)
+                throw new PrintExecutionBlockedException("IMAGE_RENDER_OPEN_FAILED", "The image stream is not seekable.");
+            stream.Position = 0;
+            // Skia owns and disposes the stream instance passed to Decode on some
+            // native decoder paths. Give it a non-owning facade so PDF export can
+            // safely rewind and reuse the queue's authenticated source stream for
+            // the existing fallback renderer.
+            using var decoderStream = new NonClosingStream(stream);
+            using var bitmap = SKBitmap.Decode(decoderStream);
             if (bitmap is null || bitmap.Width <= 0 || bitmap.Height <= 0 ||
                 (long)bitmap.Width * bitmap.Height > MaxRasterPixels ||
                 bitmap.Width > MaxRasterDimension || bitmap.Height > MaxRasterDimension)

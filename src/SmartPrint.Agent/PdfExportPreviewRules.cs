@@ -1,3 +1,5 @@
+using System.Net.Http;
+using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 

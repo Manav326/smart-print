@@ -1,6 +1,9 @@
 using System.Security.Cryptography;
 using System.Text.Json;
 using SmartPrint.Agent;
+using SmartPrint.Documents;
+using UglyToad.PdfPig.Content;
+using UglyToad.PdfPig.Writer;
 
 namespace SmartPrint.Agent.Tests;
 
@@ -34,6 +37,120 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal("ACKNOWLEDGED", duplicate.State);
             Assert.Single(Directory.GetFiles(root, "*.qdoc"));
             Assert.Single(Directory.GetFiles(root, "*.json"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StreamsQsp2DocumentsIntoDpapiProtectedQueueAndSupportsSeeking()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var agentScopeId = Guid.NewGuid();
+            var bytes = RandomNumberGenerator.GetBytes(256 * 1024 + 91);
+            var job = CreateJob(bytes);
+            await using var input = new MemoryStream(bytes, writable: false);
+
+            var entry = await store.EnqueueStreamingAsync(job, agentScopeId, input, CancellationToken.None);
+            var persisted = await File.ReadAllBytesAsync(entry.DocumentPath);
+
+            Assert.Equal("QLQ2", System.Text.Encoding.ASCII.GetString(persisted, 0, 4));
+            Assert.False(bytes.AsSpan().SequenceEqual(persisted));
+            Assert.Equal(agentScopeId, entry.DocumentScopeId);
+            Assert.Equal(bytes, store.ReadDocument(job.Id));
+
+            using var document = store.OpenDocumentReadStream(job.Id, agentScopeId);
+            Assert.True(document.CanSeek);
+            Assert.Equal(bytes.LongLength, document.Length);
+            document.Position = 111_111;
+            var actual = new byte[8192];
+            var read = document.Read(actual, 0, actual.Length);
+            Assert.Equal(actual.Length, read);
+            Assert.Equal(bytes.AsSpan(111_111, actual.Length).ToArray(), actual);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task StreamedQsp2QueueRejectsRecordTampering()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var agentScopeId = Guid.NewGuid();
+            var bytes = RandomNumberGenerator.GetBytes(128 * 1024);
+            var job = CreateJob(bytes);
+            await using var input = new MemoryStream(bytes, writable: false);
+            var entry = await store.EnqueueStreamingAsync(job, agentScopeId, input, CancellationToken.None);
+
+            var persisted = await File.ReadAllBytesAsync(entry.DocumentPath);
+            var protectedKeyLength = checked((int)System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(persisted.AsSpan(5, 4)));
+            var recordCipherOffset = 9 + protectedKeyLength +
+                Qsp2DocumentFormat.HeaderSizeBytes + Qsp2DocumentFormat.HeaderMacSizeBytes + sizeof(uint);
+            persisted[recordCipherOffset + 17] ^= 0x40;
+            await File.WriteAllBytesAsync(entry.DocumentPath, persisted);
+
+            using var document = store.OpenDocumentReadStream(job.Id, agentScopeId);
+            var output = new byte[bytes.Length];
+            Assert.Throws<InvalidDataException>(() => document.Read(output, 0, output.Length));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WindowsAgentStagesAnExtensionlessPdfAfterContentBasedValidation()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var builder = new PdfDocumentBuilder();
+            builder.AddPage(PageSize.A4);
+            var bytes = builder.Build();
+
+            // This is the same content analyzer used by the local upload HTTP route.
+            // The supplied filename has no extension; file content determines PDF.
+            var analysis = DocumentAnalyzer.Analyse(bytes);
+            Assert.Equal("application/pdf", analysis.MediaType);
+            Assert.Equal(".pdf", analysis.Extension);
+            Assert.Equal(1, analysis.PageCount);
+
+            var agentScopeId = Guid.NewGuid();
+            var upload = CreateJob(bytes) with
+            {
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT",
+                DocumentName = "certificate-without-extension",
+                MediaType = analysis.MediaType,
+                PageCount = analysis.PageCount
+            };
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            await using var input = new MemoryStream(bytes, writable: false);
+
+            var entry = await store.EnqueueLocalUploadStreamingAsync(
+                upload, agentScopeId, input, CancellationToken.None);
+
+            Assert.Equal("LOCAL_UPLOAD_STAGED", entry.State);
+            using var staged = store.OpenDocumentReadStream(upload.Id, agentScopeId);
+            var stagedAnalysis = DocumentAnalyzer.Analyse(staged, analysis.Extension);
+            Assert.Equal("application/pdf", stagedAnalysis.MediaType);
+            Assert.Equal(".pdf", stagedAnalysis.Extension);
+            Assert.Equal(1, stagedAnalysis.PageCount);
+            Assert.Equal(upload.Sha256, entry.Sha256);
         }
         finally
         {

@@ -20,6 +20,11 @@ const NON_ACTIVE = new Set(["REJECTED","REFUNDED","CANCELLED"]);
 function produciblePages(job: ShopPrintJob): number {
   const pageCount = Number.isFinite(job.pageCount) ? Math.max(0, Math.trunc(job.pageCount)) : 0;
   const copies = Number.isFinite(job.copies) ? Math.max(1, Math.trunc(job.copies)) : 1;
+  // PageCount is the source PDF page count; PagesPerSheet is driver-backed
+  // output-side layout. Rejection is counted against source pages before N-up.
+  const pagesPerSheet = Number.isInteger(job.pagesPerSheet) && (job.pagesPerSheet ?? 0) > 0
+    ? Math.max(1, Math.trunc(job.pagesPerSheet ?? 1))
+    : 1;
   let rejectedCount = 0;
   try {
     const parsed: unknown = JSON.parse(job.rejectedPageNumbersJson || "[]");
@@ -32,7 +37,8 @@ function produciblePages(job: ShopPrintJob): number {
   } catch {
     // Invalid legacy metadata must not break the order journey.
   }
-  return Math.max(0, pageCount - rejectedCount) * copies;
+  const remainingSourcePages = Math.max(0, pageCount - rejectedCount);
+  return Math.ceil(remainingSourcePages / pagesPerSheet) * copies;
 }
 function isPhotoJob(job: ShopPrintJob): boolean {
   return (job.printKind ?? "").toUpperCase() === "PHOTO";
@@ -133,6 +139,10 @@ export function buildShopOrderJourneys(jobs: ShopPrintJob[], payments: ShopPayme
     if (a.stageIndex !== b.stageIndex) return a.stageIndex-b.stageIndex;
     return Date.parse(b.createdUtc)-Date.parse(a.createdUtc);
   });
+}
+
+export function isActiveOrderWork(journey: Pick<ShopOrderJourney, "isClosed" | "stage">): boolean {
+  return !journey.isClosed && journey.stage !== "ready";
 }
 
 export function orderJourneyStageLabel(stage: OrderJourneyStage): string {

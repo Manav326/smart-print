@@ -23,9 +23,11 @@ import android.widget.TextView
 import androidx.appcompat.widget.AppCompatImageView
 import androidx.exifinterface.media.ExifInterface
 import java.io.File
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.max
@@ -41,13 +43,18 @@ class SmartPrintDocumentViewer(
     private val imageSiblings: List<File>,
     startPosition: Int? = null,
     documentMimeType: String = DocumentNamePolicy.mimeType(startFile),
-    private val onNavigateImage: (File) -> Unit
+    private val onNavigateImage: (File) -> Unit,
+    private val folderBreadcrumbs: List<Pair<String, String>> = emptyList(),
+    private val onNavigateFolder: (String) -> Unit = {},
+    private val onResolvePendingPdfChanges: ((File, Map<Int, Int>, () -> Unit) -> Unit)? = null
 ) : LinearLayout(context) {
     companion object {
         private const val MAX_PAGE_EDGE = 2200
         private const val MAX_IMAGE_EDGE = 2600
         private const val THUMBNAIL_EDGE = 96
         private const val IMAGE_THUMBNAIL_WINDOW = 4
+        private const val PDF_THUMBNAIL_PREFETCH = 2
+        private const val MAX_CACHED_PDF_THUMBNAILS = 24
     }
 
     private data class Thumbnail(val index: Int, val bitmap: Bitmap)
@@ -59,9 +66,44 @@ class SmartPrintDocumentViewer(
     )
 
     private val host = context as? Activity ?: error("The document reader requires an Activity.")
-    private val worker: ExecutorService = Executors.newSingleThreadExecutor()
+    // One active operation and at most one queued operation per renderer. A
+    // newer request removes its superseded FutureTask instead of allowing rapid
+    // page changes or filmstrip scrolling to grow an unbounded executor queue.
+    private val worker = ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1)
+    ) { task -> Thread(task, "SmartPrint-pdf-page").apply { isDaemon = true } }
+    private val thumbnailWorker = ThreadPoolExecutor(
+        1, 1, 0L, TimeUnit.MILLISECONDS, LinkedBlockingQueue<Runnable>(1)
+    ) { task -> Thread(task, "SmartPrint-pdf-thumbnails").apply { isDaemon = true } }
     private val disposed = AtomicBoolean(false)
+    private var activeRenderTask: Future<*>? = null
+    private var thumbnailBatchTask: Future<*>? = null
+    private var pagePdfDescriptor: ParcelFileDescriptor? = null
+    private var pagePdfRenderer: PdfRenderer? = null
+    private var pagePdfIdentity: String? = null
+    private var thumbnailPdfDescriptor: ParcelFileDescriptor? = null
+    private var thumbnailPdfRenderer: PdfRenderer? = null
+    private var thumbnailPdfIdentity: String? = null
+    private var thumbnailGeneration = 0
+    // The PDF filmstrip keeps only a viewport-sized set of views. The full
+    // document is represented by leading/trailing spacers, not one View per page.
+    private val thumbnailViews = mutableMapOf<Int, ImageView>()
+    private val thumbnailFrames = mutableMapOf<Int, View>()
+    private val cachedPdfThumbnails = LinkedHashMap<Int, Bitmap>(32, 0.75f, true)
+    private var thumbnailWindowStart = -1
+    private var thumbnailWindowEnd = -1
+    private var thumbnailWindowUpdatePosted = false
     private val stage = FrameLayout(context)
+    private val breadcrumbScroller = HorizontalScrollView(context).apply {
+        isHorizontalScrollBarEnabled = false
+        clipToPadding = false
+        overScrollMode = View.OVER_SCROLL_NEVER
+        setPadding(dp(12), dp(2), dp(12), dp(4))
+    }
+    private val breadcrumbRow = LinearLayout(context).apply {
+        orientation = LinearLayout.HORIZONTAL
+        gravity = Gravity.CENTER_VERTICAL
+    }
     private val pageImage = ZoomableDocumentImageView(context) { direction ->
         if (isPdf) showPdfPage(currentPage + direction)
         else navigateImage(currentImageIndex + direction)
@@ -99,8 +141,13 @@ class SmartPrintDocumentViewer(
 
     private var currentFile = startFile
     private var currentPage = startPosition?.coerceAtLeast(0) ?: 0
+    private var displayedPage: Int? = null
+    private var pageRenderFailed = false
     private var pageCount = 0
     private var rotationDegrees = 0
+    // Page-indexed state prevents rotations from being lost when customers move
+    // through a multi-page PDF and rotate several pages in one editing session.
+    private val pendingPageRotations = linkedMapOf<Int, Int>()
     private var renderVersion = 0
     // The current file path is authoritative for images; list positions can change if
     // another photo is imported, renamed or removed while the viewer is closed.
@@ -113,6 +160,10 @@ class SmartPrintDocumentViewer(
         background = SmartPrintGlass.backdrop(context)
         clipToPadding = false
 
+        updateBreadcrumbs()
+        breadcrumbScroller.addView(breadcrumbRow, FrameLayout.LayoutParams(-2, -1))
+        addView(breadcrumbScroller, LinearLayout.LayoutParams(-1, dp(35)))
+
         if (isPdf) {
             val pageControls = LinearLayout(context).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -121,8 +172,15 @@ class SmartPrintDocumentViewer(
             }
             previousPage.setOnClickListener { showPdfPage(currentPage - 1) }
             nextPage.setOnClickListener { showPdfPage(currentPage + 1) }
+            val canSaveRotations = onResolvePendingPdfChanges != null
+            rotatePage.contentDescription = if (canSaveRotations) "Rotate page" else "Rotate view"
             rotatePage.setOnClickListener {
+                if (displayedPage != currentPage) return@setOnClickListener
                 rotationDegrees = (rotationDegrees + 90) % 360
+                if (canSaveRotations) {
+                    if (rotationDegrees == 0) pendingPageRotations.remove(currentPage)
+                    else pendingPageRotations[currentPage] = rotationDegrees
+                }
                 renderCurrentPdfPage()
             }
             pageControls.contentDescription = "Document navigation"
@@ -157,32 +215,66 @@ class SmartPrintDocumentViewer(
 
     fun currentPosition(): Int = if (isPdf) currentPage else currentImageIndex
 
+    fun pendingRotationSnapshot(): Map<Int, Int> = pendingPageRotations.toMap()
+
+    fun restorePendingRotations(rotations: Map<Int, Int>) {
+        if (!isPdf || disposed.get()) return
+        pendingPageRotations.clear()
+        rotations.forEach { (index, degrees) ->
+            if (index >= 0 && degrees in setOf(90, 180, 270)) {
+                pendingPageRotations[index] = degrees
+            }
+        }
+        rotationDegrees = pendingPageRotations[currentPage] ?: 0
+        if (pageCount > 0) renderCurrentPdfPage()
+    }
+
+    /**
+     * Routes every user-initiated exit through the host's save/discard decision.
+     * The reader remains mounted until the customer chooses an action.
+     */
+    fun requestExit(afterExit: () -> Unit) {
+        val pending = pendingPageRotations.toMap()
+        val resolver = onResolvePendingPdfChanges
+        if (pending.isEmpty() || resolver == null) afterExit()
+        else resolver.invoke(currentFile, pending, afterExit)
+    }
+
     fun dispose() {
         if (!disposed.compareAndSet(false, true)) return
         renderVersion++
-        worker.shutdownNow()
+        activeRenderTask?.let { task ->
+            task.cancel(true)
+            (task as? Runnable)?.let(worker::remove)
+        }
+        thumbnailBatchTask?.let { task ->
+            task.cancel(true)
+            (task as? Runnable)?.let(thumbnailWorker::remove)
+        }
+        // Close PdfRenderer and its descriptor on the worker that owns it, after
+        // any interrupted render leaves its current page. No cross-thread close.
+        runCatching { worker.execute { closePagePdfRenderer() } }
+        runCatching { thumbnailWorker.execute { closeThumbnailPdfRenderer() } }
+        worker.shutdown()
+        thumbnailWorker.shutdown()
         clearDisplayedBitmaps()
     }
 
     private fun loadPdfPageCount() {
+        val request = ++renderVersion
         submitRender {
             try {
-                val count = ParcelFileDescriptor.open(
-                    currentFile,
-                    ParcelFileDescriptor.MODE_READ_ONLY
-                ).use { descriptor ->
-                    PdfRenderer(descriptor).use { renderer -> renderer.pageCount }
-                }
+                val count = pagePdfRendererFor(currentFile).pageCount
                 require(count > 0) { "This PDF has no pages to display." }
                 host.runOnUiThread {
-                    if (disposed.get()) return@runOnUiThread
+                    if (disposed.get() || request != renderVersion) return@runOnUiThread
                     pageCount = count
                     currentPage = currentPage.coerceIn(0, count - 1)
                     updatePdfControls()
                     renderCurrentPdfPage()
                 }
             } catch (error: Exception) {
-                showRenderError(++renderVersion, error)
+                showRenderError(request, error)
             }
         }
     }
@@ -192,18 +284,65 @@ class SmartPrintDocumentViewer(
         val target = index.coerceIn(0, pageCount - 1)
         if (target == currentPage) return
         currentPage = target
-        rotationDegrees = 0
+        rotationDegrees = pendingPageRotations[target] ?: 0
         updatePdfControls()
         renderCurrentPdfPage()
     }
 
     private fun updatePdfControls() {
-        pageCounter.text = "Page ${if (pageCount == 0) 1 else currentPage + 1} of ${max(1, pageCount)}"
+        pageCounter.text = displayedPage?.let { "Page ${it + 1} of ${max(1, pageCount)}" }
+            ?: when {
+                pageRenderFailed -> "Page ${currentPage + 1} unavailable"
+                pageCount > 0 -> "Rendering page ${currentPage + 1}…"
+                else -> "Opening PDF…"
+            }
+        rotatePage.isEnabled = displayedPage == currentPage && pageCount > 0
+        rotatePage.alpha = if (rotatePage.isEnabled) 1f else 0.32f
         previousPage.isEnabled = currentPage > 0
         nextPage.isEnabled = pageCount > 0 && currentPage < pageCount - 1
         previousPage.alpha = if (previousPage.isEnabled) 1f else 0.32f
         nextPage.alpha = if (nextPage.isEnabled) 1f else 0.32f
-        rotatePage.alpha = if (pageCount > 0) 1f else 0.32f
+    }
+
+    private fun updateBreadcrumbs() {
+        breadcrumbRow.removeAllViews()
+        fun separator() {
+            if (breadcrumbRow.childCount > 0) {
+                breadcrumbRow.addView(TextView(context).apply {
+                    text = "›"
+                    textSize = 13f
+                    setTextColor(getColor(R.color.qp_muted))
+                    setPadding(dp(7), 0, dp(7), 0)
+                }, LinearLayout.LayoutParams(-2, -2))
+            }
+        }
+        folderBreadcrumbs.forEach { (label, path) ->
+            separator()
+            breadcrumbRow.addView(TextView(context).apply {
+                text = label
+                textSize = 12f
+                setTextColor(getColor(R.color.qp_primary))
+                setPadding(dp(3), dp(6), dp(3), dp(6))
+                contentDescription = "Open folder $label"
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { requestExit { onNavigateFolder(path) } }
+                val selectable = android.util.TypedValue()
+                if (context.theme.resolveAttribute(android.R.attr.selectableItemBackground, selectable, true)) {
+                    setBackgroundResource(selectable.resourceId)
+                }
+            }, LinearLayout.LayoutParams(-2, -2))
+        }
+        separator()
+        breadcrumbRow.addView(TextView(context).apply {
+            text = currentFile.name
+            textSize = 12f
+            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTextColor(getColor(R.color.qp_text))
+            setPadding(dp(3), dp(6), dp(3), dp(6))
+            maxLines = 1
+        }, LinearLayout.LayoutParams(-2, -2))
+        breadcrumbScroller.post { breadcrumbScroller.fullScroll(View.FOCUS_RIGHT) }
     }
 
     private fun renderCurrentPdfPage() {
@@ -212,8 +351,14 @@ class SmartPrintDocumentViewer(
         val file = currentFile
         val requestedPage = currentPage
         val requestedRotation = rotationDegrees
-        showLoading("Rendering page ${requestedPage + 1}…")
-        submitRender {
+        // Never leave a previous page visible beneath a new page's loading state.
+        clearDisplayedBitmaps(clearThumbnails = false)
+        displayedPage = null
+        pageRenderFailed = false
+        updatePdfControls()
+        pageImage.contentDescription = "Rendering PDF page ${requestedPage + 1} preview"
+        showLoading("Rendering page ${requestedPage + 1} of $pageCount…")
+        submitLatestRender {
             try {
                 val rendered = renderPdfFrame(file, requestedPage, requestedRotation)
                 host.runOnUiThread {
@@ -221,15 +366,20 @@ class SmartPrintDocumentViewer(
                         recycle(rendered)
                         return@runOnUiThread
                     }
-                    clearDisplayedBitmaps()
+                    clearDisplayedBitmaps(clearThumbnails = false)
                     pageCount = rendered.pageCount
                     currentPage = rendered.index
+                    displayedPage = rendered.index
+                    pageRenderFailed = false
+                    rotationDegrees = pendingPageRotations[rendered.index] ?: 0
                     displayedBitmaps.add(rendered.bitmap)
                     pageImage.setDocumentBitmap(rendered.bitmap)
-                    rendered.thumbnails.forEach { displayedBitmaps.add(it.bitmap) }
+                    pageImage.contentDescription = "PDF page ${rendered.index + 1} preview"
                     showFeedback(false)
                     updatePdfControls()
-                    showThumbnails(rendered.thumbnails, isPdf = true)
+                    if (thumbnailViews.isEmpty()) showPdfThumbnailPlaceholders()
+                    updatePdfThumbnailSelection()
+                    scrollPdfThumbnailIntoView(rendered.index)
                 }
             } catch (error: Exception) {
                 showRenderError(request, error)
@@ -237,43 +387,302 @@ class SmartPrintDocumentViewer(
         }
     }
 
+    /**
+     * The large page is rendered alone at display resolution. Thumbnail work is
+     * lazy and independent, so a 500-page PDF never renders 500 previews before
+     * the first page appears or repeats that work on every page navigation.
+     */
     private fun renderPdfFrame(file: File, requestedPage: Int, rotation: Int): RenderedDocument {
-        return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-            PdfRenderer(descriptor).use { renderer ->
-                require(renderer.pageCount > 0) { "This PDF has no pages to display." }
-                val index = requestedPage.coerceIn(0, renderer.pageCount - 1)
-                val pageBitmap = renderer.openPageBitmap(index, MAX_PAGE_EDGE)
-                val displayBitmap = try {
-                    rotateBitmap(pageBitmap, rotation).also {
-                        if (it !== pageBitmap) pageBitmap.recycle()
-                    }
-                } catch (error: Exception) {
-                    if (!pageBitmap.isRecycled) pageBitmap.recycle()
-                    throw error
-                }
+        val renderer = pagePdfRendererFor(file)
+        require(renderer.pageCount > 0) { "This PDF has no pages to display." }
+        val index = requestedPage.coerceIn(0, renderer.pageCount - 1)
+        val pageBitmap = renderer.openPageBitmap(index, MAX_PAGE_EDGE)
+        val displayBitmap = try {
+            rotateBitmap(pageBitmap, rotation).also {
+                if (it !== pageBitmap) pageBitmap.recycle()
+            }
+        } catch (error: Exception) {
+            if (!pageBitmap.isRecycled) pageBitmap.recycle()
+            throw error
+        }
+        return RenderedDocument(renderer.pageCount, index, displayBitmap, emptyList())
+    }
 
-                val thumbnails = mutableListOf<Thumbnail>()
+    /**
+     * Reuse the parsed native renderer while this document remains open. PdfRenderer
+     * is confined to the page worker; file identity includes metadata so a changed
+     * document at the same path is reopened rather than serving stale pages.
+     */
+    private fun pagePdfRendererFor(file: File): PdfRenderer {
+        val identity = "${file.canonicalPath}:${file.length()}:${file.lastModified()}"
+        pagePdfRenderer?.let { existing ->
+            if (pagePdfIdentity == identity) return existing
+        }
+        closePagePdfRenderer()
+        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        return try {
+            PdfRenderer(descriptor).also { renderer ->
+                pagePdfDescriptor = descriptor
+                pagePdfRenderer = renderer
+                pagePdfIdentity = identity
+            }
+        } catch (error: Exception) {
+            runCatching { descriptor.close() }
+            throw error
+        }
+    }
+
+    private fun closePagePdfRenderer() {
+        try {
+            pagePdfRenderer?.close()
+        } finally {
+            pagePdfRenderer = null
+            pagePdfIdentity = null
+            runCatching { pagePdfDescriptor?.close() }
+            pagePdfDescriptor = null
+        }
+    }
+
+    /**
+     * Thumbnail parsing is retained independently on its own serial worker so it
+     * never races full-page rendering and does not reparse the document per batch.
+     */
+    private fun thumbnailPdfRendererFor(file: File): PdfRenderer {
+        val identity = "${file.canonicalPath}:${file.length()}:${file.lastModified()}"
+        thumbnailPdfRenderer?.let { existing ->
+            if (thumbnailPdfIdentity == identity) return existing
+        }
+        closeThumbnailPdfRenderer()
+        val descriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        return try {
+            PdfRenderer(descriptor).also { renderer ->
+                thumbnailPdfDescriptor = descriptor
+                thumbnailPdfRenderer = renderer
+                thumbnailPdfIdentity = identity
+            }
+        } catch (error: Exception) {
+            runCatching { descriptor.close() }
+            throw error
+        }
+    }
+
+    private fun closeThumbnailPdfRenderer() {
+        try {
+            thumbnailPdfRenderer?.close()
+        } finally {
+            thumbnailPdfRenderer = null
+            thumbnailPdfIdentity = null
+            runCatching { thumbnailPdfDescriptor?.close() }
+            thumbnailPdfDescriptor = null
+        }
+    }
+
+    private fun showPdfThumbnailPlaceholders() {
+        thumbnailRow.removeAllViews()
+        thumbnailViews.clear()
+        thumbnailFrames.clear()
+        thumbnailWindowStart = -1
+        thumbnailWindowEnd = -1
+        if (pageCount <= 1) {
+            filmstrip.visibility = View.GONE
+            return
+        }
+
+        filmstrip.visibility = View.VISIBLE
+        filmstrip.setOnScrollChangeListener { _, _, _, _, _ ->
+            schedulePdfThumbnailWindowUpdate()
+        }
+        filmstrip.post {
+            if (!disposed.get()) updatePdfThumbnailWindow(centerPage = currentPage, force = true)
+        }
+    }
+
+    private fun schedulePdfThumbnailWindowUpdate() {
+        if (thumbnailWindowUpdatePosted || disposed.get()) return
+        thumbnailWindowUpdatePosted = true
+        filmstrip.post {
+            thumbnailWindowUpdatePosted = false
+            updatePdfThumbnailWindow()
+        }
+    }
+
+    /**
+     * Rebuild only when the viewport approaches the current window's edge.
+     * Amortized scroll work is O(visible thumbnails), not O(total PDF pages).
+     */
+    private fun updatePdfThumbnailWindow(centerPage: Int? = null, force: Boolean = false) {
+        if (!isPdf || pageCount <= 1 || disposed.get()) return
+        if (filmstrip.width <= 0) {
+            filmstrip.post { updatePdfThumbnailWindow(centerPage, force) }
+            return
+        }
+
+        val itemWidth = dp(75).coerceAtLeast(1)
+        val visibleCount = ((filmstrip.width + itemWidth - 1) / itemWidth + 1).coerceAtLeast(1)
+        val visibleStart = if (centerPage != null) {
+            (centerPage - visibleCount / 2).coerceIn(0, max(0, pageCount - 1))
+        } else {
+            ((filmstrip.scrollX + filmstrip.paddingLeft) / itemWidth).coerceIn(0, max(0, pageCount - 1))
+        }
+        val visibleEnd = min(pageCount, visibleStart + visibleCount)
+
+        val currentWindowHasRunway =
+            thumbnailWindowStart >= 0 &&
+            visibleStart >= thumbnailWindowStart + PDF_THUMBNAIL_PREFETCH &&
+            visibleEnd <= thumbnailWindowEnd - PDF_THUMBNAIL_PREFETCH
+        if (!force && centerPage == null && currentWindowHasRunway) {
+            requestVisiblePdfThumbnails()
+            return
+        }
+
+        val newStart = max(0, visibleStart - PDF_THUMBNAIL_PREFETCH)
+        val newEnd = min(pageCount, visibleEnd + PDF_THUMBNAIL_PREFETCH)
+        if (!force && newStart == thumbnailWindowStart && newEnd == thumbnailWindowEnd) {
+            requestVisiblePdfThumbnails()
+            return
+        }
+
+        thumbnailRow.removeAllViews()
+        thumbnailViews.clear()
+        thumbnailFrames.clear()
+
+        fun addSpacer(pageSlots: Int) {
+            if (pageSlots <= 0) return
+            thumbnailRow.addView(
+                View(context),
+                LinearLayout.LayoutParams(pageSlots * itemWidth, dp(1))
+            )
+        }
+
+        addSpacer(newStart)
+        for (pageIndex in newStart until newEnd) {
+            val frame = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(4), dp(3), dp(4), dp(3))
+                contentDescription = "Go to page ${pageIndex + 1}"
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { showPdfPage(pageIndex) }
+            }
+            val preview = ImageView(context).apply {
+                scaleType = ImageView.ScaleType.FIT_CENTER
+                setBackgroundColor(Color.WHITE)
+                contentDescription = "Page ${pageIndex + 1} thumbnail"
+                cachedPdfThumbnails[pageIndex]?.let(::setImageBitmap)
+            }
+            frame.addView(preview, LinearLayout.LayoutParams(dp(62), dp(58)))
+            frame.addView(
+                TextView(context).apply {
+                    text = (pageIndex + 1).toString()
+                    textSize = 9f
+                    gravity = Gravity.CENTER
+                    setTextColor(getColor(R.color.qp_muted))
+                },
+                LinearLayout.LayoutParams(-1, dp(15))
+            )
+            thumbnailRow.addView(
+                frame,
+                LinearLayout.LayoutParams(dp(70), dp(82)).apply { marginEnd = dp(5) }
+            )
+            thumbnailViews[pageIndex] = preview
+            thumbnailFrames[pageIndex] = frame
+        }
+        addSpacer(pageCount - newEnd)
+
+        thumbnailWindowStart = newStart
+        thumbnailWindowEnd = newEnd
+        updatePdfThumbnailSelection()
+        requestVisiblePdfThumbnails()
+    }
+
+    private fun requestVisiblePdfThumbnails() {
+        if (!isPdf || pageCount <= 1 || disposed.get() || thumbnailWindowStart < 0) return
+        val pending = (thumbnailWindowStart until thumbnailWindowEnd)
+            .filter { it !in cachedPdfThumbnails }
+        if (pending.isEmpty()) return
+
+        val generation = ++thumbnailGeneration
+        thumbnailBatchTask?.let { task ->
+            task.cancel(true)
+            (task as? Runnable)?.let(thumbnailWorker::remove)
+        }
+        val file = currentFile
+        thumbnailBatchTask = try {
+            thumbnailWorker.submit {
+                val rendered = mutableListOf<Pair<Int, Bitmap>>()
                 try {
-                    for (pageIndex in 0 until renderer.pageCount) {
-                        val raw = renderer.openPageBitmap(pageIndex, THUMBNAIL_EDGE, Bitmap.Config.RGB_565)
-                        val thumb = try {
-                            rotateBitmap(raw, if (pageIndex == index) rotation else 0).also {
-                                if (it !== raw) raw.recycle()
-                            }
-                        } catch (error: Exception) {
-                            if (!raw.isRecycled) raw.recycle()
-                            throw error
-                        }
-                        thumbnails.add(Thumbnail(pageIndex, thumb))
+                    val renderer = thumbnailPdfRendererFor(file)
+                    for (index in pending) {
+                        if (Thread.currentThread().isInterrupted) break
+                        if (index !in 0 until renderer.pageCount) continue
+                        val bitmap = renderer.openPageBitmap(index, THUMBNAIL_EDGE, Bitmap.Config.RGB_565)
+                        rendered.add(index to bitmap)
                     }
-                    RenderedDocument(renderer.pageCount, index, displayBitmap, thumbnails)
-                } catch (error: Exception) {
-                    if (!displayBitmap.isRecycled) displayBitmap.recycle()
-                    thumbnails.forEach { if (!it.bitmap.isRecycled) it.bitmap.recycle() }
-                    throw error
+                } catch (_: Exception) {
+                    // A thumbnail failure must not block the current full-size PDF page.
+                }
+                host.runOnUiThread {
+                    if (disposed.get() || generation != thumbnailGeneration || !sameFile(file, currentFile)) {
+                        rendered.forEach { (_, bitmap) -> if (!bitmap.isRecycled) bitmap.recycle() }
+                        return@runOnUiThread
+                    }
+                    rendered.forEach { (index, bitmap) ->
+                        cachedPdfThumbnails[index] = bitmap
+                        thumbnailViews[index]?.setImageBitmap(bitmap)
+                        trimPdfThumbnailCache()
+                    }
                 }
             }
+        } catch (_: RejectedExecutionException) {
+            null
         }
+    }
+
+    private fun trimPdfThumbnailCache() {
+        while (cachedPdfThumbnails.size > MAX_CACHED_PDF_THUMBNAILS) {
+            val eldest = cachedPdfThumbnails.entries.iterator().next()
+            cachedPdfThumbnails.remove(eldest.key)
+            thumbnailViews[eldest.key]?.setImageDrawable(null)
+            if (!eldest.value.isRecycled) eldest.value.recycle()
+        }
+    }
+
+    private fun updatePdfThumbnailSelection() {
+        // Only the small materialized window is visited, never all PDF pages.
+        thumbnailFrames.forEach { (index, frame) ->
+            frame.setBackgroundColor(if (index == currentPage) getColor(R.color.qp_soft) else Color.TRANSPARENT)
+        }
+    }
+
+    private fun scrollPdfThumbnailIntoView(index: Int) {
+        filmstrip.post {
+            if (index !in thumbnailWindowStart until thumbnailWindowEnd) {
+                updatePdfThumbnailWindow(centerPage = index, force = true)
+                // Wait for the replacement window's child positions to be measured.
+                filmstrip.post { scrollPdfThumbnailIntoView(index) }
+                return@post
+            }
+            val frame = thumbnailFrames[index] ?: return@post
+            val target = (frame.left - (filmstrip.width - frame.width) / 2).coerceAtLeast(0)
+            if (target != filmstrip.scrollX) filmstrip.smoothScrollTo(target, 0)
+            else requestVisiblePdfThumbnails()
+        }
+    }
+
+    private fun clearPdfThumbnailCache() {
+        thumbnailGeneration++
+        thumbnailBatchTask?.let { task ->
+            task.cancel(true)
+            (task as? Runnable)?.let(thumbnailWorker::remove)
+        }
+        thumbnailBatchTask = null
+        cachedPdfThumbnails.values.forEach { if (!it.isRecycled) it.recycle() }
+        cachedPdfThumbnails.clear()
+        thumbnailViews.clear()
+        thumbnailFrames.clear()
+        thumbnailWindowStart = -1
+        thumbnailWindowEnd = -1
     }
 
     private fun PdfRenderer.openPageBitmap(index: Int, maxEdge: Int, config: Bitmap.Config = Bitmap.Config.ARGB_8888): Bitmap {
@@ -306,10 +715,11 @@ class SmartPrintDocumentViewer(
         if (imageSiblings.isEmpty() || index !in imageSiblings.indices || disposed.get()) return
         currentImageIndex = index
         currentFile = imageSiblings[index]
+        updateBreadcrumbs()
         val request = ++renderVersion
         if (imageSiblings.size > 1) pageCounter.text = "Photo ${index + 1} of ${imageSiblings.size}"
         showLoading("Opening image…")
-        submitRender {
+        submitLatestRender {
             try {
                 val rendered = renderImageFrame(index)
                 host.runOnUiThread {
@@ -500,6 +910,9 @@ class SmartPrintDocumentViewer(
         host.runOnUiThread {
             if (disposed.get() || request != renderVersion) return@runOnUiThread
             clearDisplayedBitmaps()
+            displayedPage = null
+            pageRenderFailed = true
+            updatePdfControls()
             feedback.text = "Could not open this document. Tap to try again."
             feedback.contentDescription = "Retry opening document"
             feedback.setOnClickListener {
@@ -525,11 +938,15 @@ class SmartPrintDocumentViewer(
         }
     }
 
-    private fun clearDisplayedBitmaps() {
+    private fun clearDisplayedBitmaps(clearThumbnails: Boolean = true) {
         pageImage.setDocumentBitmap(null)
-        thumbnailRow.removeAllViews()
         displayedBitmaps.forEach { if (!it.isRecycled) it.recycle() }
         displayedBitmaps.clear()
+        if (clearThumbnails) {
+            thumbnailRow.removeAllViews()
+            filmstrip.visibility = View.GONE
+            clearPdfThumbnailCache()
+        }
     }
 
     private fun recycle(rendered: RenderedDocument) {
@@ -543,6 +960,19 @@ class SmartPrintDocumentViewer(
             worker.execute { if (!disposed.get()) task() }
         } catch (_: RejectedExecutionException) {
             // The reader was closed while a render was being queued.
+        }
+    }
+
+    private fun submitLatestRender(task: () -> Unit) {
+        if (disposed.get()) return
+        activeRenderTask?.let { pending ->
+            pending.cancel(true)
+            (pending as? Runnable)?.let(worker::remove)
+        }
+        activeRenderTask = try {
+            worker.submit { if (!disposed.get()) task() }
+        } catch (_: RejectedExecutionException) {
+            null
         }
     }
 

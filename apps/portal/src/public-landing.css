@@ -189,6 +189,7 @@
 .sp-download-progress-fill{display:block;height:100%;border-radius:20px;background:linear-gradient(90deg,#7057db,#9a86f2);transition:width .16s ease}
 .sp-download-progress-indeterminate{width:34%;animation:spDownloadIndeterminate 1.25s ease-in-out infinite}
 .sp-download-progress-details{color:#7d8798;font-size:9px;font-variant-numeric:tabular-nums}
+.sp-download-speed-details{display:flex;align-items:center;justify-content:space-between;gap:10px;color:#536078;font-size:10px;font-weight:700;font-variant-numeric:tabular-nums}
 .sp-download-cancel{justify-self:end;display:inline-flex;align-items:center;gap:5px;padding:5px 2px;border:0;background:transparent;color:#8b5260;font-size:9px;font-weight:700;cursor:pointer}
 .sp-download-cancel:hover{color:#b33c52}
 .sp-download-result{display:grid;gap:9px;padding:12px;border:1px solid #e4e8ef;border-radius:11px;background:#f8f9fc}
@@ -378,6 +379,9 @@ html[data-theme="dark"] .sp-download-result {
 }
 html[data-theme="dark"] .sp-download-progress-track {
   background: #2a364b;
+}
+html[data-theme="dark"] .sp-download-speed-details {
+  color: #bac5d7;
 }
 html[data-theme="dark"] .sp-download-result-success {
   background: #183c34;

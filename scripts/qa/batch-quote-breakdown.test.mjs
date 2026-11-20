@@ -80,3 +80,22 @@ test("empty and single-category batches report zeroes in the other categories", 
   assert.equal(onlyIdCards.photoPages, 0);
   assert.equal(onlyIdCards.totalOutputPagesAndSheets, 1);
 });
+
+test("N-up reports billable output sides rather than original PDF pages", () => {
+  const result = calculateBatchQuoteBreakdown([
+    {
+      printKind: "DOCUMENT",
+      pageCount: 33,
+      copies: 1,
+      pagesPerSheet: 4,
+      colourMode: "Mono",
+      quotedAmountMinor: 900
+    }
+  ]);
+
+  assert.equal(result.normalDocumentSourcePages, 33);
+  assert.equal(result.normalDocumentOutputPages, 9);
+  assert.equal(result.normalDocumentMonoOutputPages, 9);
+  assert.equal(result.normalDocumentColourOutputPages, 0);
+  assert.equal(result.totalOutputPagesAndSheets, 9);
+});

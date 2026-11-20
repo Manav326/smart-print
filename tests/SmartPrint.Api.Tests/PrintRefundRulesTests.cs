@@ -51,6 +51,49 @@ public sealed class PrintRefundRulesTests
     }
 
     [Fact]
+    public void NupRefundIsBasedOnOutputSidesRatherThanRejectedSourcePageCount()
+    {
+        // 33 pages at 4-up = 9 output sides. Removing one page drops to 8 sides;
+        // removing a second page still leaves 8 sides, so it must not refund again.
+        var first = PrintRefundRules.CalculateAdditionalNupRefundAmount(
+            900, 0, 33, 1, false, 4, [1]);
+        var second = PrintRefundRules.CalculateAdditionalNupRefundAmount(
+            900, first, 33, 1, false, 4, [1, 2]);
+        var third = PrintRefundRules.CalculateAdditionalNupRefundAmount(
+            900, first + second, 33, 1, false, 4, [1, 2, 3, 4, 5]);
+
+        Assert.Equal(100, first);
+        Assert.Equal(0, second);
+        Assert.Equal(100, third);
+        Assert.Equal(200, first + second + third);
+    }
+
+    [Fact]
+    public void NupDuplexRefundUsesPhysicalSheetCount()
+    {
+        // 33 at 4-up = 9 sides = 5 duplex sheets. Removing one source page
+        // leaves 8 sides = 4 sheets, so one fifth of the paid amount is refunded.
+        Assert.Equal(200, PrintRefundRules.CalculateAdditionalNupRefundAmount(
+            1_000, 0, 33, 1, true, 4, [1]));
+    }
+
+    [Fact]
+    public void NupRefundReturnsEverythingWhenEverySourcePageIsRejected()
+    {
+        Assert.Equal(900, PrintRefundRules.CalculateAdditionalNupRefundAmount(
+            900, 0, 33, 1, false, 4, Enumerable.Range(1, 33).ToArray()));
+    }
+
+    [Fact]
+    public void NupRefundKeepsMinimumChargeSnapshotProportionalToRemainingOutputSheets()
+    {
+        // The quoted minimum is retained as the original amount. Removing one of
+        // nine output sides refunds one ninth of that paid quote, not one thirty-third.
+        Assert.Equal(56, PrintRefundRules.CalculateAdditionalNupRefundAmount(
+            500, 0, 33, 1, false, 4, [1]));
+    }
+
+    [Fact]
     public void SavedAllocationsMustMatchOriginalPaidAmount()
         => Assert.Throws<InvalidOperationException>(() => PrintRefundRules.NormalizePageAllocations(100, 3, [30L, 30L, 30L]));
 

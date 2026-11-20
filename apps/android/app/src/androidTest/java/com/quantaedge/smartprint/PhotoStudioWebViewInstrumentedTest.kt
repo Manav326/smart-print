@@ -230,6 +230,27 @@ class PhotoStudioWebViewInstrumentedTest {
         tapCssPoint(scenario, point.getDouble("x"), point.getDouble("y"))
     }
 
+    private fun tapPhotoBackgroundSample(scenario: ActivityScenario<MainActivity>) {
+        val coordinates = evaluate(
+            scenario,
+            """(() => {
+              const dialog = document.querySelector('[role="dialog"]');
+              const canvas = document.getElementById('photo-studio-preview-canvas');
+              if (!dialog || !(canvas instanceof HTMLCanvasElement) || !dialog.contains(canvas)) return null;
+              const rect = canvas.getBoundingClientRect();
+              const xMm = Number(canvas.getAttribute('data-background-sample-x-mm'));
+              const yMm = Number(canvas.getAttribute('data-background-sample-y-mm'));
+              if (!Number.isFinite(xMm) || !Number.isFinite(yMm)) return null;
+              return JSON.stringify({
+                x: rect.left + rect.width * xMm / 210,
+                y: rect.top + rect.height * yMm / 297
+              });
+            })()"""
+        )
+        val point = JSONObject(decodeJavascriptString(coordinates))
+        tapCssPoint(scenario, point.getDouble("x"), point.getDouble("y"))
+    }
+
     private fun tapButtonId(scenario: ActivityScenario<MainActivity>, componentId: String) {
         val id = JSONObject.quote(componentId)
         waitFor(
@@ -687,7 +708,7 @@ class PhotoStudioWebViewInstrumentedTest {
                     "document.querySelector('[role=dialog]')?.innerText.includes('Not selected')"
                 )
             )
-            tapPhotoSheetPoint(scenario, 13.5, 10.0)
+            tapPhotoBackgroundSample(scenario)
             waitFor(
                 scenario,
                 "document.querySelector('[role=dialog]')?.innerText.includes('#D8E7F5')",
@@ -725,7 +746,7 @@ class PhotoStudioWebViewInstrumentedTest {
             tapElement(
                 scenario,
                 """Array.from(document.querySelectorAll('[role="dialog"] label'))
-                  .find(item => item.textContent.includes('Add name and DOB to each photo'))"""
+                  .find(item => item.textContent.includes('Print name and date of birth below each photo'))"""
             )
             waitFor(
                 scenario,
@@ -749,7 +770,7 @@ class PhotoStudioWebViewInstrumentedTest {
             setLabelValue(scenario, "photo-studio-photo-count", "1.5")
             waitFor(
                 scenario,
-                "document.getElementById('photo-studio-photo-count')?.value === '1.5' && document.querySelector('[role=dialog]')?.innerText.includes('Enter a whole number from 1 to 100') && Array.from(document.querySelectorAll('[role=dialog] button')).find(button => button.innerText.includes('Prepare A4 sheet'))?.disabled === true",
+                "document.getElementById('photo-studio-photo-count')?.value === '1.5' && document.querySelector('[role=dialog]')?.innerText.includes('Enter 1–100 whole copies') && Array.from(document.querySelectorAll('[role=dialog] button')).find(button => button.innerText.includes('Prepare A4 sheet'))?.disabled === true",
                 "fractional quantities to remain visible, invalid and blocked without crashing Photo Studio"
             )
             setLabelValue(scenario, "photo-studio-photo-count", "50")
@@ -860,7 +881,7 @@ class PhotoStudioWebViewInstrumentedTest {
             setLabelValue(scenario, "photo-studio-photo-count", "1.5")
             waitFor(
                 scenario,
-                "Array.from(document.querySelectorAll('[role=dialog] input')).find(input => input.getAttribute('aria-label') === 'Number of photos')?.value === '1.5' && document.querySelector('[role=dialog]')?.innerText.includes('Enter a whole number from 1 to 100')",
+                "Array.from(document.querySelectorAll('[role=dialog] input')).find(input => input.getAttribute('aria-label') === 'Number of copies')?.value === '1.5' && document.querySelector('[role=dialog]')?.innerText.includes('Enter 1–100 whole copies')",
                 "fractional shop photo quantity to stay visible with validation"
             )
             setLabelValue(scenario, "photo-studio-photo-count", "14")
@@ -956,7 +977,7 @@ class PhotoStudioWebViewInstrumentedTest {
                 "true",
                 evaluate(
                     scenario,
-                    "Array.from(document.querySelectorAll('[role=dialog] label')).find(label => label.textContent.trim().startsWith('Number of photos'))?.querySelector('input')?.value === '17'"
+                    "Array.from(document.querySelectorAll('[role=dialog] label')).find(label => label.textContent.trim().startsWith('Number of copies'))?.querySelector('input')?.value === '17'"
                 )
             )
         } finally {

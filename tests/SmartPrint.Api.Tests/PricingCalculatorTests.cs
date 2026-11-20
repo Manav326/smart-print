@@ -24,6 +24,32 @@ public sealed class PricingCalculatorTests
     }
 
     [Fact]
+    public void FourUpPricingUsesNineOutputSidesForThirtyThreeSourcePages()
+    {
+        var pricing = ConfiguredPricing();
+        Assert.Equal(1_800, PricingCalculator.Calculate(33, 1, "Mono", false, pricing, 4));
+        Assert.Equal(3_600, PricingCalculator.Calculate(33, 2, "Mono", false, pricing, 4));
+        Assert.Equal(1_500, PricingCalculator.Calculate(33, 1, "Mono", true, pricing, 4));
+    }
+
+    [Fact]
+    public void NupPageRefundAllocationsStillSumToTheQuotedAmount()
+    {
+        var allocations = PricingCalculator.CalculatePageRefundAllocations(33, 1, "Mono", false, ConfiguredPricing(), 4);
+        Assert.Equal(33, allocations.Length);
+        Assert.Equal(1_800, allocations.Sum());
+    }
+
+    [Fact]
+    public void RejectsUnsupportedPagesPerSheetValues()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PricingCalculator.Calculate(33, 1, "Mono", false, ConfiguredPricing(), 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            PricingCalculator.Calculate(33, 1, "Mono", false, ConfiguredPricing(), 501));
+    }
+
+    [Fact]
     public void RejectsUnpricedDuplexMode()
     {
         var pricing = ConfiguredPricing();

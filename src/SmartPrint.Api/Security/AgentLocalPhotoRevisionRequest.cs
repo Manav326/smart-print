@@ -12,4 +12,6 @@ public sealed record AgentLocalPhotoRevisionRequest(
     int PhotosPerPage,
     long? ExpectedQuotedAmountMinor = null,
     int? ExpectedPricingVersion = null,
-    string? EditorSettingsJson = null);
+    string? EditorSettingsJson = null,
+    string PhotoOutputLayout = "A4_SHEET",
+    string PhotoPaperFinish = "PLAIN");

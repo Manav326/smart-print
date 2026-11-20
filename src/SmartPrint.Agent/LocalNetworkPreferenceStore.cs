@@ -1,3 +1,5 @@
+using System.Net.Http;
+using System.IO;
 using System.Text;
 
 namespace SmartPrint.Agent;

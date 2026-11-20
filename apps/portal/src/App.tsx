@@ -1,11 +1,13 @@
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
+import { validateCustomerUploadBatchLimits } from "./upload-batch-policy";
+import { CUSTOMER_UPLOAD_CONCURRENCY, mapConcurrentSettled } from "./upload-concurrency";
 import { identifySupportedDocument, type SupportedDocumentType } from "./document-content-policy";
 import { calculateBatchQuoteBreakdown } from "./batch-quote-breakdown.js";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
   Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
-  ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound,
-  ShieldCheck, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, RefreshCw, Zap, Info, Lock
+  ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound, Share2,
+  ShieldCheck, AlertTriangle, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, RefreshCw, Zap, Info, Lock
 } from "lucide-react";
 import QRCode from "react-qr-code";
 import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } from "./PhotoStudio";
@@ -21,6 +23,8 @@ import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from ".
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
 import QrStationPrintDocument from "./QrStationPrintDocument";
+import { createQrStationImageFile, downloadQrStationImage, loadQrStationLogoDataUri, shareQrStationImage, type QrStationImageFormat } from "./qr-station-export";
+import { resolveCustomerUploadStatusMessage } from "./customer-upload-status";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import PlatformAdminConsole from "./PlatformAdminConsole";
 import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
@@ -56,6 +60,21 @@ import { getSubscriptionReminderState } from "./subscription-checkout-state";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "printer" | "station" | null;
+
+type CustomerUploadFileProgress = {
+  name: string;
+  sizeBytes: number;
+  bytesSent: number;
+  totalBytes: number;
+  status: "QUEUED" | "PREPARING" | "TRANSFERRING" | "STREAMING_ENCRYPTED" | "WAITING_FOR_SHOP" | "PROCESSING" | "COMPLETED" | "FAILED";
+  message: string;
+};
+
+type CustomerUploadProgressState = {
+  completed: number;
+  total: number;
+  files: CustomerUploadFileProgress[];
+};
 
 const sections: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: "Order Journey", icon: Activity },
@@ -1251,6 +1270,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     try{
       const result=await createShopPhotoJob(tokens.accessToken,sheet.file,{
         photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,
+        photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish,
         recipientType:draft.recipientType,customerUserId:draft.customerUserId,
         recipientName:draft.recipientName,recipientPhone:draft.recipientPhone,
         paymentMethod:draft.paymentMethod,idempotencyKey:draft.idempotencyKey
@@ -1341,9 +1361,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setToast("");
     try{
       if(editor.job.storageMode==="LOCAL_AGENT") {
-        await replaceShopPhotoDocumentLocally(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}));
+        await replaceShopPhotoDocumentLocally(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}),sheet.photoOutputLayout,sheet.photoPaperFinish);
       } else {
-        await replaceShopPhotoDocument(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}));
+        await replaceShopPhotoDocument(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}),sheet.photoOutputLayout,sheet.photoPaperFinish);
       }
     }catch(exception){
       setError(exception instanceof Error?exception.message:"Could not save the enhanced photo sheet.");
@@ -1352,17 +1372,17 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
     setShopPhotoStudio(null);
     setFocusShopPhotoEdit(false);
-    setToast("The enhanced multi-page A4 photo PDF is saved to the same print job and its photo price has been recalculated.");
+    setToast(sheet.photoOutputLayout==="PHOTO_PAPER"?"The individual photo-paper prints are saved to the same job. Printer compatibility will be checked before dispatch.":"The enhanced multi-page A4 photo PDF is saved to the same print job and its photo price has been recalculated.");
     try{
       await reload();
       const blob=await downloadShopDocument(tokens.accessToken,editor.job.id,"original");
       const detectedMediaType=await identifyDocumentPreviewMediaType(blob);
       const mediaType=detectedMediaType==="application/pdf"?detectedMediaType:"";
       const previewBlob=mediaType?new Blob([blob],{type:mediaType}):blob;
-      const savedJob:ShopPrintJob={...editor.job,photoEditorSettingsJson:JSON.stringify(sheet.editorSettings??{}),printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
+      const savedJob:ShopPrintJob={...editor.job,photoEditorSettingsJson:JSON.stringify(sheet.editorSettings??{}),printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish,document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
       setPreview({name:sheet.file.name,url:URL.createObjectURL(previewBlob),blob:previewBlob,mediaType,job:savedJob,readOnly:true});
     }catch{
-      setError("The A4 photo PDF was saved to the existing print job, but the queue could not refresh its preview. Refresh the queue before approving or printing.");
+      setError("The prepared photo output was saved to the existing print job, but the queue could not refresh its preview. Refresh the queue before approving or printing.");
     }finally{
       setBusyJobId(null);
     }
@@ -1659,7 +1679,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onOpenPhotoStudio={job=>void openShopPhotoStudioForJob(job)}
           />}
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
-          {active === "Printers" && <PrintersPage printers={printers} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
+          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} busyResourceId={busyResourceId} onAdd={() => setModal("printer")} onToggle={togglePrinter}/>}
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
@@ -2156,12 +2176,144 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   );
 }
 
-function PrintersPage({ printers, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
+type PrinterCapabilitySnapshot = {
+  source?: string;
+  queueName?: string;
+  driverName?: string | null;
+  discoveredAtUtc?: string;
+  color?: boolean | null;
+  colorStatus?: string;
+  duplex?: boolean | null;
+  duplexStatus?: string;
+  orientation?: { portrait?: boolean | null; landscape?: boolean | null } | null;
+  paperSizes?: Array<{ name?: string | null; code?: number }> | null;
+  pagesPerSheet?: number[] | null;
+  pagesPerSheetStatus?: string;
+  pagesPerSheetDirection?: string | null;
+  pagesPerSheetDirectionStatus?: string;
+  mediaTypes?: Array<{ name?: string | null; code?: number }> | null;
+  resolutions?: Array<{ xDpi?: number; yDpi?: number }> | null;
+};
+
+function parsePrinterCapabilitySnapshot(json?:string|null):PrinterCapabilitySnapshot|null {
+  if(!json?.trim()||json.trim()==="{}")return null;
+  try {
+    const value=JSON.parse(json) as unknown;
+    return value&&typeof value==="object"&&!Array.isArray(value)
+      ?value as PrinterCapabilitySnapshot:null;
+  } catch {
+    return null;
+  }
+}
+
+function capabilityState(value:unknown,reported?:string):"supported"|"unsupported"|"unknown" {
+  if(reported==="supported"||reported==="unsupported"||reported==="unknown")return reported;
+  return typeof value==="boolean"?(value?"supported":"unsupported"):"unknown";
+}
+
+function capabilityStateLabel(state:"supported"|"unsupported"|"unknown"):string {
+  return state==="supported"?"Supported":state==="unsupported"?"Not supported":"Not reported";
+}
+
+function formatCapabilityTimestamp(value?:string):string {
+  if(!value)return "Not yet discovered";
+  const date=new Date(value);
+  return Number.isFinite(date.getTime())?date.toLocaleString():"Timestamp unavailable";
+}
+
+function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
+  const snapshot=parsePrinterCapabilitySnapshot(printer.capabilitiesJson);
+  const pages=Array.isArray(snapshot?.pagesPerSheet)
+    ?snapshot.pagesPerSheet.filter(value=>Number.isInteger(value)&&value>=1&&value<=500):[];
+  const nupValues=pages.filter(value=>value>1).sort((a,b)=>a-b);
+  const nupState=capabilityState(nupValues.length>0,snapshot?.pagesPerSheetStatus);
+  const colourState=capabilityState(snapshot?.color,snapshot?.colorStatus);
+  const duplexState=capabilityState(snapshot?.duplex,snapshot?.duplexStatus);
+  const directionState=capabilityState(
+    snapshot?.pagesPerSheetDirection,
+    snapshot?.pagesPerSheetDirectionStatus
+  );
+  const paperSizes=(snapshot?.paperSizes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
+  const mediaTypes=(snapshot?.mediaTypes??[]).map(item=>item.name?.trim()|| (item.code?"Driver code "+item.code:"")).filter(Boolean);
+  const resolutions=(snapshot?.resolutions??[]).map(item=>
+    item.xDpi&&item.yDpi?item.xDpi+" × "+item.yDpi+" dpi":""
+  ).filter(Boolean);
+  const status=printer.status.toLowerCase();
+  const statusIssue=status.includes("offline")||status.includes("stale")||status.includes("revoked")||
+    status.includes("paused")||status.includes("error")||status==="unknown";
+  const diagnostic=status.includes("revoked")
+    ?"The paired Print Agent has been revoked. Re-enrol the shop computer before using this queue."
+    :status.includes("offline")
+      ?"The Print Agent is offline. Check that the shop computer is powered on, connected to the internet and running SmartPrint Agent."
+      :status.includes("stale")
+        ?"The last Windows printer inventory is stale. Reconnect the Agent or refresh printer discovery on the shop computer."
+        :status.includes("paused")
+          ?"Windows reports this queue as paused. Resume it in Windows Settings → Printers & scanners, then refresh discovery."
+          :status.includes("error")
+            ?"Windows reports a printer error. Open the queue in Windows, clear the blocked document or resolve the displayed driver/device warning, then reconnect the printer."
+            :status==="unknown"
+              ?"Windows could not confirm the live queue state. Check the printer, cable/network and Windows queue before retrying."
+            :!snapshot
+              ?"No capability snapshot has been received yet. Confirm the Agent is connected, then reconnect or rediscover this printer."
+              :nupState==="unknown"||colourState==="unknown"||duplexState==="unknown"
+                ?"Some driver capabilities were not reported. Update or reinstall the printer driver, then reconnect the queue to refresh its capability report."
+                :"The Agent has reported this queue. Compare the requested print settings with the driver capabilities below before retrying a failed job.";
+  const capabilityTiles=[
+    {label:"Colour",value:snapshot?.color===true?"Colour":snapshot?.color===false?"Mono only":"Not reported",state:colourState},
+    {label:"Duplex",value:snapshot?.duplex===true?"Available":snapshot?.duplex===false?"Simplex only":"Not reported",state:duplexState},
+    {label:"N-up",value:nupValues.length?nupValues.map(value=>value+"-up").join(" · "):capabilityStateLabel(nupState),state:nupState},
+    {label:"Paper sizes",value:paperSizes.length?paperSizes.length+" reported":"Not reported",state:paperSizes.length?"supported" as const:"unknown" as const}
+  ];
+  return (
+    <div className="printer-capability-panel">
+      <div className="printer-capability-heading">
+        <strong>Driver capabilities</strong>
+        <span>{snapshot?formatCapabilityTimestamp(snapshot.discoveredAtUtc):"Awaiting Agent discovery"}</span>
+      </div>
+      {snapshot&&<div className="printer-capability-tiles">
+        {capabilityTiles.map(tile=><div className="printer-capability-tile" key={tile.label}>
+          <span>{tile.label}</span>
+          <strong className={"capability-state-"+tile.state}>{tile.value}</strong>
+        </div>)}
+      </div>}
+      <details className="printer-diagnostics" open={statusIssue||!snapshot}>
+        <summary>{snapshot?"Full capabilities & troubleshooting":"Capability diagnostics"}</summary>
+        <div className="printer-diagnostic-content">
+          <div className="printer-driver-identity">
+            <span>Installed driver</span>
+            <strong>{snapshot?.driverName||"Driver name not reported by Agent"}</strong>
+            <small>{snapshot?.source==="WINDOWS_DRIVER"?"Read from the Windows print driver":"Capability source not reported"}</small>
+          </div>
+          <div className="printer-capability-facts">
+            <div><span>Colour printing</span><strong>{capabilityStateLabel(colourState)}</strong></div>
+            <div><span>Duplex printing</span><strong>{capabilityStateLabel(duplexState)}</strong></div>
+            <div><span>Page order for N-up</span><strong>{snapshot?.pagesPerSheetDirection||capabilityStateLabel(directionState)}</strong></div>
+            <div><span>Orientation</span><strong>{snapshot?.orientation?[
+              snapshot.orientation.portrait===true?"Portrait":null,
+              snapshot.orientation.landscape===true?"Landscape":null
+            ].filter(Boolean).join(" · ")||"Not reported":"Not reported"}</strong></div>
+            <div><span>Paper sizes</span><strong>{paperSizes.length?paperSizes.slice(0,10).join(", ")+(paperSizes.length>10?" +"+(paperSizes.length-10)+" more":""):"Not reported"}</strong></div>
+            <div><span>Media types</span><strong>{mediaTypes.length?mediaTypes.slice(0,8).join(", ")+(mediaTypes.length>8?" +"+(mediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>Resolutions</span><strong>{resolutions.length?resolutions.slice(0,8).join(", ")+(resolutions.length>8?" +"+(resolutions.length-8)+" more":""):"Not reported"}</strong></div>
+          </div>
+          <div className={"printer-diagnostic-advice"+(statusIssue||!snapshot?" warning":"")} role="note">
+            <strong>{statusIssue||!snapshot?"What to check":"Troubleshooting guidance"}</strong>
+            <span>{diagnostic}</span>
+          </div>
+          {printer.lastSeenUtc&&<small className="printer-last-seen">Agent last seen · {formatCapabilityTimestamp(printer.lastSeenUtc)}</small>}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+function PrintersPage({ printers, agents, busyResourceId, onAdd, onToggle }: { printers: PrinterDevice[]; agents:AgentDevice[]; busyResourceId:string|null; onAdd:()=>void; onToggle:(printer:PrinterDevice)=>void }) {
   return (
     <section className="panel collection-panel">
       <div className="collection-header"><div><h2>Your printers</h2><p>Each Windows queue stays separate. Microsoft Print to PDF is the supported virtual test destination; other virtual/document drivers remain visible but cannot be assigned for output.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Add printer</button></div>
       {printers.length===0 ? <EmptyModule icon={<Printer size={24}/>} title="No printers registered yet" text="Add your first printer. It will appear here as awaiting local-agent discovery until the Windows Print Agent reports its capabilities and live status." actionLabel="Add your first printer" onAction={onAdd}/> :
       <div className="printer-grid">{printers.map(printer=>{
+        const agent=agents.find(candidate=>candidate.id===printer.agentDeviceId);
         const isUnsupportedVirtual=printer.outputMode==="UNSUPPORTED_VIRTUAL";
         const possibleDuplicates=printer.outputMode==="PHYSICAL"&&printer.agentDeviceId&&printer.connectionAddress
           ?printers.filter(other=>other.id!==printer.id&&other.outputMode==="PHYSICAL"&&other.agentDeviceId===printer.agentDeviceId&&
@@ -2174,7 +2326,9 @@ function PrintersPage({ printers, busyResourceId, onAdd, onToggle }: { printers:
           <div className="printer-meta">
             <span>{isUnsupportedVirtual?"Not available for print dispatch":printer.outputMode==="PDF_EXPORT"?"PDF test destination":printer.connectionType}{printer.isDefault?(printer.outputMode==="PDF_EXPORT"?" · Default output destination":" · Default Windows queue"):""}</span>
             <span>{printer.queueName || printer.connectionAddress || "Connection not verified"}</span>
+            <span>Print Agent · {agent?.deviceName||"Not linked"}</span>
           </div>
+          <PrinterCapabilityPanel printer={printer}/>
           {possibleDuplicates.length>0&&<div className="printer-duplicate-warning" role="note">
             <strong>Possible duplicate printer</strong>
             <span>{possibleDuplicates.map(item=>item.displayName).join(", ")} uses the same Windows port. SmartPrint keeps both queues separate; confirm whether they are alternate queues for one physical printer.</span>
@@ -2190,6 +2344,85 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
   const [printingStationId,setPrintingStationId]=useState<string|null>(null);
+  const [formatByStation,setFormatByStation]=useState<Record<string,QrStationImageFormat>>({});
+  const [exportingStationId,setExportingStationId]=useState<string|null>(null);
+  const [copyFeedback,setCopyFeedback]=useState<Record<string,{kind:"success"|"error";message:string}>>({});
+  const [exportFeedback,setExportFeedback]=useState<Record<string,{kind:"success"|"info"|"error";message:string}>>({});
+  const [preparedShareImage,setPreparedShareImage]=useState<{stationId:string;signature:string;file:File}|null>(null);
+  const imageFormatFor=(station:QrStation)=>formatByStation[station.id]??"png";
+  const stationImageSignature=(station:QrStation)=>JSON.stringify([
+    station.publicUrl??"",station.displayName,station.isEnabled,
+    profile?.displayName??"",profile?.logoUrl??"",imageFormatFor(station)
+  ]);
+  const copyStationUrl=async(station:QrStation)=>{
+    if(!station.publicUrl)return;
+    const copied=await copyText(station.publicUrl);
+    setCopyFeedback(current=>({...current,[station.id]:copied
+      ?{kind:"success",message:"Station link copied."}
+      :{kind:"error",message:"Could not copy automatically. Open the link and copy it manually."}}));
+  };
+  const createStationImage=async(station:QrStation)=>{
+    if(!station.publicUrl)throw new Error("This station does not have a public QR link yet.");
+    const root=document.getElementById("qr-station-"+station.id);
+    const qrSvg=root?.querySelector<SVGSVGElement>(".qr-code-frame svg");
+    if(!qrSvg)throw new Error("The station QR code is not ready. Refresh the page and try again.");
+    const logoDataUri=await loadQrStationLogoDataUri(profile?.logoUrl);
+    return createQrStationImageFile({
+      shopName:profile?.displayName?.trim()||station.displayName,
+      stationName:station.displayName,
+      isEnabled:station.isEnabled,
+      logoDataUri
+    },new XMLSerializer().serializeToString(qrSvg),imageFormatFor(station));
+  };
+  const exportStationImage=async(station:QrStation)=>{
+    setExportingStationId(station.id);
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing a sharp, scan-ready QR image…"}}));
+    try{
+      const file=await createStationImage(station);
+      downloadQrStationImage(file);
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Your "+imageFormatFor(station).toUpperCase()+" QR image is ready."}}));
+    }catch(exception){
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+    }finally{setExportingStationId(null);}
+  };
+  const prepareStationShare=async(station:QrStation)=>{
+    setExportingStationId(station.id);
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing the QR image for sharing…"}}));
+    try{
+      const file=await createStationImage(station);
+      setPreparedShareImage({stationId:station.id,signature:stationImageSignature(station),file});
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Image ready. Tap “Share image now” to open your device’s share options."}}));
+    }catch(exception){
+      setPreparedShareImage(null);
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+    }finally{setExportingStationId(null);}
+  };
+  const sharePreparedStationImage=(station:QrStation)=>{
+    const prepared=preparedShareImage;
+    if(!prepared||prepared.stationId!==station.id||prepared.signature!==stationImageSignature(station)){
+      setPreparedShareImage(null);
+      setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Station details changed. Prepare the image again before sharing."}}));
+      return;
+    }
+    setExportingStationId(station.id);
+    const file=prepared.file;
+    // Invoke navigator.share directly from this click. Image generation has
+    // already finished, so the browser's transient user activation is intact.
+    void shareQrStationImage(file).then(result=>{
+      if(result==="shared"){
+        setPreparedShareImage(null);
+        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR image shared successfully."}}));
+      }else if(result==="cancelled"){
+        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Sharing was cancelled. The image was not sent."}}));
+      }else{
+        downloadQrStationImage(file);
+        setPreparedShareImage(null);
+        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"File sharing is not supported here, so the QR image was downloaded instead."}}));
+      }
+    }).catch(exception=>{
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not share this QR image."}}));
+    }).finally(()=>setExportingStationId(null));
+  };
   useEffect(()=>{
     if(!printingStationId)return;
     let cancelled=false;
@@ -2232,7 +2465,28 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
           <div className="qr-powered"><small>POWERED BY</small><div className="qr-powered-lockup" aria-label="QuantaEdge, Smarter Decisions. Greater Growth."><img className="qr-quantaedge-mark" src="/branding/quantaedge-mark.png" alt="" onError={event=>{event.currentTarget.hidden=true;const fallback=event.currentTarget.nextElementSibling;if(fallback instanceof HTMLElement)fallback.hidden=false;}}/><span className="qr-quantaedge-mark-fallback" hidden aria-hidden="true">Q</span><div className="qr-powered-wordmark"><strong>Quanta<span>Edge</span></strong><small>Smarter Decisions. Greater Growth.</small></div></div></div>
         </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div>}</div>
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:station.isEnabled?"Disable station":"Enable station"}</button></div>
-        {station.publicUrl && <div className="station-actions"><button className="secondary-button" onClick={()=>void copyText(station.publicUrl!)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print / download QR poster</button></div>}
+        {station.publicUrl && <>
+           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print / download QR poster</button></div>
+           {copyFeedback[station.id]&&<small className={"qr-share-feedback "+copyFeedback[station.id].kind} role="status" aria-live="polite">{copyFeedback[station.id].message}</small>}
+           <details className="qr-share-export">
+             <summary><Share2 size={15}/> Download or share QR image <span>PNG / JPG</span></summary>
+             <div className="qr-share-export-controls">
+               <label>Image format
+                 <select value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));}} disabled={!!exportingStationId}>
+                   <option value="png">PNG · best QR clarity</option>
+                   <option value="jpg">JPG · smaller file</option>
+                 </select>
+               </label>
+               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<ImageIcon size={14}/>} Download image</button>
+               {preparedShareImage?.stationId===station.id&&preparedShareImage.signature===stationImageSignature(station)
+                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Share image now</button>
+                 :<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Prepare to share</button>}
+             </div>
+             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The exported image is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
+             {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
+             <small className="qr-share-export-help">Prepare the image first, then tap “Share image now” to open your device’s share sheet. If file sharing is unavailable, SmartPrint downloads the same image instead. The QR contains this station’s current public link, never a customer session token.</small>
+           </details>
+         </>}
       </article>)}</div>}
     </section>
     <QrStationPrintDocument station={stations.find(station => station.id === printingStationId) ?? null} profile={profile}/>
@@ -2786,7 +3040,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.batchGroupName??"Loose files"} · ${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)} · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
@@ -2889,24 +3143,60 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   const quoteRefreshRequiredCount=acceptedJobs.filter(quoteExpired).length;
   const acceptedTotal=acceptedJobs.filter(job=>!quoteExpired(job))
     .reduce((sum,job)=>sum+Math.max(0,job.quotedAmountMinor),0);
-  const acceptedRequestedPages=acceptedJobs.reduce((sum,job)=>sum+job.pageCount*job.copies,0);
-  const acceptedMonoPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?job.pageCount*job.copies:0),0);
-  const acceptedColourPages=acceptedJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?job.pageCount*job.copies:0),0);
+  const acceptedDocumentJobs=acceptedJobs.filter(job=>job.printKind!=="PHOTO"&&job.printKind!=="ID_DOCUMENT");
+  const acceptedIdCardJobs=acceptedJobs.filter(job=>job.printKind==="ID_DOCUMENT");
+  const acceptedPhotoJobs=acceptedJobs.filter(job=>job.printKind==="PHOTO");
+  const acceptedOutputSides=acceptedDocumentJobs.reduce((sum,job)=>sum+printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies),0);
+  const acceptedIdSheets=acceptedIdCardJobs.reduce((sum,job)=>sum+job.pageCount,0);
+  const acceptedPhotoPages=acceptedPhotoJobs.reduce((sum,job)=>sum+job.pageCount,0);
+  const acceptedMonoPages=acceptedDocumentJobs.reduce((sum,job)=>sum+(job.colourMode==="Mono"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
+  const acceptedColourPages=acceptedDocumentJobs.reduce((sum,job)=>sum+(job.colourMode==="Colour"?printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies):0),0);
   const folders=Array.from(new Set(jobs.map(job=>job.batchGroupName??"Loose files")));
-  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Files start accepted. Uncheck a file to exclude it; recheck it to restore it."} onClose={onClose}>
-    <div className="batch-review-list">{folders.map(folderName=><section className="batch-review-folder" key={folderName}>
-      <div className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).length} files</small></div>
-      {jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName).map((job,index)=>{
-        const accepted=decisions[job.id]??true;
-        const needsFreshQuote=accepted&&quoteExpired(job);
-        return <div className={accepted?"batch-review-row accepted":"batch-review-row rejected"} key={job.id}>
-          <label className="batch-review-checkbox"><input type="checkbox" checked={accepted} disabled={busy} onChange={event=>onDecision(job.id,event.target.checked)}/></label>
-          <span className="batch-review-index">{index+1}</span>
-          <div className="batch-review-file"><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag">Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/></div><small>{job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.pageCount} A4 pages` : `${job.pageCount} pages × ${job.copies} copies = ${job.pageCount*job.copies} pages requested · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`} · {needsFreshQuote?"Previous quote expired · fresh quote required":formatMoney(job.quotedAmountMinor,job.currency)}</small><Status label={!accepted?"Marked for rejection":needsFreshQuote?"Accepted · re-quote needed":"Accepted"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
-          <button className="subtle-button" type="button" disabled={busy||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source · preview disabled":"Preview"}</button>
-        </div>;
-      })}
-    </section>)}</div>
+  return <Modal title={retrying?"Retry batch review":"Review batch"} subtitle={retrying?"Retry review. Rejected files stay excluded until restored.":"Select the files that should remain in the customer's batch checkout. Excluded files will not be charged."} onClose={onClose}>
+    <section className="batch-review-overview" aria-label="Batch review summary">
+      <div className="batch-review-overview-heading"><div><span>REVIEW SUMMARY</span><strong>{jobs.length} {jobs.length===1?"file":"files"} in this batch</strong><small>Included files stay in one checkout. Excluded files will not be charged.</small></div><div className="batch-review-total"><small>Accepted value · valid quotes only</small><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong></div></div>
+      <div className="batch-review-stats">
+        <span className="included"><b>{acceptedCount}</b> included</span>
+        <span className="excluded"><b>{rejectedCount}</b> excluded</span>
+        <span className="output"><b>{acceptedOutputSides}</b> document output sides</span>
+        {acceptedIdSheets>0&&<span className="id-cards"><b>{acceptedIdSheets}</b> ID-card A4 sheets</span>}
+        {acceptedPhotoPages>0&&<span className="photos"><b>{acceptedPhotoPages}</b> photo A4 pages</span>}
+        {quoteRefreshRequiredCount>0&&<span className="refresh"><b>{quoteRefreshRequiredCount}</b> need a fresh quote</span>}
+      </div>
+      <div className="batch-review-output-note"><span><strong>Document output mix</strong></span><span><i className="mono-dot"/> B&W <strong>{acceptedMonoPages}</strong></span><span><i className="colour-dot"/> Colour <strong>{acceptedColourPages}</strong></span></div>
+    </section>
+    <div className="batch-review-list">{folders.map(folderName=>{
+      const folderJobs=jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName);
+      const folderAccepted=folderJobs.filter(job=>decisions[job.id]??true).length;
+      return <details className="batch-review-folder" key={folderName} open>
+        <summary className="batch-review-folder-head"><FolderOpen size={15}/><strong>{folderName}</strong><small>{folderAccepted} of {folderJobs.length} included</small></summary>
+        {folderJobs.map((job,index)=>{
+          const accepted=decisions[job.id]??true;
+          const needsFreshQuote=accepted&&quoteExpired(job);
+          const outputSides=printJobOutputSides(job.pageCount,job.pagesPerSheet??1,job.copies);
+          const fileName=job.document.originalFileName;
+          const printDetail=job.printKind==="PHOTO"
+            ? `${job.photoCount??0} finished photos · ${job.photoSizeCode??"Size not recorded"} · ${job.pageCount} A4 pages`
+            : job.printKind==="ID_DOCUMENT"
+              ? `${job.pageCount} prepared A4 ${job.pageCount===1?"sheet":"sheets"} · ${job.copies} ${job.copies===1?"copy":"copies"} · ID card layout`
+              : `${job.pageCount} source pages → ${outputSides} output sides · ${job.copies} ${job.copies===1?"copy":"copies"} · ${job.pagesPerSheet??1} per sheet · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"}`;
+          return <article className={"batch-review-row "+(accepted?"accepted":"rejected")} key={job.id}>
+            <label className="batch-review-toggle" title="Include this file in the customer's batch checkout">
+              <input type="checkbox" checked={accepted} disabled={busy} aria-label={"Include "+fileName+" in batch checkout"} onChange={event=>onDecision(job.id,event.currentTarget.checked)}/>
+              <span>{accepted?"Included":"Excluded"}</span>
+            </label>
+            <span className="batch-review-index">{index+1}</span>
+            <div className="batch-review-file">
+              <div className="batch-review-file-heading"><strong>{fileName}</strong>{job.privatePrinting&&<span className="private-printing-tag">Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/></div>
+              <small>{printDetail}</small>
+              <div className="batch-review-file-status"><Status label={!accepted?"Will be excluded":needsFreshQuote?"Fresh quote required":"Included in checkout"} tone={!accepted?"red":needsFreshQuote?"amber":"green"}/></div>
+            </div>
+            <div className="batch-review-file-finance"><strong>{!accepted?"Not charged":needsFreshQuote?"—":formatMoney(job.quotedAmountMinor,job.currency)}</strong><small>{!accepted?"Excluded":needsFreshQuote?"Recalculate before checkout":"Current quote"}</small></div>
+            <button className="subtle-button batch-review-preview" type="button" disabled={busy||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source":"Preview"}</button>
+          </article>;
+        })}
+      </details>;
+    })}</div>
     <div className="batch-branding-setting">
       <div className="batch-branding-copy">
         <strong>SmartPrint PDF footer <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Multi-copy or reformatted exports may be flattened.</span></InfoTooltip></strong>
@@ -2917,8 +3207,8 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         <span>{hasIdDocument?"Unavailable for ID card sheets":pdfBrandingEnabled?"On for this batch":"Off · default"}</span>
       </label>
     </div>
-    <div className="batch-review-summary"><span><strong>{acceptedCount}</strong> accepted</span><span><strong>{rejectedCount}</strong> rejected</span><span><strong>{acceptedRequestedPages}</strong> pages requested</span><span><strong>{acceptedMonoPages}</strong> B&W · <strong>{acceptedColourPages}</strong> Colour</span><span><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong> accepted value with valid quotes</span>{quoteRefreshRequiredCount>0&&<span><strong>{quoteRefreshRequiredCount}</strong> need a fresh quote</span>}<small>Page count = source pages × copies. Refresh expired quotes before checkout. Reject files before checkout; after payment starts, use the file-level refund action.</small></div>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled&&!hasIdDocument)}>{busy?<span className="button-spinner"/>:"Apply review"}</button></div>
+    <p className="batch-review-next-step">{quoteRefreshRequiredCount>0?quoteRefreshRequiredCount+" accepted file(s) need a new quote before customer checkout. ":""}Applying this review saves the file decisions. It does not collect payment or send files to a printer.</p>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled&&!hasIdDocument)}>{busy?<span className="button-spinner"/>:"Save batch review"}</button></div>
   </Modal>;
 }
 
@@ -2947,7 +3237,7 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,isSavedOutp
     ? "Final PDF export saved by this shop. This is the actual output file; the uploaded original remains separate and unchanged."
     : job.printKind==="PHOTO"
       ? `${job.photoCount??0} ${photoDimensions[job.photoSizeCode??""]??job.photoSizeCode??""} photos · ${job.photosPerPage??"Layout density not recorded"} per A4 page · ${job.pageCount} A4 PDF page(s). Preview displays the complete prepared file.`
-      : `${job.pageCount} source page(s) × ${job.copies} copy/copies = ${job.pageCount*job.copies} printed page(s). Preview displays the uploaded original once.`;
+      : `${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)}. Preview displays the uploaded original once; the assigned printer driver applies the N-up layout at print time.`;
   const subtitle = isSavedOutput ? "Saved PDF output · Read-only preview" : readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary;
   return <Modal title={name} subtitle={subtitle} onClose={onClose}>
     <ShopDocumentPreviewSurface name={name} url={url} mediaType={mediaType} printKind={job.printKind}/>
@@ -3093,8 +3383,8 @@ function prettyStatus(status:string) {
     AUTHORISED:"Approved",
     PAID_AUTHORISED:"Payment received",
     VERIFIED:"Payment received",
-    LOCAL_QUEUE_CLAIMED:"Preparing to print",
-    LOCAL_QUEUE_READY:"Preparing to print",
+    LOCAL_QUEUE_CLAIMED:"Shop computer preparing",
+    LOCAL_QUEUE_READY:"Ready for print",
     PRINT_AUTHORISED:"Ready to print",
     PRINT_SUBMITTING:"Sending to printer",
     SPOOLER_ACCEPTED:"Sent to printer",
@@ -3466,11 +3756,11 @@ function pageDescription(section:Section) {
   };
   return descriptions[section];
 }
-async function copyText(value:string) {
+async function copyText(value:string):Promise<boolean> {
   try {
     if(navigator.clipboard?.writeText) {
       await navigator.clipboard.writeText(value);
-      return;
+      return true;
     }
   } catch {
     // Fall through to the in-page clipboard fallback.
@@ -3482,7 +3772,16 @@ async function copyText(value:string) {
   helper.style.opacity="0";
   document.body.appendChild(helper);
   helper.select();
-  try { document.execCommand("copy"); } finally { helper.remove(); }
+  try { return document.execCommand("copy"); } catch { return false; }
+  finally { helper.remove(); }
+}
+
+function CustomerInlineNotice({kind,title,children}:{kind:"info"|"warning";title:string;children:ReactNode}) {
+  const Icon=kind==="warning"?AlertTriangle:Info;
+  return <div className={"customer-inline-notice "+kind} role={kind==="warning"?"alert":"status"}>
+    <Icon size={16} aria-hidden="true"/>
+    <div><strong>{title}</strong><span>{children}</span></div>
+  </div>;
 }
 
 function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
@@ -3576,6 +3875,9 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
           existing=await resumeCustomerSession(storedToken,publicCode);
         } catch(exception) {
           if(exception instanceof ApiError&&exception.status===401){
+            // Retain the expired capability only in this tab, for read-only
+            // restoration of its own order. It is never saved to localStorage.
+            sessionStorage.setItem("qrtoprint.customer-previous-session:"+publicCode,storedToken);
             sessionStorage.removeItem(stationKey);
             sessionStorage.removeItem("qrtoprint.customer-session");
             await clearNativeCustomerPrintSession(publicCode);
@@ -3605,6 +3907,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     setLocalReady(false);
     setLocalFallbackSuggested(false);
     try{
+      sessionStorage.removeItem("qrtoprint.customer-previous-session:"+publicCode);
       const value=await createCustomerSession(publicCode);
       const storedNatively=await saveNativeCustomerPrintSession(publicCode,value.sessionToken);
       await saveNativeCustomerShopProfile(publicCode,value.shop);
@@ -3895,7 +4198,9 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
       onUnavailable();
       setPermissionState("unknown");
       setCheckStatus("unavailable");
-      setMessage("The shop's paired print computer has not reported a reachable local connection. Direct shop Wi-Fi or hotspot transfer is temporarily unavailable. Use Secure queue · HTTPS below to submit your request when available.");
+      setMessage(cloudAssistedPrintingEnabled
+        ? "The shop computer isn't reachable on this Wi-Fi. Choose Cloud-assisted · HTTPS to continue."
+        : "The shop computer isn't reachable on this Wi-Fi. Choose Secure queue · HTTPS to continue.");
       return ()=>{checkGeneration.current++;};
     }
     onReady(false);
@@ -3975,7 +4280,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     </div>
     {!nativeAppMode&&<p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>}
     {!localAgent?.endpoints.length
-      ? <div className="entry-local-agent-message" role="status"><strong>Direct transfer is temporarily unavailable.</strong> {message}</div>
+      ? <div className="entry-local-agent-message" role="status"><strong>Local transfer unavailable.</strong> {message}</div>
       : checkStatus==="insecure"
       ? <div className="entry-local-agent-message">
           <small>{message}</small>
@@ -3986,7 +4291,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
         : <button type="button" className="customer-flow-button" disabled={checkStatus==="checking"} onClick={()=>void checkConnection()}>
             {checkStatus==="checking"?"Checking…":checkStatus==="connected"?"Check again":nativeAppMode?"Check Wi-Fi":"Check shop Wi-Fi"}
           </button>}
-    {message&&checkStatus!=="insecure"&&!(permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission)&&<small className="entry-local-agent-message">{message}</small>}
+    {Boolean(localAgent?.endpoints.length)&&message&&checkStatus!=="insecure"&&!(permissionState==="denied"&&!localOriginDoesNotNeedLnaPermission)&&<small className="entry-local-agent-message">{message}</small>}
   </section>;
 }
 
@@ -3998,6 +4303,7 @@ type CustomerGroupSettings = {
   advancedEnabled: boolean;
   paperSize: CustomerPrintRequestSettings["paperSize"];
   orientation: CustomerPrintRequestSettings["orientation"];
+  pagesPerSheet: number;
 };
 type CustomerFileSettings = CustomerGroupSettings & { custom: boolean };
 
@@ -4008,7 +4314,7 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
   return Array.isArray(groups)?groups:undefined;
 }
 type CustomerSavedPrintSettings = CustomerPrintRequestSettings & { advancedEnabled?: boolean };
-type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage?: number };
+type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" };
 function customerPhotoSizeLabel(sizeCode?:string|null):string {
   switch(sizeCode){
     case "35x45": return "35 × 45 mm";
@@ -4017,6 +4323,24 @@ function customerPhotoSizeLabel(sizeCode?:string|null):string {
     case "4x6": return "4 × 6 in";
     default: return "photo";
   }
+}
+
+function printJobOutputSides(pageCount:number,pagesPerSheet=1,copies=1):number {
+  const density=Number.isInteger(pagesPerSheet)&&pagesPerSheet>1?pagesPerSheet:1;
+  return Math.ceil(pageCount/density)*copies;
+}
+
+function customerDocumentOutputSummary(
+  pageCount:number,
+  copies:number,
+  pagesPerSheet=1,
+  isDuplex=false
+):string {
+  const density=Number.isInteger(pagesPerSheet)&&pagesPerSheet>1?pagesPerSheet:1;
+  const outputSidesPerCopy=Math.ceil(pageCount/density);
+  if(density===1)return `${pageCount} pages × ${copies} copies = ${pageCount*copies} pages requested`;
+  const outputSheetsPerCopy=isDuplex?Math.ceil(outputSidesPerCopy/2):outputSidesPerCopy;
+  return `${pageCount} PDF pages · ${density} per sheet = ${outputSidesPerCopy} output sides per copy · ${outputSidesPerCopy*copies} output sides total${isDuplex?` · ${outputSheetsPerCopy} duplex sheets per copy`:""}`;
 }
 
 type StoredCustomerDraft = {
@@ -4080,9 +4404,25 @@ function isSmartPrintIdDocument(file:File):boolean {
 function isSmartPrintPhotoDocument(file:File):boolean {
   return (file as File & {__smartPrintPrintKind?:string}).__smartPrintPrintKind==="PHOTO";
 }
+type CustomerNupDirection =
+  | "RightBottom" | "BottomRight" | "LeftBottom" | "BottomLeft"
+  | "RightTop" | "TopRight" | "LeftTop" | "TopLeft";
 type NativeCustomerPdfPreview = {
   token:string; requestedPageIndex:number; pageIndex:number; pageCount:number;
+  pagesPerSheet:number; pagesPerSheetDirection:CustomerNupDirection; paperSize:string; orientation:string;
+  firstSourcePage:number; lastSourcePage:number;
   image:string; thumbnails:Array<{index:number;image:string}>; loading:boolean;
+};
+type BrowserCustomerNupPreview = {
+  url:string;
+  sheetIndex:number;
+  sheetCount:number;
+  pagesPerSheet:number;
+  pagesPerSheetDirection:CustomerNupDirection;
+  firstSourcePage:number;
+  lastSourcePage:number;
+  loading:boolean;
+  failed:boolean;
 };
 function customerStatusTone(status:string):"green"|"red"|"amber"|"blue"|"slate" {
   if(["COMPLETED","PDF_EXPORTED","PAID_AUTHORISED","REFUNDED"].includes(status))return "green";
@@ -4099,8 +4439,54 @@ function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSetting
   const settings=value as CustomerPhotoSettings;
   const maximumBySize:Record<string,number>={"35x45":25,"25x35":49,"2x2":15,"4x6":1};
   const maximum=maximumBySize[settings.sizeCode];
+  const outputLayout=settings.photoOutputLayout??"A4_SHEET";
+  const finish=settings.photoPaperFinish??"PLAIN";
   return maximum!==undefined&&Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
-    Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum;
+    Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum&&
+    (outputLayout==="A4_SHEET"||outputLayout==="PHOTO_PAPER")&&
+    (outputLayout==="A4_SHEET"?finish==="PLAIN":finish==="GLOSSY"||finish==="MATTE");
+}
+
+function parseCustomerPagesPerSheetDirection(
+  capabilitiesJson?:string|null
+):CustomerNupDirection|null {
+  if(!capabilitiesJson)return null;
+  try {
+    const capabilities=JSON.parse(capabilitiesJson) as {pagesPerSheetDirection?:unknown};
+    const direction=capabilities.pagesPerSheetDirection;
+    return direction==="RightBottom"||direction==="BottomRight"||direction==="LeftBottom"||
+      direction==="BottomLeft"||direction==="RightTop"||direction==="TopRight"||
+      direction==="LeftTop"||direction==="TopLeft"
+      ?direction:null;
+  } catch {
+    return null;
+  }
+}
+
+function parseCustomerPagesPerSheetStatus(capabilitiesJson?:string|null):"supported"|"unsupported"|"unknown" {
+  if(!capabilitiesJson?.trim()||capabilitiesJson.trim()==="{}")return "unknown";
+  try {
+    const capabilities=JSON.parse(capabilitiesJson) as {pagesPerSheetStatus?:unknown;pagesPerSheet?:unknown};
+    if(capabilities.pagesPerSheetStatus==="supported"||capabilities.pagesPerSheetStatus==="unsupported"||capabilities.pagesPerSheetStatus==="unknown")
+      return capabilities.pagesPerSheetStatus;
+    return Array.isArray(capabilities.pagesPerSheet)&&capabilities.pagesPerSheet.some(value=>
+      typeof value==="number"&&Number.isInteger(value)&&value>1&&value<=500)?"supported":"unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function parseCustomerPagesPerSheetCapabilities(capabilitiesJson?:string|null):number[] {
+  if(!capabilitiesJson)return [1];
+  try {
+    const capabilities=JSON.parse(capabilitiesJson) as {pagesPerSheet?:unknown};
+    const values=Array.isArray(capabilities.pagesPerSheet)?capabilities.pagesPerSheet:[];
+    const supported=values.filter((value):value is number=>
+      typeof value==="number"&&Number.isInteger(value)&&value>1&&value<=500);
+    return [1,...new Set(supported)].sort((left,right)=>left-right);
+  } catch {
+    return [1];
+  }
 }
 
 const identifiedCustomerDocumentTypes=new WeakMap<File,SupportedDocumentType>();
@@ -4119,26 +4505,24 @@ function postSmartPrintNativeMessage(message:string):boolean {
   catch {return false;}
 }
 
-function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onPage:(page:number)=>void}) {
+function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onPage:(sheet:number)=>void}) {
   const current=preview?.token===token?preview:null;
   return <div className="customer-native-pdf-preview">
     {current?.image
-      ? <img className="customer-native-pdf-page" src={"data:image/jpeg;base64,"+current.image} alt={"PDF page "+(current.pageIndex+1)+" of "+current.pageCount}/>
+      ? <img className="customer-native-pdf-page" src={"data:image/jpeg;base64,"+current.image} alt={"Print sheet "+(current.pageIndex+1)+" of "+current.pageCount+", containing PDF pages "+current.firstSourcePage+" to "+current.lastSourcePage}/>
       : <div className="customer-native-pdf-empty">
           {current===null||current.loading
-            ? <><span className="button-spinner"/><span>Preparing document preview…</span></>
-            : <><FileText size={22}/><strong>Preview unavailable</strong><span>The PDF could not be rendered on this device. You can still upload it.</span></>}
+            ? <><span className="button-spinner"/><span>Preparing print layout preview…</span></>
+            : <><FileText size={22}/><strong>Preview unavailable</strong><span>The print layout could not be previewed on this device. You can still upload the original PDF.</span></>}
         </div>}
-    {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
-      <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous</button>
-      <span>Page {current.pageIndex+1} of {current.pageCount}</span>
-      <button type="button" disabled={current.loading||current.pageIndex>=current.pageCount-1} onClick={()=>onPage(current.pageIndex+1)}>Next</button>
+    {current?.image&&<div className="customer-native-pdf-layout-note">
+      <strong>{current.pagesPerSheet}-up print layout · {current.pagesPerSheetDirection}</strong>
+      <span>PDF pages {current.firstSourcePage}–{current.lastSourcePage} appear on this output sheet. Page order follows the selected driver direction; final margins and page fitting are controlled by the printer driver. The original PDF is sent to the printer driver unchanged.</span>
     </div>}
-    {current&&current.thumbnails.length>1&&<div className="customer-native-pdf-thumbnails" aria-label="PDF page thumbnails">
-      {current.thumbnails.map(page=><button type="button" key={page.index} aria-current={current.pageIndex===page.index?"page":undefined} onClick={()=>onPage(page.index)} disabled={current.loading}>
-        <img src={"data:image/jpeg;base64,"+page.image} alt={"Page "+(page.index+1)}/>
-        <span>{page.index+1}</span>
-      </button>)}
+    {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
+      <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous sheet</button>
+      <span>Sheet {current.pageIndex+1} of {current.pageCount}</span>
+      <button type="button" disabled={current.loading||current.pageIndex>=current.pageCount-1} onClick={()=>onPage(current.pageIndex+1)}>Next sheet</button>
     </div>}
   </div>;
 }
@@ -4179,15 +4563,23 @@ function normalizeCustomerCopies(value:string):string {
 }
 
 function readStoredCustomerDraft(publicCode:string,sessionToken:string):StoredCustomerDraft|null {
-  try {
-    const raw=localStorage.getItem(`qrtoprint.customer-active-job:${publicCode}`);
-    if(!raw)return null;
-    const draft=JSON.parse(raw) as StoredCustomerDraft;
-    return draft.sessionMarker===sessionToken.slice(-16)&&
-      (draft.uploaded?.job?.id||draft.uploadedBatch?.length||draft.batchName?.trim())?draft:null;
-  } catch {
-    return null;
+  const marker=sessionToken.slice(-16);
+  const keys=[
+    `qrtoprint.customer-active-job:${publicCode}`,
+    `qrtoprint.customer-previous-job:${publicCode}`
+  ];
+  for(const key of keys){
+    try {
+      const raw=localStorage.getItem(key);
+      if(!raw)continue;
+      const draft=JSON.parse(raw) as StoredCustomerDraft;
+      if(draft.sessionMarker===marker&&
+        (draft.uploaded?.job?.id||draft.uploadedBatch?.length||draft.batchName?.trim()))return draft;
+    } catch {
+      // A corrupt draft must not stop the customer from starting a new upload.
+    }
   }
+  return null;
 }
 
 function smartPrintNativeHeadline(status:string):string {
@@ -4222,9 +4614,63 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   // Private Printing is available only with a live paired Agent/key and a ready
   // physical queue, or an explicitly approved non-production virtual test queue.
-  void printerCapabilitiesJson;
+  const supportedPagesPerSheet=hasAssignedPrinter
+    ?parseCustomerPagesPerSheetCapabilities(printerCapabilitiesJson)
+    :[1];
+  const pagesPerSheetDirection=hasAssignedPrinter
+    ?parseCustomerPagesPerSheetDirection(printerCapabilitiesJson)
+    :null;
+  // A direction must be reported too, otherwise a customer preview could
+  // show a different page reading order from the eventual physical output.
+  const nupCapabilityStatus=parseCustomerPagesPerSheetStatus(printerCapabilitiesJson);
+  const nupOptions=pagesPerSheetDirection
+    ?supportedPagesPerSheet.filter(value=>value>1)
+    :[];
+  const nupUnavailableReason=!hasAssignedPrinter
+    ?"No printer is assigned to this QR station. Ask the shop owner to assign an active printer."
+    :nupCapabilityStatus==="unsupported"
+      ?"The installed driver explicitly reports that multiple pages per sheet is not supported."
+      :nupCapabilityStatus==="supported"
+        ?"The driver reports N-up counts but not a reliable page-reading direction. SmartPrint keeps this option hidden to prevent the preview and printed page order from disagreeing."
+        :"The printer has not reported its N-up capabilities yet. Ask the shop owner to reconnect the printer or refresh the Print Agent.";
   const photoRatesAvailable=Boolean(photoPricing&&[photoPricing.photo35x45Minor,photoPricing.photo25x35Minor,photoPricing.photo2x2Minor,photoPricing.photo4x6Minor].some(rate=>Number.isFinite(rate)&&rate>0));
   const initialDraft=readStoredCustomerDraft(publicCode,sessionToken);
+  const previousSessionToken=sessionStorage.getItem("qrtoprint.customer-previous-session:"+publicCode);
+  const previousDraft=useState(()=>previousSessionToken&&previousSessionToken!==sessionToken
+    ?readStoredCustomerDraft(publicCode,previousSessionToken):null)[0];
+  const previousItems=previousDraft?.uploadedBatch?.length
+    ?previousDraft.uploadedBatch
+    :previousDraft?.uploaded?[previousDraft.uploaded]:[];
+  const previousHistoryKey=previousItems.map(item=>item.job.id).join("|");
+  const [previousHistoryStatuses,setPreviousHistoryStatuses]=useState<Record<string,CustomerJobStatus>>({});
+  const [previousHistoryLoading,setPreviousHistoryLoading]=useState(previousItems.length>0);
+  const [previousHistoryUnavailable,setPreviousHistoryUnavailable]=useState(false);
+  useEffect(()=>{
+    if(!previousSessionToken||!previousHistoryKey){setPreviousHistoryLoading(false);return;}
+    let active=true;
+    let running=false;
+    const refreshPreviousHistory=async()=>{
+      if(running)return;
+      running=true;
+      try{
+        const results=await Promise.all(previousItems.map(async item=>{
+          try{return [item.job.id,await getCustomerJobStatus(previousSessionToken,item.job.id)] as const;}
+          catch{return [item.job.id,null] as const;}
+        }));
+        if(!active)return;
+        const recovered=results.reduce<Record<string,CustomerJobStatus>>((map,[id,status])=>{
+          if(status)map[id]=status;
+          return map;
+        },{});
+        setPreviousHistoryStatuses(recovered);
+        setPreviousHistoryUnavailable(results.some(([,status])=>status===null));
+        setPreviousHistoryLoading(false);
+      }finally{running=false;}
+    };
+    void refreshPreviousHistory();
+    const timer=window.setInterval(()=>void refreshPreviousHistory(),60000);
+    return ()=>{active=false;window.clearInterval(timer);};
+  },[previousSessionToken,previousHistoryKey]);
   const [files,setFiles]=useState<File[]>([]);
   const selectedFilesRef=useRef<File[]>([]);
   useEffect(()=>{selectedFilesRef.current=files;},[files]);
@@ -4232,6 +4678,34 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const file=files[selectedFileIndex]??null;
   const [previewUrl,setPreviewUrl]=useState<string|null>(null);
   const [nativePdfPreview,setNativePdfPreview]=useState<NativeCustomerPdfPreview|null>(null);
+  const [browserNupPreview,setBrowserNupPreview]=useState<BrowserCustomerNupPreview|null>(null);
+  const [browserNupPreviewSheetIndex,setBrowserNupPreviewSheetIndex]=useState(0);
+  // Retain only the currently selected PDF's parsed source and serialize sheet renders.
+  // This avoids rereading and reparsing a large PDF on every N-up sheet navigation.
+  const browserNupSourceCacheRef=useRef<{
+    file:File;
+    document:Promise<import("./customer-nup-preview").CustomerNupPreviewSource>|null;
+  }|null>(null);
+  // One active render plus one replaceable pending task: rapid page/settings
+  // changes never accumulate an unbounded queue of obsolete PDF jobs.
+  const browserNupRenderQueueRef=useRef<{
+    running:boolean;
+    pending:(()=>Promise<void>)|null;
+  }>({running:false,pending:null});
+  const enqueueBrowserNupRender=(task:()=>Promise<void>)=>{
+    const queue=browserNupRenderQueueRef.current;
+    queue.pending=task;
+    if(queue.running)return;
+    queue.running=true;
+    void (async()=>{
+      while(queue.pending){
+        const next=queue.pending;
+        queue.pending=null;
+        try{await next();}catch{/* Each task owns its visible error state. */}
+      }
+      queue.running=false;
+    })();
+  };
   const [uploaded,setUploaded]=useState<UploadedPrintJob|null>(()=>initialDraft?.uploaded??initialDraft?.uploadedBatch?.[0]??null);
   const [uploadedBatch,setUploadedBatch]=useState<UploadedPrintJob[]>(()=>initialDraft?.uploadedBatch??(initialDraft?.uploaded?[initialDraft.uploaded]:[]));
   const [uploadedFileFingerprints,setUploadedFileFingerprints]=useState<string[]>(()=>initialDraft?.uploadedFileFingerprints??[]);
@@ -4251,7 +4725,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [photoSettingsByJobId,setPhotoSettingsByJobId]=useState<Record<string,CustomerPhotoSettings>>(()=>initialDraft?.photoSettingsByJobId??{});
   const [photoStudioSource,setPhotoStudioSource]=useState<File|null>(null);
   const [photoStudioSourceFingerprint,setPhotoStudioSourceFingerprint]=useState<string|null>(null);
-  const [uploadProgress,setUploadProgress]=useState<{completed:number;total:number;currentFile:string|null}|null>(null);
+  const [uploadProgress,setUploadProgress]=useState<CustomerUploadProgressState|null>(null);
   const [quote,setQuote]=useState<PrintQuoteResult|null>(()=>initialDraft?.quote??null);
   const [jobStatus,setJobStatus]=useState<CustomerJobStatus|null>(null);
   const [batchStatuses,setBatchStatuses]=useState<Record<string,CustomerJobStatus>>({});
@@ -4346,7 +4820,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const [paymentMethod,setPaymentMethod]=useState<"UPI"|"CASH">(paymentOptions.upiEnabled?"UPI":"CASH");
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState("");
-  const [notice,setNotice]=useState<{kind:"info"|"warning";message:string}|null>(null);
+  const [notices,setNotices]=useState<Array<{kind:"info"|"warning";message:string}>>([]);
   const [uploadMode,setUploadMode]=useState<"LOCAL"|"CLOUD">(
     localAgent?.endpoints.length ? "LOCAL" : "CLOUD"
   );
@@ -4412,13 +4886,38 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   useEffect(()=>{
     const storageKey=`qrtoprint.customer-active-job:${publicCode}`;
+    const previousStorageKey=`qrtoprint.customer-previous-job:${publicCode}`;
+    const currentMarker=sessionToken.slice(-16);
     if(!uploaded&&uploadedBatch.length===0&&!batchName.trim()){
+      const existingRaw=localStorage.getItem(storageKey);
+      if(existingRaw){
+        try{
+          const existing=JSON.parse(existingRaw) as StoredCustomerDraft;
+          // A fresh QR session must not erase the previous session's order.
+          if(existing.sessionMarker&&existing.sessionMarker!==currentMarker)return;
+        }catch{
+          // Corrupt local metadata can be cleared safely.
+        }
+      }
       localStorage.removeItem(storageKey);
       return;
     }
+    const existingRaw=localStorage.getItem(storageKey);
+    if(existingRaw){
+      try{
+        const existing=JSON.parse(existingRaw) as StoredCustomerDraft;
+        if(existing.sessionMarker&&existing.sessionMarker!==currentMarker&&
+          (existing.uploaded?.job?.id||existing.uploadedBatch?.length||existing.batchName?.trim())){
+          // Keep one bounded prior-order snapshot; never persist a token or file bytes.
+          localStorage.setItem(previousStorageKey,existingRaw);
+        }
+      }catch{
+        // Replace malformed metadata with this session's valid snapshot.
+      }
+    }
     // Store only job metadata, never the bearer session capability.
     localStorage.setItem(storageKey,JSON.stringify({
-      sessionMarker:sessionToken.slice(-16),
+      sessionMarker:currentMarker,
       uploaded: uploaded??uploadedBatch[0],
       uploadedBatch,
       uploadedFileFingerprints,
@@ -4442,7 +4941,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const groupNameForFile=(candidate:File)=>fileGroupNames[customerFileFingerprint(candidate)]??customerBatchGroupName(candidate);
   const defaultsForGroup=(name:string):CustomerGroupSettings=>{
     const baseline:CustomerGroupSettings={
-      copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"
+      copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1
     };
     return {...baseline,...(groupSettings[name]??{})};
   };
@@ -4450,14 +4949,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(isSmartPrintIdDocument(candidate)) {
       const defaults=defaultsForGroup(groupNameForFile(candidate));
       return {
-        copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",advancedEnabled:false
+        copies:1,colourMode:defaults.colourMode,isDuplex:false,paperSize:"A4",orientation:"PORTRAIT",pagesPerSheet:1,advancedEnabled:false
       };
     }
     const fingerprint=customerFileFingerprint(candidate);
     const defaults=defaultsForGroup(groupNameForFile(candidate));
     const own=fileSettings[fingerprint];
     if(photoSettingsByFileFingerprint[fingerprint])return {
-      copies:1,colourMode:"Colour",paperSize:"A4",isDuplex:false,orientation:"AUTO",advancedEnabled:false
+      copies:1,colourMode:"Colour",paperSize:"A4",isDuplex:false,orientation:"AUTO",pagesPerSheet:1,advancedEnabled:false
     };
     const selected=own?.custom?{...defaults,...own}:defaults;
     return {
@@ -4466,6 +4965,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       isDuplex:selected.isDuplex,
       paperSize:selected.advancedEnabled?selected.paperSize:"A4",
       orientation:selected.advancedEnabled?selected.orientation:"AUTO",
+      pagesPerSheet:selected.advancedEnabled&&isCustomerPdf(candidate)&&!isSmartPrintPhotoDocument(candidate)&&
+        nupOptions.includes(selected.pagesPerSheet??1)
+        ?(selected.pagesPerSheet??1):1,
       advancedEnabled:selected.advancedEnabled
     };
   };
@@ -4529,10 +5031,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       if(message.startsWith("CUSTOMER_PDF_PREVIEW|")){
         try{
           const payload=JSON.parse(message.slice("CUSTOMER_PDF_PREVIEW|".length)) as {
-            token:string;pageIndex:number;pageCount:number;image:string;
+            token:string;pageIndex:number;pageCount:number;pagesPerSheet:number;
+            pagesPerSheetDirection:CustomerNupDirection;
+            paperSize:string;orientation:string;firstSourcePage:number;lastSourcePage:number;image:string;
             thumbnails:Array<{index:number;image:string}>;
           };
-          setNativePdfPreview(current=>current&&current.token===payload.token&&current.requestedPageIndex===payload.pageIndex
+          setNativePdfPreview(current=>current&&current.token===payload.token&&
+            current.requestedPageIndex===payload.pageIndex&&current.pagesPerSheet===payload.pagesPerSheet&&
+            current.pagesPerSheetDirection===payload.pagesPerSheetDirection&&
+            current.paperSize===payload.paperSize&&current.orientation===payload.orientation
             ?{...payload,requestedPageIndex:payload.pageIndex,loading:false}:current);
         }catch{
           setError("The PDF preview could not be displayed. You can still upload the document.");
@@ -4565,8 +5072,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   useEffect(()=>{
     if(!nativeAppMode||!file||!isCustomerPdf(file))return;
     if(photoSettingsByFileFingerprint[customerFileFingerprint(file)])return;
+    // Re-render the sheet preview whenever pages-per-sheet, paper or orientation changes.
     openCustomerPdfPreview(file);
-  },[file,nativeAppMode,photoSettingsByFileFingerprint]);
+  },[file,nativeAppMode,photoSettingsByFileFingerprint,groupSettings,fileSettings]);
 
   useEffect(()=>{
     if(!nativeAppMode)return;
@@ -4603,6 +5111,118 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     setPreviewUrl(url);
     return ()=>URL.revokeObjectURL(url);
   },[file]);
+
+  useEffect(()=>{
+    setBrowserNupPreviewSheetIndex(0);
+  },[file,groupSettings,fileSettings]);
+
+  useEffect(()=>{
+    if(nativeAppMode||!file||!isCustomerPdf(file)){
+      browserNupSourceCacheRef.current=null;
+      setBrowserNupPreview(null);
+      return;
+    }
+
+    const settings=settingsForFile(file);
+    const pagesPerSheet=settings.pagesPerSheet??1;
+    if(pagesPerSheet<=1||!pagesPerSheetDirection||photoSettingsByFileFingerprint[customerFileFingerprint(file)]){
+      browserNupSourceCacheRef.current=null;
+      setBrowserNupPreview(null);
+      return;
+    }
+
+    let cancelled=false;
+    let generatedUrl:string|null=null;
+    const sheetIndex=Math.max(0,browserNupPreviewSheetIndex);
+    setBrowserNupPreview({
+      url:"",
+      sheetIndex,
+      sheetCount:0,
+      pagesPerSheet,
+      pagesPerSheetDirection,
+      firstSourcePage:sheetIndex*pagesPerSheet+1,
+      lastSourcePage:(sheetIndex+1)*pagesPerSheet,
+      loading:true,
+      failed:false
+    });
+
+    // Create/retain one parsed source per currently selected File. The promise is
+    // lazy so a superseded request does not read a PDF it will never render.
+    let sourceCache=browserNupSourceCacheRef.current;
+    if(!sourceCache||sourceCache.file!==file){
+      sourceCache={file,document:null};
+      browserNupSourceCacheRef.current=sourceCache;
+    }
+
+    enqueueBrowserNupRender(async()=>{
+      try{
+        if(cancelled)return;
+        const {loadCustomerNupPreviewSource,createCustomerNupPreviewFromDocument}=await import("./customer-nup-preview");
+        if(cancelled)return;
+        if(!sourceCache!.document){
+          const loadingDocument=(async()=>{
+            const sourceBytes=new Uint8Array(await file.arrayBuffer());
+            if(cancelled)throw new Error("PDF preview superseded.");
+            return loadCustomerNupPreviewSource(sourceBytes);
+          })();
+          // A cancelled/failed first parse must not poison the cached promise.
+          // Clear only this exact in-flight promise so a newer parse is preserved.
+          sourceCache!.document=loadingDocument;
+          void loadingDocument.catch(()=>{
+            if(sourceCache!.document===loadingDocument)sourceCache!.document=null;
+          });
+        }
+        const source=await sourceCache!.document;
+        if(cancelled)return;
+        const preview=await createCustomerNupPreviewFromDocument(source,{
+          pagesPerSheet,
+          paperSize:settings.paperSize,
+          orientation:settings.orientation,
+          pagesPerSheetDirection,
+          sheetIndex
+        });
+        if(cancelled)return;
+        const outputBuffer=preview.bytes.buffer.slice(
+          preview.bytes.byteOffset,
+          preview.bytes.byteOffset+preview.bytes.byteLength
+        ) as ArrayBuffer;
+        generatedUrl=URL.createObjectURL(new Blob([outputBuffer],{type:"application/pdf"}));
+        setBrowserNupPreview({
+          url:generatedUrl,
+          sheetIndex:preview.sheetIndex,
+          sheetCount:preview.sheetCount,
+          pagesPerSheet,
+          pagesPerSheetDirection,
+          firstSourcePage:preview.firstSourcePage,
+          lastSourcePage:preview.lastSourcePage,
+          loading:false,
+          failed:false
+        });
+      }catch{
+        if(!cancelled){
+          setBrowserNupPreview({
+            url:"",
+            sheetIndex,
+            sheetCount:0,
+            pagesPerSheet,
+            pagesPerSheetDirection,
+            firstSourcePage:sheetIndex*pagesPerSheet+1,
+            lastSourcePage:(sheetIndex+1)*pagesPerSheet,
+            loading:false,
+            failed:true
+          });
+        }
+      }
+    });
+
+    return ()=>{
+      cancelled=true;
+      if(generatedUrl)URL.revokeObjectURL(generatedUrl);
+      // Release the parsed document when a different File becomes selected.
+      // Sheet/settings changes for the same File continue to reuse the cache.
+      if(browserNupSourceCacheRef.current?.file!==file)browserNupSourceCacheRef.current=null;
+    };
+  },[file,nativeAppMode,groupSettings,fileSettings,photoSettingsByFileFingerprint,browserNupPreviewSheetIndex]);
 
   async function upload() {
     if(batchLockedForPayment){
@@ -4643,53 +5263,143 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
     if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
-    setBusy(true);setError("");setNotice(null);setQuote(null);setQuotesByJobId({});setJobStatus(null);setUploadProgress({completed:0,total:pending.length,currentFile:pending[0]?.name??null});
+    const currentBatchBytes=results.reduce((sum,item)=>sum+item.document.sizeBytes,0);
+    const uploadCapacityError=validateCustomerUploadBatchLimits(results.length,currentBatchBytes,pending.map(candidate=>candidate.size));
+    if(uploadCapacityError){setError(uploadCapacityError.code==="FILE_SIZE"?"One selected file exceeds the 50 MB per-file upload limit.":uploadCapacityError.code==="FILE_COUNT"?"A print batch can contain up to 20 files.":"A print batch can contain up to 500 MB in total.");return;}
+    setBusy(true);setError("");setNotices([]);setQuote(null);setQuotesByJobId({});setJobStatus(null);
+    setUploadProgress({
+      completed:0,
+      total:pending.length,
+      files:pending.map(candidate=>({
+        name:candidate.name,
+        sizeBytes:candidate.size,
+        bytesSent:0,
+        totalBytes:candidate.size,
+        status:"QUEUED",
+        message:"Waiting for an available upload slot"
+      }))
+    });
+    const updateFileProgress=(index:number,patch:Partial<CustomerUploadFileProgress>)=>{
+      setUploadProgress(current=>{
+        if(!current||!current.files[index])return current;
+        const next=[...current.files];
+        const previous=next[index];
+        next[index]={
+          ...previous,
+          ...patch,
+          ...(patch.status==="COMPLETED"
+            ?{bytesSent:previous.totalBytes||previous.sizeBytes}
+            :{})
+        };
+        return {...current,files:next};
+      });
+    };
+    const reportTransferProgress=(index:number,progress:{bytesSent:number;totalBytes:number;stage:string})=>{
+      updateFileProgress(index,{
+        bytesSent:progress.bytesSent,
+        totalBytes:progress.totalBytes,
+        status:progress.stage==="STREAMING_ENCRYPTED"?"STREAMING_ENCRYPTED":"TRANSFERRING",
+        message:progress.stage==="STREAMING_ENCRYPTED"
+          ?"Encrypting and streaming authenticated records"
+          :"Transferring file bytes"
+      });
+    };
+    const reportPrivateStage=(index:number,stage:string,message:string)=>{
+      const status=stage==="WAITING_FOR_AGENT"
+        ?"WAITING_FOR_SHOP"
+        :stage==="WAITING_FOR_UPLOAD"?"PREPARING"
+          :stage==="RECEIVING_ENCRYPTED_PAYLOAD"?"STREAMING_ENCRYPTED"
+            :stage==="READY"?"COMPLETED"
+              :stage==="FAILED"||stage==="EXPIRED"?"FAILED"
+                :"PROCESSING";
+      updateFileProgress(index,{status,message});
+    };
     try {
-      for(let index=0;index<pending.length;index++){
-        const candidate=pending[index];
-        setUploadProgress({completed:index,total:pending.length,currentFile:candidate.name});
-        const fingerprint=customerFileFingerprint(candidate);
-        const batchGroupName=groupNameForFile(candidate);
-        const settings=settingsForFile(candidate);
-        const idDocument=isSmartPrintIdDocument(candidate);
-        const photoSettings=photoSettingsByFileFingerprint[fingerprint];
-        const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
-        // ID Studio sheets remain Private Printing only. Saved Photo Studio sheets
-        // follow the customer's selected batch privacy mode (Private by default).
-        if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards must use Private Printing. No normal cloud upload is allowed.",409);
-        const uploadedItem=effectiveUploadMode==="LOCAL"&&localAgent
-          ? await uploadCustomerDocumentLocally(sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings)
-          : idDocument
-            ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded or sent to cloud storage.",409);})()
-            : await uploadCustomerDocument(sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,settings,printKind,photoSettings);
-        // Keep private filenames only in this customer's local draft. The upload
-        // request and server-side PrintDocument continue using an anonymized label.
-        const created=effectivePrivatePrinting
-          ? {...uploadedItem,document:{...uploadedItem.document,originalFileName:candidate.name}}
-          : uploadedItem;
-        if(created.job.batchId&&created.job.batchId!==currentBatchId) {
-          if(results.length>0) {
+      const initialResults=[...results];
+      const resultsByPendingIndex=new Map<number,UploadedPrintJob>();
+      const outcomes=await mapConcurrentSettled(
+        pending,
+        CUSTOMER_UPLOAD_CONCURRENCY,
+        async (candidate,index)=>{
+          updateFileProgress(index,{
+            status:"PREPARING",
+            message:effectivePrivatePrinting?"Preparing encrypted Private Printing transfer":"Preparing secure upload"
+          });
+          const fingerprint=customerFileFingerprint(candidate);
+          const batchGroupName=groupNameForFile(candidate);
+          const settings=settingsForFile(candidate);
+          const idDocument=isSmartPrintIdDocument(candidate);
+          const photoSettings=photoSettingsByFileFingerprint[fingerprint];
+          const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
+          if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards must use Private Printing. No normal cloud upload is allowed.",409);
+          const uploadedItem=effectiveUploadMode==="LOCAL"&&localAgent
+            ? await uploadCustomerDocumentLocally(
+                sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,
+                cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings,
+                progress=>reportTransferProgress(index,progress),
+                (stage,message)=>reportPrivateStage(index,stage,message)
+              )
+            : idDocument
+              ? (()=>{throw new ApiError("The paired shop computer's encrypted transfer is not ready. No ID document was uploaded or sent to cloud storage.",409);})()
+              : await uploadCustomerDocument(
+                  sessionToken,candidate,currentBatchId,batchGroupName,currentBatchName||undefined,
+                  settings,printKind,photoSettings,
+                  progress=>reportTransferProgress(index,progress)
+                );
+          const created=effectivePrivatePrinting
+            ? {...uploadedItem,document:{...uploadedItem.document,originalFileName:candidate.name}}
+            : uploadedItem;
+          if(created.job.batchId&&created.job.batchId!==currentBatchId) {
             throw new ApiError("This file belongs to an earlier batch. Refresh the original print request before adding more files; SmartPrint will not mix two batches.",409);
           }
-          currentBatchId=created.job.batchId;
-          setBatchId(currentBatchId);
+          if(created.job.batchName)currentBatchName=created.job.batchName;
+          return created;
+        },
+        progress=>{
+          setUploadProgress(current=>current?{...current,completed:progress.completed}:current);
+        },
+        (index,outcome)=>{
+          if(outcome.status==="fulfilled") {
+            updateFileProgress(index,{status:"COMPLETED",message:"Upload confirmed"});
+          } else if(outcome.reason instanceof LocalUploadOutcomeUnknownError) {
+            updateFileProgress(index,{status:"WAITING_FOR_SHOP",message:outcome.reason.message});
+          } else {
+            updateFileProgress(index,{
+              status:"FAILED",
+              message:outcome.reason instanceof Error?outcome.reason.message:"Upload failed"
+            });
+          }
+          if(outcome.status!=="fulfilled")return;
+          const candidate=pending[index];
+          const created=outcome.value;
+          const fingerprint=customerFileFingerprint(candidate);
+          resultsByPendingIndex.set(index,created);
+          if(effectivePrivatePrinting)savedPrivateFileNames[created.job.id]=candidate.name;
+          savedSettings[created.job.id]=settingsForFile(candidate);
+          const photoSettings=photoSettingsByFileFingerprint[fingerprint];
+          if(photoSettings)savedPhotoSettings[created.job.id]=photoSettings;
+          savedPrintKinds[created.job.id]=isSmartPrintIdDocument(candidate)?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
+          completedFingerprints.add(fingerprint);
+
+          const orderedResults=[
+            ...initialResults,
+            ...pending.flatMap((_,pendingIndex)=>{
+              const result=resultsByPendingIndex.get(pendingIndex);
+              return result?[result]:[];
+            })
+          ];
+          results.splice(0,results.length,...orderedResults);
+          setPrivateFileNamesByJobId({...savedPrivateFileNames});
+          setPrintSettingsByJobId({...savedSettings});
+          setPhotoSettingsByJobId({...savedPhotoSettings});
+          setPrintKindsByJobId({...savedPrintKinds});
+          setUploadedBatch(orderedResults);
+          setUploaded(orderedResults[0]??null);
+          setUploadedFileFingerprints([...completedFingerprints]);
         }
-        if(created.job.batchName) {
-          currentBatchName=created.job.batchName;
-          setBatchName(currentBatchName);
-        }
-        if(!results.some(item=>item.job.id===created.job.id))results.push(created);
-        if(effectivePrivatePrinting)savedPrivateFileNames[created.job.id]=candidate.name;
-        setPrivateFileNamesByJobId({...savedPrivateFileNames});
-        savedSettings[created.job.id]=settings;
-        if(photoSettings)savedPhotoSettings[created.job.id]=photoSettings;
-        savedPrintKinds[created.job.id]=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
-        setPrintKindsByJobId({...savedPrintKinds});
-        completedFingerprints.add(fingerprint);
-        setUploadedBatch([...results]);
-        setUploadedFileFingerprints([...completedFingerprints]);
-        setUploadProgress({completed:index+1,total:pending.length,currentFile:pending[index+1]?.name??null});
-      }
+      );
+      const firstFailure=outcomes.find(outcome=>outcome.status==="rejected");
+      if(firstFailure?.status==="rejected")throw firstFailure.reason;
       setPrintSettingsByJobId(savedSettings);
       setPhotoSettingsByJobId(savedPhotoSettings);
       setPrintKindsByJobId(savedPrintKinds);
@@ -4722,17 +5432,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       );
       if(canFallbackToCloud){setUploadModeManuallySelected(true);setUploadMode("CLOUD");}
       if(exception instanceof LocalUploadOutcomeUnknownError&&effectiveUploadMode==="LOCAL"&&!privatePrinting&&secureQueueFallbackEnabled) {
-        // Local ticket and grant are preserved. The next retry will resume that
-        // same PrintJob over HTTPS rather than creating a second cloud upload.
+        // Local ticket and grant are preserved. HTTPS recovery uses this same
+        // PrintJob; an incomplete file may need to be sent again from the start.
         setUploadModeManuallySelected(true);
         setUploadMode("CLOUD");
       }
       const uploadError=exception instanceof LocalUploadOutcomeUnknownError
         ? privatePrinting
-          ? "Your file is still being prepared. Tap Retry to check its status."
-          : cloudAssistedPrintingEnabled
-            ? "Shop Wi-Fi was interrupted. Cloud-assisted upload is now selected for secure HTTPS continuation. SmartPrint has kept this file attached to its original job; tap Retry to resume that same upload without creating another print job."
-            : "Shop Wi-Fi was interrupted. SmartPrint has kept this file attached to its original job. Reconnect to the shop computer and tap Retry; the same upload will resume without creating a second print job."
+          ? "The shop computer is still preparing your secure file. Tap Retry to check its status."
+          : "Your original print request is saved. Tap Retry to check its status. The file may need to be sent again from the beginning; SmartPrint will not create a duplicate print job."
         : batchCheckoutLocked
           ? "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file."
           : confirmedPreTicketRejection
@@ -4750,7 +5458,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           : exception instanceof ApiError ? exception.message
           : "Upload stopped after "+completedFingerprints.size+" file(s). Retry the selected files to continue; completed files will be skipped.";
       setError(uploadError);
-    } finally {setBusy(false);setUploadProgress(null);}
+    } finally {setBusy(false);}
   }
 
   function selectUploadedFile(item:UploadedPrintJob) {
@@ -4781,6 +5489,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           isDuplex:requestedSettings?.isDuplex??false,
           paperSize:requestedSettings?.paperSize??"A4",
           orientation:requestedSettings?.orientation??"AUTO",
+          pagesPerSheet:requestedSettings?.pagesPerSheet??1,
           advancedEnabled:requestedSettings?.advancedEnabled??false
         };
         const photoSettings=photoSettingsOverride?.[item.job.id]??photoSettingsByJobId[item.job.id];
@@ -4792,8 +5501,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             isDuplex:photoSettings||idDocument?false:settings.isDuplex,
             copies:photoSettings?1:idDocument?1:settings.copies,
             orientation:photoSettings?"AUTO":idDocument?"PORTRAIT":settings.orientation,
+            pagesPerSheet:photoSettings||idDocument?1:(settings.pagesPerSheet??1),
             ...(photoSettings
-              ?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount}
+              ?{printKind:"PHOTO" as const,photoSizeCode:photoSettings.sizeCode,photoCount:photoSettings.photoCount,photosPerPage:photoSettings.photosPerPage??photoSettings.photoCount,photoOutputLayout:photoSettings.photoOutputLayout??"A4_SHEET",photoPaperFinish:photoSettings.photoPaperFinish??"PLAIN"}
               :idDocument?{printKind:"ID_DOCUMENT" as const}:{printKind:"DOCUMENT" as const})
           });
         } catch(exception) {
@@ -4980,14 +5690,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(index<0){setError("The source photo is no longer in this batch. Select it again.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const generated=sheets.map(sheet=>sheet.file),nextFiles=[...files.slice(0,index),...generated,...files.slice(index+1)];
     const pending=nextFiles.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate)));
-    const bytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,file)=>sum+file.size,0);
-    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||bytes>UPLOAD_LIMITS.maxBatchBytes){setError("Prepared photo sheets exceed the batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
+    const existingBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0);
+    const capacityError=validateCustomerUploadBatchLimits(uploadedBatch.length,existingBytes,pending.map(candidate=>candidate.size));
+    if(capacityError){setError("Prepared photo sheets exceed the 50 MB per-file, 20-file or 500 MB batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint},previews={...photoPreviewPagesByFingerprint};
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];delete previews[photoStudioSourceFingerprint];
     for(const sheet of sheets){
       const fp=customerFileFingerprint(sheet.file);groups[fp]=group;
-      settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
-      photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage};
+      settings[fp]={copies:"1",custom:true,colourMode:"Colour",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1};
+      photos[fp]={sizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish};
       const urls=(sheet.previewPages??[]).map(page=>{const url=URL.createObjectURL(page);photoPreviewUrlsRef.current.add(url);return url;});
       if(urls.length)previews[fp]=urls;
     }
@@ -5015,6 +5726,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     setPhotoStudioSourceFingerprint(fingerprint);
     setError("");
   }
+  function postCustomerPdfPreviewRequest(token:string,sheetIndex:number,candidate:File):boolean {
+    const settings=settingsForFile(candidate);
+    const pagesPerSheet=settings.pagesPerSheet??1;
+    return postSmartPrintNativeMessage(
+      "previewCustomerPdf|"+token+"|"+sheetIndex+"|"+pagesPerSheet+"|"+settings.paperSize+"|"+settings.orientation+"|"+(pagesPerSheetDirection??"RightBottom")
+    );
+  }
   function openCustomerPdfPreview(candidate:File) {
     const token=smartPrintNativePdfPreviewTokens.get(candidate);
     if(!token){
@@ -5022,27 +5740,39 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setError("The PDF preview is unavailable. You can still upload the document.");
       return;
     }
-    setNativePdfPreview({token,requestedPageIndex:0,pageIndex:0,pageCount:0,image:"",thumbnails:[],loading:true});
-    if(!postSmartPrintNativeMessage("previewCustomerPdf|"+token+"|0")){
-      setNativePdfPreview({token,requestedPageIndex:0,pageIndex:0,pageCount:0,image:"",thumbnails:[],loading:false});
+    const settings=settingsForFile(candidate);
+    const pagesPerSheet=settings.pagesPerSheet??1;
+    setNativePdfPreview({
+      token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+      pagesPerSheetDirection:pagesPerSheetDirection??"RightBottom",
+      paperSize:settings.paperSize,orientation:settings.orientation,
+      firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:true
+    });
+    if(!postCustomerPdfPreviewRequest(token,0,candidate)){
+      setNativePdfPreview({
+        token,requestedPageIndex:0,pageIndex:0,pageCount:0,pagesPerSheet,
+        pagesPerSheetDirection:pagesPerSheetDirection??"RightBottom",
+        paperSize:settings.paperSize,orientation:settings.orientation,
+        firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:false
+      });
       setError("The PDF preview is unavailable. You can still upload the document.");
       return;
     }
     setError("");
   }
-  function requestCustomerPdfPreviewPage(token:string,pageIndex:number) {
+  function requestCustomerPdfPreviewPage(token:string,sheetIndex:number) {
     const current=nativePdfPreview;
-    if(!current||current.token!==token||current.loading)return;
-    const target=Math.max(0,Math.min(current.pageCount-1,pageIndex));
+    if(!current||current.token!==token||current.loading||!file)return;
+    const target=Math.max(0,Math.min(current.pageCount-1,sheetIndex));
     if(target===current.pageIndex)return;
     setNativePdfPreview({...current,requestedPageIndex:target,loading:true});
-    if(!postSmartPrintNativeMessage("previewCustomerPdf|"+token+"|"+target)){
+    if(!postCustomerPdfPreviewRequest(token,target,file)){
       setNativePdfPreview({...current,loading:false});
-      setError("The PDF page could not be opened.");
+      setError("The print layout sheet could not be opened.");
     }
   }
   async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
-    setNotice(null);
+    setNotices([]);
     if(batchLockedForPayment){
       setError("This batch already has a payment attempt. Start a new batch for additional files.");
       return;
@@ -5123,16 +5853,22 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return ext!==detected.extension&&!(detected.extension===".jpg"&&ext===".jpeg");
     });
     if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
-    const oversized=supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
-    if(oversized){setError(`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file limit.`);return;}
     const merged=new Map(selectedFilesRef.current.map(candidate=>[customerFileFingerprint(candidate),candidate]));
     for(const candidate of supported)merged.set(customerFileFingerprint(candidate),candidate);
     const selected=Array.from(merged.values());
     const alreadyUploaded=new Set(uploadedFileFingerprints);
     const pending=selected.filter(candidate=>!alreadyUploaded.has(customerFileFingerprint(candidate)));
-    const totalBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0)+pending.reduce((sum,candidate)=>sum+candidate.size,0);
-    if(uploadedBatch.length+pending.length>UPLOAD_LIMITS.maxBatchFiles||totalBytes>UPLOAD_LIMITS.maxBatchBytes){
-      setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchFiles} files · ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB max.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchFiles} files and ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB in total.`);
+    const existingBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0);
+    const capacityError=validateCustomerUploadBatchLimits(uploadedBatch.length,existingBytes,pending.map(candidate=>candidate.size));
+    if(capacityError){
+      if(capacityError.code==="FILE_SIZE"){
+        const oversized=pending[capacityError.fileIndex]??supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
+        setError(oversized?`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file limit.`:"Choose a valid, non-empty file.");
+      } else if(capacityError.code==="FILE_COUNT"){
+        setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchFiles} files maximum.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchFiles} files.`);
+      } else {
+        setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB batch limit.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB in total.`);
+      }
       return;
     }
     setFileGroupNames(current=>{
@@ -5148,7 +5884,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       for(const candidate of supported) {
         const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim();
         const group=nativeGroup||customerBatchGroupName(candidate);
-        if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO"};
+        if(!updated[group])updated[group]={copies:"1",colourMode:"Mono",isDuplex:false,advancedEnabled:false,paperSize:"A4",orientation:"AUTO",pagesPerSheet:1};
       }
       return updated;
     });
@@ -5161,12 +5897,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       return updated;
     });
     selectedFilesRef.current=selected;setFiles(selected);setSelectedFileIndex(0);
-    const notices:string[]=[];
-    if(nestedSkipped)notices.push("Nested folders are skipped; only files directly inside each selected folder are included.");
-    if(unsupportedSkipped)notices.push("Files without a supported PDF, JPEG or PNG signature were skipped.");
-    if(mismatchedNames.length)notices.push(`${mismatchedNames.length} file(s) were identified by their contents; their original filenames are preserved.`);
+    const selectionNotices:Array<{kind:"info"|"warning";message:string}>=[];
+    if(nestedSkipped||unsupportedSkipped) {
+      const skippedMessages:string[]=[];
+      if(nestedSkipped)skippedMessages.push("Files inside nested folders aren't included.");
+      if(unsupportedSkipped)skippedMessages.push("Only PDF, JPG and PNG files are supported.");
+      selectionNotices.push({kind:"warning",message:skippedMessages.join(" ")});
+    }
+    if(mismatchedNames.length)selectionNotices.push({
+      kind:"info",
+      message:`${mismatchedNames.length} file(s) were identified by content. Original filenames were kept.`
+    });
     setError("");
-    setNotice(notices.length?{kind:nestedSkipped||unsupportedSkipped?"warning":"info",message:notices.join(" ")}:null);
+    setNotices(selectionNotices);
   }
 
   function removeSelectedFile(fingerprint: string) {
@@ -5191,10 +5934,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     });
     setPhotoSettingsByFileFingerprint(current=>{const next={...current};delete next[fingerprint];return next;});
     setError("");
-    setNotice(null);
+    setNotices([]);
   }
 
   const pendingFilesCount=files.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate))).length;
+  const uploadConfirmedCount=uploadProgress?.files.filter(file=>file.status==="COMPLETED").length??0;
+  const uploadFailedCount=uploadProgress?.files.filter(file=>file.status==="FAILED").length??0;
+  const uploadWaitingCount=uploadProgress?.files.filter(file=>file.status==="WAITING_FOR_SHOP").length??0;
   const uploadGroups=Array.from(new Set(files.map(candidate=>groupNameForFile(candidate)))).map(name=>({
     name, files:files.filter(candidate=>groupNameForFile(candidate)===name)
   }));
@@ -5265,13 +6011,38 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       :batchPayment!.status==="CASH_AWAITING_PAYMENT"?"PAY AT SHOP COUNTER"
       :"PAYMENT FOR ACCEPTED FILES"
     :"PAY FOR ACCEPTED FILES";
-  const quoteEntries=quoteItems.map(item=>({item,quote:quotesByJobId[item.job.id]}))
-    .filter(entry=>!!entry.quote&&!quoteExpiredForBatchItem(entry.item));
-  const acceptedQuoteEntries=quoteEntries.filter(entry=>
-    !["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))
-  );
+  const quoteRows=quoteItems.map(item=>({
+    item,
+    quote:quotesByJobId[item.job.id],
+    excluded:["REJECTED","REFUNDED"].includes(statusForBatchItem(item))
+  }));
+  const quoteEntries=quoteRows.filter(entry=>!!entry.quote&&!quoteExpiredForBatchItem(entry.item));
+  const acceptedQuoteEntries=quoteEntries.filter(entry=>!entry.excluded);
   const batchQuoteTotal=acceptedQuoteEntries.reduce((total,entry)=>
     total+(entry.quote?.quotedAmountMinor??0),0);
+  const batchQuoteNeedsRefresh=quoteRows.filter(entry=>
+    !entry.excluded&&!shouldBlockQuoteRefreshForStatus(statusForBatchItem(entry.item))&&
+    (!entry.quote||quoteExpiredForBatchItem(entry.item))
+  ).length;
+  const batchQuoteCurrency=quoteEntries[0]?.quote?.currency??quoteItems[0]?.job.currency??"INR";
+  const hasAcceptedQuoteLocked=quoteRows.some(entry=>
+    !entry.excluded&&!!entry.quote&&quoteExpiredForBatchItem(entry.item)&&
+    shouldBlockQuoteRefreshForStatus(statusForBatchItem(entry.item))
+  );
+  const batchQuoteTotalDisplay=acceptedQuoteEntries.length>0
+    ?formatMoney(batchQuoteTotal,batchQuoteCurrency)
+    :batchQuoteNeedsRefresh>0||hasAcceptedQuoteLocked?"—"
+      :quoteRows.some(entry=>!entry.excluded)?"Pending":formatMoney(0,batchQuoteCurrency);
+  const acceptedBatchRows=quoteRows.filter(entry=>!entry.excluded);
+  const batchQuoteCounts={
+    documents:acceptedBatchRows.filter(entry=>normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="DOCUMENT").length,
+    idCards:acceptedBatchRows.filter(entry=>normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="ID_DOCUMENT").length,
+    photos:acceptedBatchRows.filter(entry=>normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="PHOTO").length,
+    excluded:quoteRows.filter(entry=>entry.excluded).length
+  };
+  const batchQuoteSummary=acceptedQuoteEntries.length>0
+    ?acceptedQuoteEntries.length+" "+(acceptedQuoteEntries.length===1?"file has":"files have")+" a current quote."
+    :"No accepted files have a current quote yet.";
   const batchQuoteBreakdown=calculateBatchQuoteBreakdown(acceptedQuoteEntries.map(entry=>({
     printKind:printKindsByJobId[entry.item.job.id]==="ID_DOCUMENT"
       ?"ID_DOCUMENT"
@@ -5280,6 +6051,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     copies:entry.quote!.copies,
     colourMode:entry.quote!.colourMode==="Colour"?"Colour":"Mono",
     photoCount:entry.quote!.photoCount??0,
+    pagesPerSheet:entry.quote!.pagesPerSheet??1,
     quotedAmountMinor:entry.quote!.quotedAmountMinor
   })));
   const quoteEligibleItems=quoteItems.filter(item=>!["REJECTED","REFUNDED"].includes(statusForBatchItem(item)));
@@ -5298,6 +6070,22 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   const photoAlreadyUploaded=Boolean(file&&uploadedFileFingerprints.includes(customerFileFingerprint(file)));
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
+    {previousItems.length>0&&<section className="customer-previous-order" aria-label="Previous print request">
+      <div className="customer-previous-order-heading"><div><span>PREVIOUS REQUEST</span><strong>From your earlier QR session</strong></div><span className="customer-previous-order-readonly">Read only</span></div>
+      <p>This request is separate from your current session. Its status is restored for reference only; printing, payment and file changes are not available here.</p>
+      <div className="customer-previous-order-list">
+        {previousItems.map(item=>{
+          const recovered=previousHistoryStatuses[item.job.id];
+          const status=recovered?.status??(previousHistoryLoading?"Refreshing status":previousHistoryUnavailable?"Status unavailable · ask the shop before resubmitting":customerStatusLabel(item.job.status??"UPLOADED"));
+          return <div className="customer-previous-order-item" key={item.job.id}>
+            <span><FileText size={14}/></span>
+            <div><strong>{resolveCustomerDocumentName(item,storedCustomerPrivateFileNames(previousDraft))}</strong><small>{item.job.jobNumber} · {status}</small></div>
+          </div>;
+        })}
+      </div>
+      {previousHistoryUnavailable&&<CustomerInlineNotice kind="warning" title="Earlier status unavailable">Check with the shop before uploading the same document again.</CustomerInlineNotice>}
+      <small className="customer-previous-order-footnote">Your earlier order remains attached to its original shop session. Document contents stay private; this panel restores status metadata only.</small>
+    </section>}
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · Up to {UPLOAD_LIMITS.maxBatchFiles} files / {UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB</span></div>
     <section className="customer-privacy-choice" aria-label="Document privacy choice">
       <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>Choose how files are handled</strong></div><small>Applies to all files</small></div>
@@ -5309,8 +6097,16 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Normal print queue. 7-day auto-delete.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
-      <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>Files are encrypted before leaving your device and decrypted only by the paired Windows Agent. {privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"In development, the Agent can create a protected test PDF. It is not physical fulfilment; the test artifact is retained locally for up to 24 hours.":"The Agent erases its working source after physical output is confirmed."} Your original stays on your device.</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Standard Printing uses the shop's normal print queue. Completed source copies are deleted automatically 7 days after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
-      {!canOfferPrivatePrinting&&<small className="customer-privacy-unavailable">Private Printing unavailable. <InfoTooltip label="Why Private Printing is unavailable"><span>{!hasAssignedPrinter?"This QR station needs an active printer assignment.":!localAgent?.agentDeviceId||!localAgent.documentEncryptionPublicKey?"The paired Windows Agent must be online and publish its encryption key.":!privateQueueReady?"The assigned printer queue must report Ready or Busy.":privateVirtualTestMode?"Virtual test output is blocked until the Company Main Admin enables it in non-production.":"Private Printing requires an eligible physical printer or an approved non-production test printer."}</span></InfoTooltip></small>}
+      <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted on your device. The protected test PDF stays on this computer for up to 24 hours; it is not a physical print. Your original stays on your device.":"Encrypted on your device and decrypted only by the paired Windows Agent. The shop-side copy is erased after confirmed output. Your original stays on your device."}</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Uses the shop's normal print queue. The shop-side copy is deleted 7 days after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
+      {!canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title="Private Printing unavailable">{!hasAssignedPrinter
+        ?"The shop needs to assign an active printer."
+        :!localAgent?.agentDeviceId||!localAgent.documentEncryptionPublicKey
+          ?"The paired shop computer must be online and publish its encryption key."
+          :!privateQueueReady
+            ?"The assigned printer queue must be Ready or Busy."
+            :privateVirtualTestMode
+              ?"The Company Main Admin must enable virtual test output."
+              :"The shop needs an eligible physical printer."}</CustomerInlineNotice>}
       {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on.</strong></span></div>}
       {files.some(isSmartPrintPhotoDocument)&&<div className="customer-private-confirmation" role="status">
         <ShieldCheck size={16}/>
@@ -5324,14 +6120,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       : <div className="customer-upload-modes">
       <div className="customer-upload-mode-heading"><strong>How your files reach the shop</strong><small>Choose a connection method. Your privacy setting above stays the same.</small></div>
       {localAgent?.endpoints.length
-        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct over shop Wi-Fi · unencrypted connection</small></button>
+        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct transfer over shop Wi-Fi</small></button>
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Unavailable</small></button>}
       {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Encrypted online transfer · print when ready</small></button>}
     </div>}
-    {!localAgent?.endpoints.length&&<small className="customer-upload-local-note">Shop connection details <InfoTooltip label="Shop connection unavailable"><span>The paired shop computer has not reported a reachable local connection.</span></InfoTooltip></small>}
-    {customerUploadUnavailable&&<div className="customer-upload-local-note" role="status">Secure upload unavailable. <InfoTooltip label="Upload unavailable"><span>No document was uploaded. Ask the shop to reconnect its print service, then try again.</span></InfoTooltip></div>}
-    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<div className="customer-upload-local-note" role="status">Encrypted online relay in use. <InfoTooltip label="Secure relay details"><span>Shop Wi-Fi is not verified. SmartPrint uses the encrypted online relay automatically; no Wi-Fi setup is needed.</span></InfoTooltip></div>}
-    <div className="customer-upload-picker-grid"
+    {customerUploadUnavailable&&<CustomerInlineNotice kind="warning" title="Secure upload unavailable">No file was uploaded. Ask the shop to reconnect its print service, then retry.</CustomerInlineNotice>}
+    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title="Encrypted online relay">No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.</CustomerInlineNotice>}
+    {batchLockedForPayment&&<CustomerInlineNotice kind="warning" title="This batch is locked">Payment has started. Add more documents in a new batch.</CustomerInlineNotice>}
+    <div className="customer-upload-picker-grid" aria-label="Choose documents or folders"
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
       onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
@@ -5347,7 +6143,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         <small>{nativeAppMode?"Select multiple folders":"One folder at a time"}</small>
       </label>
     </div>
-    {files.length>0&&<div className="customer-selected-files">
+    {notices.length>0&&<div className="customer-inline-notices" aria-label="File selection messages">
+      {notices.map((item,index)=><CustomerInlineNotice
+        key={item.kind+"-"+index}
+        kind={item.kind}
+        title={item.kind==="warning"?"Some files were skipped":"File details"}
+      >{item.message}</CustomerInlineNotice>)}
+    </div>}
+    {files.length>0&&<div className="customer-selected-files" aria-label="Selected files and print settings">
       <div className="customer-selected-files-head"><strong>{files.length} selected</strong><span>{formatBytes(files.reduce((total,item)=>total+item.size,0))} in this selection</span></div>
       <div className="customer-batch-groups">{uploadGroups.map(group=>{
         const defaults=defaultsForGroup(group.name);
@@ -5359,18 +6162,18 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
               ? <div className="customer-folder-defaults">
                 <div><span>ID sheet</span><strong className="customer-paper-default">A4 portrait · 1 copy · Single-sided</strong></div>
                 <div><span>Print mode</span><div className="customer-choice-row">
-                  <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
-                  <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
+                  <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
+                  <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
                 </div></div>
               </div>
               : <div className="customer-folder-defaults">
               <div><span>Colour</span><div className="customer-choice-row">
-                <button type="button" className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
-                <button type="button" className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
+                <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
+                <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
               </div></div>
               <div><span>Sides</span><div className="customer-choice-row">
-                <button type="button" className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>Single</button>
-                <button type="button" className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
+                <button type="button" aria-pressed={!defaults.isDuplex} className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>Single</button>
+                <button type="button" aria-pressed={defaults.isDuplex} className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
               </div></div>
               <label className="customer-folder-copies"><span>Copies · all files</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies}
                  onChange={event=>{
@@ -5400,6 +6203,18 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                }}>
                 <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
               </select></label>
+              {nupOptions.length>0&&group.files.some(candidate=>
+                isCustomerPdf(candidate)&&!isSmartPrintIdDocument(candidate)&&!isSmartPrintPhotoDocument(candidate)
+              )&&<label><span>Pages per sheet</span><select value={defaults.pagesPerSheet??1} onChange={event=>{
+                 const pagesPerSheet=Number(event.currentTarget.value)||1;
+                 setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),pagesPerSheet}}));
+               }}>
+                <option value={1}>1 page per sheet</option>
+                {nupOptions.map(value=><option key={value} value={value}>{value} pages per sheet</option>)}
+              </select></label>}
+              {nupOptions.length===0&&group.files.some(candidate=>
+                isCustomerPdf(candidate)&&!isSmartPrintIdDocument(candidate)&&!isSmartPrintPhotoDocument(candidate)
+              )&&<p className="customer-advanced-help">Multiple pages per sheet is unavailable. {nupUnavailableReason}</p>}
             </div>}
           </div>
           <div className="customer-folder-file-list">{group.files.map(selected=>{
@@ -5408,8 +6223,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             const own={...defaults,...savedOwn};
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
-              <button type="button" className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
-              {!isSmartPrintIdDocument(selected)&&<button type="button" className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
+              <button type="button" aria-pressed={selectedFileIndex===index} title={selected.name} className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
+              {!isSmartPrintIdDocument(selected)&&<button type="button" aria-pressed={own.custom} aria-label={`Use ${own.custom?"folder":"custom"} settings for ${selected.name}`} className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation,pagesPerSheet:defaults.pagesPerSheet}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
               <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
               {own.custom&&!isSmartPrintIdDocument(selected)&&<div className="customer-file-overrides">
                 <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
@@ -5422,12 +6237,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
                    }}/></label>
                 <div className="customer-choice-row">
-                  <button type="button" className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>B&W</button>
-                  <button type="button" className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
+                  <button type="button" aria-pressed={own.colourMode==="Mono"} className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>B&W</button>
+                  <button type="button" aria-pressed={own.colourMode==="Colour"} className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
                 </div>
                 <div className="customer-choice-row">
-                  <button type="button" className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>Single</button>
-                  <button type="button" className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
+                  <button type="button" aria-pressed={!own.isDuplex} className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>Single</button>
+                  <button type="button" aria-pressed={own.isDuplex} className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
                 </div>
                 <div><span>Paper</span><strong className="customer-paper-default">{own.advancedEnabled?own.paperSize:"A4"}</strong></div>
                 <label className="customer-advanced-toggle"><input type="checkbox" checked={own.advancedEnabled} onChange={event=>{
@@ -5447,6 +6262,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                    }}>
                     <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
                   </select></label>
+                  {nupOptions.length>0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<label><span>Pages per sheet</span><select value={own.pagesPerSheet??1} onChange={event=>{
+                     const pagesPerSheet=Number(event.currentTarget.value)||1;
+                     setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,pagesPerSheet}}));
+                   }}>
+                    <option value={1}>1 page per sheet</option>
+                    {nupOptions.map(value=><option key={value} value={value}>{value} pages per sheet</option>)}
+                  </select></label>}
+                  {nupOptions.length===0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<p className="customer-advanced-help">Multiple pages per sheet is unavailable. {nupUnavailableReason}</p>}
                 </div>}
               </div>}
             </div>;
@@ -5463,20 +6286,78 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   />
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply. <InfoTooltip label="Folder settings"><span>Settings apply to every file in this folder. Use Custom on a file to change its settings.</span></InfoTooltip></small>}
-    {previewUrl&&file&&<div className="customer-file-preview"><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<small className="customer-upload-local-note">Photo printing unavailable. Contact shop. <InfoTooltip label="Photo printing details"><span>This shop must enable photo printing and configure its photo sizes and rates.</span></InfoTooltip></small>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<small className="customer-upload-local-note">Photo already sent. <InfoTooltip label="Photo already sent"><span>The shop owner can prepare this photo from the review queue without creating another print job.</span></InfoTooltip></small>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<iframe src={previewUrl} title={file.name+" preview"}/>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
+    {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&(localReady
+      ?<CustomerInlineNotice kind="warning" title="Local transfer is not encrypted">{secureQueueFallbackEnabled
+          ?"Shop Wi-Fi uses HTTP. Choose HTTPS or Private Printing for an encrypted transfer."
+          :canOfferPrivatePrinting
+            ?"Shop Wi-Fi uses HTTP. Choose Private Printing for an encrypted transfer."
+            :"Shop Wi-Fi uses HTTP. This transfer is not encrypted in transit."}</CustomerInlineNotice>
+      :<CustomerInlineNotice kind="info" title="Check shop Wi-Fi">Tap Check shop Wi-Fi above and allow local-network access.</CustomerInlineNotice>)}
+    {files.length>0&&uploadMode==="CLOUD"&&<CustomerInlineNotice kind="info" title="Secure HTTPS transfer">Your files are encrypted while being sent to the shop.</CustomerInlineNotice>}
+    {previewUrl&&file&&<div className="customer-file-preview" role="region" aria-label={`Preview for ${file.name}`}><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<CustomerInlineNotice kind="info" title="Photo printing unavailable">Ask the shop to enable photo printing and set its rates.</CustomerInlineNotice>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<CustomerInlineNotice kind="info" title="Photo already sent">The shop can prepare it from the review queue. No second upload is needed.</CustomerInlineNotice>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<>
+  <iframe src={browserNupPreview?.url||previewUrl} title={browserNupPreview?.url?file.name+" N-up print preview":file.name+" preview"}/>
+  {browserNupPreview&&<div className="customer-nup-browser-preview" role="region" aria-label="Pages per sheet preview">
+    {browserNupPreview.loading
+      ? <span>Preparing {browserNupPreview.pagesPerSheet}-up sheet preview…</span>
+      : browserNupPreview.failed
+        ? <span>The N-up layout preview could not be prepared. Your original PDF remains available and will still be sent to the selected printer driver.</span>
+        : <>
+            <strong>{browserNupPreview.pagesPerSheet}-up preview · Output sheet {browserNupPreview.sheetIndex+1} of {browserNupPreview.sheetCount}</strong>
+            <span>PDF pages {browserNupPreview.firstSourcePage}–{browserNupPreview.lastSourcePage} appear on this output sheet.</span>
+            {browserNupPreview.sheetCount>1&&<div className="customer-nup-browser-preview-controls">
+              <button type="button" disabled={browserNupPreview.sheetIndex<=0} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.max(0,index-1))}>Previous sheet</button>
+              <button type="button" disabled={browserNupPreview.sheetIndex>=browserNupPreview.sheetCount-1} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.min(browserNupPreview.sheetCount-1,index+1))}>Next sheet</button>
+            </div>}
+            <small>Page order follows {browserNupPreview.pagesPerSheetDirection}. This visual preview does not replace driver-specific margins or page fitting. The original PDF is uploaded unchanged; the selected Windows printer driver applies the physical N-up layout.</small>
+          </>}
+  </div>}
+</>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
-    {uploadProgress&&<div className="customer-upload-progress"><span>{uploadProgress.currentFile?`Uploading ${Math.min(uploadProgress.completed+1,uploadProgress.total)} of ${uploadProgress.total}: ${uploadProgress.currentFile}`:`${uploadProgress.completed} of ${uploadProgress.total} files uploaded`}</span><div><i style={{width:`${uploadProgress.total?uploadProgress.completed/uploadProgress.total*100:0}%`}}/>{uploadProgress.currentFile&&<b aria-hidden="true"/>}</div>{!nativeAppMode&&<small>Updates after each file.</small>}</div>}
-    {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&<small className="customer-upload-local-note">{localReady?<>Local transfer is not encrypted. <InfoTooltip label="Local transfer security"><span>Shop Wi-Fi uses local HTTP. Choose Cloud-assisted for encrypted HTTPS transfer.</span></InfoTooltip></>:<>Check shop Wi-Fi first. <InfoTooltip label="Shop Wi-Fi access"><span>In a browser, tap Check shop Wi-Fi above to grant local network access.</span></InfoTooltip></>}</small>}
-    {files.length>0&&uploadMode==="CLOUD"&&<small className="customer-upload-local-note">Encrypted HTTPS upload. <InfoTooltip label="Secure upload details"><span>Files are encrypted in transit and stored in the existing print queue until the shop computer is ready.</span></InfoTooltip></small>}
+    {uploadProgress&&<section className="customer-upload-progress" aria-live="polite" aria-label="Upload progress">
+      <div className="customer-upload-progress-header">
+        <div><strong>{uploadConfirmedCount} of {uploadProgress.total} files uploaded</strong><span>{uploadFailedCount>0?`${uploadFailedCount} failed · Retry only failed files.`:uploadWaitingCount>0?`${uploadWaitingCount} waiting for the shop computer.`:uploadConfirmedCount===uploadProgress.total?"All files uploaded. Printing status is shown separately.":"Files upload in parallel."}</span></div>
+        <span className="customer-upload-progress-count">{Math.round(
+          uploadProgress.files.reduce((sum,file)=>sum+Math.min(file.bytesSent,file.totalBytes||file.sizeBytes),0)/
+          Math.max(1,uploadProgress.files.reduce((sum,file)=>sum+(file.totalBytes||file.sizeBytes),0))*100
+        )}%</span>
+      </div>
+      <div className="customer-upload-progress-list">
+        {uploadProgress.files.map((file,index)=>{
+          const isComplete=file.status==="COMPLETED";
+          const isWaiting=file.status==="WAITING_FOR_SHOP"||file.status==="PROCESSING";
+          const total=file.totalBytes||file.sizeBytes;
+          const percent=isComplete?100:total>0?Math.min(100,file.bytesSent/total*100):0;
+          const hasMeasuredBytes=file.totalBytes>0&&file.bytesSent>0;
+          return <div className="customer-upload-progress-file" key={index}>
+            <div className="customer-upload-progress-file-head">
+              <span className="customer-upload-progress-file-icon">{isComplete?<Check size={14}/>:file.status==="FAILED"?<X size={14}/>:<FileText size={14}/>}</span>
+              <div className="customer-upload-progress-file-main">
+                <strong title={file.name}>{file.name}</strong>
+                <span>{file.message}</span>
+              </div>
+              <span className={"customer-upload-progress-file-status "+(isComplete?"complete":file.status==="FAILED"?"failed":isWaiting?"waiting":"active")}>
+                {isComplete?"Done":file.status==="FAILED"?"Failed":isWaiting?"Processing":file.status==="QUEUED"?"Queued":"Uploading"}
+              </span>
+            </div>
+            <div className="customer-upload-progress-track" role="progressbar" aria-label={`Upload progress for ${file.name}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(percent)}><i className={hasMeasuredBytes||isComplete?"measured":"indeterminate"} style={{width:percent+"%"}}/></div>
+            <div className="customer-upload-progress-file-foot">
+              <span>{hasMeasuredBytes?formatBytes(Math.min(file.bytesSent,total))+" / "+formatBytes(total):formatBytes(file.sizeBytes)+" total"}</span>
+              <span>{isComplete?"100%":hasMeasuredBytes?Math.floor(percent)+"%":file.status==="QUEUED"?"Waiting":isWaiting?"Transfer sent":"Preparing"}</span>
+            </div>
+          </div>;
+        })}
+      </div>
+      <small>Progress shows file transfer, not printing. A file is complete only after SmartPrint confirms it. Successful files stay saved if another file fails.</small>
+    </section>}
     {uploaded&&<>
       {uploadedBatch.length>0&&<div className="customer-uploaded-batch">
         <div className="customer-uploaded-batch-head"><strong>{batchName.trim()?"Batch · "+batchName.trim():"Batch · "+uploadedBatch.length+" files"}</strong><span>{uploadedBatch[0]?.job.jobNumber?"First job · "+uploadedBatch[0].job.jobNumber+" · ":""}Select a file to view its status. Pay once for all accepted files.</span></div>
          {uploadedBatch.some(item=>item.job.privatePrinting&&resolveCustomerDocumentName(item,privateFileNamesByJobId)==="Private file")&&<p className="customer-payment-model-note">Private filenames are kept only on this device. A filename that is not available locally is shown as “Private file”; the shop does not receive or restore the original name.</p>}
-        {batchLockedForPayment&&<p className="customer-payment-model-note">This batch is locked because a payment attempt has started. Add more documents in a new batch to keep each checkout total accurate.</p>}
+
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
-          {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
-            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??batchStatuses[item.job.id]?.printKind??item.job.printKind)}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${item.job.pageCount} pages × ${printSettingsByJobId[item.job.id]?.copies??item.job.copies} copies = ${item.job.pageCount*(printSettingsByJobId[item.job.id]?.copies??item.job.copies)} pages requested · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
+          {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} aria-pressed={uploaded.job.id===item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
+            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??batchStatuses[item.job.id]?.printKind??item.job.printKind)}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(item.job.pageCount,printSettingsByJobId[item.job.id]?.copies??item.job.copies,printSettingsByJobId[item.job.id]?.pagesPerSheet??item.job.pagesPerSheet??1,printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)} · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":customerStatusLabel(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
               tone={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"amber":customerStatusTone(statusForBatchItem(item))}
@@ -5484,30 +6365,76 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           </button>)}
         </section>)}
       </div>}
-      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><div className="uploaded-document-title"><strong>{resolveCustomerDocumentName(uploaded,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[uploaded.job.id]??batchStatuses[uploaded.job.id]?.printKind??uploaded.job.printKind)}/></div><span>{(photoSettingsByJobId[uploaded.job.id]||batchStatuses[uploaded.job.id]?.printKind==="PHOTO"||uploaded.job.printKind==="PHOTO")?`${photoSettingsByJobId[uploaded.job.id]?.photoCount??batchStatuses[uploaded.job.id]?.photoCount??uploaded.job.photoCount??0} photos · ${photoSettingsByJobId[uploaded.job.id]?.sizeCode??batchStatuses[uploaded.job.id]?.photoSizeCode??uploaded.job.photoSizeCode??""} · ${uploaded.job.pageCount} A4 pages`:`${uploaded.job.pageCount} ${uploaded.job.pageCount===1?"page":"pages"}`} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={customerStatusLabel(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={customerStatusTone(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")}/></div>
-      {batchId&&hasLegacyIndividualPayment&&<p className="customer-payment-warning">A file in this batch already has a separate individual payment. Complete or resolve that attempt before starting another payment for this batch. A second collection path is blocked to prevent duplicate charges.</p>}
+      <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><div className="uploaded-document-title"><strong>{resolveCustomerDocumentName(uploaded,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[uploaded.job.id]??batchStatuses[uploaded.job.id]?.printKind??uploaded.job.printKind)}/></div><span>{(photoSettingsByJobId[uploaded.job.id]||batchStatuses[uploaded.job.id]?.printKind==="PHOTO"||uploaded.job.printKind==="PHOTO")?`${photoSettingsByJobId[uploaded.job.id]?.photoCount??batchStatuses[uploaded.job.id]?.photoCount??uploaded.job.photoCount??0} photos · ${photoSettingsByJobId[uploaded.job.id]?.sizeCode??batchStatuses[uploaded.job.id]?.photoSizeCode??uploaded.job.photoSizeCode??""} · ${uploaded.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(uploaded.job.pageCount,printSettingsByJobId[uploaded.job.id]?.copies??uploaded.job.copies,printSettingsByJobId[uploaded.job.id]?.pagesPerSheet??uploaded.job.pagesPerSheet??1,printSettingsByJobId[uploaded.job.id]?.isDuplex??uploaded.job.isDuplex??false)}`} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={customerStatusLabel(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={customerStatusTone(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")}/></div>
+      {batchId&&hasLegacyIndividualPayment&&<CustomerInlineNotice kind="warning" title="Individual payment already exists">Resolve that payment before paying for this batch to avoid a duplicate charge.</CustomerInlineNotice>}
       {canCalculateBatch&&<div className="customer-batch-quote-action">
         <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Review batch settings</h2></div><small>{quoteItems.length} files</small></div>
         <button className="customer-flow-button" disabled={busy} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
       </div>}
     </>}
-    {notice&&<div className={"customer-upload-notice "+notice.kind} role={notice.kind==="warning"?"alert":"status"}>{notice.message}</div>}
-    {error&&<div className="customer-flow-error" role="alert">{error}</div>}
-    {quoteEntries.length>0&&<div className="customer-quote-card customer-batch-quote-card">
-      <div><span>BATCH QUOTE</span><strong>{formatMoney(batchQuoteTotal,quoteEntries[0].quote!.currency)}</strong><small>{acceptedQuoteEntries.length} accepted file(s) · {batchQuoteBreakdown.idCardCount} ID-card file(s) · {batchQuoteBreakdown.idCardSheets} ID-card A4 sheet(s) · {batchQuoteBreakdown.photoPages} photo A4 page(s) · {batchQuoteBreakdown.normalDocumentSourcePages} normal document page(s) · {batchQuoteBreakdown.totalOutputPagesAndSheets} total output page sides / prepared sheets</small></div>
-      <div className="customer-batch-quote-lines">{quoteEntries.map(entry=><div key={entry.item.job.id}><span><span className="customer-quote-line-title">{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[entry.item.job.id]??entry.quote!.printKind??entry.item.job.printKind)}/>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?" · Rejected":""}</span><small>{entry.quote!.printKind==="PHOTO"?(entry.quote!.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote!.photoSizeCode)+" · "+(entry.quote!.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote!.pageCount+" A4 pages · "+formatMoney(entry.quote!.photoUnitPriceMinor??0,entry.quote!.currency)+" per photo":entry.quote!.printKind==="ID_DOCUMENT"?entry.quote!.pageCount+" A4 portrait "+(entry.quote!.pageCount===1?"sheet":"sheets")+" × "+entry.quote!.copies+" copy · "+entry.quote!.colourMode+" · Single-sided":entry.quote!.pageCount+" pages × "+entry.quote!.copies+" copies · "+entry.quote!.colourMode+" · "+(entry.quote!.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")}</small></span><strong>{["REJECTED","REFUNDED"].includes(statusForBatchItem(entry.item))?"Excluded":formatMoney(entry.quote!.quotedAmountMinor,entry.quote!.currency)}</strong></div>)}</div>
-      <div className="customer-batch-print-breakdown">
-        <div><span>Normal documents · {batchQuoteBreakdown.normalDocumentFileCount} file(s) · {batchQuoteBreakdown.normalDocumentSourcePages} original page(s) × copies = {batchQuoteBreakdown.normalDocumentOutputPages} output page sides</span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,quoteEntries[0].quote!.currency)}</strong><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,quoteEntries[0].quote!.currency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} output page sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,quoteEntries[0].quote!.currency)}</small></div>
-        <div><span>ID cards · {batchQuoteBreakdown.idCardCount} prepared ID-card file(s) · {batchQuoteBreakdown.idCardSheets} A4 sheet(s)</span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
-        <div><span>Photo printing · {batchQuoteBreakdown.photoPages} A4 page(s) · {batchQuoteBreakdown.finishedPhotos} finished photo(s)</span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,quoteEntries[0].quote!.currency)}</strong></div>
-        <div className="customer-batch-print-total"><span>Total output page sides / prepared A4 sheets</span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
+    {error&&<div className="customer-flow-error" role="alert"><AlertTriangle size={16} aria-hidden="true"/><span>{error}</span></div>}
+    {(quoteEntries.length>0||batchQuoteNeedsRefresh>0)&&<section className="customer-quote-card customer-batch-quote-card" aria-label="Batch quote summary">
+      <div className="customer-batch-quote-heading">
+        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{batchQuoteTotalDisplay}</strong><small>{batchQuoteSummary} {batchQuoteNeedsRefresh>0?batchQuoteNeedsRefresh+" need a fresh quote. ":""}Excluded files are not charged.</small></div>
+        <span className="customer-batch-quote-validity">{batchQuoteNeedsRefresh>0?"Review required":"Quote for review"}</span>
       </div>
-      <p className="customer-payment-model-note customer-quote-explanation">Pricing varies by document type and print settings. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages before copies are applied. Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted separately as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing shows both finished photo quantity and the A4 PDF pages they occupy; pricing remains per finished photo.</span><span>Normal-document output counts page sides after copies. With duplex printing, two page sides may share one physical sheet.</span><span>Rejected files are excluded. Pay once for all accepted files after review.</span></InfoTooltip></p>
-    </div>}
+      <div className="customer-batch-quote-categories" aria-label="Files included in this quote">
+        <span className="customer-batch-quote-chip included"><b>{acceptedQuoteEntries.length}</b> priced</span>
+        {batchQuoteNeedsRefresh>0&&<span className="customer-batch-quote-chip refresh"><b>{batchQuoteNeedsRefresh}</b> quote needed</span>}
+        {batchQuoteCounts.excluded>0&&<span className="customer-batch-quote-chip excluded"><b>{batchQuoteCounts.excluded}</b> excluded</span>}
+        {batchQuoteCounts.documents>0&&<span className="customer-batch-quote-chip document"><b>{batchQuoteCounts.documents}</b> documents</span>}
+        {batchQuoteCounts.idCards>0&&<span className="customer-batch-quote-chip id-card"><b>{batchQuoteCounts.idCards}</b> ID cards</span>}
+        {batchQuoteCounts.photos>0&&<span className="customer-batch-quote-chip photo"><b>{batchQuoteCounts.photos}</b> photo jobs</span>}
+      </div>
+      <div className="customer-batch-quote-lines" aria-label="File-by-file prices">
+        {quoteRows.map(entry=>{
+          const status=statusForBatchItem(entry.item);
+          const quoteExpired=Boolean(entry.quote)&&quoteExpiredForBatchItem(entry.item);
+          const needsFreshQuote=!entry.excluded&&!shouldBlockQuoteRefreshForStatus(status)&&(!entry.quote||quoteExpired);
+          const printKind=normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind);
+          const detail=entry.quote
+            ? entry.quote.printKind==="PHOTO"
+              ? (entry.quote.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote.photoSizeCode)+" · "+(entry.quote.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote.pageCount+" A4 pages · "+formatMoney(entry.quote.photoUnitPriceMinor??0,entry.quote.currency)+" per photo"
+              : entry.quote.printKind==="ID_DOCUMENT"
+                ? entry.quote.pageCount+" A4 portrait "+(entry.quote.pageCount===1?"sheet":"sheets")+" × "+entry.quote.copies+" copy · "+entry.quote.colourMode+" · Single-sided"
+                : entry.quote.pageCount+" source pages · "+customerDocumentOutputSummary(entry.quote.pageCount,entry.quote.copies,entry.quote.pagesPerSheet??1,entry.quote.isDuplex)+" · "+entry.quote.colourMode+" · "+(entry.quote.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")
+            : entry.item.job.pageCount+" source "+(entry.item.job.pageCount===1?"page":"pages")+" · "+entry.item.job.copies+" "+(entry.item.job.copies===1?"copy":"copies")+" · quote not available yet";
+          const lineState=entry.excluded
+            ?"Excluded"
+            :needsFreshQuote?(entry.quote?"Quote expired":"Quote needed")
+              :!entry.quote?customerStatusLabel(status)
+                :quoteExpired?"Quote locked · "+customerStatusLabel(status)
+                  :"Included in total";
+          const amountLabel=entry.excluded
+            ?"Not charged"
+            :needsFreshQuote?"—"
+              :!entry.quote?"Pending"
+                :quoteExpired?"See order status"
+                  :formatMoney(entry.quote.quotedAmountMinor,entry.quote.currency);
+          return <div className="customer-batch-quote-line" key={entry.item.job.id}>
+            <span className="customer-batch-quote-line-copy">
+              <span className="customer-batch-quote-line-top"><strong>{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={printKind}/><span className={"customer-batch-quote-line-state "+(entry.excluded?"excluded":needsFreshQuote?"refresh":"included")}>{lineState}</span></span>
+              <small>{detail}</small>
+            </span>
+            <strong className={"customer-batch-quote-line-amount "+(entry.excluded||needsFreshQuote||quoteExpired?"excluded":"")}>{amountLabel}</strong>
+          </div>;
+        })}
+      </div>
+      {acceptedQuoteEntries.length>0&&<details className="customer-batch-quote-details">
+        <summary><span>See price breakdown</span><small>Documents, ID cards and photos</small></summary>
+        <div className="customer-batch-print-breakdown">
+          <div><span><strong>Normal documents</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,batchQuoteCurrency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,batchQuoteCurrency)}</small></span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>ID cards</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>Photo printing</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div className="customer-batch-print-total"><span><strong>Total output</strong><small>Page sides and prepared A4 sheets, grouped by print type</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
+        </div>
+      </details>}
+      <p className="customer-payment-model-note customer-quote-explanation">{batchQuoteNeedsRefresh>0?"Only files with a current quote are included in this displayed total. Calculate a fresh quote for the highlighted files before sending the batch to the shop. ":""}This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing is priced per finished photo; the A4 page count is shown for planning.</span><span>Duplex printing can place two output sides on one physical sheet.</span><span>Rejected or refunded files are excluded from the total.</span></InfoTooltip></p>
+    </section>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
-    {jobStatus&&<div className="customer-job-state"><div className="customer-job-state-top"><Status label={customerStatusLabel(jobStatus.status)} tone={customerStatusTone(jobStatus.status)}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
-      <strong>{jobStatus.status==="TEST_OUTPUT_READY"?"Development test PDF generated · no physical print was made":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Your document is reaching the shop":jobStatus.status==="LOCAL_QUEUE_READY"?"Your document is secured at the shop":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
+    {jobStatus&&<div className="customer-job-state" role="status" aria-live="polite"><div className="customer-job-state-top"><Status label={customerStatusLabel(jobStatus.status)} tone={customerStatusTone(jobStatus.status)}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
+      <strong>{jobStatus.status==="TEST_OUTPUT_READY"?"Development test PDF generated · no physical print was made":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Shop computer is preparing your file":jobStatus.status==="LOCAL_QUEUE_READY"?"Your file is ready for printing":jobStatus.status==="PRINT_AUTHORISED"?"The shop started printing":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
       <small className="customer-job-updated">Last updated · {formatIstDateTime(jobStatus.updatedUtc)}</small>
       <p>{jobStatus.status==="TEST_OUTPUT_READY"?"This was a test only. No physical pages were printed."
         :jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop is reviewing your files. No payment has been collected."
@@ -5517,7 +6444,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         :jobStatus.status==="PAYMENT_REPORTED"?"Your payment details were sent to the shop. The shop is checking the payment."
         :jobStatus.status==="PAYMENT_REJECTED"?"The payment could not be confirmed. Please check with the shop before paying again."
         :jobStatus.status==="PAID_AUTHORISED"?"Payment received. The shop is preparing your print."
-        :jobStatus.status==="LOCAL_QUEUE_CLAIMED"||jobStatus.status==="LOCAL_QUEUE_READY"?"Your files have reached the shop and are being prepared for printing."
+        :jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"The shop computer has picked up your request and is preparing the file."
+         :jobStatus.status==="LOCAL_QUEUE_READY"?"Your file is safely stored on the shop computer and ready for printing."
         :jobStatus.status==="PRINT_AUTHORISED"?"The shop approved your print. Printing will start shortly.":["PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus.status)?"Your print is in progress. The shop will confirm when the pages are ready."
         :jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking the printer and will confirm whether your pages were printed. Please do not pay or upload the same file again."
         :jobStatus.status==="COMPLETED"?"Your pages are printed and ready for collection."
@@ -5542,12 +6470,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
       {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
-        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<small className="customer-payment-method-note">Cash at counter unavailable. <InfoTooltip label="Why cash is unavailable"><span>The shop must enable Cash at counter in Payments settings.</span></InfoTooltip></small>}
-        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<small className="customer-payment-method-note">The shop has not enabled UPI or cash payment. Please contact the shop to arrange payment.</small>}
-        {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
-        {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
+        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title="Cash at counter unavailable">Choose UPI or ask the shop whether cash can be enabled.</CustomerInlineNotice>}
+        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<CustomerInlineNotice kind="warning" title="No payment method available">Ask the shop to enable UPI or cash at the counter.</CustomerInlineNotice>}
+        {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
+        {paymentOptions.cashEnabled&&<button type="button" aria-pressed={paymentMethod==="CASH"} className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:nativeAppMode?"Continue":"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
-        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
+        
       </div>}
       {legacyIndividualPayment&&payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
@@ -5569,7 +6497,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter transaction ID after paying"/></label>
             <small className="customer-payment-reference-hint">Find it in your UPI app under payment details or transaction history.</small>
             <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
-            <small className="customer-payment-warning">UPI transfers can still be declined by the bank or UPI provider. A downloaded QR offers a scan-from-image route; it does not bypass payment security checks.</small>
+            <CustomerInlineNotice kind="warning" title="Bank security checks still apply">Downloading the QR does not bypass bank or UPI checks.</CustomerInlineNotice>
           </div>
         </>}
         {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>{nativeAppMode?"Pay at counter · Await confirmation.":"Pay at the shop counter. The shop will confirm receipt before authorising the job."}</p>}
@@ -5597,18 +6525,18 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           </div>;
         })}
       </div>
-      {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<p className="customer-payment-warning">Refreshing the per-file payment breakdown. Check the complete file list before paying or submitting a reference.</p>}
-      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<p className="customer-payment-warning">Recorded file refunds: {formatMoney(batchPaymentRefundedTotal,batchCheckoutCurrency)}. Remaining amount after those returns: {formatMoney(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</p>}
+      {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<CustomerInlineNotice kind="info" title="Checking payment breakdown">Review the full file list before paying or submitting a reference.</CustomerInlineNotice>}
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<CustomerInlineNotice kind="info" title="Refund summary">Refunded: {formatMoney(batchPaymentRefundedTotal,batchCheckoutCurrency)} · Remaining: {formatMoney(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</CustomerInlineNotice>}
       {!batchCheckoutUsesPayment&&<>
         {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">The previous batch payment was rejected. {batchPayment.rejectionReason||"Check with the shop before trying again."}</p>}
-        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<small className="customer-payment-method-note">Cash at counter unavailable. <InfoTooltip label="Why cash is unavailable"><span>The shop must enable Cash at counter in Payments settings.</span></InfoTooltip></small>}
-        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<small className="customer-payment-method-note">The shop has not enabled UPI or cash payment. Please contact the shop to arrange payment.</small>}
-        {paymentOptions.upiEnabled&&<button className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
-        {paymentOptions.cashEnabled&&<button className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
+        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title="Cash at counter unavailable">Choose UPI or ask the shop whether cash can be enabled.</CustomerInlineNotice>}
+        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<CustomerInlineNotice kind="warning" title="No payment method available">Ask the shop to enable UPI or cash at the counter.</CustomerInlineNotice>}
+        {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
+        {paymentOptions.cashEnabled&&<button type="button" aria-pressed={paymentMethod==="CASH"} className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)||batchPayableItems.length===0} onClick={()=>void beginPayment(paymentMethod,true)}>
           {busy?<span className="button-spinner"/>:nativeAppMode?"Pay accepted files":"Pay accepted files · "+formatMoney(batchPayableTotal,batchCheckoutCurrency)}
         </button>
-        {!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled&&<p className="customer-flow-error">{nativeAppMode?"No payment method. Ask shop.":"The shop has not configured a payment method yet. Please speak to the shop operator."}</p>}
+        
       </>}
       {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="UPI"&&batchPayment.status==="AWAITING_CUSTOMER_PAYMENT"&&<>
         <CustomerUpiQr
@@ -5628,14 +6556,21 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter transaction ID after paying"/></label>
             <small className="customer-payment-reference-hint">Find it in your UPI app under payment details or transaction history.</small>
           <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
-          <small className="customer-payment-warning">The shop verifies the actual UPI credit. A downloaded QR offers an alternative scan route; it cannot override a bank or UPI security decline.</small>
+          <CustomerInlineNotice kind="warning" title="Bank security checks still apply">The shop verifies payment. A downloaded QR does not bypass bank or UPI checks.</CustomerInlineNotice>
         </div>
       </>}
       {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}
     </section>}
-    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{jobStatus?.status==="PAID_AUTHORISED"?"Payment received. The shop is preparing your print.":jobStatus?.status==="PRINT_AUTHORISED"?"The shop approved your print. Printing will start shortly.":["PRINT_SUBMITTING","SPOOLER_ACCEPTED","PRINTING"].includes(jobStatus?.status??"")?"Your print is in progress.":jobStatus?.status==="OUTPUT_UNCONFIRMED"?"The shop is checking whether your pages were printed. Please do not submit the same file again.":jobStatus?.status==="COMPLETED"?"Printing is complete. Your pages are ready for collection.":jobStatus?.status==="PDF_EXPORTED"?"Your PDF is ready.":jobStatus?.status==="REFUNDED"?"This file was not printed and the payment was returned.":jobStatus?.status==="CANCELLED"?"This request was cancelled.":jobStatus?.status==="FAILED"?"Printing could not be completed. Please speak to the shop.":jobStatus?.status==="LOCAL_QUEUE_CLAIMED"||jobStatus?.status==="LOCAL_QUEUE_READY"?"Your files have reached the shop and are being prepared.":jobStatus?.status==="AWAITING_PAYMENT"?"Your files are accepted. Complete payment to continue.":jobStatus?.status==="PAYMENT_REPORTED"?"The shop is checking your payment.":quote?"Check the price and print options before sending your request to the shop.":"Choose your files to get started."}</span></div>
+    <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{resolveCustomerUploadStatusMessage({
+      jobStatus:jobStatus?.status??(uploaded?batchStatuses[uploaded.job.id]?.status??uploaded.job.status:null),
+      filesSelected:files.length,
+      uploadedFileCount:uploadedBatch.length||(uploaded?1:0),
+      quoteAvailable:Boolean(quote),
+      paymentStatus:payment?.status??batchPayment?.status??null,
+      uploadProgress:uploadProgress?{files:uploadProgress.files}:null
+    })}</span></div>
   </section></>;
 }
 

@@ -45,6 +45,7 @@ services:
       Database__ApplyMigrationsOnStartup: "true"
       PublicPortal__BaseUrl: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
       PublicDownloads__GitHubRepository: ${GITHUB_REPOSITORY:?Set GITHUB_REPOSITORY in .env}
+      PublicDownloads__PublicBaseUrl: ${PUBLIC_DOWNLOAD_BASE_URL:-}
       Cors__AllowedOrigins__0: ${PUBLIC_BASE_URL:?Set PUBLIC_BASE_URL in .env}
     volumes:
       - qrtoprint_documents:/var/lib/qrtoprint/documents

@@ -50,7 +50,8 @@ jobs:
       - name: Install Chromium for real-browser appearance and viewport checks
         id: chromium_install
         if: ${{ !cancelled() && steps.portal_dependencies.outcome == 'success' }}
-        run: npx --yes --package=playwright@1.56.1 playwright install --with-deps chromium
+        # The ubuntu-24.04 runner image provides Chromium's runtime libraries; avoid apt mirror downloads here.
+        run: npx --yes --package=playwright@1.56.1 playwright install chromium
       - name: Validate Photo Studio browser runner syntax
         if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
         run: node --check apps/portal/tests/photo-studio.browser.mjs
@@ -67,6 +68,25 @@ jobs:
         with:
           name: smartprint-photo-studio-browser-qa
           path: artifacts/photo-studio-browser/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Validate document preview and batch upload browser runner syntax
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        run: node --check apps/portal/tests/document-preview.browser.mjs
+      - name: Run document preview and 20-file batch recovery browser acceptance
+        if: ${{ !cancelled() && steps.chromium_install.outcome == 'success' }}
+        env:
+          VITE_API_BASE_URL: ""
+          SMARTPRINT_DOCUMENT_PREVIEW_ARTIFACT_DIR: artifacts/document-preview-browser
+        run: |
+          mkdir -p artifacts/document-preview-browser
+          npx --yes --package=playwright@1.56.1 -c 'PLAYWRIGHT_MODULE_DIR="$(dirname "$(readlink -f "$(command -v playwright)")")" SMARTPRINT_DOCUMENT_PREVIEW_ARTIFACT_DIR=artifacts/document-preview-browser node apps/portal/tests/document-preview.browser.mjs'
+      - name: Upload document preview and batch recovery browser evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-document-preview-batch-browser-qa
+          path: artifacts/document-preview-browser/
           if-no-files-found: warn
           retention-days: 14
       - name: Validate Private Printing browser runner syntax
@@ -331,13 +351,33 @@ jobs:
           }
           Write-Host "Primary queue: $($primary.Name) -> $($primary.PortName)"
           Write-Host "Secondary queue: $($secondary.Name) -> $($secondary.PortName)"
+      - name: Create a dedicated virtual queue for N-up driver validation
+        id: nup_queue
+        if: ${{ !cancelled() && steps.pdf_queue.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $primary = Get-Printer -Name "Microsoft Print to PDF" -ErrorAction Stop
+          $nupName = "SmartPrint CI N-up Queue"
+          Remove-Printer -Name $nupName -ErrorAction SilentlyContinue
+          Add-Printer -Name $nupName -DriverName $primary.DriverName -PortName $primary.PortName -ErrorAction Stop
+          $nupQueue = Get-Printer -Name $nupName -ErrorAction Stop
+          if ($nupQueue.DriverName -ne $primary.DriverName -or $nupQueue.PortName -ne $primary.PortName) {
+            throw "The N-up validation queue must use the real Microsoft PDF driver and the same virtual output port."
+          }
+          "queue=$nupName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "N-up validation queue: $($nupQueue.Name) -> $($nupQueue.PortName)"
       - name: Run Windows Agent unit and real spooler integration tests
         id: agent_tests
         if: ${{ !cancelled() && steps.setup_dotnet.outcome == 'success' }}
         env:
           SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION: ${{ steps.pdf_queue.outcome == 'success' && '1' || '0' }}
           SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION: ${{ steps.secondary_queue.outcome == 'success' && '1' || '0' }}
+          SMARTPRINT_NUP_TEST_QUEUE: ${{ steps.nup_queue.outputs.queue }}
         run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
+      - name: Remove the temporary N-up Windows queue
+        if: always()
+        shell: pwsh
+        run: Remove-Printer -Name "SmartPrint CI N-up Queue" -ErrorAction SilentlyContinue
       - name: Remove the temporary secondary Windows queue
         if: always()
         shell: pwsh

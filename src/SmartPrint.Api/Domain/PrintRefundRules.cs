@@ -72,6 +72,52 @@ public static class PrintRefundRules
         return rejectedPages.Aggregate(0L, (sum, page) => checked(sum + pageAllocations[page - 1]));
     }
 
+    public static long CalculateAdditionalNupRefundAmount(
+        long originalAmountMinor,
+        long alreadyRefundedAmountMinor,
+        int pageCount,
+        int copies,
+        bool isDuplex,
+        int pagesPerSheet,
+        IReadOnlyCollection<int> rejectedPages)
+    {
+        ArgumentNullException.ThrowIfNull(rejectedPages);
+        if (originalAmountMinor <= 0)
+            throw new ArgumentOutOfRangeException(nameof(originalAmountMinor));
+        if (alreadyRefundedAmountMinor < 0 || alreadyRefundedAmountMinor > originalAmountMinor)
+            throw new ArgumentOutOfRangeException(nameof(alreadyRefundedAmountMinor));
+        if (pageCount is < 1 or > 500)
+            throw new ArgumentOutOfRangeException(nameof(pageCount));
+        if (copies is < 1 or > 100)
+            throw new ArgumentOutOfRangeException(nameof(copies));
+        if (pagesPerSheet is < 2 or > 500)
+            throw new ArgumentOutOfRangeException(nameof(pagesPerSheet));
+        if (rejectedPages.Any(page => page < 1 || page > pageCount) ||
+            rejectedPages.Distinct().Count() != rejectedPages.Count)
+            throw new ArgumentException("Rejected page numbers must be unique and in range.", nameof(rejectedPages));
+
+        var acceptedPages = pageCount - rejectedPages.Count;
+        var originalOutputSides = (pageCount + pagesPerSheet - 1) / pagesPerSheet;
+        var acceptedOutputSides = (acceptedPages + pagesPerSheet - 1) / pagesPerSheet;
+        var originalSheetsPerCopy = isDuplex ? (originalOutputSides + 1) / 2 : originalOutputSides;
+        var acceptedSheetsPerCopy = isDuplex ? (acceptedOutputSides + 1) / 2 : acceptedOutputSides;
+        var originalSheets = checked((long)originalSheetsPerCopy * copies);
+        var acceptedSheets = checked((long)acceptedSheetsPerCopy * copies);
+
+        // Keep the original quoted amount authoritative (including any minimum charge),
+        // then allocate it proportionally to the physical sheets remaining after rejection.
+        // This makes 1 or 2 rejected pages inside the same 4-up output side refund the
+        // same single output side, instead of refunding a fixed amount per source page.
+        var remainingPaidAmount = decimal.ToInt64(decimal.Round(
+            (decimal)originalAmountMinor * acceptedSheets / originalSheets,
+            0,
+            MidpointRounding.AwayFromZero));
+        var cumulativeRefund = originalAmountMinor - remainingPaidAmount;
+        if (cumulativeRefund < alreadyRefundedAmountMinor)
+            throw new InvalidOperationException("The selected pages do not produce an additional refund amount.");
+        return cumulativeRefund - alreadyRefundedAmountMinor;
+    }
+
     public static long CalculateAdditionalRefundAmount(long originalAmountMinor, long alreadyRefundedAmountMinor,
         IReadOnlyCollection<int> rejectedPages, IReadOnlyList<long> pageAllocations)
     {

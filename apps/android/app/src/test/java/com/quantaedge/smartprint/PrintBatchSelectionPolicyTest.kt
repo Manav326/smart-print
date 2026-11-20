@@ -71,6 +71,31 @@ class PrintBatchSelectionPolicyTest {
     }
 
     @Test
+    fun acceptsExactlyTwentyFilesAtFiveHundredMegabytes() {
+        val perFileBytes = PrintBatchSelectionPolicy.MAX_TOTAL_BYTES / PrintBatchSelectionPolicy.MAX_FILES
+        val files = (0 until PrintBatchSelectionPolicy.MAX_FILES).map { index ->
+            createFile("twenty-file-$index.pdf", perFileBytes)
+        }
+
+        assertEquals(20, files.size)
+        assertEquals(PrintBatchSelectionPolicy.MAX_TOTAL_BYTES, files.sumOf { it.length() })
+        assertTrue(files.all { it.length() <= DocumentNamePolicy.MAX_PRINT_BYTES })
+        assertNull(PrintBatchSelectionPolicy.validationError(files))
+    }
+
+    @Test
+    fun rejectsTheTwentyFirstNativeFileEvenWhenBytesRemain() {
+        val files = (0..PrintBatchSelectionPolicy.MAX_FILES).map { index ->
+            createFile("twenty-one-file-$index.pdf", 1L)
+        }
+
+        assertEquals(
+            "A print batch can contain up to ${PrintBatchSelectionPolicy.MAX_FILES} files.",
+            PrintBatchSelectionPolicy.validationError(files)
+        )
+    }
+
+    @Test
     fun rejectsCombinedSizeAboveTheSharedBatchLimit() {
         val files = createBatchWithTotalBytes("over-batch", PrintBatchSelectionPolicy.MAX_TOTAL_BYTES + 1L)
 
