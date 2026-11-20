@@ -3470,6 +3470,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
     IHostEnvironment environment,
+    PrivateRelayWakeupService relayWakeups,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
@@ -3721,6 +3722,9 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
 
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
+    if (printer.AgentDeviceId is Guid assignedAgentId)
+        await relayWakeups.NotifyAgentAsync(assignedAgentId);
+
     return Results.Ok(new
     {
         selectedJob.Id,
@@ -3883,7 +3887,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/settings", async (
     });
 });
 
-shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, IHostEnvironment environment, CancellationToken ct) =>
+shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrincipal principal, SmartPrintDbContext db, IHostEnvironment environment, PrivateRelayWakeupService relayWakeups, CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId)) return Results.Forbid();
 
@@ -3998,6 +4002,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
     });
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
+    await relayWakeups.NotifyAgentAsync(ready.AgentId);
     return Results.Ok(new
     {
         job.Id, job.JobNumber, job.Status, PrinterName = ready.DisplayName,
@@ -8795,6 +8800,8 @@ agentApi.MapPost("/printers/sync", async (
             // Rescans never override the owner's active/inactive selection.
             var wasQuotaSelected = printer.IsActive &&
                 (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT");
+            var driverChanged = !string.Equals(
+                printer.Model, discovered.DriverName, StringComparison.OrdinalIgnoreCase);
             printer.AgentDeviceId = device.Id;
             printer.DisplayName = discovered.QueueName;
             printer.Manufacturer = "Windows";
@@ -8803,7 +8810,8 @@ agentApi.MapPost("/printers/sync", async (
             printer.OutputMode = discovered.OutputMode;
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName;
             printer.IsDefault = discovered.IsDefault;
-            printer.CapabilitiesJson = discovered.CapabilitiesJson;
+            printer.CapabilitiesJson = AgentPrinterSyncRules.ResolveCapabilitiesJson(
+                printer.CapabilitiesJson, discovered.CapabilitiesJson, driverChanged);
             if (discovered.OutputMode == "UNSUPPORTED_VIRTUAL")
             {
                 printer.IsActive = false;
