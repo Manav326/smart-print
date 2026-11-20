@@ -1670,7 +1670,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         <div className="content-wrap">
           <div className="page-heading">
             <div><div className="eyebrow"><span className="eyebrow-line"/>SHOP WORKSPACE</div><h1>{active === "Overview" ? `Welcome, ${(profile?.ownerName || "there").split(" ")[0]}` : activePageTitle}</h1><p>{active === "Overview" ? "Your shop setup and operations, all in one place." : pageDescription(active)}</p></div>
-            <div className="heading-actions"><span className="date-chip"><Clock3 size={15}/>{today}</span>{active === "Printers" && <button className="primary-button" onClick={() => setModal("printer")}><Plus size={16}/> Add printer</button>}{active === "QR Stations" && <button className="primary-button" onClick={() => setModal("station")}><Plus size={16}/> Create QR station</button>}</div>
+            <div className="heading-actions"><span className="date-chip"><Clock3 size={15}/>{today}</span>{active === "QR Stations" && <button className="primary-button" onClick={() => setModal("station")}><Plus size={16}/> Create QR station</button>}</div>
           </div>
 
           {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X size={15}/></button></div>}
@@ -2366,7 +2366,8 @@ function PrintersPage({
     printer.connectionType === "WindowsQueue" && !!printer.agentDeviceId
   ).length;
   const quotaFull = maxPrinters != null && selectedPrinters.length >= maxPrinters;
-  const canUseSelection = subscriptionActive !== false;
+  const canUseSelection = subscriptionActive === true;
+  const canReplaceSelection = selectedPrinters.length > 0;
 
   async function confirmReplacement() {
     if (!pendingReplacement || !replacePrinterId) return;
@@ -2395,8 +2396,15 @@ function PrintersPage({
           <p>At the plan limit? Select any other available queue and replace one of your current selections. The other discovered queues remain available; nothing is removed from Windows.</p>
         </div>
         {!canUseSelection && (
-          <div className="printer-selection-warning" role="alert">
-            Your shop subscription is inactive. Your queues and files remain visible, but new printer selections are paused until shop access is restored.
+          <div className="printer-selection-warning" role={subscriptionActive === false ? "alert" : "status"}>
+            {subscriptionActive === false
+              ? "Your shop subscription is inactive. Your queues and files remain visible, but new printer selections are paused until shop access is restored."
+              : "Checking your shop plan before allowing printer selection. Your detected queues remain visible."}
+          </div>
+        )}
+        {maxPrinters === 0 && selectedPrinters.length === 0 && (
+          <div className="printer-selection-warning" role="status">
+            This plan currently has no printer selection slots. All discovered queues remain visible, but selecting one requires a plan with at least one printer slot.
           </div>
         )}
         {printers.length === 0 ? (
@@ -2470,14 +2478,14 @@ function PrintersPage({
                     ) : (
                       <button
                         className="subtle-button"
-                        disabled={!!busyResourceId || !canSelect || !canUseSelection}
-                        title={!canSelect ? "The Agent must discover and link this Windows queue before it can be selected." : !canUseSelection ? "Restore the shop subscription to select a printer." : undefined}
+                        disabled={!!busyResourceId || !canSelect || !canUseSelection || (quotaFull && !canReplaceSelection)}
+                        title={!canSelect ? "The Agent must discover and link this Windows queue before it can be selected." : !canUseSelection ? "Shop plan access must be confirmed before selecting a printer." : quotaFull && !canReplaceSelection ? "This plan has no printer slots available. Upgrade the plan to select a printer." : undefined}
                         onClick={() => {
                           if (!canSelect || !canUseSelection) return;
-                          if (quotaFull) {
+                          if (quotaFull && canReplaceSelection) {
                             setPendingReplacement(printer);
                             setReplacePrinterId(selectedPrinters[0]?.id ?? "");
-                          } else {
+                          } else if (!quotaFull) {
                             void onToggle(printer);
                           }
                         }}

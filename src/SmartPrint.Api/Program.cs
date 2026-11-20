@@ -1893,8 +1893,9 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
             var activeJobNumber = await db.PrintJobs.AsNoTracking()
                 .Where(job => job.TenantId == tenantId &&
                               job.PrinterDeviceId == previousId &&
-                              (job.Status == "LOCAL_QUEUE_CLAIMED" ||
-                               job.Status == "LOCAL_QUEUE_READY" ||
+                              ((job.Status == "LOCAL_QUEUE_CLAIMED" &&
+                                job.AgentLeaseExpiresUtc != null &&
+                                job.AgentLeaseExpiresUtc > DateTimeOffset.UtcNow) ||
                                job.Status == "PRINT_AUTHORISED" ||
                                job.Status == "PRINT_SUBMITTING" ||
                                job.Status == "SPOOLER_ACCEPTED" ||
@@ -1920,7 +1921,6 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                     equals new { document.TenantId, PrintJobId = document.PrintJobId }
                 where job.TenantId == tenantId &&
                       job.PrinterDeviceId == previousId &&
-                      job.PrivatePrinting &&
                       document.StorageMode == "LOCAL_AGENT" &&
                       document.AgentDeviceId != printer.AgentDeviceId &&
                       job.Status is not ("REJECTED" or "REFUNDED" or "CANCELLED" or "COMPLETED")
@@ -1932,7 +1932,7 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                 return Results.Conflict(new
                 {
                     code = "private_printing_computer_locked",
-                    message = "A Private Printing file is secured on the original Windows computer. Finish that file there, or choose another queue connected to the same computer, before replacing this queue."
+                    message = "A local-only document is secured on the original Windows computer. Finish that file there, or choose another queue connected to the same computer, before replacing this queue."
                 });
             }
 
@@ -1968,13 +1968,14 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
         var activeJobNumber = await db.PrintJobs.AsNoTracking()
             .Where(job => job.TenantId == tenantId &&
                           job.PrinterDeviceId == printerId &&
-                          (job.Status == "LOCAL_QUEUE_CLAIMED" ||
-                           job.Status == "LOCAL_QUEUE_READY" ||
-                           job.Status == "PRINT_AUTHORISED" ||
-                           job.Status == "PRINT_SUBMITTING" ||
-                           job.Status == "SPOOLER_ACCEPTED" ||
-                           job.Status == "PRINTING" ||
-                           job.Status == "OUTPUT_UNCONFIRMED"))
+                          ((job.Status == "LOCAL_QUEUE_CLAIMED" &&
+                                job.AgentLeaseExpiresUtc != null &&
+                                job.AgentLeaseExpiresUtc > DateTimeOffset.UtcNow) ||
+                               job.Status == "PRINT_AUTHORISED" ||
+                               job.Status == "PRINT_SUBMITTING" ||
+                               job.Status == "SPOOLER_ACCEPTED" ||
+                               job.Status == "PRINTING" ||
+                               job.Status == "OUTPUT_UNCONFIRMED"))
             .OrderByDescending(job => job.CreatedUtc)
             .Select(job => job.JobNumber)
             .FirstOrDefaultAsync(ct);
@@ -1986,6 +1987,20 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
             {
                 code = "printer_has_active_output",
                 message = $"Printer cannot be deselected while job {activeJobNumber} is active in the Windows Agent or spooler, or awaiting output reconciliation. Resolve that same job first; disabling it does not cancel Windows output."
+            });
+        }
+
+        var enabledStationCount = await db.QrStations.AsNoTracking()
+            .CountAsync(station => station.TenantId == tenantId &&
+                                   station.PrinterDeviceId == printerId &&
+                                   station.IsEnabled, ct);
+        if (enabledStationCount > 0)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "printer_is_qr_station_default",
+                message = $"This queue is the default for {enabledStationCount} enabled QR station(s). Replace it with another selected queue to keep those stations working, or disable the affected stations first."
             });
         }
 
@@ -8551,14 +8566,19 @@ agentApi.MapPost("/printers/sync", async (
             item.AgentDeviceId == device.Id &&
             item.QueueName == discovered.QueueName, ct);
 
-        printer ??= await db.PrinterDevices.FirstOrDefaultAsync(item =>
-            item.TenantId == device.TenantId &&
-            item.QueueName == discovered.QueueName &&
-            (item.AgentDeviceId == null ||
-             db.AgentDevices.Any(previousAgent =>
-                 previousAgent.Id == item.AgentDeviceId &&
-                 previousAgent.TenantId == device.TenantId &&
-                 previousAgent.RevokedUtc != null)), ct);
+        var adoptedUnlinkedQueue = false;
+        if (printer is null)
+        {
+            printer = await db.PrinterDevices.FirstOrDefaultAsync(item =>
+                item.TenantId == device.TenantId &&
+                item.QueueName == discovered.QueueName &&
+                (item.AgentDeviceId == null ||
+                 db.AgentDevices.Any(previousAgent =>
+                     previousAgent.Id == item.AgentDeviceId &&
+                     previousAgent.TenantId == device.TenantId &&
+                     previousAgent.RevokedUtc != null)), ct);
+            adoptedUnlinkedQueue = printer is not null && printer.AgentDeviceId is null;
+        }
 
         if (printer is null)
         {
@@ -8610,6 +8630,23 @@ agentApi.MapPost("/printers/sync", async (
             {
                 printer.IsActive = false;
                 if (wasQuotaSelected) selectedPrinterCount--;
+            }
+            else if (adoptedUnlinkedQueue && !printer.IsActive)
+            {
+                // An unlinked manual placeholder is not an owner selection. It may
+                // be selected after discovery only when a supported slot is available.
+                var selectQueue = AgentPrinterSyncRules.ShouldAutoSelectQueue(
+                    discovered.OutputMode,
+                    discovered.Status,
+                    entitlement.IsAccessActive,
+                    selectedPrinterCount,
+                    entitlement.MaxPrinters);
+                if (selectQueue)
+                {
+                    printer.IsActive = true;
+                    selectedPrinterCount++;
+                    autoSelected++;
+                }
             }
             updated++;
         }

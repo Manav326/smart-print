@@ -4979,3 +4979,31 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
     padding:6px 8px;
   }
 }
+
+/* Owner-first printer discovery and plan-slot selection. */
+.printer-selection-summary{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:18px;
+  margin:0 0 16px;padding:14px 16px;border:1px solid var(--border);
+  border-radius:12px;background:var(--surface-2);min-width:0
+}
+.printer-selection-summary>div{display:flex;flex-direction:column;gap:5px;min-width:170px}
+.printer-selection-summary strong{font:700 13px Manrope,sans-serif;color:var(--text)}
+.printer-selection-summary span,.printer-selection-summary p{
+  margin:0;font-size:11px;line-height:1.55;color:var(--muted)
+}
+.printer-selection-summary p{max-width:570px}
+.printer-selection-warning{
+  display:flex;align-items:flex-start;margin:0 0 14px;padding:11px 13px;
+  border:1px solid var(--border);border-radius:10px;background:var(--surface-2);
+  color:var(--muted);font-size:11px;line-height:1.55
+}
+.printer-card h3{font-size:13px}
+.printer-card>p{font-size:11px;line-height:1.5}
+.printer-meta{font-size:10px;line-height:1.5;color:var(--muted)}
+.printer-card-footer .enabled-label,.printer-card-footer .disabled-label{font-size:10px}
+.printer-card-footer .subtle-button{font-size:10px;padding:7px 10px}
+@media(max-width:650px){
+  .printer-selection-summary{flex-direction:column;gap:8px;padding:12px}
+  .printer-selection-summary>div{min-width:0}
+  .printer-selection-summary p{max-width:none}
+}
