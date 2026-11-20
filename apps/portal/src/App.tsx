@@ -1686,7 +1686,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onOpenPhotoStudio={job=>void openShopPhotoStudioForJob(job)}
           />}
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
-          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} maxPrinters={subscription?.entitlements.maxPrinters} subscriptionActive={subscription?.entitlements.isAccessActive} busyResourceId={busyResourceId} onToggle={togglePrinter}/>}
+          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} maxPrinters={subscription?.entitlements.maxPrinters} subscriptionActive={subscription?.entitlements.isAccessActive} busyResourceId={busyResourceId} onToggle={togglePrinter} onOpenAgent={() => navAction("Print Agent")}/>} 
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
@@ -2327,7 +2327,7 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
 }
 
 function PrintersPage({
-  printers, agents, maxPrinters, subscriptionActive, busyResourceId, onToggle
+  printers, agents, maxPrinters, subscriptionActive, busyResourceId, onToggle, onOpenAgent
 }: {
   printers: PrinterDevice[];
   agents: AgentDevice[];
@@ -2335,6 +2335,7 @@ function PrintersPage({
   subscriptionActive?: boolean;
   busyResourceId: string | null;
   onToggle: (printer: PrinterDevice, replacePrinterId?: string) => Promise<boolean>;
+  onOpenAgent: () => void;
 }) {
   const [pendingReplacement, setPendingReplacement] = useState<PrinterDevice | null>(null);
   const [replacePrinterId, setReplacePrinterId] = useState("");
@@ -2395,8 +2396,10 @@ function PrintersPage({
         {printers.length === 0 ? (
           <EmptyModule
             icon={<Printer size={24}/>}
-            title="Waiting for Windows printer discovery"
-            text="Install the printer driver in Windows, connect the printer, and make sure Windows reports it as Ready. Keep the SmartPrint Print Agent online; it discovers and registers installed Windows queues automatically, normally within 30 seconds. You do not need to register the same printer manually."
+            title="No Windows printer queues reported yet"
+            text="Install the printer driver in Windows, connect the printer, and make sure Windows reports it as Ready. Keep the SmartPrint Print Agent online; new queues appear automatically after the next scan. Check the Agent status if nothing appears."
+            actionLabel="Check Print Agent"
+            onAction={onOpenAgent}
           />
         ) : (
           <div className="printer-grid">
