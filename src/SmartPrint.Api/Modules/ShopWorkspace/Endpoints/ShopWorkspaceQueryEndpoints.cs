@@ -25,7 +25,7 @@ public static class ShopWorkspaceQueryEndpoints
             TenantEntitlementService entitlements,
             CancellationToken ct) =>
         {
-            if (!TryGetTenantId(principal, out var tenantId))
+            if (!TenantIdentity.TryGetTenantId(principal, out var tenantId))
             {
                 return Results.Forbid();
             }
@@ -141,7 +141,7 @@ public static class ShopWorkspaceQueryEndpoints
             CancellationToken ct) =>
         {
             if (!principal.FindAll("shop_role").Any(claim => claim.Value == "ShopOwner") ||
-                !TryGetTenantId(principal, out var tenantId) ||
+                !TenantIdentity.TryGetTenantId(principal, out var tenantId) ||
                 !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var userId))
             {
                 return Results.Forbid();
@@ -176,7 +176,7 @@ public static class ShopWorkspaceQueryEndpoints
 
         shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
         {
-            if (!TryGetTenantId(principal, out var tenantId))
+            if (!TenantIdentity.TryGetTenantId(principal, out var tenantId))
             {
                 return Results.Forbid();
             }
@@ -221,7 +221,7 @@ public static class ShopWorkspaceQueryEndpoints
 
         shop.MapGet("/qr-stations", async (ClaimsPrincipal principal, SmartPrintDbContext db, IConfiguration configuration, CancellationToken ct) =>
         {
-            if (!TryGetTenantId(principal, out var tenantId))
+            if (!TenantIdentity.TryGetTenantId(principal, out var tenantId))
             {
                 return Results.Forbid();
             }
@@ -258,7 +258,7 @@ public static class ShopWorkspaceQueryEndpoints
             SmartPrintDbContext db,
             CancellationToken ct) =>
         {
-            if (!TryGetTenantId(principal, out var tenantId))
+            if (!TenantIdentity.TryGetTenantId(principal, out var tenantId))
             {
                 return Results.Forbid();
             }
