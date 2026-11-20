@@ -119,7 +119,7 @@ test("initial Agent acceptance receipts cannot supply terminal PRINTED proof", (
 test("the API gates completion and private-source purge on fresh output proof or an explicit queue reconciliation", () => {
   const program = read("../../../src/SmartPrint.Api/Program.cs");
   const routeStart = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/confirm-output"');
-  const routeEnd = program.indexOf('shop.MapGet("/print-jobs/{jobId:guid}/events"', routeStart);
+  const routeEnd = program.indexOf('shop.MapPost("/print-jobs/{jobId:guid}/photo-revision-grant"', routeStart);
   assert.ok(routeStart >= 0 && routeEnd > routeStart, "The physical output-confirmation endpoint must exist.");
   const route = program.slice(routeStart, routeEnd);
   const verified = route.indexOf("SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(");
