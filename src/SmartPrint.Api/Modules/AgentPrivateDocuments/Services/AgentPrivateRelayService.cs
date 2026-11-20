@@ -7,6 +7,21 @@ using SmartPrint.Api.Services;
 
 namespace SmartPrint.Api.Modules.AgentPrivateDocuments.Services;
 
+public enum AgentPrivateRelayRejectResultKind
+{
+    InvalidRequest,
+    NotFound,
+    Conflict,
+    Duplicate,
+    Rejected
+}
+
+public sealed record AgentPrivateRelayRejectResult(
+    AgentPrivateRelayRejectResultKind Kind,
+    Guid Id = default,
+    DateTimeOffset? FailedUtc = null,
+    string? Code = null);
+
 public enum AgentPrivateRelayStageResultKind
 {
     InvalidStage,
@@ -29,8 +44,69 @@ public sealed record AgentPrivateRelayStageResult(
 /// </summary>
 public sealed class AgentPrivateRelayService(
     SmartPrintDbContext db,
-    PrivateRelayWakeupService relayWakeups)
+    PrivateRelayWakeupService relayWakeups,
+    SmartPrint.Api.Storage.DocumentStorage storage)
 {
+    public async Task<AgentPrivateRelayRejectResult> RejectAsync(
+        Guid tenantId,
+        Guid agentDeviceId,
+        Guid ticketId,
+        string? code,
+        string? message,
+        CancellationToken ct)
+    {
+        if (!AgentPrivateRelayRejectionRules.IsValidRequest(code, message))
+        {
+            return new AgentPrivateRelayRejectResult(
+                AgentPrivateRelayRejectResultKind.InvalidRequest,
+                Code: "private_relay_rejection_invalid");
+        }
+
+        var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
+            item.Id == ticketId &&
+            item.TenantId == tenantId &&
+            item.AgentDeviceId == agentDeviceId &&
+            item.PrivatePrinting, ct);
+        if (ticket is null)
+            return new AgentPrivateRelayRejectResult(AgentPrivateRelayRejectResultKind.NotFound);
+
+        if (ticket.CompletedUtc is not null)
+        {
+            return new AgentPrivateRelayRejectResult(
+                AgentPrivateRelayRejectResultKind.Conflict,
+                ticket.Id,
+                Code: "private_relay_already_completed");
+        }
+
+        if (ticket.PrivateRelayFailedUtc is not null)
+        {
+            return new AgentPrivateRelayRejectResult(
+                AgentPrivateRelayRejectResultKind.Duplicate,
+                ticket.Id,
+                ticket.PrivateRelayFailedUtc);
+        }
+
+        if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
+            await storage.DeleteAsync(ticket.PrivateRelayStorageKey);
+
+        ticket.PrivateRelayStorageKey = null;
+        ticket.PrivateRelayWrappedKey = null;
+        ticket.PrivateRelayIv = null;
+        ticket.PrivateRelayUploadedUtc = null;
+        ticket.PrivateRelayFailedUtc = DateTimeOffset.UtcNow;
+        ticket.PrivateRelayStage = PrivateRelayProgressRules.Failed;
+        ticket.PrivateRelayStageUpdatedUtc = ticket.PrivateRelayFailedUtc;
+        ticket.PrivateRelayFailureCode = code;
+        ticket.PrivateRelayFailureMessage = message!.Trim();
+        ticket.ExpiresUtc = ticket.PrivateRelayFailedUtc.Value;
+        await db.SaveChangesAsync(ct);
+
+        return new AgentPrivateRelayRejectResult(
+            AgentPrivateRelayRejectResultKind.Rejected,
+            ticket.Id,
+            ticket.PrivateRelayFailedUtc);
+    }
+
     public async Task<AgentPrivateRelayStageResult> UpdateStageAsync(
         Guid tenantId,
         Guid agentDeviceId,

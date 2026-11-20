@@ -3807,45 +3807,6 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     });
 });
 
-agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
-    Guid ticketId,
-    AgentPrivateRelayRejectRequest request,
-    HttpContext context,
-    SmartPrintDbContext db,
-    DocumentStorage storage,
-    CancellationToken ct) =>
-{
-    var device = await AuthenticateAgentAsync(context, db, ct);
-    if (device is null) return Results.Unauthorized();
-    if (request.Code is not ("document_not_supported" or "document_content_type_mismatch" or "private_document_encryption_required" or "private_document_integrity_failed" or "private_document_decryption_failed") ||
-        string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 400)
-        return Results.BadRequest(new { code = "private_relay_rejection_invalid" });
-
-    var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
-        item.Id == ticketId && item.TenantId == device.TenantId &&
-        item.AgentDeviceId == device.Id && item.PrivatePrinting, ct);
-    if (ticket is null) return Results.NotFound();
-    if (ticket.CompletedUtc is not null)
-        return Results.Conflict(new { code = "private_relay_already_completed" });
-    if (ticket.PrivateRelayFailedUtc is not null)
-        return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = true });
-
-    if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
-        await storage.DeleteAsync(ticket.PrivateRelayStorageKey);
-    ticket.PrivateRelayStorageKey = null;
-    ticket.PrivateRelayWrappedKey = null;
-    ticket.PrivateRelayIv = null;
-    ticket.PrivateRelayUploadedUtc = null;
-    ticket.PrivateRelayFailedUtc = DateTimeOffset.UtcNow;
-    ticket.PrivateRelayStage = PrivateRelayProgressRules.Failed;
-    ticket.PrivateRelayStageUpdatedUtc = ticket.PrivateRelayFailedUtc;
-    ticket.PrivateRelayFailureCode = request.Code;
-    ticket.PrivateRelayFailureMessage = request.Message.Trim();
-    ticket.ExpiresUtc = ticket.PrivateRelayFailedUtc.Value;
-    await db.SaveChangesAsync(ct);
-    return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = false });
-});
-
 agentApi.MapPost("/jobs/claim", async (
     HttpContext context,
     SmartPrintDbContext db,

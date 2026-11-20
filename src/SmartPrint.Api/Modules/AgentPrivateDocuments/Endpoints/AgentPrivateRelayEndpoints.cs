@@ -69,6 +69,42 @@ public static class AgentPrivateRelayEndpoints
             return Results.Ok(result);
         });
 
+        agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
+            Guid ticketId,
+            AgentPrivateRelayRejectRequest request,
+            HttpContext context,
+            AgentPrivateRelayService service,
+            CancellationToken ct) =>
+        {
+            if (!context.Items.TryGetValue(AgentRateLimitService.AuthenticatedAgentItemKey, out var value) ||
+                value is not AgentDevice device)
+            {
+                return Results.Unauthorized();
+            }
+
+            var result = await service.RejectAsync(
+                device.TenantId, device.Id, ticketId, request.Code, request.Message, ct);
+
+            return result.Kind switch
+            {
+                AgentPrivateRelayRejectResultKind.InvalidRequest => Results.BadRequest(new { code = result.Code }),
+                AgentPrivateRelayRejectResultKind.NotFound => Results.NotFound(),
+                AgentPrivateRelayRejectResultKind.Conflict => Results.Conflict(new { code = result.Code }),
+                AgentPrivateRelayRejectResultKind.Duplicate => Results.Ok(new
+                {
+                    result.Id,
+                    PrivateRelayFailedUtc = result.FailedUtc,
+                    DuplicateRequest = true
+                }),
+                _ => Results.Ok(new
+                {
+                    result.Id,
+                    PrivateRelayFailedUtc = result.FailedUtc,
+                    DuplicateRequest = false
+                })
+            };
+        });
+
         return agentApi;
     }
 }

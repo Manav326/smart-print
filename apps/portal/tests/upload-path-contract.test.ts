@@ -61,6 +61,15 @@ test("shop batch review cannot accept more than twenty files", () => {
 test("per-session upload rate budget can carry a complete 20-file Private Printing batch", () => {
   assert.match(api, /PermitLimit = UploadLimits\.MaxBatchFiles \* 3/);
 });
+test("Agent private-relay rejection remains owned by the AgentPrivateDocuments module", () => {
+  assert.match(privateRelayEndpoints, /MapPost\("\/private-relays\/\{ticketId:guid\}\/reject"/);
+  assert.match(privateRelayService, /AgentPrivateRelayRejectionRules\.IsValidRequest/);
+  assert.match(privateRelayService, /await storage\.DeleteAsync/);
+  assert.match(privateRelayService, /PrivateRelayProgressRules\.Failed/);
+  const rejectionRules = read("../../../src/SmartPrint.Api/Modules/AgentPrivateDocuments/Domain/AgentPrivateRelayRejectionRules.cs");
+  assert.match(rejectionRules, /message\.Length <= 400/);
+});
+
 test("Private Printing publishes durable, authenticated stage updates for direct LAN and cloud relay processing", () => {
   assert.match(privateRelayEndpoints, /MapPost\("\/private-relays\/\{ticketId:guid\}\/stage"/);
   assert.match(privateRelayService, /AgentPrivateRelayStageRules\.HasReceivedPayload/);

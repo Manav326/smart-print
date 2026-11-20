@@ -9,6 +9,7 @@ Owns Agent-side private-relay queue discovery/long polling and the pending-purge
 - Relay pickup is bounded to 50 oldest eligible tickets, a 2-minute fresh/ready printer queue, and a 25-second listener / 10-second fallback wait. Caller-supplied wait values are clamped to those bounds.
 - PDF virtual output is independently disabled in Production even when the operational setting is enabled; non-production requires the explicit operational setting.
 - Agent stage updates are tenant- and Agent-scoped, require an actually received cloud payload or an unexpired direct-LAN claim, and preserve monotonic transitions, duplicate success and terminal-state rejection.
+- Agent rejection reports accept only the existing five document failure codes and a message of at most 400 characters; the same Agent/tenant owns the ticket, rejected encrypted relay bytes are deleted, encryption metadata is cleared and repeated rejection is idempotent.
 - A purge is offered only after confirmed physical output or a separately recorded non-production test output, with an explicit purge request.
 - A duplicate acknowledgement is idempotent and returns the original purge timestamp.
 - The API accepts acknowledgements only from the Agent that owns the `LOCAL_AGENT` document record.
