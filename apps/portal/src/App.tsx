@@ -2549,37 +2549,6 @@ function PrintersPage({
     </>
   );
 }
-on>
-      {pendingReplacement && (
-        <Modal
-          title="Replace a selected printer"
-          subtitle={`Select which current queue to replace with ${pendingReplacement.displayName}.`}
-          onClose={() => { if (!busyResourceId) { setPendingReplacement(null); setReplacePrinterId(""); } }}
-        >
-          <div className="modal-form">
-            <label>
-              Queue to replace
-              <select value={replacePrinterId} onChange={event => setReplacePrinterId(event.target.value)}>
-                <option value="">Choose a selected queue</option>
-                {selectedPrinters.map(printer => <option key={printer.id} value={printer.id}>{printer.displayName}</option>)}
-              </select>
-            </label>
-            <div className="modal-note">
-              <ShieldCheck size={15}/>
-              <span>The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Private files stay on their original Windows computer.</span>
-            </div>
-            <div className="modal-actions">
-              <button type="button" className="secondary-button" disabled={!!busyResourceId} onClick={() => { setPendingReplacement(null); setReplacePrinterId(""); }}>Cancel</button>
-              <button type="button" className="primary-button" disabled={!!busyResourceId || !replacePrinterId} onClick={() => void confirmReplacement()}>
-                {busyResourceId === pendingReplacement.id ? <span className="button-spinner"/> : "Replace selected queue"}
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </>
-  );
-}
 function QrStationArtworkPreview({station,profile}:{station:QrStation;profile:ShopProfile|null}) {
   const [posterSrc,setPosterSrc]=useState<string|null>(null);
   const previewQrHostRef=useRef<HTMLDivElement|null>(null);
