@@ -328,9 +328,14 @@ export default function PhotoStudio({
   const [photoOutputLayout,setPhotoOutputLayout]=useState<PhotoOutputLayout>(
     initialSettings?.photoOutputLayout === "PHOTO_PAPER" ? "PHOTO_PAPER" : "A4_SHEET"
   );
-  const [photoPaperFinish,setPhotoPaperFinish]=useState<PhotoPaperFinish>(
-    initialSettings?.photoPaperFinish === "MATTE" ? "MATTE" : "GLOSSY"
-  );
+  const [photoPaperFinish,setPhotoPaperFinish]=useState<PhotoPaperFinish>(() => {
+    if (initialSettings?.photoOutputLayout === "PHOTO_PAPER") {
+      return initialSettings.photoPaperFinish === "MATTE" ? "MATTE" : "GLOSSY";
+    }
+    return initialSettings?.photoPaperFinish === "GLOSSY" || initialSettings?.photoPaperFinish === "MATTE"
+      ? initialSettings.photoPaperFinish
+      : "PLAIN";
+  });
   const [previewPage,setPreviewPage]=useState(0);
   // Preview magnification affects only the editor viewport, never print framing.
   const [previewScale,setPreviewScale]=useState(1);
@@ -757,7 +762,7 @@ export default function PhotoStudio({
         sourceBackgroundColor,
         backgroundTolerance,
         photoOutputLayout,
-        photoPaperFinish: isPhotoPaperLayout ? photoPaperFinish : "PLAIN"
+        photoPaperFinish
       };
       await onApply([{
         file: output,
@@ -766,7 +771,7 @@ export default function PhotoStudio({
         photosPerPage: outputPhotosPerPage,
         captionHeightMm,
         photoOutputLayout,
-        photoPaperFinish: isPhotoPaperLayout ? photoPaperFinish : "PLAIN",
+        photoPaperFinish,
         resolutionDpi:300,editorSettings,
         previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))
       }]);
@@ -778,9 +783,9 @@ export default function PhotoStudio({
   const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
   const outputDescription = isPhotoPaperLayout
     ? `${size.label} · ${photoPaperFinish.toLowerCase()} photo paper`
-    : `${size.label} · regular A4 sheets`;
+    : `${size.label} · ${photoPaperFinish.toLowerCase()} A4 sheets`;
   const footerHint = mode === "private-library"
-    ? (isPhotoPaperLayout ? "Original stays private · individual photo-paper prints saved here." : "Original stays private · A4 sheet saved here.")
+    ? (isPhotoPaperLayout ? "Original stays private · individual photo-paper prints saved here." : "Original stays private · "+photoPaperFinish.toLowerCase()+" A4 photo sheets saved here.")
     : mode === "shop-create"
       ? "New order · Verify payment before printing."
       : mode === "shop"
@@ -957,21 +962,25 @@ export default function PhotoStudio({
             <div className={styles.fieldLabel}>Paper and output
               <div className={styles.photoOutputChoices} role="group" aria-label="Photo output type">
                 <button type="button" id="photo-studio-output-a4" className={photoOutputLayout === "A4_SHEET" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "A4_SHEET"} onClick={() => setPhotoOutputLayout("A4_SHEET")}>
-                  <strong>Regular A4 paper</strong>
+                  <strong>A4 sheets</strong>
                   <span>Multiple copies per A4 sheet.</span>
                 </button>
-                <button type="button" id="photo-studio-output-photo-paper" className={photoOutputLayout === "PHOTO_PAPER" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "PHOTO_PAPER"} onClick={() => setPhotoOutputLayout("PHOTO_PAPER")}>
+                <button type="button" id="photo-studio-output-photo-paper" className={photoOutputLayout === "PHOTO_PAPER" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "PHOTO_PAPER"} onClick={() => { setPhotoOutputLayout("PHOTO_PAPER"); if (photoPaperFinish === "PLAIN") setPhotoPaperFinish("GLOSSY"); }}>
                   <strong>Photo paper</strong>
                   <span>One print per sheet.</span>
                 </button>
               </div>
             </div>
-            {isPhotoPaperLayout && <label className={styles.fieldLabel}>Photo-paper finish
+            <label className={styles.fieldLabel}>Paper finish
               <select id="photo-studio-photo-paper-finish" value={photoPaperFinish} onChange={event => setPhotoPaperFinish(event.target.value as PhotoPaperFinish)}>
+                {!isPhotoPaperLayout && <option value="PLAIN">Plain</option>}
                 <option value="GLOSSY">Glossy</option>
                 <option value="MATTE">Matte</option>
               </select>
-            </label>}
+            </label>
+            <small className={styles.fieldHint}>{isPhotoPaperLayout
+              ? "One print per selected-size photo-paper sheet."
+              : "Choose the stock loaded in the shop printer. Compatibility is checked before printing."}</small>
             {!isPhotoPaperLayout && <label className={styles.fieldLabel}>Photos per A4 page
               <select id="photo-studio-photos-per-page" value={photosPerPageInput} onChange={event=>setPhotosPerPageInput(event.target.value)}>
                 <option value="auto">Fit as many as possible ({maximumLayout.perSheet})</option>
