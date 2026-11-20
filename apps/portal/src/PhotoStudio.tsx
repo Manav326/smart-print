@@ -328,9 +328,14 @@ export default function PhotoStudio({
   const [photoOutputLayout,setPhotoOutputLayout]=useState<PhotoOutputLayout>(
     initialSettings?.photoOutputLayout === "PHOTO_PAPER" ? "PHOTO_PAPER" : "A4_SHEET"
   );
-  const [photoPaperFinish,setPhotoPaperFinish]=useState<PhotoPaperFinish>(
-    initialSettings?.photoPaperFinish === "MATTE" ? "MATTE" : "GLOSSY"
-  );
+  const [photoPaperFinish,setPhotoPaperFinish]=useState<PhotoPaperFinish>(() => {
+    if (initialSettings?.photoOutputLayout === "PHOTO_PAPER") {
+      return initialSettings.photoPaperFinish === "MATTE" ? "MATTE" : "GLOSSY";
+    }
+    return initialSettings?.photoPaperFinish === "GLOSSY" || initialSettings?.photoPaperFinish === "MATTE"
+      ? initialSettings.photoPaperFinish
+      : "PLAIN";
+  });
   const [previewPage,setPreviewPage]=useState(0);
   // Preview magnification affects only the editor viewport, never print framing.
   const [previewScale,setPreviewScale]=useState(1);
@@ -339,6 +344,7 @@ export default function PhotoStudio({
   const [focusY, setFocusY] = useState(() => Math.min(100, Math.max(0, initialSettings?.focusY ?? 50)));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [preparationProgress, setPreparationProgress] = useState<string | null>(null);
   const busyRef = useRef(busy);
   const onCancelRef = useRef(onCancel);
   busyRef.current = busy;
@@ -701,42 +707,50 @@ export default function PhotoStudio({
     if(!image||busyRef.current)return;
     const parsedCopies=Number(copiesInput);
     if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose 1–"+maxCopies+" whole copies.");return;}
+    const pages = Math.ceil(parsedCopies / outputPhotosPerPage);
     busyRef.current=true;setBusy(true);setError("");
+    setPreparationProgress("Preparing page 1 of "+pages+"…");
+    let outputCanvas:HTMLCanvasElement|null=null;
+    let sharedPhotoTile:HTMLCanvasElement|null=null;
     try{
-      const pages = Math.ceil(parsedCopies / outputPhotosPerPage);
       const jpegPages: Uint8Array[] = [];
       let jpegByteLength=0;
       const pdfStructureAllowance=4096+pages*1024;
-      const sharedPhotoTile=createPhotoTile(image,size,zoom,focusX,focusY,adjustments,
+      sharedPhotoTile=createPhotoTile(image,size,zoom,focusX,focusY,adjustments,
         {sourceColor:sourceBackgroundColor,targetColor:targetBackgroundColor,tolerance:backgroundTolerance},300);
-      try{
-        for (let page = 0; page < pages; page++) {
-          const canvas = document.createElement("canvas");
-          canvas.width = isPhotoPaperLayout ? photoPaperGeometry.widthPx : A4_WIDTH_PX;
-          canvas.height = isPhotoPaperLayout ? photoPaperGeometry.heightPx : A4_HEIGHT_PX;
-          const context = canvas.getContext("2d");
-          if (!context) throw new Error("A print canvas could not be created.");
-          const background = { sourceColor: sourceBackgroundColor, targetColor: targetBackgroundColor, tolerance: backgroundTolerance };
-          if (isPhotoPaperLayout) {
-            drawPhotoPaperPage(context, image, size, zoom, focusX, focusY, adjustments, background, textLayers, sharedPhotoTile);
-          } else {
-            drawPhotoSheetPage(context,image,canvas.width,size,parsedCopies,photosPerPage,page,zoom,focusX,focusY,adjustments,
-              {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
-              background,captionHeightMm,textLayers,sharedPhotoTile);
-          }
-          let blob=await canvasToBlob(canvas,"image/jpeg",.9);
-          if(mode!=="private-library"&&blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(canvas,"image/jpeg",.82);
-          jpegByteLength+=blob.size;
-          if(mode!=="private-library"&&jpegByteLength+pdfStructureAllowance>MAX_FILE_BYTES)
-            throw new Error(`The prepared photo PDF would exceed SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo, choose fewer photos per job, or split the order into smaller batches.`);
-          jpegPages.push(new Uint8Array(await blob.arrayBuffer()));
+
+      // Reuse one 300-DPI surface for every page. Creating a fresh 8.7-megapixel
+      // A4 canvas per page leaves multiple large native surfaces awaiting GC on
+      // Android WebView; serial toBlob completion makes reuse safe and bounds
+      // raster memory independently of the number of requested pages.
+      outputCanvas=document.createElement("canvas");
+      outputCanvas.width=isPhotoPaperLayout?photoPaperGeometry.widthPx:A4_WIDTH_PX;
+      outputCanvas.height=isPhotoPaperLayout?photoPaperGeometry.heightPx:A4_HEIGHT_PX;
+      const context=outputCanvas.getContext("2d",{alpha:false});
+      if(!context)throw new Error("A print canvas could not be created.");
+
+      for (let page = 0; page < pages; page++) {
+        setPreparationProgress("Preparing page "+(page+1)+" of "+pages+"…");
+        const background = { sourceColor: sourceBackgroundColor, targetColor: targetBackgroundColor, tolerance: backgroundTolerance };
+        if (isPhotoPaperLayout) {
+          drawPhotoPaperPage(context,image,size,zoom,focusX,focusY,adjustments,background,textLayers,sharedPhotoTile);
+        } else {
+          drawPhotoSheetPage(context,image,outputCanvas.width,size,parsedCopies,photosPerPage,page,zoom,focusX,focusY,adjustments,
+            {name:photoName,dob:dateOfBirth,fontSizePt:captionFontSizePt,color:captionColor},
+            background,captionHeightMm,textLayers,sharedPhotoTile);
         }
-      }finally{
-        sharedPhotoTile.width=0;
-        sharedPhotoTile.height=0;
+
+        let blob=await canvasToBlob(outputCanvas,"image/jpeg",.9);
+        if(mode!=="private-library"&&blob.size>MAX_FILE_BYTES)blob=await canvasToBlob(outputCanvas,"image/jpeg",.82);
+        jpegByteLength+=blob.size;
+        if(mode!=="private-library"&&jpegByteLength+pdfStructureAllowance>MAX_FILE_BYTES)
+          throw new Error("The prepared photo PDF would exceed SmartPrint's "+(MAX_FILE_BYTES/(1024*1024))+" MB file limit. Use a smaller original photo, choose fewer photos per job, or split the order into smaller batches.");
+        jpegPages.push(new Uint8Array(await blob.arrayBuffer()));
+        setPreparationProgress(page+1===pages?"Assembling the print PDF…":"Prepared page "+(page+1)+" of "+pages+"…");
       }
+
       const pdf = buildPhotoPdfBlob(jpegPages, photoOutputLayout, isPhotoPaperLayout ? size : undefined);
-      if(mode!=="private-library"&&pdf.size>MAX_FILE_BYTES)throw new Error(`The prepared photo PDF exceeds SmartPrint's ${MAX_FILE_BYTES / (1024 * 1024)} MB file limit. Use a smaller original photo or reduce the number of copies.`);
+      if(mode!=="private-library"&&pdf.size>MAX_FILE_BYTES)throw new Error("The prepared photo PDF exceeds SmartPrint's "+(MAX_FILE_BYTES/(1024*1024))+" MB file limit. Use a smaller original photo or reduce the number of copies.");
       const output=new File([pdf],safeBaseName(source.name)+"-"+size.id+"-photos.pdf",{type:"application/pdf",lastModified:Date.now()});
       const editorSettings: PhotoStudioEditorSettings = {
         sizeId: size.id,
@@ -757,8 +771,9 @@ export default function PhotoStudio({
         sourceBackgroundColor,
         backgroundTolerance,
         photoOutputLayout,
-        photoPaperFinish: isPhotoPaperLayout ? photoPaperFinish : "PLAIN"
+        photoPaperFinish
       };
+      setPreparationProgress(mode==="shop"?"Saving the prepared sheet to this job…":mode==="private-library"?"Saving the private photo sheet…":"Preparing the customer upload…");
       await onApply([{
         file: output,
         sizeCode: size.id,
@@ -766,21 +781,26 @@ export default function PhotoStudio({
         photosPerPage: outputPhotosPerPage,
         captionHeightMm,
         photoOutputLayout,
-        photoPaperFinish: isPhotoPaperLayout ? photoPaperFinish : "PLAIN",
+        photoPaperFinish,
         resolutionDpi:300,editorSettings,
         previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))
       }]);
     }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
-    finally{busyRef.current=false;setBusy(false);}
+    finally{
+      if(sharedPhotoTile){sharedPhotoTile.width=0;sharedPhotoTile.height=0;}
+      if(outputCanvas){outputCanvas.width=0;outputCanvas.height=0;}
+      setPreparationProgress(null);
+      busyRef.current=false;setBusy(false);
+    }
   }
 
   const resolutionIsSufficient = image ? hasSufficientPhotoResolution(image.naturalWidth,image.naturalHeight,size,zoom) : true;
   const resolutionMessage = image ? sourceResolutionNote(image, size, zoom) : "";
   const outputDescription = isPhotoPaperLayout
     ? `${size.label} · ${photoPaperFinish.toLowerCase()} photo paper`
-    : `${size.label} · regular A4 sheets`;
+    : `${size.label} · ${photoPaperFinish.toLowerCase()} A4 sheets`;
   const footerHint = mode === "private-library"
-    ? (isPhotoPaperLayout ? "Original stays private · individual photo-paper prints saved here." : "Original stays private · A4 sheet saved here.")
+    ? (isPhotoPaperLayout ? "Original stays private · individual photo-paper prints saved here." : "Original stays private · "+photoPaperFinish.toLowerCase()+" A4 photo sheets saved here.")
     : mode === "shop-create"
       ? "New order · Verify payment before printing."
       : mode === "shop"
@@ -788,7 +808,7 @@ export default function PhotoStudio({
         : "Prepared photo output replaces this upload; original stays untouched.";
   const actionLabel = mode === "private-library" ? "Save private sheet" : mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
   const outputActionLabel = isPhotoPaperLayout ? (mode === "private-library" ? "Save photo-paper prints" : mode === "shop" ? "Save photo-paper prints to this job" : "Prepare photo-paper prints") : actionLabel;
-  const busyLabel = mode === "private-library" ? "Saving privately…" : mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your photo output…";
+  const busyLabel = preparationProgress ?? (mode === "private-library" ? "Saving privately…" : mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your photo output…");
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
   const panelTitle=cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Text layers":backgroundPanel?"Photo background":"Photo sheet & form details";
 
@@ -957,21 +977,25 @@ export default function PhotoStudio({
             <div className={styles.fieldLabel}>Paper and output
               <div className={styles.photoOutputChoices} role="group" aria-label="Photo output type">
                 <button type="button" id="photo-studio-output-a4" className={photoOutputLayout === "A4_SHEET" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "A4_SHEET"} onClick={() => setPhotoOutputLayout("A4_SHEET")}>
-                  <strong>Regular A4 paper</strong>
+                  <strong>A4 sheets</strong>
                   <span>Multiple copies per A4 sheet.</span>
                 </button>
-                <button type="button" id="photo-studio-output-photo-paper" className={photoOutputLayout === "PHOTO_PAPER" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "PHOTO_PAPER"} onClick={() => setPhotoOutputLayout("PHOTO_PAPER")}>
+                <button type="button" id="photo-studio-output-photo-paper" className={photoOutputLayout === "PHOTO_PAPER" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "PHOTO_PAPER"} onClick={() => { setPhotoOutputLayout("PHOTO_PAPER"); if (photoPaperFinish === "PLAIN") setPhotoPaperFinish("GLOSSY"); }}>
                   <strong>Photo paper</strong>
                   <span>One print per sheet.</span>
                 </button>
               </div>
             </div>
-            {isPhotoPaperLayout && <label className={styles.fieldLabel}>Photo-paper finish
+            <label className={styles.fieldLabel}>Paper finish
               <select id="photo-studio-photo-paper-finish" value={photoPaperFinish} onChange={event => setPhotoPaperFinish(event.target.value as PhotoPaperFinish)}>
+                {!isPhotoPaperLayout && <option value="PLAIN">Plain</option>}
                 <option value="GLOSSY">Glossy</option>
                 <option value="MATTE">Matte</option>
               </select>
-            </label>}
+            </label>
+            <small className={styles.fieldHint}>{isPhotoPaperLayout
+              ? "One print per selected-size photo-paper sheet."
+              : "Choose the stock loaded in the shop printer. Compatibility is checked before printing."}</small>
             {!isPhotoPaperLayout && <label className={styles.fieldLabel}>Photos per A4 page
               <select id="photo-studio-photos-per-page" value={photosPerPageInput} onChange={event=>setPhotosPerPageInput(event.target.value)}>
                 <option value="auto">Fit as many as possible ({maximumLayout.perSheet})</option>
@@ -1074,7 +1098,7 @@ export default function PhotoStudio({
         <div className={styles.footerHint}><Check size={14}/> {footerHint}</div>
         <div className={styles.footerActions}>
           <button type="button" id="photo-studio-cancel" className={styles.cancelButton} onClick={onCancel} disabled={busy}>Cancel</button>
-          <button type="button" id="photo-studio-apply" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !copiesInputValid}>
+          <button type="button" id="photo-studio-apply" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !copiesInputValid} aria-live="polite">
             {busy ? busyLabel : outputActionLabel} <Check size={15}/>
           </button>
         </div>

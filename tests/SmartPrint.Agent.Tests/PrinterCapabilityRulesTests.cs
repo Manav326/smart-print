@@ -105,11 +105,70 @@ public sealed class PrinterCapabilityRulesTests
         (short Code, string Name)[] ambiguous =
         [
             (2, "Glossy Photo"),
-            (7, "Premium Glossy")
+            (7, "PhotographicGlossy")
         ];
 
         Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(ambiguous, "GLOSSY"));
         Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(Array.Empty<(short, string)>(), "MATTE"));
+    }
+
+    [Theory]
+    [InlineData("PhotographicGlossy", "PhotographicHighGloss", null, "GLOSSY", "PhotographicGlossy")]
+    [InlineData("PhotographicHighGloss", null, null, "GLOSSY", "PhotographicHighGloss")]
+    [InlineData("PhotographicMatte", null, null, "MATTE", "PhotographicMatte")]
+    [InlineData("PhotographicSatin", "PhotographicSemiGloss", null, "GLOSSY", null)]
+    [InlineData("Photographic", "Plain", null, "GLOSSY", null)]
+    public void MapsOnlyCanonicalPrintSchemaPhotoFinishes(
+        string first,
+        string? second,
+        string? third,
+        string finish,
+        string? expected)
+    {
+        var supported = new[] { first, second, third }.Where(value => value is not null).Cast<string>();
+        Assert.Equal(expected, PrinterCapabilityRules.SelectPhotoPrintSchemaMediaType(supported, finish));
+    }
+
+    [Theory]
+    [InlineData("Photo Glossy Paper", "GLOSSY", 1)]
+    [InlineData("PhotographicHighGloss", "GLOSSY", 1)]
+    [InlineData("Premium Gloss", "GLOSSY", 1)]
+    [InlineData("PhotographicMatte", "MATTE", 2)]
+    [InlineData("Photo Matt Paper", "MATTE", 2)]
+    public void MatchesCommonLegacyDriverPhotoMediaAliases(string name, string finish, short expected)
+    {
+        (short Code, string Name)[] media =
+        [
+            (expected, name),
+            (99, "Plain Paper")
+        ];
+        Assert.Equal(expected, PrinterCapabilityRules.SelectPhotoMediaTypeCode(media, finish));
+    }
+
+    [Theory]
+    [InlineData("Semi-Gloss Photo Paper", "GLOSSY")]
+    [InlineData("Satin Photo Paper", "GLOSSY")]
+    [InlineData("Lustre Photo Paper", "GLOSSY")]
+    [InlineData("Luster Photo Paper", "GLOSSY")]
+    public void DoesNotFoldDistinctSemiGlossSatinOrLustreFinishesIntoGlossy(string name, string finish)
+    {
+        (short Code, string Name)[] media =
+        [
+            (2, name),
+            (3, "Plain Paper")
+        ];
+        Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(media, finish));
+    }
+
+    [Fact]
+    public void AmbiguousEquivalentLegacyMediaNamesRemainUnconfirmed()
+    {
+        (short Code, string Name)[] media =
+        [
+            (2, "Glossy Photo Paper"),
+            (3, "PhotographicGlossy")
+        ];
+        Assert.Null(PrinterCapabilityRules.SelectPhotoMediaTypeCode(media, "GLOSSY"));
     }
 
     [Fact]

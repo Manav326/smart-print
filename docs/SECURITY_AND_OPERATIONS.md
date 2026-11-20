@@ -39,7 +39,7 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 - Encrypt cloud documents at rest using AES-256-GCM with a deployment-specific 32-byte key; protect the key in the deployment secret store.
 - For direct LAN uploads, issue a random one-use grant bound to the live QR session, tenant, station, assigned Agent/printer, filename, byte count and SHA-256. Persist only a hash of the grant in the API.
 - Accept the document only at the exact private-LAN Agent, verify grant ownership with the cloud API, enforce a 20 MB transfer ceiling and analyse the actual document signature/content before storing.
-- Store received Agent documents and the Windows Agent identity with DPAPI LocalMachine; protect the queue directory with SYSTEM/Administrators-only Windows ACLs. Never return a local-only document through cloud document-preview/download endpoints.
+- Store received Agent documents and the Windows Agent identity with DPAPI LocalMachine. The Windows Agent service runs as built-in LocalService; restrict the encrypted local queue and document key to LocalService and SYSTEM, while machine identity/preferences also allow SYSTEM and Administrators for supported recovery. Never return a local-only document through cloud document-preview/download endpoints.
 - The document storage format is versioned (`QSP1`); never reuse the development key in production.
 - Scan uploads where configured and isolate conversion/rendering processes.
 - Apply explicit retention and deletion policies. Never log document contents or public file URLs.
@@ -76,7 +76,7 @@ A printed QR identifies a shop station; it does not authorise printing by itself
 
 - Local authorised jobs should continue during temporary internet outages.
 - Current limitation: direct LAN document upload and local Agent status/preview communication use private-network HTTP. CORS, one-use grants, ownership checks and hashes do not encrypt the document bytes in transit. Until end-to-end local payload encryption or trusted HTTPS is implemented and tested, treat the shop LAN as a trusted, segmented network and do not use this path on guest/public Wi-Fi.
-- Current limitation: the Windows Agent installer does not yet configure a dedicated least-privilege service identity. Validate the service account and printer permissions before production deployment.
+- The Windows Agent runs as built-in LocalService rather than LocalSystem and uses standard Print permission on machine-wide Windows printer queues. Per-user-only queues and network shares requiring the signed-in user's credentials are not guaranteed to be visible to the service.
 - Local queue and event journal must be durable across process and machine restart.
 - Define recovery and reconciliation for interrupted uploads, conversion, payment, spooler submission and sync.
 - Provide encrypted backup/restore for local configuration and metadata; document customer document retention separately.

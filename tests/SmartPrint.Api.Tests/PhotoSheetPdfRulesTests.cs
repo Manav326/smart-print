@@ -154,6 +154,25 @@ public sealed class PhotoSheetPdfRulesTests
         Assert.False(PhotoSheetPdfRules.HasExactlyPhotoPages(photoPage, 1, "A4_SHEET", "35x45"));
     }
 
+    [Theory]
+    [InlineData("A4_SHEET", "PLAIN", 1, true)]
+    [InlineData("A4_SHEET", "GLOSSY", 1, true)]
+    [InlineData("A4_SHEET", "MATTE", 25, true)]
+    [InlineData("a4_sheet", "glossy", 9, true)]
+    [InlineData("A4_SHEET", "SATIN", 1, false)]
+    [InlineData("A4_SHEET", null, 1, false)]
+    [InlineData("PHOTO_PAPER", "GLOSSY", 1, true)]
+    [InlineData("PHOTO_PAPER", "MATTE", 1, true)]
+    [InlineData("PHOTO_PAPER", "PLAIN", 1, false)]
+    [InlineData("PHOTO_PAPER", "GLOSSY", 2, false)]
+    [InlineData("PHOTO_PAPER", "SATIN", 1, false)]
+    [InlineData("UNKNOWN", "GLOSSY", 1, false)]
+    public void ValidatesPhotoPaperFinishAgainstTheSelectedPhysicalOutput(
+        string? outputLayout, string? finish, int photosPerPage, bool expected)
+    {
+        Assert.Equal(expected, PhotoSheetPdfRules.IsValidPhotoOutputOptions(outputLayout, finish, photosPerPage));
+    }
+
     private static string Pages(int count, double width, double height)
     {
         var page = Page(width, height, "[" + FullPageImage(width, height) + "]");

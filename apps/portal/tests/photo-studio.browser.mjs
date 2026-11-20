@@ -171,6 +171,9 @@ function verifyPdfEnvelope(buffer, expectedPages) {
 }
 
 function verifyPreparedPdfResult(result, expected) {
+  const pageGeometry = expected.pageGeometry ?? {
+    widthPoints: 595.275590551, heightPoints: 841.88976378, widthPx: 2480, heightPx: 3508
+  };
   assert.equal(result.mediaType, "application/pdf");
   assert.equal(result.sizeCode, expected.sizeCode);
   assert.equal(result.photoCount, expected.photoCount);
@@ -178,14 +181,20 @@ function verifyPreparedPdfResult(result, expected) {
   assert.equal(result.pageCount, expected.pageCount);
   assert.ok(result.bytes > 1000, "The prepared PDF must contain real output bytes.");
   assert.equal(result.mediaBoxCount, expected.pageCount,
-    "Every exported page must use the exact A4 MediaBox.");
+    "Every exported page must declare one exact physical MediaBox.");
+  assert.equal(result.pageMediaBoxes.length, expected.pageCount,
+    "The PDF page geometry metadata must be present for every page.");
+  for (const [width, height] of result.pageMediaBoxes) {
+    assert.ok(Math.abs(width - pageGeometry.widthPoints) < 0.001, "Every page must use the selected physical width.");
+    assert.ok(Math.abs(height - pageGeometry.heightPoints) < 0.001, "Every page must use the selected physical height.");
+  }
   assert.equal(result.fullPageImageTransforms, expected.pageCount,
-    "Each A4 PDF page must place one full-page raster.");
+    "Each PDF page must place one full-page raster.");
   assert.equal(result.previewPageCount, expected.pageCount);
   assert.equal(result.pdfImageSizes.length, expected.pageCount);
   for (const [width, height] of result.pdfImageSizes) {
-    assert.equal(width, 2480, "Every page image must be 300-DPI A4 width.");
-    assert.equal(height, 3508, "Every page image must be 300-DPI A4 height.");
+    assert.equal(width, pageGeometry.widthPx, "Every page image must use the selected physical width at 300 DPI.");
+    assert.equal(height, pageGeometry.heightPx, "Every page image must use the selected physical height at 300 DPI.");
   }
   assert.deepEqual(result.embeddedPreviewPages, Array(expected.pageCount).fill(true),
     "The PDF must embed the exact JPEG page previews reviewed in Photo Studio.");
@@ -206,11 +215,13 @@ function verifyPreparedPdfResult(result, expected) {
   return result;
 }
 
-async function verifyComponentResult(page, expectedMode, expectedPages = 2) {
+async function verifyComponentResult(page, expectedMode, expectedPages = 2, expectedFinish = "MATTE") {
   const raw = await page.locator("#photo-studio-result").textContent();
   assert.ok(raw, "The Photo Studio did not return a prepared PDF result.");
   const result = JSON.parse(raw);
   assert.equal(result.mode, expectedMode);
+  assert.equal(result.photoOutputLayout, "A4_SHEET");
+  assert.equal(result.photoPaperFinish, expectedFinish);
   return verifyPreparedPdfResult(result, {
     sizeCode: "35x45",
     photoCount: 17,
@@ -242,6 +253,8 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await page.getByRole("dialog").waitFor({ state: "detached" });
   assert.equal(await page.evaluate(() => document.activeElement?.id), "open-photo-studio", "Escape must restore focus to the opener.");
   await openComponentStudio(page);
+  const paperFinish = page.getByLabel("Paper finish");
+  assert.equal(await paperFinish.inputValue(), "PLAIN", "A4 Photo Studio should default to plain paper for legacy-compatible behavior.");
 
   await page.getByRole("button", { name: "Crop" }).click();
   // Toolbar magnification must not change the crop used by the prepared print.
@@ -343,6 +356,7 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await page.getByLabel("Number of copies").fill("17");
   await page.getByLabel("Number of copies").press("Tab");
   await page.getByLabel("Photos per A4 page").selectOption("9");
+  await page.getByLabel("Paper finish").selectOption("MATTE");
 
   const summary = await page.locator('[data-testid="photo-studio-sheet-summary"]').innerText();
   assert.match(summary, /A4 pages in this job\s+2/);
@@ -355,10 +369,35 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await page.getByRole("button", { name: scenario.mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet" }).click();
   await page.waitForFunction(() => {
     const result = document.querySelector("#photo-studio-result");
-    if (!result?.textContent) return false;
-    try { return Boolean(JSON.parse(result.textContent).pageCount); } catch { return false; }
-  }, { timeout: 90000 });
-  const result = await verifyComponentResult(page, scenario.mode);
+    if (result?.textContent) {
+      try {
+        if (JSON.parse(result.textContent).pageCount) return true;
+      } catch {}
+    }
+    const dialog = document.querySelector('[role="dialog"]');
+    return Boolean(dialog?.querySelector('[role="alert"]')?.textContent?.trim());
+  }, null, { timeout: 90000 }).catch(async error => {
+    const alerts = await page.locator('[role="dialog"] [role="alert"]').allTextContents().catch(() => []);
+    const browserErrors = pageErrors.length ? pageErrors.join("; ") : "none";
+    throw new Error(
+      "Photo Studio did not finish the export within 90 seconds. " +
+      "Editor messages: " + (alerts.filter(Boolean).join(" | ") || "none") +
+      ". Browser errors: " + browserErrors + ". " + error.message
+    );
+  });
+  const exportState = await page.locator("#photo-studio-result").textContent().catch(() => null);
+  if (!exportState) {
+    const alerts = await page.locator('[role="dialog"] [role="alert"]').allTextContents().catch(() => []);
+    throw new Error("Photo Studio export was rejected: " + (alerts.filter(Boolean).join(" | ") || "No result or validation message was produced."));
+  }
+  let exportResult;
+  try { exportResult = JSON.parse(exportState); }
+  catch { throw new Error("Photo Studio returned invalid export metadata."); }
+  if (!exportResult.pageCount) {
+    const alerts = await page.locator('[role="dialog"] [role="alert"]').allTextContents().catch(() => []);
+    throw new Error("Photo Studio export failed: " + (alerts.filter(Boolean).join(" | ") || "No page count was returned."));
+  }
+  const result = await verifyComponentResult(page, scenario.mode, 2, "MATTE");
   assert.equal(result.sourceFingerprintBefore, originalFingerprint);
   assert.equal(result.sourceFingerprintAfter, originalFingerprint, "The original source file must remain byte-identical after editing and PDF preparation.");
   const targetBackground = [220, 236, 255];
@@ -381,11 +420,14 @@ async function exercisePhotoSizeOutputs(browser) {
   page.on("pageerror", error => pageErrors.push(error.message));
   await page.goto(baseUrl + "/tests/photo-studio.browser.html?mode=customer&theme=light", { waitUntil: "networkidle" });
   const generated = [];
+  const finishBySize = { "25x35": "GLOSSY", "2x2": "PLAIN", "4x6": "MATTE" };
   for (const sizeCode of ["25x35", "2x2", "4x6"]) {
     await openComponentStudio(page);
     await activatePhotoTool(page, "Sheet", "Photos per A4 page");
     await page.getByLabel("Photo size").selectOption(sizeCode);
     assert.equal(await page.getByLabel("Photo size").inputValue(), sizeCode, "The requested photo size must be selected before export.");
+    const finish = finishBySize[sizeCode];
+    await page.getByLabel("Paper finish").selectOption(finish);
     await setControlValue(page, "Number of copies", "3");
     await page.getByLabel("Photos per A4 page").selectOption("auto");
     const summary = await page.locator('[data-testid="photo-studio-sheet-summary"]').innerText();
@@ -402,6 +444,8 @@ async function exercisePhotoSizeOutputs(browser) {
     }, sizeCode, { timeout: 90000 });
     const result = JSON.parse(await page.locator("#photo-studio-result").textContent() ?? "{}");
     const expectedPages = Math.ceil(3 / expectedPerPage);
+    assert.equal(result.photoOutputLayout, "A4_SHEET");
+    assert.equal(result.photoPaperFinish, finish);
     verifyPreparedPdfResult(result, {
       sizeCode,
       photoCount: 3,
@@ -409,11 +453,92 @@ async function exercisePhotoSizeOutputs(browser) {
       pageCount: expectedPages
     });
     await page.screenshot({ path: join(artifactDirectory, "photo-size-" + sizeCode + ".png"), fullPage: true });
-    generated.push({ sizeCode, requestedPhotos: 3, photosPerPage: expectedPerPage, pageCount: expectedPages });
+    generated.push({ sizeCode, requestedPhotos: 3, photosPerPage: expectedPerPage, pageCount: expectedPages, finish });
   }
   assert.equal(pageErrors.length, 0, "Uncaught size-export browser errors: " + pageErrors.join("; "));
   await context.close();
   return { label: "all-supported-photo-sizes-exported", generated };
+}
+
+
+async function exercisePhotoPaperOutputs(browser) {
+  const sizeGeometry = {
+    "35x45": { widthMm: 35, heightMm: 45 },
+    "25x35": { widthMm: 25, heightMm: 35 },
+    "2x2": { widthMm: 50.8, heightMm: 50.8 },
+    "4x6": { widthMm: 101.6, heightMm: 152.4 }
+  };
+  const scenarios = [
+    { mode: "customer", theme: "light", sizeCode: "4x6", finish: "GLOSSY" },
+    { mode: "shop", theme: "dark", sizeCode: "35x45", finish: "MATTE" }
+  ];
+  const results = [];
+  for (const scenario of scenarios) {
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    const pageErrors = [];
+    page.on("pageerror", error => pageErrors.push(error.message));
+    await page.goto(baseUrl + "/tests/photo-studio.browser.html?mode=" + scenario.mode + "&theme=" + scenario.theme, { waitUntil: "networkidle" });
+    await page.waitForFunction(() => {
+      const ready = document.querySelector("#photo-studio-result")?.getAttribute("data-ready") === "true";
+      const fingerprint = document.querySelector("#photo-studio-source-fingerprint")?.textContent?.trim();
+      return ready && Boolean(fingerprint);
+    }, null, { timeout: 15000 });
+    const originalFingerprint = await page.locator("#photo-studio-source-fingerprint").textContent();
+    await openComponentStudio(page);
+    await activatePhotoTool(page, "Sheet", "Photos per A4 page");
+    await page.getByLabel("Photo size").selectOption(scenario.sizeCode);
+    await page.locator("#photo-studio-output-photo-paper").click();
+    const finishControl = page.getByLabel("Paper finish");
+    assert.equal(await finishControl.inputValue(), "GLOSSY",
+      "Switching from A4 plain stock to individual photo paper must choose a valid default finish.");
+    await finishControl.selectOption(scenario.finish);
+    await page.getByLabel("Number of copies").fill("2");
+    await page.getByLabel("Number of copies").press("Tab");
+    const summary = await page.locator('[data-testid="photo-studio-sheet-summary"]').innerText();
+    assert.match(summary, /Individual photo prints\s+2/);
+    await page.screenshot({ path: join(artifactDirectory, "photo-paper-" + scenario.mode + "-editor.png"), fullPage: true });
+    await page.getByRole("button", { name: "Next photo-paper page" }).click();
+    await page.getByRole("button", { name: "Previous photo-paper page" }).click();
+    const action = scenario.mode === "shop" ? "Save photo-paper prints to this job" : "Prepare photo-paper prints";
+    await page.getByRole("button", { name: action, exact: true }).click();
+    await page.waitForFunction(() => {
+      const result = document.querySelector("#photo-studio-result");
+      if (!result?.textContent) return false;
+      try {
+        const value = JSON.parse(result.textContent);
+        return Boolean(value.pageCount) && value.photoOutputLayout === "PHOTO_PAPER";
+      } catch { return false; }
+    }, { timeout: 90000 });
+    const result = JSON.parse(await page.locator("#photo-studio-result").textContent() ?? "{}");
+    assert.equal(result.mode, scenario.mode);
+    assert.equal(result.photoOutputLayout, "PHOTO_PAPER");
+    assert.equal(result.photoPaperFinish, scenario.finish);
+    const physicalSize = sizeGeometry[scenario.sizeCode];
+    const pageGeometry = {
+      widthMm: physicalSize.widthMm,
+      heightMm: physicalSize.heightMm,
+      widthPoints: physicalSize.widthMm * 72 / 25.4,
+      heightPoints: physicalSize.heightMm * 72 / 25.4,
+      widthPx: Math.round(physicalSize.widthMm / 25.4 * 300),
+      heightPx: Math.round(physicalSize.heightMm / 25.4 * 300)
+    };
+    verifyPreparedPdfResult(result, {
+      sizeCode: scenario.sizeCode,
+      photoCount: 2,
+      photosPerPage: 1,
+      pageCount: 2,
+      pageGeometry
+    });
+    assert.equal(result.sourceFingerprintBefore, originalFingerprint);
+    assert.equal(result.sourceFingerprintAfter, originalFingerprint,
+      "The source image must remain byte-identical after individual photo-paper export.");
+    assert.equal(pageErrors.length, 0, "Uncaught individual photo-paper browser errors: " + pageErrors.join("; "));
+    await page.screenshot({ path: join(artifactDirectory, "photo-paper-" + scenario.mode + "-prepared.png"), fullPage: true });
+    await context.close();
+    results.push({ mode: scenario.mode, sizeCode: scenario.sizeCode, finish: scenario.finish, pages: result.pageCount });
+  }
+  return { label: "customer-and-shop-individual-photo-paper", results };
 }
 
 async function exerciseComponentViewport(browser, scenario) {
@@ -780,6 +905,7 @@ try {
     viewport: { width: 390, height: 844 }
   }));
   results.push(await exercisePhotoSizeOutputs(browser));
+  results.push(await exercisePhotoPaperOutputs(browser));
   results.push(await exerciseComponentViewport(browser, {
     mode: "customer", theme: "light", label: "customer-mobile-320x568",
     viewport: { width: 320, height: 568 }

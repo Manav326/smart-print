@@ -134,7 +134,10 @@ public static class PhotoSheetPdfRules
     public static bool IsValidPhotoOutputOptions(string? outputLayout, string? paperFinish, int photosPerPage)
     {
         if (string.Equals(outputLayout, "A4_SHEET", StringComparison.OrdinalIgnoreCase))
-            return string.Equals(paperFinish, "PLAIN", StringComparison.OrdinalIgnoreCase) && photosPerPage >= 1;
+            return photosPerPage >= 1 &&
+                (string.Equals(paperFinish, "PLAIN", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(paperFinish, "GLOSSY", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(paperFinish, "MATTE", StringComparison.OrdinalIgnoreCase));
         if (string.Equals(outputLayout, "PHOTO_PAPER", StringComparison.OrdinalIgnoreCase))
             return paperFinish is not null &&
                 (string.Equals(paperFinish, "GLOSSY", StringComparison.OrdinalIgnoreCase) ||

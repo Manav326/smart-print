@@ -327,6 +327,11 @@ async function installPrivatePrintingApiHarness(context, page) {
   let nextJobNumber = 1;
   let activePrivateRelayTransfers = 0;
   let maximumConcurrentPrivateRelayTransfers = 0;
+  let observedThreeConcurrentPrivateRelayTransfers = false;
+  let releaseInitialRelayTransfers;
+  const initialThreeRelayTransfers = new Promise(resolve => {
+    releaseInitialRelayTransfers = resolve;
+  });
 
   const sessionResponse = {
     id: randomUUID(),
@@ -472,6 +477,20 @@ async function installPrivatePrintingApiHarness(context, page) {
         maximumConcurrentPrivateRelayTransfers = Math.max(
           maximumConcurrentPrivateRelayTransfers, activePrivateRelayTransfers
         );
+        if (activePrivateRelayTransfers >= 3 && !observedThreeConcurrentPrivateRelayTransfers) {
+          observedThreeConcurrentPrivateRelayTransfers = true;
+          releaseInitialRelayTransfers();
+        }
+        // The relay is intentionally held briefly until the third worker arrives.
+        // Without this small test-only network delay, tiny local fixtures can finish
+        // before worker three reaches the route, making a three-worker scheduler
+        // appear to have a concurrency limit of two on fast runners.
+        if (!observedThreeConcurrentPrivateRelayTransfers) {
+          await Promise.race([
+            initialThreeRelayTransfers,
+            new Promise(resolve => setTimeout(resolve, 5000))
+          ]);
+        }
         let diagnosticStage = "capture-tee-stream";
         let plaintext = null;
         let encryptedBodyBytes = null;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import PhotoStudio, { type PreparedPhotoSheet } from "../src/PhotoStudio";
-import { A4_HEIGHT_PX, A4_WIDTH_PX, getPhotoSheetPhotoPositions, type PhotoSheetSize } from "../src/photo-studio-layout";
+import { A4_HEIGHT_POINTS, A4_HEIGHT_PX, A4_WIDTH_POINTS, A4_WIDTH_PX, getPhotoPaperPageGeometry, getPhotoSheetPhotoPositions, type PhotoSheetSize } from "../src/photo-studio-layout";
 
 function containsByteSequence(haystack: Uint8Array, needle: Uint8Array): boolean {
   if (needle.length === 0) return true;
@@ -195,10 +195,6 @@ function PhotoStudioBrowserFixture() {
       const pageBytes = new Uint8Array(await pageBlob.arrayBuffer());
       return containsByteSequence(pdfBytes, pageBytes);
     }));
-    const mediaBoxCount = (pdfText.match(/\/MediaBox \[0 0 595\.275590551 841\.88976378\]/g) ?? []).length;
-    const pdfImageSizes = [...pdfText.matchAll(/\/Width (\d+) \/Height (\d+) \/ColorSpace/g)]
-      .map(match => [Number(match[1]), Number(match[2])]);
-    const fullPageImageTransforms = (pdfText.match(/595\.275590551 0 0 841\.88976378 0 0 cm/g) ?? []).length;
     const sizeByCode: Record<string, PhotoSheetSize> = {
       "35x45": { widthMm: 35, heightMm: 45 },
       "25x35": { widthMm: 25, heightMm: 35 },
@@ -207,6 +203,21 @@ function PhotoStudioBrowserFixture() {
     };
     const photoSize = sizeByCode[sheet.sizeCode];
     if (!photoSize) throw new Error("Photo Studio returned an unsupported photo size.");
+    const isPhotoPaperOutput = sheet.photoOutputLayout === "PHOTO_PAPER";
+    const pageGeometry = isPhotoPaperOutput
+      ? getPhotoPaperPageGeometry(photoSize)
+      : {
+          widthMm: 210, heightMm: 297,
+          widthPx: A4_WIDTH_PX, heightPx: A4_HEIGHT_PX,
+          widthPoints: A4_WIDTH_POINTS, heightPoints: A4_HEIGHT_POINTS
+        };
+    const pageMediaBoxes = [...pdfText.matchAll(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/g)]
+      .map(match => [Number(match[1]), Number(match[2])]);
+    const mediaBoxCount = pageMediaBoxes.length;
+    const pdfImageSizes = [...pdfText.matchAll(/\/Width (\d+) \/Height (\d+) \/ColorSpace/g)]
+      .map(match => [Number(match[1]), Number(match[2])]);
+    const imageTransform = pageGeometry.widthPoints + " 0 0 " + pageGeometry.heightPoints + " 0 0 cm";
+    const fullPageImageTransforms = pdfText.split(imageTransform).length - 1;
     const jpegPages = sheet.previewPages ?? [];
     const captionHeightMm = sheet.captionHeightMm;
     const pixelProbes: Array<{ page: number; slot: number; rgb: number[] }> = [];
@@ -216,8 +227,8 @@ function PhotoStudioBrowserFixture() {
       // Pixel-only QA probes use a 150-DPI decode to keep memory and image-read
       // work bounded on physical phones without weakening content checks.
       const bitmap = await createImageBitmap(jpegPages[pageIndex], {
-        resizeWidth: Math.round(A4_WIDTH_PX / 2),
-        resizeHeight: Math.round(A4_HEIGHT_PX / 2),
+        resizeWidth: Math.max(1, Math.round(pageGeometry.widthPx / 2)),
+        resizeHeight: Math.max(1, Math.round(pageGeometry.heightPx / 2)),
         resizeQuality: "high"
       });
       try {
@@ -227,12 +238,16 @@ function PhotoStudioBrowserFixture() {
         const context = canvas.getContext("2d", { willReadFrequently: true });
         if (!context) throw new Error("Could not inspect the prepared photo raster.");
         context.drawImage(bitmap, 0, 0);
-        const countOnPage = Math.min(sheet.photosPerPage, sheet.photoCount - pageIndex * sheet.photosPerPage);
-        const positions = getPhotoSheetPhotoPositions(photoSize, captionHeightMm, sheet.photosPerPage, countOnPage);
-        const fullGrid = getPhotoSheetPhotoPositions(photoSize, captionHeightMm, sheet.photosPerPage, sheet.photosPerPage);
+        const countOnPage = isPhotoPaperOutput ? 1 : Math.min(sheet.photosPerPage, sheet.photoCount - pageIndex * sheet.photosPerPage);
+        const positions = isPhotoPaperOutput
+          ? [{ photoIndex: 0, row: 0, column: 0, xMm: 0, yMm: 0 }]
+          : getPhotoSheetPhotoPositions(photoSize, captionHeightMm, sheet.photosPerPage, countOnPage);
+        const fullGrid = isPhotoPaperOutput
+          ? positions
+          : getPhotoSheetPhotoPositions(photoSize, captionHeightMm, sheet.photosPerPage, sheet.photosPerPage);
         const sampleMm = (xMm: number, yMm: number) => {
-          const x = Math.max(0, Math.min(bitmap.width - 1, Math.round(xMm * bitmap.width / 210)));
-          const y = Math.max(0, Math.min(bitmap.height - 1, Math.round(yMm * bitmap.height / 297)));
+          const x = Math.max(0, Math.min(bitmap.width - 1, Math.round(xMm * bitmap.width / pageGeometry.widthMm)));
+          const y = Math.max(0, Math.min(bitmap.height - 1, Math.round(yMm * bitmap.height / pageGeometry.heightMm)));
           return Array.from(context.getImageData(x, y, 1, 1).data).slice(0, 3);
         };
         const sample = (position: { xMm: number; yMm: number }) =>
@@ -241,10 +256,10 @@ function PhotoStudioBrowserFixture() {
           sampleMm(position.xMm + 2, position.yMm + 2);
         const countRedCaptionPixels = (position: { xMm: number; yMm: number }) => {
           if (captionHeightMm <= 0) return 0;
-          const left = Math.max(0, Math.floor(position.xMm * bitmap.width / 210));
-          const top = Math.max(0, Math.floor((position.yMm + photoSize.heightMm) * bitmap.height / 297));
-          const width = Math.min(bitmap.width - left, Math.ceil(photoSize.widthMm * bitmap.width / 210));
-          const height = Math.min(bitmap.height - top, Math.ceil(captionHeightMm * bitmap.height / 297));
+          const left = Math.max(0, Math.floor(position.xMm * bitmap.width / pageGeometry.widthMm));
+          const top = Math.max(0, Math.floor((position.yMm + photoSize.heightMm) * bitmap.height / pageGeometry.heightMm));
+          const width = Math.min(bitmap.width - left, Math.ceil(photoSize.widthMm * bitmap.width / pageGeometry.widthMm));
+          const height = Math.min(bitmap.height - top, Math.ceil(captionHeightMm * bitmap.height / pageGeometry.heightMm));
           const pixels = context.getImageData(left, top, width, height).data;
           let matches = 0;
           for (let index = 0; index < pixels.length; index += 4) {
@@ -259,7 +274,7 @@ function PhotoStudioBrowserFixture() {
           backgroundRgb: sampleBackground(position),
           captionRedPixels: countRedCaptionPixels(position)
         }));
-        if (pageIndex === jpegPages.length - 1 && countOnPage < sheet.photosPerPage) {
+        if (!isPhotoPaperOutput && pageIndex === jpegPages.length - 1 && countOnPage < sheet.photosPerPage) {
           finalUnusedSlotRgb = sample(fullGrid[countOnPage]);
         }
       } finally {
@@ -271,10 +286,13 @@ function PhotoStudioBrowserFixture() {
       mediaType: sheet.file.type,
       fileName: sheet.file.name,
       sizeCode: sheet.sizeCode,
+      photoOutputLayout: sheet.photoOutputLayout,
+      photoPaperFinish: sheet.photoPaperFinish,
       photoCount: sheet.photoCount,
       photosPerPage: sheet.photosPerPage,
       pageCount,
       mediaBoxCount,
+      pageMediaBoxes,
       pdfImageSizes,
       fullPageImageTransforms,
       previewPageCount: jpegPages.length,
