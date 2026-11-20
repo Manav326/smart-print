@@ -1,4 +1,5 @@
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
+import { isValidCustomerPhotoSettings, type CustomerPhotoSettings } from "./customer-photo-settings";
 import { validateCustomerUploadBatchLimits } from "./upload-batch-policy";
 import { CUSTOMER_UPLOAD_CONCURRENCY, mapConcurrentSettled } from "./upload-concurrency";
 import { identifySupportedDocument, type SupportedDocumentType } from "./document-content-policy";
@@ -1372,7 +1373,8 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
     setShopPhotoStudio(null);
     setFocusShopPhotoEdit(false);
-    setToast(sheet.photoOutputLayout==="PHOTO_PAPER"?"The individual photo-paper prints are saved to the same job. Printer compatibility will be checked before dispatch.":"The enhanced multi-page A4 photo PDF is saved to the same print job and its photo price has been recalculated.");
+    const finishLabel=sheet.photoPaperFinish==="GLOSSY"?"glossy":sheet.photoPaperFinish==="MATTE"?"matte":"plain";
+    setToast(sheet.photoOutputLayout==="PHOTO_PAPER"?"The individual "+finishLabel+" photo-paper prints are saved to the same job. Printer compatibility will be checked before dispatch.":"The enhanced multi-page A4 photo PDF is saved to the same print job; its "+finishLabel+" stock and photo price are updated.");
     try{
       await reload();
       const blob=await downloadShopDocument(tokens.accessToken,editor.job.id,"original");
@@ -4323,7 +4325,6 @@ function consumeSmartPrintNativePickerGroups():string[]|undefined {
   return Array.isArray(groups)?groups:undefined;
 }
 type CustomerSavedPrintSettings = CustomerPrintRequestSettings & { advancedEnabled?: boolean };
-type CustomerPhotoSettings = { sizeCode: string; photoCount: number; photosPerPage?: number; photoOutputLayout?: "A4_SHEET" | "PHOTO_PAPER"; photoPaperFinish?: "PLAIN" | "GLOSSY" | "MATTE" };
 function customerPhotoSizeLabel(sizeCode?:string|null):string {
   switch(sizeCode){
     case "35x45": return "35 × 45 mm";
@@ -4443,18 +4444,7 @@ function customerStatusTone(status:string):"green"|"red"|"amber"|"blue"|"slate" 
 function customerStatusLabel(status:string):string {
   return status==="AWAITING_SHOP_APPROVAL"?"Waiting for shop review":prettyStatus(status);
 }
-function isValidNativePhotoSettings(value:unknown):value is CustomerPhotoSettings {
-  if(!value||typeof value!=="object")return false;
-  const settings=value as CustomerPhotoSettings;
-  const maximumBySize:Record<string,number>={"35x45":25,"25x35":49,"2x2":15,"4x6":1};
-  const maximum=maximumBySize[settings.sizeCode];
-  const outputLayout=settings.photoOutputLayout??"A4_SHEET";
-  const finish=settings.photoPaperFinish??"PLAIN";
-  return maximum!==undefined&&Number.isInteger(settings.photoCount)&&settings.photoCount>=1&&settings.photoCount<=100&&
-    Number.isInteger(settings.photosPerPage)&&settings.photosPerPage!>=1&&settings.photosPerPage!<=maximum&&
-    (outputLayout==="A4_SHEET"||outputLayout==="PHOTO_PAPER")&&
-    (outputLayout==="A4_SHEET"?finish==="PLAIN":finish==="GLOSSY"||finish==="MATTE");
-}
+const isValidNativePhotoSettings = isValidCustomerPhotoSettings;
 
 function parseCustomerPagesPerSheetDirection(
   capabilitiesJson?:string|null
