@@ -32,8 +32,8 @@ public sealed class Worker(
     private readonly TimeSpan printWorkPollInterval = TimeSpan.FromSeconds(
         AgentLoopIntervals.ResolvePrintWorkPollIntervalSeconds(
             configuration.GetValue<int?>("Agent:PrintWorkPollIntervalSeconds")));
-    private readonly int maxConcurrentPrinterLanes = Math.Clamp(
-        configuration.GetValue<int?>("Agent:MaxConcurrentPrinterLanes") ?? 2, 1, 8);
+    private readonly int maxConcurrentPrinterLanes = AgentLoopIntervals.ResolvePrinterLaneConcurrency(
+        configuration.GetValue<int?>("Agent:MaxConcurrentPrinterLanes"));
 
     private int printClaimBatchOffset;
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
