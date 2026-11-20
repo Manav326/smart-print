@@ -108,7 +108,7 @@ public sealed class AgentConnectivityService(
         await db.SaveChangesAsync(cancellationToken);
 
         var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
-            .SingleAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, cancellationToken);
+            .SingleAsync(item => item.Id == SmartPrint.Api.Domain.PlatformOperationalSettings.SingletonIdValue, cancellationToken);
 
         return new AgentHeartbeatResult(
             device.Id,
