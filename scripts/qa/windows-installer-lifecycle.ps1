@@ -271,6 +271,33 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
     if ($LASTEXITCODE -ne 0) {
         throw "Could not grant the LocalService lifecycle harness access to its result directory."
     }
+
+    # The fingerprint is a test-only preservation oracle, not part of the
+    # encrypted production queue. Apply and verify its file DACL explicitly:
+    # files created before the directory ACL migration do not necessarily pick
+    # up the new inherited LocalService ACE.
+    $keyFingerprintPath = Join-Path $fixtureDataDirectory "document-key.sha256"
+    if (Test-Path -LiteralPath $keyFingerprintPath -PathType Leaf) {
+        $fingerprintAcl = @(
+            "*S-1-5-18:R",
+            "*S-1-5-32-544:F",
+            "*S-1-5-19:R"
+        )
+        & $icaclsPath $keyFingerprintPath /inheritance:r /grant:r @fingerprintAcl /C /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not grant LocalService read-only access to the lifecycle document-key fingerprint."
+        }
+        $fingerprintSecurity = Get-Acl -LiteralPath $keyFingerprintPath
+        $localServiceFingerprintRead = @(
+            $fingerprintSecurity.Access | Where-Object {
+                $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+                $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -eq "S-1-5-19" -and
+                (($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::ReadData) -eq [System.Security.AccessControl.FileSystemRights]::ReadData)
+            }
+        )
+        Assert-True ($localServiceFingerprintRead.Count -gt 0) "LocalService does not have read access to the lifecycle fingerprint file."
+    }
+
     $resultPath = Join-Path $resultDirectory "smartprint-localservice-fixture-$Mode.txt"
     $buildAssemblyPath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.dll"
     $buildExecutablePath = Join-Path $buildOutputDirectory "SmartPrintLifecycleFixture.exe"
