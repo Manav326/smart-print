@@ -19,7 +19,7 @@ import CustomerUpiQr from "./CustomerUpiQr";
 import ShopDocumentPreviewSurface from "./ShopDocumentPreviewSurface";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
-import { getPrinterAvailabilityReason, isPrinterAvailableForShop } from "./printer-availability";
+import { getPrinterAvailabilityReason, getPrinterReadinessReason, isPrinterAvailableForShop } from "./printer-availability";
 import { shouldBlockBatchCheckoutForExpiredQuote, shouldBlockQuoteRefreshForStatus } from "./batch-checkout-state";
 import { isCustomerBatchFinished } from "./customer-session-state";
 import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "./local-upload-routing";
@@ -3696,7 +3696,7 @@ function printBlockMessage(code:string):string {
 }
 
 function isPrinterReadyForSelection(printer: PrinterDevice, agents: readonly AgentDevice[], now = Date.now()) {
-  return getPrinterAvailabilityReason(printer, agents, now) === null;
+  return getPrinterReadinessReason(printer, agents, now) === null;
 }
 
 function formatMoney(minor:number,currency:string) {
