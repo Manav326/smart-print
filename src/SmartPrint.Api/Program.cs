@@ -1935,7 +1935,7 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                 return Results.Conflict(new { code = "printer_replacement_source_unavailable", message = "The selected queue to replace is no longer selected. Refresh the printer list and try again." });
             }
 
-var queueJobsUnderLock = await db.PrintJobs.FromSqlInterpolated(
+            var queueJobsUnderLock = await db.PrintJobs.FromSqlInterpolated(
                 $"""
                 SELECT * FROM "PrintJobs"
                 WHERE "TenantId" = {tenantId}
@@ -1974,7 +1974,7 @@ var queueJobsUnderLock = await db.PrintJobs.FromSqlInterpolated(
                 });
             }
 
-                        // Batch assignment is locked after any file has completed output. If a
+            // Batch assignment is locked after any file has completed output. If a
             // batch is only partly complete, replacing the queue here would leave
             // its remaining files impossible to move as a group. Keep the old
             // printer selected until that whole batch is resolved.
@@ -2056,46 +2056,46 @@ var queueJobsUnderLock = await db.PrintJobs.FromSqlInterpolated(
     }
     else if (!isActive && printer.IsActive)
     {
-var queueJobsUnderLock = await db.PrintJobs.FromSqlInterpolated(
-                $"""
-                SELECT * FROM "PrintJobs"
-                WHERE "TenantId" = {tenantId}
-                  AND "PrinterDeviceId" = {printerId}
-                  AND "Status" IN (
-                    'PAID_AUTHORISED', 'LOCAL_QUEUE_READY', 'LOCAL_QUEUE_CLAIMED',
-                    'PRINT_AUTHORISED', 'PRINT_SUBMITTING', 'SPOOLER_ACCEPTED',
-                    'PRINTING', 'OUTPUT_UNCONFIRMED')
-                FOR UPDATE
-                """)
-                .ToListAsync(ct);
-            var activeJobNumber = queueJobsUnderLock
-                .Where(job =>
-                    (job.Status == "LOCAL_QUEUE_CLAIMED" &&
-                     job.AgentLeaseExpiresUtc != null &&
-                     job.AgentLeaseExpiresUtc > DateTimeOffset.UtcNow) ||
-                    (job.Status == "PRINT_AUTHORISED" &&
-                     !PrintDispatchReassignmentRules.CanReassignBeforeSpoolerSubmission(
-                         job.Status, job.SpoolerStatus, job.SpoolerJobId,
-                         job.PrintDispatchLeaseExpiresUtc, job.SpoolerSubmittedUtc,
-                         job.SpoolerObservedUtc, job.OutputConfirmedUtc)) ||
-                    job.Status == "PRINT_SUBMITTING" ||
-                    job.Status == "SPOOLER_ACCEPTED" ||
-                    job.Status == "PRINTING" ||
-                    job.Status == "OUTPUT_UNCONFIRMED")
-                .OrderByDescending(job => job.CreatedUtc)
-                .Select(job => job.JobNumber)
-                .FirstOrDefault();
-            if (!string.IsNullOrWhiteSpace(activeJobNumber))
+        var queueJobsUnderLock = await db.PrintJobs.FromSqlInterpolated(
+            $"""
+            SELECT * FROM "PrintJobs"
+            WHERE "TenantId" = {tenantId}
+              AND "PrinterDeviceId" = {printerId}
+              AND "Status" IN (
+                'PAID_AUTHORISED', 'LOCAL_QUEUE_READY', 'LOCAL_QUEUE_CLAIMED',
+                'PRINT_AUTHORISED', 'PRINT_SUBMITTING', 'SPOOLER_ACCEPTED',
+                'PRINTING', 'OUTPUT_UNCONFIRMED')
+            FOR UPDATE
+            """)
+            .ToListAsync(ct);
+        var activeJobNumber = queueJobsUnderLock
+            .Where(job =>
+                (job.Status == "LOCAL_QUEUE_CLAIMED" &&
+                 job.AgentLeaseExpiresUtc != null &&
+                 job.AgentLeaseExpiresUtc > DateTimeOffset.UtcNow) ||
+                (job.Status == "PRINT_AUTHORISED" &&
+                 !PrintDispatchReassignmentRules.CanReassignBeforeSpoolerSubmission(
+                     job.Status, job.SpoolerStatus, job.SpoolerJobId,
+                     job.PrintDispatchLeaseExpiresUtc, job.SpoolerSubmittedUtc,
+                     job.SpoolerObservedUtc, job.OutputConfirmedUtc)) ||
+                job.Status == "PRINT_SUBMITTING" ||
+                job.Status == "SPOOLER_ACCEPTED" ||
+                job.Status == "PRINTING" ||
+                job.Status == "OUTPUT_UNCONFIRMED")
+            .OrderByDescending(job => job.CreatedUtc)
+            .Select(job => job.JobNumber)
+            .FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(activeJobNumber))
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
             {
-                await transaction.RollbackAsync(ct);
-                return Results.Conflict(new
-                {
-                    code = "printer_has_active_output",
-                    message = $"Printer cannot be deselected while job {activeJobNumber} is active in the Windows Agent or spooler, or awaiting output reconciliation. Resolve that same job first; disabling it does not cancel Windows output."
-                });
-            }
+                code = "printer_has_active_output",
+                message = $"Printer cannot be deselected while job {activeJobNumber} is active in the Windows Agent or spooler, or awaiting output reconciliation. Resolve that same job first; disabling it does not cancel Windows output."
+            });
+        }
 
-                    var partiallyCompletedBatchJobNumber = await db.PrintJobs.AsNoTracking()
+        var partiallyCompletedBatchJobNumber = await db.PrintJobs.AsNoTracking()
             .Where(job => job.TenantId == tenantId &&
                           job.PrinterDeviceId == printerId &&
                           job.BatchId != null &&
