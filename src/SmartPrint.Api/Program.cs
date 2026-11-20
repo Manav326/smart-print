@@ -1923,7 +1923,8 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                       job.PrinterDeviceId == previousId &&
                       document.StorageMode == "LOCAL_AGENT" &&
                       document.AgentDeviceId != printer.AgentDeviceId &&
-                      job.Status is not ("REJECTED" or "REFUNDED" or "CANCELLED" or "COMPLETED")
+                      job.Status != "REJECTED" && job.Status != "REFUNDED" &&
+                      job.Status != "CANCELLED" && job.Status != "COMPLETED"
                 select job.Id
             ).AnyAsync(ct);
             if (privateDocumentOnAnotherComputer)
