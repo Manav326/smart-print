@@ -161,7 +161,20 @@ function Invoke-Setup([string]$Path) {
     if ($process.ExitCode -ne 0) {
         throw "Installer exited with code $($process.ExitCode): $Path"
     }
-    Wait-Service "Running"
+    try {
+        Wait-Service "Running"
+    }
+    catch {
+        $diagnosticPath = Join-Path ([System.IO.Path]::GetTempPath()) "SmartPrint-Agent-Service-Install.log"
+        if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
+            Write-Host "[QA-INSTALL-DIAGNOSTICS] Hidden service-install script output:" -ForegroundColor Yellow
+            Get-Content -LiteralPath $diagnosticPath | ForEach-Object { Write-Host "[QA-INSTALL-DIAGNOSTICS] $_" }
+        }
+        else {
+            Write-Host "[QA-INSTALL-DIAGNOSTICS] No service-install diagnostic log was created." -ForegroundColor Yellow
+        }
+        throw
+    }
 }
 
 function Invoke-Uninstall {
