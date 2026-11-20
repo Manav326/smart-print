@@ -2378,7 +2378,7 @@ function PrintersPage({
             <strong>{detectedCount} detected Windows queues</strong>
             <span>{selectedPrinters.length} selected{maxPrinters == null ? " · no configured selection limit" : ` of ${maxPrinters} plan slots`}</span>
           </div>
-          <p>At the plan limit? Select any other available queue and replace one of your current selections. The other discovered queues remain available; nothing is removed from Windows.</p>
+          <p>At the plan limit, choose another ready queue and replace any selected one. You can also replace a queue before the limit is reached; use Select to add a queue without replacing anything. The other discovered queues remain visible.</p>
         </div>
         {!canUseSelection && (
           <div className="printer-selection-warning" role={subscriptionActive === false ? "alert" : "status"}>
@@ -2478,22 +2478,36 @@ function PrintersPage({
                         {busyResourceId === printer.id ? <span className="button-spinner"/> : "Deselect"}
                       </button>
                     ) : (
-                      <button
-                        className="subtle-button"
-                        disabled={!!busyResourceId || !canSelect || !canUseSelection || (quotaFull && !canReplaceSelection)}
-                        title={!canSelect ? selectionBlockReason : !canUseSelection ? "Shop plan access must be confirmed before selecting a printer." : quotaFull && !canReplaceSelection ? "No other ready queue is available to replace a selected printer. Connect and ready another printer, or upgrade your plan for another slot." : undefined}
-                        onClick={() => {
-                          if (!canSelect || !canUseSelection) return;
-                          if (quotaFull && canReplaceSelection) {
-                            setPendingReplacement(printer);
-                            setReplacePrinterId("");
-                          } else if (!quotaFull) {
-                            void onToggle(printer);
-                          }
-                        }}
-                      >
-                        {busyResourceId === printer.id ? <span className="button-spinner"/> : "Select"}
-                      </button>
+                      <div className="printer-card-actions">
+                        {!quotaFull && selectedPrinters.length > 0 && canSelect && canUseSelection && (
+                          <button
+                            className="subtle-button"
+                            disabled={!!busyResourceId}
+                            onClick={() => {
+                              setPendingReplacement(printer);
+                              setReplacePrinterId("");
+                            }}
+                          >
+                            Replace
+                          </button>
+                        )}
+                        <button
+                          className="subtle-button"
+                          disabled={!!busyResourceId || !canSelect || !canUseSelection || (quotaFull && !canReplaceSelection)}
+                          title={!canSelect ? selectionBlockReason : !canUseSelection ? "Shop plan access must be confirmed before selecting a printer." : quotaFull && !canReplaceSelection ? "No other ready queue is available to replace a selected printer. Connect and ready another printer, or upgrade your plan for another slot." : undefined}
+                          onClick={() => {
+                            if (!canSelect || !canUseSelection) return;
+                            if (quotaFull && canReplaceSelection) {
+                              setPendingReplacement(printer);
+                              setReplacePrinterId("");
+                            } else if (!quotaFull) {
+                              void onToggle(printer);
+                            }
+                          }}
+                        >
+                          {busyResourceId === printer.id ? <span className="button-spinner"/> : "Select"}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </article>
