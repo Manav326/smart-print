@@ -116,6 +116,7 @@ builder.Services.AddAuthorization(options =>
 builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddAuthenticationModule();
 builder.Services.AddPlatformOperationalSettingsModule();
+builder.Services.AddShopPaymentsModule();
 builder.Services.AddPlatformTenantsModule();
 builder.Services.AddSingleton<GoogleIdentityService>();
 builder.Services.AddSingleton<GoogleLoginNonceStore>();
@@ -585,7 +586,7 @@ var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
 shop.MapShopSubscriptionPaymentsModule();
 shop.MapShopWorkspaceQueriesModule();
 shop.MapShopOperationsQueriesModule();
-shop.MapShopPaymentQueriesModule();
+shop.MapShopPaymentsModule();
 
 
 
@@ -6892,69 +6893,7 @@ agentApi.MapPost("/printers/sync", async (
 
 
 
-shop.MapPut("/payment-settings", async (
-    ShopPaymentSettingsRequest request,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
 
-    var upiId = request.UpiId?.Trim();
-    var payeeName = request.PayeeName?.Trim();
-    if (request.UpiEnabled &&
-        (!IsValidUpiId(upiId) || string.IsNullOrWhiteSpace(payeeName) || payeeName.Length > 120))
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["upi"] = ["Enter a valid UPI ID and payee/business name before enabling UPI."]
-        });
-    }
-
-    if (upiId is { Length: > 160 })
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["upiId"] = ["UPI ID cannot exceed 160 characters."]
-        });
-    }
-
-    if (!request.UpiEnabled && !request.CashEnabled)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["methods"] = ["Enable at least one payment method so customers can pay for approved print jobs."]
-        });
-    }
-
-    var settings = await db.ShopPaymentProfiles.SingleOrDefaultAsync(
-        item => item.TenantId == tenantId, ct);
-    if (settings is null)
-    {
-        return Results.NotFound();
-    }
-
-    settings.UpiEnabled = request.UpiEnabled;
-    settings.UpiId = request.UpiEnabled ? upiId : null;
-    settings.PayeeName = request.UpiEnabled ? payeeName : null;
-    settings.CashEnabled = request.CashEnabled;
-    settings.InstantPaymentEnabled = request.InstantPaymentEnabled;
-    settings.UpdatedUtc = DateTimeOffset.UtcNow;
-    await db.SaveChangesAsync(ct);
-
-    return Results.Ok(new
-    {
-        settings.UpiEnabled,
-        settings.UpiId,
-        settings.PayeeName,
-        settings.CashEnabled,
-        settings.InstantPaymentEnabled,
-        settings.UpdatedUtc
-    });
-});
 
 
 
@@ -11300,22 +11239,9 @@ static async Task<AgentDevice?> AuthenticateAgentAsync(
 }
 
 static bool IsShopOwner(ClaimsPrincipal principal) =>
-    principal.FindAll("shop_role").Any(claim => claim.Value is "ShopOwner" or "ShopManager");
+    ShopIdentity.CanManageShop(principal);
 
-static bool IsValidUpiId(string? value)
-{
-    if (string.IsNullOrWhiteSpace(value) || value.Length > 160)
-    {
-        return false;
-    }
 
-    var parts = value.Split('@');
-    return parts.Length == 2 &&
-           parts[0].Length is >= 2 and <= 128 &&
-           parts[1].Length is >= 2 and <= 64 &&
-           parts[0].All(character => char.IsLetterOrDigit(character) || character is '.' or '_' or '-') &&
-           parts[1].All(character => char.IsLetterOrDigit(character) || character is '.' or '-');
-}
 
 static string? BuildUpiUri(Guid paymentId, string method, string? upiId, string? payeeName, long amountMinor, string currency, string jobNumber)
 {
