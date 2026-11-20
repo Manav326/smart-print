@@ -105,16 +105,27 @@ function Set-AgentServiceAccount {
         [string]$Account
     )
 
-    if ($Account -eq "LocalService") {
-        & sc.exe config $serviceName obj= $localServiceAccount password= "" | Out-Null
-    }
-    else {
-        & sc.exe config $serviceName obj= "LocalSystem" | Out-Null
+    $serviceAccountName = if ($Account -eq "LocalService") { $localServiceAccount } else { "LocalSystem" }
+
+    # LocalSystem and LocalService are built-in accounts without passwords.
+    # Omit password= entirely to avoid passing an empty native argument through
+    # PowerShell's version-dependent command-line quoting rules.
+    $commandOutput = & sc.exe config $serviceName obj= $serviceAccountName 2>&1
+    $commandExitCode = $LASTEXITCODE
+    $commandDetail = ($commandOutput | Out-String).Trim()
+    Write-InstallDiagnostic "sc.exe config service account '$serviceAccountName' exit=$commandExitCode output='$commandDetail'"
+
+    if ($commandExitCode -ne 0) {
+        throw "Could not configure the SmartPrint Agent service identity as $Account. sc.exe exit=$commandExitCode. $commandDetail"
     }
 
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not configure the SmartPrint Agent service identity as $Account."
+    $configuredService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction Stop
+    if (-not $configuredService -or
+        ([string]$configuredService.StartName).Trim() -ine $serviceAccountName) {
+        $observedStartName = if ($configuredService) { [string]$configuredService.StartName } else { "service not found" }
+        throw "The Service Control Manager did not retain the requested $Account identity. Observed: '$observedStartName'."
     }
+    Write-InstallDiagnostic "Verified service account configuration: $($configuredService.StartName)."
 }
 
 # Keep the old executable and firewall rule untouched until the new service has

@@ -369,9 +369,34 @@ async function exerciseComponentFullFlow(browser, scenario) {
   await page.getByRole("button", { name: scenario.mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet" }).click();
   await page.waitForFunction(() => {
     const result = document.querySelector("#photo-studio-result");
-    if (!result?.textContent) return false;
-    try { return Boolean(JSON.parse(result.textContent).pageCount); } catch { return false; }
-  }, { timeout: 90000 });
+    if (result?.textContent) {
+      try {
+        if (JSON.parse(result.textContent).pageCount) return true;
+      } catch {}
+    }
+    const dialog = document.querySelector('[role="dialog"]');
+    return Boolean(dialog?.querySelector('[role="alert"]')?.textContent?.trim());
+  }, null, { timeout: 90000 }).catch(async error => {
+    const alerts = await page.locator('[role="dialog"] [role="alert"]').allTextContents().catch(() => []);
+    const browserErrors = pageErrors.length ? pageErrors.join("; ") : "none";
+    throw new Error(
+      "Photo Studio did not finish the export within 90 seconds. " +
+      "Editor messages: " + (alerts.filter(Boolean).join(" | ") || "none") +
+      ". Browser errors: " + browserErrors + ". " + error.message
+    );
+  });
+  const exportState = await page.locator("#photo-studio-result").textContent().catch(() => null);
+  if (!exportState) {
+    const alerts = await page.locator('[role="dialog"] [role="alert"]').allTextContents().catch(() => []);
+    throw new Error("Photo Studio export was rejected: " + (alerts.filter(Boolean).join(" | ") || "No result or validation message was produced."));
+  }
+  let exportResult;
+  try { exportResult = JSON.parse(exportState); }
+  catch { throw new Error("Photo Studio returned invalid export metadata."); }
+  if (!exportResult.pageCount) {
+    const alerts = await page.locator('[role="dialog"] [role="alert"]').allTextContents().catch(() => []);
+    throw new Error("Photo Studio export failed: " + (alerts.filter(Boolean).join(" | ") || "No page count was returned."));
+  }
   const result = await verifyComponentResult(page, scenario.mode, 2, "MATTE");
   assert.equal(result.sourceFingerprintBefore, originalFingerprint);
   assert.equal(result.sourceFingerprintAfter, originalFingerprint, "The original source file must remain byte-identical after editing and PDF preparation.");
