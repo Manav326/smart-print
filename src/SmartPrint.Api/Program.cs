@@ -1770,13 +1770,10 @@ shop.MapPost("/printers", async (
     CreatePrinterRequest request,
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
-    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
         return Results.Forbid();
-    }
 
     var connectionTypes = new[] { "USB", "LAN", "IPP", "WindowsQueue" };
     if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 160 ||
@@ -1795,9 +1792,7 @@ shop.MapPost("/printers", async (
     {
         using var parsed = JsonDocument.Parse(capabilities);
         if (parsed.RootElement.ValueKind != JsonValueKind.Object || capabilities.Length > 16000)
-        {
             throw new JsonException();
-        }
     }
     catch (JsonException)
     {
@@ -1807,15 +1802,8 @@ shop.MapPost("/printers", async (
         });
     }
 
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.Printer, ct);
-    var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.Printer, ct);
-    if (!quota.Allowed)
-    {
-        await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
-    }
-
+    // Manual entries are unlinked placeholders, not selected output queues. They
+    // cannot consume a printer slot until the Agent discovers and links the queue.
     var printer = new PrinterDevice
     {
         TenantId = tenantId,
@@ -1827,11 +1815,10 @@ shop.MapPost("/printers", async (
         QueueName = string.IsNullOrWhiteSpace(request.QueueName) ? null : request.QueueName.Trim(),
         CapabilitiesJson = capabilities,
         Status = "Unknown",
-        IsActive = true
+        IsActive = false
     };
     db.PrinterDevices.Add(printer);
     await db.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
     return Results.Created($"/api/v1/shop/printers/{printer.Id}", new
     {
         printer.Id,
@@ -1851,22 +1838,132 @@ shop.MapPost("/printers", async (
 shop.MapPatch("/printers/{printerId:guid}/active", async (
     Guid printerId,
     bool isActive,
+    Guid? replacePrinterId,
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    TenantEntitlementService entitlements,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
         return Results.Forbid();
-    }
 
-    var printer = await db.PrinterDevices.SingleOrDefaultAsync(x => x.Id == printerId && x.TenantId == tenantId, ct);
+    if (replacePrinterId is not null && !isActive)
+        return Results.BadRequest(new { code = "invalid_printer_replacement", message = "Choose a replacement queue to enable; do not combine replacement with disabling." });
+
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.Printer, ct);
+
+    var printer = await db.PrinterDevices.SingleOrDefaultAsync(
+        x => x.Id == printerId && x.TenantId == tenantId, ct);
     if (printer is null)
     {
+        await transaction.RollbackAsync(ct);
         return Results.NotFound();
     }
 
-    if (!isActive)
+    if (isActive && !printer.IsActive)
+    {
+        if (printer.OutputMode is not ("PHYSICAL" or "PDF_EXPORT") || printer.AgentDeviceId is null)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "printer_not_ready_for_selection",
+                message = "This queue is not linked to a Windows Print Agent yet, or its driver is not supported for SmartPrint output. Keep it visible and select it after discovery confirms the queue."
+            });
+        }
+
+        PrinterDevice? replacedPrinter = null;
+        if (replacePrinterId is Guid previousId)
+        {
+            if (previousId == printerId)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.BadRequest(new { code = "invalid_printer_replacement", message = "Choose a different selected queue to replace." });
+            }
+
+            replacedPrinter = await db.PrinterDevices.SingleOrDefaultAsync(
+                item => item.Id == previousId && item.TenantId == tenantId && item.IsActive, ct);
+            if (replacedPrinter is null)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new { code = "printer_replacement_source_unavailable", message = "The selected queue to replace is no longer selected. Refresh the printer list and try again." });
+            }
+
+            var activeJobNumber = await db.PrintJobs.AsNoTracking()
+                .Where(job => job.TenantId == tenantId &&
+                              job.PrinterDeviceId == previousId &&
+                              (job.Status == "LOCAL_QUEUE_CLAIMED" ||
+                               job.Status == "LOCAL_QUEUE_READY" ||
+                               job.Status == "PRINT_AUTHORISED" ||
+                               job.Status == "PRINT_SUBMITTING" ||
+                               job.Status == "SPOOLER_ACCEPTED" ||
+                               job.Status == "PRINTING" ||
+                               job.Status == "OUTPUT_UNCONFIRMED"))
+                .OrderByDescending(job => job.CreatedUtc)
+                .Select(job => job.JobNumber)
+                .FirstOrDefaultAsync(ct);
+            if (!string.IsNullOrWhiteSpace(activeJobNumber))
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
+                {
+                    code = "printer_has_active_output",
+                    message = $"Queue {replacedPrinter.DisplayName} still has job {activeJobNumber} in progress or awaiting output reconciliation. Resolve that same job before replacing the queue; SmartPrint will not cancel or duplicate Windows output."
+                });
+            }
+
+            var privateDocumentOnAnotherComputer = await (
+                from job in db.PrintJobs.AsNoTracking()
+                join document in db.PrintDocuments.AsNoTracking()
+                    on new { job.TenantId, PrintJobId = job.Id }
+                    equals new { document.TenantId, PrintJobId = document.PrintJobId }
+                where job.TenantId == tenantId &&
+                      job.PrinterDeviceId == previousId &&
+                      job.PrivatePrinting &&
+                      document.StorageMode == "LOCAL_AGENT" &&
+                      document.AgentDeviceId != printer.AgentDeviceId &&
+                      job.Status is not ("REJECTED" or "REFUNDED" or "CANCELLED" or "COMPLETED")
+                select job.Id
+            ).AnyAsync(ct);
+            if (privateDocumentOnAnotherComputer)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
+                {
+                    code = "private_printing_computer_locked",
+                    message = "A Private Printing file is secured on the original Windows computer. Finish that file there, or choose another queue connected to the same computer, before replacing this queue."
+                });
+            }
+
+            replacedPrinter.IsActive = false;
+            replacedPrinter.UpdatedUtc = DateTimeOffset.UtcNow;
+
+            // Keep existing QR codes working: atomically move station defaults to
+            // the selected replacement. Existing private upload tickets remain bound
+            // to their original Agent and are never moved.
+            var stations = await db.QrStations
+                .Where(station => station.TenantId == tenantId && station.PrinterDeviceId == previousId)
+                .ToListAsync(ct);
+            foreach (var station in stations)
+                station.PrinterDeviceId = printer.Id;
+        }
+
+        // Persist the source deactivation inside this transaction before checking
+        // capacity. The same transaction and advisory lock make swap atomic.
+        if (replacedPrinter is not null)
+            await db.SaveChangesAsync(ct);
+
+        var quota = await entitlements.CheckCapacityAsync(tenantId, TenantQuotaResource.Printer, ct);
+        if (!quota.Allowed)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new { code = quota.Code, message = quota.Message, current = quota.Current, maximum = quota.Maximum });
+        }
+
+        printer.IsActive = true;
+    }
+    else if (!isActive && printer.IsActive)
     {
         var activeJobNumber = await db.PrintJobs.AsNoTracking()
             .Where(job => job.TenantId == tenantId &&
@@ -1876,25 +1973,35 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                            job.Status == "PRINT_AUTHORISED" ||
                            job.Status == "PRINT_SUBMITTING" ||
                            job.Status == "SPOOLER_ACCEPTED" ||
-                           job.Status == "PRINTING"))
+                           job.Status == "PRINTING" ||
+                           job.Status == "OUTPUT_UNCONFIRMED"))
             .OrderByDescending(job => job.CreatedUtc)
             .Select(job => job.JobNumber)
             .FirstOrDefaultAsync(ct);
 
         if (!string.IsNullOrWhiteSpace(activeJobNumber))
         {
+            await transaction.RollbackAsync(ct);
             return Results.Conflict(new
             {
                 code = "printer_has_active_output",
-                message = $"Printer cannot be disabled while job {activeJobNumber} is active in the Windows Agent or spooler. Resolve that same job first; disabling it does not cancel Windows output."
+                message = $"Printer cannot be deselected while job {activeJobNumber} is active in the Windows Agent or spooler, or awaiting output reconciliation. Resolve that same job first; disabling it does not cancel Windows output."
             });
         }
+
+        printer.IsActive = false;
     }
 
-    printer.IsActive = isActive;
     printer.UpdatedUtc = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
-    return Results.Ok(new { printer.Id, printer.IsActive, printer.UpdatedUtc });
+    await transaction.CommitAsync(ct);
+    return Results.Ok(new
+    {
+        printer.Id,
+        printer.IsActive,
+        ReplacedPrinterDeviceId = replacePrinterId,
+        printer.UpdatedUtc
+    });
 });
 
 shop.MapGet("/qr-stations", async (ClaimsPrincipal principal, SmartPrintDbContext db, IConfiguration configuration, CancellationToken ct) =>
