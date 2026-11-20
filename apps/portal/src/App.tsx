@@ -2527,7 +2527,7 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
              </div>
              {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The poster is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
              {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
-             <small className="qr-share-export-help">Print, download and share all use the same poster artwork and station QR. PNG or JPG changes only the downloaded/shared file format. If file sharing is unavailable, SmartPrint downloads the selected image instead.</small>
+             <small className="qr-poster-actions-help">Print, download and share all use the same poster artwork and station QR. PNG or JPG changes only the downloaded/shared file format. If file sharing is unavailable, SmartPrint downloads the selected image instead.</small>
            </details>
          </>}
       </article>)}</div>}
