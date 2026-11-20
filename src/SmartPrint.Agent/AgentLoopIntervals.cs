@@ -15,5 +15,5 @@ public static class AgentLoopIntervals
     // Keep cross-printer submission concurrency bounded so a slow/broken queue
     // cannot monopolise the Agent, while multiple selected printers make progress.
     public static int ResolvePrinterLaneConcurrency(int? configuredLanes) =>
-        Math.Clamp(configuredLanes ?? 2, 1, 8);
+        Math.Clamp(configuredLanes ?? 4, 1, 8);
 }
