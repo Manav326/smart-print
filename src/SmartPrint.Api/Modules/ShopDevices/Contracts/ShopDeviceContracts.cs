@@ -44,7 +44,7 @@ public sealed record ShopDeviceOperationResult<T>(
     string? Code = null,
     string? Message = null,
     long Current = 0,
-    long Maximum = 0,
+    long? Maximum = null,
     string? ActiveJobNumber = null)
 {
     public static ShopDeviceOperationResult<T> Success(T value) =>
@@ -60,7 +60,7 @@ public sealed record ShopDeviceOperationResult<T>(
         new(ShopDeviceOperationKind.NotFound);
 
     public static ShopDeviceOperationResult<T> Conflict(string code, string message,
-        long current = 0, long maximum = 0) =>
+        long current = 0, long? maximum = null) =>
         new(ShopDeviceOperationKind.Conflict, Code: code, Message: message, Current: current, Maximum: maximum);
 
     public static ShopDeviceOperationResult<T> InvalidPrinterSelection(Dictionary<string, string[]> errors) =>
