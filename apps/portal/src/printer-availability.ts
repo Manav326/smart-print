@@ -32,8 +32,9 @@ export function getPrinterReadinessReason(
   if (printer.outputMode !== "PHYSICAL" && printer.outputMode !== "PDF_EXPORT")
     return "Unsupported Windows output queue";
   if (!hasRecentHeartbeat(printer.lastSeenUtc, now)) return "Windows printer queue has not reported recently";
-  if (printer.status === "Ready" || printer.status === "Busy") return null;
-  return "Windows queue reports " + printer.status.toLowerCase();
+  const queueStatus = printer.status.toLowerCase();
+  if (queueStatus === "ready" || queueStatus === "busy") return null;
+  return "Windows queue reports " + queueStatus;
 }
 
 export function getPrinterAvailabilityReason(
