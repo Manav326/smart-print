@@ -2056,6 +2056,32 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
             });
         }
 
+        var partiallyCompletedBatchJobNumber = await db.PrintJobs.AsNoTracking()
+            .Where(job => job.TenantId == tenantId &&
+                          job.PrinterDeviceId == printerId &&
+                          job.BatchId != null &&
+                          job.Status == "COMPLETED" &&
+                          db.PrintJobs.Any(remaining =>
+                              remaining.TenantId == tenantId &&
+                              remaining.BatchId == job.BatchId &&
+                              remaining.Status != "REJECTED" &&
+                              remaining.Status != "REFUNDED" &&
+                              remaining.Status != "CANCELLED" &&
+                              remaining.Status != "COMPLETED" &&
+                              remaining.Status != "PDF_EXPORTED"))
+            .OrderByDescending(job => job.CreatedUtc)
+            .Select(job => job.JobNumber)
+            .FirstOrDefaultAsync(ct);
+        if (!string.IsNullOrWhiteSpace(partiallyCompletedBatchJobNumber))
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "printer_batch_output_locked",
+                message = $"A file in batch containing {partiallyCompletedBatchJobNumber} has already completed on {printer.DisplayName}, while other files in that batch are still pending. Finish or resolve the remaining files on that same printer before deselecting it; the batch will not be split or silently moved."
+            });
+        }
+
         var enabledStationCount = await db.QrStations.AsNoTracking()
             .CountAsync(station => station.TenantId == tenantId &&
                                    station.PrinterDeviceId == printerId &&
