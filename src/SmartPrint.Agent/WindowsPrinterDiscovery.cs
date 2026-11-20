@@ -44,7 +44,22 @@ public sealed class WindowsPrinterDiscovery
         return result.Success;
     }
 
+
     public async Task<(bool Success, IReadOnlyList<DiscoveredPrinter> Printers)> TryDiscoverAsync(
+        CancellationToken cancellationToken)
+    {
+        var metadata = await TryDiscoverMetadataAsync(cancellationToken);
+        if (!metadata.Success)
+            return metadata;
+        return await EnrichCapabilitiesAsync(metadata.Printers, cancellationToken);
+    }
+
+    /// <summary>
+    /// Discovers queue identity and live Windows status without waiting for vendor
+    /// capability queries. The Agent can publish this inventory immediately while
+    /// capability enrichment continues independently.
+    /// </summary>
+    public async Task<(bool Success, IReadOnlyList<DiscoveredPrinter> Printers)> TryDiscoverMetadataAsync(
         CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows())
@@ -53,55 +68,57 @@ public sealed class WindowsPrinterDiscovery
             return (false, Array.Empty<DiscoveredPrinter>());
         }
 
-        (bool Success, IReadOnlyList<DiscoveredPrinter> Printers) metadata;
         if (executeInCurrentProcess)
+            return await DiscoverInProcessAsync(cancellationToken);
+
+        try
         {
-            metadata = await DiscoverInProcessAsync(cancellationToken);
-        }
-        else
-        {
-            try
+            var child = await childProcessRunner.ExecuteAsync(
+                "--discover-printers", string.Empty, discoveryTimeout, cancellationToken);
+            var printers = TryParseDiscoveryResult(child);
+            if (printers is null || printers.Count == 0)
             {
-                var child = await childProcessRunner.ExecuteAsync(
-                    "--discover-printers", string.Empty, discoveryTimeout, cancellationToken);
-                var printers = TryParseDiscoveryResult(child);
-                if (printers is null || printers.Count == 0)
+                logger.LogWarning(
+                    "WMI printer enumeration did not return a usable queue list. Trying isolated Windows spooler enumeration. ExitCode={ExitCode}; TimedOut={TimedOut}; Error={Error}",
+                    child.ExitCode, child.TimedOut, Truncate(child.StandardError, 400));
+
+                var fallback = await childProcessRunner.ExecuteAsync(
+                    "--discover-printers-winspool", string.Empty, discoveryTimeout, cancellationToken);
+                printers = TryParseDiscoveryResult(fallback);
+                if (printers is null)
                 {
                     logger.LogWarning(
-                        "WMI printer enumeration did not return a usable queue list. Trying isolated Windows spooler enumeration. ExitCode={ExitCode}; TimedOut={TimedOut}; Error={Error}",
-                        child.ExitCode, child.TimedOut, Truncate(child.StandardError, 400));
-
-                    var fallback = await childProcessRunner.ExecuteAsync(
-                        "--discover-printers-winspool", string.Empty, discoveryTimeout, cancellationToken);
-                    printers = TryParseDiscoveryResult(fallback);
-                    if (printers is null)
-                    {
-                        logger.LogWarning(
-                            "Both isolated Windows queue enumeration methods failed. ExitCode={ExitCode}; TimedOut={TimedOut}; Error={Error}",
-                            fallback.ExitCode, fallback.TimedOut, Truncate(fallback.StandardError, 400));
-                        return (false, Array.Empty<DiscoveredPrinter>());
-                    }
+                        "Both isolated Windows queue enumeration methods failed. ExitCode={ExitCode}; TimedOut={TimedOut}; Error={Error}",
+                        fallback.ExitCode, fallback.TimedOut, Truncate(fallback.StandardError, 400));
+                    return (false, Array.Empty<DiscoveredPrinter>());
                 }
+            }
 
-                metadata = (true, NormalizeDiscoveredQueues(printers));
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception exception)
-            {
-                logger.LogWarning(exception, "The isolated Windows discovery worker failed; the previous server inventory is retained.");
-                return (false, Array.Empty<DiscoveredPrinter>());
-            }
+            return (true, NormalizeDiscoveredQueues(printers));
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "The isolated Windows discovery worker failed; the previous server inventory is retained.");
+            return (false, Array.Empty<DiscoveredPrinter>());
+        }
+    }
 
-        if (!metadata.Success)
-            return metadata;
+    /// <summary>
+    /// Enriches already-published Windows queues. A failed vendor probe leaves that
+    /// queue's capability state unknown without delaying queue visibility or other work.
+    /// </summary>
+    public async Task<(bool Success, IReadOnlyList<DiscoveredPrinter> Printers)> EnrichCapabilitiesAsync(
+        IReadOnlyList<DiscoveredPrinter> printers,
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsWindows())
+            return (false, Array.Empty<DiscoveredPrinter>());
 
-        // Run the per-queue capability probes in this long-lived Agent process so
-        // a broken-driver backoff survives the short-lived WMI discovery worker.
-        var enriched = await Task.WhenAll(metadata.Printers.Select(async printer =>
+        var enriched = await Task.WhenAll(printers.Select(async printer =>
             printer with
             {
                 CapabilitiesJson = await capabilityProbe.ProbeAsync(
