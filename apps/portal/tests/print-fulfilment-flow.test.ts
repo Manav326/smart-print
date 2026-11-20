@@ -626,7 +626,7 @@ test("shop-originated photo orders use their own tenant-owned job and the shared
  const api=read("../src/api.ts");
  const program=read("../../../src/SmartPrint.Api/Program.cs");
  const endpointStart=program.indexOf('shop.MapPost("/photo-jobs"');
- const endpointEnd=program.indexOf('shop.MapGet("/reports/summary"',endpointStart);
+ const endpointEnd=program.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/printer"',endpointStart);
  assert.ok(endpointStart>=0&&endpointEnd>endpointStart);
  const endpoint=program.slice(endpointStart,endpointEnd);
  assert.match(app,/New photo order/);
