@@ -13,7 +13,7 @@ public sealed record PrinterCreatedResponse(
     string Status,
     bool IsActive);
 
-public sealed record PrinterActivationResponse(Guid Id, bool IsActive, DateTimeOffset UpdatedUtc);
+public sealed record PrinterActivationResponse(Guid Id, bool IsActive, Guid? ReplacedPrinterDeviceId, DateTimeOffset UpdatedUtc);
 
 public sealed record QrStationCreatedResponse(
     Guid Id,
@@ -34,6 +34,7 @@ public enum ShopDeviceOperationKind
     PortalNotConfigured,
     NotFound,
     Conflict,
+    BadRequest,
     InvalidPrinterSelection
 }
 
@@ -58,6 +59,9 @@ public sealed record ShopDeviceOperationResult<T>(
 
     public static ShopDeviceOperationResult<T> NotFound() =>
         new(ShopDeviceOperationKind.NotFound);
+
+    public static ShopDeviceOperationResult<T> BadRequest(string code, string message) =>
+        new(ShopDeviceOperationKind.BadRequest, Code: code, Message: message);
 
     public static ShopDeviceOperationResult<T> Conflict(string code, string message,
         long current = 0, long? maximum = null) =>
