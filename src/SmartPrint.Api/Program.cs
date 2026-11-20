@@ -1861,6 +1861,16 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
         return Results.NotFound();
     }
 
+    if (replacePrinterId is not null && printer.IsActive)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "printer_already_selected",
+            message = "This queue was selected in another shop session. Refresh the printer list and choose again; no other printer was deselected."
+        });
+    }
+
     if (isActive && !printer.IsActive)
     {
         if (printer.OutputMode is not ("PHYSICAL" or "PDF_EXPORT") || printer.AgentDeviceId is null)
