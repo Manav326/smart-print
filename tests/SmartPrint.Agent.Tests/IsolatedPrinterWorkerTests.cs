@@ -9,7 +9,7 @@ public sealed class IsolatedPrinterWorkerTests
     public async Task CapabilityProbeCrashReturnsUnknownAndIsBackedOff()
     {
         var runner = new FakeChildProcessRunner(new AgentChildProcessResult(
-            0xC0000374, string.Empty, "native driver crash", false));
+            unchecked((int)0xC0000374u), string.Empty, "native driver crash", false));
         var probes = new WindowsPrinterCapabilityProbeRunner(
             NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
             childProcessRunner: runner);
@@ -48,7 +48,7 @@ public sealed class IsolatedPrinterWorkerTests
     public async Task PrintWorkerCrashBeforeSubmissionIsBlockedNotRetriedAsUncertain()
     {
         var runner = new FakeChildProcessRunner(
-            new AgentChildProcessResult(0xC0000374, string.Empty, "heap corruption", false));
+            new AgentChildProcessResult(unchecked((int)0xC0000374u), string.Empty, "heap corruption", false));
         var executor = new IsolatedWindowsPrintExecutor(
             NullLogger<IsolatedWindowsPrintExecutor>.Instance,
             childProcessRunner: runner);
@@ -63,7 +63,7 @@ public sealed class IsolatedPrinterWorkerTests
     public async Task PrintWorkerCrashAfterSubmissionIsUncertainAndNeverAutomaticallyRetried()
     {
         var runner = new FakeChildProcessRunner(
-            new AgentChildProcessResult(0xC0000374, "READY\nSUBMITTING\n", "native driver crash", false));
+            new AgentChildProcessResult(unchecked((int)0xC0000374u), "READY\nSUBMITTING\n", "native driver crash", false));
         var executor = new IsolatedWindowsPrintExecutor(
             NullLogger<IsolatedWindowsPrintExecutor>.Instance,
             childProcessRunner: runner);

@@ -159,7 +159,7 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
-    public void DiscoversTwoSeparateWindowsQueuesOnTheSamePort()
+    public async Task DiscoversTwoSeparateWindowsQueuesOnTheSamePort()
     {
         if (!string.Equals(
                 Environment.GetEnvironmentVariable("SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION"),
@@ -175,7 +175,7 @@ public sealed class WindowsPrinterDiscoveryTests
             NullLogger<WindowsPrinterDiscovery>.Instance,
             probe,
             executeInCurrentProcess: true);
-        var result = discovery.DiscoverInProcessAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var result = await discovery.DiscoverInProcessAsync(CancellationToken.None);
         Assert.True(result.Success, "Windows WMI printer discovery failed.");
         var discovered = result.Printers;
 
