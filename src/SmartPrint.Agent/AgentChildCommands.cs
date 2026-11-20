@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Principal;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace SmartPrint.Agent;
@@ -136,6 +137,7 @@ internal static class AgentChildCommands
         var submissionStarting = false;
         try
         {
+            EnsureAgentServiceIdentity();
             var request = await ReadInputAsync<PrintJobChildRequest>();
             if (request.JobId == Guid.Empty || request.AgentDeviceId == Guid.Empty ||
                 request.QueueName.Length is 0 or > 256 || request.SpoolerJobName.Length is 0 or > 180)
@@ -144,7 +146,9 @@ internal static class AgentChildCommands
                     "The isolated print request is invalid.");
 
             var store = new AgentLocalQueueStore();
-            await store.InitializeAsync(CancellationToken.None);
+            // The parent print worker initializes and recovers the protected queue
+            // before it launches this child. Do not repeat startup cleanup here:
+            // it could race with another upload's temporary staging file.
             var entry = store.Find(request.JobId)
                 ?? throw new PrintExecutionBlockedException(
                     "LOCAL_QUEUE_JOB_MISSING",
@@ -196,6 +200,7 @@ internal static class AgentChildCommands
     {
         try
         {
+            EnsureAgentServiceIdentity();
             var request = await ReadInputAsync<PdfExportChildRequest>();
             if (request.JobId == Guid.Empty || request.AgentDeviceId == Guid.Empty)
                 throw new PrintExecutionBlockedException("PDF_EXPORT_REQUEST_INVALID", "The PDF export request is invalid.");
@@ -211,7 +216,7 @@ internal static class AgentChildCommands
                     "The PDF export destination is outside the configured export directory.");
 
             var store = new AgentLocalQueueStore();
-            await store.InitializeAsync(CancellationToken.None);
+            // Queue recovery was completed by the parent service before dispatch.
             var entry = store.Find(request.JobId)
                 ?? throw new PrintExecutionBlockedException("LOCAL_QUEUE_JOB_MISSING", "The protected local PDF source is unavailable.");
             using var documentStream = store.OpenDocumentReadStream(request.JobId, request.AgentDeviceId);
@@ -247,6 +252,7 @@ internal static class AgentChildCommands
     {
         try
         {
+            EnsureAgentServiceIdentity();
             var request = await ReadInputAsync<SpoolerJobChildRequest>();
             ValidateSpoolerRequest(request);
             var job = new WindowsPrintExecutor().GetJob(request.QueueName, request.JobId);
@@ -264,6 +270,7 @@ internal static class AgentChildCommands
     {
         try
         {
+            EnsureAgentServiceIdentity();
             var request = await ReadInputAsync<SpoolerDocumentChildRequest>();
             if (string.IsNullOrWhiteSpace(request.QueueName) || request.QueueName.Length > 256 ||
                 string.IsNullOrWhiteSpace(request.DocumentName) || request.DocumentName.Length > 180)
@@ -283,6 +290,7 @@ internal static class AgentChildCommands
     {
         try
         {
+            EnsureAgentServiceIdentity();
             var request = await ReadInputAsync<SpoolerJobChildRequest>();
             ValidateSpoolerRequest(request);
             new WindowsPrintExecutor().ReleaseRetainedJob(request.QueueName, request.JobId);
@@ -294,6 +302,19 @@ internal static class AgentChildCommands
             Console.Error.WriteLine("Spooler release worker failed: " + exception.GetType().Name);
             return 2;
         }
+    }
+
+    private static void EnsureAgentServiceIdentity()
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new UnauthorizedAccessException("Windows printer worker commands are available only under the Windows Agent service identity.");
+
+        using var identity = WindowsIdentity.GetCurrent();
+        var sid = identity.User;
+        var localService = new SecurityIdentifier(WellKnownSidType.LocalServiceSid, null);
+        var localSystem = new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null);
+        if (sid is null || (!sid.Equals(localService) && !sid.Equals(localSystem)))
+            throw new UnauthorizedAccessException("Protected print-worker commands can only be launched by the SmartPrint Windows service.");
     }
 
     private static void ValidateSpoolerRequest(SpoolerJobChildRequest request)
