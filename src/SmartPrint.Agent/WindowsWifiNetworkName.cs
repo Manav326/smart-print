@@ -62,7 +62,7 @@ internal static class WindowsWifiNetworkName
         }
         catch (Exception exception) when (
             exception is AgentChildProcessStartException or InvalidOperationException or
-                System.ComponentModel.Win32Exception or JsonException)
+                System.ComponentModel.Win32Exception or IOException or JsonException)
         {
             Cache[networkInterfaceId] = new CacheEntry(DateTimeOffset.UtcNow.Add(FailureCacheLifetime), null);
             return null;

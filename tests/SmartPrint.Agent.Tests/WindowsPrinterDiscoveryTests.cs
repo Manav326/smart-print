@@ -84,6 +84,23 @@ public sealed class WindowsPrinterDiscoveryTests
             PrinterOutputModeRules.Detect("Generic PDF Queue", "Generic Driver", "PORTPROMPT:"));
     }
 
+    [Theory]
+    [InlineData("IppVirtual - Microsoft IPP", "Microsoft IPP Class Driver", "http://Android.local:10631/p/virtual")]
+    [InlineData("Android Virtual Printer", "Microsoft IPP Class Driver", "http://Android.local:10631/p/virtual")]
+    [InlineData("Android Virtual Printer", "Microsoft IPP Class Driver", "ipp://android.local/printer")]
+    public void AndroidIppVirtualQueueIsAUsableWindowsPrintTarget(string queue, string driver, string port)
+    {
+        Assert.Equal(PrinterOutputModeRules.Physical, PrinterOutputModeRules.Detect(queue, driver, port));
+    }
+
+    [Fact]
+    public void GenericVirtualPrinterWithoutIppTransportRemainsUnsupported()
+    {
+        Assert.Equal(
+            PrinterOutputModeRules.UnsupportedVirtual,
+            PrinterOutputModeRules.Detect("Generic Virtual Printer", "Generic Virtual Driver", "USB001"));
+    }
+
     [Fact]
     public void WindowsDriverCapabilityDiscoveryReturnsStructuredReportForInstalledPdfPrinter()
     {
