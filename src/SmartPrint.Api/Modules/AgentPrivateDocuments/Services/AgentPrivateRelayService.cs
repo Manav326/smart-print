@@ -24,11 +24,14 @@ public sealed class AgentPrivateRelayService(
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(environment);
 
-        var allowPrivateVirtualOutput = !environment.IsProduction() &&
+        var isProduction = environment.IsProduction();
+        var operationalSettingEnabled = !isProduction &&
             await db.PlatformOperationalSettings.AsNoTracking()
                 .Where(item => item.Id == SmartPrint.Api.Domain.PlatformOperationalSettings.SingletonIdValue)
                 .Select(item => (bool?)item.AllowPrivatePrintingVirtualOutput)
                 .SingleOrDefaultAsync(ct) is true;
+        var allowPrivateVirtualOutput = AgentPrivateRelayRules.AllowsPdfVirtualOutput(
+            isProduction, operationalSettingEnabled);
 
         async Task<List<AgentPrivateRelayItem>> ReadPendingItemsAsync()
         {
