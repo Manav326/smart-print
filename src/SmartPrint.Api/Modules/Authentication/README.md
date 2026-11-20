@@ -1,14 +1,15 @@
 # Authentication module
 
 ## Ownership
-Owns Google challenge/configuration and shop/customer Google sign-in HTTP routes, plus the Google-session creation workflow.
+Owns Google sign-in, refresh-token creation/rotation and logout revocation for customer/shop authentication surfaces.
 
 ## Invariants
-- Preserve nonce issuance, surface binding, expiry and one-time consumption.
-- Verify Google credentials before account linking or session issuance.
-- Preserve shop/customer identity separation and account-type checks.
-- Persist only the refresh-token hash; never log raw tokens or credentials.
-- Keep the existing route paths, public response names and authentication error codes stable.
+- Google login keeps nonce, issuer/audience, account-type and tenant-role checks in the existing Google identity implementation.
+- Refresh tokens are stored as SHA-256 hashes; raw tokens are never persisted.
+- Refresh is single-use: the old token is atomically claimed/revoked, a replacement is created and linked, and both are committed in one transaction.
+- Only eligible shop, global customer and platform-administrator principals can refresh.
+- Refresh tokens remain valid for 30 days and public endpoints preserve anonymous access, 401/200/204 responses and the existing token response fields.
+- Logout revokes only the matching active refresh-token hash and remains idempotent.
 
 ## Dependencies
-Google identity verification, Identity account persistence and token issuance reuse the established shared API services and security components. Refresh-token persistence is owned by `GoogleAuthSessionService`.
+Uses a module-owned identity abstraction implemented by an ASP.NET Identity infrastructure adapter, the existing `TokenIssuer`, EF Core and shared customer/platform authorization policies.
