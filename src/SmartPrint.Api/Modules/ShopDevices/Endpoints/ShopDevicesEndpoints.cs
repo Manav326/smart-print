@@ -42,6 +42,7 @@ public static class ShopDevicesEndpoints
         shop.MapPatch("/printers/{printerId:guid}/active", async (
             Guid printerId,
             bool isActive,
+            Guid? replacePrinterId,
             ClaimsPrincipal principal,
             ShopDevicesService service,
             CancellationToken ct) =>
@@ -49,10 +50,11 @@ public static class ShopDevicesEndpoints
             if (!ShopIdentity.CanManageShop(principal) || !TenantIdentity.TryGetTenantId(principal, out var tenantId))
                 return Results.Forbid();
 
-            var result = await service.SetPrinterActiveAsync(tenantId, printerId, isActive, ct);
+            var result = await service.SetPrinterActiveAsync(tenantId, printerId, isActive, replacePrinterId, ct);
             return result.Kind switch
             {
                 ShopDeviceOperationKind.NotFound => Results.NotFound(),
+                ShopDeviceOperationKind.BadRequest => Results.BadRequest(new { code = result.Code, message = result.Message }),
                 ShopDeviceOperationKind.Conflict => Results.Conflict(new
                 {
                     code = result.Code, message = result.Message
