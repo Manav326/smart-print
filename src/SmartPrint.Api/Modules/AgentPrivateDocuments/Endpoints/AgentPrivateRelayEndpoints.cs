@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Routing;
+using SmartPrint.Api.Domain;
 using SmartPrint.Api.Modules.AgentPrivateDocuments.Services;
 using SmartPrint.Api.Security;
 
