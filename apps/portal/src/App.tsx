@@ -2426,11 +2426,13 @@ function PrintersPage({
                 : [];
               const ownerStatus = !printer.agentDeviceId
                 ? "Waiting for Print Agent discovery"
-                : !agent || agent.revokedUtc || agent.status !== "Online"
+                : !agentOnline
                   ? "Windows computer not currently connected"
-                  : printer.status === "Ready" || printer.status === "Busy"
-                    ? "Windows queue reported ready"
-                    : `Windows queue reports ${printer.status.toLowerCase()}`;
+                  : !queueFresh
+                    ? "Waiting for a fresh Windows printer scan"
+                    : printer.status === "Ready" || printer.status === "Busy"
+                      ? "Windows queue reported ready"
+                      : `Windows queue reports ${printer.status.toLowerCase()}`;
               return (
                 <article className="printer-card" key={printer.id}>
                   <div className="printer-card-top">
@@ -2481,7 +2483,7 @@ function PrintersPage({
                           if (!canSelect || !canUseSelection) return;
                           if (quotaFull && canReplaceSelection) {
                             setPendingReplacement(printer);
-                            setReplacePrinterId(selectedPrinters[0]?.id ?? "");
+                            setReplacePrinterId("");
                           } else if (!quotaFull) {
                             void onToggle(printer);
                           }
