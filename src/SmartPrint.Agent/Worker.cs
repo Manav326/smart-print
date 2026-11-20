@@ -732,9 +732,22 @@ public sealed class Worker(
             if (!enriched.Success)
                 return;
 
+            // Capability probes may take longer than an inventory heartbeat. Re-read
+            // the current Windows queues before syncing so old Ready/Offline/port data
+            // from the original probe snapshot cannot overwrite a newer queue state.
+            var currentMetadata = await printerDiscovery.TryDiscoverMetadataAsync(cancellationToken);
+            if (!currentMetadata.Success)
+            {
+                logger.LogWarning("Could not refresh Windows queue metadata after capability probing; keeping the last published live queue state.");
+                return;
+            }
+
+            var currentWithCapabilities = WindowsPrinterDiscovery.ApplyCapabilitySnapshots(
+                currentMetadata.Printers, enriched.Printers);
+
             using var client = httpClientFactory.CreateClient("cloud");
             client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
-            if (!await SyncPrinterInventoryBatchAsync(client, credentials, enriched.Printers, cancellationToken))
+            if (!await SyncPrinterInventoryBatchAsync(client, credentials, currentWithCapabilities, cancellationToken))
                 logger.LogWarning("Printer capability enrichment could not be synchronized; published queue status remains available.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
