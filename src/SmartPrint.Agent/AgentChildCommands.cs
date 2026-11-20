@@ -27,6 +27,9 @@ internal static class AgentChildCommands
             case "--probe-printer-capabilities":
                 Environment.ExitCode = await RunCapabilityProbeAsync();
                 return true;
+            case "--get-current-ssid":
+                Environment.ExitCode = await RunGetCurrentSsidAsync();
+                return true;
             case "--discover-printers":
                 Environment.ExitCode = await RunDiscoveryAsync();
                 return true;
@@ -50,6 +53,23 @@ internal static class AgentChildCommands
                 return true;
             default:
                 return false;
+        }
+    }
+
+    private static async Task<int> RunGetCurrentSsidAsync()
+    {
+        try
+        {
+            var request = await ReadInputAsync<string>();
+            if (!Guid.TryParse(request, out _))
+                throw new InvalidDataException("The WLAN interface identifier is invalid.");
+            WriteProtocol("RESULT", WindowsWifiNetworkName.TryGetCurrentSsidInProcess(request));
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine("Wi-Fi SSID worker failed: " + exception.GetType().Name);
+            return 2;
         }
     }
 
