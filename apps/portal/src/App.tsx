@@ -19,6 +19,7 @@ import CustomerUpiQr from "./CustomerUpiQr";
 import ShopDocumentPreviewSurface from "./ShopDocumentPreviewSurface";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
+import { getPrinterAvailabilityReason, isPrinterAvailableForShop } from "./printer-availability";
 import { shouldBlockBatchCheckoutForExpiredQuote, shouldBlockQuoteRefreshForStatus } from "./batch-checkout-state";
 import { isCustomerBatchFinished } from "./customer-session-state";
 import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "./local-upload-routing";
@@ -548,9 +549,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
   ).map(agent => agent.id));
   const onlineAgentCount = onlineAgentIds.size;
-  const usablePrinterCount = printers.filter(printer => isPrinterAvailable(printer, onlineAgentIds)).length;
+  const usablePrinterCount = printers.filter(printer => isPrinterAvailableForShop(printer, agentDevices)).length;
   const offlinePrinterCount = printers.filter(printer =>
-    printer.isActive && !isPrinterAvailable(printer, onlineAgentIds)
+    printer.isActive && !isPrinterAvailableForShop(printer, agentDevices)
   ).length;
   const today = new Intl.DateTimeFormat("en-IN", { timeZone: IST_TIME_ZONE, weekday: "long", day: "numeric", month: "long" }).format(new Date());
 
@@ -2137,7 +2138,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
       !!agent.lastSeenUtc && Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000)
     .map(agent => agent.id));
   const hasOnlineAgent = onlineAgentIds.size > 0;
-  const hasReachablePrinter = printers.some(printer => isPrinterAvailable(printer, onlineAgentIds));
+  const hasReachablePrinter = printers.some(printer => isPrinterAvailableForShop(printer, agentDevices));
   const hasPaymentMethod = paymentSettings?.cashEnabled === true ||
     (paymentSettings?.upiEnabled === true &&
       !!paymentSettings.upiId?.trim() && !!paymentSettings.payeeName?.trim());
@@ -3194,12 +3195,8 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
 
   const reviewableBatchFileStatuses=new Set(["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED","REJECTED"]);
   const reviewBatches=Array.from(new Map(jobs.filter(job=>job.batchId&&reviewableBatchFileStatuses.has(job.status)).map(job=>[job.batchId!,job])).keys());
-  const onlineAgentIds = new Set(agentDevices.filter(agent =>
-    !agent.revokedUtc && agent.status === "Online" && !!agent.lastSeenUtc &&
-    Date.parse(agent.lastSeenUtc) > Date.now() - 2 * 60 * 1000
-  ).map(agent => agent.id));
   const dispatchablePrinters = printers.filter(printer =>
-    isPrinterAvailable(printer, onlineAgentIds)
+    isPrinterAvailableForShop(printer, agentDevices)
   );
   const batchMap=new Map<string,{key:string;batchId:string|null;jobs:ShopPrintJob[]}>();
   for(const job of jobs) {
@@ -3699,24 +3696,7 @@ function printBlockMessage(code:string):string {
 }
 
 function isPrinterReadyForSelection(printer: PrinterDevice, agents: readonly AgentDevice[], now = Date.now()) {
-  if (!printer.agentDeviceId || printer.outputMode === "UNSUPPORTED_VIRTUAL") return false;
-  const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
-  if (!agent || agent.revokedUtc || agent.status !== "Online") return false;
-  const agentLastSeen = agent.lastSeenUtc ? Date.parse(agent.lastSeenUtc) : Number.NaN;
-  const printerLastSeen = printer.lastSeenUtc ? Date.parse(printer.lastSeenUtc) : Number.NaN;
-  return Number.isFinite(agentLastSeen) && agentLastSeen > now - 2 * 60 * 1000 &&
-    Number.isFinite(printerLastSeen) && printerLastSeen > now - 2 * 60 * 1000 &&
-    (printer.status === "Ready" || printer.status === "Busy") &&
-    (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT");
-}
-
-function isPrinterAvailable(printer: PrinterDevice, onlineAgentIds: ReadonlySet<string>, now = Date.now()) {
-  if (!printer.isActive || !printer.agentDeviceId || !onlineAgentIds.has(printer.agentDeviceId)) return false;
-  if (printer.outputMode === "UNSUPPORTED_VIRTUAL") return false;
-  if (printer.outputMode === "PDF_EXPORT") return true;
-  const lastSeen = printer.lastSeenUtc ? Date.parse(printer.lastSeenUtc) : Number.NaN;
-  return Number.isFinite(lastSeen) && lastSeen > now - 2 * 60 * 1000 &&
-    (printer.status === "Ready" || printer.status === "Busy");
+  return getPrinterAvailabilityReason(printer, agents, now) === null;
 }
 
 function formatMoney(minor:number,currency:string) {
