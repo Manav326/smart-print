@@ -166,6 +166,7 @@ builder.Services.AddCors(options => options.AddPolicy("web", policy => policy
 var app = builder.Build();
 
 app.MapRazorpaySubscriptionWebhookEndpoint();
+app.MapPublicAdvertisingQueriesModule();
 app.MapPublicAdvertisingEndpoints();
 app.MapHealthModule();
 

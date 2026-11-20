@@ -66,22 +66,7 @@ public static class PlatformAdvertisingEndpoints
     public static WebApplication MapPublicAdvertisingEndpoints(this WebApplication app)
     {
         var group=app.MapGroup("/api/v1/advertising").AllowAnonymous().RequireRateLimiting("public-api");
-        group.MapGet("/active",async(string placement,SmartPrintDbContext db,CancellationToken ct)=>{
-            if(!PlatformAdvertisingRules.IsSupportedPlacement(placement))return Results.ValidationProblem(new Dictionary<string,string[]>{{"placement",new[]{"Choose HOME, FILES or SHOP_OVERVIEW."}}});
-            var now=DateTimeOffset.UtcNow;
-            var candidates=await db.PlatformAdCampaigns.AsNoTracking()
-                .Where(x=>x.Placement==placement&&x.Status=="Active"&&x.StartsUtc<=now&&(x.EndsUtc==null||x.EndsUtc>now))
-                .OrderBy(x=>x.CreatedUtc).Take(100).ToListAsync(ct);
-            if(candidates.Count==0)return Results.NoContent();
-            var candidateIds=candidates.Select(x=>x.Id).ToArray();
-            var recentCounts=await db.PlatformAdEvents.AsNoTracking()
-                .Where(x=>candidateIds.Contains(x.CampaignId)&&x.EventType=="IMPRESSION"&&x.CreatedUtc>=now.AddDays(-7))
-                .GroupBy(x=>x.CampaignId).Select(g=>new{CampaignId=g.Key,Count=g.LongCount()}).ToDictionaryAsync(x=>x.CampaignId,x=>x.Count,ct);
-            var item=candidates.OrderBy(x=>recentCounts.GetValueOrDefault(x.Id)).ThenBy(x=>x.CreatedUtc).First();
-            var creative=await db.PlatformAdCreatives.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==item.CreativeId,ct);
-            if(creative is null)return Results.NoContent();
-            return Results.Ok(new{item.Id,item.AdvertiserName,item.Headline,item.Body,item.DestinationUrl,item.Placement,item.Format,imageUrl=$"/api/v1/advertising/creatives/{creative.Id}"});
-        });
+        
         group.MapPost("/{id:guid}/events",async(Guid id,PlatformAdEventRequest request,SmartPrintDbContext db,CancellationToken ct)=>{
             if(request.EventType is not("IMPRESSION" or "CLICK"))return Results.ValidationProblem(new Dictionary<string,string[]>{{"eventType",new[]{"Use IMPRESSION or CLICK."}}});
             var now=DateTimeOffset.UtcNow;var item=await db.PlatformAdCampaigns.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);
@@ -89,14 +74,7 @@ public static class PlatformAdvertisingEndpoints
             db.PlatformAdEvents.Add(new PlatformAdEvent{CampaignId=id,EventType=request.EventType,Placement=item.Placement,CreatedUtc=now});await db.SaveChangesAsync(ct);
             return Results.Accepted();
         });
-        group.MapGet("/creatives/{id:guid}",async(Guid id,SmartPrintDbContext db,PlatformAdCreativeStorage storage,HttpContext context,CancellationToken ct)=>{
-            var now=DateTimeOffset.UtcNow;var creative=await db.PlatformAdCreatives.AsNoTracking().SingleOrDefaultAsync(x=>x.Id==id,ct);
-            if(creative is null)return Results.NotFound();
-            var published=await db.PlatformAdCampaigns.AsNoTracking().AnyAsync(x=>x.CreativeId==id&&x.Status=="Active"&&x.StartsUtc<=now&&(x.EndsUtc==null||x.EndsUtc>now),ct);
-            if(!published)return Results.NotFound();
-            context.Response.Headers["Cache-Control"]="public,max-age=300,stale-while-revalidate=60";context.Response.Headers["X-Content-Type-Options"]="nosniff";
-            return Results.File(storage.OpenRead(creative),creative.ContentType,enableRangeProcessing:false);
-        });
+        
         return app;
     }
     private static async Task<Dictionary<string,string[]>> Validate(PlatformAdCampaignRequest request,SmartPrintDbContext db,CancellationToken ct)
