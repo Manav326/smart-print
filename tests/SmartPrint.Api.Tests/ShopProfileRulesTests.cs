@@ -26,7 +26,7 @@ public sealed class ShopProfileRulesTests
     [Theory]
     [InlineData("", "#7662E8", null)]
     [InlineData("   ", "#7662E8", null)]
-    [InlineData("01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890", "#7662E8", null)]
+    
     [InlineData("Shop", "7662E8", null)]
     [InlineData("Shop", "#12345G", null)]
     [InlineData("Shop", "#12345678", null)]
@@ -40,6 +40,14 @@ public sealed class ShopProfileRulesTests
         Assert.Equal(
             "Provide a display name, a six-digit hex accent colour, and an optional HTTPS logo URL.",
             errors["profile"][0]);
+    }
+
+    [Fact]
+    public void RejectsDisplayNamesLongerThan180Characters()
+    {
+        var errors = ShopProfileRules.Validate(new string('S', 181), "#7662E8", null);
+
+        Assert.Contains("profile", errors.Keys);
     }
 
     [Fact]

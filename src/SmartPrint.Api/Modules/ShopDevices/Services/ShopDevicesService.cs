@@ -1,5 +1,4 @@
 using System.Security.Cryptography;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SmartPrint.Api.Contracts;
@@ -130,7 +129,7 @@ public sealed class ShopDevicesService(
                 quota.Code, quota.Message, quota.Current, quota.Maximum);
         }
 
-        var publicCode = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
+        var publicCode = Base64UrlTokenEncoder.Encode(RandomNumberGenerator.GetBytes(24));
         var station = new QrStation
         {
             TenantId = tenantId,
@@ -159,7 +158,7 @@ public sealed class ShopDevicesService(
             item => item.Id == stationId && item.TenantId == tenantId, ct);
         if (station is null) return ShopDeviceOperationResult<QrStationCodeResponse>.NotFound();
 
-        var publicCode = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(24));
+        var publicCode = Base64UrlTokenEncoder.Encode(RandomNumberGenerator.GetBytes(24));
         station.PublicCodeHash = OpaqueTokenHasher.Hash(publicCode);
         station.PublicCode = publicCode;
         station.PublicCodeHint = publicCode[^4..];

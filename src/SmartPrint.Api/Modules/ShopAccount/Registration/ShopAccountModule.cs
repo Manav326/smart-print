@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using SmartPrint.Api.Modules.ShopAccount.Endpoints;
 using SmartPrint.Api.Modules.ShopAccount.Services;
+using SmartPrint.Api.Modules.ShopAccount.Abstractions;
+using SmartPrint.Api.Modules.ShopAccount.Infrastructure;
 
 namespace SmartPrint.Api.Modules.ShopAccount.Registration;
 
@@ -12,6 +14,7 @@ public static class ShopAccountModule
 {
     public static IServiceCollection AddShopAccountModule(this IServiceCollection services)
     {
+        services.AddScoped<IShopAccountIdentity, IdentityShopAccountIdentity>();
         services.AddScoped<ShopAccountService>();
         return services;
     }

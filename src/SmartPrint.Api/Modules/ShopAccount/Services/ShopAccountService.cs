@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
@@ -13,8 +12,7 @@ namespace SmartPrint.Api.Modules.ShopAccount.Services;
 /// </summary>
 public sealed class ShopAccountService(
     SmartPrintDbContext db,
-    UserManager<AppUser> userManager,
-    SignInManager<AppUser> signInManager)
+    IShopAccountIdentity identity)
 {
     public async Task<ShopAccountUpdateResult> UpdateAsync(
         Guid tenantId,
@@ -29,7 +27,7 @@ public sealed class ShopAccountService(
                 ["account"] = ["Enter a name between 1 and 160 characters and a valid email address."]
             });
 
-        var user = await userManager.FindByIdAsync(userId.ToString());
+        var user = await identity.FindByIdAsync(userId);
         if (user is null || user.TenantId != tenantId)
             return ShopAccountUpdateResult.Forbidden();
 
@@ -39,15 +37,13 @@ public sealed class ShopAccountService(
             if (string.IsNullOrWhiteSpace(request.CurrentPassword))
                 return ShopAccountUpdateResult.CurrentPasswordRequired();
 
-            var passwordCheck = await signInManager.CheckPasswordSignInAsync(
-                user, request.CurrentPassword, lockoutOnFailure: true);
-            if (passwordCheck.IsLockedOut)
+            var passwordCheck = await identity.CheckCurrentPasswordAsync(user, request.CurrentPassword);
+            if (passwordCheck == ShopAccountPasswordCheck.LockedOut)
                 return ShopAccountUpdateResult.LockedOut();
-            if (!passwordCheck.Succeeded)
+            if (passwordCheck != ShopAccountPasswordCheck.Valid)
                 return ShopAccountUpdateResult.IncorrectPassword();
 
-            var existingUser = await userManager.FindByEmailAsync(email);
-            if (existingUser is not null && existingUser.Id != user.Id)
+            if (await identity.EmailBelongsToAnotherUserAsync(email, user.Id))
                 return ShopAccountUpdateResult.EmailAlreadyRegistered();
         }
 
@@ -59,14 +55,11 @@ public sealed class ShopAccountService(
             user.UserName = email;
         }
 
-        var update = await userManager.UpdateAsync(user);
+        var update = await identity.UpdateAsync(user);
         if (!update.Succeeded)
         {
             await transaction.RollbackAsync(ct);
-            return ShopAccountUpdateResult.Invalid(update.Errors
-                .GroupBy(error => error.Code)
-                .ToDictionary(group => group.Key,
-                    group => group.Select(error => error.Description).ToArray()));
+            return ShopAccountUpdateResult.Invalid(update.Errors);
         }
 
         await transaction.CommitAsync(ct);
