@@ -1,10 +1,13 @@
 # Agent private documents module
 
 ## Ownership
-Owns the Agent-side pending-purge queue and acknowledgement that a local-only private source has been erased.
+Owns Agent-side private-relay queue discovery/long polling and the pending-purge queue/acknowledgement that a local-only private source has been erased.
 
 ## Safety invariants
-- Queue results are scoped to the verified tenant and the exact Agent that claimed the job.
+- Relay and purge queue results are scoped to the verified tenant and the exact Agent that owns or claimed the job.
+- The relay endpoint subscribes before its first durable database read, then re-reads after a notification or bounded timeout; PostgreSQL remains the source of truth.
+- Relay pickup is bounded to 50 oldest eligible tickets, a 2-minute fresh/ready printer queue, and a 25-second listener / 10-second fallback wait. Caller-supplied wait values are clamped to those bounds.
+- PDF virtual output is independently disabled in Production even when the operational setting is enabled; non-production requires the explicit operational setting.
 - A purge is offered only after confirmed physical output or a separately recorded non-production test output, with an explicit purge request.
 - A duplicate acknowledgement is idempotent and returns the original purge timestamp.
 - The API accepts acknowledgements only from the Agent that owns the `LOCAL_AGENT` document record.
