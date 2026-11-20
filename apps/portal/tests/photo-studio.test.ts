@@ -647,6 +647,17 @@ test("ID Studio remains Private Printing only",()=>{
 
 
 
+test("Photo Studio browser fixture resolves selected page geometry before its PDF checks",()=>{
+ const fixture=readFileSync(new URL("./photo-studio.browser.tsx",import.meta.url),"utf8");
+ const geometryDeclaration=fixture.indexOf("const pageGeometry = isPhotoPaperOutput");
+ const imageTransform=fixture.indexOf("const imageTransform = pageGeometry.widthPoints");
+ const firstBitmap=fixture.indexOf("createImageBitmap(jpegPages[pageIndex]");
+ assert.ok(geometryDeclaration>=0&&imageTransform>geometryDeclaration&&firstBitmap>imageTransform,
+  "Selected A4 or photo-paper geometry must be initialized before transform counts and raster probes use it.");
+ assert.match(fixture,/const isPhotoPaperOutput = sheet\.photoOutputLayout === "PHOTO_PAPER"/);
+ assert.match(fixture,/getPhotoPaperPageGeometry\(photoSize\)/);
+});
+
 test("one processed 300-DPI crop is reused across all copies and every A4 page",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const helperStart=studio.indexOf("function createPhotoTile(");

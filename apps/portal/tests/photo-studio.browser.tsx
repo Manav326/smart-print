@@ -195,13 +195,6 @@ function PhotoStudioBrowserFixture() {
       const pageBytes = new Uint8Array(await pageBlob.arrayBuffer());
       return containsByteSequence(pdfBytes, pageBytes);
     }));
-    const pageMediaBoxes = [...pdfText.matchAll(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/g)]
-      .map(match => [Number(match[1]), Number(match[2])]);
-    const mediaBoxCount = pageMediaBoxes.length;
-    const pdfImageSizes = [...pdfText.matchAll(/\/Width (\d+) \/Height (\d+) \/ColorSpace/g)]
-      .map(match => [Number(match[1]), Number(match[2])]);
-    const imageTransform = pageGeometry.widthPoints + " 0 0 " + pageGeometry.heightPoints + " 0 0 cm";
-    const fullPageImageTransforms = pdfText.split(imageTransform).length - 1;
     const sizeByCode: Record<string, PhotoSheetSize> = {
       "35x45": { widthMm: 35, heightMm: 45 },
       "25x35": { widthMm: 25, heightMm: 35 },
@@ -218,6 +211,13 @@ function PhotoStudioBrowserFixture() {
           widthPx: A4_WIDTH_PX, heightPx: A4_HEIGHT_PX,
           widthPoints: A4_WIDTH_POINTS, heightPoints: A4_HEIGHT_POINTS
         };
+    const pageMediaBoxes = [...pdfText.matchAll(/\/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/g)]
+      .map(match => [Number(match[1]), Number(match[2])]);
+    const mediaBoxCount = pageMediaBoxes.length;
+    const pdfImageSizes = [...pdfText.matchAll(/\/Width (\d+) \/Height (\d+) \/ColorSpace/g)]
+      .map(match => [Number(match[1]), Number(match[2])]);
+    const imageTransform = pageGeometry.widthPoints + " 0 0 " + pageGeometry.heightPoints + " 0 0 cm";
+    const fullPageImageTransforms = pdfText.split(imageTransform).length - 1;
     const jpegPages = sheet.previewPages ?? [];
     const captionHeightMm = sheet.captionHeightMm;
     const pixelProbes: Array<{ page: number; slot: number; rgb: number[] }> = [];
