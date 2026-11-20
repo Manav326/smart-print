@@ -661,7 +661,7 @@ test("customer uploader keeps its batch example, inline Android PDF preview and 
  assert.match(app,/customerStatusTone\(jobStatus\.status\)/);
  assert.match(app,/Last updated · \{formatIstDateTime\(jobStatus\.updatedUtc\)\}/);
  assert.match(api,/previousStatus\?: string \| null/);
- assert.match(program,/new \{ item\.PreviousStatus, item\.NewStatus, item\.ActorType, item\.CreatedUtc \}/);
+ assert.match(customerQueries,/new \{ item\.PreviousStatus, item\.NewStatus, item\.ActorType, item\.CreatedUtc \}/);
  assert.match(css,/\.customer-native-pdf-preview/);
  assert.match(css,/\.customer-batch-quote-card \.customer-batch-quote-title>strong\{[\s\S]*?white-space:normal;[\s\S]*?overflow-wrap:anywhere/);
 });
