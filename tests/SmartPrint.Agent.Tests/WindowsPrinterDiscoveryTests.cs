@@ -102,6 +102,42 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
+    public void CapabilityEnrichmentMergesByQueueAndDriverWithoutOverwritingFreshQueueStatus()
+    {
+        var current =
+            new DiscoveredPrinter("HP Lobby", "HP Universal", "USB002", "Offline", false,
+                OutputMode: PrinterOutputModeRules.Physical);
+        var oldSnapshot =
+            new DiscoveredPrinter("hp lobby", "HP Universal", "USB001", "Ready", true,
+                OutputMode: PrinterOutputModeRules.Physical,
+                CapabilitiesJson: "{\"color\":true}");
+        var result = WindowsPrinterDiscovery.ApplyCapabilitySnapshots([current], [oldSnapshot]);
+
+        var merged = Assert.Single(result);
+        Assert.Equal("Offline", merged.Status);
+        Assert.Equal("USB002", merged.PortName);
+        Assert.False(merged.IsDefault);
+        Assert.Equal("{\"color\":true}", merged.CapabilitiesJson);
+    }
+
+    [Fact]
+    public void CapabilityEnrichmentDoesNotApplySnapshotFromAChangedDriver()
+    {
+        var current =
+            new DiscoveredPrinter("HP Lobby", "New Driver", "USB002", "Ready", true,
+                OutputMode: PrinterOutputModeRules.Physical);
+        var oldSnapshot =
+            new DiscoveredPrinter("HP Lobby", "Old Driver", "USB001", "Ready", true,
+                OutputMode: PrinterOutputModeRules.Physical,
+                CapabilitiesJson: "{\"duplex\":true}");
+
+        var result = Assert.Single(WindowsPrinterDiscovery.ApplyCapabilitySnapshots([current], [oldSnapshot]));
+
+        Assert.Equal("New Driver", result.DriverName);
+        Assert.Equal("{}", result.CapabilitiesJson);
+    }
+
+    [Fact]
     public void WindowsDriverCapabilityDiscoveryReturnsStructuredReportForInstalledPdfPrinter()
     {
         if (!OperatingSystem.IsWindows())
