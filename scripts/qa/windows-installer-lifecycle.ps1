@@ -305,24 +305,65 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
         $startExitCode = $LASTEXITCODE
         if ($startExitCode -ne 0) {
             $serviceDetails = (& sc.exe queryex $probeServiceName 2>&1 | Out-String).Trim()
-            $recentServiceEvents = @()
-            foreach ($eventLog in @("System", "Application")) {
-                try {
-                    $recentServiceEvents += @(
-                        Get-WinEvent -FilterHashtable @{ LogName = $eventLog; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction Stop |
-                        Where-Object {
-                            ($eventLog -eq "System" -and $_.ProviderName -eq "Service Control Manager") -or
-                            ($eventLog -eq "Application" -and $_.ProviderName -in @(".NET Runtime", "Application Error"))
-                        } |
-                        Select-Object -First 5 |
-                        ForEach-Object { "$($_.TimeCreated.ToString('o')) [$($_.ProviderName)] EventId=$($_.Id): $(($_.Message -replace '\s+', ' ').Trim())" }
-                    )
-                }
-                catch {
-                    # Event-log access varies by hosted-runner image; keep SCM output when unavailable.
+            $serviceConfiguration = (& sc.exe qc $probeServiceName 2>&1 | Out-String).Trim()
+            $serviceSecurityDescriptor = (& sc.exe sdshow $probeServiceName 2>&1 | Out-String).Trim()
+            $fixtureExecutableAcl = (& $icaclsPath $fixtureExecutablePath 2>&1 | Out-String).Trim()
+            $fixtureDirectoryAcl = (& $icaclsPath $serviceFixtureDirectory 2>&1 | Out-String).Trim()
+            $currentIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+            $currentPrincipal = [System.Security.Principal.WindowsPrincipal]::new($currentIdentity)
+            $isAdministrator = $currentPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)
+            $serviceLogonRights = "unavailable"
+            $securityPolicyPath = Join-Path $env:RUNNER_TEMP "smartprint-lifecycle-user-rights.inf"
+            try {
+                & (Join-Path $env:SystemRoot "System32\secedit.exe") /export /cfg $securityPolicyPath /areas USER_RIGHTS /quiet | Out-Null
+                if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $securityPolicyPath)) {
+                    $rights = Get-Content -LiteralPath $securityPolicyPath |
+                        Where-Object { $_ -match '^Se(ServiceLogonRight|DenyServiceLogonRight)\s*=' }
+                    $serviceLogonRights = ($rights -join " | ")
                 }
             }
-            throw "Windows could not start the disposable LocalService fixture service. ExitCode=$startExitCode; StartOutput=$startOutput; ServiceDetails=$serviceDetails; RecentEvents=$($recentServiceEvents -join ' || ')"
+            catch {
+                $serviceLogonRights = "export failed: $($_.Exception.Message)"
+            }
+            finally {
+                Remove-Item -LiteralPath $securityPolicyPath -Force -ErrorAction SilentlyContinue
+            }
+
+            $relevantSystemEvents = @()
+            try {
+                $relevantSystemEvents = @(
+                    Get-WinEvent -FilterHashtable @{
+                        LogName = "System"
+                        Id = @(7000, 7001, 7009, 7011, 7023, 7024, 7038, 7041, 7045)
+                        StartTime = (Get-Date).AddMinutes(-10)
+                    } -ErrorAction Stop |
+                    Select-Object -First 20 |
+                    ForEach-Object {
+                        "$($_.TimeCreated.ToString('o')) EventId=$($_.Id): $(($_.Message -replace '\s+', ' ').Trim())"
+                    }
+                )
+            }
+            catch {
+                $relevantSystemEvents = @("System event query unavailable: $($_.Exception.Message)")
+            }
+            $failedLogons = @()
+            try {
+                $failedLogons = @(
+                    Get-WinEvent -FilterHashtable @{
+                        LogName = "Security"
+                        Id = 4625
+                        StartTime = (Get-Date).AddMinutes(-10)
+                    } -ErrorAction Stop |
+                    Select-Object -First 10 |
+                    ForEach-Object {
+                        "$($_.TimeCreated.ToString('o')) EventId=$($_.Id): $(($_.Message -replace '\s+', ' ').Trim())"
+                    }
+                )
+            }
+            catch {
+                $failedLogons = @("Security event query unavailable: $($_.Exception.Message)")
+            }
+            throw "Windows could not start the disposable LocalService fixture service. ExitCode=$startExitCode; StartOutput=$startOutput; ServiceDetails=$serviceDetails; ServiceConfiguration=$serviceConfiguration; ServiceSecurityDescriptor=$serviceSecurityDescriptor; FixtureExecutableAcl=$fixtureExecutableAcl; FixtureDirectoryAcl=$fixtureDirectoryAcl; Caller=$($currentIdentity.Name); CallerIsAdministrator=$isAdministrator; ServiceLogonRights=$serviceLogonRights; RelevantSystemEvents=$($relevantSystemEvents -join ' || '); FailedLogons=$($failedLogons -join ' || ')"
         }
 
         $deadline = [DateTime]::UtcNow.AddSeconds(45)
