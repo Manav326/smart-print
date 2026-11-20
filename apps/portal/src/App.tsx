@@ -7,7 +7,7 @@ import { identifySupportedDocument, type SupportedDocumentType } from "./documen
 import { calculateBatchQuoteBreakdown } from "./batch-quote-breakdown.js";
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from "react";
 import {
-  Activity, ArrowRight, Check, Clock3, Copy, CreditCard, FileText, FileUp, FolderOpen, LayoutDashboard,
+  Activity, ArrowRight, Check, Clock3, Copy, CreditCard, Download, FileText, FileUp, FolderOpen, LayoutDashboard,
   ChevronDown, LifeBuoy, LogOut, Menu, Monitor, Plus, Printer, QrCode, Search, Settings, Wifi, Image as ImageIcon, UserRound, Share2,
   ShieldCheck, AlertTriangle, Users, Wallet, X, PanelLeftClose, PanelLeftOpen, RotateCcw, RefreshCw, Zap, Info, Lock
 } from "lucide-react";
@@ -25,7 +25,7 @@ import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from ".
 import AuthScreen from "./AuthScreen";
 import PublicLandingPage from "./PublicLandingPage";
 import QrStationPrintDocument from "./QrStationPrintDocument";
-import { createQrStationImageFile, downloadQrStationImage, loadQrStationLogoDataUri, shareQrStationImage, type QrStationImageFormat } from "./qr-station-export";
+import { buildQrStationArtworkSvg, createQrStationImageFile, downloadQrStationImage, loadQrStationLogoDataUri, shareQrStationImage, type QrStationArtworkSource, type QrStationImageFormat } from "./qr-station-export";
 import { resolveCustomerUploadStatusMessage } from "./customer-upload-status";
 import { getPublicDownloadPath, usePublicRelease } from "./release-metadata";
 import PlatformAdminConsole from "./PlatformAdminConsole";
@@ -2354,19 +2354,56 @@ function PrintersPage({ printers, agents, busyResourceId, onAdd, onToggle }: { p
   );
 }
 
+function QrStationArtworkPreview({station,profile}:{station:QrStation;profile:ShopProfile|null}) {
+  const [posterSrc,setPosterSrc]=useState<string|null>(null);
+  const previewQrHostRef=useRef<HTMLDivElement|null>(null);
+
+  useEffect(()=>{
+    let cancelled=false;
+    const qrSvg=previewQrHostRef.current?.querySelector<SVGSVGElement>(".qr-code-frame svg");
+    if(!qrSvg){setPosterSrc(null);return;}
+    const qrSvgMarkup=new XMLSerializer().serializeToString(qrSvg);
+    void loadQrStationLogoDataUri(profile?.logoUrl).then(logoDataUri=>{
+      if(cancelled)return;
+      try{
+        const poster=buildQrStationArtworkSvg({
+          shopName:profile?.displayName?.trim()||station.displayName,
+          stationName:station.displayName,
+          isEnabled:station.isEnabled,
+          logoDataUri
+        },qrSvgMarkup);
+        setPosterSrc("data:image/svg+xml;charset=utf-8,"+encodeURIComponent(poster));
+      }catch{
+        setPosterSrc(null);
+      }
+    });
+    return ()=>{cancelled=true;};
+  },[station.id,station.publicUrl,station.displayName,station.isEnabled,profile?.displayName,profile?.logoUrl]);
+
+  return <div id={`qr-station-${station.id}`} className="station-qr-area qr-station-preview">
+    {posterSrc
+      ?<img className="station-poster-preview" src={posterSrc} alt={`${station.displayName} QR poster preview for ${profile?.displayName?.trim()||station.displayName}`}/>
+      :<div className="station-poster-preview-loading" role="status">Preparing the matching QR poster preview…</div>}
+    <div className="qr-preview-source" ref={previewQrHostRef} aria-hidden="true">
+      <div className="qr-code-frame"><QRCode value={station.publicUrl??""} size={172} level="H" fgColor="#101c35" bgColor="#ffffff"/></div>
+    </div>
+  </div>;
+}
+
 function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGenerate }: {
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
   const [printingStationId,setPrintingStationId]=useState<string|null>(null);
+  const [printingArtwork,setPrintingArtwork]=useState<{stationId:string;artwork:QrStationArtworkSource}|null>(null);
   const [formatByStation,setFormatByStation]=useState<Record<string,QrStationImageFormat>>({});
   const [exportingStationId,setExportingStationId]=useState<string|null>(null);
   const [copyFeedback,setCopyFeedback]=useState<Record<string,{kind:"success"|"error";message:string}>>({});
   const [exportFeedback,setExportFeedback]=useState<Record<string,{kind:"success"|"info"|"error";message:string}>>({});
   const [preparedShareImage,setPreparedShareImage]=useState<{stationId:string;signature:string;file:File}|null>(null);
   const imageFormatFor=(station:QrStation)=>formatByStation[station.id]??"png";
-  const stationImageSignature=(station:QrStation)=>JSON.stringify([
+  const stationImageSignature=(station:QrStation,format=imageFormatFor(station))=>JSON.stringify([
     station.publicUrl??"",station.displayName,station.isEnabled,
-    profile?.displayName??"",profile?.logoUrl??"",imageFormatFor(station)
+    profile?.displayName??"",profile?.logoUrl??"",format
   ]);
   const copyStationUrl=async(station:QrStation)=>{
     if(!station.publicUrl)return;
@@ -2375,40 +2412,64 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
       ?{kind:"success",message:"Station link copied."}
       :{kind:"error",message:"Could not copy automatically. Open the link and copy it manually."}}));
   };
-  const createStationImage=async(station:QrStation)=>{
+  const createStationArtwork=async(station:QrStation):Promise<QrStationArtworkSource>=>{
     if(!station.publicUrl)throw new Error("This station does not have a public QR link yet.");
     const root=document.getElementById("qr-station-"+station.id);
     const qrSvg=root?.querySelector<SVGSVGElement>(".qr-code-frame svg");
     if(!qrSvg)throw new Error("The station QR code is not ready. Refresh the page and try again.");
     const logoDataUri=await loadQrStationLogoDataUri(profile?.logoUrl);
-    return createQrStationImageFile({
-      shopName:profile?.displayName?.trim()||station.displayName,
-      stationName:station.displayName,
-      isEnabled:station.isEnabled,
-      logoDataUri
-    },new XMLSerializer().serializeToString(qrSvg),imageFormatFor(station));
+    return {
+      options:{
+        shopName:profile?.displayName?.trim()||station.displayName,
+        stationName:station.displayName,
+        isEnabled:station.isEnabled,
+        logoDataUri
+      },
+      qrSvgMarkup:new XMLSerializer().serializeToString(qrSvg)
+    };
+  };
+  const createStationImage=async(station:QrStation,format=imageFormatFor(station))=>{
+    const artwork=await createStationArtwork(station);
+    return createQrStationImageFile(artwork.options,artwork.qrSvgMarkup,format);
+  };
+  const prepareStationPrint=async(station:QrStation)=>{
+    setPrintingStationId(station.id);
+    setPrintingArtwork(null);
+    try{
+      const artwork=await createStationArtwork(station);
+      setPrintingArtwork({stationId:station.id,artwork});
+    }catch(exception){
+      setPrintingStationId(null);
+      setExportFeedback(current=>({...current,[station.id]:{
+        kind:"error",
+        message:exception instanceof Error?exception.message:"Could not prepare this QR poster."
+      }}));
+    }
   };
   const exportStationImage=async(station:QrStation)=>{
     setExportingStationId(station.id);
-    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing a sharp, scan-ready QR image…"}}));
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing your QR poster download…"}}));
     try{
       const file=await createStationImage(station);
       downloadQrStationImage(file);
-      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Your "+imageFormatFor(station).toUpperCase()+" QR image is ready."}}));
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Your "+imageFormatFor(station).toUpperCase()+" poster is ready."}}));
     }catch(exception){
-      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR poster."}}));
     }finally{setExportingStationId(null);}
   };
-  const prepareStationShare=async(station:QrStation)=>{
+  const prepareStationShare=async(station:QrStation,format=imageFormatFor(station))=>{
+    const signature=stationImageSignature(station,format);
+    if(preparedShareImage?.stationId===station.id&&preparedShareImage.signature===signature)return;
     setExportingStationId(station.id);
-    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing the QR image for sharing…"}}));
+    setPreparedShareImage(null);
+    setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Preparing the poster so it is ready to share…"}}));
     try{
-      const file=await createStationImage(station);
-      setPreparedShareImage({stationId:station.id,signature:stationImageSignature(station),file});
-      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Image ready. Tap “Share image now” to open your device’s share options."}}));
+      const file=await createStationImage(station,format);
+      setPreparedShareImage({stationId:station.id,signature,file});
+      setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"Poster ready. Share will open your device’s sharing options."}}));
     }catch(exception){
       setPreparedShareImage(null);
-      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR image."}}));
+      setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not prepare this QR poster for sharing."}}));
     }finally{setExportingStationId(null);}
   };
   const sharePreparedStationImage=(station:QrStation)=>{
@@ -2425,31 +2486,29 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
     void shareQrStationImage(file).then(result=>{
       if(result==="shared"){
         setPreparedShareImage(null);
-        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR image shared successfully."}}));
+        setExportFeedback(current=>({...current,[station.id]:{kind:"success",message:"QR poster shared successfully."}}));
       }else if(result==="cancelled"){
         setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"Sharing was cancelled. The image was not sent."}}));
       }else{
         downloadQrStationImage(file);
         setPreparedShareImage(null);
-        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"File sharing is not supported here, so the QR image was downloaded instead."}}));
+        setExportFeedback(current=>({...current,[station.id]:{kind:"info",message:"File sharing is not supported here, so the QR poster was downloaded instead."}}));
       }
     }).catch(exception=>{
       setExportFeedback(current=>({...current,[station.id]:{kind:"error",message:exception instanceof Error?exception.message:"Could not share this QR image."}}));
     }).finally(()=>setExportingStationId(null));
   };
   useEffect(()=>{
-    if(!printingStationId)return;
+    if(!printingStationId||!printingArtwork||printingArtwork.stationId!==printingStationId)return;
     let cancelled=false;
-    const onAfterPrint=()=>setPrintingStationId(null);
+    const onAfterPrint=()=>{
+      setPrintingStationId(null);
+      setPrintingArtwork(null);
+    };
     const printSelectedStation=async()=>{
-      const images=Array.from(document.querySelectorAll<HTMLImageElement>(".qr-print-document img"));
-      await Promise.all(images.map(async image=>{
-        try {
-          if(!image.complete) await image.decode();
-        } catch {
-          // Shop name and the text wordmark remain available if a brand image fails.
-        }
-      }));
+      const image=document.querySelector<HTMLImageElement>(".qr-print-document img.qr-print-poster");
+      if(!image)throw new Error("The QR poster is not ready to print.");
+      await image.decode();
       await document.fonts.ready.catch(()=>undefined);
       await new Promise<void>(resolve=>{
         window.requestAnimationFrame(()=>window.requestAnimationFrame(()=>resolve()));
@@ -2457,53 +2516,60 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
       if(!cancelled)window.print();
     };
     window.addEventListener("afterprint",onAfterPrint);
-    void printSelectedStation();
+    void printSelectedStation().catch(exception=>{
+      if(cancelled)return;
+      setExportFeedback(current=>({...current,[printingStationId]:{
+        kind:"error",
+        message:exception instanceof Error?exception.message:"Could not print this QR poster."
+      }}));
+      setPrintingStationId(null);
+      setPrintingArtwork(null);
+    });
     return ()=>{
       cancelled=true;
       window.removeEventListener("afterprint",onAfterPrint);
     };
-  },[printingStationId]);
+  },[printingStationId,printingArtwork]);
 
   return (
     <>
     <section className="panel collection-panel">
       <div className="collection-header"><div><h2>Customer QR stations</h2><p>Each station has a permanent public link. Every scan creates a separate short-lived customer session.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Create station</button></div>
       {stations.length===0 ? <EmptyModule icon={<QrCode size={24}/>} title="Your first QR station starts here" text="Create a station for a counter or printer. The QR code identifies the station; every scan gets a separate expiring customer session." actionLabel="Create QR station" onAction={onAdd}/> :
-      <div className="station-grid">{stations.map(station=><article id={`qr-station-${station.id}`} className="station-card" key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
-        <div className="station-qr-area">{station.publicUrl ? <div className="qr-paper">
-          <div className="qr-shop-brand">{profile?.logoUrl?<img src={profile.logoUrl} alt={profile.displayName+" logo"}/>:<img src="/smartprint-mark.svg" alt="Smart Print"/>}<div><strong>{profile?.displayName||station.displayName}</strong><small>DOCUMENT PRINTING STATION</small></div></div>
-          <div className="qr-code-frame"><QRCode value={station.publicUrl} size={172} level="H" fgColor="#101c35" bgColor="#ffffff"/></div>
-          <span className="qr-scan-label">SCAN TO PRINT</span>
-          <span className="qr-scan-hint">Scan to upload documents and send them to this shop</span>
-          <div className="qr-shop-station">{station.displayName}</div>
-          <div className="qr-powered"><small>POWERED BY</small><div className="qr-powered-lockup" aria-label="QuantaEdge, Smarter Decisions. Greater Growth."><img className="qr-quantaedge-mark" src="/branding/quantaedge-mark.png" alt="" onError={event=>{event.currentTarget.hidden=true;const fallback=event.currentTarget.nextElementSibling;if(fallback instanceof HTMLElement)fallback.hidden=false;}}/><span className="qr-quantaedge-mark-fallback" hidden aria-hidden="true">Q</span><div className="qr-powered-wordmark"><strong>Quanta<span>Edge</span></strong><small>Smarter Decisions. Greater Growth.</small></div></div></div>
-        </div> : <div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div>}</div>
+      <div className="station-grid">{stations.map(station=><article className="station-card" key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
+        {station.publicUrl
+          ?<QrStationArtworkPreview station={station} profile={profile}/>
+          :<div className="station-qr-area"><div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div></div>}
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:station.isEnabled?"Disable station":"Enable station"}</button></div>
         {station.publicUrl && <>
-           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button><button className="secondary-button" onClick={()=>setPrintingStationId(station.id)}>Print / download QR poster</button></div>
+           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button></div>
            {copyFeedback[station.id]&&<small className={"qr-share-feedback "+copyFeedback[station.id].kind} role="status" aria-live="polite">{copyFeedback[station.id].message}</small>}
-           <details className="qr-share-export">
-             <summary><Share2 size={15}/> Download or share QR image <span>PNG / JPG</span></summary>
-             <div className="qr-share-export-controls">
-               <label>Image format
-                 <select value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));}} disabled={!!exportingStationId}>
+           <details className="qr-poster-actions" onToggle={event=>{if(event.currentTarget.open)void prepareStationShare(station);}}>
+             <summary><Printer size={15}/> Print / download QR poster <span>Print · PNG / JPG · Share</span></summary>
+             <div className="qr-poster-format-row">
+               <label htmlFor={`qr-poster-format-${station.id}`}>
+                 <span>File format <small>Download and Share only · Print uses the poster as shown</small></span>
+                 <select id={`qr-poster-format-${station.id}`} value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));setPreparedShareImage(current=>current?.stationId===station.id?null:current);void prepareStationShare(station,format);}} disabled={!!exportingStationId}>
                    <option value="png">PNG · best QR clarity</option>
                    <option value="jpg">JPG · smaller file</option>
                  </select>
                </label>
-               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<ImageIcon size={14}/>} Download image</button>
-               {preparedShareImage?.stationId===station.id&&preparedShareImage.signature===stationImageSignature(station)
-                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Share image now</button>
-                 :<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Share2 size={14}/>} Prepare to share</button>}
              </div>
-             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The exported image is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
+             <div className="qr-poster-action-buttons">
+               <button className="primary-button" disabled={!!printingStationId||!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationPrint(station)}>{printingStationId===station.id?<span className="button-spinner"/>:<Printer size={15}/>} Print poster</button>
+               <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Download size={15}/>} Download poster</button>
+               {preparedShareImage?.stationId===station.id&&preparedShareImage.signature===stationImageSignature(station)
+                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}><Share2 size={15}/> Share poster</button>
+                 :<button className="secondary-button" disabled={!!busyResourceId||exportingStationId===station.id} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:exportFeedback[station.id]?.kind==="error"?<RefreshCw size={15}/>:<Share2 size={15}/>} {exportingStationId===station.id?"Preparing share…":exportFeedback[station.id]?.kind==="error"?"Retry share preparation":"Refresh share"}</button>}
+             </div>
+             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The poster is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
              {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
-             <small className="qr-share-export-help">Prepare the image first, then tap “Share image now” to open your device’s share sheet. If file sharing is unavailable, SmartPrint downloads the same image instead. The QR contains this station’s current public link, never a customer session token.</small>
+             <small className="qr-poster-actions-help">The preview above is the exact poster used for printing, downloading and sharing. We prepare the selected file format when you open this panel, so Share is ready as a single action. The QR uses this station’s permanent public link, not a customer session token. If your device cannot share files, SmartPrint downloads the poster instead.</small>
            </details>
          </>}
       </article>)}</div>}
     </section>
-    <QrStationPrintDocument station={stations.find(station => station.id === printingStationId) ?? null} profile={profile}/>
+    <QrStationPrintDocument artwork={printingArtwork?.stationId===printingStationId?printingArtwork.artwork:null}/>
     </>
   );
 }

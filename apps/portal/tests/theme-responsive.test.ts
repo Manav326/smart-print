@@ -232,47 +232,50 @@ test("workspace styles retain one authoritative appearance palette", () => {
 });
 
 
-test("QR station poster renders one canonical QR in an isolated single-page A5 print surface", () => {
+test("QR station preview and print surface use the same canonical poster artwork", () => {
   const app = read("../src/App.tsx");
   const poster = read("../src/QrStationPrintDocument.tsx");
+  const exporter = read("../src/qr-station-export.ts");
   const css = read("../src/styles.css");
 
-  assert.match(app, /<QrStationPrintDocument station=\{stations\.find\(station => station\.id === printingStationId\)/);
-  assert.match(app, /querySelectorAll<HTMLImageElement>\("\.qr-print-document img"\)/);
+  assert.match(app, /function QrStationArtworkPreview/);
+  assert.match(app, /buildQrStationArtworkSvg\(\{/);
+  assert.match(app, /<QrStationArtworkPreview station=\{station\} profile=\{profile\}\/>/);
+  assert.match(app, /querySelector<SVGSVGElement>\("\.qr-code-frame svg"\)/);
+  assert.match(app, /station-poster-preview/);
+  assert.match(app, /<QrStationPrintDocument artwork=\{printingArtwork/);
   assert.match(poster, /createPortal\([\s\S]*document\.body/);
-  assert.match(poster, /<QRCode value=\{station\.publicUrl\}/);
-  assert.equal((poster.match(/<QRCode\b/g) ?? []).length, 1);
-  assert.match(poster, /Scan, save &amp; send/);
-  assert.match(poster, /save it in the app/i);
-  assert.match(poster, /We review your files/);
-  assert.match(poster, /Print &amp; pick up/);
-  assert.match(poster, /src="\/branding\/quantaedge-logo\.svg" alt="QuantaEdge/);
+  assert.match(poster, /buildQrStationArtworkSvg\(artwork\.options, artwork\.qrSvgMarkup\)/);
+  assert.match(poster, /className="qr-print-poster"/);
+  assert.equal((app.match(/<QRCode value=\{station\.publicUrl\?\?""\}/g) ?? []).length, 1,
+    "The on-screen preview owns the one QR SVG source used by all poster actions.");
+  assert.match(exporter, /width="2480" height="1748" viewBox="0 0 2100 1480"/);
+  assert.match(exporter, /Scan this QR code/);
+  assert.match(exporter, /SCAN TO PRINT/);
   assert.match(css, /@page\s*\{\s*size:\s*A5 landscape;\s*margin:\s*0;/);
-  assert.doesNotMatch(css, /size: 90mm 54mm/);
-  assert.match(css, /body > #root,\s*body > #smartprint-desktop-root\s*\{\s*display:\s*none\s*!important;/,
-    "Print mode must hide both React roots while preserving the isolated station QR poster.");
+  assert.match(css, /body > #root, body > #smartprint-desktop-root\s*\{\s*display:\s*none\s*!important;/);
   assert.match(css, /body > \.qr-print-document\s*\{[^}]*width:\s*210mm[^}]*height:\s*148mm/s);
-  assert.match(css, /\.qr-print-code-frame svg\s*\{[^}]*width:\s*66mm[^}]*height:\s*66mm/s);
+  assert.match(css, /\.qr-print-document img\.qr-print-poster\s*\{[^}]*width:\s*210mm[^}]*height:\s*148mm/s);
+  assert.match(css, /\.station-poster-preview\s*\{[^}]*width:\s*100%[^}]*object-fit:\s*contain/s);
 });
 
-
-test("QR station poster has a clear three-step hierarchy and scan-first customer call to action", () => {
-  const poster = read("../src/QrStationPrintDocument.tsx");
+test("QR poster instructions clearly explain the customer journey from scanning to collection", () => {
+  const exporter = read("../src/qr-station-export.ts");
   const css = read("../src/styles.css");
 
-  assert.match(poster, /YOUR PRINTING, MADE SIMPLE/);
-  assert.match(poster, /Scan, save &amp; send/);
-  assert.match(poster, /We review your files/);
-  assert.match(poster, /Print &amp; pick up/);
-  assert.match(poster, /START HERE/);
-  assert.match(poster, /SCAN TO PRINT/);
-  assert.match(poster, /quantaedge-logo\.svg/);
-  assert.match(css, /qr-print-step-scan/);
-  assert.match(css, /qr-print-step-review/);
-  assert.match(css, /qr-print-step-collect/);
-  assert.match(css, /qr-print-scan-panel\s*\{/);
-  assert.match(css, /font:\s*500 7\.8pt\/1\.28/);
-  assert.match(poster, /aria-hidden="true">↓<\/span>/);
+  assert.match(exporter, /YOUR PRINTING, MADE SIMPLE/);
+  assert.match(exporter, /Scan this QR code/);
+  assert.match(exporter, /Open the link, then choose or photograph your documents\./);
+  assert.match(exporter, /Send for shop review/);
+  assert.match(exporter, /Your shop checks the files before printing\./);
+  assert.match(exporter, /Collect your printouts/);
+  assert.match(exporter, /Visit the counter when your copies are ready\./);
+  assert.match(exporter, /START HERE/);
+  assert.match(exporter, /SCAN TO PRINT/);
+  assert.match(css, /\.station-poster-preview-loading/);
+  assert.match(css, /\.qr-poster-action-buttons\s*\{[^}]*grid-template-columns:\s*repeat\(3,minmax\(0,1fr\)\)/s);
+  assert.match(css, /\.qr-poster-action-buttons button\s*\{[^}]*min-height:\s*44px/s);
+  assert.match(css, /\.qr-poster-action-buttons button:last-child\s*\{\s*grid-column:\s*1\/-1/s);
 });
 
 test("batch routing enforces local-computer ownership and preserves print-time audit identity", () => {
@@ -784,28 +787,37 @@ test("customer upload controls and selected-document preview reflow cleanly on n
 });
 
 
-test("QR station image sharing keeps the canonical station QR and offers PNG/JPG file actions", () => {
+test("QR station actions share one poster and scope PNG/JPG to file outputs", () => {
   const app = read("../src/App.tsx");
   const exporter = read("../src/qr-station-export.ts");
   const printPoster = read("../src/QrStationPrintDocument.tsx");
-  assert.ok(app.includes("Download or share QR image"));
-  assert.ok(app.includes("PNG · best QR clarity"));
-  assert.ok(app.includes("JPG · smaller file"));
+  const css = read("../src/styles.css");
+
+  assert.ok(app.includes("Print / download QR poster"));
+  assert.ok(app.includes("File format"));
+  assert.ok(app.includes("Download and Share only · Print uses the poster as shown"));
+  assert.ok(app.includes("Share poster"));
+  assert.ok(!app.includes("Download or share QR image"));
+  assert.ok(!app.includes("Prepare to share poster"));
+  assert.ok(app.includes("onToggle={event=>{if(event.currentTarget.open)void prepareStationShare(station);}}"));
+  assert.ok(app.includes("void prepareStationShare(station,format)"));
+  assert.ok(app.includes("The preview above is the exact poster used for printing, downloading and sharing."));
+  assert.ok(app.includes("permanent public link, not a customer session token"));
   assert.ok(app.includes("shareQrStationImage(file)"));
-  assert.ok(app.includes("File sharing is not supported here"));
-  assert.ok(app.includes("The QR contains this station’s current public link"));
+  assert.ok(app.includes("File sharing is not supported here, so the QR poster was downloaded instead."));
   assert.ok(app.includes("The image was not sent"));
   assert.ok(app.includes("Station link copied."));
   assert.ok(app.includes("Could not copy automatically"));
   assert.ok(app.includes("downloadQrStationImage(file)"));
   assert.ok(app.includes('document.getElementById("qr-station-"+station.id)'));
-  assert.ok(app.includes('QRCode value={station.publicUrl}'));
-  assert.ok(exporter.includes('width="1080" height="1350"'));
+  assert.ok(app.includes('QRCode value={station.publicUrl??""}'));
+  assert.ok(exporter.includes('width="2480" height="1748"'));
   assert.ok(exporter.includes("TEMPORARILY PAUSED"));
   assert.ok(exporter.includes("shareNavigator.canShare"));
   assert.ok(exporter.includes("image/jpeg"));
-  assert.ok(printPoster.includes("<QRCode value={station.publicUrl}"),
-    "The existing A5 print poster must remain available.");
+  assert.ok(printPoster.includes("buildQrStationArtworkSvg(artwork.options, artwork.qrSvgMarkup)"));
+  assert.match(css, /\.qr-poster-format-row select\s*\{[^}]*height:\s*44px/s);
+  assert.match(css, /\.qr-poster-action-buttons button:last-child\s*\{\s*grid-column:\s*1\/-1/s);
 });
 
 test("customer QR session recovery is tab-scoped and the previous order is explicitly read-only", () => {
@@ -854,19 +866,24 @@ test("shop media preview distinguishes loading, unsupported and failed media sta
 });
 
 
-test("QR image sharing prepares the file before a separate user-activated share action", () => {
+test("QR poster sharing is prebuilt on panel open and opens from one user action", () => {
   const app = read("../src/App.tsx");
   const handlerStart = app.indexOf("const sharePreparedStationImage=(station:QrStation)=>{");
   assert.ok(handlerStart >= 0, "The ready-to-share file must have a dedicated click handler.");
   const handlerEnd = app.indexOf("\n  useEffect(()=>{", handlerStart);
   const handler = app.slice(handlerStart, handlerEnd > handlerStart ? handlerEnd : undefined);
   assert.ok(handler.includes("void shareQrStationImage(file)"));
-  assert.ok(!handler.includes("await "), "Image generation must finish before the share click to preserve browser user activation.");
-  assert.ok(app.includes("Prepare to share"));
-  assert.ok(app.includes("Share image now"));
-  assert.ok(app.includes("stationImageSignature(station)"), "Stale prepared artwork must not be shared after station details change.");
+  assert.ok(!handler.includes("await "), "Image generation must finish before the Share click to preserve browser user activation.");
+  assert.ok(app.includes("onToggle={event=>{if(event.currentTarget.open)void prepareStationShare(station);}}"),
+    "Opening the action panel should prepare the selected format before the owner presses Share.");
+  assert.ok(app.includes("Share poster"));
+  assert.ok(app.includes("onClick={()=>sharePreparedStationImage(station)}"));
+  assert.ok(app.includes("void prepareStationShare(station,format)"),
+    "Changing PNG/JPG should refresh the cached file before it is shared.");
+  assert.ok(app.includes("stationImageSignature(station,format)"),
+    "Stale prepared artwork must not be shared after station details or file format change.");
+  assert.ok(!app.includes("Prepare to share poster"));
 });
-
 
 test("shop PDF previews never leave an indefinite loading spinner when the browser viewer is slow", () => {
   const preview = read("../src/ShopDocumentPreviewSurface.tsx");
