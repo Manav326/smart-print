@@ -22,6 +22,7 @@ using SmartPrint.Api.Storage;
 using SmartPrint.Api.Services;
 using SmartPrint.Api.Modules.Health.Registration;
 using SmartPrint.Api.Modules.Authentication.Registration;
+using SmartPrint.Api.Modules.PlatformOperationalSettings.Registration;
 using SmartPrint.Api.Modules.PlatformDataTransfer.Registration;
 using SmartPrint.Api.Modules.ShopSubscriptionPayments.Registration;
 using SmartPrint.Documents;
@@ -104,6 +105,7 @@ builder.Services.AddAuthorization(options =>
 });
 builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddAuthenticationModule();
+builder.Services.AddPlatformOperationalSettingsModule();
 builder.Services.AddSingleton<GoogleIdentityService>();
 builder.Services.AddSingleton<GoogleLoginNonceStore>();
 builder.Services.AddScoped<TenantEntitlementService>();
@@ -286,7 +288,7 @@ var platform = app.MapGroup("/api/v1/platform")
 
 platform.MapSubscriptionPlanEndpoints();
 platform.MapPlatformSubscriptionEndpoints();
-platform.MapPlatformOperationalSettingsEndpoints();
+platform.MapPlatformOperationalSettingsModule();
 platform.MapPlatformAdvertisingEndpoints();
 platform.MapPlatformDataTransferModule();
 
