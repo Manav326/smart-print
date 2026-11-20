@@ -1048,7 +1048,7 @@ test("shop owners can only select online ready printer queues and new printers r
   assert.match(app, /Adding a new printer/);
   assert.match(app, /Printers &amp; scanners, choose Add device/);
   assert.match(app, /pair that PC's SmartPrint Print Agent to this shop/);
-  assert.match(app, /discovers and registers Windows queues automatically/);
+  assert.match(app, /lists the queue automatically/);
   assert.match(app, /actionLabel="Check Print Agent"/);
   assert.match(app, /onOpenAgent=\{\(\) => navAction\("Print Agent"\)\}/);
   assert.match(app, /use Select to add a queue without replacing anything/);
