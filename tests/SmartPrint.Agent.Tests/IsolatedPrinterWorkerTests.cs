@@ -40,7 +40,7 @@ public sealed class IsolatedPrinterWorkerTests
         var good = await probes.ProbeAsync("Good queue", "Good driver", CancellationToken.None);
 
         Assert.Equal("{}", failed);
-        Assert.Contains("Good queue", good, StringComparison.Ordinal);
+        Assert.Contains("Good queue", good);
         Assert.Equal(2, runner.CallCount);
     }
 

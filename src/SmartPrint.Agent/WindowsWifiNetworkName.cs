@@ -74,7 +74,7 @@ internal static class WindowsWifiNetworkName
         if (!OperatingSystem.IsWindows() || !Guid.TryParse(networkInterfaceId, out var interfaceGuid))
             return null;
 
-        return WindowsWifiNativeQuery.TryGetCurrentSsid(interfaceGuid);
+        return WindowsWifiNativeQuery.TryGetCurrentSsid(networkInterfaceId);
     }
 
     private sealed record CacheEntry(DateTimeOffset ExpiresUtc, string? Ssid);
