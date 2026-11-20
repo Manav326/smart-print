@@ -39,6 +39,7 @@ using SmartPrint.Api.Modules.ShopProfile.Registration;
 using SmartPrint.Api.Modules.ShopAccount.Registration;
 using SmartPrint.Api.Modules.ShopDevices.Registration;
 using SmartPrint.Api.Modules.AgentConnectivity.Registration;
+using SmartPrint.Api.Modules.AgentPrivateDocuments.Registration;
 using SmartPrint.Api.Modules.ShopPricing.Registration;
 using SmartPrint.Documents;
 
@@ -126,6 +127,7 @@ builder.Services.AddShopProfileModule();
 builder.Services.AddShopAccountModule();
 builder.Services.AddShopDevicesModule();
 builder.Services.AddAgentConnectivityModule();
+builder.Services.AddAgentPrivateDocumentsModule();
 builder.Services.AddShopPricingModule();
 builder.Services.AddPlatformTenantsModule();
 builder.Services.AddSingleton<GoogleIdentityService>();
@@ -3377,6 +3379,7 @@ var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
     });
 
 agentApi.MapAgentConnectivityModule(corsOrigins);
+agentApi.MapAgentPrivateDocumentsModule();
 
 agentApi.MapPost("/enroll", async (
     AgentEnrollmentRequest request,
@@ -3460,114 +3463,6 @@ agentApi.MapPost("/enroll", async (
         new AgentEnrollmentResponse(device.Id, rawSecret, device.CreatedUtc));
 }).RequireRateLimiting("authentication");
 
-
-agentApi.MapGet("/jobs/private-purge", async (
-    HttpContext context,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    var device = await AuthenticateAgentAsync(context, db, ct);
-    if (device is null) return Results.Unauthorized();
-
-    var jobIds = await db.PrintJobs.AsNoTracking()
-        .Where(job => job.TenantId == device.TenantId &&
-                      job.ClaimedByAgentDeviceId == device.Id &&
-                      job.PrivatePrinting &&
-                      ((job.Status == "COMPLETED" &&
-                        job.OutputType == "PHYSICAL" &&
-                        job.OutputConfirmedUtc != null) ||
-                       (job.Status == "TEST_OUTPUT_READY" &&
-                        job.OutputType == PrivatePrintingOutputPolicy.TestVirtual &&
-                        job.OutputCompletedUtc != null)) &&
-                      job.PrivateDocumentPurgeRequestedUtc != null &&
-                      job.PrivateDocumentPurgedUtc == null)
-        .OrderBy(job => job.PrivateDocumentPurgeRequestedUtc)
-        .Select(job => job.Id)
-        .Take(100)
-        .ToListAsync(ct);
-
-    return Results.Ok(new { JobIds = jobIds });
-});
-
-agentApi.MapPost("/jobs/{jobId:guid}/private-document-purged", async (
-    Guid jobId,
-    HttpContext context,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    var device = await AuthenticateAgentAsync(context, db, ct);
-    if (device is null) return Results.Unauthorized();
-
-    var job = await db.PrintJobs.SingleOrDefaultAsync(
-        item => item.Id == jobId && item.TenantId == device.TenantId, ct);
-    if (job is null) return Results.NotFound();
-    if (job.PrivateDocumentPurgedUtc is not null)
-        return Results.Ok(new { job.Id, job.PrivateDocumentPurgedUtc, DuplicateRequest = true });
-
-    var physicalOutputConfirmed = job.Status == "COMPLETED" &&
-        job.OutputType == "PHYSICAL" && job.OutputConfirmedUtc is not null;
-    var testOutputVerified = job.Status == "TEST_OUTPUT_READY" &&
-        job.OutputType == PrivatePrintingOutputPolicy.TestVirtual && job.OutputCompletedUtc is not null;
-    if (!job.PrivatePrinting ||
-        (!physicalOutputConfirmed && !testOutputVerified) ||
-        job.PrivateDocumentPurgeRequestedUtc is null ||
-        job.ClaimedByAgentDeviceId != device.Id)
-    {
-        return Results.Conflict(new
-        {
-            code = "private_document_purge_not_authorized",
-            message = "The private source can be purged only after verified physical output or a separately recorded non-production test output. The source must remain available for reconciliation."
-        });
-    }
-
-    var document = await db.PrintDocuments.SingleOrDefaultAsync(
-        item => item.TenantId == device.TenantId && item.PrintJobId == jobId, ct);
-    if (document is null)
-        return Results.Conflict(new { code = "private_document_record_missing", message = "The private document record is unavailable; the purge cannot be acknowledged safely." });
-    if (document.StorageMode != "LOCAL_AGENT" || document.AgentDeviceId != device.Id)
-        return Results.Conflict(new { code = "private_document_storage_mismatch", message = "This private source is not assigned to the acknowledging Agent." });
-
-    var now = DateTimeOffset.UtcNow;
-    document.OriginalFileName = "Private document";
-    document.MediaType = string.Empty;
-    document.FileExtension = string.Empty;
-    document.SizeBytes = 0;
-    document.Sha256 = string.Empty;
-    document.StorageKey = string.Empty;
-    document.PageSizesJson = "[]";
-    document.AgentDeviceId = null;
-    document.PurgedUtc = now;
-    job.PrivateDocumentPurgedUtc = now;
-    job.UpdatedUtc = now;
-    var uploadTicket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
-        item.TenantId == device.TenantId && item.PrintJobId == jobId && item.PrivatePrinting, ct);
-    if (uploadTicket is not null)
-    {
-        uploadTicket.OriginalFileName = "Private document";
-        uploadTicket.MediaType = "application/octet-stream";
-        uploadTicket.FileExtension = ".private";
-        uploadTicket.SizeBytes = 0;
-        uploadTicket.Sha256 = string.Empty;
-        // Keep only the one-way grant digest so the customer can reconcile a
-        // lost upload response. It cannot authorize document retrieval or
-        // cloud recovery after the ticket has completed.
-        uploadTicket.BatchGroupName = "Private documents";
-        uploadTicket.BatchName = null;
-    }
-    db.PrintJobEvents.Add(new PrintJobEvent
-    {
-        TenantId = device.TenantId,
-        PrintJobId = job.Id,
-        PreviousStatus = job.Status,
-        NewStatus = job.Status,
-        ActorType = "PrintAgent",
-        ActorId = device.Id,
-        ReasonCode = "PRIVATE_SOURCE_DOCUMENT_PURGED_AND_METADATA_REDACTED",
-        CreatedUtc = now
-    });
-    await db.SaveChangesAsync(ct);
-    return Results.Ok(new { job.Id, job.PrivateDocumentPurgedUtc, DuplicateRequest = false });
-});
 
 agentApi.MapGet("/private-relays/pending", async (
     HttpContext context,
