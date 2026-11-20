@@ -3464,49 +3464,6 @@ agentApi.MapPost("/enroll", async (
 }).RequireRateLimiting("authentication");
 
 
-agentApi.MapPost("/private-relays/{ticketId:guid}/stage", async (
-    Guid ticketId,
-    AgentPrivateRelayStageUpdateRequest request,
-    HttpContext context,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    var device = await AuthenticateAgentAsync(context, db, ct);
-    if (device is null) return Results.Unauthorized();
-
-    var requestedStage = request.Stage?.Trim().ToUpperInvariant();
-    if (string.IsNullOrWhiteSpace(requestedStage) ||
-        !PrivateRelayProgressRules.IsAgentStage(requestedStage))
-        return Results.BadRequest(new { code = "private_relay_stage_invalid" });
-
-    var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
-        item.Id == ticketId &&
-        item.TenantId == device.TenantId &&
-        item.AgentDeviceId == device.Id &&
-        item.PrivatePrinting, ct);
-    if (ticket is null) return Results.NotFound();
-    if (ticket.CompletedUtc is not null || ticket.PrivateRelayFailedUtc is not null)
-        return Results.Conflict(new { code = "private_relay_terminal_state" });
-    var hasStoredCloudRelay = ticket.PrivateRelayUploadedUtc is not null &&
-        !string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey);
-    var hasClaimedDirectLanUpload = ticket.ClaimedUtc is not null &&
-        ticket.AgentUploadAttempts > 0 && ticket.ClaimLeaseExpiresUtc > DateTimeOffset.UtcNow;
-    if (!hasStoredCloudRelay && !hasClaimedDirectLanUpload)
-        return Results.Conflict(new { code = "private_relay_payload_not_received" });
-
-    if (!PrivateRelayProgressRules.CanAdvance(ticket.PrivateRelayStage, requestedStage))
-    {
-        if (string.Equals(ticket.PrivateRelayStage, requestedStage, StringComparison.Ordinal))
-            return Results.Ok(new { ticket.Id, ticket.PrivateRelayStage, DuplicateRequest = true });
-        return Results.Conflict(new { code = "private_relay_stage_out_of_order", stage = ticket.PrivateRelayStage });
-    }
-
-    ticket.PrivateRelayStage = requestedStage;
-    ticket.PrivateRelayStageUpdatedUtc = DateTimeOffset.UtcNow;
-    await db.SaveChangesAsync(ct);
-    return Results.Ok(new { ticket.Id, ticket.PrivateRelayStage, ticket.PrivateRelayStageUpdatedUtc, DuplicateRequest = false });
-});
-
 agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     Guid ticketId,
     HttpContext context,
