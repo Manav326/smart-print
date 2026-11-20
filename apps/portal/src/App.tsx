@@ -2535,7 +2535,7 @@ function PrintersPage({
             </label>
             <div className="modal-note">
               <ShieldCheck size={15}/>
-              <span>The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Private files stay on their original Windows computer.</span>
+              <span>The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Files stored only on the original Windows computer stay there; choose another queue on that same PC or finish those files before replacing the computer.</span>
             </div>
             <div className="modal-actions">
               <button type="button" className="secondary-button" disabled={!!busyResourceId} onClick={() => { setPendingReplacement(null); setReplacePrinterId(""); }}>Cancel</button>
