@@ -301,9 +301,28 @@ function Invoke-FixtureAsLocalService([string]$Mode, [string[]]$AdditionalArgume
         $probeConfiguration = Get-CimInstance -ClassName Win32_Service -Filter "Name='$probeServiceName'"
         Assert-True ($probeConfiguration.StartName -match 'LocalService$') "The lifecycle fixture service is not configured as LocalService: $($probeConfiguration.StartName)"
 
-        & sc.exe start $probeServiceName | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            throw "Windows could not start the disposable LocalService fixture service."
+        $startOutput = (& sc.exe start $probeServiceName 2>&1 | Out-String).Trim()
+        $startExitCode = $LASTEXITCODE
+        if ($startExitCode -ne 0) {
+            $serviceDetails = (& sc.exe queryex $probeServiceName 2>&1 | Out-String).Trim()
+            $recentServiceEvents = @()
+            foreach ($eventLog in @("System", "Application")) {
+                try {
+                    $recentServiceEvents += @(
+                        Get-WinEvent -FilterHashtable @{ LogName = $eventLog; StartTime = (Get-Date).AddMinutes(-5) } -ErrorAction Stop |
+                        Where-Object {
+                            ($eventLog -eq "System" -and $_.ProviderName -eq "Service Control Manager") -or
+                            ($eventLog -eq "Application" -and $_.ProviderName -in @(".NET Runtime", "Application Error"))
+                        } |
+                        Select-Object -First 5 |
+                        ForEach-Object { "$($_.TimeCreated.ToString('o')) [$($_.ProviderName)] EventId=$($_.Id): $(($_.Message -replace '\s+', ' ').Trim())" }
+                    )
+                }
+                catch {
+                    # Event-log access varies by hosted-runner image; keep SCM output when unavailable.
+                }
+            }
+            throw "Windows could not start the disposable LocalService fixture service. ExitCode=$startExitCode; StartOutput=$startOutput; ServiceDetails=$serviceDetails; RecentEvents=$($recentServiceEvents -join ' || ')"
         }
 
         $deadline = [DateTime]::UtcNow.AddSeconds(45)
