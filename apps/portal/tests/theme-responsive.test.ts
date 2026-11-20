@@ -1035,3 +1035,20 @@ test("customer upload progress counts confirmed files separately from failed and
   assert.match(app, /Retry only failed files/);
   assert.doesNotMatch(app, /\{uploadProgress\.completed\} of \{uploadProgress\.total\} files complete/);
 });
+
+
+test("shop owners can only select online ready printer queues and new printers register through discovery", () => {
+  const app = read("../src/App.tsx");
+  const api = read("../../../src/SmartPrint.Api/Program.cs");
+
+  assert.match(app, /function isPrinterReadyForSelection/);
+  assert.match(app, /agent\.status !== "Online"/);
+  assert.match(app, /printer\.status === "Ready" \|\| printer\.status === "Busy"/);
+  assert.match(app, /!printer\.isActive && isPrinterReadyForSelection\(printer, agents\)/);
+  assert.match(app, /Adding a new printer/);
+  assert.match(app, /discovers and registers Windows queues automatically/);
+  assert.doesNotMatch(app, /Add manually|function PrinterModal|Register manually \(advanced\)/);
+
+  assert.match(api, /PrinterSelectionRules\.CanSelect/);
+  assert.match(api, /No selected printer is being replaced/);
+});
