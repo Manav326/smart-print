@@ -15,6 +15,7 @@ public sealed class WindowsPrinterDiscovery
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly ILogger<WindowsPrinterDiscovery> logger;
     private readonly WindowsPrinterCapabilityProbeRunner capabilityProbe;
+    private readonly IAgentChildProcessRunner childProcessRunner;
     private readonly bool executeInCurrentProcess;
     private readonly TimeSpan discoveryTimeout;
 
@@ -22,11 +23,13 @@ public sealed class WindowsPrinterDiscovery
         ILogger<WindowsPrinterDiscovery> logger,
         WindowsPrinterCapabilityProbeRunner? capabilityProbe = null,
         IConfiguration? configuration = null,
-        bool executeInCurrentProcess = false)
+        bool executeInCurrentProcess = false,
+        IAgentChildProcessRunner? childProcessRunner = null)
     {
         this.logger = logger;
         this.capabilityProbe = capabilityProbe ??
             new WindowsPrinterCapabilityProbeRunner(NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance);
+        this.childProcessRunner = childProcessRunner ?? new AgentChildProcessRunner();
         this.executeInCurrentProcess = executeInCurrentProcess;
         discoveryTimeout = TimeSpan.FromSeconds(Math.Clamp(
             configuration?.GetValue<int?>("Agent:PrinterDiscoveryTimeoutSeconds") ?? 90, 15, 300));
@@ -57,7 +60,7 @@ public sealed class WindowsPrinterDiscovery
         {
             try
             {
-                var child = await AgentChildProcess.ExecuteAsync(
+                var child = await childProcessRunner.ExecuteAsync(
                     "--discover-printers", string.Empty, discoveryTimeout, cancellationToken);
                 if (child.TimedOut || child.ExitCode != 0 || child.StandardOutput.Length > 2 * 1024 * 1024)
                 {

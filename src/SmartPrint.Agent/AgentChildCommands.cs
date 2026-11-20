@@ -14,6 +14,8 @@ internal static class AgentChildCommands
 
     public static async Task<bool> TryHandleAsync(string[] args)
     {
+        Console.InputEncoding = System.Text.Encoding.UTF8;
+        Console.OutputEncoding = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
         var command = args.FirstOrDefault(argument => argument.StartsWith("--", StringComparison.Ordinal));
         if (command is null)
             return false;
