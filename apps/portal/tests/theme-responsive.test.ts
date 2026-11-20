@@ -1061,6 +1061,8 @@ test("shop owners can only select online ready printer queues and new printers r
   assert.match(api, /No selected printer is being replaced/);
   assert.match(api, /code = "printer_already_selected"/);
   const orderJourney = read("../src/OrderJourneyPage.tsx");
+  assert.match(orderJourney, /expiredAgentLease/);
+  assert.match(orderJourney, /lease expired before it finished receiving this file/);
   assert.match(orderJourney, /awaitingAgentDispatchCanBeReassigned/);
   assert.match(orderJourney, /has not been submitted to Windows yet/);
   assert.match(orderJourney, /localDocumentNeedsOriginalAgent/);
