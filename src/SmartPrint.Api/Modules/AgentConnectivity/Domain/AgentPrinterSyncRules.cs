@@ -1,7 +1,7 @@
 using System.Text.Json;
 using SmartPrint.Api.Contracts;
 
-namespace SmartPrint.Api.Domain;
+namespace SmartPrint.Api.Modules.AgentConnectivity.Domain;
 
 public enum AgentPrinterSyncValidationFailure
 {
@@ -97,6 +97,20 @@ public static class AgentPrinterSyncRules
             rejectedCount,
             capabilitiesUnknownCount);
     }
+
+    /// <summary>
+    /// Orders supported physical queues before PDF exports and unsupported virtual queues.
+    /// Ready/busy queues and the Windows default queue win ties within each output class.
+    /// </summary>
+    public static IReadOnlyList<AgentPrinterDiscoveryRequest> OrderForSelection(
+        IEnumerable<AgentPrinterDiscoveryRequest> printers) =>
+        printers
+            .OrderBy(printer => printer.OutputMode == "PHYSICAL" ? 0 :
+                printer.OutputMode == "PDF_EXPORT" ? 1 : 2)
+            .ThenByDescending(printer => printer.Status is "Ready" or "Busy")
+            .ThenByDescending(printer => printer.IsDefault)
+            .ThenBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
 
     /// <summary>
     /// Decides whether a newly discovered queue can take an unused plan slot.

@@ -38,6 +38,7 @@ using SmartPrint.Api.Modules.ShopPayments.Registration;
 using SmartPrint.Api.Modules.ShopProfile.Registration;
 using SmartPrint.Api.Modules.ShopAccount.Registration;
 using SmartPrint.Api.Modules.ShopDevices.Registration;
+using SmartPrint.Api.Modules.AgentConnectivity.Registration;
 using SmartPrint.Api.Modules.ShopPricing.Registration;
 using SmartPrint.Documents;
 
@@ -124,6 +125,7 @@ builder.Services.AddShopPaymentsModule();
 builder.Services.AddShopProfileModule();
 builder.Services.AddShopAccountModule();
 builder.Services.AddShopDevicesModule();
+builder.Services.AddAgentConnectivityModule();
 builder.Services.AddShopPricingModule();
 builder.Services.AddPlatformTenantsModule();
 builder.Services.AddSingleton<GoogleIdentityService>();
@@ -3374,6 +3376,8 @@ var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
         return await EnforceTenantActiveAsync(context, next, allowSubscriptionRead: false);
     });
 
+agentApi.MapAgentConnectivityModule(corsOrigins);
+
 agentApi.MapPost("/enroll", async (
     AgentEnrollmentRequest request,
     SmartPrintDbContext db,
@@ -6261,279 +6265,6 @@ agentApi.MapGet("/local-document-previews/{jobId:guid}/authorize", async (
         document.Sha256
     });
 });
-
-agentApi.MapPost("/heartbeat", async (
-    HttpContext context,
-    SmartPrintDbContext db,
-    IConfiguration configuration,
-    AgentHeartbeatRequest request,
-    CancellationToken ct) =>
-{
-    var device = await AuthenticateAgentAsync(context, db, ct);
-    if (device is null)
-    {
-        return Results.Unauthorized();
-    }
-
-    var now = DateTimeOffset.UtcNow;
-    var localEndpoints = AgentLocalEndpointRules.Normalize(request.LocalEndpoints);
-    device.LocalEndpointsJson = JsonSerializer.Serialize(localEndpoints);
-    if (!string.IsNullOrWhiteSpace(request.DocumentEncryptionPublicKey))
-    {
-        try
-        {
-            var publicKeyBytes = Convert.FromBase64String(request.DocumentEncryptionPublicKey);
-            try
-            {
-                using var rsa = RSA.Create();
-                rsa.ImportSubjectPublicKeyInfo(publicKeyBytes, out _);
-                if (rsa.KeySize < 2048 || rsa.KeySize > 4096)
-                    return Results.BadRequest(new { code = "agent_document_key_invalid", message = "The Agent document-encryption key must be RSA-2048 through RSA-4096." });
-                device.DocumentEncryptionPublicKey = request.DocumentEncryptionPublicKey;
-            }
-            finally { CryptographicOperations.ZeroMemory(publicKeyBytes); }
-        }
-        catch (Exception exception) when (exception is FormatException or CryptographicException)
-        {
-            return Results.BadRequest(new { code = "agent_document_key_invalid", message = "The Agent document-encryption public key is invalid." });
-        }
-    }
-    else
-    {
-        // A heartbeat without a usable key disables Private Printing rather
-        // than advertising an obsolete public key after local key-store failure.
-        device.DocumentEncryptionPublicKey = null;
-    }
-    device.Status = "Online";
-    device.LastSeenUtc = now;
-    if (request.StorageSnapshot is { } storageSnapshot &&
-        storageSnapshot.DocumentCount >= 0 &&
-        storageSnapshot.LogicalDocumentBytes >= 0 &&
-        storageSnapshot.QueueDiskBytes >= 0 &&
-        storageSnapshot.OutputFileCount >= 0 &&
-        storageSnapshot.OutputFileBytes >= 0 &&
-        storageSnapshot.MeasuredUtc >= now.AddHours(-1) &&
-        storageSnapshot.MeasuredUtc <= now.AddMinutes(1))
-    {
-        device.LocalQueueDocumentCount = storageSnapshot.DocumentCount;
-        device.LocalQueueLogicalBytes = storageSnapshot.LogicalDocumentBytes;
-        device.LocalQueueDiskBytes = storageSnapshot.QueueDiskBytes;
-        device.LocalOutputFileCount = storageSnapshot.OutputFileCount;
-        device.LocalOutputFileBytes = storageSnapshot.OutputFileBytes;
-        device.LocalStorageMeasuredUtc = storageSnapshot.MeasuredUtc;
-    }
-    await db.SaveChangesAsync(ct);
-    var publicBaseUrl = (configuration["PublicPortal:BaseUrl"] ?? string.Empty).TrimEnd('/');
-    var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
-        .SingleAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, ct);
-    return Results.Ok(new
-    {
-        device.Id,
-        device.Status,
-        device.LastSeenUtc,
-        AgentVersion = request.Version,
-        LocalEndpoints = localEndpoints,
-        PublicBaseUrl = publicBaseUrl,
-        AllowedPortalOrigins = corsOrigins,
-        AgentCompletedDocumentRetentionDays = operationalSettings.AgentCompletedDocumentRetentionDays,
-        AgentRetentionSweepHours = operationalSettings.AgentRetentionSweepHours
-    });
-});
-
-agentApi.MapPost("/printers/sync", async (
-    HttpContext context,
-    SmartPrintDbContext db,
-    AgentPrinterSyncRequest request,
-    TenantEntitlementService entitlements,
-    CancellationToken ct) =>
-{
-    var device = await AuthenticateAgentAsync(context, db, ct);
-    if (device is null) return Results.Unauthorized();
-
-    var validation = AgentPrinterSyncRules.Validate(request.Printers);
-    if (validation.Failure != AgentPrinterSyncValidationFailure.None)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["printers"] = ["Windows can report at most 100 installed printer queues in one inventory update."]
-        });
-    }
-
-    // Prefer usable physical queues, then document export; default queues win ties.
-    // Unsupported virtual/document drivers remain visible but never consume a slot.
-    var normalized = validation.Printers
-        .OrderBy(printer => printer.OutputMode == "PHYSICAL" ? 0 : printer.OutputMode == "PDF_EXPORT" ? 1 : 2)
-        .ThenByDescending(printer => printer.Status is "Ready" or "Busy")
-        .ThenByDescending(printer => printer.IsDefault)
-        .ThenBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
-        .ToList();
-
-    var now = DateTimeOffset.UtcNow;
-    await using var transaction = await db.Database.BeginTransactionAsync(ct);
-    await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.Printer, ct);
-
-    // Discovery is independent of plan capacity. Every valid queue is persisted;
-    // IsActive represents the owner's selected/usable set.
-    var entitlement = await entitlements.GetForTenantAsync(device.TenantId, ct);
-    var tenantPrinters = await db.PrinterDevices.AsNoTracking()
-        .Where(printer => printer.TenantId == device.TenantId)
-        .Select(printer => new { printer.QueueName, printer.IsActive, printer.OutputMode })
-        .ToListAsync(ct);
-    var selectedPrinterCount = tenantPrinters.LongCount(printer =>
-        printer.IsActive && (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT"));
-
-    var existing = await db.PrinterDevices
-        .Where(printer => printer.TenantId == device.TenantId &&
-                          printer.AgentDeviceId == device.Id)
-        .ToListAsync(ct);
-    var seenQueues = normalized.Select(printer => printer.QueueName)
-        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-    var created = 0;
-    var updated = 0;
-    var autoSelected = 0;
-
-    foreach (var discovered in normalized)
-    {
-        var printer = await db.PrinterDevices.FirstOrDefaultAsync(item =>
-            item.TenantId == device.TenantId &&
-            item.AgentDeviceId == device.Id &&
-            item.QueueName == discovered.QueueName, ct);
-
-        var adoptedUnlinkedQueue = false;
-        if (printer is null)
-        {
-            printer = await db.PrinterDevices.FirstOrDefaultAsync(item =>
-                item.TenantId == device.TenantId &&
-                item.QueueName == discovered.QueueName &&
-                (item.AgentDeviceId == null ||
-                 db.AgentDevices.Any(previousAgent =>
-                     previousAgent.Id == item.AgentDeviceId &&
-                     previousAgent.TenantId == device.TenantId &&
-                     previousAgent.RevokedUtc != null)), ct);
-            adoptedUnlinkedQueue = printer is not null && printer.AgentDeviceId is null;
-        }
-
-        if (printer is null)
-        {
-            var selectQueue = AgentPrinterSyncRules.ShouldAutoSelectQueue(
-                discovered.OutputMode,
-                discovered.Status,
-                entitlement.IsAccessActive,
-                selectedPrinterCount,
-                entitlement.MaxPrinters);
-            printer = new PrinterDevice
-            {
-                TenantId = device.TenantId,
-                AgentDeviceId = device.Id,
-                DisplayName = discovered.QueueName,
-                Manufacturer = "Windows",
-                Model = discovered.DriverName,
-                ConnectionType = "WindowsQueue",
-                OutputMode = discovered.OutputMode,
-                ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName,
-                QueueName = discovered.QueueName,
-                IsDefault = discovered.IsDefault,
-                CapabilitiesJson = discovered.CapabilitiesJson,
-                IsActive = selectQueue,
-                CreatedUtc = now
-            };
-            db.PrinterDevices.Add(printer);
-            if (selectQueue)
-            {
-                selectedPrinterCount++;
-                autoSelected++;
-            }
-            created++;
-        }
-        else
-        {
-            // Rescans never override the owner's active/inactive selection.
-            var wasQuotaSelected = printer.IsActive &&
-                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT");
-            var driverChanged = !string.Equals(
-                printer.Model, discovered.DriverName, StringComparison.OrdinalIgnoreCase);
-            printer.AgentDeviceId = device.Id;
-            printer.DisplayName = discovered.QueueName;
-            printer.Manufacturer = "Windows";
-            printer.Model = discovered.DriverName;
-            printer.ConnectionType = "WindowsQueue";
-            printer.OutputMode = discovered.OutputMode;
-            printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName;
-            printer.IsDefault = discovered.IsDefault;
-            printer.CapabilitiesJson = AgentPrinterSyncRules.ResolveCapabilitiesJson(
-                printer.CapabilitiesJson, discovered.CapabilitiesJson, driverChanged);
-            if (discovered.OutputMode == "UNSUPPORTED_VIRTUAL")
-            {
-                printer.IsActive = false;
-                if (wasQuotaSelected) selectedPrinterCount--;
-            }
-            else if (adoptedUnlinkedQueue && !printer.IsActive)
-            {
-                // An unlinked manual placeholder is not an owner selection. It may
-                // be selected after discovery only when a supported slot is available.
-                var selectQueue = AgentPrinterSyncRules.ShouldAutoSelectQueue(
-                    discovered.OutputMode,
-                    discovered.Status,
-                    entitlement.IsAccessActive,
-                    selectedPrinterCount,
-                    entitlement.MaxPrinters);
-                if (selectQueue)
-                {
-                    printer.IsActive = true;
-                    selectedPrinterCount++;
-                    autoSelected++;
-                }
-            }
-            updated++;
-        }
-
-        printer.Status = discovered.Status;
-        printer.LastSeenUtc = now;
-        printer.UpdatedUtc = now;
-    }
-
-    // Do not mark old queues unavailable from a partial or malformed inventory.
-    var unavailable = 0;
-    if (validation.RejectedCount == 0)
-    {
-        foreach (var printer in existing.Where(printer =>
-                     !seenQueues.Contains(printer.QueueName ?? string.Empty)))
-        {
-            printer.Status = "Unavailable";
-            printer.UpdatedUtc = now;
-            unavailable++;
-        }
-    }
-
-    device.Status = "Online";
-    device.LastSeenUtc = now;
-    await db.SaveChangesAsync(ct);
-    await transaction.CommitAsync(ct);
-    return Results.Ok(new
-    {
-        device.Id,
-        Discovered = normalized.Count,
-        Created = created,
-        Updated = updated,
-        Unavailable = unavailable,
-        Rejected = validation.RejectedCount,
-        CapabilitiesUnknown = validation.CapabilitiesUnknownCount,
-        Partial = validation.RejectedCount > 0 || validation.CapabilitiesUnknownCount > 0,
-        AutoSelected = autoSelected,
-        Selected = selectedPrinterCount,
-        MaximumSelected = entitlement.MaxPrinters,
-        SyncedUtc = now
-    });
-});
-
-
-
-
-
-
-
-
-
 
 shop.MapPost("/payments/{paymentId:guid}/verify", async (
     Guid paymentId,

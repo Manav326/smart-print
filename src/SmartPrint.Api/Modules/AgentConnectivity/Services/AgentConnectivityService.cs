@@ -3,8 +3,10 @@ using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Contracts;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
+using SmartPrint.Api.Modules.AgentConnectivity.Domain;
+using SmartPrint.Api.Services;
 
-namespace SmartPrint.Api.Services;
+namespace SmartPrint.Api.Modules.AgentConnectivity.Services;
 
 public sealed record AgentHeartbeatResult(
     Guid Id,
@@ -15,7 +17,12 @@ public sealed record AgentHeartbeatResult(
     string PublicBaseUrl,
     IReadOnlyList<string> AllowedPortalOrigins,
     int AgentCompletedDocumentRetentionDays,
-    int AgentRetentionSweepHours);
+    int AgentRetentionSweepHours,
+    string? FailureCode = null,
+    string? FailureMessage = null)
+{
+    public bool Succeeded => FailureCode is null;
+}
 
 public enum AgentPrinterSyncFailure
 {
@@ -33,6 +40,7 @@ public sealed record AgentPrinterSyncResult(
     int Created = 0,
     int Updated = 0,
     int Unavailable = 0,
+    int AutoSelected = 0,
     DateTimeOffset? SyncedUtc = null,
     string? QuotaCode = null,
     string? QuotaMessage = null,
@@ -40,7 +48,7 @@ public sealed record AgentPrinterSyncResult(
     long? QuotaMaximum = null,
     int Rejected = 0,
     int CapabilitiesUnknown = 0,
-    int Selected = 0,
+    long Selected = 0,
     int? MaximumSelected = null)
 {
     public bool Succeeded => Failure == AgentPrinterSyncFailure.None;
@@ -64,8 +72,39 @@ public sealed class AgentConnectivityService(
         var now = DateTimeOffset.UtcNow;
         var localEndpoints = AgentLocalEndpointRules.Normalize(request.LocalEndpoints);
         device.LocalEndpointsJson = JsonSerializer.Serialize(localEndpoints);
+
+        var keyValidation = AgentHeartbeatRules.ValidateDocumentEncryptionPublicKey(
+            request.DocumentEncryptionPublicKey);
+        if (keyValidation != AgentDocumentEncryptionKeyFailure.None)
+        {
+            var message = keyValidation == AgentDocumentEncryptionKeyFailure.UnsupportedKeySize
+                ? "The Agent document-encryption key must be RSA-2048 through RSA-4096."
+                : "The Agent document-encryption public key is invalid.";
+            return new AgentHeartbeatResult(
+                device.Id, device.Status, device.LastSeenUtc ?? now, request.Version,
+                localEndpoints, publicBaseUrl, corsOrigins, 0, 0,
+                "agent_document_key_invalid", message);
+        }
+
+        // A heartbeat without usable local key material disables Private Printing instead
+        // of leaving an obsolete public key advertised after a local key-store failure.
+        device.DocumentEncryptionPublicKey = string.IsNullOrWhiteSpace(request.DocumentEncryptionPublicKey)
+            ? null
+            : request.DocumentEncryptionPublicKey;
+
         device.Status = "Online";
         device.LastSeenUtc = now;
+        if (request.StorageSnapshot is { } snapshot &&
+            AgentHeartbeatRules.IsStorageSnapshotUsable(snapshot, now))
+        {
+            device.LocalQueueDocumentCount = snapshot.DocumentCount;
+            device.LocalQueueLogicalBytes = snapshot.LogicalDocumentBytes;
+            device.LocalQueueDiskBytes = snapshot.QueueDiskBytes;
+            device.LocalOutputFileCount = snapshot.OutputFileCount;
+            device.LocalOutputFileBytes = snapshot.OutputFileBytes;
+            device.LocalStorageMeasuredUtc = snapshot.MeasuredUtc;
+        }
+
         await db.SaveChangesAsync(cancellationToken);
 
         var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
@@ -100,16 +139,18 @@ public sealed class AgentConnectivityService(
                     : AgentPrinterSyncFailure.InvalidPrinterMetadata);
         }
 
-        var normalized = validation.Printers;
+        var normalized = AgentPrinterSyncRules.OrderForSelection(validation.Printers);
         var now = DateTimeOffset.UtcNow;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.Printer, cancellationToken);
 
         var entitlement = await entitlements.GetForTenantAsync(device.TenantId, cancellationToken);
-        var selectedPrinterCount = await db.PrinterDevices.AsNoTracking()
-            .LongCountAsync(printer => printer.TenantId == device.TenantId &&
-                printer.IsActive && (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT"),
-                cancellationToken);
+        var tenantPrinters = await db.PrinterDevices.AsNoTracking()
+            .Where(printer => printer.TenantId == device.TenantId)
+            .Select(printer => new { printer.IsActive, printer.OutputMode })
+            .ToListAsync(cancellationToken);
+        var selectedPrinterCount = tenantPrinters.LongCount(printer =>
+            printer.IsActive && (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT"));
 
         var existing = await db.PrinterDevices
             .Where(printer => printer.TenantId == device.TenantId &&
@@ -123,8 +164,10 @@ public sealed class AgentConnectivityService(
 
         foreach (var discovered in normalized)
         {
-            var printer = existing.FirstOrDefault(item =>
-                string.Equals(item.QueueName, discovered.QueueName, StringComparison.OrdinalIgnoreCase));
+            var printer = await db.PrinterDevices.FirstOrDefaultAsync(item =>
+                item.TenantId == device.TenantId &&
+                item.AgentDeviceId == device.Id &&
+                item.QueueName == discovered.QueueName, cancellationToken);
 
             var adoptedUnlinkedQueue = false;
             if (printer is null)
@@ -176,6 +219,8 @@ public sealed class AgentConnectivityService(
             {
                 var wasQuotaSelected = printer.IsActive &&
                     (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT");
+                var driverChanged = !string.Equals(
+                    printer.Model, discovered.DriverName, StringComparison.OrdinalIgnoreCase);
                 printer.AgentDeviceId = device.Id;
                 printer.DisplayName = discovered.QueueName.Trim();
                 printer.Manufacturer = "Windows";
@@ -184,7 +229,8 @@ public sealed class AgentConnectivityService(
                 printer.OutputMode = discovered.OutputMode;
                 printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim();
                 printer.IsDefault = discovered.IsDefault;
-                printer.CapabilitiesJson = discovered.CapabilitiesJson;
+                printer.CapabilitiesJson = AgentPrinterSyncRules.ResolveCapabilitiesJson(
+                    printer.CapabilitiesJson, discovered.CapabilitiesJson, driverChanged);
 
                 if (discovered.OutputMode == "UNSUPPORTED_VIRTUAL")
                 {
@@ -238,10 +284,11 @@ public sealed class AgentConnectivityService(
             Created: created,
             Updated: updated,
             Unavailable: unavailable,
+            AutoSelected: autoSelected,
             SyncedUtc: now,
             Rejected: validation.RejectedCount,
             CapabilitiesUnknown: validation.CapabilitiesUnknownCount,
-            Selected: checked((int)Math.Min(selectedPrinterCount, int.MaxValue)),
+            Selected: selectedPrinterCount,
             MaximumSelected: entitlement.MaxPrinters);
     }
 }

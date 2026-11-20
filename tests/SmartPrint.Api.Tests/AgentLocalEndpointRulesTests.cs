@@ -1,4 +1,4 @@
-using SmartPrint.Api.Domain;
+using SmartPrint.Api.Modules.AgentConnectivity.Domain;
 
 namespace SmartPrint.Api.Tests;
 

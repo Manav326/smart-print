@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 
-namespace SmartPrint.Api.Domain;
+namespace SmartPrint.Api.Modules.AgentConnectivity.Domain;
 
 public static class AgentLocalEndpointRules
 {
