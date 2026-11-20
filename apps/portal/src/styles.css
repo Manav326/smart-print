@@ -4038,18 +4038,19 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 }
 
 
-/* Additive QR image export controls; the original print poster remains untouched. */
-.qr-share-export{margin-top:10px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);overflow:hidden}
-.qr-share-export>summary{min-height:44px;padding:10px 12px;display:flex;align-items:center;gap:8px;list-style:none;cursor:pointer;color:var(--text);font-size:12px;font-weight:700}
-.qr-share-export>summary::-webkit-details-marker{display:none}
-.qr-share-export>summary:after{content:"+";margin-left:auto;color:var(--accent);font-size:18px}
-.qr-share-export[open]>summary:after{content:"−"}
-.qr-share-export>summary span{margin-left:auto;color:var(--muted);font-size:10px;font-weight:600}
-.qr-share-export-controls{display:flex;flex-wrap:wrap;align-items:end;gap:8px;padding:0 12px 12px}
-.qr-share-export-controls label{display:grid;gap:5px;min-width:150px;color:var(--muted);font-size:10px;font-weight:700}
-.qr-share-export-controls select{height:38px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:0 9px;font:600 11px "DM Sans",sans-serif}
-.qr-share-export-controls .secondary-button{min-height:38px;display:inline-flex;align-items:center;justify-content:center;gap:7px}
-.qr-share-export-help,.qr-share-paused-note,.qr-share-feedback{display:block;margin:0 12px 11px;color:var(--muted);font-size:10px;line-height:1.5}
+/* One action expands the complete QR poster print, download and share workflow. */
+.qr-poster-actions{margin-top:10px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);overflow:hidden}
+.qr-poster-actions>summary{min-height:46px;padding:11px 13px;display:flex;align-items:center;gap:9px;list-style:none;cursor:pointer;color:var(--text);font-size:12px;font-weight:750}
+.qr-poster-actions>summary::-webkit-details-marker{display:none}
+.qr-poster-actions>summary:after{content:"+";margin-left:auto;color:var(--accent);font-size:18px}
+.qr-poster-actions[open]>summary:after{content:"−"}
+.qr-poster-actions>summary span{margin-left:auto;color:var(--muted);font-size:10px;font-weight:600}
+.qr-poster-actions[open]>summary{border-bottom:1px solid var(--border)}
+.qr-poster-actions-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:9px;padding:13px}
+.qr-poster-actions-controls label{display:grid;gap:6px;min-width:0;color:var(--muted);font-size:10px;font-weight:750}
+.qr-poster-actions-controls select{width:100%;height:39px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:0 9px;font:600 11px "DM Sans",sans-serif}
+.qr-poster-actions-controls .secondary-button{min-width:0;min-height:39px;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:normal}
+.qr-share-export-help,.qr-share-paused-note,.qr-share-feedback{display:block;margin:0 13px 11px;color:var(--muted);font-size:10px;line-height:1.5}
 .qr-share-paused-note{color:#a65a16}
 .qr-share-feedback.success{color:var(--green)}
 .qr-share-feedback.error{color:var(--red)}
@@ -4077,9 +4078,11 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 .shop-document-preview-loading strong{font-size:11px;white-space:nowrap}
 .shop-document-preview-loading small{font-size:10px;color:var(--muted)}
 @media(max-width:600px){
-  .qr-share-export-controls{display:grid;grid-template-columns:1fr 1fr}
-  .qr-share-export-controls label{grid-column:1/-1}
-  .qr-share-export-controls .secondary-button{width:100%;white-space:normal}
+  .qr-poster-actions>summary{flex-wrap:wrap}
+  .qr-poster-actions>summary span{margin-left:0;width:100%}
+  .qr-poster-actions-controls{grid-template-columns:1fr 1fr}
+  .qr-poster-actions-controls label{grid-column:1/-1}
+  .qr-poster-actions-controls .secondary-button{width:100%;white-space:normal}
   .shop-document-preview-loading small{display:none}
   .customer-previous-order{padding:12px}
 }
