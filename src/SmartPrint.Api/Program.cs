@@ -25,6 +25,7 @@ using SmartPrint.Api.Modules.Authentication.Registration;
 using SmartPrint.Api.Modules.PlatformOperationalSettings.Registration;
 using SmartPrint.Api.Modules.PlatformSubscriptions.Registration;
 using SmartPrint.Api.Modules.PlatformPlans.Registration;
+using SmartPrint.Api.Modules.PlatformAdvertising.Registration;
 using SmartPrint.Api.Modules.PlatformDataTransfer.Registration;
 using SmartPrint.Api.Modules.ShopSubscriptionPayments.Registration;
 using SmartPrint.Documents;
@@ -293,6 +294,7 @@ platform.MapSubscriptionPlanEndpoints();
 platform.MapPlatformSubscriptionsQueryModule();
 platform.MapPlatformSubscriptionEndpoints();
 platform.MapPlatformOperationalSettingsModule();
+platform.MapPlatformAdvertisingQueriesModule();
 platform.MapPlatformAdvertisingEndpoints();
 platform.MapPlatformDataTransferModule();
 

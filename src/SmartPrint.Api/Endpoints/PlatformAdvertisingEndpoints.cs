@@ -8,27 +8,14 @@ using Microsoft.EntityFrameworkCore;
 using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Storage;
+using SmartPrint.Api.Modules.PlatformAdvertising.Services;
+
 namespace SmartPrint.Api.Endpoints;
 public static class PlatformAdvertisingEndpoints
 {
     public static RouteGroupBuilder MapPlatformAdvertisingEndpoints(this RouteGroupBuilder platform)
     {
-        platform.MapGet("/advertising/campaigns", async (SmartPrintDbContext db,CancellationToken ct) =>
-        {
-            var now=DateTimeOffset.UtcNow;
-            var items=await db.PlatformAdCampaigns.AsNoTracking().OrderByDescending(x=>x.UpdatedUtc).Take(250).ToListAsync(ct);
-            var ids=items.Select(x=>x.Id).ToArray();
-            var events=await db.PlatformAdEvents.AsNoTracking().Where(x=>ids.Contains(x.CampaignId))
-                .GroupBy(x=>new{x.CampaignId,x.EventType}).Select(g=>new{g.Key.CampaignId,g.Key.EventType,Count=g.LongCount()}).ToListAsync(ct);
-            var creativeIds=items.Select(x=>x.CreativeId).Distinct().ToArray();
-            var creatives=await db.PlatformAdCreatives.AsNoTracking().Where(x=>creativeIds.Contains(x.Id)).ToDictionaryAsync(x=>x.Id,ct);
-            return Results.Ok(items.Select(x=>{
-                creatives.TryGetValue(x.CreativeId,out var c);
-                var views=events.Where(e=>e.CampaignId==x.Id&&e.EventType=="IMPRESSION").Select(e=>e.Count).FirstOrDefault();
-                var clicks=events.Where(e=>e.CampaignId==x.Id&&e.EventType=="CLICK").Select(e=>e.Count).FirstOrDefault();
-                return ToResponse(x,c,views,clicks,now);
-            }));
-        });
+        
         platform.MapPost("/advertising/creatives",async(HttpRequest request,ClaimsPrincipal user,SmartPrintDbContext db,PlatformAdCreativeStorage storage,CancellationToken ct)=>{
             var actor=ActorId(user); if(actor is null)return Results.Forbid();
             var name=request.Headers["X-Ad-Creative-File-Name"].FirstOrDefault();
@@ -42,18 +29,7 @@ public static class PlatformAdvertisingEndpoints
             try{db.PlatformAdCreatives.Add(creative);await db.SaveChangesAsync(ct);}catch{await storage.DeleteAsync(creative);throw;}
             return Results.Created($"/api/v1/advertising/creatives/{creative.Id}",new{creative.Id,creative.FileName,creative.ContentType,creative.SizeBytes,imageUrl=$"/api/v1/advertising/creatives/{creative.Id}"});
         });
-        platform.MapGet("/advertising/creatives/{creativeId:guid}/preview", async (
-            Guid creativeId, SmartPrintDbContext db, PlatformAdCreativeStorage storage, CancellationToken ct) =>
-        {
-            var creative = await db.PlatformAdCreatives.AsNoTracking()
-                .SingleOrDefaultAsync(item => item.Id == creativeId, ct);
-            if (creative is null) return Results.NotFound();
-            await using var source = storage.OpenRead(creative);
-            await using var memory = new MemoryStream();
-            await source.CopyToAsync(memory, ct);
-            var dataUrl = "data:" + creative.ContentType + ";base64," + Convert.ToBase64String(memory.ToArray());
-            return Results.Ok(new { dataUrl, creative.FileName, creative.ContentType });
-        });
+        
 
         platform.MapPost("/advertising/campaigns",async(PlatformAdCampaignRequest request,ClaimsPrincipal user,SmartPrintDbContext db,CancellationToken ct)=>{
             var actor=ActorId(user);if(actor is null)return Results.Forbid();
@@ -62,7 +38,7 @@ public static class PlatformAdvertisingEndpoints
             var item=new PlatformAdCampaign{Name=request.Name!.Trim(),AdvertiserName=request.AdvertiserName!.Trim(),Headline=request.Headline!.Trim(),Body=request.Body!.Trim(),Terms=Optional(request.Terms),CreativeId=request.CreativeId,DestinationUrl=request.DestinationUrl!.Trim(),Placement=request.Placement!,Format=request.Format!,StartsUtc=request.StartsUtc,EndsUtc=request.EndsUtc,Status="Draft",CreatedByUserId=actor,UpdatedByUserId=actor,CreatedUtc=now,UpdatedUtc=now};
             db.PlatformAdCampaigns.Add(item);Audit(db,item,actor.Value,"CREATED",new{after=item});await db.SaveChangesAsync(ct);
             var creative=await db.PlatformAdCreatives.AsNoTracking().SingleAsync(x=>x.Id==item.CreativeId,ct);
-            return Results.Created($"/api/v1/platform/advertising/campaigns/{item.Id}",ToResponse(item,creative,0,0,now));
+            return Results.Created($"/api/v1/platform/advertising/campaigns/{item.Id}",PlatformAdvertisingResponseMapper.ToResponse(item,creative,0,0,now));
         });
         platform.MapPut("/advertising/campaigns/{id:guid}",async(Guid id,PlatformAdCampaignRequest request,ClaimsPrincipal user,SmartPrintDbContext db,CancellationToken ct)=>{
             var actor=ActorId(user);if(actor is null)return Results.Forbid();
@@ -74,7 +50,7 @@ public static class PlatformAdvertisingEndpoints
             await db.SaveChangesAsync(ct);
             var creative=await db.PlatformAdCreatives.AsNoTracking().SingleAsync(x=>x.Id==item.CreativeId,ct);
             var counts=await db.PlatformAdEvents.AsNoTracking().Where(x=>x.CampaignId==id).GroupBy(x=>x.EventType).Select(g=>new{g.Key,Count=g.LongCount()}).ToListAsync(ct);
-            return Results.Ok(ToResponse(item,creative,counts.Where(x=>x.Key=="IMPRESSION").Select(x=>x.Count).FirstOrDefault(),counts.Where(x=>x.Key=="CLICK").Select(x=>x.Count).FirstOrDefault(),DateTimeOffset.UtcNow));
+            return Results.Ok(PlatformAdvertisingResponseMapper.ToResponse(item,creative,counts.Where(x=>x.Key=="IMPRESSION").Select(x=>x.Count).FirstOrDefault(),counts.Where(x=>x.Key=="CLICK").Select(x=>x.Count).FirstOrDefault(),DateTimeOffset.UtcNow));
         });
         platform.MapPost("/advertising/campaigns/{id:guid}/status",async(Guid id,PlatformAdCampaignStatusRequest request,ClaimsPrincipal user,SmartPrintDbContext db,CancellationToken ct)=>{
             var actor=ActorId(user);if(actor is null)return Results.Forbid();
@@ -82,13 +58,9 @@ public static class PlatformAdvertisingEndpoints
             var item=await db.PlatformAdCampaigns.SingleOrDefaultAsync(x=>x.Id==id,ct);if(item is null)return Results.NotFound();
             var before=item.Status;item.Status=request.Status;item.UpdatedByUserId=actor;item.UpdatedUtc=DateTimeOffset.UtcNow;Audit(db,item,actor.Value,"STATUS_CHANGED",new{before,after=item.Status});await db.SaveChangesAsync(ct);
             var creative=await db.PlatformAdCreatives.AsNoTracking().SingleAsync(x=>x.Id==item.CreativeId,ct);
-            return Results.Ok(ToResponse(item,creative,0,0,DateTimeOffset.UtcNow));
+            return Results.Ok(PlatformAdvertisingResponseMapper.ToResponse(item,creative,0,0,DateTimeOffset.UtcNow));
         });
-        platform.MapGet("/advertising/campaigns/{id:guid}/history",async(Guid id,SmartPrintDbContext db,CancellationToken ct)=>{
-            if(!await db.PlatformAdCampaigns.AsNoTracking().AnyAsync(x=>x.Id==id,ct))return Results.NotFound();
-            var rows=await db.PlatformAdCampaignAudits.AsNoTracking().Where(x=>x.CampaignId==id).OrderByDescending(x=>x.CreatedUtc).Take(100).Select(x=>new{x.Id,x.Action,x.DetailsJson,x.ActorUserId,x.CreatedUtc}).ToListAsync(ct);
-            return Results.Ok(rows);
-        });
+        
         return platform;
     }
     public static WebApplication MapPublicAdvertisingEndpoints(this WebApplication app)
@@ -142,9 +114,6 @@ public static class PlatformAdvertisingEndpoints
     private static string? Optional(string? value)=>string.IsNullOrWhiteSpace(value)?null:value.Trim();
     private static Guid? ActorId(ClaimsPrincipal user){var text=user.FindFirstValue(JwtRegisteredClaimNames.Sub)??user.FindFirstValue(ClaimTypes.NameIdentifier);return Guid.TryParse(text,out var id)?id:null;}
     private static void Audit(SmartPrintDbContext db,PlatformAdCampaign item,Guid actor,string action,object details)=>db.PlatformAdCampaignAudits.Add(new PlatformAdCampaignAudit{CampaignId=item.Id,ActorUserId=actor,Action=action,DetailsJson=JsonSerializer.Serialize(details),CreatedUtc=DateTimeOffset.UtcNow});
-    private static object ToResponse(PlatformAdCampaign x,PlatformAdCreative? c,long impressions,long clicks,DateTimeOffset now)=>new{
-        x.Id,x.Name,x.AdvertiserName,x.Headline,x.Body,x.Terms,x.CreativeId,creativeUrl=c is null?null:$"/api/v1/advertising/creatives/{c.Id}",creativeFileName=c?.FileName,x.DestinationUrl,x.Placement,x.Format,
-        status=PlatformAdvertisingRules.DisplayStatus(x,now),storedStatus=x.Status,x.StartsUtc,x.EndsUtc,x.CreatedUtc,x.UpdatedUtc,impressions,clicks,clickThroughRate=impressions==0?0:Math.Round((double)clicks/impressions*100,2)};
 }
 public sealed record PlatformAdCampaignRequest(string? Name,string? AdvertiserName,string? Headline,string? Body,string? Terms,Guid CreativeId,string? DestinationUrl,string? Placement,string? Format,DateTimeOffset StartsUtc,DateTimeOffset? EndsUtc);
 public sealed record PlatformAdCampaignStatusRequest(string? Status);
