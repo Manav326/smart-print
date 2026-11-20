@@ -81,16 +81,11 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
   const currentPrinter=printers.find(printer=>printer.id===job.printerDeviceId);
   const localDocumentNeedsOriginalAgent=job.storageMode==="LOCAL_AGENT";
   const localDocumentAgentId=job.documentAgentDeviceId??job.claimedByAgentDeviceId??null;
-  const assignableAgentIds=new Set(agents.filter(isAgentOnline).map(agent=>agent.id));
   const assignablePrinters=printers.filter(printer=>
-    printer.isActive&&!!printer.agentDeviceId&&assignableAgentIds.has(printer.agentDeviceId)&&
+    isPrinterAvailableForShop(printer,agents)&&
+    (printer.outputMode!=="PDF_EXPORT"||!job.privatePrinting)&&
     (!localDocumentNeedsOriginalAgent||
-      (!!localDocumentAgentId&&printer.agentDeviceId===localDocumentAgentId))&&
-    (printer.outputMode==="PDF_EXPORT"
-      ?!job.privatePrinting
-      :printer.outputMode==="PHYSICAL"&&!!printer.lastSeenUtc&&
-        Number.isFinite(Date.parse(printer.lastSeenUtc))&&Date.parse(printer.lastSeenUtc)>=Date.now()-120000&&
-        (printer.status==="Ready"||printer.status==="Busy"))
+      (!!localDocumentAgentId&&printer.agentDeviceId===localDocumentAgentId))
   );
   const confirmable=isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT");
   const spoolerRetained=isRetainedSpoolerJob(job.spoolerStatus);
