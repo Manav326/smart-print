@@ -43,7 +43,9 @@ test("only selected supported queues are reported as available", () => {
   assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "UNSUPPORTED_VIRTUAL" }), [agent()], now), "Unsupported Windows output queue");
 });
 
-test("PDF export availability follows the live Agent rather than physical queue readiness", () => {
-  assert.equal(isPrinterAvailableForShop(printer({ outputMode: "PDF_EXPORT", status: "Unknown", lastSeenUtc: null }), [agent()], now), true);
+test("PDF export queues follow the same fresh queue and Agent readiness contract as server selection", () => {
+  assert.equal(isPrinterAvailableForShop(printer({ outputMode: "PDF_EXPORT" }), [agent()], now), true);
+  assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT", lastSeenUtc: null }), [agent()], now), "Windows printer queue has not reported recently");
+  assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT", status: "Offline" }), [agent()], now), "Windows queue reports offline");
   assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT" }), [agent({ lastSeenUtc: stale })], now), "Shop computer offline");
 });
