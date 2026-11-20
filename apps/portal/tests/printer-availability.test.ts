@@ -27,6 +27,8 @@ function printer(overrides: Partial<PrinterDevice> = {}): PrinterDevice {
 test("physical queues are available only when Agent and Windows queue are fresh and Ready or Busy", () => {
   assert.equal(isPrinterAvailableForShop(printer(), [agent()], now), true);
   assert.equal(isPrinterAvailableForShop(printer({ status: "Busy" }), [agent()], now), true);
+  assert.equal(isPrinterAvailableForShop(printer({ status: "ready" }), [agent()], now), true);
+  assert.equal(isPrinterAvailableForShop(printer({ status: "busy" }), [agent()], now), true);
   assert.equal(getPrinterAvailabilityReason(printer({ status: "Offline" }), [agent()], now), "Windows queue reports offline");
   assert.equal(getPrinterAvailabilityReason(printer({ status: "Paused" }), [agent()], now), "Windows queue reports paused");
   assert.equal(getPrinterAvailabilityReason(printer({ lastSeenUtc: stale }), [agent()], now), "Windows printer queue has not reported recently");
