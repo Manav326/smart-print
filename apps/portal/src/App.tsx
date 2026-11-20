@@ -2564,7 +2564,7 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
              </div>
              {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The poster is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
              {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
-             <small className="qr-poster-actions-help">The preview above is the exact poster used for printing, downloading and sharing. We prepare the selected file format when you open this panel, so Share is ready as a single action. If your device cannot share files, SmartPrint downloads the poster instead.</small>
+             <small className="qr-poster-actions-help">The preview above is the exact poster used for printing, downloading and sharing. We prepare the selected file format when you open this panel, so Share is ready as a single action. The QR uses this station’s permanent public link, not a customer session token. If your device cannot share files, SmartPrint downloads the poster instead.</small>
            </details>
          </>}
       </article>)}</div>}
