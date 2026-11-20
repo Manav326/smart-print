@@ -3660,7 +3660,7 @@ function prettyStatus(status:string) {
     VERIFIED:"Payment received",
     LOCAL_QUEUE_CLAIMED:"Shop computer preparing",
     LOCAL_QUEUE_READY:"Ready for print",
-    PRINT_AUTHORISED:"Ready to print",
+    PRINT_AUTHORISED:"Waiting for shop computer",
     PRINT_SUBMITTING:"Sending to printer",
     SPOOLER_ACCEPTED:"Sent to printer",
     SUBMITTING_TO_SPOOLER:"Sent to printer",
