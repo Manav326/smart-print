@@ -1112,7 +1112,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
   async function resumeUnprintedBatch(batchId:string,jobIds:string[]):Promise<boolean>{
     if(!jobIds.length||busyJobId)return false;
-    const selectedJobs=jobIds.map(id=>printJobs.find(job=>job.id===id));
+    const selectedJobs=jobIds.map(id=>journeyJobs.find(job=>job.id===id));
     const resolvedJobs=selectedJobs.filter((job):job is ShopPrintJob=>job!==undefined);
     if(resolvedJobs.length!==jobIds.length){
       setError("The selected files changed in the latest order refresh. Refresh the order and select the files again.");
