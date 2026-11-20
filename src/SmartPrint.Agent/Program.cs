@@ -1,9 +1,10 @@
-if (await AgentChildCommands.TryHandleAsync(args))
-    return;
-
 using System.Net.Http;
 using System.IO;
 using SmartPrint.Agent;
+
+if (await AgentChildCommands.TryHandleAsync(args))
+    return;
+
 
 if (args.Any(argument => argument.Equals("--check-pairing", StringComparison.OrdinalIgnoreCase)))
 {

@@ -1580,7 +1580,7 @@ public sealed class Worker(
                 attemptRecorded = true;
                 await isolatedWindowsPrintExecutor.ReleaseRetainedJobAsync(cleanup.QueueName, cleanup.SpoolerJobId, ct);
 
-                var remaining = printExecutor.GetJob(cleanup.QueueName, cleanup.SpoolerJobId);
+                var remaining = await isolatedWindowsPrintExecutor.GetJobAsync(cleanup.QueueName, cleanup.SpoolerJobId, ct);
                 if (remaining is null)
                 {
                     await localQueueStore.CompletePrivateSpoolerCleanupAsync(cleanup.JobId, ct);
