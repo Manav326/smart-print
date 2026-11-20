@@ -113,6 +113,29 @@ public sealed class AgentPrinterSyncRulesTests
     }
 
     [Fact]
+    public void MetadataOnlySyncPreservesLastKnownCapabilitiesForTheSameDriver()
+    {
+        const string known = "{\"color\":true,\"duplex\":true}";
+        Assert.Equal(known, AgentPrinterSyncRules.ResolveCapabilitiesJson(known, "{}", driverChanged: false));
+        Assert.Equal(known, AgentPrinterSyncRules.ResolveCapabilitiesJson(known, null, driverChanged: false));
+    }
+
+    [Fact]
+    public void CapabilitySnapshotIsClearedWhenTheWindowsDriverChanges()
+    {
+        const string oldSnapshot = "{\"color\":true}";
+        Assert.Equal("{}", AgentPrinterSyncRules.ResolveCapabilitiesJson(oldSnapshot, "{}", driverChanged: true));
+        const string newSnapshot = "{\"duplex\":true}";
+        Assert.Equal(newSnapshot, AgentPrinterSyncRules.ResolveCapabilitiesJson(oldSnapshot, newSnapshot, driverChanged: true));
+    }
+
+    [Fact]
+    public void UnknownExistingCapabilitiesRemainUnknownUntilAValidSnapshotArrives()
+    {
+        Assert.Equal("{}", AgentPrinterSyncRules.ResolveCapabilitiesJson("{}", null, driverChanged: false));
+    }
+
+    [Fact]
     public void AcceptsAnEmptyPrinterDiscoveryResult()
     {
         var result = AgentPrinterSyncRules.Validate([]);
