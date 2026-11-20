@@ -84,6 +84,9 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.Contains(
             "202611170003_AddSpoolerPageProgress",
             await db.Database.GetAppliedMigrationsAsync());
+        Assert.Contains(
+            "202611200001_ConfigurableVirtualPrinterTestMode",
+            await db.Database.GetAppliedMigrationsAsync());
 
         // Reproduce the local-upload completion transaction at the exact monthly quota boundary.
         settings.TrialMaxMonthlyPrintJobs = 1;
@@ -165,6 +168,7 @@ public sealed class PostgresMigrationUpgradeTests
         db.AddRange(tenant, agent, revokedAgent, printer, station, session, subscription, ticket);
         await db.SaveChangesAsync();
 
+
         // Rollback must remain safe when revoked and replacement records share a fingerprint.
         const string fingerprintIndexSql =
             "SELECT indexdef AS \"Value\" FROM pg_indexes WHERE schemaname = current_schema() " +
@@ -182,6 +186,7 @@ public sealed class PostgresMigrationUpgradeTests
         var indexAfterReapply = await db.Database.SqlQueryRaw<string>(fingerprintIndexSql).SingleAsync();
         Assert.Contains("RevokedUtc", indexAfterReapply, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("IS NULL", indexAfterReapply, StringComparison.OrdinalIgnoreCase);
+
 
                 var entitlements = new TenantEntitlementService(db);
         Assert.Equal(1L, await entitlements.GetMonthlyPrintJobUsageAsync(
@@ -358,6 +363,51 @@ public sealed class PostgresMigrationUpgradeTests
         // A private ID_DOCUMENT ticket must materialise as the schema-supported DOCUMENT job.
         await VerifyPrivateIdDocumentJobPersistsAsDocumentAsync(
             options, tenant.Id, station.Id, session.Id, now);
+
+        // Add unsupported virtual inventory only after every legacy rollback/reapply
+        // exercise above has completed. The guard must then refuse an older schema
+        // that cannot represent the visible virtual queue without changing its data.
+        var unsupportedVirtualPrinter = new PrinterDevice
+        {
+            TenantId = tenant.Id,
+            AgentDeviceId = agent.Id,
+            DisplayName = "IPP virtual test queue",
+            Manufacturer = "Windows",
+            Model = "Microsoft IPP Class Driver",
+            ConnectionType = "IPP",
+            OutputMode = "UNSUPPORTED_VIRTUAL",
+            IsActive = false,
+            QueueName = "IppVirtual - Microsoft IPP",
+            ConnectionAddress = "http://192.168.31.171:10631/p/virtual"
+        };
+        db.PrinterDevices.Add(unsupportedVirtualPrinter);
+        await db.SaveChangesAsync();
+
+        await using (var unsupportedQueueContext = new SmartPrintDbContext(options))
+        {
+            var savedUnsupportedQueue = await unsupportedQueueContext.PrinterDevices.AsNoTracking()
+                .SingleAsync(item => item.Id == unsupportedVirtualPrinter.Id);
+            Assert.Equal("UNSUPPORTED_VIRTUAL", savedUnsupportedQueue.OutputMode);
+            Assert.Equal("IPP", savedUnsupportedQueue.ConnectionType);
+            Assert.False(savedUnsupportedQueue.IsActive);
+            Assert.False(savedUnsupportedQueue.IsTestModeOverride);
+        }
+
+        // A rollback to the old two-value output-mode constraint must be blocked,
+        // not delete or rewrite the newly visible unsupported virtual inventory.
+        var downgradeFailure = await Record.ExceptionAsync(
+            () => migrator.MigrateAsync("202611190001_AddPrivateRelayProcessingStages"));
+        var downgradePostgresException = FindPostgresException(downgradeFailure);
+        Assert.NotNull(downgradePostgresException);
+        Assert.Equal("P0001", downgradePostgresException.SqlState);
+        Assert.Contains("Cannot downgrade printer test-mode migration", downgradePostgresException.Message, StringComparison.Ordinal);
+        await using (var afterBlockedDowngrade = new SmartPrintDbContext(options))
+        {
+            var preservedQueue = await afterBlockedDowngrade.PrinterDevices.AsNoTracking()
+                .SingleAsync(item => item.Id == unsupportedVirtualPrinter.Id);
+            Assert.Equal("UNSUPPORTED_VIRTUAL", preservedQueue.OutputMode);
+            Assert.Equal("http://192.168.31.171:10631/p/virtual", preservedQueue.ConnectionAddress);
+        }
     }
 
     private static async Task VerifyPrivateIdDocumentJobPersistsAsDocumentAsync(
@@ -826,6 +876,17 @@ public sealed class PostgresMigrationUpgradeTests
             await Assert.ThrowsAsync<DbUpdateException>(
                 () => wrongClaimContext.SaveChangesAsync());
         }
+    }
+
+    private static Npgsql.PostgresException? FindPostgresException(Exception? exception)
+    {
+        while (exception is not null)
+        {
+            if (exception is Npgsql.PostgresException postgresException)
+                return postgresException;
+            exception = exception.InnerException;
+        }
+        return null;
     }
 
     private static AgentDevice CreateIsolationAgent(Guid tenantId, string name) => new()

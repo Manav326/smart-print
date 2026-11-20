@@ -94,7 +94,39 @@ public sealed class WindowsPrinterDiscovery
                 }
             }
 
-            return (true, NormalizeDiscoveredQueues(printers));
+            var normalized = NormalizeDiscoveredQueues(printers);
+            if (normalized.Any(printer =>
+                    string.Equals(printer.Status, "Unknown", StringComparison.OrdinalIgnoreCase)))
+            {
+                // WMI sometimes reports Other/Unknown even when the local spooler
+                // has a current queue state. Ask WinSpool only for this uncertain
+                // case; keep the WMI queue list and merge status by queue identity.
+                try
+                {
+                    var statusChild = await childProcessRunner.ExecuteAsync(
+                        "--discover-printers-winspool",
+                        string.Empty,
+                        TimeSpan.FromSeconds(15),
+                        cancellationToken);
+                    var statusSnapshots = TryParseDiscoveryResult(statusChild);
+                    if (statusSnapshots is not null)
+                        normalized = ApplyWinspoolStatusSnapshots(normalized, statusSnapshots);
+                    else
+                        logger.LogWarning(
+                            "WinSpool status refresh for WMI queues with Unknown status did not complete; unknown statuses are retained. ExitCode={ExitCode}; TimedOut={TimedOut}; Error={Error}",
+                            statusChild.ExitCode, statusChild.TimedOut, Truncate(statusChild.StandardError, 400));
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    logger.LogWarning(exception, "WinSpool status refresh failed; WMI queue identities are retained with their reported statuses.");
+                }
+            }
+
+            return (true, normalized);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -142,6 +174,26 @@ public sealed class WindowsPrinterDiscovery
         }).ToArray();
     }
 
+    public static IReadOnlyList<DiscoveredPrinter> ApplyWinspoolStatusSnapshots(
+        IReadOnlyList<DiscoveredPrinter> currentMetadata,
+        IReadOnlyList<DiscoveredPrinter> winspoolSnapshots)
+    {
+        var statusByQueue = winspoolSnapshots
+            .Where(snapshot => !string.IsNullOrWhiteSpace(snapshot.QueueName))
+            .GroupBy(snapshot => snapshot.QueueName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+        return currentMetadata.Select(current =>
+        {
+            if (!string.Equals(current.Status, "Unknown", StringComparison.OrdinalIgnoreCase) ||
+                !statusByQueue.TryGetValue(current.QueueName, out var snapshot) ||
+                string.Equals(snapshot.Status, "Unknown", StringComparison.OrdinalIgnoreCase))
+                return current;
+
+            return current with { Status = snapshot.Status };
+        }).ToArray();
+    }
+
     private static List<DiscoveredPrinter>? TryParseDiscoveryResult(AgentChildProcessResult child)
     {
         if (child.TimedOut || child.ExitCode != 0 || child.StandardOutput.Length > 2 * 1024 * 1024)
@@ -185,7 +237,7 @@ public sealed class WindowsPrinterDiscovery
                     var offline = ReadBoolean(printer, "WorkOffline");
                     var printerStatus = ReadInteger(printer, "PrinterStatus");
                     var isDefault = ReadBoolean(printer, "Default");
-                    var outputMode = PrinterOutputModeRules.Detect(name, driver, port);
+                    var outputMode = ResolveDetectedOutputMode(name, driver, port);
 
                     printers.Add(new DiscoveredPrinter(
                         name.Trim(),
@@ -367,7 +419,7 @@ public sealed class WindowsPrinterDiscovery
                         _ = ClosePrinter(printerHandle);
                 }
 
-                var outputMode = PrinterOutputModeRules.Detect(name, driverName, portName);
+                var outputMode = ResolveDetectedOutputMode(name, driverName, portName);
                 result.Add(new DiscoveredPrinter(name, driverName, portName, status, isDefault, outputMode));
             }
 
@@ -413,6 +465,24 @@ public sealed class WindowsPrinterDiscovery
             .Select(group => group.First())
             .OrderBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+    public static string ResolveDetectedOutputMode(string queueName, string? driverName, string? portName)
+    {
+        // Some Android/IPP bridge queues present a virtual endpoint through a
+        // Microsoft IPP Windows driver. Keep that transport distinct from a
+        // physical IPP printer; the platform's audited test setting may promote
+        // a working queue to physical dispatch after inventory reaches the API.
+        var textLooksVirtual = queueName.Contains("virtual", StringComparison.OrdinalIgnoreCase) ||
+            (driverName?.Contains("virtual", StringComparison.OrdinalIgnoreCase) ?? false);
+        var portIsVirtualEndpoint = Uri.TryCreate(portName, UriKind.Absolute, out var endpoint) &&
+            endpoint.Scheme is "ipp" or "ipps" or "http" or "https" &&
+            endpoint.AbsolutePath.Contains("virtual", StringComparison.OrdinalIgnoreCase);
+        if (portIsVirtualEndpoint || (textLooksVirtual && Uri.TryCreate(portName, UriKind.Absolute, out endpoint) &&
+            endpoint.Scheme is "ipp" or "ipps" or "http" or "https"))
+            return PrinterOutputModeRules.UnsupportedVirtual;
+
+        return PrinterOutputModeRules.Detect(queueName, driverName, portName);
+    }
 
     public static string ResolvePublishedStatus(string? outputMode, int printerStatus, bool offline) =>
         string.Equals(outputMode, PrinterOutputModeRules.PdfExport, StringComparison.OrdinalIgnoreCase)

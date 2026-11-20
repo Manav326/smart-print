@@ -51,9 +51,24 @@ test("unsupported virtual queues remain visible but cannot be selected or assign
   assert.equal(getPrinterReadinessReason(printer({ outputMode: "UNSUPPORTED_VIRTUAL" }), [agent()], now), "Unsupported Windows output queue");
 });
 
-test("PDF export queues follow the same fresh queue and Agent readiness contract as server selection", () => {
+
+test("IPP physical queues use the same live Windows readiness contract as USB printers", () => {
+  const ipp = printer({ connectionType: "IPP", outputMode: "PHYSICAL" });
+  assert.equal(isPrinterAvailableForShop(ipp, [agent()], now), true);
+  assert.equal(getPrinterAvailabilityReason({ ...ipp, status: "Offline" }, [agent()], now), "Windows queue reports offline");
+  assert.equal(getPrinterAvailabilityReason({ ...ipp, lastSeenUtc: stale }, [agent()], now), "Windows printer queue has not reported recently");
+});
+
+test("virtual queues promoted by platform test mode use physical readiness after server classification", () => {
+  const promoted = printer({ connectionType: "IPP", outputMode: "PHYSICAL", isTestModeOverride: true });
+  assert.equal(getPrinterReadinessReason(promoted, [agent()], now), null);
+  assert.equal(getPrinterReadinessReason({ ...promoted, status: "Offline" }, [agent()], now), "Windows queue reports offline");
+});
+
+test("PDF Export is ready independently of physical Windows queue status when the Agent is online", () => {
   assert.equal(isPrinterAvailableForShop(printer({ outputMode: "PDF_EXPORT" }), [agent()], now), true);
-  assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT", lastSeenUtc: null }), [agent()], now), "Windows printer queue has not reported recently");
-  assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT", status: "Offline" }), [agent()], now), "Windows queue reports offline");
+  assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT", lastSeenUtc: null }), [agent()], now), null);
+  assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT", lastSeenUtc: stale }), [agent()], now), null);
+  assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT", status: "Offline" }), [agent()], now), null);
   assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT" }), [agent({ lastSeenUtc: stale })], now), "Shop computer offline");
 });

@@ -88,7 +88,8 @@ public sealed record AgentPrinterDiscoveryRequest(
     string Status,
     bool IsDefault,
     string OutputMode = "PHYSICAL",
-    string CapabilitiesJson = "{}");
+    string CapabilitiesJson = "{}",
+    bool TestModeOverride = false);
 
 public sealed record AgentPrinterSyncRequest(IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
 
@@ -164,6 +165,9 @@ public sealed record LocalPrintUploadCompletionRequest(
     int AttemptNumber = 0);
 
 public sealed record AgentJobReceivedRequest(string Sha256, long SizeBytes);
+
+public sealed record AgentLocalUploadStatusBatchRequest(IReadOnlyList<Guid> JobIds);
+
 
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);

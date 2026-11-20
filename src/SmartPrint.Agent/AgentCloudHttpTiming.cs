@@ -13,6 +13,7 @@ public static class AgentCloudHttpTiming
     // Drain at most four batches (the customer batch ceiling) in one work cycle so
     // a 20-file order does not wait for another Agent polling interval.
     public const int MaxJobClaimBatchesPerCycle = 4;
+    public const int LocalUploadStatusBatchSize = 50;
 
     // Document responses can be much larger than control-plane JSON. With
     // ResponseHeadersRead, HttpClient.Timeout only covers response headers, so

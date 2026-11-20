@@ -2392,7 +2392,7 @@ function PrintersPage({
     !printer.isActive && isPrinterReadyForSelection(printer, agents)
   );
   const detectedCount = printers.filter(printer =>
-    printer.connectionType === "WindowsQueue" && !!printer.agentDeviceId
+    !!printer.agentDeviceId && !!printer.queueName
   ).length;
   const quotaFull = maxPrinters != null && selectedPrinters.length >= maxPrinters;
   const canUseSelection = subscriptionActive === true;
@@ -2412,8 +2412,8 @@ function PrintersPage({
       <section className="panel collection-panel">
         <div className="collection-header">
           <div>
-            <h2>Windows printer queues</h2>
-            <p>Queues are discovered automatically by your connected Print Agent. Every discovered queue stays visible; your plan limit applies only to the queues you select for use.</p>
+            <h2>Detected printer connections and Windows queues</h2>
+            <p>USB, LAN, shared and IPP connections are discovered through Windows. Connection type tells you how the queue is reached; output type tells you whether SmartPrint sends a physical print job, creates a PDF, or keeps an unsupported virtual queue visible. Your plan limit applies only to selected output queues.</p>
           </div>
           <div className="printer-discovery-guidance" role="note">
             <strong>Adding a new printer</strong>
@@ -2458,8 +2458,10 @@ function PrintersPage({
               const agentOnline = !!agent && !agent.revokedUtc && agent.status === "Online" &&
                 Number.isFinite(agentLastSeen) && agentLastSeen > Date.now() - 2 * 60 * 1000;
               const printerLastSeen = printer.lastSeenUtc ? Date.parse(printer.lastSeenUtc) : Number.NaN;
-              const queueFresh = Number.isFinite(printerLastSeen) && printerLastSeen > Date.now() - 2 * 60 * 1000;
-              const queueReady = printer.status === "Ready" || printer.status === "Busy";
+              const queueFresh = printer.outputMode === "PDF_EXPORT" ||
+                (Number.isFinite(printerLastSeen) && printerLastSeen > Date.now() - 2 * 60 * 1000);
+              const queueReady = printer.outputMode === "PDF_EXPORT" ||
+                printer.status === "Ready" || printer.status === "Busy";
               const selectionBlockReason = isUnsupportedVirtual
                 ? "This virtual/document driver is visible but is not supported for SmartPrint output."
                 : !printer.agentDeviceId
@@ -2480,11 +2482,13 @@ function PrintersPage({
                 ? "Waiting for Print Agent discovery"
                 : !agentOnline
                   ? "Windows computer not currently connected"
-                  : !queueFresh
-                    ? "Waiting for a fresh Windows printer scan"
-                    : printer.status === "Ready" || printer.status === "Busy"
-                      ? "Windows queue reported ready"
-                      : `Windows queue reports ${printer.status.toLowerCase()}`;
+                  : printer.outputMode === "PDF_EXPORT"
+                    ? "PDF export destination ready on this computer"
+                    : !queueFresh
+                      ? "Waiting for a fresh Windows printer scan"
+                      : printer.status === "Ready" || printer.status === "Busy"
+                        ? "Windows queue reported ready"
+                        : `Windows queue reports ${printer.status.toLowerCase()}`;
               return (
                 <article className="printer-card" key={printer.id}>
                   <div className="printer-card-top">
@@ -2494,16 +2498,20 @@ function PrintersPage({
                       tone={isUnsupportedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
                     />
                   </div>
-                  <h3>{isUnsupportedVirtual ? "Unsupported virtual · " : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : ""}{printer.displayName}</h3>
+                  <h3>{isUnsupportedVirtual ? "Unsupported virtual · " : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : printer.isTestModeOverride ? "Test physical · " : printer.connectionType === "IPP" ? "IPP printer · " : ""}{printer.displayName}</h3>
                   <p>{isUnsupportedVirtual
-                    ? "This Windows driver is visible but is not approved for SmartPrint print output."
+                    ? "This virtual Windows queue is visible but not approved for SmartPrint output. The platform test override is currently off or Windows has not reported it Ready/Busy."
                     : printer.outputMode === "PDF_EXPORT"
-                      ? "Supported Microsoft Print to PDF destination."
-                      : printer.manufacturer === "Windows"
-                        ? `Installed Windows driver · ${printer.model}`
-                        : `${printer.manufacturer} · ${printer.model}`}</p>
+                      ? "Supported Microsoft Print to PDF destination. SmartPrint creates the PDF directly on this connected computer; physical printer status is not used."
+                      : printer.isTestModeOverride
+                        ? `Temporary test policy: this working virtual queue is dispatched through its existing Windows queue as a physical output. Transport remains ${printer.connectionType}.`
+                        : printer.connectionType === "IPP"
+                          ? `IPP-connected Windows queue · installed driver ${printer.model}`
+                          : printer.manufacturer === "Windows"
+                            ? `Installed Windows driver · ${printer.model}`
+                            : `${printer.manufacturer} · ${printer.model}`}</p>
                   <div className="printer-meta">
-                    <span>{ownerStatus}{printer.isDefault ? " · Default Windows queue" : ""}</span>
+                    <span>{printer.isTestModeOverride ? "Platform test override · treated as physical" : ownerStatus}{printer.isDefault ? " · Default Windows queue" : ""}</span>
                     <span>{printer.queueName || printer.connectionAddress || "Connection details not reported"}</span>
                     <span>Print Agent · {agent?.deviceName || "Not linked"}</span>
                   </div>

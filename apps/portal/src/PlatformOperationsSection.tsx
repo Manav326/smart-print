@@ -135,6 +135,14 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
               ))}
             </div>
             <label className="platform-ops-toggle">
+              <input type="checkbox" checked={draft.treatWorkingVirtualQueuesAsPhysicalForTesting}
+                onChange={event => {
+                  const checked = event.target.checked;
+                  setDraft(current => current ? { ...current, treatWorkingVirtualQueuesAsPhysicalForTesting: checked } : current);
+                }}/>
+              <span><strong>Treat working virtual Windows queues as physical (testing)</strong><small>Platform-wide test override. When enabled, an otherwise unsupported virtual Windows queue is temporarily selectable and dispatched through its existing Windows queue only when Windows reports Ready or Busy. This includes IPP destinations such as /p/virtual. The connection remains labelled IPP or its detected transport; the override does not change Microsoft Print to PDF, which always follows the separate PDF Export workflow. Turn this off to return those queues to visible but unsupported on the next successful printer sync. Use only for controlled testing; some virtual drivers may display prompts or behave differently from physical printers.</small></span>
+            </label>
+            <label className="platform-ops-toggle">
               <input type="checkbox" checked={draft.allowPrivatePrintingVirtualOutput}
                 onChange={event => {
                   const checked = event.target.checked;

@@ -60,6 +60,58 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
+    public void WinspoolStatusRefreshResolvesOnlyUnknownWmiQueueStates()
+    {
+        var wmi = new[]
+        {
+            new DiscoveredPrinter("IppVirtual", "Microsoft IPP Class Driver",
+                "http://Android.local:10631/p/virtual", "Unknown", false,
+                PrinterOutputModeRules.UnsupportedVirtual),
+            new DiscoveredPrinter("USB Office", "Office Driver", "USB001", "Ready", true,
+                PrinterOutputModeRules.Physical)
+        };
+        var winspool = new[]
+        {
+            new DiscoveredPrinter("IppVirtual", "Microsoft IPP Class Driver",
+                "http://Android.local:10631/p/virtual", "Ready", true,
+                PrinterOutputModeRules.UnsupportedVirtual),
+            new DiscoveredPrinter("USB Office", "Office Driver", "USB001", "Busy", false,
+                PrinterOutputModeRules.Physical)
+        };
+
+        var refreshed = WindowsPrinterDiscovery.ApplyWinspoolStatusSnapshots(wmi, winspool);
+
+        Assert.Equal("Ready", refreshed[0].Status);
+        Assert.Equal("http://Android.local:10631/p/virtual", refreshed[0].PortName);
+        // The second WMI queue already had a fresh Ready status; the
+        // supplemental WinSpool snapshot must not overwrite it with Busy.
+        Assert.Equal("Ready", refreshed[1].Status);
+        Assert.True(refreshed[1].IsDefault);
+    }
+
+    [Fact]
+    public void WinspoolUnknownStatusDoesNotPromoteOrOverwriteWmiUnknownStatus()
+    {
+        var wmi = new[]
+        {
+            new DiscoveredPrinter("IppVirtual", "Microsoft IPP Class Driver",
+                "http://Android.local:10631/p/virtual", "Unknown", false,
+                PrinterOutputModeRules.UnsupportedVirtual)
+        };
+        var winspool = new[]
+        {
+            new DiscoveredPrinter("IppVirtual", "Microsoft IPP Class Driver",
+                "http://Android.local:10631/p/virtual", "Unknown", false,
+                PrinterOutputModeRules.UnsupportedVirtual)
+        };
+
+        var refreshed = Assert.Single(
+            WindowsPrinterDiscovery.ApplyWinspoolStatusSnapshots(wmi, winspool));
+
+        Assert.Equal("Unknown", refreshed.Status);
+    }
+
+    [Fact]
     public void MicrosoftPrintToPdfIsIdentifiedAsAgentSidePdfExport()
     {
         Assert.Equal(
@@ -88,9 +140,20 @@ public sealed class WindowsPrinterDiscoveryTests
     [InlineData("IppVirtual - Microsoft IPP", "Microsoft IPP Class Driver", "http://Android.local:10631/p/virtual")]
     [InlineData("Android Virtual Printer", "Microsoft IPP Class Driver", "http://Android.local:10631/p/virtual")]
     [InlineData("Android Virtual Printer", "Microsoft IPP Class Driver", "ipp://android.local/printer")]
-    public void AndroidIppVirtualQueueIsAUsableWindowsPrintTarget(string queue, string driver, string port)
+    public void AndroidIppVirtualQueueRemainsVirtualUntilThePlatformTestPolicyPromotesIt(string queue, string driver, string port)
     {
-        Assert.Equal(PrinterOutputModeRules.Physical, PrinterOutputModeRules.Detect(queue, driver, port));
+        Assert.Equal(
+            PrinterOutputModeRules.UnsupportedVirtual,
+            WindowsPrinterDiscovery.ResolveDetectedOutputMode(queue, driver, port));
+    }
+
+    [Fact]
+    public void OrdinaryIppPhysicalQueueRemainsPhysical()
+    {
+        Assert.Equal(
+            PrinterOutputModeRules.Physical,
+            WindowsPrinterDiscovery.ResolveDetectedOutputMode(
+                "Office IPP Printer", "Microsoft IPP Class Driver", "ipp://printer.local/ipp/print"));
     }
 
     [Fact]

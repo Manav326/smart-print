@@ -1721,7 +1721,7 @@ shop.MapPut("/profile", async (
     return Results.Ok(new { profile.DisplayName, profile.LogoUrl, profile.AccentColor, profile.UpdatedUtc });
 });
 
-shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
+shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext db, IHostEnvironment environment, CancellationToken ct) =>
 {
     if (!TryGetTenantId(principal, out var tenantId))
     {
@@ -1739,12 +1739,13 @@ shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext d
             printer.Manufacturer,
             printer.Model,
             printer.ConnectionType,
-            printer.OutputMode,
+            OutputMode = environment.IsProduction() && printer.IsTestModeOverride ? "UNSUPPORTED_VIRTUAL" : printer.OutputMode,
             printer.ConnectionAddress,
             printer.QueueName,
             printer.IsDefault,
             printer.AgentDeviceId,
             printer.CapabilitiesJson,
+            IsTestModeOverride = printer.IsTestModeOverride && !environment.IsProduction(),
             Status = printer.Status == "AgentRevoked"
                 ? "AgentRevoked"
                 : printer.AgentDeviceId != null &&
@@ -1842,6 +1843,7 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
@@ -1873,7 +1875,8 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
 
     if (isActive && !printer.IsActive)
     {
-        if (printer.OutputMode is not ("PHYSICAL" or "PDF_EXPORT") || printer.AgentDeviceId is null)
+        if ((environment.IsProduction() && printer.IsTestModeOverride) ||
+            printer.OutputMode is not ("PHYSICAL" or "PDF_EXPORT") || printer.AgentDeviceId is null)
         {
             await transaction.RollbackAsync(ct);
             return Results.Conflict(new
@@ -2190,6 +2193,7 @@ shop.MapPost("/qr-stations", async (
     SmartPrintDbContext db,
     IConfiguration configuration,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
@@ -2217,7 +2221,8 @@ shop.MapPost("/qr-stations", async (
     if (request.PrinterDeviceId is Guid printerId)
     {
         var selectedPrinterOutputMode = await db.PrinterDevices.AsNoTracking()
-            .Where(printer => printer.Id == printerId && printer.TenantId == tenantId && printer.IsActive)
+            .Where(printer => printer.Id == printerId && printer.TenantId == tenantId && printer.IsActive &&
+                              (!environment.IsProduction() || !printer.IsTestModeOverride))
             .Select(printer => printer.OutputMode)
             .SingleOrDefaultAsync(ct);
         if (selectedPrinterOutputMode is null)
@@ -3551,6 +3556,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
                        item.TenantId == tenantId &&
                        item.IsActive &&
                        item.AgentDeviceId != null &&
+                       (!environment.IsProduction() || !item.IsTestModeOverride) &&
                        (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT") &&
                        ((item.OutputMode == "PDF_EXPORT" && !selectedJob.PrivatePrinting) ||
                         (item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
@@ -3952,6 +3958,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
             equals new { agent.TenantId, AgentId = agent.Id }
         where printer.Id == job.PrinterDeviceId && printer.TenantId == tenantId &&
               printer.AgentDeviceId == job.ClaimedByAgentDeviceId && printer.IsActive &&
+              (!environment.IsProduction() || !printer.IsTestModeOverride) &&
               printer.QueueName != null && printer.QueueName != "" &&
               (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
               ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
@@ -4318,6 +4325,7 @@ shop.MapPost("/print-batches/{batchId:guid}/resume-unprinted", async (
     ResumeUnprintedBatchRequest request,
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
+    IHostEnvironment environment,
     PrivateRelayWakeupService relayWakeups,
     CancellationToken ct) =>
 {
@@ -4372,6 +4380,7 @@ shop.MapPost("/print-batches/{batchId:guid}/resume-unprinted", async (
     var printer = await db.PrinterDevices.AsNoTracking()
         .Where(item => item.Id == printerId && item.TenantId == tenantId &&
                        item.AgentDeviceId == agentId && item.IsActive &&
+                       (!environment.IsProduction() || !item.IsTestModeOverride) &&
                        item.OutputMode == "PHYSICAL" &&
                        item.QueueName != null && item.QueueName != "" &&
                        item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
@@ -5910,8 +5919,10 @@ var agentApi = app.MapGroup("/api/v1/agent").AllowAnonymous()
             if (device is null) return Results.Unauthorized();
 
             http.Items[AgentRateLimitService.AuthenticatedAgentItemKey] = device;
+            var trafficClass = AgentRateLimitService.ClassifyTraffic(
+                http.Request.Method, http.Request.Path.Value);
             var decision = http.RequestServices.GetRequiredService<AgentRateLimitService>()
-                .TryAcquire(device.Id, DateTimeOffset.UtcNow);
+                .TryAcquire(device.Id, DateTimeOffset.UtcNow, trafficClass);
             if (!decision.IsAllowed)
             {
                 var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(decision.RetryAfter.TotalSeconds));
@@ -6149,6 +6160,7 @@ agentApi.MapGet("/private-relays/pending", async (
                   ticket.ExpiresUtc > now &&
                   printer.AgentDeviceId == device.Id &&
                   printer.IsActive &&
+                  (!environment.IsProduction() || !printer.IsTestModeOverride) &&
                   (printer.OutputMode == "PHYSICAL" ||
                    (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
                   printer.LastSeenUtc != null && printer.LastSeenUtc >= now.AddMinutes(-2) &&
@@ -6883,7 +6895,10 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
     context.Response.ContentLength = document.SizeBytes;
 
     var attemptStartedUtc = DateTimeOffset.UtcNow;
-    var attemptNumber = await db.Database.SqlQuery<int?>($"""
+    // Materialise the data-modifying CTE directly. SingleOrDefaultAsync would
+    // compose a wrapper SELECT around this SQL, which PostgreSQL rejects because
+    // a data-modifying WITH clause must remain the top-level statement.
+    var attemptNumbers = await db.Database.SqlQuery<int?>($"""
         WITH updated AS (
             UPDATE "PrintJobs"
             SET "AgentDocumentDownloadAttempts" = "AgentDocumentDownloadAttempts" + 1
@@ -6895,7 +6910,8 @@ agentApi.MapGet("/jobs/{jobId:guid}/document", async (
             RETURNING "AgentDocumentDownloadAttempts"
         )
         SELECT "AgentDocumentDownloadAttempts" AS "Value" FROM updated
-        """).SingleOrDefaultAsync(ct);
+        """).ToListAsync(ct);
+    var attemptNumber = attemptNumbers.SingleOrDefault();
     if (attemptNumber is null)
     {
         content.Dispose();
@@ -7186,7 +7202,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
             message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document was transferred. Reconnect and retry the same upload."
         });
 
-    var claimedAttemptNumber = await db.Database.SqlQuery<int?>($"""
+    // Keep UPDATE ... RETURNING as the top-level PostgreSQL statement.
+    var claimedAttemptNumbers = await db.Database.SqlQuery<int?>($"""
         WITH updated AS (
             UPDATE "LocalPrintUploadTickets"
             SET "ClaimedUtc" = COALESCE("ClaimedUtc", {now}),
@@ -7200,7 +7217,8 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
             RETURNING "AgentUploadAttempts"
         )
         SELECT "AgentUploadAttempts" AS "Value" FROM updated
-        """).SingleOrDefaultAsync(ct);
+        """).ToListAsync(ct);
+    var claimedAttemptNumber = claimedAttemptNumbers.SingleOrDefault();
     if (claimedAttemptNumber is null) return Results.Conflict();
     ticket.AgentUploadAttempts = claimedAttemptNumber.Value;
     if (ticket.PrivatePrinting)
@@ -7751,6 +7769,129 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
     });
 });
 
+agentApi.MapPost("/local-uploads/status-batch", async (
+    AgentLocalUploadStatusBatchRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    if (!AgentLocalUploadStatusBatchRules.IsValid(request.JobIds))
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["jobIds"] = [$"Provide between 1 and {AgentLocalUploadStatusBatchRules.MaximumItems} unique upload job IDs."]
+        });
+
+    var jobIds = request.JobIds;
+    var tickets = await db.LocalPrintUploadTickets.AsNoTracking()
+        .Where(item => item.TenantId == device.TenantId &&
+                       item.AgentDeviceId == device.Id &&
+                       jobIds.Contains(item.PrintJobId))
+        .Select(item => new
+        {
+            item.PrintJobId,
+            item.CompletedUtc,
+            item.ExpiresUtc,
+            item.Sha256,
+            item.SizeBytes,
+            item.PrivatePrinting
+        })
+        .ToListAsync(ct);
+
+    var documentRows = await db.PrintDocuments.AsNoTracking()
+        .Where(item => item.TenantId == device.TenantId && jobIds.Contains(item.PrintJobId))
+        .Select(item => new
+        {
+            item.PrintJobId,
+            item.SizeBytes,
+            item.Sha256,
+            item.StorageMode,
+            item.AgentDeviceId
+        })
+        .ToListAsync(ct);
+
+    var documentExistsForJob = tickets
+        .Select(ticket => new
+        {
+            ticket.PrintJobId,
+            Exists = documentRows.Any(document =>
+                document.PrintJobId == ticket.PrintJobId &&
+                document.SizeBytes == ticket.SizeBytes &&
+                document.Sha256 == ticket.Sha256 &&
+                (document.StorageMode == "CLOUD" ||
+                 (document.StorageMode == "LOCAL_AGENT" && document.AgentDeviceId == device.Id)))
+        })
+        .GroupBy(item => item.PrintJobId)
+        .ToDictionary(group => group.Key, group => group.Any(item => item.Exists));
+
+    var completedDocumentJobIds = tickets
+        .Where(ticket => ticket.CompletedUtc != null &&
+                         documentExistsForJob.GetValueOrDefault(ticket.PrintJobId))
+        .Select(ticket => ticket.PrintJobId)
+        .ToArray();
+
+    var terminalJobs = await db.PrintJobs.AsNoTracking()
+        .Where(item => item.TenantId == device.TenantId &&
+                       completedDocumentJobIds.Contains(item.Id) &&
+                       (item.Status == "REJECTED" ||
+                        item.Status == "PAYMENT_REJECTED" ||
+                        item.Status == "QUOTE_EXPIRED" ||
+                        item.Status == "REFUNDED") &&
+                       item.OutputConfirmedUtc == null &&
+                       item.OutputCompletedUtc == null)
+        .Select(item => new { item.Id, item.Status, item.UpdatedUtc })
+        .ToListAsync(ct);
+
+    var terminalJobIds = terminalJobs.Select(item => item.Id).ToArray();
+    var financialHoldJobIds = terminalJobIds.Length == 0
+        ? new HashSet<Guid>()
+        : (await db.PrintPayments.AsNoTracking()
+            .Where(payment => payment.TenantId == device.TenantId &&
+                              terminalJobIds.Contains(payment.PrintJobId) &&
+                              (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
+                               payment.Status == "CUSTOMER_REPORTED" ||
+                               payment.Status == "CASH_AWAITING_PAYMENT" ||
+                               ((payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
+                                payment.RefundedAmountMinor < payment.AmountMinor)))
+            .Select(payment => payment.PrintJobId)
+            .Distinct()
+            .ToListAsync(ct)).ToHashSet();
+
+    var retentionDays = terminalJobs.Count == 0
+        ? 30
+        : await db.PlatformOperationalSettings.AsNoTracking()
+            .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
+            .Select(item => (int?)item.PendingLocalUploadRetentionDays)
+            .SingleOrDefaultAsync(ct) ?? 30;
+
+    var jobsById = terminalJobs.ToDictionary(item => item.Id);
+    var now = DateTimeOffset.UtcNow;
+    var items = tickets.Select(ticket =>
+    {
+        var completed = ticket.CompletedUtc != null &&
+            documentExistsForJob.GetValueOrDefault(ticket.PrintJobId);
+        jobsById.TryGetValue(ticket.PrintJobId, out var job);
+        var safeToDelete = completed && job is not null &&
+            !financialHoldJobIds.Contains(ticket.PrintJobId);
+        DateTimeOffset? deleteAfterUtc = safeToDelete
+            ? ticket.PrivatePrinting ? now : job!.UpdatedUtc.AddDays(retentionDays)
+            : null;
+
+        return new
+        {
+            JobId = ticket.PrintJobId,
+            Completed = completed,
+            ticket.ExpiresUtc,
+            SafeToDelete = safeToDelete,
+            DeleteAfterUtc = deleteAfterUtc
+        };
+    }).ToArray();
+
+    return Results.Ok(new { Items = items });
+});
+
 agentApi.MapGet("/local-uploads/{jobId:guid}/status", async (
     Guid jobId,
     HttpContext context,
@@ -7871,6 +8012,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                       other.Status != "REFUNDED" &&
                       other.PrinterDeviceId != job.PrinterDeviceId)) &&
                   printer.AgentDeviceId == device.Id && printer.IsActive &&
+                  (!environment.IsProduction() || !printer.IsTestModeOverride) &&
                   printer.QueueName != null && printer.QueueName != "" &&
                   (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
                   (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
@@ -7903,7 +8045,9 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                 other.Status != "REFUNDED" &&
                 other.PrinterDeviceId != job.PrinterDeviceId)) &&
             db.PrinterDevices.Any(printer => printer.Id == job.PrinterDeviceId && printer.TenantId == device.TenantId &&
-                printer.AgentDeviceId == device.Id && printer.IsActive && printer.QueueName != null && printer.QueueName != "" &&
+                printer.AgentDeviceId == device.Id && printer.IsActive &&
+                (!environment.IsProduction() || !printer.IsTestModeOverride) &&
+                printer.QueueName != null && printer.QueueName != "" &&
                 (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
                 (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
                  (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
@@ -8899,6 +9043,7 @@ agentApi.MapPost("/printers/sync", async (
     SmartPrintDbContext db,
     AgentPrinterSyncRequest request,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
@@ -8913,9 +9058,34 @@ agentApi.MapPost("/printers/sync", async (
         });
     }
 
-    // Prefer usable physical queues, then document export; default queues win ties.
-    // Unsupported virtual/document drivers remain visible but never consume a slot.
+    var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
+        .SingleAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, ct);
+
+    // The platform test setting is the only path that promotes an unsupported
+    // virtual queue. It requires a working Windows status, is never active in
+    // production, and never changes the connection type or PDF Export profile.
+    var allowVirtualQueueTestMode = PrinterTypePolicy.IsTestModeEnabled(
+        operationalSettings.TreatWorkingVirtualQueuesAsPhysicalForTesting,
+        environment.IsProduction());
     var normalized = validation.Printers
+        .Select(discovered =>
+        {
+            var effectiveMode = PrinterTypePolicy.ResolveOutputMode(
+                discovered.OutputMode,
+                discovered.Status,
+                allowVirtualQueueTestMode,
+                discovered.PortName);
+            return discovered with
+            {
+                OutputMode = effectiveMode,
+                TestModeOverride = PrinterTypePolicy.IsTestModeOverride(
+                    discovered.OutputMode,
+                    effectiveMode,
+                    discovered.Status,
+                    allowVirtualQueueTestMode,
+                    discovered.PortName)
+            };
+        })
         .OrderBy(printer => printer.OutputMode == "PHYSICAL" ? 0 : printer.OutputMode == "PDF_EXPORT" ? 1 : 2)
         .ThenByDescending(printer => printer.Status is "Ready" or "Busy")
         .ThenByDescending(printer => printer.IsDefault)
@@ -8982,8 +9152,9 @@ agentApi.MapPost("/printers/sync", async (
                 DisplayName = discovered.QueueName,
                 Manufacturer = "Windows",
                 Model = discovered.DriverName,
-                ConnectionType = "WindowsQueue",
+                ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName),
                 OutputMode = discovered.OutputMode,
+                IsTestModeOverride = discovered.TestModeOverride,
                 ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName,
                 QueueName = discovered.QueueName,
                 IsDefault = discovered.IsDefault,
@@ -9010,8 +9181,9 @@ agentApi.MapPost("/printers/sync", async (
             printer.DisplayName = discovered.QueueName;
             printer.Manufacturer = "Windows";
             printer.Model = discovered.DriverName;
-            printer.ConnectionType = "WindowsQueue";
+            printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName);
             printer.OutputMode = discovered.OutputMode;
+            printer.IsTestModeOverride = discovered.TestModeOverride;
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName;
             printer.IsDefault = discovered.IsDefault;
             printer.CapabilitiesJson = AgentPrinterSyncRules.ResolveCapabilitiesJson(
@@ -10768,6 +10940,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
               station.IsEnabled &&
               station.PrinterDeviceId != null &&
               printer.IsActive &&
+              (!environment.IsProduction() || !printer.IsTestModeOverride) &&
               printer.AgentDeviceId != null &&
               !string.IsNullOrWhiteSpace(printer.QueueName) &&
               agent.RevokedUtc == null &&
@@ -13373,6 +13546,7 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
 publicApi.MapGet("/sessions/current", async (
     HttpContext context,
     SmartPrintDbContext db,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     var rawToken = context.Request.Headers["X-Print-Session"].FirstOrDefault();
@@ -13404,7 +13578,8 @@ publicApi.MapGet("/sessions/current", async (
     var localAgent = await GetLocalAgentInfoAsync(db, session.TenantId, stationPrinterId, now, ct);
     var printer = stationPrinterId is Guid currentPrinterId
         ? await db.PrinterDevices.AsNoTracking()
-            .Where(item => item.Id == currentPrinterId && item.TenantId == session.TenantId && item.IsActive)
+            .Where(item => item.Id == currentPrinterId && item.TenantId == session.TenantId && item.IsActive &&
+                           (!environment.IsProduction() || !item.IsTestModeOverride))
             .Select(item => new { item.DisplayName, item.Manufacturer, item.Model, item.Status, item.CapabilitiesJson })
             .SingleOrDefaultAsync(ct)
         : null;
@@ -13440,6 +13615,7 @@ static async Task<bool> IsPrivatePrintingOutputQueueReadyAsync(
                        item.TenantId == tenantId &&
                        item.AgentDeviceId == agentDeviceId &&
                        item.IsActive &&
+                       (!environment.IsProduction() || !item.IsTestModeOverride) &&
                        item.QueueName != null && item.QueueName != "")
         .Select(item => new { item.OutputMode, item.Status, item.LastSeenUtc })
         .SingleOrDefaultAsync(ct);
