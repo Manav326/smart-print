@@ -5,7 +5,7 @@ import { formatIstDateTime } from "./date-time";
 import { buildShopOrderJourneys, filterShopOrderJourneys, isActiveOrderWork, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
 import styles from "./OrderJourney.module.css";
 import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
-import { getPrinterAvailabilityReason, isPrinterAvailableForShop } from "./printer-availability";
+import { getPrinterAvailabilityReason, isAgentOnlineForShop, isPrinterAvailableForShop } from "./printer-availability";
 
 type ShopDestination = "Print Queue" | "Payments" | "Print Agent";
 interface Props {
@@ -212,7 +212,7 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
     printing:journeys.filter(j=>j.stage==="printing"&&!j.isClosed).length,
     ready:journeys.filter(j=>j.stage==="ready").length
   }),[journeys]);
-  const agentsOnline=agents.filter(isAgentOnline).length;
+  const agentsOnline=agents.filter(agent=>isAgentOnlineForShop(agent)).length;
   const reachable=printers.filter(printer=>isPrinterAvailableForShop(printer,agents)).length;
   const inMotion=journeys.filter(isActiveOrderWork).length;
   const readyForCollection=journeys.filter(j=>j.stage==="ready").length;
