@@ -467,34 +467,11 @@ function Assert-MachineDataAcl {
 }
 
 function Assert-PrivateQueueAcl {
-    $queueRoot = Join-Path $programDataRoot "LocalQueue"
-    Assert-True (Test-Path -LiteralPath $queueRoot -PathType Container) "The encrypted SmartPrint queue directory is missing."
-
-    # Keep the queue root protected. Child items may safely inherit from
-    # this protected root, so verify their effective allow ACEs rather than
-    # requiring every newly-created file to carry a redundant protected DACL.
-    $queueRootSecurity = Get-Acl -LiteralPath $queueRoot
-    Assert-True ($queueRootSecurity.AreAccessRulesProtected) "The encrypted SmartPrint queue root must have a protected DACL."
-
-    # Verify every manifest, encrypted document, key and nested directory.
-    # Checking only the root DACL can hide stale explicit ACEs on child files.
-    $queueItems = @($queueRoot)
-    $queueItems += @(Get-ChildItem -LiteralPath $queueRoot -Force -Recurse | ForEach-Object { $_.FullName })
-    foreach ($queueItem in $queueItems) {
-        $security = Get-Acl -LiteralPath $queueItem
-        $allowedSids = @(
-            $security.Access |
-                Where-Object { $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow } |
-                ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }
-        )
-        Assert-True ($allowedSids -contains "S-1-5-18") "SYSTEM access is missing from private queue item: $queueItem"
-        Assert-True ($allowedSids -contains "S-1-5-19") "LocalService access is missing from private queue item: $queueItem"
-        $unexpectedAllowedSids = @($allowedSids | Where-Object { $_ -notin @("S-1-5-18", "S-1-5-19") })
-        Assert-True ($unexpectedAllowedSids.Count -eq 0) "An unexpected principal has allow access to private queue item '$queueItem': $($unexpectedAllowedSids -join ', ')"
-    }
-
-    $keyPath = Join-Path $queueRoot "document-encryption-key.dpapi"
-    Assert-True (Test-Path -LiteralPath $keyPath -PathType Leaf) "The Agent document-encryption key file is missing."
+    # Administrators are intentionally excluded from the encrypted queue DACL.
+    # Inspect every effective queue/file ACL as the authorized LocalService
+    # identity instead of opening the production queue from the runner token.
+    $fixtureResult = Invoke-FixtureAsLocalService "verify"
+    Assert-True ($fixtureResult -eq "VERIFIED") "The LocalService private-queue ACL/content verification returned an unexpected result: $fixtureResult"
 }
 
 function Assert-PreservedFixtures {
@@ -504,8 +481,6 @@ function Assert-PreservedFixtures {
     $currentHash = (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
     Assert-True ($currentHash -eq $identityHash) "The machine Agent identity changed during install/uninstall."
     Assert-True (Test-Path -LiteralPath $networkPreferencePath -PathType Leaf) "The shop's saved local-network selection was removed."
-    $fixtureResult = Invoke-FixtureAsLocalService "verify"
-    Assert-True ($fixtureResult -eq "VERIFIED") "The protected queue fixture verification returned an unexpected result: $fixtureResult"
 }
 
 function Add-QueueFixture {
@@ -695,6 +670,8 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -776,6 +753,53 @@ if (mode == "seed")
 }
 else if (mode == "verify")
 {
+    // The encrypted queue intentionally denies access to the elevated runner.
+    // Verify its complete effective DACL from this LocalService worker context.
+    var queueRootPath = Path.GetDirectoryName(documentKeyPath)
+        ?? throw new InvalidOperationException("The Agent queue root could not be resolved.");
+    if (!Directory.Exists(queueRootPath))
+        throw new InvalidOperationException("The protected Agent queue directory is missing.");
+
+    var queuePaths = new List<string> { queueRootPath };
+    queuePaths.AddRange(Directory.EnumerateFileSystemEntries(
+        queueRootPath, "*", SearchOption.AllDirectories));
+    foreach (var queuePath in queuePaths)
+    {
+        var attributes = File.GetAttributes(queuePath);
+        FileSystemSecurity security = (attributes & FileAttributes.Directory) != 0
+            ? FileSystemAclExtensions.GetAccessControl(
+                new DirectoryInfo(queuePath), AccessControlSections.Access)
+            : FileSystemAclExtensions.GetAccessControl(
+                new FileInfo(queuePath), AccessControlSections.Access);
+
+        if (string.Equals(
+                Path.GetFullPath(queuePath),
+                Path.GetFullPath(queueRootPath),
+                StringComparison.OrdinalIgnoreCase) &&
+            !security.AreAccessRulesProtected)
+        {
+            throw new InvalidOperationException("The encrypted Agent queue root DACL is not protected.");
+        }
+
+        var allowedSids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(
+                     includeExplicit: true,
+                     includeInherited: true,
+                     targetType: typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType == AccessControlType.Allow)
+                allowedSids.Add(((SecurityIdentifier)rule.IdentityReference).Value);
+        }
+
+        if (!allowedSids.Contains("S-1-5-18") || !allowedSids.Contains("S-1-5-19"))
+            throw new InvalidOperationException($"SYSTEM or LocalService allow access is missing from protected queue item '{queuePath}'.");
+        var unexpectedSids = allowedSids
+            .Where(sid => sid is not "S-1-5-18" and not "S-1-5-19")
+            .ToArray();
+        if (unexpectedSids.Length > 0)
+            throw new InvalidOperationException($"Unexpected principals have allow access to protected queue item '{queuePath}': {string.Join(", ", unexpectedSids)}");
+    }
+
     var credentials = credentialStore.Load()
         ?? throw new InvalidOperationException("The synthetic machine identity is missing.");
     if (credentials.AgentDeviceId != Guid.Parse(expectedIdentityId))
