@@ -119,6 +119,66 @@ function stopServer(child) {
     catch { if (child.exitCode === null) child.kill("SIGTERM"); }
   }
 }
+async function captureApplicationBootDiagnostics(page) {
+  try {
+    return await page.evaluate(() => ({
+      url: window.location.href,
+      readyState: document.readyState,
+      title: document.title,
+      bodyText: (document.body?.innerText || "").slice(0, 1200),
+      bodyHtml: (document.body?.innerHTML || "").slice(0, 2400),
+      desktopRootHtml: (document.querySelector("#smartprint-desktop-root")?.innerHTML || "").slice(0, 2400),
+      scripts: Array.from(document.scripts).map(script => ({
+        src: script.src || null,
+        type: script.type || null
+      })),
+      moduleResources: performance.getEntriesByType("resource")
+        .filter(entry => /\\.(?:tsx?|jsx?)(?:\\?|$)/i.test(entry.name))
+        .slice(-20)
+        .map(entry => ({ name: entry.name, duration: Math.round(entry.duration) })),
+      tauriBridgePresent: "__TAURI_INTERNALS__" in window
+    }));
+  } catch (error) {
+    return { diagnosticError: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function waitForDesktopApplicationShell(page, browserDiagnostics) {
+  try {
+    await page.locator(".app-shell").waitFor({ state: "visible", timeout: 30000 });
+    return;
+  } catch (initialError) {
+    const initial = await captureApplicationBootDiagnostics(page);
+    browserDiagnostics.push({
+      phase: "initial-desktop-shell-timeout",
+      message: initialError instanceof Error ? initialError.message : String(initialError),
+      ...initial
+    });
+
+    // The Windows Vite/WebView development host can expose its HTTP health route
+    // before the desktop entry module has finished its first transform. Retry one
+    // clean navigation for this test-only desktop shell; never retry the native
+    // Credential Manager/WebView2 path and never convert a second timeout to pass.
+    if (appMode !== "desktop") {
+      throw new Error("SmartPrint application shell did not boot: " + JSON.stringify(initial));
+    }
+
+    await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+    try {
+      await page.locator(".app-shell").waitFor({ state: "visible", timeout: 20000 });
+    } catch (retryError) {
+      const retried = await captureApplicationBootDiagnostics(page);
+      browserDiagnostics.push({
+        phase: "desktop-shell-retry-timeout",
+        message: retryError instanceof Error ? retryError.message : String(retryError),
+        ...retried
+      });
+      throw new Error("SmartPrint desktop shell did not boot after one clean navigation retry: " +
+        JSON.stringify({ initial, retried }));
+    }
+  }
+}
+
 async function waitForServer(child) {
   const timeoutSeconds = appMode === "desktop-native" ? nativeStartupTimeoutSeconds : 120;
   const healthUrl = appMode === "desktop-native"
@@ -461,6 +521,7 @@ let nativeSecureSessionCaptured = false;
 let nativeSecureSessionOverwritten = false;
 let nativeCredentialSessionRestored = false;
 const pageErrors = [];
+const browserDiagnostics = [];
 let desktopShellBooted = false;
 let duplicateReplay = null;
 let nativeConfigPath = null;
@@ -523,6 +584,24 @@ try {
   }
 
   page.on("pageerror", error => pageErrors.push(error.message));
+  page.on("console", message => {
+    if (message.type() === "error") browserDiagnostics.push({
+      phase: "console-error",
+      message: message.text().slice(0, 1200)
+    });
+  });
+  page.on("requestfailed", request => browserDiagnostics.push({
+    phase: "request-failed",
+    url: request.url(),
+    error: request.failure()?.errorText || "unknown"
+  }));
+  page.on("response", response => {
+    if (response.status() >= 400) browserDiagnostics.push({
+      phase: "http-error",
+      status: response.status(),
+      url: response.url()
+    });
+  });
   await installApiRoutes(page);
 
   const secureSession = JSON.stringify({
@@ -590,7 +669,7 @@ try {
     await page.goto(baseUrl + "/shop", { waitUntil: "networkidle" });
   }
 
-  await page.locator(".app-shell").waitFor({ state: "visible", timeout: 30000 });
+  await waitForDesktopApplicationShell(page, browserDiagnostics);
   if (appMode === "desktop" || appMode === "desktop-native") {
     assert.equal(await page.locator("body").getAttribute("data-app-shell"), "desktop");
     desktopShellBooted = true;
@@ -771,7 +850,7 @@ try {
     } catch {}
   }
   writeFileSync(join(artifactDirectory, "mixed-batch-refund-failure-" + appMode + ".json"), JSON.stringify({
-    appMode, message: error instanceof Error ? error.message : String(error), pageErrors, apiRequests, unhandledApi
+    appMode, message: error instanceof Error ? error.message : String(error), pageErrors, browserDiagnostics, apiRequests, unhandledApi
   }, null, 2), "utf8");
   throw error;
 } finally {

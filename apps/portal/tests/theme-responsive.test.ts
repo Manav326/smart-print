@@ -1040,6 +1040,7 @@ test("customer upload progress counts confirmed files separately from failed and
 test("shop owners can only select online ready printer queues and new printers register through discovery", () => {
   const app = read("../src/App.tsx");
   const api = read("../../../src/SmartPrint.Api/Program.cs");
+  const printerManagement = read("../../../src/SmartPrint.Api/Modules/ShopDevices/Services/ShopDevicesService.cs");
 
   assert.match(app, /function isPrinterReadyForSelection/);
   assert.match(app, /getPrinterReadinessReason\(printer, agents, now\)/);
@@ -1059,11 +1060,11 @@ test("shop owners can only select online ready printer queues and new printers r
   assert.ok(app.includes("setPendingReplacement(printer);") && app.includes('setReplacePrinterId("");'));
   assert.doesNotMatch(app, /Add manually|function PrinterModal|Register manually \(advanced\)/);
 
-  assert.match(api, /PrinterSelectionRules\.CanSelect/);
+  assert.match(printerManagement, /PrinterSelectionRules\.CanSelect/);
   assert.match(api, /PrintDispatchReassignmentRules\.CanReassignBeforeSpoolerSubmission/);
   assert.match(api, /awaitingAgentDispatchCanBeReassigned/);
-  assert.match(api, /No selected printer is being replaced/);
-  assert.match(api, /code = "printer_already_selected"/);
+  assert.match(printerManagement, /No selected printer is being replaced/);
+  assert.match(printerManagement, /"printer_already_selected"/);
   const orderJourney = read("../src/OrderJourneyPage.tsx");
   assert.match(orderJourney, /expiredAgentLease/);
   assert.match(orderJourney, /lease expired before it finished receiving this file/);
@@ -1073,11 +1074,11 @@ test("shop owners can only select online ready printer queues and new printers r
   assert.match(orderJourney, /printer\.agentDeviceId===localDocumentAgentId/);
   assert.match(orderJourney, /printers on other computers cannot receive this local-only file/);
   assert.match(app, /Files stored only on the original Windows computer stay there/);
-  assert.equal((api.match(/var queueJobsUnderLock = await db\.PrintJobs\.FromSqlInterpolated/g) ?? []).length, 2,
+  assert.equal((printerManagement.match(/var queueJobsUnderLock = await db\.PrintJobs\.FromSqlInterpolated/g) ?? []).length, 2,
     "Both replacement and deselection must serialize against Agent queue claims.");
-  assert.equal((api.match(/FOR UPDATE/g) ?? []).length >= 4, true,
+  assert.equal((printerManagement.match(/FOR UPDATE/g) ?? []).length, 2,
     "Printer swaps and job reassignment must use row locks before changing printer ownership.");
-  assert.equal((api.match(/var partiallyCompletedBatchJobNumber/g) ?? []).length, 2,
+  assert.equal((printerManagement.match(/var partiallyCompletedBatchJobNumber/g) ?? []).length, 2,
     "Both replacement and ordinary deselection must protect partially completed batches.");
-  assert.equal((api.match(/code = "printer_batch_output_locked"/g) ?? []).length, 2);
+  assert.equal((printerManagement.match(/"printer_batch_output_locked"/g) ?? []).length, 2);
 });

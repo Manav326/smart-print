@@ -1,5 +1,5 @@
 using SmartPrint.Api.Contracts;
-using SmartPrint.Api.Domain;
+using SmartPrint.Api.Modules.AgentConnectivity.Domain;
 
 namespace SmartPrint.Api.Tests;
 
@@ -263,6 +263,27 @@ public sealed class AgentPrinterSyncRulesTests
         ]);
         Assert.Equal(2, result.Printers.Count);
         Assert.Equal(1, result.RejectedCount);
+    }
+
+    [Fact]
+    public void OrdersPhysicalReadyThenPdfThenUnsupportedAndPrefersDefaultWithinEachGroup()
+    {
+        var printers = new[]
+        {
+            Printer("Unsupported", "Driver", "Port", outputMode: "UNSUPPORTED_VIRTUAL"),
+            Printer("PDF Default", "Driver", "Port", outputMode: "PDF_EXPORT") with { IsDefault = true },
+            Printer("Physical Offline Default", "Driver", "Port", status: "Offline") with { IsDefault = true },
+            Printer("Physical Ready", "Driver", "Port", status: "Ready"),
+            Printer("Physical Busy Default", "Driver", "Port", status: "Busy") with { IsDefault = true },
+            Printer("PDF Ready", "Driver", "Port", status: "Ready", outputMode: "PDF_EXPORT")
+        };
+
+        var ordered = AgentPrinterSyncRules.OrderForSelection(printers);
+
+        Assert.Equal(
+            ["Physical Busy Default", "Physical Ready", "Physical Offline Default",
+             "PDF Default", "PDF Ready", "Unsupported"],
+            ordered.Select(printer => printer.QueueName));
     }
 
     private static AgentPrinterDiscoveryRequest Printer(

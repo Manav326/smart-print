@@ -593,7 +593,9 @@ test("local shop Photo Studio revision authorization and completion enforce the 
   const authorizeStart=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/authorize"');
   const authorizeEnd=program.indexOf('agentApi.MapPost("/local-document-photo-revisions/{jobId:guid}/complete"',authorizeStart);
   const completeStart=authorizeEnd;
-  const completeEnd=program.indexOf("\nagentApi.MapPost(",completeStart+30);
+  const nextAgentRoute=program.indexOf("\nagentApi.",completeStart+30);
+  const nextShopRoute=program.indexOf("\nshop.",completeStart+30);
+  const completeEnd=[nextAgentRoute,nextShopRoute].filter(index=>index>completeStart).sort((a,b)=>a-b)[0] ?? -1;
   assert.ok(authorizeStart>=0&&authorizeEnd>authorizeStart);
   assert.ok(completeStart>=0&&completeEnd>completeStart);
   const authorize=program.slice(authorizeStart,authorizeEnd);
@@ -626,7 +628,7 @@ test("shop-originated photo orders use their own tenant-owned job and the shared
  const api=read("../src/api.ts");
  const program=read("../../../src/SmartPrint.Api/Program.cs");
  const endpointStart=program.indexOf('shop.MapPost("/photo-jobs"');
- const endpointEnd=program.indexOf('shop.MapGet("/reports/summary"',endpointStart);
+ const endpointEnd=program.indexOf('shop.MapPatch("/print-jobs/{jobId:guid}/printer"',endpointStart);
  assert.ok(endpointStart>=0&&endpointEnd>endpointStart);
  const endpoint=program.slice(endpointStart,endpointEnd);
  assert.match(app,/New photo order/);
@@ -652,7 +654,7 @@ test("shop-originated photo orders use their own tenant-owned job and the shared
 test("customer uploader keeps its batch example, inline Android PDF preview and real status transitions",()=>{
  const app=read("../src/App.tsx");
  const api=read("../src/api.ts");
- const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const customerQueries=read("../../../src/SmartPrint.Api/Modules/Customer/Endpoints/CustomerQueryEndpoints.cs");
  const css=read("../src/styles.css");
  assert.match(app,/placeholder="e.g. Manjeet - College Notes"/);
  assert.doesNotMatch(app,/Rahul\s*[–-]\s*College Notes/);
@@ -661,7 +663,7 @@ test("customer uploader keeps its batch example, inline Android PDF preview and 
  assert.match(app,/customerStatusTone\(jobStatus\.status\)/);
  assert.match(app,/Last updated · \{formatIstDateTime\(jobStatus\.updatedUtc\)\}/);
  assert.match(api,/previousStatus\?: string \| null/);
- assert.match(program,/new \{ item\.PreviousStatus, item\.NewStatus, item\.ActorType, item\.CreatedUtc \}/);
+ assert.match(customerQueries,/new \{ item\.PreviousStatus, item\.NewStatus, item\.ActorType, item\.CreatedUtc \}/);
  assert.match(css,/\.customer-native-pdf-preview/);
  assert.match(css,/\.customer-batch-quote-card \.customer-batch-quote-title>strong\{[\s\S]*?white-space:normal;[\s\S]*?overflow-wrap:anywhere/);
 });
