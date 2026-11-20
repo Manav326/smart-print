@@ -81,6 +81,10 @@ test("authorised dispatch waits for the shop computer rather than claiming print
   assert.equal(orderJourneyStatusLabel("PRINT_AUTHORISED"), "Waiting for shop computer");
 });
 
+test("authorised dispatch is shown as waiting for the shop computer", () => {
+  assert.equal(orderJourneyStatusLabel("PRINT_AUTHORISED"), "Waiting for shop computer");
+});
+
 test("stage filters and search cover batch, order, original file and folder names", () => {
   const orders = buildShopOrderJourneys([
     job({id:"a",jobNumber:"SP-100",batchId:"batch-abc",batchName:"Morning packet",batchGroupName:"School forms",status:"AWAITING_SHOP_APPROVAL",
