@@ -35,6 +35,7 @@ using SmartPrint.Api.Modules.ShopSubscriptionPayments.Registration;
 using SmartPrint.Api.Modules.ShopWorkspace.Registration;
 using SmartPrint.Api.Modules.ShopOperations.Registration;
 using SmartPrint.Api.Modules.ShopPayments.Registration;
+using SmartPrint.Api.Modules.ShopProfile.Registration;
 using SmartPrint.Documents;
 
 const string bootstrapPlatformAdminArgument = "--bootstrap-platform-admin";
@@ -117,6 +118,7 @@ builder.Services.AddScoped<TokenIssuer>();
 builder.Services.AddAuthenticationModule();
 builder.Services.AddPlatformOperationalSettingsModule();
 builder.Services.AddShopPaymentsModule();
+builder.Services.AddShopProfileModule();
 builder.Services.AddPlatformTenantsModule();
 builder.Services.AddSingleton<GoogleIdentityService>();
 builder.Services.AddSingleton<GoogleLoginNonceStore>();
@@ -585,6 +587,7 @@ var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
 
 shop.MapShopSubscriptionPaymentsModule();
 shop.MapShopWorkspaceQueriesModule();
+shop.MapShopProfileModule();
 shop.MapShopOperationsQueriesModule();
 shop.MapShopPaymentsModule();
 
@@ -685,50 +688,7 @@ shop.MapPut("/account", async (
     });
 }).RequireRateLimiting("authentication");
 
-shop.MapPut("/profile", async (
-    ShopProfileRequest request,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    TenantEntitlementService entitlements,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
 
-    if (string.IsNullOrWhiteSpace(request.DisplayName) || request.DisplayName.Trim().Length > 180 ||
-        !IsHexColor(request.AccentColor) ||
-        (request.LogoUrl is not null && (!Uri.TryCreate(request.LogoUrl, UriKind.Absolute, out var logoUri) || logoUri.Scheme != Uri.UriSchemeHttps)))
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["profile"] = ["Provide a display name, a six-digit hex accent colour, and an optional HTTPS logo URL."]
-        });
-    }
-
-    var plan = await entitlements.GetForTenantAsync(tenantId, ct);
-    var requestsCustomBranding = request.LogoUrl is not null ||
-        !string.Equals(request.AccentColor, "#7662E8", StringComparison.OrdinalIgnoreCase);
-    if (requestsCustomBranding && !plan.WhiteLabelEnabled)
-    {
-        return Results.Problem(statusCode: StatusCodes.Status403Forbidden,
-            title: "Custom shop branding is not included in this shop's current plan.");
-    }
-
-    var profile = await db.ShopProfiles.SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
-    if (profile is null)
-    {
-        return Results.NotFound();
-    }
-
-    profile.DisplayName = request.DisplayName.Trim();
-    profile.LogoUrl = request.LogoUrl;
-    profile.AccentColor = request.AccentColor.ToUpperInvariant();
-    profile.UpdatedUtc = DateTimeOffset.UtcNow;
-    await db.SaveChangesAsync(ct);
-    return Results.Ok(new { profile.DisplayName, profile.LogoUrl, profile.AccentColor, profile.UpdatedUtc });
-});
 
 
 
@@ -11314,9 +11274,6 @@ static bool IsValidPageSizesJson(string value)
         return false;
     }
 }
-
-static bool IsHexColor(string value) =>
-    value is { Length: 7 } && value[0] == '#' && value[1..].All(Uri.IsHexDigit);
 
 static string Slugify(string value)
 {

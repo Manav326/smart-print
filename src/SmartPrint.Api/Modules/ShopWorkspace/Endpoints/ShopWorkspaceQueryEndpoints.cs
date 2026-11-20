@@ -1,6 +1,4 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -134,45 +132,7 @@ public static class ShopWorkspaceQueryEndpoints
             });
         });
 
-        shop.MapGet("/profile", async (
-            ClaimsPrincipal principal,
-            SmartPrintDbContext db,
-            UserManager<AppUser> userManager,
-            CancellationToken ct) =>
-        {
-            if (!principal.FindAll("shop_role").Any(claim => claim.Value == "ShopOwner") ||
-                !TenantIdentity.TryGetTenantId(principal, out var tenantId) ||
-                !Guid.TryParse(principal.FindFirstValue(JwtRegisteredClaimNames.Sub), out var userId))
-            {
-                return Results.Forbid();
-            }
         
-            var owner = await userManager.FindByIdAsync(userId.ToString());
-            if (owner is null || owner.TenantId != tenantId)
-            {
-                return Results.Forbid();
-            }
-        
-            var profile = await db.ShopProfiles.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == tenantId, ct);
-            var tenant = await db.Tenants.AsNoTracking().SingleOrDefaultAsync(x => x.Id == tenantId && x.Status == "Active", ct);
-            return profile is null || tenant is null
-                ? Results.NotFound()
-                : Results.Ok(new
-                {
-                    tenant.Id,
-                    tenant.Slug,
-                    tenant.BusinessName,
-                    tenant.Status,
-                    OwnerName = owner.DisplayName,
-                    OwnerEmail = owner.Email ?? string.Empty,
-                    profile.DisplayName,
-                    profile.LogoUrl,
-                    profile.AccentColor,
-                    profile.Currency,
-                    profile.TimeZone,
-                    profile.WhiteLabelEnabled
-                });
-        });
 
         shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext db, CancellationToken ct) =>
         {
