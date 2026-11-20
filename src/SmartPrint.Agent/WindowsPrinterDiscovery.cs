@@ -127,6 +127,21 @@ public sealed class WindowsPrinterDiscovery
         return (true, NormalizeDiscoveredQueues(enriched));
     }
 
+    public static IReadOnlyList<DiscoveredPrinter> ApplyCapabilitySnapshots(
+        IReadOnlyList<DiscoveredPrinter> currentMetadata,
+        IReadOnlyList<DiscoveredPrinter> enrichedSnapshots)
+    {
+        return currentMetadata.Select(current =>
+        {
+            var capabilitySnapshot = enrichedSnapshots.FirstOrDefault(snapshot =>
+                string.Equals(snapshot.QueueName, current.QueueName, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(snapshot.DriverName, current.DriverName, StringComparison.OrdinalIgnoreCase));
+            return capabilitySnapshot is null
+                ? current
+                : current with { CapabilitiesJson = capabilitySnapshot.CapabilitiesJson };
+        }).ToArray();
+    }
+
     private static List<DiscoveredPrinter>? TryParseDiscoveryResult(AgentChildProcessResult child)
     {
         if (child.TimedOut || child.ExitCode != 0 || child.StandardOutput.Length > 2 * 1024 * 1024)
