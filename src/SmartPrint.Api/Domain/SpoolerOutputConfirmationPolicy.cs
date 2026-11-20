@@ -91,7 +91,7 @@ public static class SpoolerOutputConfirmationPolicy
                 normalizedSpoolerStatus, spoolerSubmittedUtc, spoolerObservedUtc,
                 nowUtc, failureCode, spoolerJobId) ||
             IsRetained(normalizedSpoolerStatus) ||
-            (spoolerTotalPages > 0 && spoolerPagesPrinted < spoolerTotalPages)
+            (spoolerTotalPages > 0 && spoolerPagesPrinted < spoolerTotalPages))
             return false;
 
         // A live/queued Windows job is not proof of printed paper. Require the

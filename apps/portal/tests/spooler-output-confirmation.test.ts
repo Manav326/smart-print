@@ -71,6 +71,7 @@ test("verified queue absence retains manual physical-page resolution", () => {
   assert.equal(hasIncompleteSpoolerPageProgress(0, 8), true);
   assert.equal(hasIncompleteSpoolerPageProgress(3, 8), true);
   assert.equal(hasIncompleteSpoolerPageProgress(8, 8), false);
+});
 
 test("only fresh zero-page physical queue absences with a local copy can be resumed", () => {
   const eligible = [
@@ -104,7 +105,6 @@ test("only fresh zero-page physical queue absences with a local copy can be resu
     "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,"2026-11-16T08:50:59.000Z",null,null,
     "2026-11-16T09:00:05.000Z",true,nowUtc
   ), false);
-});
 });
 
 test("an Agent restart without a spooler ID is uncertain and requires manual queue reconciliation", () => {
