@@ -38,6 +38,7 @@ using SmartPrint.Api.Modules.ShopPayments.Registration;
 using SmartPrint.Api.Modules.ShopProfile.Registration;
 using SmartPrint.Api.Modules.ShopAccount.Registration;
 using SmartPrint.Api.Modules.ShopDevices.Registration;
+using SmartPrint.Api.Modules.ShopPricing.Registration;
 using SmartPrint.Documents;
 
 const string bootstrapPlatformAdminArgument = "--bootstrap-platform-admin";
@@ -123,6 +124,7 @@ builder.Services.AddShopPaymentsModule();
 builder.Services.AddShopProfileModule();
 builder.Services.AddShopAccountModule();
 builder.Services.AddShopDevicesModule();
+builder.Services.AddShopPricingModule();
 builder.Services.AddPlatformTenantsModule();
 builder.Services.AddSingleton<GoogleIdentityService>();
 builder.Services.AddSingleton<GoogleLoginNonceStore>();
@@ -623,80 +625,9 @@ shop.MapShopDevicesModule();
 
 
 
-shop.MapPut("/pricing", async (
-    ShopPricingRequest request,
-    ClaimsPrincipal principal,
-    SmartPrintDbContext db,
-    CancellationToken ct) =>
-{
-    if (!IsShopOwner(principal) || !TryGetTenantId(principal, out var tenantId))
-    {
-        return Results.Forbid();
-    }
+shop.MapShopPricingModule();
 
-    const long maximumRateMinor = 100_000;
-    const long maximumMinimumChargeMinor = 10_000_000;
-    var rates = new[]
-    {
-        request.MonoPerSideMinor,
-        request.ColourPerSideMinor,
-        request.MonoDuplexPerSheetMinor,
-        request.ColourDuplexPerSheetMinor,
-        request.Photo35x45Minor,
-        request.Photo25x35Minor,
-        request.Photo2x2Minor,
-        request.Photo4x6Minor
-    };
-    if (rates.Any(amount => amount < 0 || amount > maximumRateMinor) ||
-        request.IdDocumentPriceMinor is < 0 or > maximumRateMinor ||
-        request.MinimumChargeMinor < 0 || request.MinimumChargeMinor > maximumMinimumChargeMinor ||
-        request.MonoPerSideMinor == 0 || request.ColourPerSideMinor == 0)
-    {
-        return Results.ValidationProblem(new Dictionary<string, string[]>
-        {
-            ["pricing"] = ["Set positive mono and colour per-side prices, non-negative duplex prices and a valid minimum charge. Prices use paise for INR."]
-        });
-    }
 
-    var pricing = await db.ShopPricingProfiles.SingleOrDefaultAsync(item => item.TenantId == tenantId, ct);
-    if (pricing is null)
-    {
-        return Results.NotFound();
-    }
-
-    pricing.MonoPerSideMinor = request.MonoPerSideMinor;
-    pricing.ColourPerSideMinor = request.ColourPerSideMinor;
-    pricing.MonoDuplexPerSheetMinor = request.MonoDuplexPerSheetMinor;
-    pricing.ColourDuplexPerSheetMinor = request.ColourDuplexPerSheetMinor;
-    pricing.MinimumChargeMinor = request.MinimumChargeMinor;
-    pricing.Photo35x45Minor = request.Photo35x45Minor;
-    pricing.Photo25x35Minor = request.Photo25x35Minor;
-    pricing.Photo2x2Minor = request.Photo2x2Minor;
-    pricing.Photo4x6Minor = request.Photo4x6Minor;
-    if (request.IdDocumentPriceMinor is long idDocumentPriceMinor)
-        pricing.IdDocumentPriceMinor = idDocumentPriceMinor;
-    pricing.IsConfigured = true;
-    pricing.Version++;
-    pricing.UpdatedUtc = DateTimeOffset.UtcNow;
-    await db.SaveChangesAsync(ct);
-
-    return Results.Ok(new
-    {
-        pricing.IsConfigured,
-        pricing.MonoPerSideMinor,
-        pricing.ColourPerSideMinor,
-        pricing.MonoDuplexPerSheetMinor,
-        pricing.ColourDuplexPerSheetMinor,
-        pricing.MinimumChargeMinor,
-            pricing.Photo35x45Minor,
-            pricing.Photo25x35Minor,
-            pricing.Photo2x2Minor,
-            pricing.Photo4x6Minor,
-            pricing.IdDocumentPriceMinor,
-        pricing.Version,
-        pricing.UpdatedUtc
-    });
-});
 
 
 
