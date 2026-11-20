@@ -2367,7 +2367,7 @@ function PrintersPage({
   ).length;
   const quotaFull = maxPrinters != null && selectedPrinters.length >= maxPrinters;
   const canUseSelection = subscriptionActive === true;
-  const canReplaceSelection = selectedPrinters.length > 0;
+  const canReplaceSelection = selectedPrinters.length > 0 && selectablePrinters.length > 0;
 
   async function confirmReplacement() {
     if (!pendingReplacement || !replacePrinterId) return;
@@ -2530,6 +2530,42 @@ function PrintersPage({
     </>
   );
 }
+function QrStationArtworkPreview({station,profile}:{station:QrStation;profile:ShopProfile|null}) {
+  const [posterSrc,setPosterSrc]=useState<string|null>(null);
+  const previewQrHostRef=useRef<HTMLDivElement|null>(null);
+
+  useEffect(()=>{
+    let cancelled=false;
+    const qrSvg=previewQrHostRef.current?.querySelector<SVGSVGElement>(".qr-code-frame svg");
+    if(!qrSvg){setPosterSrc(null);return;}
+    const qrSvgMarkup=new XMLSerializer().serializeToString(qrSvg);
+    void loadQrStationLogoDataUri(profile?.logoUrl).then(logoDataUri=>{
+      if(cancelled)return;
+      try{
+        const poster=buildQrStationArtworkSvg({
+          shopName:profile?.displayName?.trim()||station.displayName,
+          stationName:station.displayName,
+          isEnabled:station.isEnabled,
+          logoDataUri
+        },qrSvgMarkup);
+        setPosterSrc("data:image/svg+xml;charset=utf-8,"+encodeURIComponent(poster));
+      }catch{
+        setPosterSrc(null);
+      }
+    });
+    return ()=>{cancelled=true;};
+  },[station.id,station.publicUrl,station.displayName,station.isEnabled,profile?.displayName,profile?.logoUrl]);
+
+  return <div id={`qr-station-${station.id}`} className="station-qr-area qr-station-preview">
+    {posterSrc
+      ?<img className="station-poster-preview" src={posterSrc} alt={`${station.displayName} QR poster preview for ${profile?.displayName?.trim()||station.displayName}`}/>
+      :<div className="station-poster-preview-loading" role="status">Preparing the matching QR poster preview…</div>}
+    <div className="qr-preview-source" ref={previewQrHostRef} aria-hidden="true">
+      <div className="qr-code-frame"><QRCode value={station.publicUrl??""} size={172} level="H" fgColor="#101c35" bgColor="#ffffff"/></div>
+    </div>
+  </div>;
+}
+
 function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGenerate }: {
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
