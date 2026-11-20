@@ -200,6 +200,23 @@ public sealed class SpoolerOutputConfirmationPolicyTests
         Assert.False(SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownRetainedStatus(currentStatus, incomingStatus));
 
     [Fact]
+    public void IncompletePageProgressCannotBeMarkedCompleteFromQueueAbsence()
+    {
+        Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
+            "OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED",
+            SubmittedUtc, ObservedUtc, NowUtc, "Ready",
+            "SPOOLER_JOB_NO_LONGER_VISIBLE", 17, 0, 8));
+        Assert.False(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
+            "OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED",
+            SubmittedUtc, ObservedUtc, NowUtc, "Ready",
+            "SPOOLER_JOB_NO_LONGER_VISIBLE", 17, 3, 8));
+        Assert.True(SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
+            "OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED",
+            SubmittedUtc, ObservedUtc, NowUtc, "Ready",
+            "SPOOLER_JOB_NO_LONGER_VISIBLE", 17, 8, 8));
+    }
+
+    [Fact]
     public void PageProgressIsMonotonicAcrossStaleWindowsObservations()
     {
         var merged = SpoolerOutputConfirmationPolicy.MergePageProgress(4, 12, 2, 10);

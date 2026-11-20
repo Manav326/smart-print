@@ -1614,7 +1614,39 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
-    public async Task PhysicalRetryRequiresVerifiedZeroPageAbsenceAndKeepsProtectedDocument()
+    public async Task PartialPhysicalOutputCannotBePreparedForAutomaticRetry()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Protected partial-output source"u8.ToArray();
+            var job = CreateJob(bytes);
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-SP-1", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 17, "SmartPrint-SP-1", CancellationToken.None);
+            await store.UpdateSpoolerStatusAsync(job.Id, "OUTPUT_UNCONFIRMED", CancellationToken.None, 1, 8);
+            await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
+            await store.MarkSpoolerJobAbsentAsync(job.Id, CancellationToken.None);
+
+            var partial = store.Find(job.Id)!;
+            Assert.Equal(1, partial.SpoolerPagesPrinted);
+            Assert.Equal(8, partial.SpoolerTotalPages);
+            Assert.Empty(store.GetAcknowledgedJobs());
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.PreparePhysicalOutputRetryAsync(job.Id, "SmartPrint-SP-1-R2", CancellationToken.None));
+            Assert.Equal(bytes, store.ReadDocument(job.Id));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifiedZeroPageAbsenceCanBePreparedForRetryWithoutReupload()
     {
         var root = CreateTemporaryDirectory();
         try
@@ -1637,9 +1669,6 @@ public sealed class AgentLocalQueueStoreTests
             Assert.Equal(0, absent.SpoolerPagesPrinted);
             Assert.Equal(8, absent.SpoolerTotalPages);
             Assert.Single(store.GetAcknowledgedJobs());
-
-            await Assert.ThrowsAsync<InvalidOperationException>(() =>
-                store.PreparePhysicalOutputRetryAsync(job.Id, "SmartPrint-SP-1-R2", CancellationToken.None));
 
             await store.PreparePhysicalOutputRetryAsync(job.Id, "SmartPrint-SP-1-R2", CancellationToken.None);
             var retry = store.Find(job.Id)!;

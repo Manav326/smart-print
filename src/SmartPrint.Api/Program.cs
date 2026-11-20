@@ -4241,10 +4241,19 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
     var printerStatus = printerSnapshot?.Status;
     var canConfirmFromAgent = SpoolerOutputConfirmationPolicy.CanConfirmPhysicalOutput(
         job.Status, job.SpoolerStatus, job.SpoolerSubmittedUtc, job.SpoolerObservedUtc,
-        now, printerStatus, job.FailureCode, job.SpoolerJobId);
+        now, printerStatus, job.FailureCode, job.SpoolerJobId,
+        job.SpoolerPagesPrinted, job.SpoolerTotalPages);
     var canManuallyReconcile = SpoolerOutputConfirmationPolicy.CanManuallyReconcileUncertainOutput(
         job.Status, job.SpoolerStatus, job.FailureCode, job.SpoolerJobId,
         job.PrinterQueueNameSnapshot ?? printerSnapshot?.QueueName, job.SpoolerJobName);
+
+    if (job.SpoolerTotalPages > 0 && job.SpoolerPagesPrinted < job.SpoolerTotalPages)
+        return Results.Conflict(new
+        {
+            code = "physical_output_incomplete",
+            message = $"Windows recorded {job.SpoolerPagesPrinted} of {job.SpoolerTotalPages} pages. Do not mark this file complete. Finish and inspect the remaining pages separately; only a fresh zero-page result may use the batch resume action."
+        });
+
 
     if (!canConfirmFromAgent && !(canManuallyReconcile && manualQueueReconciliationConfirmed))
     {

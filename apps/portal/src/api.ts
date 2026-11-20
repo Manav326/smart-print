@@ -1367,6 +1367,8 @@ export interface ShopPrintJob {
   spoolerJobId?: number | null;
   spoolerJobName?: string | null;
   spoolerStatus?: string | null;
+  spoolerPagesPrinted?: number;
+  spoolerTotalPages?: number;
   spoolerSubmittedUtc?: string | null;
   spoolerObservedUtc?: string | null;
   outputConfirmedUtc?: string | null;
@@ -2468,6 +2470,17 @@ export function confirmShopPrintOutput(
     token
   );
 }
+export function resumeShopUnprintedBatch(token: string, batchId: string, jobIds: string[]) {
+  return apiRequest<{
+    batchId: string; resumedJobIds: string[]; resumedCount: number;
+    printerName: string; queueName: string; agentDeviceId: string; updatedUtc: string;
+  }>(
+    `/api/v1/shop/print-batches/${batchId}/resume-unprinted`,
+    { method: "POST", body: JSON.stringify({ jobIds, confirmedNoPhysicalOutput: true }) },
+    token
+  );
+}
+
 
 export function getShopPrinters(token: string) {
   return apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token);

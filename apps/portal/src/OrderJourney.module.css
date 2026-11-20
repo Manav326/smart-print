@@ -258,6 +258,19 @@
 .fileDetailsToggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .chevronOpen{transform:rotate(180deg)}
 .orderFileDetails{display:grid;gap:7px;min-width:0}
+.resumePanel{display:grid;gap:9px;min-width:0;padding:11px;border:1px solid color-mix(in srgb,var(--accent) 30%,var(--border));border-radius:9px;background:var(--surface-2)}
+.resumePanelHeading{display:grid;gap:4px}
+.resumePanelHeading strong{font-size:10px;color:var(--text)}
+.resumePanelHeading span,.resumePanel>p{font-size:8px;line-height:1.5;color:var(--muted);margin:0}
+.resumeCandidateList{display:grid;gap:6px}
+.resumeCandidate{display:flex;align-items:center;gap:8px;min-width:0;padding:7px 8px;border:1px solid var(--border);border-radius:7px;background:var(--surface);cursor:pointer}
+.resumeCandidate input{width:16px;height:16px;flex:0 0 16px;accent-color:var(--accent)}
+.resumeCandidate>span{display:grid;gap:2px;min-width:0}
+.resumeCandidate strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-size:9px}
+.resumeCandidate small{color:var(--muted);font-size:8px}
+.resumeButton{min-height:38px;display:inline-flex;align-items:center;justify-content:center;padding:7px 11px;border:0;border-radius:7px;background:var(--accent-strong);color:#fff;font:700 9px "DM Sans",sans-serif;cursor:pointer}
+.resumeButton:disabled{opacity:.45;cursor:not-allowed}
+.resumeButton:focus-visible,.resumeCandidate input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .orderFileItem{gap:6px;padding:8px 9px}
 .orderFileMeta{align-items:flex-start}
 .orderFileMeta strong{font-size:8.5px}

@@ -4,7 +4,7 @@ import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./ap
 import { formatIstDateTime } from "./date-time";
 import { buildShopOrderJourneys, filterShopOrderJourneys, isActiveOrderWork, orderJourneyStageLabel, orderJourneyStatusLabel, type OrderJourneyStage } from "./order-journey";
 import styles from "./OrderJourney.module.css";
-import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
+import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, canResumeUnprintedPhysicalJob, hasIncompleteSpoolerPageProgress, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
 import { getPrinterAvailabilityReason, isAgentOnlineForShop, isPrinterAvailableForShop } from "./printer-availability";
 
 type ShopDestination = "Print Queue" | "Payments" | "Print Agent";
@@ -18,6 +18,7 @@ interface Props {
   onDispatch: (job: ShopPrintJob) => void; onConfirmOutput: (job: ShopPrintJob) => void;
   onRetryPdfExport: (job: ShopPrintJob) => void; onHistory: (job: ShopPrintJob) => void;
   onOpenPhotoStudio: (job: ShopPrintJob) => void;
+  onResumeUnprintedBatch: (batchId: string, jobIds: string[]) => Promise<void>;
 }
 const readyStatuses = new Set(["COMPLETED","PDF_EXPORTED"]);
 const flowSteps: Array<{id:OrderJourneyStage;title:string;detail:string;icon:typeof Inbox}> = [
@@ -93,13 +94,18 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
   );
   const canConfirmOutput=canConfirmPhysicalOutput(
     job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,
-    job.printerStatus,job.failureCode,job.spoolerJobId
+    job.printerStatus,job.failureCode,job.spoolerJobId,Date.now(),
+    job.spoolerPagesPrinted??0,job.spoolerTotalPages??0
   )||manualQueueReconciliationAvailable;
-  const confirmationBlockedMessage=!canConfirmOutput
-    ?spoolerRetained?"Windows still holds this job. Confirmation remains blocked until the Agent verifies that it has cleared."
-    :!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for a fresh Agent observation from after submission before confirmation."
-    :["QUEUED","SPOOLING","PRINTING"].includes((job.spoolerStatus??"").toUpperCase())?"Windows still reports this job queued or printing. Wait for a terminal state."
-    :"Confirm output only after Windows reports printed output or verified queue absence."
+  const incompletePageProgress=hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages);
+  const canFinishOutput=canConfirmOutput&&!incompletePageProgress;
+  const confirmationBlockedMessage=!canFinishOutput
+    ?incompletePageProgress
+      ?`Windows recorded ${job.spoolerPagesPrinted??0} of ${job.spoolerTotalPages} pages. Do not mark this file complete; finish and inspect the remaining pages separately.`
+      :spoolerRetained?"Windows still holds this job. Confirmation remains blocked until the Agent verifies that it has cleared."
+      :!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for a fresh Agent observation from after submission before confirmation."
+      :["QUEUED","SPOOLING","PRINTING"].includes((job.spoolerStatus??"").toUpperCase())?"Windows still reports this job queued or printing. Wait for a terminal state."
+      :"Confirm output only after Windows reports printed output or verified queue absence."
     :undefined;
   return <div className={styles.fileActionPanel}>
     {!job.privatePrinting&&<button type="button" className={styles.miniAction} onClick={()=>onPreview(job)}><Eye size={12}/> Preview</button>}
@@ -128,7 +134,9 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
         :"This file is stored locally, but its original Windows computer is not identified. Reconnect the computer that received it before changing its printer."
       :"No selected printer is ready right now. This file stays in its order; reconnect a Windows computer or select another ready queue in Printers. You do not need to upload the file again."}</span></div>}
     {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
-    {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canConfirmOutput} title={manualQueueReconciliationAvailable?"The Agent restarted before Windows returned a spooler ID. Check the exact job in the selected Windows queue and inspect the paper output before confirming.":confirmationBlockedMessage} onClick={()=>onConfirmOutput(job)}><Check size={12}/> {manualQueueReconciliationAvailable?"Reconcile & confirm":"Confirm output"}</button>}
+    {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canFinishOutput} title={manualQueueReconciliationAvailable?"The Agent restarted before Windows returned a spooler ID. Check the exact job in the selected Windows queue and inspect the paper output before confirming.":confirmationBlockedMessage} onClick={()=>onConfirmOutput(job)}><Check size={12}/> {manualQueueReconciliationAvailable?"Reconcile & confirm":"Confirm output"}</button>}
+    {confirmable&&incompletePageProgress&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="alert"><AlertTriangle size={13}/><span>{confirmationBlockedMessage}</span></div>}
+    {confirmable&&job.failureCode==="SPOOLER_JOB_NO_LONGER_VISIBLE"&&(job.spoolerTotalPages??0)<=0&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>Windows no longer lists this job, but the page count is unknown. Automatic retry is blocked; inspect the full paper output before resolving.</span></div>}
     {confirmable&&manualQueueReconciliationAvailable&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>The Agent could not identify this Windows job. Manually check the {job.queueName} queue for {job.spoolerJobName}, then inspect every printed page before reconciling.</span></div>}
     {confirmable&&spoolerRetained&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>Windows is still holding this print job. SmartPrint will enable confirmation after the Agent verifies that the held entry has cleared.</span></div>}
     {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onRetryPdfExport(job)}><RotateCcw size={12}/> Save PDF again</button>}
@@ -142,6 +150,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
   onRefund:(job:ShopPrintJob)=>void;onAssignPrinter:(job:ShopPrintJob,printerId:string)=>void;
   onDispatch:(job:ShopPrintJob)=>void;onConfirmOutput:(job:ShopPrintJob)=>void;
   onRetryPdfExport:(job:ShopPrintJob)=>void;onHistory:(job:ShopPrintJob)=>void;onOpenPhotoStudio:(job:ShopPrintJob)=>void;
+  onResumeUnprintedBatch:(batchId:string,jobIds:string[])=>Promise<void>;
 }){
   const printer=printerSummary(journey.jobs,printers,agents);
   const canReview=journey.canReview&&!!journey.batchId;
@@ -150,6 +159,32 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
   const headline=journey.isClosed?"No files moving forward":journey.attentionJobs.length?"Needs a quick check":journey.stage==="received"?"New order received":journey.stage==="review"?"Your review is next":journey.stage==="payment"?"Waiting for payment":journey.stage==="printing"?"Order is being prepared":allOutputsReady?"Ready for collection":"Print output saved";
   const stageIndex=journey.isClosed?1:journey.stageIndex;
   const [filesExpanded,setFilesExpanded]=useState(false);
+  const [selectedResumeJobIds,setSelectedResumeJobIds]=useState<string[]>([]);
+  const [resumeBusy,setResumeBusy]=useState(false);
+  const unprintedResumeCandidates=journey.batchId?journey.jobs.filter(job=>{
+    const originalPrinter=printers.find(printer=>printer.id===job.printerDeviceId);
+    const originalQueueReady=!!originalPrinter&&
+      originalPrinter.agentDeviceId===job.claimedByAgentDeviceId&&
+      originalPrinter.outputMode==="PHYSICAL"&&isPrinterAvailableForShop(originalPrinter,agents);
+    const verifiedPayment=job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED";
+    return verifiedPayment&&canResumeUnprintedPhysicalJob(
+      job.status,job.outputMode,job.outputType,job.spoolerStatus,job.failureCode,
+      job.spoolerJobId,job.spoolerPagesPrinted??0,job.spoolerTotalPages??0,
+      job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.outputConfirmedUtc,
+      job.printDispatchLeaseExpiresUtc,job.localQueueReceivedUtc,originalQueueReady
+    );
+  }):[];
+  const effectiveSelectedResumeJobIds=selectedResumeJobIds.filter(id=>
+    unprintedResumeCandidates.some(job=>job.id===id)
+  );
+  async function resumeSelectedUnprintedFiles(){
+    if(!journey.batchId||effectiveSelectedResumeJobIds.length===0||resumeBusy)return;
+    setResumeBusy(true);
+    try{
+      await actions.onResumeUnprintedBatch(journey.batchId,effectiveSelectedResumeJobIds);
+      setSelectedResumeJobIds([]);
+    }finally{setResumeBusy(false);}
+  }
   return <article className={styles.orderCard}>
     <div className={styles.orderCardTop}><div className={styles.orderIdentity}>
       <div className={styles.orderEyebrow}><span>ORDER</span><span className={styles.orderReference}>{journey.reference}</span>{journey.batchId&&<span className={styles.batchBadge}>Batch · {journey.batchId.slice(0,8).toUpperCase()}</span>}{journey.privatePrinting&&<span className={styles.privateModeBadge}>Private · content hidden</span>}</div>
@@ -187,6 +222,30 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
         <span>{journey.jobs.length} {journey.jobs.length===1?"file":"files"} <ChevronDown size={14} className={filesExpanded?styles.chevronOpen:""}/></span>
       </button>
       {filesExpanded&&<div className={styles.orderFileDetails} id={"order-files-"+journey.key}>
+        {journey.batchId&&unprintedResumeCandidates.length>0&&<section className={styles.resumePanel} aria-label="Resume files verified as unprinted">
+          <div className={styles.resumePanelHeading}>
+            <strong>Resume files with zero pages printed</strong>
+            <span>Only files with a fresh Windows queue-absence check, a known page total and a secured copy on the original computer appear here.</span>
+          </div>
+          <div className={styles.resumeCandidateList}>
+            {unprintedResumeCandidates.map(job=>{
+              const originalIndex=journey.jobs.findIndex(item=>item.id===job.id);
+              const privateIndex=journey.jobs.slice(0,originalIndex+1).filter(item=>item.privatePrinting).length;
+              const fileLabel=job.privatePrinting?"Private file "+privateIndex:job.document.originalFileName;
+              const checked=effectiveSelectedResumeJobIds.includes(job.id);
+              return <label className={styles.resumeCandidate} key={job.id}>
+                <input type="checkbox" checked={checked} disabled={resumeBusy} onChange={event=>setSelectedResumeJobIds(current=>
+                  event.currentTarget.checked?[...current.filter(id=>id!==job.id),job.id]:current.filter(id=>id!==job.id)
+                )}/>
+                <span><strong>{fileLabel}</strong><small>0 of {job.spoolerTotalPages} pages recorded</small></span>
+              </label>;
+            })}
+          </div>
+          <p>Before continuing, check the original Windows queue and paper tray for each selected file. Files with any printed pages or unknown page counts cannot be retried here.</p>
+          <button type="button" className={styles.resumeButton} disabled={resumeBusy||effectiveSelectedResumeJobIds.length===0} onClick={()=>void resumeSelectedUnprintedFiles()}>
+            {resumeBusy?"Authorising selected files":`Resume ${effectiveSelectedResumeJobIds.length} selected file(s)`}
+          </button>
+        </section>}
         {journey.jobs.map((job,index)=><div className={styles.orderFileItem} key={job.id}>
           <div className={styles.orderFileMeta}>
             <strong title={job.privatePrinting?undefined:job.document.originalFileName}>
