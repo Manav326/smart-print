@@ -2053,7 +2053,13 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                           ((job.Status == "LOCAL_QUEUE_CLAIMED" &&
                                 job.AgentLeaseExpiresUtc != null &&
                                 job.AgentLeaseExpiresUtc > DateTimeOffset.UtcNow) ||
-                               job.Status == "PRINT_AUTHORISED" ||
+                               (job.Status == "PRINT_AUTHORISED" &&
+                               (job.SpoolerStatus != "AWAITING_AGENT" ||
+                                job.SpoolerJobId != null ||
+                                job.PrintDispatchLeaseExpiresUtc != null ||
+                                job.SpoolerSubmittedUtc != null ||
+                                job.SpoolerObservedUtc != null ||
+                                job.OutputConfirmedUtc != null)) ||
                                job.Status == "PRINT_SUBMITTING" ||
                                job.Status == "SPOOLER_ACCEPTED" ||
                                job.Status == "PRINTING" ||
