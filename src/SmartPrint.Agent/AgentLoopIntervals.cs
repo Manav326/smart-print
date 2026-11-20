@@ -11,4 +11,9 @@ public static class AgentLoopIntervals
     // durable polling fallback when a notification is missed or unavailable.
     public static int ResolvePrintWorkPollIntervalSeconds(int? configuredSeconds) =>
         Math.Clamp(configuredSeconds ?? 5, 2, 30);
+
+    // Keep cross-printer submission concurrency bounded so a slow/broken queue
+    // cannot monopolise the Agent, while multiple selected printers make progress.
+    public static int ResolvePrinterLaneConcurrency(int? configuredLanes) =>
+        Math.Clamp(configuredLanes ?? 2, 1, 8);
 }
