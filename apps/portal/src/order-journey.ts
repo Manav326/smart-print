@@ -174,7 +174,7 @@ export function orderJourneyStatusLabel(status: string): string {
     VERIFIED:"Payment received",
     LOCAL_QUEUE_CLAIMED:"Preparing to print",
     LOCAL_QUEUE_READY:"Preparing to print",
-    PRINT_AUTHORISED:"Ready to print",
+    PRINT_AUTHORISED:"Waiting for shop computer",
     PRINT_SUBMITTING:"Sending to printer",
     SPOOLER_ACCEPTED:"Sent to printer",
     SUBMITTING_TO_SPOOLER:"Sent to printer",
