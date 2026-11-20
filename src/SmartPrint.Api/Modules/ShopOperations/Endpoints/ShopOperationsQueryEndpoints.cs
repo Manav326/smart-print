@@ -334,6 +334,8 @@ public static class ShopOperationsQueryEndpoints
                     job.SpoolerJobId,
                     job.SpoolerJobName,
                     job.SpoolerStatus,
+                    job.SpoolerPagesPrinted,
+                    job.SpoolerTotalPages,
                     job.SpoolerSubmittedUtc,
                     job.SpoolerObservedUtc,
                     job.OutputConfirmedUtc,
