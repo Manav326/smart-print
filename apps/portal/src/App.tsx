@@ -2324,14 +2324,13 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
 }
 
 function PrintersPage({
-  printers, agents, maxPrinters, subscriptionActive, busyResourceId, onAdd, onToggle
+  printers, agents, maxPrinters, subscriptionActive, busyResourceId, onToggle
 }: {
   printers: PrinterDevice[];
   agents: AgentDevice[];
   maxPrinters?: number | null;
   subscriptionActive?: boolean;
   busyResourceId: string | null;
-  onAdd: () => void;
   onToggle: (printer: PrinterDevice, replacePrinterId?: string) => Promise<boolean>;
 }) {
   const [pendingReplacement, setPendingReplacement] = useState<PrinterDevice | null>(null);
@@ -2340,9 +2339,7 @@ function PrintersPage({
     printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT")
   );
   const selectablePrinters = printers.filter(printer =>
-    !printer.isActive &&
-    printer.outputMode !== "UNSUPPORTED_VIRTUAL" &&
-    !!printer.agentDeviceId
+    !printer.isActive && isPrinterReadyForSelection(printer, agents)
   );
   const detectedCount = printers.filter(printer =>
     printer.connectionType === "WindowsQueue" && !!printer.agentDeviceId
@@ -2368,7 +2365,10 @@ function PrintersPage({
             <h2>Windows printer queues</h2>
             <p>Queues are discovered automatically by your connected Print Agent. Every discovered queue stays visible; your plan limit applies only to the queues you select for use.</p>
           </div>
-          <button className="secondary-button" onClick={onAdd}><Plus size={15}/> Add manually</button>
+          <div className="printer-discovery-guidance" role="note">
+            <strong>Adding a new printer</strong>
+            <span>Install its manufacturer driver in Windows, connect it by USB or the shop network, then confirm Windows shows it as Ready. The connected Print Agent discovers and registers Windows queues automatically, normally within 30 seconds. You do not need to add a duplicate here.</span>
+          </div>
         </div>
         <div className="printer-selection-summary" role="status">
           <div>
@@ -2393,9 +2393,7 @@ function PrintersPage({
           <EmptyModule
             icon={<Printer size={24}/>}
             title="Waiting for Windows printer discovery"
-            text="Connect the SmartPrint Print Agent on the Windows computer. SmartPrint will list its installed printer queues here automatically; you do not need to enter driver names or queue names."
-            actionLabel="Register manually (advanced)"
-            onAction={onAdd}
+            text="Install the printer driver in Windows, connect the printer, and make sure Windows reports it as Ready. Keep the SmartPrint Print Agent online; it discovers and registers installed Windows queues automatically, normally within 30 seconds. You do not need to register the same printer manually."
           />
         ) : (
           <div className="printer-grid">
@@ -2403,7 +2401,24 @@ function PrintersPage({
               const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
               const isUnsupportedVirtual = printer.outputMode === "UNSUPPORTED_VIRTUAL";
               const isSelected = printer.isActive && !isUnsupportedVirtual;
-              const canSelect = !isUnsupportedVirtual && !!printer.agentDeviceId;
+              const canSelect = isPrinterReadyForSelection(printer, agents);
+              const agentLastSeen = agent?.lastSeenUtc ? Date.parse(agent.lastSeenUtc) : Number.NaN;
+              const agentOnline = !!agent && !agent.revokedUtc && agent.status === "Online" &&
+                Number.isFinite(agentLastSeen) && agentLastSeen > Date.now() - 2 * 60 * 1000;
+              const printerLastSeen = printer.lastSeenUtc ? Date.parse(printer.lastSeenUtc) : Number.NaN;
+              const queueFresh = Number.isFinite(printerLastSeen) && printerLastSeen > Date.now() - 2 * 60 * 1000;
+              const queueReady = printer.status === "Ready" || printer.status === "Busy";
+              const selectionBlockReason = isUnsupportedVirtual
+                ? "This virtual/document driver is visible but is not supported for SmartPrint output."
+                : !printer.agentDeviceId
+                  ? "Keep the Print Agent connected. This Windows queue has not been linked yet."
+                  : !agentOnline
+                    ? "Connect the shop Windows computer and wait for its Print Agent to report online."
+                    : !queueFresh
+                      ? "The Agent is online, but this queue has not reported recently. Wait for the next automatic printer scan."
+                      : !queueReady
+                        ? "This Windows queue is not ready. Clear its Windows printer error or paper/connection issue, then wait for the next automatic scan."
+                        : undefined;
               const possibleDuplicates = printer.outputMode === "PHYSICAL" && printer.agentDeviceId && printer.connectionAddress
                 ? printers.filter(other => other.id !== printer.id && other.outputMode === "PHYSICAL" &&
                     other.agentDeviceId === printer.agentDeviceId && !!other.connectionAddress &&
@@ -2421,8 +2436,8 @@ function PrintersPage({
                   <div className="printer-card-top">
                     <div className="printer-card-icon"><Printer size={20}/></div>
                     <Status
-                      label={isUnsupportedVirtual ? "Not supported" : isSelected ? "Selected" : canSelect ? "Available" : "Waiting for Agent"}
-                      tone={isUnsupportedVirtual ? "red" : isSelected ? "green" : canSelect ? "slate" : "amber"}
+                      label={isUnsupportedVirtual ? "Not supported" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? "Available" : !agentOnline ? "Computer offline" : "Queue not ready"}
+                      tone={isUnsupportedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
                     />
                   </div>
                   <h3>{isUnsupportedVirtual ? "Unsupported virtual · " : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : ""}{printer.displayName}</h3>
@@ -2461,7 +2476,7 @@ function PrintersPage({
                       <button
                         className="subtle-button"
                         disabled={!!busyResourceId || !canSelect || !canUseSelection || (quotaFull && !canReplaceSelection)}
-                        title={!canSelect ? "The Agent must discover and link this Windows queue before it can be selected." : !canUseSelection ? "Shop plan access must be confirmed before selecting a printer." : quotaFull && !canReplaceSelection ? "This plan has no printer slots available. Upgrade the plan to select a printer." : undefined}
+                        title={!canSelect ? selectionBlockReason : !canUseSelection ? "Shop plan access must be confirmed before selecting a printer." : quotaFull && !canReplaceSelection ? "No other ready queue is available to replace a selected printer. Connect and ready another printer, or upgrade your plan for another slot." : undefined}
                         onClick={() => {
                           if (!canSelect || !canUseSelection) return;
                           if (quotaFull && canReplaceSelection) {
