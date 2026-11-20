@@ -18,12 +18,11 @@ export function isAgentOnlineForShop(agent: AgentDevice, now = Date.now()): bool
  * Mirrors the server's selection contract: both physical and PDF queues need a
  * fresh Agent heartbeat plus a fresh Ready/Busy Windows queue report.
  */
-export function getPrinterAvailabilityReason(
+export function getPrinterReadinessReason(
   printer: PrinterDevice,
   agents: readonly AgentDevice[],
   now = Date.now()
 ): string | null {
-  if (!printer.isActive) return "Not selected for new jobs";
   if (printer.outputMode === "UNSUPPORTED_VIRTUAL") return "Unsupported Windows output queue";
   if (!printer.agentDeviceId) return "Waiting for Print Agent discovery";
 
@@ -35,6 +34,15 @@ export function getPrinterAvailabilityReason(
   if (!hasRecentHeartbeat(printer.lastSeenUtc, now)) return "Windows printer queue has not reported recently";
   if (printer.status === "Ready" || printer.status === "Busy") return null;
   return "Windows queue reports " + printer.status.toLowerCase();
+}
+
+export function getPrinterAvailabilityReason(
+  printer: PrinterDevice,
+  agents: readonly AgentDevice[],
+  now = Date.now()
+): string | null {
+  if (!printer.isActive) return "Not selected for new jobs";
+  return getPrinterReadinessReason(printer, agents, now);
 }
 
 export function isPrinterAvailableForShop(
