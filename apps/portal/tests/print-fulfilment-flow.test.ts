@@ -652,7 +652,7 @@ test("shop-originated photo orders use their own tenant-owned job and the shared
 test("customer uploader keeps its batch example, inline Android PDF preview and real status transitions",()=>{
  const app=read("../src/App.tsx");
  const api=read("../src/api.ts");
- const program=read("../../../src/SmartPrint.Api/Program.cs");
+ const customerQueries=read("../../../src/SmartPrint.Api/Modules/Customer/Endpoints/CustomerQueryEndpoints.cs");
  const css=read("../src/styles.css");
  assert.match(app,/placeholder="e.g. Manjeet - College Notes"/);
  assert.doesNotMatch(app,/Rahul\s*[–-]\s*College Notes/);

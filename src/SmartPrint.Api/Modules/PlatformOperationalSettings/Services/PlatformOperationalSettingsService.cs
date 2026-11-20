@@ -4,6 +4,7 @@ using SmartPrint.Api.Data;
 using SmartPrint.Api.Domain;
 using SmartPrint.Api.Modules.PlatformOperationalSettings.Contracts;
 using SmartPrint.Api.Modules.PlatformOperationalSettings.Domain;
+using OperationalSettingsEntity = SmartPrint.Api.Domain.PlatformOperationalSettings;
 
 namespace SmartPrint.Api.Modules.PlatformOperationalSettings.Services;
 
@@ -86,7 +87,7 @@ public sealed class PlatformOperationalSettingsService(SmartPrintDbContext db)
         return new PlatformOperationalSettingsUpdateResult(errors, false, after);
     }
 
-    private static PlatformOperationalSettingsResponse ToResponse(PlatformOperationalSettings settings) => new(
+    private static PlatformOperationalSettingsResponse ToResponse(OperationalSettingsEntity settings) => new(
         settings.TrialMaxMonthlyPrintJobs,
         settings.CloudCompletedDocumentRetentionDays,
         settings.AgentCompletedDocumentRetentionDays,
