@@ -584,10 +584,8 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setError("The selected printer list changed. Refresh and choose the replacement again.");
       return false;
     }
-    if (replacedPrinter && !(await confirmInApp(
-      `Replace ${replacedPrinter.displayName} with ${printer.displayName}? QR stations using the old default will move to the new queue. Existing files stay in their orders and may need reassignment before dispatch. Jobs already handed to Windows are never moved or cancelled.`,
-      "Replace selected printer?", "Replace printer"
-    ))) return false;
+    // The PrintersPage replacement dialog is the explicit owner confirmation.
+    // Do not ask for a second confirmation after that dialog has already been accepted.
     if (printer.isActive && !(await confirmInApp(
       `Deselect ${printer.displayName}? New jobs will no longer be assigned to it. Existing Windows output is not cancelled; an active or uncertain job must be resolved first.`,
       "Deselect this printer?", "Deselect printer"
@@ -2509,7 +2507,7 @@ function PrintersPage({
                             }
                           }}
                         >
-                          {busyResourceId === printer.id ? <span className="button-spinner"/> : "Select"}
+                          {busyResourceId === printer.id ? <span className="button-spinner"/> : quotaFull ? "Replace" : "Select"}
                         </button>
                       </div>
                     )}
