@@ -1118,9 +1118,11 @@ export function updateStationEnabled(token: string, stationId: string, isEnabled
   );
 }
 
-export function updatePrinterActive(token: string, printerId: string, isActive: boolean) {
-  return apiRequest<{ id: string; isActive: boolean }>(
-    `/api/v1/shop/printers/${printerId}/active?isActive=${isActive}`,
+export function updatePrinterActive(token: string, printerId: string, isActive: boolean, replacePrinterId?: string) {
+  const query = new URLSearchParams({ isActive: String(isActive) });
+  if (replacePrinterId) query.set("replacePrinterId", replacePrinterId);
+  return apiRequest<{ id: string; isActive: boolean; replacedPrinterDeviceId?: string | null }>(
+    `/api/v1/shop/printers/${printerId}/active?${query.toString()}`,
     { method: "PATCH" },
     token
   );
@@ -1365,6 +1367,8 @@ export interface ShopPrintJob {
   spoolerJobId?: number | null;
   spoolerJobName?: string | null;
   spoolerStatus?: string | null;
+  spoolerPagesPrinted?: number;
+  spoolerTotalPages?: number;
   spoolerSubmittedUtc?: string | null;
   spoolerObservedUtc?: string | null;
   outputConfirmedUtc?: string | null;
@@ -2466,6 +2470,17 @@ export function confirmShopPrintOutput(
     token
   );
 }
+export function resumeShopUnprintedBatch(token: string, batchId: string, jobIds: string[]) {
+  return apiRequest<{
+    batchId: string; resumedJobIds: string[]; resumedCount: number;
+    printerName: string; queueName: string; agentDeviceId: string; updatedUtc: string;
+  }>(
+    `/api/v1/shop/print-batches/${batchId}/resume-unprinted`,
+    { method: "POST", body: JSON.stringify({ jobIds, confirmedNoPhysicalOutput: true }) },
+    token
+  );
+}
+
 
 export function getShopPrinters(token: string) {
   return apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token);

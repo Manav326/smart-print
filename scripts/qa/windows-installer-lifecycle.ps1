@@ -965,7 +965,17 @@ else if (mode == "discover-printer")
 {
     if (args.Length < 3)
         throw new ArgumentException("discover-printer requires an output path and expected queue name.");
-    var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
+    // This disposable fixture executable is not SmartPrint.Agent.exe, so the
+    // production child-process runner would relaunch the fixture with Agent-only
+    // command-line switches. Exercise the discovery and driver APIs in this
+    // LocalService process; the packaged Agent child-worker path has a separate smoke test.
+    var capabilityProbe = new WindowsPrinterCapabilityProbeRunner(
+        NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+        executeInCurrentProcess: true);
+    var discovery = new WindowsPrinterDiscovery(
+        NullLogger<WindowsPrinterDiscovery>.Instance,
+        capabilityProbe: capabilityProbe,
+        executeInCurrentProcess: true);
     if (!discovery.TryDiscover(out var printers))
         throw new InvalidOperationException("The Agent's Windows WMI printer discovery failed under LocalService.");
     var expectedQueue = args[2];

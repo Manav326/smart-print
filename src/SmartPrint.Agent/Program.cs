@@ -2,6 +2,10 @@ using System.Net.Http;
 using System.IO;
 using SmartPrint.Agent;
 
+if (await AgentChildCommands.TryHandleAsync(args))
+    return;
+
+
 if (args.Any(argument => argument.Equals("--check-pairing", StringComparison.OrdinalIgnoreCase)))
 {
     var pairingBuilder = Host.CreateApplicationBuilder(Array.Empty<string>());
@@ -35,7 +39,10 @@ builder.Services.AddHttpClient("cloud", client =>
 builder.Services.AddSingleton<AgentCredentialStore>();
 builder.Services.AddSingleton<AgentDocumentEncryptionKeyStore>();
 builder.Services.AddSingleton<IAgentEnrollmentHandler, AgentEnrollmentHandler>();
+builder.Services.AddSingleton<IAgentChildProcessRunner, AgentChildProcessRunner>();
+builder.Services.AddSingleton<WindowsPrinterCapabilityProbeRunner>();
 builder.Services.AddSingleton<WindowsPrinterDiscovery>();
+builder.Services.AddSingleton<IsolatedWindowsPrintExecutor>();
 builder.Services.AddSingleton<AgentLocalQueueStore>();
 builder.Services.AddSingleton<WindowsPrintExecutor>();
 builder.Services.AddSingleton<LocalAgentApiState>();

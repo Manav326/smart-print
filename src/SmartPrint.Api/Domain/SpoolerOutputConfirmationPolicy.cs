@@ -79,7 +79,9 @@ public static class SpoolerOutputConfirmationPolicy
         DateTimeOffset nowUtc,
         string? printerStatus,
         string? failureCode = null,
-        int? spoolerJobId = null)
+        int? spoolerJobId = null,
+        int spoolerPagesPrinted = 0,
+        int spoolerTotalPages = 0)
     {
         var normalizedJobStatus = Normalize(jobStatus);
         var normalizedSpoolerStatus = Normalize(spoolerStatus);
@@ -88,7 +90,8 @@ public static class SpoolerOutputConfirmationPolicy
             !HasVerifiedAgentSpoolerObservation(
                 normalizedSpoolerStatus, spoolerSubmittedUtc, spoolerObservedUtc,
                 nowUtc, failureCode, spoolerJobId) ||
-            IsRetained(normalizedSpoolerStatus))
+            IsRetained(normalizedSpoolerStatus) ||
+            (spoolerTotalPages > 0 && spoolerPagesPrinted < spoolerTotalPages))
             return false;
 
         // A live/queued Windows job is not proof of printed paper. Require the
@@ -134,4 +137,44 @@ public static class SpoolerOutputConfirmationPolicy
     public static bool ShouldPreserveLastKnownRetainedStatus(string? currentStatus, string? incomingStatus) =>
         IsRetained(currentStatus) &&
         string.Equals(Normalize(incomingStatus), "PRINTER_UNAVAILABLE", StringComparison.OrdinalIgnoreCase);
+
+    public static (int PagesPrinted, int TotalPages) MergePageProgress(
+        int currentPagesPrinted,
+        int currentTotalPages,
+        int? reportedPagesPrinted,
+        int? reportedTotalPages)
+    {
+        // Windows polling can return stale or incomplete metadata. Progress must
+        // never move backwards when a queue briefly reports zeros or older values.
+        var pagesPrinted = Math.Max(Math.Max(0, currentPagesPrinted), Math.Max(0, reportedPagesPrinted ?? 0));
+        var totalPages = Math.Max(Math.Max(0, currentTotalPages), Math.Max(0, reportedTotalPages ?? 0));
+        if (totalPages > 0 && pagesPrinted > totalPages)
+            totalPages = pagesPrinted;
+        return (pagesPrinted, totalPages);
+    }
+
+    public static bool CanResumeUnprintedPhysicalJob(
+        string? jobStatus,
+        string? outputType,
+        string? spoolerStatus,
+        string? failureCode,
+        int? spoolerJobId,
+        int pagesPrinted,
+        int totalPages,
+        DateTimeOffset? spoolerSubmittedUtc,
+        DateTimeOffset? spoolerObservedUtc,
+        DateTimeOffset? outputConfirmedUtc,
+        DateTimeOffset? dispatchLeaseExpiresUtc,
+        DateTimeOffset nowUtc)
+    {
+        return string.Equals(Normalize(jobStatus), "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(Normalize(outputType), "PHYSICAL", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(Normalize(spoolerStatus), "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase) &&
+            IsVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId) &&
+            pagesPrinted == 0 &&
+            totalPages > 0 &&
+            outputConfirmedUtc is null &&
+            dispatchLeaseExpiresUtc is null &&
+            IsFreshSpoolerObservation(spoolerSubmittedUtc, spoolerObservedUtc, nowUtc);
+    }
 }

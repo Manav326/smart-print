@@ -5,10 +5,10 @@ using Npgsql;
 namespace SmartPrint.Api.Services;
 
 /// <summary>
-/// Wakes only the paired Agent that owns a newly accepted private relay.
-/// PostgreSQL notifications are hints, not the source of truth: the Agent always
-/// re-reads the durable ticket table after waking, and long-poll timeout is the
-/// recovery path when a notification listener is restarting.
+/// Wakes a paired Agent when new local work is available (private relay upload,
+/// paid-document assignment or authorised print dispatch). PostgreSQL notifications
+/// are hints, not the source of truth: the Agent re-reads durable work after waking,
+/// and bounded polling is the recovery path when a listener is restarting.
 /// </summary>
 public sealed class PrivateRelayWakeupService(
     string connectionString,
@@ -52,8 +52,8 @@ public sealed class PrivateRelayWakeupService(
     }
 
     /// <summary>
-    /// Publishes after the upload-ticket transaction commits. Failure is deliberately
-    /// non-fatal: the Agent's bounded long-poll timeout will still discover the ticket.
+    /// Publishes after the job or upload transaction commits. Failure is deliberately
+    /// non-fatal: the Agent's bounded work-poll interval remains the recovery path.
     /// </summary>
     public async Task NotifyAgentAsync(Guid agentDeviceId)
     {
@@ -72,13 +72,13 @@ public sealed class PrivateRelayWakeupService(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             logger.LogWarning(exception,
-                "Could not publish the private-relay wake-up for Agent {AgentDeviceId}; its long-poll timeout remains the recovery path.",
+                "Could not publish the work wake-up for Agent {AgentDeviceId}; bounded polling remains the recovery path.",
                 agentDeviceId);
         }
         catch (OperationCanceledException exception)
         {
             logger.LogWarning(exception,
-                "Private-relay wake-up for Agent {AgentDeviceId} was interrupted; its long-poll timeout remains the recovery path.",
+                "Agent work wake-up for {AgentDeviceId} was interrupted; bounded polling remains the recovery path.",
                 agentDeviceId);
         }
     }

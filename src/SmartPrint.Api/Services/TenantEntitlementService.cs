@@ -185,8 +185,11 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
 
         var current = resource switch
         {
+            // Only owner-selected supported queues consume printer slots. Discovered alternatives
+            // remain visible even when the plan has no free selection slots.
             TenantQuotaResource.Printer => await db.PrinterDevices.AsNoTracking()
-                .LongCountAsync(item => item.TenantId == tenantId, cancellationToken),
+                .LongCountAsync(item => item.TenantId == tenantId && item.IsActive &&
+                    (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT"), cancellationToken),
             TenantQuotaResource.AgentDevice => await db.AgentDevices.AsNoTracking()
                 .LongCountAsync(item => item.TenantId == tenantId && item.RevokedUtc == null && item.Status != "Revoked", cancellationToken),
             TenantQuotaResource.QrStation => await db.QrStations.AsNoTracking()

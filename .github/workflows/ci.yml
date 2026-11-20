@@ -584,6 +584,15 @@ jobs:
           if ($agentProcess.ExitCode -ne 2) {
             throw "Expected an unpaired Windows Agent to exit with code 2, got $($agentProcess.ExitCode)."
           }
+      - name: Verify isolated Windows printer discovery and driver capability workers
+        if: ${{ !cancelled() && steps.agent_publish.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $agent = Join-Path (Resolve-Path artifacts/agent) "SmartPrint.Agent.exe"
+          & $agent --verify-printer-discovery
+          if ($LASTEXITCODE -ne 0) {
+            throw "The Agent's isolated Windows queue-discovery/capability-worker acceptance failed."
+          }
       - name: Add Agent setup scripts and guide
         if: ${{ !cancelled() && steps.agent_publish.outcome == 'success' }}
         shell: pwsh

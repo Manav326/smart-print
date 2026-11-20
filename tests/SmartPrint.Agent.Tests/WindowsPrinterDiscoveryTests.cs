@@ -84,6 +84,59 @@ public sealed class WindowsPrinterDiscoveryTests
             PrinterOutputModeRules.Detect("Generic PDF Queue", "Generic Driver", "PORTPROMPT:"));
     }
 
+    [Theory]
+    [InlineData("IppVirtual - Microsoft IPP", "Microsoft IPP Class Driver", "http://Android.local:10631/p/virtual")]
+    [InlineData("Android Virtual Printer", "Microsoft IPP Class Driver", "http://Android.local:10631/p/virtual")]
+    [InlineData("Android Virtual Printer", "Microsoft IPP Class Driver", "ipp://android.local/printer")]
+    public void AndroidIppVirtualQueueIsAUsableWindowsPrintTarget(string queue, string driver, string port)
+    {
+        Assert.Equal(PrinterOutputModeRules.Physical, PrinterOutputModeRules.Detect(queue, driver, port));
+    }
+
+    [Fact]
+    public void GenericVirtualPrinterWithoutIppTransportRemainsUnsupported()
+    {
+        Assert.Equal(
+            PrinterOutputModeRules.UnsupportedVirtual,
+            PrinterOutputModeRules.Detect("Generic Virtual Printer", "Generic Virtual Driver", "USB001"));
+    }
+
+    [Fact]
+    public void CapabilityEnrichmentMergesByQueueAndDriverWithoutOverwritingFreshQueueStatus()
+    {
+        var current =
+            new DiscoveredPrinter("HP Lobby", "HP Universal", "USB002", "Offline", false,
+                OutputMode: PrinterOutputModeRules.Physical);
+        var oldSnapshot =
+            new DiscoveredPrinter("hp lobby", "HP Universal", "USB001", "Ready", true,
+                OutputMode: PrinterOutputModeRules.Physical,
+                CapabilitiesJson: "{\"color\":true}");
+        var result = WindowsPrinterDiscovery.ApplyCapabilitySnapshots([current], [oldSnapshot]);
+
+        var merged = Assert.Single(result);
+        Assert.Equal("Offline", merged.Status);
+        Assert.Equal("USB002", merged.PortName);
+        Assert.False(merged.IsDefault);
+        Assert.Equal("{\"color\":true}", merged.CapabilitiesJson);
+    }
+
+    [Fact]
+    public void CapabilityEnrichmentDoesNotApplySnapshotFromAChangedDriver()
+    {
+        var current =
+            new DiscoveredPrinter("HP Lobby", "New Driver", "USB002", "Ready", true,
+                OutputMode: PrinterOutputModeRules.Physical);
+        var oldSnapshot =
+            new DiscoveredPrinter("HP Lobby", "Old Driver", "USB001", "Ready", true,
+                OutputMode: PrinterOutputModeRules.Physical,
+                CapabilitiesJson: "{\"duplex\":true}");
+
+        var result = Assert.Single(WindowsPrinterDiscovery.ApplyCapabilitySnapshots([current], [oldSnapshot]));
+
+        Assert.Equal("New Driver", result.DriverName);
+        Assert.Equal("{}", result.CapabilitiesJson);
+    }
+
     [Fact]
     public void WindowsDriverCapabilityDiscoveryReturnsStructuredReportForInstalledPdfPrinter()
     {
@@ -142,7 +195,7 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
-    public void DiscoversTwoSeparateWindowsQueuesOnTheSamePort()
+    public async Task DiscoversTwoSeparateWindowsQueuesOnTheSamePort()
     {
         if (!string.Equals(
                 Environment.GetEnvironmentVariable("SMARTPRINT_RUN_MULTI_QUEUE_INTEGRATION"),
@@ -151,8 +204,16 @@ public sealed class WindowsPrinterDiscoveryTests
             return;
 
         Assert.True(OperatingSystem.IsWindows(), "The live Windows queue discovery check requires Windows.");
-        var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
-        Assert.True(discovery.TryDiscover(out var discovered), "Windows WMI printer discovery failed.");
+        var probe = new WindowsPrinterCapabilityProbeRunner(
+            NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+            executeInCurrentProcess: true);
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            probe,
+            executeInCurrentProcess: true);
+        var result = await discovery.DiscoverInProcessAsync(CancellationToken.None);
+        Assert.True(result.Success, "Windows WMI printer discovery failed.");
+        var discovered = result.Printers;
 
         var primary = Assert.Single(discovered, item => item.QueueName == "Microsoft Print to PDF");
         var secondary = Assert.Single(discovered, item => item.QueueName == "SmartPrint CI Secondary Queue");
