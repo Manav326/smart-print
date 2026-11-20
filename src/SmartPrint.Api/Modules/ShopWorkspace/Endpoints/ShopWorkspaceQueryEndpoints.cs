@@ -85,7 +85,8 @@ public static class ShopWorkspaceQueryEndpoints
             var periodEnd = periodStart.AddMonths(1);
         
             var printerCount = await db.PrinterDevices.AsNoTracking()
-                .LongCountAsync(item => item.TenantId == tenantId, ct);
+                .LongCountAsync(item => item.TenantId == tenantId && item.IsActive &&
+                    (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT"), ct);
             var agentDeviceCount = await db.AgentDevices.AsNoTracking()
                 .LongCountAsync(item => item.TenantId == tenantId &&
                                         item.RevokedUtc == null && item.Status != "Revoked", ct);
