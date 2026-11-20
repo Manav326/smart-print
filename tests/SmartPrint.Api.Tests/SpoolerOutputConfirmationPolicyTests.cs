@@ -198,4 +198,51 @@ public sealed class SpoolerOutputConfirmationPolicyTests
     [InlineData(null, "PRINTER_UNAVAILABLE")]
     public void FreshNonTransientAgentObservationReplacesThePreviousState(string? currentStatus, string? incomingStatus) =>
         Assert.False(SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownRetainedStatus(currentStatus, incomingStatus));
+
+    [Fact]
+    public void PageProgressIsMonotonicAcrossStaleWindowsObservations()
+    {
+        var merged = SpoolerOutputConfirmationPolicy.MergePageProgress(4, 12, 2, 10);
+        Assert.Equal((4, 12), merged);
+
+        merged = SpoolerOutputConfirmationPolicy.MergePageProgress(4, 12, null, null);
+        Assert.Equal((4, 12), merged);
+
+        merged = SpoolerOutputConfirmationPolicy.MergePageProgress(0, 0, 0, 12);
+        Assert.Equal((0, 12), merged);
+    }
+
+    [Fact]
+    public void OnlyFreshVerifiedZeroPagePhysicalAbsenceCanBeResumed()
+    {
+        bool CanResume(
+            string? status = "OUTPUT_UNCONFIRMED",
+            string? outputType = "PHYSICAL",
+            string? spoolerStatus = "OUTPUT_UNCONFIRMED",
+            string? failure = "SPOOLER_JOB_NO_LONGER_VISIBLE",
+            int? spoolerJobId = 17,
+            int pagesPrinted = 0,
+            int totalPages = 12,
+            DateTimeOffset? submitted = null,
+            DateTimeOffset? observed = null,
+            DateTimeOffset? outputConfirmed = null,
+            DateTimeOffset? dispatchLease = null) =>
+            SpoolerOutputConfirmationPolicy.CanResumeUnprintedPhysicalJob(
+                status, outputType, spoolerStatus, failure, spoolerJobId,
+                pagesPrinted, totalPages, submitted ?? SubmittedUtc,
+                observed ?? ObservedUtc, outputConfirmed, dispatchLease, NowUtc);
+
+        Assert.True(CanResume());
+        Assert.False(CanResume(pagesPrinted: 1));
+        Assert.False(CanResume(totalPages: 0));
+        Assert.False(CanResume(spoolerJobId: null));
+        Assert.False(CanResume(failure: "AGENT_RESTART_DURING_PRINT_SUBMISSION"));
+        Assert.False(CanResume(spoolerStatus: "PRINTING"));
+        Assert.False(CanResume(status: "PRINTING"));
+        Assert.False(CanResume(outputType: "PDF_EXPORT"));
+        Assert.False(CanResume(outputConfirmed: NowUtc));
+        Assert.False(CanResume(dispatchLease: NowUtc.AddMinutes(1)));
+        Assert.False(CanResume(observed: NowUtc.AddMinutes(-11)));
+    }
+
 }

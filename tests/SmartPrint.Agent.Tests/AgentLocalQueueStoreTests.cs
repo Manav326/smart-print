@@ -1613,6 +1613,50 @@ public sealed class AgentLocalQueueStoreTests
         }
     }
 
+    [Fact]
+    public async Task PhysicalRetryRequiresVerifiedZeroPageAbsenceAndKeepsProtectedDocument()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Protected retry source"u8.ToArray();
+            var job = CreateJob(bytes);
+            await store.EnqueueAsync(job, bytes, CancellationToken.None);
+            await store.MarkAcknowledgedAsync(job.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(job.Id, "SmartPrint-SP-1", CancellationToken.None);
+            await store.MarkSpoolerAcceptedAsync(job.Id, 17, "SmartPrint-SP-1", CancellationToken.None);
+            await store.UpdateSpoolerStatusAsync(job.Id, "OUTPUT_UNCONFIRMED", CancellationToken.None, 0, 8);
+            await store.MarkOutputUnconfirmedAsync(job.Id, "SPOOLER_JOB_NO_LONGER_VISIBLE", CancellationToken.None);
+            await store.MarkSpoolerJobAbsentAsync(job.Id, CancellationToken.None);
+
+            var absent = store.Find(job.Id)!;
+            Assert.Equal(17, absent.SpoolerJobId);
+            Assert.Equal("SPOOLER_JOB_NO_LONGER_VISIBLE", absent.FailureCode);
+            Assert.Equal(0, absent.SpoolerPagesPrinted);
+            Assert.Equal(8, absent.SpoolerTotalPages);
+            Assert.Single(store.GetAcknowledgedJobs());
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.PreparePhysicalOutputRetryAsync(job.Id, "SmartPrint-SP-1-R2", CancellationToken.None));
+
+            await store.PreparePhysicalOutputRetryAsync(job.Id, "SmartPrint-SP-1-R2", CancellationToken.None);
+            var retry = store.Find(job.Id)!;
+            Assert.Equal("ACKNOWLEDGED", retry.State);
+            Assert.Equal("SmartPrint-SP-1-R2", retry.SpoolerJobName);
+            Assert.Null(retry.SpoolerJobId);
+            Assert.Null(retry.FailureCode);
+            Assert.Equal(0, retry.SpoolerPagesPrinted);
+            Assert.Equal(0, retry.SpoolerTotalPages);
+            Assert.Equal(bytes, store.ReadDocument(job.Id));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static AgentClaimedJob CreateJob(byte[] content)
     {
         var hash = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();

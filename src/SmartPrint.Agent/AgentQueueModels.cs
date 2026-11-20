@@ -129,7 +129,9 @@ public sealed record AgentLocalQueueEntry(
     string PhotoPaperFinish = "PLAIN",
     string PhotoOutputLayout = "A4_SHEET",
     string? PhotoSizeCode = null,
-    Guid? DocumentScopeId = null);
+    Guid? DocumentScopeId = null,
+    int SpoolerPagesPrinted = 0,
+    int SpoolerTotalPages = 0);
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
@@ -138,7 +140,7 @@ public sealed record AgentPrintClaimedJob(Guid Id, string JobNumber, string Stat
 public sealed record AgentPdfExportedRequest(string FileName, string OutputPath, long SizeBytes, string Sha256);
 public sealed record PdfExportReceipt(string FileName, string OutputPath, long SizeBytes, string Sha256);
 public sealed record AgentSpoolerAcceptedRequest(int SpoolerJobId, string SpoolerJobName, string SpoolerStatus);
-public sealed record AgentPrintBlockedRequest(string ReasonCode, string Message);
+public sealed record AgentPrintBlockedRequest(string ReasonCode, string Message, int? PagesPrinted = null, int? TotalPages = null);
 public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerStatus, int PagesPrinted, int TotalPages);
 
 // Persisted independently from the document manifest so spooler cleanup can

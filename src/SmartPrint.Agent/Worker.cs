@@ -1551,8 +1551,11 @@ public sealed class Worker(
         foreach (var entry in localQueueStore.GetSpoolerTrackingJobs())
         {
             ct.ThrowIfCancellationRequested();
-            if (entry.SpoolerJobId is > 0 && !string.IsNullOrWhiteSpace(entry.SpoolerJobName))
-                await ReportSpoolerAcceptedAsync(client, credentials, entry.JobId, entry.SpoolerJobId.Value, entry.SpoolerJobName, entry.SpoolerStatus ?? "QUEUED", ct);
+            if (entry.State != "SPOOLER_ACCEPTED" ||
+                entry.SpoolerJobId is not > 0 ||
+                string.IsNullOrWhiteSpace(entry.SpoolerJobName))
+                continue;
+            await ReportSpoolerAcceptedAsync(client, credentials, entry.JobId, entry.SpoolerJobId.Value, entry.SpoolerJobName, entry.SpoolerStatus ?? "QUEUED", ct);
         }
     }
 
@@ -1605,9 +1608,17 @@ public sealed class Worker(
         ct.ThrowIfCancellationRequested();
         var entry = localQueueStore.Find(job.Id);
         var isPdfExport = AgentOutputModeRules.IsPdfExport(job.OutputMode);
+        var canResumeAfterVerifiedAbsence = entry is not null && !isPdfExport &&
+            entry.State == "OUTPUT_UNCONFIRMED" &&
+            entry.FailureCode == "SPOOLER_JOB_NO_LONGER_VISIBLE" &&
+            entry.SpoolerStatus == "OUTPUT_UNCONFIRMED" &&
+            entry.SpoolerJobId is > 0 &&
+            entry.SpoolerPagesPrinted == 0 &&
+            entry.SpoolerTotalPages > 0;
         var localStateValid = entry is not null &&
             (entry.State == "ACKNOWLEDGED" ||
-             (isPdfExport && entry.State == "OUTPUT_UNCONFIRMED"));
+             (isPdfExport && entry.State == "OUTPUT_UNCONFIRMED") ||
+             canResumeAfterVerifiedAbsence);
         if (entry is null || !localStateValid ||
             !string.Equals(entry.QueueName, job.QueueName, StringComparison.OrdinalIgnoreCase) ||
             string.IsNullOrWhiteSpace(job.SpoolerJobName))
@@ -1618,6 +1629,12 @@ public sealed class Worker(
 
         try
         {
+            // The server can only return this job after the shop explicitly
+            // authorised a zero-page retry. Reset the local manifest only now,
+            // after that durable server claim, never merely because the queue vanished.
+            if (canResumeAfterVerifiedAbsence)
+                await localQueueStore.PreparePhysicalOutputRetryAsync(job.Id, job.SpoolerJobName, ct);
+
             var rejectedPages = job.RejectedPageNumbers ?? Array.Empty<int>();
             await localQueueStore.UpdateRejectedPagesAsync(job.Id, rejectedPages, ct);
             entry = localQueueStore.Find(job.Id)
@@ -1814,7 +1831,7 @@ public sealed class Worker(
 
                 // Report the real Windows state. RETAINED alone must never be
                 // coerced to PRINTED; only JOB_STATUS_PRINTED maps to PRINTED.
-                await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, found.Status, ct);
+                await localQueueStore.UpdateSpoolerStatusAsync(entry.JobId, found.Status, ct, found.PagesPrinted, found.TotalPages);
                 await ReportSpoolerStatusAsync(
                     client, credentials, entry.JobId, found.JobId,
                     found.Status, found.PagesPrinted, found.TotalPages, ct);
@@ -2001,8 +2018,13 @@ public sealed class Worker(
 
     private async Task<bool> ReportOutputUnconfirmedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, string code, string message, CancellationToken ct)
     {
+        var localEntry = localQueueStore.Find(jobId);
         using var response = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{jobId}/output-unconfirmed",
-            new AgentPrintBlockedRequest(code, message.Length > 300 ? message[..300] : message), ct);
+            new AgentPrintBlockedRequest(
+                code,
+                message.Length > 300 ? message[..300] : message,
+                localEntry?.SpoolerPagesPrinted,
+                localEntry?.SpoolerTotalPages), ct);
         if (!response.IsSuccessStatusCode)
         {
             logger.LogWarning("Output reconciliation for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);
