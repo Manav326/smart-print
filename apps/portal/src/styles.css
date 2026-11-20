@@ -32,6 +32,11 @@
 .subtle-button{border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:6px;padding:6px 9px;font:600 8px "DM Sans",sans-serif;cursor:pointer}.subtle-button:hover{color:var(--text);border-color:var(--accent)}
 .station-card{padding:13px}.station-card-head{display:flex;align-items:center;gap:9px;min-width:0}.station-head-copy{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}.station-head-copy strong{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.station-head-copy span{font-size:8px;color:var(--muted)}
 .station-qr-area{min-height:205px;display:grid;place-items:center;padding:13px 0 10px}
+.station-qr-area.qr-station-preview{position:relative;display:block;min-height:0;padding:8px 0 10px}
+.station-poster-preview{display:block;width:100%;height:auto;max-height:260px;object-fit:contain;border-radius:9px;box-shadow:0 6px 18px #0002}
+.station-poster-preview-loading{display:grid;place-items:center;min-height:190px;padding:16px;border:1px dashed var(--border);border-radius:9px;color:var(--muted);font-size:10px;text-align:center}
+.qr-preview-source{position:fixed;left:-10000px;top:0;width:172px;height:172px;overflow:hidden;opacity:0;pointer-events:none}
+.qr-preview-source .qr-code-frame{width:172px;height:172px}
 .qr-paper{background:#fff;border-radius:9px;padding:12px 12px 9px;display:flex;flex-direction:column;align-items:center;gap:7px;box-shadow:0 6px 18px #0002}
 .qr-paper svg{display:block;max-width:100%;height:auto}.qr-paper span{color:#202638;font-size:7px;letter-spacing:1.4px;font-weight:800}
 .station-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid var(--border);padding-top:10px}.station-foot>span{font-size:8px;color:var(--faint)}
@@ -4038,7 +4043,7 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 }
 
 
-/* One action expands the complete QR poster print, download and share workflow. */
+/* One action expands a shop-owner-friendly poster workflow. */
 .qr-poster-actions{margin-top:10px;border:1px solid var(--border);border-radius:11px;background:var(--surface-2);overflow:hidden}
 .qr-poster-actions>summary{min-height:46px;padding:11px 13px;display:flex;align-items:center;gap:9px;list-style:none;cursor:pointer;color:var(--text);font-size:12px;font-weight:750}
 .qr-poster-actions>summary::-webkit-details-marker{display:none}
@@ -4046,10 +4051,15 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 .qr-poster-actions[open]>summary:after{content:"−"}
 .qr-poster-actions>summary span{margin-left:auto;color:var(--muted);font-size:10px;font-weight:600}
 .qr-poster-actions[open]>summary{border-bottom:1px solid var(--border)}
-.qr-poster-actions-controls{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:end;gap:9px;padding:13px}
-.qr-poster-actions-controls label{display:grid;gap:6px;min-width:0;color:var(--muted);font-size:10px;font-weight:750}
-.qr-poster-actions-controls select{width:100%;height:39px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);padding:0 9px;font:600 11px "DM Sans",sans-serif}
-.qr-poster-actions-controls .secondary-button{min-width:0;min-height:39px;display:inline-flex;align-items:center;justify-content:center;gap:7px;white-space:normal}
+.qr-poster-actions>summary:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.qr-poster-format-row{padding:13px 13px 0}
+.qr-poster-format-row label{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;color:var(--text);font-size:11px;font-weight:750}
+.qr-poster-format-row label>span{display:grid;gap:4px;min-width:0}
+.qr-poster-format-row label small{color:var(--muted);font-size:9px;font-weight:500;line-height:1.4}
+.qr-poster-format-row select{flex:0 0 min(220px,48%);width:min(220px,48%);min-width:0;height:44px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);padding:0 10px;font:600 11px "DM Sans",sans-serif}
+.qr-poster-action-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;padding:12px 13px}
+.qr-poster-action-buttons button{min-width:0;min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:8px 10px;white-space:normal;text-align:center}
+.qr-poster-action-buttons button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .qr-poster-actions-help,.qr-share-paused-note,.qr-share-feedback{display:block;margin:0 13px 11px;color:var(--muted);font-size:10px;line-height:1.5}
 .qr-share-paused-note{color:#a65a16}
 .qr-share-feedback.success{color:var(--green)}
@@ -4080,9 +4090,11 @@ html[data-theme="dark"] .customer-upi-quick-actions button{border-color:var(--na
 @media(max-width:600px){
   .qr-poster-actions>summary{flex-wrap:wrap}
   .qr-poster-actions>summary span{margin-left:0;width:100%}
-  .qr-poster-actions-controls{grid-template-columns:1fr 1fr}
-  .qr-poster-actions-controls label{grid-column:1/-1}
-  .qr-poster-actions-controls .secondary-button{width:100%;white-space:normal}
+  .qr-poster-format-row label{align-items:stretch;flex-direction:column}
+  .qr-poster-format-row select{flex:0 0 auto;width:100%}
+  .qr-poster-action-buttons{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .qr-poster-action-buttons button:last-child{grid-column:1/-1}
+  .station-poster-preview{max-height:none}
   .shop-document-preview-loading small{display:none}
   .customer-previous-order{padding:12px}
 }
