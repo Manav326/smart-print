@@ -25,6 +25,14 @@ public sealed class Worker(
     AgentDocumentEncryptionKeyStore documentEncryptionKeyStore,
     IConfiguration configuration) : BackgroundService
 {
+    private readonly SemaphoreSlim printWorkWakeSignal = new(0, 1);
+    private readonly SemaphoreSlim capabilityEnrichmentGate = new(1, 1);
+    private readonly TimeSpan printWorkPollInterval = TimeSpan.FromSeconds(
+        AgentLoopIntervals.ResolvePrintWorkPollIntervalSeconds(
+            configuration.GetValue<int?>("Agent:PrintWorkPollIntervalSeconds")));
+    private readonly int maxConcurrentPrinterLanes = Math.Clamp(
+        configuration.GetValue<int?>("Agent:MaxConcurrentPrinterLanes") ?? 2, 1, 8);
+
     private int printClaimBatchOffset;
     private readonly TimeSpan pollInterval = TimeSpan.FromSeconds(
         Math.Clamp(configuration.GetValue<int?>("Agent:PollIntervalSeconds") ?? 30, 10, 300));
@@ -85,6 +93,9 @@ public sealed class Worker(
 
             if (pollSucceeded)
             {
+                // The per-Agent PostgreSQL signal is shared by private uploads,
+                // paid-document assignment and authorised print dispatch.
+                SignalPrintWork();
                 retryDelay = TimeSpan.FromSeconds(5);
                 continue;
             }
@@ -679,18 +690,73 @@ public sealed class Worker(
             runtimeReadiness.MarkPrinterInventoryFailure("printer_agent_unpaired");
             return;
         }
-        var discovery = await printerDiscovery.TryDiscoverAsync(cancellationToken);
-        if (!discovery.Success)
+
+        // Publish queue names/status first. Vendor capability probes must not hide
+        // newly installed printers or make a healthy queue wait behind a bad driver.
+        var metadata = await printerDiscovery.TryDiscoverMetadataAsync(cancellationToken);
+        if (!metadata.Success)
         {
             runtimeReadiness.MarkPrinterInventoryFailure("printer_discovery_failed");
-            logger.LogWarning("Skipping this printer inventory sync because the isolated Windows discovery worker failed; the server's last known queues are retained.");
+            logger.LogWarning("Skipping this printer inventory sync because Windows queue discovery failed; the server's last known queues are retained.");
             return;
         }
 
-        var printers = discovery.Printers;
+        using (var client = httpClientFactory.CreateClient("cloud"))
+        {
+            client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+            if (!await SyncPrinterInventoryBatchAsync(client, credentials, metadata.Printers, cancellationToken))
+            {
+                runtimeReadiness.MarkPrinterInventoryFailure("printer_sync_failed");
+                return;
+            }
+        }
 
-        using var client = httpClientFactory.CreateClient("cloud");
-        client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+        // Queue availability is fresh now, even while capability enrichment continues.
+        runtimeReadiness.MarkPrinterInventorySuccess(metadata.Printers.Count);
+        if (!await capabilityEnrichmentGate.WaitAsync(0, cancellationToken))
+            return;
+
+        // The inventory loop remains free to refresh queue health on its normal
+        // cadence. At most one capability-enrichment batch runs at a time.
+        _ = EnrichAndSyncPrinterCapabilitiesAsync(credentials, metadata.Printers, cancellationToken);
+    }
+
+    private async Task EnrichAndSyncPrinterCapabilitiesAsync(
+        AgentCredentials credentials,
+        IReadOnlyList<DiscoveredPrinter> metadata,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var enriched = await printerDiscovery.EnrichCapabilitiesAsync(metadata, cancellationToken);
+            if (!enriched.Success)
+                return;
+
+            using var client = httpClientFactory.CreateClient("cloud");
+            client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+            if (!await SyncPrinterInventoryBatchAsync(client, credentials, enriched.Printers, cancellationToken))
+                logger.LogWarning("Printer capability enrichment could not be synchronized; published queue status remains available.");
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Normal service shutdown.
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Printer capability enrichment failed; discovered Windows queues remain available.");
+        }
+        finally
+        {
+            capabilityEnrichmentGate.Release();
+        }
+    }
+
+    private async Task<bool> SyncPrinterInventoryBatchAsync(
+        HttpClient client,
+        AgentCredentials credentials,
+        IReadOnlyList<DiscoveredPrinter> printers,
+        CancellationToken cancellationToken)
+    {
         using var sync = await SendAgentRequestAsync(
             client,
             credentials,
@@ -700,14 +766,12 @@ public sealed class Worker(
 
         if (sync.IsSuccessStatusCode)
         {
-            runtimeReadiness.MarkPrinterInventorySuccess(printers.Count);
             logger.LogInformation("Synchronized {PrinterCount} Windows printer queues with the shop.", printers.Count);
+            return true;
         }
-        else
-        {
-            runtimeReadiness.MarkPrinterInventoryFailure($"printer_sync_http_{(int)sync.StatusCode}");
-            logger.LogWarning("Printer inventory synchronization failed with HTTP {StatusCode}; the last successful inventory is retained.", (int)sync.StatusCode);
-        }
+
+        logger.LogWarning("Printer inventory synchronization failed with HTTP {StatusCode}; the last successful inventory is retained.", (int)sync.StatusCode);
+        return false;
     }
 
     private async Task RunPrintWorkLoopAsync(CancellationToken cancellationToken)
@@ -781,13 +845,13 @@ public sealed class Worker(
                 exception is CryptographicException or IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
             {
                 logger.LogError(exception, "The saved Agent identity could not be read. Print processing is paused until the owner repairs the local pairing.");
-                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
+                await WaitForPrintWorkOrDelayAsync(cancellationToken);
                 continue;
             }
 
             if (credentials is null)
             {
-                await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
+                await WaitForPrintWorkOrDelayAsync(cancellationToken);
                 continue;
             }
 
@@ -826,13 +890,42 @@ public sealed class Worker(
             }
 
             runtimeReadiness.MarkPrintWorkCycle();
-            await localNetworkManager.WaitForSelectionChangeOrDelayAsync(pollInterval, cancellationToken);
+            await WaitForPrintWorkOrDelayAsync(cancellationToken);
             }
         }
         finally
         {
             runtimeReadiness.SetPrintWorkerRunning(false);
         }
+    }
+
+    private void SignalPrintWork()
+    {
+        if (printWorkWakeSignal.CurrentCount == 0)
+        {
+            try { printWorkWakeSignal.Release(); }
+            catch (SemaphoreFullException) { /* A pending wake already covers this notification. */ }
+        }
+    }
+
+    private async Task WaitForPrintWorkOrDelayAsync(CancellationToken cancellationToken)
+    {
+        using var waitCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var wakeTask = printWorkWakeSignal.WaitAsync(waitCancellation.Token);
+        var networkOrFallbackTask = localNetworkManager.WaitForSelectionChangeOrDelayAsync(
+            printWorkPollInterval, waitCancellation.Token);
+
+        await Task.WhenAny(wakeTask, networkOrFallbackTask);
+        waitCancellation.Cancel();
+        try
+        {
+            await Task.WhenAll(wakeTask, networkOrFallbackTask);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The losing wait is cancelled after the first wake source wins.
+        }
+        cancellationToken.ThrowIfCancellationRequested();
     }
 
     private async Task ProcessLocalQueueHandoffAsync(
@@ -1257,109 +1350,135 @@ public sealed class Worker(
             return;
         }
         var result = await response.Content.ReadFromJsonAsync<AgentPrintClaimResponse>(ct);
-        if (result?.Jobs is null) return;
+        if (result?.Jobs is null || result.Jobs.Count == 0) return;
 
-        foreach (var job in result.Jobs)
+        // Preserve FIFO order within each Windows queue while independent printers
+        // submit concurrently. This limit protects the shop computer and spooler.
+        var lanes = AgentPrintLaneSelector.GroupByQueue(result.Jobs);
+        using var laneGate = new SemaphoreSlim(maxConcurrentPrinterLanes, maxConcurrentPrinterLanes);
+        var laneTasks = lanes.Select(async lane =>
         {
-            ct.ThrowIfCancellationRequested();
-            var entry = localQueueStore.Find(job.Id);
-            var isPdfExport = AgentOutputModeRules.IsPdfExport(job.OutputMode);
-            var localStateValid = entry is not null &&
-                (entry.State == "ACKNOWLEDGED" ||
-                 (isPdfExport && entry.State == "OUTPUT_UNCONFIRMED"));
-            if (entry is null || !localStateValid ||
-                !string.Equals(entry.QueueName, job.QueueName, StringComparison.OrdinalIgnoreCase) ||
-                string.IsNullOrWhiteSpace(job.SpoolerJobName))
-            {
-                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "LOCAL_QUEUE_PROOF_MISMATCH", "The local queue item no longer matches the output assignment.", CancellationToken.None);
-                continue;
-            }
+            await laneGate.WaitAsync(ct);
             try
             {
-                var rejectedPages = job.RejectedPageNumbers ?? Array.Empty<int>();
-                await localQueueStore.UpdateRejectedPagesAsync(job.Id, rejectedPages, ct);
-                entry = localQueueStore.Find(job.Id)
-                    ?? throw new FileNotFoundException("The local print job disappeared before output.");
-
-                if (isPdfExport)
+                foreach (var job in lane)
                 {
-                    var privateTestOutput = entry.PrivatePrinting;
-                    var exportDirectory = privateTestOutput
-                        ? localQueueStore.EnsurePrivateTestOutputDirectory()
-                        : pdfExportDirectory;
-                    var exportEntry = entry with { OutputMode = PrinterOutputModeRules.PdfExport, RejectedPageNumbers = rejectedPages };
-                    var destination = printExecutor.GetPdfExportPath(exportEntry, exportDirectory);
-                    await localQueueStore.MarkPdfExportStartedAsync(job.Id, destination, ct);
-                    PdfExportExecutionResult exportResult;
-                    exportResult = await isolatedWindowsPrintExecutor.ExportPdfAsync(
-                        job.Id, credentials.AgentDeviceId, destination, exportDirectory, ct);
-
-                    var receipt = exportResult.Receipt;
-                    await localQueueStore.MarkPdfExportedAsync(job.Id, receipt, ct);
-                    await ReportPdfExportedAsync(client, credentials, job.Id, receipt, ct);
-                    logger.LogInformation(
-                        privateTestOutput
-                            ? "Private test output for {JobNumber} was saved locally as {FileName}; it is not physical fulfilment. The protected source remains pending platform-authorised cleanup."
-                            : "Job {JobNumber} was exported as {FileName} to {OutputPath} using {ExportMethod}; spooler job {SpoolerJobId}.",
-                        job.JobNumber, receipt.FileName, receipt.OutputPath, exportResult.Method, exportResult.SpoolerJobId);
-                    continue;
+                    ct.ThrowIfCancellationRequested();
+                    await ProcessAuthorizedPrintJobAsync(client, credentials, job, ct);
                 }
-
-                await localQueueStore.MarkSubmissionStartedAsync(
-                    job.Id, job.SpoolerJobName, ct, job.OutputMode);
-                var printEntry = entry with
-                {
-                    OutputMode = job.OutputMode,
-                    SpoolerJobName = job.SpoolerJobName,
-                    RejectedPageNumbers = rejectedPages
-                };
-                var spoolerReceipt = await isolatedWindowsPrintExecutor.PrintAsync(
-                    printEntry, credentials.AgentDeviceId, ct);
-
-                await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
-                await ReportSpoolerAcceptedAsync(client, credentials, job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, "QUEUED", ct);
             }
-            catch (PrintExecutionBlockedException ex)
+            finally
             {
-                await localQueueStore.MarkReadyAfterBlockedAsync(job.Id, ex.ReasonCode, CancellationToken.None);
-                await ReportPrintBlockedAsync(client, credentials, job.Id, ex.ReasonCode, ex.Message, CancellationToken.None);
-                logger.LogWarning(ex, "Pre-submission output block for {JobNumber}.", job.JobNumber);
+                laneGate.Release();
             }
-            catch (PrintSubmissionUncertainException ex)
+        }).ToArray();
+
+        await Task.WhenAll(laneTasks);
+    }
+
+    private async Task ProcessAuthorizedPrintJobAsync(
+        HttpClient client,
+        AgentCredentials credentials,
+        AgentPrintClaimedJob job,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var entry = localQueueStore.Find(job.Id);
+        var isPdfExport = AgentOutputModeRules.IsPdfExport(job.OutputMode);
+        var localStateValid = entry is not null &&
+            (entry.State == "ACKNOWLEDGED" ||
+             (isPdfExport && entry.State == "OUTPUT_UNCONFIRMED"));
+        if (entry is null || !localStateValid ||
+            !string.Equals(entry.QueueName, job.QueueName, StringComparison.OrdinalIgnoreCase) ||
+            string.IsNullOrWhiteSpace(job.SpoolerJobName))
+        {
+            await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "LOCAL_QUEUE_PROOF_MISMATCH", "The local queue item no longer matches the output assignment.", CancellationToken.None);
+            return;
+        }
+
+        try
+        {
+            var rejectedPages = job.RejectedPageNumbers ?? Array.Empty<int>();
+            await localQueueStore.UpdateRejectedPagesAsync(job.Id, rejectedPages, ct);
+            entry = localQueueStore.Find(job.Id)
+                ?? throw new FileNotFoundException("The local print job disappeared before output.");
+
+            if (isPdfExport)
+            {
+                var privateTestOutput = entry.PrivatePrinting;
+                var exportDirectory = privateTestOutput
+                    ? localQueueStore.EnsurePrivateTestOutputDirectory()
+                    : pdfExportDirectory;
+                var exportEntry = entry with { OutputMode = PrinterOutputModeRules.PdfExport, RejectedPageNumbers = rejectedPages };
+                var destination = printExecutor.GetPdfExportPath(exportEntry, exportDirectory);
+                await localQueueStore.MarkPdfExportStartedAsync(job.Id, destination, ct);
+                var exportResult = await isolatedWindowsPrintExecutor.ExportPdfAsync(
+                    job.Id, credentials.AgentDeviceId, destination, exportDirectory, ct);
+
+                var receipt = exportResult.Receipt;
+                await localQueueStore.MarkPdfExportedAsync(job.Id, receipt, ct);
+                await ReportPdfExportedAsync(client, credentials, job.Id, receipt, ct);
+                logger.LogInformation(
+                    privateTestOutput
+                        ? "Private test output for {JobNumber} was saved locally as {FileName}; it is not physical fulfilment. The protected source remains pending platform-authorised cleanup."
+                        : "Job {JobNumber} was exported as {FileName} to {OutputPath} using {ExportMethod}; spooler job {SpoolerJobId}.",
+                    job.JobNumber, receipt.FileName, receipt.OutputPath, exportResult.Method, exportResult.SpoolerJobId);
+                return;
+            }
+
+            await localQueueStore.MarkSubmissionStartedAsync(job.Id, job.SpoolerJobName, ct, job.OutputMode);
+            var printEntry = entry with
+            {
+                OutputMode = job.OutputMode,
+                SpoolerJobName = job.SpoolerJobName,
+                RejectedPageNumbers = rejectedPages
+            };
+            var spoolerReceipt = await isolatedWindowsPrintExecutor.PrintAsync(
+                printEntry, credentials.AgentDeviceId, ct);
+
+            await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
+            await ReportSpoolerAcceptedAsync(client, credentials, job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, "QUEUED", ct);
+        }
+        catch (PrintExecutionBlockedException ex)
+        {
+            await localQueueStore.MarkReadyAfterBlockedAsync(job.Id, ex.ReasonCode, CancellationToken.None);
+            await ReportPrintBlockedAsync(client, credentials, job.Id, ex.ReasonCode, ex.Message, CancellationToken.None);
+            logger.LogWarning(ex, "Pre-submission output block for {JobNumber}.", job.JobNumber);
+        }
+        catch (PrintSubmissionUncertainException ex)
+        {
+            await localQueueStore.MarkOutputUnconfirmedAsync(
+                job.Id, ex.ReasonCode, CancellationToken.None,
+                isPdfExport ? PrinterOutputModeRules.PdfExport : null);
+            await ReportOutputUnconfirmedAsync(client, credentials, job.Id, ex.ReasonCode, ex.Message, CancellationToken.None);
+            logger.LogError(ex, "Uncertain output for {JobNumber}; no automatic retry.", job.JobNumber);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            try
             {
                 await localQueueStore.MarkOutputUnconfirmedAsync(
-                    job.Id, ex.ReasonCode, CancellationToken.None,
+                    job.Id, "AGENT_STOPPED_DURING_OUTPUT", CancellationToken.None,
                     isPdfExport ? PrinterOutputModeRules.PdfExport : null);
-                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, ex.ReasonCode, ex.Message, CancellationToken.None);
-                logger.LogError(ex, "Uncertain output for {JobNumber}; no automatic retry.", job.JobNumber);
             }
-            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist interrupted output state."); }
+            await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "AGENT_STOPPED_DURING_OUTPUT", "The agent stopped during output. Inspect the saved PDF or physical printer output before retrying.", CancellationToken.None);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            try
             {
-                try
-                {
-                    await localQueueStore.MarkOutputUnconfirmedAsync(
-                        job.Id, "AGENT_STOPPED_DURING_OUTPUT", CancellationToken.None,
-                        isPdfExport ? PrinterOutputModeRules.PdfExport : null);
-                }
-                catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist interrupted output state."); }
-                await ReportOutputUnconfirmedAsync(client, credentials, job.Id, "AGENT_STOPPED_DURING_OUTPUT", "The agent stopped during output. Inspect the saved PDF or physical printer output before retrying.", CancellationToken.None);
-                throw;
+                await localQueueStore.MarkOutputUnconfirmedAsync(
+                    job.Id, isPdfExport ? "PDF_EXPORT_OUTCOME_UNCERTAIN" : "UNEXPECTED_PRINT_EXECUTION_ERROR",
+                    CancellationToken.None, isPdfExport ? PrinterOutputModeRules.PdfExport : null);
             }
-            catch (Exception ex)
-            {
-                try
-                {
-                    await localQueueStore.MarkOutputUnconfirmedAsync(
-                        job.Id, isPdfExport ? "PDF_EXPORT_OUTCOME_UNCERTAIN" : "UNEXPECTED_PRINT_EXECUTION_ERROR",
-                        CancellationToken.None, isPdfExport ? PrinterOutputModeRules.PdfExport : null);
-                }
-                catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist uncertain output state."); }
-                await ReportOutputUnconfirmedAsync(
-                    client, credentials, job.Id,
-                    isPdfExport ? "PDF_EXPORT_OUTCOME_UNCERTAIN" : "UNEXPECTED_PRINT_EXECUTION_ERROR",
-                    ex.Message, CancellationToken.None);
-                logger.LogError(ex, "Unexpected output execution error for {JobNumber}; no automatic retry.", job.JobNumber);
-            }
+            catch (Exception persistError) { logger.LogCritical(persistError, "Could not persist uncertain output state."); }
+            await ReportOutputUnconfirmedAsync(
+                client, credentials, job.Id,
+                isPdfExport ? "PDF_EXPORT_OUTCOME_UNCERTAIN" : "UNEXPECTED_PRINT_EXECUTION_ERROR",
+                ex.Message, CancellationToken.None);
+            logger.LogError(ex, "Unexpected output execution error for {JobNumber}; no automatic retry.", job.JobNumber);
         }
     }
 
