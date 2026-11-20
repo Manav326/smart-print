@@ -29,11 +29,12 @@ public sealed class AgentLoopIntervalsTests
     }
 
     [Theory]
-    [InlineData(null, 2)]
+    [InlineData(null, 4)]
     [InlineData(0, 1)]
     [InlineData(1, 1)]
     [InlineData(2, 2)]
     [InlineData(4, 4)]
+    [InlineData(5, 5)]
     [InlineData(8, 8)]
     [InlineData(20, 8)]
     public void PrinterLaneConcurrencyIsBounded(int? configured, int expected)
