@@ -1047,6 +1047,8 @@ test("shop owners can only select online ready printer queues and new printers r
   assert.match(app, /!printer\.isActive && isPrinterReadyForSelection\(printer, agents\)/);
   assert.match(app, /Adding a new printer/);
   assert.match(app, /discovers and registers Windows queues automatically/);
+  assert.match(app, /actionLabel="Check Print Agent"/);
+  assert.match(app, /onOpenAgent=\{\(\) => navAction\("Print Agent"\)\}/);
   assert.match(app, /use Select to add a queue without replacing anything/);
   assert.match(app, /setPendingReplacement\(printer\);\s*setReplacePrinterId\("");/);
   assert.doesNotMatch(app, /Add manually|function PrinterModal|Register manually \(advanced\)/);
