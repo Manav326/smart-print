@@ -11148,6 +11148,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         });
     }
 
+    var promotedBatchTicketIds = new HashSet<Guid>();
     if (request.PrivatePrinting && standardTickets.Count > 0)
     {
         foreach (var pendingTicket in standardTickets)
@@ -11175,6 +11176,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
 
         foreach (var pendingTicket in standardTickets)
         {
+            promotedBatchTicketIds.Add(pendingTicket.Id);
             pendingTicket.PrivatePrinting = true;
             pendingTicket.OriginalFileName = "Private document";
             pendingTicket.BatchGroupName = "Private documents";
@@ -11203,10 +11205,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             item.CustomerSessionId == session.Id && item.IdempotencyKey == idempotencyKey, ct);
     if (racedTicket is not null)
     {
-        var promotingExistingTicket = existing is not null &&
-            existing.Id == racedTicket.Id &&
-            request.PrivatePrinting &&
-            !existing.PrivatePrinting;
+        var promotingExistingTicket = promotedBatchTicketIds.Contains(racedTicket.Id) ||
+            (existing is not null &&
+             existing.Id == racedTicket.Id &&
+             request.PrivatePrinting &&
+             !existing.PrivatePrinting);
         var racedCompletedPrivateTicket = racedTicket.PrivatePrinting && racedTicket.CompletedUtc is not null;
         var sameOriginalDocument = racedCompletedPrivateTicket ||
             (racedTicket.SizeBytes == request.SizeBytes &&
