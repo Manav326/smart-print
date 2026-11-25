@@ -110,8 +110,11 @@ try {
     try {
         docker cp $documentsFile ($validator.Trim() + ':' + $temporaryDocumentsPath) | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Could not copy the document archive to the validator.' }
-        docker start -a $validator | Out-Null
+        $archiveEntries = docker start -a $validator
         if ($LASTEXITCODE -ne 0) { throw 'The encrypted-document archive is invalid or unreadable.' }
+        if ($archiveEntries -match '(^|/)\.?private-relay(/|$)') {
+            throw 'This backup contains Private relay content. Restore is blocked because Private Printing documents must never be recovered from disaster backups.'
+        }
     } finally { docker rm -f $validator | Out-Null }
 
     Write-Host 'Replacing PostgreSQL database...' -ForegroundColor Cyan
@@ -125,6 +128,40 @@ try {
     docker compose @composeBaseArgs exec -T db pg_restore --exit-on-error --no-owner --no-privileges -U $dbUser -d $dbName $temporaryDbPath
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL restore failed. The API and portal remain stopped; inspect PostgreSQL logs before retrying.' }
     docker compose @composeBaseArgs exec -T db rm -f $temporaryDbPath | Out-Null
+
+    # Private relay ciphertext is intentionally absent from disaster backups.
+    # Clear stale ciphertext references and fail only incomplete relay tickets;
+    # keep job/payment/audit metadata and already-completed ticket history.
+    $privateRelayRecoverySql = @'
+UPDATE "LocalPrintUploadTickets"
+SET "PrivateRelayStorageKey" = NULL,
+    "PrivateRelayWrappedKey" = NULL,
+    "PrivateRelayIv" = NULL,
+    "PrivateRelayUploadedUtc" = NULL,
+    "PrivateRelayFailedUtc" = CASE
+        WHEN "CompletedUtc" IS NULL THEN COALESCE("PrivateRelayFailedUtc", NOW())
+        ELSE "PrivateRelayFailedUtc"
+    END,
+    "PrivateRelayFailureCode" = CASE
+        WHEN "CompletedUtc" IS NULL THEN 'RESTORE_CONTENT_EXCLUDED'
+        ELSE "PrivateRelayFailureCode"
+    END,
+    "PrivateRelayFailureMessage" = CASE
+        WHEN "CompletedUtc" IS NULL THEN 'Private relay content is intentionally excluded from disaster recovery. Re-upload the original file if the shop Agent had not received it.'
+        ELSE "PrivateRelayFailureMessage"
+    END,
+    "PrivateRelayStage" = CASE
+        WHEN "CompletedUtc" IS NULL THEN 'FAILED'
+        ELSE "PrivateRelayStage"
+    END,
+    "PrivateRelayStageUpdatedUtc" = CASE
+        WHEN "CompletedUtc" IS NULL THEN NOW()
+        ELSE "PrivateRelayStageUpdatedUtc"
+    END
+WHERE "PrivatePrinting" = TRUE AND "PrivateRelayStorageKey" IS NOT NULL;
+'@
+    docker compose @composeBaseArgs exec -T db psql -v ON_ERROR_STOP=1 -U $dbUser -d $dbName -c $privateRelayRecoverySql
+    if ($LASTEXITCODE -ne 0) { throw 'Could not safely invalidate Private relay references excluded from this restore.' }
 
     Write-Host 'Restoring encrypted cloud documents...' -ForegroundColor Cyan
     $backupHelper = docker create --volumes-from ($apiContainer.Trim() + ':rw') alpine:3.20 sh -c ('mkdir -p /var/lib/qrtoprint/documents && find /var/lib/qrtoprint/documents -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf ' + $temporaryDocumentsPath + ' -C /var/lib/qrtoprint/documents && chown -R 1654:1654 /var/lib/qrtoprint/documents')
@@ -151,6 +188,7 @@ try {
     $restoreSucceeded = $true
     Write-Host 'SmartPrint database and encrypted cloud documents have been restored successfully.' -ForegroundColor Green
     Write-Host "The previous .env was preserved at: $temporaryEnvPath"
+    Write-Host 'Private document content was not restored. Incomplete Private relay tickets were marked failed; re-upload is required only when the Agent had not received the protected file.'
     Write-Host 'The Windows Agent local DPAPI queue is not part of this Docker backup; it remains on each shop computer.'
 } finally {
     if (-not [string]::IsNullOrWhiteSpace($backupHelper)) { docker rm -f $backupHelper | Out-Null }
