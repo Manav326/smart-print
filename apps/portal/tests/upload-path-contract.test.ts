@@ -131,3 +131,19 @@ test("Private Printing progress uses short, plain-language customer messages", (
   assert.match(messages, /File secured on the shop computer · ready for printing/);
   assert.doesNotMatch(messages, /decrypting|authenticating|encrypted payload|local print queue/i);
 });
+
+test("prepared ID sheets defer batch privacy decisions to authoritative persisted jobs and tickets", () => {
+  const localTicketStart = api.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
+  const localTicketEnd = api.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/', localTicketStart + 1);
+  assert.ok(localTicketStart >= 0, "the local upload-ticket admission route must exist");
+  const ticketRoute = api.slice(localTicketStart, localTicketEnd > localTicketStart ? localTicketEnd : undefined);
+  assert.match(ticketRoute, /job\.BatchId == batchId && job\.PrivatePrinting != request\.PrivatePrinting/);
+  assert.match(ticketRoute, /ticket\.BatchId == batchId && ticket\.PrivatePrinting != request\.PrivatePrinting/);
+  assert.match(ticketRoute, /code = "batch_privacy_mode_mismatch"/);
+  assert.match(portalApi, /privatePrinting,/);
+  assert.match(portalApi, /printKind,/);
+  assert.doesNotMatch(customerApp, /uploadedBatch\.every\(item=>item\.job\.privatePrinting===true\)/,
+    "a stale or incomplete cached DTO must not pre-empt the API's authoritative batch-mode check");
+  assert.match(customerApp, /batchPrivacyMismatch=exception instanceof ApiError&&exception\.code==="batch_privacy_mode_mismatch"/);
+  assert.match(customerApp, /This batch already contains a Standard Printing file/);
+});
