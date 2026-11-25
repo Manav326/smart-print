@@ -148,7 +148,7 @@ test("prepared ID sheets defer batch privacy decisions to authoritative persiste
   assert.match(customerApp, /This batch already contains a Standard Printing file/);
 
   const successfulLocalAgentResponse = api.slice(
-    api.indexOf("AlreadyCompleted = false,"),
+    api.lastIndexOf("AlreadyCompleted = false,"),
     api.indexOf('agentApi.MapPost("/local-uploads/status-batch"')
   );
   assert.match(successfulLocalAgentResponse, /job\.PrivatePrinting/,
