@@ -83,7 +83,7 @@ test("Private Printing never starts a second relay while the same ticket is clai
   assert.match(api, /item\.PrivateRelayStage == PrivateRelayProgressRules\.WaitingForUpload[\s\S]{0,120}item\.PrivateRelayStage == PrivateRelayProgressRules\.ReceivingEncryptedPayload/);
   const relay = portalApi.slice(portalApi.indexOf("async function uploadCustomerPrivateRelay"), portalApi.indexOf("function createStreamingLocalMultipartBody"));
   const localUpload = portalApi.slice(portalApi.indexOf("export async function uploadCustomerDocumentLocally"));
-  assert.match(localUpload, /if \(privatePrinting\) break/);
+  assert.match(localUpload, /if \(privatePrinting \|\| privateUpload\) break/);
   assert.match(relay, /existing\.transferPath === "DIRECT_LAN"/);
   assert.match(relay, /existing\.transferPath === "CLOUD_RELAY"/);
   assert.match(relay, /has not started a second encrypted transfer/);
