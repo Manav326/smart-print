@@ -5725,7 +5725,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       const batchPrivacyMismatch=exception instanceof ApiError&&exception.code==="batch_privacy_mode_mismatch";
       const uploadError=batchPrivacyMismatch
-        ? "This batch already contains a Standard Printing file. Your ID sheet was not uploaded. Start a new Private Printing batch for it."
+        ? containsIdDocument
+          ? "This batch already contains a Standard Printing file. Your ID sheet was not uploaded. Start a new Private Printing batch for it."
+          : "This batch already contains a Private Printing file. Start a new Standard Printing batch for this document."
         : exception instanceof LocalUploadOutcomeUnknownError
         ? privatePrinting
           ? "The shop computer is still preparing your secure file. Tap Retry to check its status."
