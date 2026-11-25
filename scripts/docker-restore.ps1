@@ -134,28 +134,44 @@ try {
     # keep job/payment/audit metadata and already-completed ticket history.
     $privateRelayRecoverySql = @'
 UPDATE "LocalPrintUploadTickets"
-SET "PrivateRelayStorageKey" = NULL,
+SET "PrivateRelayStorageKey" = CASE
+        -- Keep only the opaque locator for a ticket already at the local-queue
+        -- handoff stage. The ciphertext itself is excluded; this lets the Agent
+        -- finish acknowledgement from its existing DPAPI-protected local copy.
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN "PrivateRelayStorageKey"
+        ELSE NULL
+    END,
     "PrivateRelayWrappedKey" = NULL,
     "PrivateRelayIv" = NULL,
-    "PrivateRelayUploadedUtc" = NULL,
+    "PrivateRelayUploadedUtc" = CASE
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN "PrivateRelayUploadedUtc"
+        ELSE NULL
+    END,
     "PrivateRelayFailedUtc" = CASE
-        WHEN "CompletedUtc" IS NULL THEN COALESCE("PrivateRelayFailedUtc", NOW())
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN COALESCE("PrivateRelayFailedUtc", NOW())
         ELSE "PrivateRelayFailedUtc"
     END,
     "PrivateRelayFailureCode" = CASE
-        WHEN "CompletedUtc" IS NULL THEN 'RESTORE_CONTENT_EXCLUDED'
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN 'RESTORE_CONTENT_EXCLUDED'
         ELSE "PrivateRelayFailureCode"
     END,
     "PrivateRelayFailureMessage" = CASE
-        WHEN "CompletedUtc" IS NULL THEN 'Private relay content is intentionally excluded from disaster recovery. Re-upload the original file if the shop Agent had not received it.'
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN 'Private relay content is intentionally excluded from disaster recovery. Re-upload the original file if the shop Agent had not secured its protected local copy.'
         ELSE "PrivateRelayFailureMessage"
     END,
     "PrivateRelayStage" = CASE
-        WHEN "CompletedUtc" IS NULL THEN 'FAILED'
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN 'FAILED'
         ELSE "PrivateRelayStage"
     END,
     "PrivateRelayStageUpdatedUtc" = CASE
-        WHEN "CompletedUtc" IS NULL THEN NOW()
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN NOW()
         ELSE "PrivateRelayStageUpdatedUtc"
     END
 WHERE "PrivatePrinting" = TRUE AND
