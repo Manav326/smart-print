@@ -45,11 +45,11 @@ public static class DocumentAnalyzer
     /// supplied array without copying it; new ingestion and storage paths should use
     /// the seekable Stream overload directly.
     /// </summary>
-    public static DocumentAnalysis Analyse(byte[] bytes, string filenameExtension = "")
+    public static DocumentAnalysis Analyse(byte[] bytes, string filenameExtension = "", bool includePdfImageMetadata = false)
     {
         ArgumentNullException.ThrowIfNull(bytes);
         using var stream = new MemoryStream(bytes, writable: false);
-        return Analyse(stream, filenameExtension);
+        return Analyse(stream, filenameExtension, includePdfImageMetadata);
     }
 
     /// <summary>
@@ -57,7 +57,7 @@ public static class DocumentAnalyzer
     /// file as another byte array. The input stream remains open and its original
     /// position is restored before returning.
     /// </summary>
-    public static DocumentAnalysis Analyse(Stream stream, string filenameExtension = "")
+    public static DocumentAnalysis Analyse(Stream stream, string filenameExtension = "", bool includePdfImageMetadata = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
         if (!stream.CanRead || !stream.CanSeek)
@@ -79,7 +79,7 @@ public static class DocumentAnalyzer
 
             return extension switch
             {
-                ".pdf" => AnalysePdf(stream),
+                ".pdf" => AnalysePdf(stream, includePdfImageMetadata),
                 ".png" => AnalysePng(stream),
                 ".jpg" or ".jpeg" => AnalyseJpeg(stream, extension),
                 _ => throw new DocumentValidationException("The file content is not a supported PDF, JPEG or PNG document.")
@@ -91,7 +91,7 @@ public static class DocumentAnalyzer
         }
     }
 
-    private static DocumentAnalysis AnalysePdf(Stream stream)
+    private static DocumentAnalysis AnalysePdf(Stream stream, bool includeEmbeddedImageMetadata)
     {
         if (stream.Length < 8)
             throw new DocumentValidationException("The PDF file is incomplete.");
@@ -107,21 +107,25 @@ public static class DocumentAnalyzer
 
             var pages = document.GetPages().Select(page =>
             {
-                var images = page.GetImages().Select(image =>
+                var images = new List<object>();
+                if (includeEmbeddedImageMetadata)
                 {
-                    var box = image.BoundingBox;
-                    return new
+                    foreach (var image in page.GetImages())
                     {
-                        widthInSamples = image.WidthInSamples,
-                        heightInSamples = image.HeightInSamples,
-                        leftPoints = Math.Round(box.Left, 2),
-                        bottomPoints = Math.Round(box.Bottom, 2),
-                        rightPoints = Math.Round(box.Right, 2),
-                        topPoints = Math.Round(box.Top, 2),
-                        rotationDegrees = Math.Round(box.Rotation, 2),
-                        isImageMask = image.IsImageMask
-                    };
-                }).ToArray();
+                        var box = image.BoundingBox;
+                        images.Add(new
+                        {
+                            widthInSamples = image.WidthInSamples,
+                            heightInSamples = image.HeightInSamples,
+                            leftPoints = Math.Round(box.Left, 2),
+                            bottomPoints = Math.Round(box.Bottom, 2),
+                            rightPoints = Math.Round(box.Right, 2),
+                            topPoints = Math.Round(box.Top, 2),
+                            rotationDegrees = Math.Round(box.Rotation, 2),
+                            isImageMask = image.IsImageMask
+                        });
+                    }
+                }
 
                 return new
                 {
