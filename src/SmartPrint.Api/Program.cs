@@ -7220,7 +7220,21 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/claim", async (
         """).ToListAsync(ct);
     var claimedAttemptNumber = claimedAttemptNumbers.SingleOrDefault();
     if (claimedAttemptNumber is null) return Results.Conflict();
-    ticket.AgentUploadAttempts = claimedAttemptNumber.Value;
+
+    // Re-read after the atomic claim: a concurrent, safe batch promotion may
+    // have completed after this request's initial read but before the claim.
+    // The Agent must receive the persisted mode, never a stale Standard DTO.
+    ticket = await db.LocalPrintUploadTickets.AsNoTracking()
+        .SingleAsync(item => item.Id == ticket.Id && item.TenantId == device.TenantId, ct);
+    if (ticket.PrivatePrinting &&
+        !await IsPrivatePrintingOutputQueueReadyAsync(
+            db, environment, ticket.TenantId, device.Id, ticket.PrinterDeviceId, ct))
+        return Results.Conflict(new
+        {
+            code = "private_printing_output_policy_changed",
+            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document was transferred. Reconnect and retry the same upload."
+        });
+
     if (ticket.PrivatePrinting)
     {
         await db.LocalPrintUploadTickets
@@ -10740,19 +10754,6 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         .SingleOrDefaultAsync(ct);
     if (session is null) return Results.Unauthorized();
 
-    var hasPrivacyMismatch = await db.PrintJobs.AsNoTracking().AnyAsync(job =>
-        job.TenantId == session.TenantId && job.CustomerSessionId == session.Id &&
-        job.BatchId == batchId && job.PrivatePrinting != request.PrivatePrinting, ct) ||
-        await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(ticket =>
-            ticket.TenantId == session.TenantId && ticket.CustomerSessionId == session.Id &&
-            ticket.BatchId == batchId && ticket.PrivatePrinting != request.PrivatePrinting, ct);
-    if (hasPrivacyMismatch)
-        return Results.Conflict(new
-        {
-            code = "batch_privacy_mode_mismatch",
-            message = "Every file in a batch must use the same privacy choice. Start a new batch to change between Standard and Private Printing."
-        });
-
     var grantHash = HashOpaqueToken(request.GrantToken);
     var existing = await db.LocalPrintUploadTickets.AsNoTracking()
         .SingleOrDefaultAsync(item =>
@@ -11055,6 +11056,12 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
 
+    // Serialize reservations for this customer batch. The session row is the
+    // stable lock target even when the batch has no PrintJob rows yet.
+    _ = await db.CustomerPrintSessions.FromSqlInterpolated(
+        $"SELECT * FROM \"CustomerPrintSessions\" WHERE \"Id\" = {session.Id} AND \"TenantId\" = {session.TenantId} FOR UPDATE")
+        .ToListAsync(ct);
+
     var batchIdOwnedByAnotherSession =
         await db.PrintJobs.AsNoTracking().AnyAsync(item =>
             item.TenantId == session.TenantId &&
@@ -11078,20 +11085,59 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         $"SELECT * FROM \"PrintJobs\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
         .ToListAsync(ct);
 
-    var hasOppositePrivacyMode = await db.PrintJobs.AsNoTracking().AnyAsync(item =>
-        item.TenantId == session.TenantId && item.CustomerSessionId == session.Id &&
-        item.BatchId == batchId && item.PrivatePrinting != request.PrivatePrinting, ct) ||
-        await db.LocalPrintUploadTickets.AsNoTracking().AnyAsync(item =>
-            item.TenantId == session.TenantId && item.CustomerSessionId == session.Id &&
-            item.BatchId == batchId && item.PrivatePrinting != request.PrivatePrinting, ct);
-    if (hasOppositePrivacyMode)
+    // Lock every outstanding ticket before evaluating promotion. The Agent claim
+    // endpoint uses a conditional UPDATE on the same rows, so promotion and claim
+    // cannot both win for the same ticket.
+    var batchTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
+        $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"TenantId\" = {session.TenantId} AND \"CustomerSessionId\" = {session.Id} AND \"BatchId\" = {batchId} FOR UPDATE")
+        .ToListAsync(ct);
+    var batchJobs = await db.PrintJobs
+        .Where(item => item.TenantId == session.TenantId &&
+                       item.CustomerSessionId == session.Id &&
+                       item.BatchId == batchId)
+        .ToListAsync(ct);
+
+    var batchAlreadyPrivate = batchJobs.Any(item => item.PrivatePrinting) ||
+                              batchTickets.Any(item => item.PrivatePrinting);
+    var batchHasStandardContent = batchJobs.Any(item => !item.PrivatePrinting);
+    var standardTickets = batchTickets.Where(item => !item.PrivatePrinting).ToList();
+
+    if (batchAlreadyPrivate && !request.PrivatePrinting)
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
         {
-            code = "batch_private_mode_mismatch",
-            message = "This batch already contains documents with a different privacy choice. Keep one privacy choice for the entire batch, or start a new batch."
+            code = "batch_privacy_mode_mismatch",
+            message = "This batch is already Private. Select Private Printing for every additional file; a Private batch cannot be downgraded."
         });
+    }
+
+    if (request.PrivatePrinting && (batchHasStandardContent ||
+        standardTickets.Any(item =>
+            item.ClaimedUtc is not null ||
+            item.AgentUploadAttempts > 0 ||
+            item.CompletedUtc is not null ||
+            item.PrivateRelayUploadedUtc is not null ||
+            !string.IsNullOrWhiteSpace(item.PrivateRelayStorageKey))))
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.Conflict(new
+        {
+            code = "batch_private_promotion_unavailable",
+            message = "This batch has already started Standard transfer or processing. To protect every document, finish it as Standard or start a new Private Printing batch. No privacy mode was changed."
+        });
+    }
+
+    if (request.PrivatePrinting && standardTickets.Count > 0)
+    {
+        foreach (var pendingTicket in standardTickets)
+        {
+            pendingTicket.PrivatePrinting = true;
+            pendingTicket.OriginalFileName = "Private document";
+            pendingTicket.BatchGroupName = "Private documents";
+            pendingTicket.BatchName = null;
+        }
+        await db.SaveChangesAsync(ct);
     }
 
     var checkoutStartedAfterTicketPreflight = await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
