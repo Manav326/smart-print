@@ -11,7 +11,7 @@ namespace SmartPrint.Api.Tests;
 public sealed class DocumentAnalyzerTests
 {
     [Fact]
-    public void AnalysesFullyDecodedPng()
+    public void AnalysesPngDimensionsWithoutDecodingPixels()
     {
         var png = CreatePng(640, 480);
 
