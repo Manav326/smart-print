@@ -7738,6 +7738,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             Job = new
             {
                 job.Id,
+                job.PrivatePrinting,
                 job.PrintKind,
                 job.BatchGroupName,
                 job.BatchName,
