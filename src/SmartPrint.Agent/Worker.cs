@@ -186,8 +186,28 @@ public sealed class Worker(
                     AgentCloudHttpTiming.DocumentResponseCompletionOption);
                 if (!contentResponse.IsSuccessStatusCode)
                 {
-                    logger.LogWarning("Encrypted relay payload for {JobNumber} returned HTTP {StatusCode}.", ticket.JobNumber, (int)contentResponse.StatusCode);
-                    retryableFailure = true;
+                    if (contentResponse.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        // After disaster recovery the relay ciphertext is intentionally
+                        // absent. If no DPAPI-protected local queue copy was found above,
+                        // fail this ticket explicitly so the customer can re-upload.
+                        using var excluded = await SendAgentRequestAsync(
+                            client, credentials,
+                            $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                            new AgentPrivateRelayRejectRequest(
+                                "restore_content_excluded",
+                                "The private relay payload was intentionally excluded from disaster recovery and no protected local queue copy was available. Please upload the original file again."),
+                            cancellationToken);
+                        if (!excluded.IsSuccessStatusCode)
+                            retryableFailure = true;
+                        else
+                            logger.LogWarning("Private relay {JobNumber} was marked for re-upload because neither its relay payload nor a protected local queue copy was available after restore.", ticket.JobNumber);
+                    }
+                    else
+                    {
+                        logger.LogWarning("Encrypted relay payload for {JobNumber} returned HTTP {StatusCode}.", ticket.JobNumber, (int)contentResponse.StatusCode);
+                        retryableFailure = true;
+                    }
                     continue;
                 }
 
