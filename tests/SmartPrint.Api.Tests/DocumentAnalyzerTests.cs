@@ -35,6 +35,17 @@ public sealed class DocumentAnalyzerTests
             DocumentAnalyzer.Analyse(truncated, ".png"));
     }
 
+    [Theory]
+    [InlineData(6001, 4000)]
+    [InlineData(10001, 1000)]
+    public void RejectsPngDimensionsThatTheWindowsPrintRendererCannotHandle(uint width, uint height)
+    {
+        var header = CreatePngHeader(width, height);
+
+        Assert.Throws<DocumentValidationException>(() =>
+            DocumentAnalyzer.Analyse(header, ".png"));
+    }
+
     [Fact]
     public void RejectsPngWithInvalidDimensions()
     {
@@ -177,6 +188,18 @@ public sealed class DocumentAnalyzerTests
             if (disposing) inner.Dispose();
             base.Dispose(disposing);
         }
+    }
+
+    private static byte[] CreatePngHeader(uint width, uint height)
+    {
+        var header = new byte[24];
+        byte[] signature = [137, 80, 78, 71, 13, 10, 26, 10];
+        signature.CopyTo(header, 0);
+        BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(8, 4), 13);
+        Encoding.ASCII.GetBytes("IHDR").CopyTo(header, 12);
+        BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(16, 4), width);
+        BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(20, 4), height);
+        return header;
     }
 
     private static byte[] CreatePng(int width, int height)
