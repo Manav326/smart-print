@@ -5733,7 +5733,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       const privatePromotionUnavailable=exception instanceof ApiError&&exception.code==="batch_private_promotion_unavailable";
       const uploadError=privatePromotionUnavailable
-        ? "Private Printing cannot be enabled because Standard transfer or processing has already started for this batch. No privacy mode was changed. Start a new Private Printing batch."
+        ? exception instanceof ApiError ? exception.message : "Private Printing could not be enabled. No privacy mode was changed."
         : batchPrivacyMismatch
           ? containsIdDocument
             ? "This batch is already Private. Keep Private Printing selected for every additional file."

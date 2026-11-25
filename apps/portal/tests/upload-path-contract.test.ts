@@ -160,8 +160,20 @@ test("a Private document promotes only unclaimed local batch tickets and never d
     "a Private batch must never be downgraded by a Standard request");
   assert.match(api, /ticket = await db\.LocalPrintUploadTickets\.AsNoTracking\(\)[\s\S]{0,180}SingleAsync/,
     "the Agent claim response must reload the authoritative privacy mode after claiming");
-  assert.doesNotMatch(portalApi, /"batch_private_promotion_unavailable"/,
-    "a promotion rejection must preserve an existing ticket's idempotency key and grant");
+  const localUploadStart = portalApi.indexOf("export async function uploadCustomerDocumentLocally");
+  const reservationCatchStart = portalApi.indexOf("  } catch (exception) {", localUploadStart);
+  const reservationCatchEnd = portalApi.indexOf("  if (isUncompletedLocalUploadTicketExpired", reservationCatchStart);
+  const reservationCatch = portalApi.slice(reservationCatchStart, reservationCatchEnd);
+  assert.match(reservationCatch, /"batch_private_promotion_unavailable"/,
+    "promotion rejection remains a known preflight result");
+  assert.doesNotMatch(reservationCatch, /sessionStorage\.removeItem|clearCustomerLocalUploadAttempt/,
+    "preflight rejection must preserve a possibly pre-existing ticket's retry identity");
+  assert.match(portalApi, /checkout blocks adding this file[\s\S]{0,220}Keep its identity/,
+    "checkout rejection must not discard an existing ticket's recovery identity");
+  assert.match(customerApp, /privatePromotionUnavailable[\s\S]{0,180}exception instanceof ApiError \? exception\.message/,
+    "the portal must show the server's specific queue or transfer reason rather than a misleading generic message");
+  assert.match(api, /do not submit the same document again unless you intentionally want a second print/,
+    "the customer must be warned against accidentally duplicating a Standard job");
   assert.match(portalApi, /customerLocalUploadAttemptStorageKeys\(sessionToken, file, batchId\)/,
     "local retry identity must be scoped to the original batch");
   assert.match(portalApi, /legacyKey \+ "\." \+ batchId/,

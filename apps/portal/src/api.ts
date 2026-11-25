@@ -2040,10 +2040,10 @@ export async function uploadCustomerDocumentLocally(
     );
   } catch (exception) {
     if (exception instanceof ApiError && exception.status === 409 &&
-        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch", "batch_privacy_mode_mismatch", "private_printing_unavailable", "private_printing_physical_output_required"].includes(exception.code ?? "")) {
-      // These preflight rejections did not create a ticket for this request. A batch-promotion rejection is deliberately excluded: an older ticket may already exist and its retry identity must be retained.
-      sessionStorage.removeItem(keys.idempotency);
-      sessionStorage.removeItem(keys.grant);
+        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch", "batch_privacy_mode_mismatch", "batch_private_promotion_unavailable", "private_printing_unavailable", "private_printing_physical_output_required"].includes(exception.code ?? "")) {
+      // A rejected reservation can still refer to a ticket created by an earlier attempt.
+      // Preserve its idempotency key and grant; batch-scoped keys allow a deliberate new batch
+      // to start a distinct attempt without losing the original ticket's recovery identity.
       throw new LocalUploadPreflightError(exception.message, exception.status, exception.code);
     }
     if (!(exception instanceof ApiError) || exception.status === 0) {
@@ -2102,9 +2102,8 @@ export async function uploadCustomerDocumentLocally(
       if (exception instanceof ApiError &&
           exception.status === 409 &&
           exception.code === "batch_upload_locked_after_payment_start") {
-        // Checkout intentionally excludes this unfinished file. Do not keep
-        // offering it as part of a batch whose payment total is already locked.
-        clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
+        // Checkout blocks adding this file, but an existing ticket may still be
+        // recoverable. Keep its identity so retry/reconciliation cannot create a duplicate.
         throw new LocalUploadPreflightError(
           "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file.",
           409,

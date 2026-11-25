@@ -11144,7 +11144,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         return Results.Conflict(new
         {
             code = "batch_private_promotion_unavailable",
-            message = "This batch has already started Standard transfer or processing. To protect every document, finish it as Standard or start a new Private Printing batch. No privacy mode was changed."
+            message = "A Standard job already exists in this batch or a file has started transferring. Its Standard job may still finish; do not submit the same document again unless you intentionally want a second print. Finish this batch as Standard or start a separate Private Printing batch. No privacy mode was changed."
         });
     }
 
@@ -11177,7 +11177,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 return Results.Conflict(new
                 {
                     code = "batch_private_promotion_unavailable",
-                    message = "An existing file in this batch is not assigned to a ready Private Printing queue. No privacy mode was changed; start a new Private Printing batch."
+                    message = "An existing file is assigned to a shop computer or printer that is not ready for Private Printing. Restore that queue and retry this same batch, or start a separate Private Printing batch. No privacy mode was changed."
                 });
             }
         }
