@@ -145,6 +145,9 @@ test("a Private document promotes only unclaimed local batch tickets and never d
   assert.match(ticketRoute, /batch_private_promotion_unavailable/);
   assert.match(ticketRoute, /item\.ClaimedUtc is not null/);
   assert.match(ticketRoute, /item\.AgentUploadAttempts > 0/);
+  assert.match(ticketRoute, /item\.PrintKind == "PHOTO"/,
+    "only Photo Studio tickets that satisfy Private Printing's required A4 PDF layout may be promoted");
+  assert.match(ticketRoute, /PricingCalculator\.MaximumPhotosPerA4Sheet/);
   assert.match(ticketRoute, /pendingTicket\.PrivatePrinting = true/);
   assert.match(ticketRoute, /pendingTicket\.OriginalFileName = "Private document"/);
   assert.match(ticketRoute, /batchAlreadyPrivate && !request\.PrivatePrinting/,
