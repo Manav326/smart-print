@@ -274,7 +274,8 @@ public static class DocumentAnalyzer
                 throw new DocumentValidationException("The PNG file contains an unexpected second image header.");
             }
 
-            if ((ulong)length > (ulong)(stream.Length - stream.Position - 4))
+            var remainingBytes = stream.Length - stream.Position;
+            if (remainingBytes < 4 || (ulong)length > (ulong)(remainingBytes - 4))
                 throw new DocumentValidationException("The PNG file is incomplete.");
 
             if (type.SequenceEqual("IDAT"u8))
