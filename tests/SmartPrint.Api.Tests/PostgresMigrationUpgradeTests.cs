@@ -639,7 +639,7 @@ public sealed class PostgresMigrationUpgradeTests
             PrintJobId = Guid.NewGuid(),
             JobNumber = $"SP-PRIV-{Guid.NewGuid():N}"[..24],
             IdempotencyKey = $"PRIVACY-{Guid.NewGuid():N}",
-            GrantHash = new string('a', 64),
+            GrantHash = Guid.NewGuid().ToString("N").PadLeft(64, 'a'),
             OriginalFileName = label + ".pdf",
             MediaType = "application/pdf",
             FileExtension = ".pdf",
