@@ -535,16 +535,21 @@ public sealed class LocalAgentUploadHttpIntegrationTests
     }
 
 
-    private sealed class Qsp2HttpContent(
-        Stream plaintext,
-        Guid agentId,
-        Guid jobId,
-        long plaintextLength,
-        byte[] dataKey) : HttpContent
+    private sealed class Qsp2HttpContent : HttpContent
     {
+        private readonly Stream plaintext;
+        private readonly Guid agentId;
+        private readonly Guid jobId;
+        private readonly long plaintextLength;
+        private readonly byte[] dataKey;
+
         public Qsp2HttpContent(Stream plaintext, Guid agentId, Guid jobId, long plaintextLength, byte[] dataKey)
-            : this(plaintext, agentId, jobId, plaintextLength, dataKey)
         {
+            this.plaintext = plaintext;
+            this.agentId = agentId;
+            this.jobId = jobId;
+            this.plaintextLength = plaintextLength;
+            this.dataKey = dataKey;
             Headers.ContentType = new MediaTypeHeaderValue("application/vnd.smartprint.qsp2");
         }
 
