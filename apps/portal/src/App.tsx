@@ -5518,10 +5518,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(files.length===0)return;
     const containsIdDocument=files.some(isSmartPrintIdDocument);
     const effectivePrivatePrinting=privatePrinting||containsIdDocument;
-    if(containsIdDocument&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
-      setError("Prepared ID cards require Private Printing. Finish the current Standard batch, then start a new private batch for this ID sheet.");
-      return;
-    }
+    // The browser's cached job DTO can be stale or incomplete while a Private
+    // relay ticket is being reconciled. The API validates the authoritative
+    // persisted batch mode (jobs and outstanding upload tickets) atomically.
+    // Do not reject an ID sheet from cached job.privatePrinting metadata here.
     if(containsIdDocument&&!privatePrinting)setPrivatePrinting(true);
     const effectiveUploadMode: "LOCAL"|"CLOUD"=effectivePrivatePrinting?"LOCAL":uploadMode;
     if(effectivePrivatePrinting&&(!localAgent||!canOfferPrivatePrinting)) {
@@ -5723,7 +5723,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         setUploadModeManuallySelected(true);
         setUploadMode("CLOUD");
       }
-      const uploadError=exception instanceof LocalUploadOutcomeUnknownError
+      const batchPrivacyMismatch=exception instanceof ApiError&&exception.code==="batch_privacy_mode_mismatch";
+      const uploadError=batchPrivacyMismatch
+        ? "This batch already contains a Standard Printing file. Your ID sheet was not uploaded. Start a new Private Printing batch for it."
+        : exception instanceof LocalUploadOutcomeUnknownError
         ? privatePrinting
           ? "The shop computer is still preparing your secure file. Tap Retry to check its status."
           : "Your original print request is saved. Tap Retry to check its status. The file may need to be sent again from the beginning; SmartPrint will not create a duplicate print job."
@@ -6105,10 +6108,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(malformedPhotoDocument){setError("This saved Photo Studio sheet is missing its print details. Refresh the private document library and select it again.");return;}
     const incomingIdDocument=supported.some(isSmartPrintIdDocument);
     const incomingPhotoDocument=supported.some(isSmartPrintPhotoDocument);
-    if(incomingIdDocument&&uploadedBatch.length>0&&!uploadedBatch.every(item=>item.job.privatePrinting===true)) {
-      setError("Prepared ID cards require Private Printing. Finish the current Standard batch, then start a new private batch for this ID sheet.");
-      return;
-    }
+    // Selection is not a batch-mode authority. Allow the customer to select
+    // the ID sheet; the local-ticket API checks persisted jobs and pending
+    // tickets before admitting it, so a genuinely Standard batch stays blocked.
     if(incomingIdDocument) {
       // ID Studio remains Private Printing only.
       setPrivatePrinting(true);
