@@ -234,11 +234,11 @@ RETURNING expired."StorageKey", expired."PhotoSourceStorageKey";
             $value = ([string]$line).Trim()
             if ([string]::IsNullOrWhiteSpace($value)) { continue }
             $rowCount++
-            $keys = $value -split '\\|', 2
+            $keys = $value -split '\|', 2
             foreach ($key in $keys) {
                 $storageKey = $key.Trim()
                 if ([string]::IsNullOrWhiteSpace($storageKey)) { continue }
-                if ($storageKey -notmatch '^[0-9a-f]{32}/[0-9a-f]{32}\\.[a-z0-9]{1,10}$') {
+                if ($storageKey -notmatch '^[0-9a-f]{32}/[0-9a-f]{32}\.[a-z0-9]{1,10}$') {
                     throw 'An expired Standard document has a non-canonical storage key. Restore is stopped rather than deleting an untrusted path.'
                 }
                 [void]$expiredBatchStorageKeys.Add($storageKey)
