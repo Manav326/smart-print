@@ -11121,11 +11121,13 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             !string.IsNullOrWhiteSpace(item.PrivateRelayStorageKey) ||
             (item.PrintKind == "PHOTO" &&
                 (item.MediaType != "application/pdf" ||
-                 item.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
-                 item.PhotoCount is not int photoCount || photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
-                 item.PhotosPerPage is not int photosPerPage ||
-                 photosPerPage < 1 ||
-                 photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(item.PhotoSizeCode) ||
+                 item.PhotoSizeCode is not string existingPhotoSizeCode ||
+                 existingPhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
+                 item.PhotoCount is not int existingPhotoCount ||
+                 existingPhotoCount is < 1 or > UploadLimits.MaxPhotoCount ||
+                 item.PhotosPerPage is not int existingPhotosPerPage ||
+                 existingPhotosPerPage < 1 ||
+                 existingPhotosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(existingPhotoSizeCode) ||
                  item.ColourMode != "Colour" ||
                  item.PaperSize != "A4" ||
                  item.IsDuplex ||
