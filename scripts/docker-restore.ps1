@@ -196,10 +196,6 @@ WHERE "PrivatePrinting" = TRUE AND
     # An older database snapshot can contain Standard documents whose original
     # 72-hour clock expired after the snapshot. Mark and remove those objects
     # before the API is brought online, so restore never briefly revives them.
-    # An older database snapshot can contain Standard documents whose original
-    # 72-hour clock expired after the snapshot. Mark and remove those objects
-    # before the API is brought online, so restore never briefly revives them.
-    $expiredDocumentStorageKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $purgeExpiredStandardSql = @'
 WITH expired AS (
     SELECT document."Id", document."StorageKey", document."PhotoSourceStorageKey"
@@ -232,37 +228,40 @@ RETURNING expired."StorageKey", expired."PhotoSourceStorageKey";
     while ($true) {
         $expiredRows = docker compose @composeBaseArgs exec -T db psql -X -A -t -F '|' -v ON_ERROR_STOP=1 -U $dbUser -d $dbName -c $purgeExpiredStandardSql
         if ($LASTEXITCODE -ne 0) { throw 'Could not enforce the original 72-hour Standard document retention during restore.' }
+        $expiredBatchStorageKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         $rowCount = 0
         foreach ($line in @($expiredRows)) {
             $value = ([string]$line).Trim()
             if ([string]::IsNullOrWhiteSpace($value)) { continue }
             $rowCount++
-            $keys = $value -split '\|', 2
+            $keys = $value -split '\\|', 2
             foreach ($key in $keys) {
                 $storageKey = $key.Trim()
                 if ([string]::IsNullOrWhiteSpace($storageKey)) { continue }
-                if ($storageKey -notmatch '^[0-9a-f]{32}/[0-9a-f]{32}\.[a-z0-9]{1,10}$') {
+                if ($storageKey -notmatch '^[0-9a-f]{32}/[0-9a-f]{32}\\.[a-z0-9]{1,10}$') {
                     throw 'An expired Standard document has a non-canonical storage key. Restore is stopped rather than deleting an untrusted path.'
                 }
-                [void]$expiredDocumentStorageKeys.Add($storageKey)
+                [void]$expiredBatchStorageKeys.Add($storageKey)
             }
         }
         if ($rowCount -eq 0) { break }
-    }
 
-    if ($expiredDocumentStorageKeys.Count -gt 0) {
-        $expiredPaths = @($expiredDocumentStorageKeys | ForEach-Object { '/var/lib/qrtoprint/documents/' + $_ })
-        $cleanupCommand = 'rm -f ' + ($expiredPaths -join ' ')
-        $cleanupHelper = docker create --volumes-from ($apiContainer.Trim() + ':rw') alpine:3.20 sh -c $cleanupCommand
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cleanupHelper)) {
-            throw 'Could not create the expired-document cleanup helper.'
-        }
-        try {
-            docker start -a $cleanupHelper | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw 'Could not remove expired Standard document objects from the restored volume.' }
-        } finally {
-            docker rm -f $cleanupHelper | Out-Null
-            $cleanupHelper = $null
+        # Delete in bounded batches so even a very large historical backup cannot
+        # create an oversized shell command or an unbounded in-memory path list.
+        if ($expiredBatchStorageKeys.Count -gt 0) {
+            $expiredPaths = @($expiredBatchStorageKeys | ForEach-Object { '/var/lib/qrtoprint/documents/' + $_ })
+            $cleanupCommand = 'rm -f ' + ($expiredPaths -join ' ')
+            $cleanupHelper = docker create --volumes-from ($apiContainer.Trim() + ':rw') alpine:3.20 sh -c $cleanupCommand
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cleanupHelper)) {
+                throw 'Could not create the expired-document cleanup helper.'
+            }
+            try {
+                docker start -a $cleanupHelper | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw 'Could not remove expired Standard document objects from the restored volume.' }
+            } finally {
+                docker rm -f $cleanupHelper | Out-Null
+                $cleanupHelper = $null
+            }
         }
     }
 
