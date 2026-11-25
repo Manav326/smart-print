@@ -290,7 +290,7 @@ public sealed class LocalAgentApiHostedService(
             {
                 policy.SetIsOriginAllowed(state.IsOriginAllowed)
                     .WithMethods("GET", "POST")
-                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant", "X-Print-Photo-Revision-Grant", "X-Print-Encrypted-Key", "X-Print-Encrypted-Iv")
+                    .WithHeaders("Content-Type", "X-Print-Upload-Grant", "X-Print-Preview-Grant", "X-Print-Photo-Revision-Grant", "X-Print-Encrypted-Format", "X-Print-Encrypted-Key", "X-Print-Encrypted-Size", "X-Print-Encrypted-Iv")
                     .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
             }));
 
@@ -1042,8 +1042,18 @@ public sealed class LocalAgentApiHostedService(
                 }
                 else
                 {
-                    var isQsp2 = claim.PrivatePrinting &&
+                    var isQsp2 =
                         string.Equals(context.Request.Headers["X-Print-Encrypted-Format"].FirstOrDefault(), "QSP2", StringComparison.Ordinal);
+                    if (!claim.PrivatePrinting &&
+                        configuration.GetValue("Agent:LocalApi:RequireEncryptedStandardUploads", true) &&
+                        !isQsp2)
+                    {
+                        return Results.BadRequest(new
+                        {
+                            code = "local_upload_encryption_required",
+                            message = "Standard Shop Wi-Fi uploads must use authenticated encryption. Refresh SmartPrint and retry; the secure HTTPS recovery route remains available."
+                        });
+                    }
                     if (isQsp2)
                     {
                         byte[]? dataKey = null;
