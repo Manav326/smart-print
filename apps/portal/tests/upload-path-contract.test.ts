@@ -160,8 +160,16 @@ test("a Private document promotes only unclaimed local batch tickets and never d
     "a Private batch must never be downgraded by a Standard request");
   assert.match(api, /ticket = await db\.LocalPrintUploadTickets\.AsNoTracking\(\)[\s\S]{0,180}SingleAsync/,
     "the Agent claim response must reload the authoritative privacy mode after claiming");
-  assert.match(portalApi, /"batch_private_promotion_unavailable"/,
-    "the portal must clear an unused retry identity after a safe promotion rejection");
+  assert.doesNotMatch(portalApi, /"batch_private_promotion_unavailable"/,
+    "a promotion rejection must preserve an existing ticket's idempotency key and grant");
+  assert.match(portalApi, /customerLocalUploadAttemptStorageKeys\(sessionToken, file, batchId\)/,
+    "local retry identity must be scoped to the original batch");
+  assert.match(portalApi, /legacyKey \+ "\." \+ batchId/,
+    "legacy retry identity must migrate into the current batch scope without being discarded");
+  assert.match(ticketRoute, /pendingQueueReadiness\.TryGetValue/,
+    "Private queue readiness must be reused for tickets assigned to the same printer");
+  assert.match(ticketRoute, /standardTickets\.All\(item => item\.AgentDeviceId == expectedAgentId\)/,
+    "the Agent key must be checked once for the batch rather than once per file");
   assert.match(customerApp, /uploadedBatch\.some\(item=>!item\.job\.privatePrinting\)/,
     "ID Studio must not offer an unsafe promotion after Standard jobs already exist");
   assert.match(customerApp, /Private mode is locked for this batch/,

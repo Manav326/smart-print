@@ -11151,18 +11151,26 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     var promotedBatchTicketIds = new HashSet<Guid>();
     if (request.PrivatePrinting && standardTickets.Count > 0)
     {
+        var pendingAgentId = stationPrinter.AgentDeviceId;
+        var pendingAgentHasKey = pendingAgentId is Guid expectedAgentId &&
+            standardTickets.All(item => item.AgentDeviceId == expectedAgentId) &&
+            await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
+                agent.Id == expectedAgentId &&
+                agent.TenantId == session.TenantId &&
+                agent.RevokedUtc == null &&
+                !string.IsNullOrWhiteSpace(agent.DocumentEncryptionPublicKey), ct);
+        var pendingQueueReadiness = new Dictionary<Guid, bool>();
         foreach (var pendingTicket in standardTickets)
         {
-            var pendingAgentHasKey = pendingTicket.AgentDeviceId == stationPrinter.AgentDeviceId &&
-                await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
-                    agent.Id == pendingTicket.AgentDeviceId &&
-                    agent.TenantId == pendingTicket.TenantId &&
-                    agent.RevokedUtc == null &&
-                    !string.IsNullOrWhiteSpace(agent.DocumentEncryptionPublicKey), ct);
-            var pendingQueueReady = pendingAgentHasKey &&
-                await IsPrivatePrintingOutputQueueReadyAsync(
+            var pendingQueueReady = pendingAgentHasKey;
+            if (pendingQueueReady &&
+                !pendingQueueReadiness.TryGetValue(pendingTicket.PrinterDeviceId, out pendingQueueReady))
+            {
+                pendingQueueReady = await IsPrivatePrintingOutputQueueReadyAsync(
                     db, environment, pendingTicket.TenantId, pendingTicket.AgentDeviceId,
                     pendingTicket.PrinterDeviceId, ct);
+                pendingQueueReadiness[pendingTicket.PrinterDeviceId] = pendingQueueReady;
+            }
             if (!pendingQueueReady)
             {
                 await transaction.RollbackAsync(ct);

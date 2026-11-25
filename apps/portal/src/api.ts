@@ -1603,7 +1603,7 @@ export async function uploadCustomerDocument(
   validateUploadFileSize(file);
   const identified=await identifySupportedDocument(file);
   if(!identified)throw new ApiError("The file contents are not a supported PDF, JPEG or PNG. Choose a valid document.",415,"document_content_unsupported");
-  const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+  const localKeys = customerLocalUploadAttemptStorageKeys(sessionToken, file, batchId);
   const pendingLocalIdempotency = sessionStorage.getItem(localKeys.idempotency);
   const pendingLocalGrant = sessionStorage.getItem(localKeys.grant);
   if (pendingLocalIdempotency && pendingLocalGrant) {
@@ -1619,7 +1619,7 @@ export async function uploadCustomerDocument(
     // Release the retry-only grant after a confirmed recovery. The customer
     // draft stores the canonical job, and a later intentional reprint needs a
     // fresh ticket. Ambiguous failures leave the grant untouched.
-    clearCustomerLocalUploadAttempt(sessionToken, file);
+    clearCustomerLocalUploadAttempt(sessionToken, file, batchId);
     return recovered;
   }
 
@@ -1666,19 +1666,30 @@ export async function uploadCustomerDocument(
 
 type CustomerLocalAgentApi = { agentDeviceId: string; endpoints: string[]; documentEncryptionPublicKey?: string | null };
 
-function customerLocalUploadAttemptStorageKeys(sessionToken: string, file: File) {
-  const key = customerUploadAttemptStorageKey(sessionToken, file) + ".local";
+function customerLocalUploadAttemptStorageKeys(sessionToken: string, file: File, batchId?: string) {
+  const legacyKey = customerUploadAttemptStorageKey(sessionToken, file) + ".local";
+  const key = batchId ? legacyKey + "." + batchId : legacyKey;
+  if (batchId && !sessionStorage.getItem(key + ".key") && !sessionStorage.getItem(key + ".grant")) {
+    const legacyIdempotency = sessionStorage.getItem(legacyKey + ".key");
+    const legacyGrant = sessionStorage.getItem(legacyKey + ".grant");
+    if (legacyIdempotency && legacyGrant) {
+      sessionStorage.setItem(key + ".key", legacyIdempotency);
+      sessionStorage.setItem(key + ".grant", legacyGrant);
+      sessionStorage.removeItem(legacyKey + ".key");
+      sessionStorage.removeItem(legacyKey + ".grant");
+    }
+  }
   return { idempotency: key + ".key", grant: key + ".grant" };
 }
 
-function clearCustomerLocalUploadAttempt(sessionToken: string, file: File): void {
-  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+function clearCustomerLocalUploadAttempt(sessionToken: string, file: File, batchId?: string): void {
+  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file, batchId);
   sessionStorage.removeItem(keys.idempotency);
   sessionStorage.removeItem(keys.grant);
 }
 
-export function hasPendingLocalCustomerUploadAttempt(sessionToken: string, file: File): boolean {
-  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+export function hasPendingLocalCustomerUploadAttempt(sessionToken: string, file: File, batchId?: string): boolean {
+  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file, batchId);
   return Boolean(sessionStorage.getItem(keys.idempotency) && sessionStorage.getItem(keys.grant));
 }
 
@@ -1767,11 +1778,11 @@ async function uploadCustomerPrivateRelay(
     existing.stageUpdatedUtc
   );
   if (existing.state === "READY") {
-    clearCustomerLocalUploadAttempt(sessionToken, file);
+    clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
     return existing.uploadResult;
   }
   if (existing.state === "FAILED" || existing.state === "EXPIRED") {
-    clearCustomerLocalUploadAttempt(sessionToken, file);
+    clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
     throw new LocalUploadPreflightError(
       existing.message || "The shop could not validate this file. Please select it again.",
       422,
@@ -1805,7 +1816,7 @@ async function uploadCustomerPrivateRelay(
         status.stageUpdatedUtc
       );
       if (status.state === "READY") {
-        clearCustomerLocalUploadAttempt(sessionToken, file);
+        clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
         return {
           ...status.uploadResult,
           document: { ...status.uploadResult.document, originalFileName: "Private document" },
@@ -1818,7 +1829,7 @@ async function uploadCustomerPrivateRelay(
         };
       }
       if (status.state === "FAILED" || status.state === "EXPIRED") {
-        clearCustomerLocalUploadAttempt(sessionToken, file);
+        clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
         throw new LocalUploadPreflightError(
           status.message || "The shop could not validate this file. Please select it again.",
           422,
@@ -1873,7 +1884,7 @@ async function uploadCustomerPrivateRelay(
       status.stageUpdatedUtc
     );
     if (status.state === "READY") {
-      clearCustomerLocalUploadAttempt(sessionToken, file);
+      clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
       return {
         ...status.uploadResult,
         document: { ...status.uploadResult.document, originalFileName: "Private document" },
@@ -1886,7 +1897,7 @@ async function uploadCustomerPrivateRelay(
       };
     }
     if (status.state === "FAILED" || status.state === "EXPIRED") {
-      clearCustomerLocalUploadAttempt(sessionToken, file);
+      clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
       throw new LocalUploadPreflightError(
         status.message || "The shop computer could not validate this file. Please select it again.",
         422,
@@ -2016,7 +2027,7 @@ export async function uploadCustomerDocumentLocally(
       "id_document_private_printing_required"
     );
   }
-  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file);
+  const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file, batchId);
   const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
   const grantToken = sessionStorage.getItem(keys.grant) || createLocalUploadGrantToken();
   sessionStorage.setItem(keys.idempotency, idempotencyKey);
@@ -2029,8 +2040,8 @@ export async function uploadCustomerDocumentLocally(
     );
   } catch (exception) {
     if (exception instanceof ApiError && exception.status === 409 &&
-        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch", "batch_privacy_mode_mismatch", "batch_private_promotion_unavailable", "private_printing_unavailable", "private_printing_physical_output_required"].includes(exception.code ?? "")) {
-      // These are explicit preflight rejections; the API did not issue a ticket.
+        ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch", "batch_privacy_mode_mismatch", "private_printing_unavailable", "private_printing_physical_output_required"].includes(exception.code ?? "")) {
+      // These preflight rejections did not create a ticket for this request. A batch-promotion rejection is deliberately excluded: an older ticket may already exist and its retry identity must be retained.
       sessionStorage.removeItem(keys.idempotency);
       sessionStorage.removeItem(keys.grant);
       throw new LocalUploadPreflightError(exception.message, exception.status, exception.code);
@@ -2051,11 +2062,11 @@ export async function uploadCustomerDocumentLocally(
     if (privatePrinting) {
       const expiredStatus = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken).catch(() => null);
       if (expiredStatus?.state === "READY") {
-        clearCustomerLocalUploadAttempt(sessionToken, file);
+        clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
         return expiredStatus.uploadResult;
       }
       if (expiredStatus?.state === "FAILED" || expiredStatus?.state === "EXPIRED") {
-        clearCustomerLocalUploadAttempt(sessionToken, file);
+        clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
         throw new LocalUploadPreflightError(
           expiredStatus.message || "The private upload expired before the shop computer received it. Please retry this file.",
           409,
@@ -2073,7 +2084,7 @@ export async function uploadCustomerDocumentLocally(
       const recovered = await uploadCustomerLocalTicketViaCloud(
         sessionToken, file, ticket, grantToken, onProgress
       );
-      clearCustomerLocalUploadAttempt(sessionToken, file);
+      clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
       return recovered;
     } catch (exception) {
       if (exception instanceof ApiError &&
@@ -2081,7 +2092,7 @@ export async function uploadCustomerDocumentLocally(
           exception.code === "local_upload_recovery_expired") {
         // The server's 24-hour recovery reservation has ended; this identity
         // can no longer materialize a job, so it is safe to start a new attempt.
-        clearCustomerLocalUploadAttempt(sessionToken, file);
+        clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
         throw new LocalUploadPreflightError(
           "The previous shop Wi-Fi upload attempt is too old to recover. Retry this file to start a fresh upload.",
           409,
@@ -2093,7 +2104,7 @@ export async function uploadCustomerDocumentLocally(
           exception.code === "batch_upload_locked_after_payment_start") {
         // Checkout intentionally excludes this unfinished file. Do not keep
         // offering it as part of a batch whose payment total is already locked.
-        clearCustomerLocalUploadAttempt(sessionToken, file);
+        clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
         throw new LocalUploadPreflightError(
           "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file.",
           409,
@@ -2114,11 +2125,11 @@ export async function uploadCustomerDocumentLocally(
   if (ticket.completed && privatePrinting) {
     const completed = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
     if (completed.state === "READY") {
-      clearCustomerLocalUploadAttempt(sessionToken, file);
+      clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
       return completed.uploadResult;
     }
     if (completed.state === "FAILED" || completed.state === "EXPIRED") {
-      clearCustomerLocalUploadAttempt(sessionToken, file);
+      clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
       throw new LocalUploadPreflightError(
         completed.message || "The shop could not validate this file. Please select it again.",
         422,
@@ -2136,7 +2147,7 @@ export async function uploadCustomerDocumentLocally(
       const completed = await uploadCustomerLocalTicketViaCloud(
         sessionToken, file, ticket, grantToken, onProgress
       );
-      clearCustomerLocalUploadAttempt(sessionToken, file);
+      clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
       return {
         ...completed,
         job: {
@@ -2248,7 +2259,7 @@ export async function uploadCustomerDocumentLocally(
       if(privatePrinting) {
         onStage?.("READY","The shop computer authenticated, validated and secured the file in its local print queue");
       }
-      clearCustomerLocalUploadAttempt(sessionToken, file);
+      clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
       return {
         ...uploaded,
         job: {
@@ -2286,7 +2297,7 @@ export async function uploadCustomerDocumentLocally(
       const recovered = await uploadCustomerLocalTicketViaCloud(
         sessionToken, file, ticket, grantToken, onProgress
       );
-      clearCustomerLocalUploadAttempt(sessionToken, file);
+      clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
       return {
         ...recovered,
         job: {
