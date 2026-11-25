@@ -11118,7 +11118,19 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             item.AgentUploadAttempts > 0 ||
             item.CompletedUtc is not null ||
             item.PrivateRelayUploadedUtc is not null ||
-            !string.IsNullOrWhiteSpace(item.PrivateRelayStorageKey))))
+            !string.IsNullOrWhiteSpace(item.PrivateRelayStorageKey) ||
+            (item.PrintKind == "PHOTO" &&
+                (item.MediaType != "application/pdf" ||
+                 item.PhotoSizeCode is not ("35x45" or "25x35" or "2x2" or "4x6") ||
+                 item.PhotoCount is not int photoCount || photoCount is < 1 or > UploadLimits.MaxPhotoCount ||
+                 item.PhotosPerPage is not int photosPerPage ||
+                 photosPerPage < 1 ||
+                 photosPerPage > PricingCalculator.MaximumPhotosPerA4Sheet(item.PhotoSizeCode) ||
+                 item.ColourMode != "Colour" ||
+                 item.PaperSize != "A4" ||
+                 item.IsDuplex ||
+                 item.Copies != 1 ||
+                 item.Orientation is not ("AUTO" or "PORTRAIT")))))
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
