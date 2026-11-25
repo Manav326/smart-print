@@ -12,7 +12,7 @@ public sealed record DocumentAnalysis(
 public sealed class DocumentValidationException(string message) : Exception(message);
 
 /// <summary>
-/// Performs the authoritative supported-format, page-count and image-integrity checks.
+/// Performs lightweight format, container-framing, page-count and dimension checks. Raster decoding is deliberately delegated to the printer driver; feature-specific PDF layout inspection remains opt-in.
 /// Stream-based callers must supply a seekable stream so PDF parsing never falls back
 /// to copying an entire non-seekable network stream into memory.
 /// </summary>
