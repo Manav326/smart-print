@@ -184,8 +184,12 @@ test("a Private document promotes only unclaimed local batch tickets and never d
     "local retry identity must be scoped to the original batch");
   assert.match(portalApi, /legacyKey \+ "\." \+ batchId/,
     "legacy retry identity must migrate into the current batch scope without being discarded");
-  assert.match(ticketRoute, /pendingQueueReadiness\.TryGetValue/,
+  assert.match(ticketRoute, /pendingQueueReadiness\.Contains/,
     "Private queue readiness must be reused for tickets assigned to the same printer");
+  assert.match(ticketRoute, /standardTickets\.Select\(item => item\.PrinterDeviceId\)\.Distinct\(\)\.ToArray\(\)/,
+    "queue readiness must be loaded once for the batch's distinct printers, not queried once per file");
+  assert.match(ticketRoute, /PrivatePrintingOutputPolicy\.IsEligible/,
+    "the batched queue lookup must preserve the Private output eligibility policy");
   assert.match(ticketRoute, /standardTickets\.All\(item => item\.AgentDeviceId == expectedAgentId\)/,
     "the Agent key must be checked once for the batch rather than once per file");
   assert.match(customerApp, /uploadedBatch\.some\(item=>!item\.job\.privatePrinting\)/,

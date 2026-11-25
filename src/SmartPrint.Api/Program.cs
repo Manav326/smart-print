@@ -9102,7 +9102,7 @@ agentApi.MapPost("/printers/sync", async (
             };
         })
         .OrderBy(printer => printer.OutputMode == "PHYSICAL" ? 0 : printer.OutputMode == "PDF_EXPORT" ? 1 : 2)
-        .ThenByDescending(printer => printer.Status is "Ready" or "Busy")
+        .ThenByDescending(printer => (printer.Status is "Ready" or "Busy"))
         .ThenByDescending(printer => printer.IsDefault)
         .ThenBy(printer => printer.QueueName, StringComparer.OrdinalIgnoreCase)
         .ToList();
@@ -11158,27 +11158,57 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     var promotedBatchTicketIds = new HashSet<Guid>();
     if (request.PrivatePrinting && standardTickets.Count > 0)
     {
+        var pendingAgentHasKey = false;
+        var pendingQueueReadiness = new HashSet<Guid>();
         var pendingAgentId = stationPrinter.AgentDeviceId;
-        var pendingAgentHasKey = pendingAgentId is Guid expectedAgentId &&
-            standardTickets.All(item => item.AgentDeviceId == expectedAgentId) &&
-            await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
-                agent.Id == expectedAgentId &&
-                agent.TenantId == session.TenantId &&
-                agent.RevokedUtc == null &&
-                !string.IsNullOrWhiteSpace(agent.DocumentEncryptionPublicKey), ct);
-        var pendingQueueReadiness = new Dictionary<Guid, bool>();
+        if (pendingAgentId is Guid expectedAgentId)
+        {
+            var queueCheckNow = DateTimeOffset.UtcNow;
+            pendingAgentHasKey = standardTickets.All(item => item.AgentDeviceId == expectedAgentId) &&
+                await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
+                    agent.Id == expectedAgentId &&
+                    agent.TenantId == session.TenantId &&
+                    agent.RevokedUtc == null &&
+                    agent.Status != "Revoked" &&
+                    agent.LastSeenUtc != null &&
+                    agent.LastSeenUtc >= queueCheckNow.AddMinutes(-2) &&
+                    !string.IsNullOrWhiteSpace(agent.DocumentEncryptionPublicKey), ct);
+            if (pendingAgentHasKey)
+            {
+                var allowVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+                var pendingPrinterIds = standardTickets.Select(item => item.PrinterDeviceId).Distinct().ToArray();
+                var pendingPrinters = await db.PrinterDevices.AsNoTracking()
+                    .Where(printer => pendingPrinterIds.Contains(printer.Id) &&
+                        printer.TenantId == session.TenantId &&
+                        printer.AgentDeviceId == expectedAgentId &&
+                        printer.IsActive &&
+                        (!environment.IsProduction() || !printer.IsTestModeOverride) &&
+                        printer.QueueName != null && printer.QueueName != "")
+                    .Select(printer => new
+                    {
+                        printer.Id,
+                        printer.OutputMode,
+                        printer.Status,
+                        printer.LastSeenUtc
+                    })
+                    .ToListAsync(ct);
+                foreach (var printer in pendingPrinters)
+                {
+                    if (PrivatePrintingOutputPolicy.IsEligible(
+                            allowVirtualOutput, environment.IsProduction(), printer.OutputMode) &&
+                        printer.LastSeenUtc is not null &&
+                        printer.LastSeenUtc >= queueCheckNow.AddMinutes(-2) &&
+                        printer.Status is "Ready" or "Busy")
+                    {
+                        pendingQueueReadiness.Add(printer.Id);
+                    }
+                }
+            }
+        }
+
         foreach (var pendingTicket in standardTickets)
         {
-            var pendingQueueReady = pendingAgentHasKey;
-            if (pendingQueueReady &&
-                !pendingQueueReadiness.TryGetValue(pendingTicket.PrinterDeviceId, out pendingQueueReady))
-            {
-                pendingQueueReady = await IsPrivatePrintingOutputQueueReadyAsync(
-                    db, environment, pendingTicket.TenantId, pendingTicket.AgentDeviceId,
-                    pendingTicket.PrinterDeviceId, ct);
-                pendingQueueReadiness[pendingTicket.PrinterDeviceId] = pendingQueueReady;
-            }
-            if (!pendingQueueReady)
+            if (!pendingAgentHasKey || !pendingQueueReadiness.Contains(pendingTicket.PrinterDeviceId))
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new
