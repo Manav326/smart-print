@@ -150,6 +150,12 @@ test("a Private document promotes only unclaimed local batch tickets and never d
   assert.match(ticketRoute, /PricingCalculator\.MaximumPhotosPerA4Sheet/);
   assert.match(ticketRoute, /pendingTicket\.PrivatePrinting = true/);
   assert.match(ticketRoute, /pendingTicket\.OriginalFileName = "Private document"/);
+  assert.match(ticketRoute, /existing is not null && request\.PrivatePrinting && !existing\.PrivatePrinting/,
+    "an exact retry can promote its own pending Standard ticket rather than losing its idempotency identity");
+  assert.match(ticketRoute, /promotedBatchTicketIds\.Contains\(racedTicket\.Id\)/,
+    "a ticket discovered after a concurrent reservation must commit its promotion");
+  assert.match(ticketRoute, /pendingQueueReady/,
+    "every existing ticket's assigned queue must be eligible for Private output");
   assert.match(ticketRoute, /batchAlreadyPrivate && !request\.PrivatePrinting/,
     "a Private batch must never be downgraded by a Standard request");
   assert.match(api, /ticket = await db\.LocalPrintUploadTickets\.AsNoTracking\(\)[\s\S]{0,180}SingleAsync/,
