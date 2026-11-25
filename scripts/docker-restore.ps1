@@ -66,6 +66,7 @@ $temporaryDbPath = "/tmp/qrtoprint-restore-$stamp.dump"
 $temporaryDocumentsPath = "/tmp/qrtoprint-restore-$stamp.tar.gz"
 $temporaryEnvPath = Join-Path $repoRoot ('.env.pre-restore-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $backupHelper = $null
+$cleanupHelper = $null
 $apiContainer = $null
 $servicesStopped = $false
 $restoreStarted = $false
@@ -195,6 +196,9 @@ WHERE "PrivatePrinting" = TRUE AND
     # An older database snapshot can contain Standard documents whose original
     # 72-hour clock expired after the snapshot. Mark and remove those objects
     # before the API is brought online, so restore never briefly revives them.
+    # An older database snapshot can contain Standard documents whose original
+    # 72-hour clock expired after the snapshot. Mark and remove those objects
+    # before the API is brought online, so restore never briefly revives them.
     $expiredDocumentStorageKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $purgeExpiredStandardSql = @'
 WITH expired AS (
@@ -233,38 +237,11 @@ RETURNING expired."StorageKey", expired."PhotoSourceStorageKey";
             $value = ([string]$line).Trim()
             if ([string]::IsNullOrWhiteSpace($value)) { continue }
             $rowCount++
-            $keys = $value -split '\|', 2
+            $keys = $value -split '\\|', 2
             foreach ($key in $keys) {
                 $storageKey = $key.Trim()
                 if ([string]::IsNullOrWhiteSpace($storageKey)) { continue }
-                if ($storageKey -notmatch '^[0-9a-f]{32}/[0-9a-f]{32}\.[a-z0-9]{1,10}
-    docker compose @composeBaseArgs up -d
-    if ($LASTEXITCODE -ne 0) { throw 'The restored data is in place, but Docker Compose could not restart the stack.' }
-
-    $healthy = $false
-    for ($attempt = 0; $attempt -lt 90; $attempt++) {
-        docker compose @composeBaseArgs exec -T api curl --fail --silent http://127.0.0.1:8080/health/ready | Out-Null
-        if ($LASTEXITCODE -eq 0) { $healthy = $true; break }
-        Start-Sleep -Seconds 2
-    }
-    if (-not $healthy) { throw 'The API did not become ready after restore. Inspect docker compose logs; the API and portal may need manual recovery.' }
-
-    $restoreSucceeded = $true
-    Write-Host 'SmartPrint database and encrypted cloud documents have been restored successfully.' -ForegroundColor Green
-    Write-Host "The previous .env was preserved at: $temporaryEnvPath"
-    Write-Host 'Private document content was not restored. Incomplete Private relay tickets were marked failed; re-upload is required only when the Agent had not received the protected file.'
-    Write-Host 'The Windows Agent local DPAPI queue is not part of this Docker backup; it remains on each shop computer.'
-} finally {
-    if (-not [string]::IsNullOrWhiteSpace($backupHelper)) { docker rm -f $backupHelper | Out-Null }
-    if (-not $restoreSucceeded -and $servicesStopped -and -not $restoreStarted) {
-        Write-Warning 'Restore stopped before replacing the database; restarting the original API and portal.'
-        if ($envReplaced -and (Test-Path -LiteralPath $temporaryEnvPath)) { Copy-Item -LiteralPath $temporaryEnvPath -Destination $envPath -Force }
-        docker compose @composeBaseArgs start api portal | Out-Null
-    } elseif (-not $restoreSucceeded -and $restoreStarted) {
-        Write-Warning 'The restore started but did not complete. API and portal are intentionally left stopped to prevent serving a partial data restore.'
-    }
-}
-) {
+                if ($storageKey -notmatch '^[0-9a-f]{32}/[0-9a-f]{32}\\.[a-z0-9]{1,10}$') {
                     throw 'An expired Standard document has a non-canonical storage key. Restore is stopped rather than deleting an untrusted path.'
                 }
                 [void]$expiredDocumentStorageKeys.Add($storageKey)
@@ -285,6 +262,7 @@ RETURNING expired."StorageKey", expired."PhotoSourceStorageKey";
             if ($LASTEXITCODE -ne 0) { throw 'Could not remove expired Standard document objects from the restored volume.' }
         } finally {
             docker rm -f $cleanupHelper | Out-Null
+            $cleanupHelper = $null
         }
     }
 
@@ -303,10 +281,11 @@ RETURNING expired."StorageKey", expired."PhotoSourceStorageKey";
     $restoreSucceeded = $true
     Write-Host 'SmartPrint database and encrypted cloud documents have been restored successfully.' -ForegroundColor Green
     Write-Host "The previous .env was preserved at: $temporaryEnvPath"
-    Write-Host 'Private document content was not restored. Incomplete Private relay tickets were marked failed; re-upload is required only when the Agent had not received the protected file.'
+    Write-Host 'Private document content was not restored. Tickets already at local queue staging can finish acknowledgement from the Agent DPAPI copy; other incomplete tickets require re-upload.'
     Write-Host 'The Windows Agent local DPAPI queue is not part of this Docker backup; it remains on each shop computer.'
 } finally {
     if (-not [string]::IsNullOrWhiteSpace($backupHelper)) { docker rm -f $backupHelper | Out-Null }
+    if (-not [string]::IsNullOrWhiteSpace($cleanupHelper)) { docker rm -f $cleanupHelper | Out-Null }
     if (-not $restoreSucceeded -and $servicesStopped -and -not $restoreStarted) {
         Write-Warning 'Restore stopped before replacing the database; restarting the original API and portal.'
         if ($envReplaced -and (Test-Path -LiteralPath $temporaryEnvPath)) { Copy-Item -LiteralPath $temporaryEnvPath -Destination $envPath -Force }
