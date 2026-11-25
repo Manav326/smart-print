@@ -36,8 +36,8 @@ public sealed class DocumentAnalyzerTests
     }
 
     [Theory]
-    [InlineData(6001, 4000)]
-    [InlineData(10001, 1000)]
+    [InlineData(6001u, 4000u)]
+    [InlineData(10001u, 1000u)]
     public void RejectsPngDimensionsThatTheWindowsPrintRendererCannotHandle(uint width, uint height)
     {
         var header = CreatePngHeader(width, height);
