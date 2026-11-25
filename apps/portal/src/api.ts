@@ -2172,24 +2172,36 @@ export async function uploadCustomerDocumentLocally(
 
   const form = privatePrinting ? null : new FormData();
   let privateUpload: PrivateQsp2UploadFactory | null = null;
-  if (privatePrinting && !ticket.completed) {
+  const hasPairedLocalEndpoint =
+    ticket.agentDeviceId === localAgent.agentDeviceId && localAgent.endpoints.length > 0;
+  // Standard documents sent directly over shop Wi-Fi use the same bounded,
+  // authenticated QSP2 stream as Private Printing. The cloud HTTPS recovery
+  // route remains available when the Agent key/endpoint is unavailable.
+  if (!ticket.completed && (privatePrinting || hasPairedLocalEndpoint)) {
     if (!localAgent.documentEncryptionPublicKey) {
-      throw new LocalUploadPreflightError("This shop has not enabled its private document-encryption key yet. No document was uploaded.", 409, "private_printing_unavailable");
-    }
-    privateUpload = await preparePrivateQsp2Upload(file, {
-      agentDeviceId: ticket.agentDeviceId,
-      printJobId: ticket.printJobId,
-      encryptionPublicKey: localAgent.documentEncryptionPublicKey,
-      onProgress: (bytesSent, totalBytes) => {
-        try { onProgress?.({ bytesSent, totalBytes, stage: "STREAMING_ENCRYPTED" }); }
-        catch { /* Progress UI is isolated from the cryptographic stream. */ }
+      if (privatePrinting) {
+        throw new LocalUploadPreflightError("This shop has not enabled its private document-encryption key yet. No document was uploaded.", 409, "private_printing_unavailable");
       }
-    });
-  } else if (!ticket.completed && form) {
+    } else {
+      privateUpload = await preparePrivateQsp2Upload(file, {
+        agentDeviceId: ticket.agentDeviceId,
+        printJobId: ticket.printJobId,
+        encryptionPublicKey: localAgent.documentEncryptionPublicKey,
+        onProgress: (bytesSent, totalBytes) => {
+          try { onProgress?.({ bytesSent, totalBytes, stage: "STREAMING_ENCRYPTED" }); }
+          catch { /* Progress UI is isolated from the cryptographic stream. */ }
+        }
+      });
+    }
+  }
+  if (!ticket.completed && form) {
     form.append("file", file, file.name);
   }
   if (ticket.agentDeviceId === localAgent.agentDeviceId && (!privatePrinting || localNetworkReady)) {
     for (const value of localAgent.endpoints.slice(0, privatePrinting ? 3 : 8)) {
+    // Never fall back to plaintext on the local HTTP endpoint. If this Agent
+    // has no published encryption key, continue through the existing HTTPS path.
+    if (!privatePrinting && !privateUpload) break;
     const endpoint = isPrivateLocalAgentEndpoint(value);
     if (!endpoint) continue;
     const controller = new AbortController();
@@ -2202,9 +2214,9 @@ export async function uploadCustomerDocumentLocally(
       };
       let requestBody: BodyInit | null = form;
       let requestDuplex: "half" | undefined = "half";
-      if (privatePrinting) {
+      if (privatePrinting || privateUpload) {
         if (!privateUpload)
-          throw new LocalUploadPreflightError("The Private Printing encryption stream is unavailable.", 409, "private_printing_unavailable");
+          throw new LocalUploadPreflightError("The encrypted local upload stream is unavailable. No document was sent over shop Wi-Fi.", 409, privatePrinting ? "private_printing_unavailable" : "local_upload_encryption_unavailable");
         const attempt = await privateUpload.createAttempt();
         requestHeaders["Content-Type"] = "application/vnd.smartprint.qsp2";
         requestHeaders["X-Print-Encrypted-Format"] = "QSP2";
@@ -2251,7 +2263,7 @@ export async function uploadCustomerDocumentLocally(
         // The Agent may have claimed this same ticket before returning an error.
         // Private Printing therefore reconciles the original path instead of
         // posting the same payload to another advertised address.
-        if (privatePrinting) break;
+        if (privatePrinting || privateUpload) break;
         continue;
       }
 
@@ -2278,7 +2290,7 @@ export async function uploadCustomerDocumentLocally(
     } catch {
       // A failed private request may already have reached the paired Agent.
       // Leave its ticket untouched and reconcile before trying another transport.
-      if (privatePrinting) break;
+      if (privatePrinting || privateUpload) break;
     } finally {
       window.clearTimeout(timeout);
       if(localStagePollController) {
