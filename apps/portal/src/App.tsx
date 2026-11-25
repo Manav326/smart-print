@@ -6120,7 +6120,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     // Selecting an ID document promotes all not-yet-uploaded files in this
     // batch to Private. The API can also promote only unclaimed, untransferred
     // local tickets; it rejects promotion after Standard content has moved.
-    if(incomingIdDocument) {    // Prepared Photo Studio documents use the same current batch privacy choice.
+    if(incomingIdDocument) {
+      setPrivatePrinting(true);
+      setUploadMode("LOCAL");
+      setUploadModeManuallySelected(true);
+    }
+    // Prepared Photo Studio documents use the same current batch privacy choice.
     // Only ID Studio imposes a mandatory Private Printing rule.
     for(const candidate of supported){
       const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
