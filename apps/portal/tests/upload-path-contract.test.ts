@@ -26,11 +26,16 @@ test("local ticket reservation enforces the same 50 MiB, 20-file and 500 MiB lim
   assert.match(api, /UploadLimits\.MaxBatchBytes/);
 });
 
-test("direct Agent LAN upload validates the ticket size before accepting either QSP2 or legacy payloads", () => {
+test("Standard direct Agent LAN uploads require authenticated QSP2 while Private keeps its QSP1 compatibility path", () => {
   assert.match(agentApi, /claim\.SizeBytes is <= 0 or > UploadLimits\.MaxFileBytes/);
   assert.match(agentApi, /Qsp2DocumentFormat\.GetEncryptedLength\(claim\.SizeBytes\)/);
+  assert.match(agentApi, /RequireEncryptedStandardUploads", true/);
+  assert.match(agentApi, /!claim\.PrivatePrinting[\s\S]{0,220}!isQsp2/);
   assert.match(agentApi, /claim\.SizeBytes\s*\+\s*UploadLimits\.PrivateRelayEncryptionOverheadBytes/);
   assert.match(agentApi, /localQueueStore\.EnqueueLocalUploadStreamingAsync\(/);
+  assert.match(portalApi, /hasPairedLocalEndpoint/);
+  assert.match(portalApi, /privatePrinting \|\| privateUpload/);
+  assert.match(portalApi, /Never fall back to plaintext on the local HTTP endpoint/);
 });
 
 test("encrypted Private Printing relay and worker enforce the original-file ceiling", () => {
