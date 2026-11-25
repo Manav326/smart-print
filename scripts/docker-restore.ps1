@@ -113,7 +113,7 @@ try {
         $archiveEntries = docker start -a $validator
         if ($LASTEXITCODE -ne 0) { throw 'The encrypted-document archive is invalid or unreadable.' }
         if ($archiveEntries -match '(^|/)\.?private-relay(/|$)') {
-            throw 'This backup contains Private relay content. Restore is blocked because Private Printing documents must never be recovered from disaster backups.'
+            Write-Warning 'This is a legacy archive containing Private relay ciphertext. The restore extraction will explicitly exclude that subtree.'
         }
     } finally { docker rm -f $validator | Out-Null }
 
@@ -158,13 +158,16 @@ SET "PrivateRelayStorageKey" = NULL,
         WHEN "CompletedUtc" IS NULL THEN NOW()
         ELSE "PrivateRelayStageUpdatedUtc"
     END
-WHERE "PrivatePrinting" = TRUE AND "PrivateRelayStorageKey" IS NOT NULL;
+WHERE "PrivatePrinting" = TRUE AND
+      ("PrivateRelayStorageKey" IS NOT NULL OR
+       "PrivateRelayWrappedKey" IS NOT NULL OR
+       "PrivateRelayIv" IS NOT NULL);
 '@
     docker compose @composeBaseArgs exec -T db psql -v ON_ERROR_STOP=1 -U $dbUser -d $dbName -c $privateRelayRecoverySql
     if ($LASTEXITCODE -ne 0) { throw 'Could not safely invalidate Private relay references excluded from this restore.' }
 
     Write-Host 'Restoring encrypted cloud documents...' -ForegroundColor Cyan
-    $backupHelper = docker create --volumes-from ($apiContainer.Trim() + ':rw') alpine:3.20 sh -c ('mkdir -p /var/lib/qrtoprint/documents && find /var/lib/qrtoprint/documents -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf ' + $temporaryDocumentsPath + ' -C /var/lib/qrtoprint/documents && chown -R 1654:1654 /var/lib/qrtoprint/documents')
+    $backupHelper = docker create --volumes-from ($apiContainer.Trim() + ':rw') alpine:3.20 sh -c ('mkdir -p /var/lib/qrtoprint/documents && find /var/lib/qrtoprint/documents -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf ' + $temporaryDocumentsPath + ' --exclude=./private-relay --exclude=private-relay -C /var/lib/qrtoprint/documents && chown -R 1654:1654 /var/lib/qrtoprint/documents')
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($backupHelper)) { throw 'Could not create the document-volume restore helper.' }
     docker cp $documentsFile ($backupHelper.Trim() + ':' + $temporaryDocumentsPath) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not copy the document archive to the restore helper.' }
