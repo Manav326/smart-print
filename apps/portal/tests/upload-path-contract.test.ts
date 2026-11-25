@@ -141,6 +141,8 @@ test("prepared ID sheets defer batch privacy decisions to authoritative persiste
   assert.match(ticketRoute, /ticket\.BatchId == batchId && ticket\.PrivatePrinting != request\.PrivatePrinting/);
   assert.match(ticketRoute, /code = "batch_privacy_mode_mismatch"/);
   assert.match(portalApi, /privatePrinting,/);
+  assert.match(portalApi, /"batch_privacy_mode_mismatch"/,
+    "a server-confirmed privacy mismatch is a pre-ticket rejection and clears the unused retry identity");
   assert.match(portalApi, /printKind,/);
   assert.doesNotMatch(customerApp, /uploadedBatch\.every\(item=>item\.job\.privatePrinting===true\)/,
     "a stale or incomplete cached DTO must not pre-empt the API's authoritative batch-mode check");
