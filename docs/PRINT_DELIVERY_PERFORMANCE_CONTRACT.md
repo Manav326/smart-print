@@ -78,7 +78,7 @@ Customer and shop-owner smoothness is the top product priority. Keep the shop-si
 
 - The Docker backup must not stop/restart the API or portal; PostgreSQL uses an online consistent dump and document files are archived read-only.
 - The cloud document archive must exclude the `private-relay/` subtree and incomplete upload temporary files. Restore must reject a legacy archive containing Private relay content rather than silently restoring it.
-- Restore clears stale Private relay object/key references and marks only incomplete relay tickets failed with `RESTORE_CONTENT_EXCLUDED`. Job, payment, refund, invoice, and audit metadata remain available for reconciliation.
+- Restore never recovers Private relay ciphertext, wrapped keys or IVs. It marks pre-staging tickets failed with `RESTORE_CONTENT_EXCLUDED`; for tickets already at `SECURING_LOCAL_QUEUE`/`READY`, it retains only the non-content ticket locator so the Agent can complete acknowledgement from its existing DPAPI-protected local copy. Job, payment, refund, invoice, and audit metadata remain available for reconciliation.
 - The Windows Agent DPAPI queue is outside Docker backup/restore. Never copy its protected files into a server backup or restore them to a different shop computer.
 - Standard document output timestamps are preserved. The 72-hour retention clock is never restarted by backup or restore; expired Standard sources must not become available again.
 - Restore must never trigger payment-provider calls, refund operations, Agent claims, or printer dispatch. Output-unconfirmed jobs remain subject to explicit reconciliation.
