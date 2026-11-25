@@ -150,7 +150,7 @@ public sealed class Worker(
                     using (var stagedDocument = localQueueStore.OpenDocumentReadStream(
                         ticket.PrintJobId, credentials.AgentDeviceId))
                     {
-                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedDocument, ticket.FileExtension);
+                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedDocument, ticket.FileExtension, ticket.PrintKind == "PHOTO");
                         if (!string.Equals(stagedAnalysis.Extension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
                             !string.Equals(stagedAnalysis.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase))
                             throw new InvalidDataException("The protected local copy no longer matches the original file type.");
@@ -235,7 +235,7 @@ public sealed class Worker(
                         DocumentAnalysis qsp2Analysis;
                         try
                         {
-                            qsp2Analysis = DocumentAnalyzer.Analyse(qsp2Plaintext, ticket.FileExtension);
+                            qsp2Analysis = DocumentAnalyzer.Analyse(qsp2Plaintext, ticket.FileExtension, ticket.PrintKind == "PHOTO");
                         }
                         catch (DocumentValidationException exception)
                         {
@@ -322,7 +322,7 @@ public sealed class Worker(
                     throw new InvalidDataException("The decrypted private document failed its SHA-256 check.");
 
                 DocumentAnalysis analysis;
-                try { analysis = DocumentAnalyzer.Analyse(plaintext, ticket.FileExtension); }
+                try { analysis = DocumentAnalyzer.Analyse(plaintext, ticket.FileExtension, ticket.PrintKind == "PHOTO"); }
                 catch (DocumentValidationException exception)
                 {
                     using var rejected = await SendAgentRequestAsync(
