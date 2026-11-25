@@ -166,6 +166,8 @@ test("a Private document promotes only unclaimed local batch tickets and never d
     "ID Studio must not offer an unsafe promotion after Standard jobs already exist");
   assert.match(customerApp, /Private mode is locked for this batch/,
     "the UI must explain why the Private option is unavailable after Standard upload");
+  assert.match(customerApp, /if\(batchPrivacyMismatch&&!containsIdDocument\)[\s\S]{0,220}setPrivatePrinting\(true\)/,
+    "a stale Standard choice must be restored to the server-confirmed Private batch mode");
   assert.match(customerApp, /effectivePrivatePrinting=privatePrinting\|\|containsIdDocument/,
     "an ID document selected before upload promotes every file in the pending batch");
   assert.match(privateRelayRules, /Rank\(requestedStage\) > Rank\(currentStage\)/);
