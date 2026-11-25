@@ -67,5 +67,4 @@ physical paper.
 The local Agent API remains available on the shop LAN. Private document bytes
 and the per-upload AES key are protected end-to-end; the wrapping public key
 comes from the authenticated API, not from an unauthenticated local endpoint.
-Existing non-private LAN uploads and the normal customer/shop workflow are
-unchanged.
+Standard Printing over shop Wi-Fi now uses the same authenticated, streaming QSP2 record encryption to the paired Agent, while retaining its 72-hour source-retention policy. The Agent rejects unencrypted Standard LAN uploads by default; older portal clients must use the existing HTTPS recovery path rather than silently sending plaintext. Private Printing retains its separate no-cloud-source and immediate post-output deletion rules.
