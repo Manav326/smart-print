@@ -11152,6 +11152,29 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
     {
         foreach (var pendingTicket in standardTickets)
         {
+            var pendingAgentHasKey = pendingTicket.AgentDeviceId == stationPrinter.AgentDeviceId &&
+                await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
+                    agent.Id == pendingTicket.AgentDeviceId &&
+                    agent.TenantId == pendingTicket.TenantId &&
+                    agent.RevokedUtc == null &&
+                    !string.IsNullOrWhiteSpace(agent.DocumentEncryptionPublicKey), ct);
+            var pendingQueueReady = pendingAgentHasKey &&
+                await IsPrivatePrintingOutputQueueReadyAsync(
+                    db, environment, pendingTicket.TenantId, pendingTicket.AgentDeviceId,
+                    pendingTicket.PrinterDeviceId, ct);
+            if (!pendingQueueReady)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
+                {
+                    code = "batch_private_promotion_unavailable",
+                    message = "An existing file in this batch is not assigned to a ready Private Printing queue. No privacy mode was changed; start a new Private Printing batch."
+                });
+            }
+        }
+
+        foreach (var pendingTicket in standardTickets)
+        {
             pendingTicket.PrivatePrinting = true;
             pendingTicket.OriginalFileName = "Private document";
             pendingTicket.BatchGroupName = "Private documents";
