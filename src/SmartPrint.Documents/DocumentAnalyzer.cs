@@ -19,7 +19,8 @@ public sealed class DocumentValidationException(string message) : Exception(mess
 public static class DocumentAnalyzer
 {
     private const int MaximumPages = 500;
-    private const ulong MaximumImagePixels = 50_000_000UL;
+    private const uint MaximumImageDimension = 10_000;
+    private const ulong MaximumImagePixels = 24_000_000UL;
     private const int MaximumSignatureSearchBytes = 1028;
 
     public static string? IdentifyExtension(ReadOnlySpan<byte> bytes)
@@ -313,9 +314,10 @@ public static class DocumentAnalyzer
     }
     private static void ValidateImageDimensions(uint width, uint height)
     {
-        if (width == 0 || height == 0 || (ulong)width * height > MaximumImagePixels)
+        if (width == 0 || height == 0 || width > MaximumImageDimension || height > MaximumImageDimension ||
+            (ulong)width * height > MaximumImagePixels)
         {
-            throw new DocumentValidationException("The image dimensions are invalid or too large to process safely.");
+            throw new DocumentValidationException("The image dimensions exceed the Windows Agent print limits.");
         }
     }
 
