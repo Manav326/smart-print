@@ -3016,7 +3016,7 @@ shop.MapPost("/photo-jobs", async (
         try
         {
             await using var input = upload.OpenReadStream();
-            stored = await storage.ValidateAndStoreStreamingAsync(tenantId, documentId, outputName, input, upload.Length, ct);
+            stored = await storage.ValidateAndStoreStreamingAsync(tenantId, documentId, outputName, input, upload.Length, ct, includePdfImageMetadata: true);
         }
         catch (DocumentValidationException exception)
         {
@@ -4722,7 +4722,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/photo-revision", async (
     try
     {
         await using var input = file.OpenReadStream();
-        stored = await storage.ValidateAndStoreStreamingAsync(tenantId, newDocumentId, outputName, input, file.Length, ct);
+        stored = await storage.ValidateAndStoreStreamingAsync(tenantId, newDocumentId, outputName, input, file.Length, ct, includePdfImageMetadata: true);
     }
     catch (DocumentValidationException exception)
     {
@@ -10269,7 +10269,8 @@ publicApi.MapPost("/sessions/current/jobs", async (
     {
         await using var input = file.OpenReadStream();
         stored = await storage.ValidateAndStoreStreamingAsync(
-            session.TenantId, documentId, originalName, input, file.Length, ct);
+            session.TenantId, documentId, originalName, input, file.Length, ct,
+            includePdfImageMetadata: isPhotoUpload);
     }
     catch (DocumentValidationException exception)
     {
@@ -11706,7 +11707,8 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/cloud-
     {
         await using var input = file.OpenReadStream();
         stored = await storage.ValidateAndStoreStreamingAsync(
-            preflightTicket.TenantId, documentId, preflightTicket.OriginalFileName, input, preflightTicket.SizeBytes, ct);
+            preflightTicket.TenantId, documentId, preflightTicket.OriginalFileName, input, preflightTicket.SizeBytes, ct,
+            includePdfImageMetadata: preflightTicket.PrintKind == "PHOTO");
     }
     catch (DocumentValidationException exception)
     {
