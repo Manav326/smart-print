@@ -5520,7 +5520,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const effectivePrivatePrinting=privatePrinting||containsIdDocument;
     // The browser's cached job DTO can be stale or incomplete while a Private
     // relay ticket is being reconciled. The API validates the authoritative
-    // persisted batch mode (jobs and outstanding upload tickets) atomically.
+    // persisted batch mode (jobs and outstanding upload tickets) before issuing a ticket.
     // Do not reject an ID sheet from cached job.privatePrinting metadata here.
     if(containsIdDocument&&!privatePrinting)setPrivatePrinting(true);
     const effectiveUploadMode: "LOCAL"|"CLOUD"=effectivePrivatePrinting?"LOCAL":uploadMode;
