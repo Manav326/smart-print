@@ -174,7 +174,7 @@ test("a Private document promotes only unclaimed local batch tickets and never d
     "only a first-attempt rejection may clear an unused identity to permit cloud fallback");
   assert.match(reservationCatch, /hasExistingTicketIdentity[\s\S]{0,260}throw new LocalUploadPreflightError/,
     "a retry rejection must retain its original idempotency key and grant");
-  assert.match(portalApi, /checkout blocks adding this file[\s\S]{0,220}Keep its identity/,
+  assert.match(portalApi, /Checkout blocks adding this file[\s\S]{0,220}Keep its identity/,
     "checkout rejection must not discard an existing ticket's recovery identity");
   assert.match(customerApp, /privatePromotionUnavailable[\s\S]{0,180}exception instanceof ApiError \? exception\.message/,
     "the portal must show the server's specific queue or transfer reason rather than a misleading generic message");
