@@ -20,6 +20,13 @@ This contract applies to every security, storage, payment, queue, Agent, and bac
 - Keep printer dispatch independent from scanning, backup, and document-conversion worker pools. Apply backpressure to upload admission rather than exhausting resources used by active print jobs.
 - Preserve streaming encryption and bounded-memory file transfer. Do not solve latency or parser isolation by buffering whole uploads in API memory.
 
+## Document retention policy
+
+- Standard completed customer documents and their local Agent source copies are retained for 72 hours (3 days) after confirmed output, then securely deleted by their respective retention workers.
+- Private Printing source documents are purged immediately after confirmed physical output and successful local purge acknowledgement. If output is uncertain or the Agent acknowledgement is unavailable, retain the protected source only as long as needed for safe reconciliation; never delete the only recoverable copy prematurely.
+- Keep financial records, invoices, payment/refund history, job status, and required audit metadata independently of document-source retention. Retention must not erase evidence needed for payment reconciliation or legal/accounting obligations.
+- Retention sweeps are bounded and must not compete with active print dispatch.
+
 ## Failure and recovery behavior
 
 - A temporary scanner, parser, cloud, LAN, or Agent outage must produce a visible retryable or operator-actionable state; it must not silently drop a job.
