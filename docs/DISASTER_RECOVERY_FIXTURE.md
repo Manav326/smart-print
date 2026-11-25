@@ -5,7 +5,7 @@ This fixture is a release gate for the existing Docker backup/restore scripts. I
 ## Recovery boundary
 
 - Standard document bytes may be restored only while their original 72-hour retention window (measured from confirmed physical output) is still open. The original output timestamp is authoritative; restore must never reset it.
-- Private document bytes are never restored. This includes opaque Private relay ciphertext, wrapped document keys, and any private source payload. The backup archive excludes `private-relay/`; restore rejects an archive that contains it and clears stale relay references from restored tickets.
+- Private document bytes are never restored. This includes opaque Private relay ciphertext, wrapped document keys, and any private source payload. The backup archive excludes `private-relay/`; restore explicitly excludes that subtree (including in legacy archives) and clears stale relay references from restored tickets.
 - The Windows Agent DPAPI-protected local queue is not part of the Docker backup. It remains on its original shop computer and is not copied to a replacement machine as part of server disaster recovery.
 - Restore financial, payment, refund, invoice, job-state, and required audit metadata from PostgreSQL. Never replay a payment or print command automatically.
 - A job whose physical output is uncertain remains output-unconfirmed and requires the existing reconciliation path. API acceptance or Windows spooler acceptance is not proof of physical completion.
@@ -31,8 +31,8 @@ Use a fixed fixture time T and synthetic tenant, Agent, printer, customer, payme
 1. Create the synthetic tenant and fixture rows above in staging. Record SHA-256, size, original output-confirmation timestamp, payment reference, job status, and privacy mode. Never place real customer content in this fixture.
 2. Start a Standard upload and a Private relay upload while a different paid job is being dispatched. Run `scripts/docker-backup.ps1` during this activity.
 3. Verify the API and portal remain running throughout backup. The PostgreSQL dump must validate with `pg_restore --list`; the encrypted-document archive must validate with `tar -tzf`.
-4. Inspect the archive listing: Standard encrypted objects may be present; no path under `private-relay/`, no upload temporary file, and no Agent DPAPI queue file may be present.
-5. In the disposable staging environment, restore the matching database, document archive, and secrets using the guarded restore procedure. The restore must reject any archive containing `private-relay/`.
+4. Inspect the archive listing: Standard encrypted objects may be present; no path under `private-relay/`, no upload temporary file, and no Agent DPAPI queue file may be present in a newly created archive. A legacy archive may contain the path, but restore must never extract it.
+5. In the disposable staging environment, restore the matching database, document archive, and secrets using the guarded restore procedure. The restore must exclude any `private-relay/` path during extraction, including from legacy backups, while still recovering eligible Standard documents.
 6. Verify restored Standard files by decrypting through the application storage reader and comparing their original SHA-256 and byte length. Verify STD-C is not available for customer preview/reprint and is purged by the normal retention sweep.
 7. Verify every Private fixture has no restored document object or relay key material. An incomplete relay ticket is failed with `RESTORE_CONTENT_EXCLUDED`; completed job/payment/audit metadata remains intact.
 8. Verify payment counts, captured amounts, refunds, invoice identities, job identities, and dispatch attempt counts match the pre-backup fixture. No provider payment call or printer command is emitted by restore.
