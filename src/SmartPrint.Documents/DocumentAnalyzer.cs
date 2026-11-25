@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using UglyToad.PdfPig;
-using StbImageSharp;
 
 namespace SmartPrint.Documents;
 
@@ -163,7 +162,8 @@ public static class DocumentAnalyzer
         var width = BinaryPrimitives.ReadUInt32BigEndian(header.Slice(16, 4));
         var height = BinaryPrimitives.ReadUInt32BigEndian(header.Slice(20, 4));
         ValidateImageDimensions(width, height);
-        return DecodeAndAnalyseImage(stream, width, height, "image/png", ".png");
+        ValidatePngStructure(stream);
+        return CreateImageAnalysis(width, height, "image/png", ".png");
     }
 
     private static DocumentAnalysis AnalyseJpeg(Stream stream, string extension)
@@ -178,7 +178,8 @@ public static class DocumentAnalyzer
 
         var dimensions = ReadJpegDimensions(stream);
         ValidateImageDimensions(dimensions.Width, dimensions.Height);
-        return DecodeAndAnalyseImage(stream, dimensions.Width, dimensions.Height, "image/jpeg", extension);
+        ValidateJpegEndMarker(stream);
+        return CreateImageAnalysis(dimensions.Width, dimensions.Height, "image/jpeg", extension);
     }
 
     private static (uint Width, uint Height) ReadJpegDimensions(Stream stream)
@@ -236,50 +237,75 @@ public static class DocumentAnalyzer
         throw new DocumentValidationException("The JPEG image dimensions could not be read.");
     }
 
-    private static DocumentAnalysis DecodeAndAnalyseImage(
-        Stream stream,
-        uint expectedWidth,
-        uint expectedHeight,
-        string mediaType,
-        string extension)
+    // Ordinary image uploads need only trustworthy format and dimension metadata.
+    // The Windows printer driver performs raster decoding when the job is printed;
+    // decoding up to 50 million pixels here would create large transient RAM spikes.
+    private static DocumentAnalysis CreateImageAnalysis(
+        uint width, uint height, string mediaType, string extension) =>
+        new(1, ImagePageSize(width, height), mediaType, extension);
+
+    // Validate PNG chunk framing without inflating IDAT data into a pixel buffer.
+    // This catches truncated/malformed containers while keeping memory and CPU bounded.
+    private static void ValidatePngStructure(Stream stream)
     {
-        try
-        {
-            // Header inspection is inexpensive; a full decode proves that compressed
-            // pixel data is complete. Decode directly from the seekable source stream
-            // instead of first copying the compressed document into a byte array.
-            stream.Position = 0;
-            var imageInfo = ImageInfo.FromStream(stream);
-            if (imageInfo is null)
-                throw new DocumentValidationException("The image format could not be identified.");
-            var identified = imageInfo.Value;
+        stream.Position = 8;
+        var hasHeader = false;
+        var hasImageData = false;
+        var hasEnd = false;
+        var chunkCount = 0;
+        Span<byte> chunkHeader = stackalloc byte[8];
+        Span<byte> crc = stackalloc byte[4];
 
-            if (identified.Width != expectedWidth || identified.Height != expectedHeight)
-                throw new DocumentValidationException("The image dimensions do not match their file header.");
-
-            stream.Position = 0;
-            var decoded = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
-            var expectedDecodedBytes = checked((long)identified.Width * identified.Height * 4);
-            if (decoded.Width != identified.Width || decoded.Height != identified.Height ||
-                decoded.Data.LongLength != expectedDecodedBytes)
-                throw new DocumentValidationException("The image pixel data is incomplete or invalid.");
-
-            return new DocumentAnalysis(
-                1,
-                ImagePageSize((uint)decoded.Width, (uint)decoded.Height),
-                mediaType,
-                extension);
-        }
-        catch (DocumentValidationException)
+        while (stream.Position < stream.Length)
         {
-            throw;
+            if (++chunkCount > 4096 || !TryReadExactly(stream, chunkHeader))
+                throw new DocumentValidationException("The PNG file has an invalid chunk structure.");
+
+            var length = BinaryPrimitives.ReadUInt32BigEndian(chunkHeader[..4]);
+            var type = chunkHeader[4..8];
+            if (!hasHeader)
+            {
+                if (!type.SequenceEqual("IHDR"u8) || length != 13)
+                    throw new DocumentValidationException("The PNG image header is invalid.");
+                hasHeader = true;
+            }
+            else if (type.SequenceEqual("IHDR"u8))
+            {
+                throw new DocumentValidationException("The PNG file contains an unexpected second image header.");
+            }
+
+            if ((ulong)length > (ulong)(stream.Length - stream.Position - 4))
+                throw new DocumentValidationException("The PNG file is incomplete.");
+
+            if (type.SequenceEqual("IDAT"u8))
+                hasImageData = true;
+
+            stream.Position += length;
+            if (!TryReadExactly(stream, crc))
+                throw new DocumentValidationException("The PNG file is incomplete.");
+
+            if (type.SequenceEqual("IEND"u8))
+            {
+                if (length != 0 || !hasImageData)
+                    throw new DocumentValidationException("The PNG image data is incomplete.");
+                hasEnd = true;
+                break;
+            }
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            throw new DocumentValidationException("The image is damaged, incomplete or could not be fully decoded.");
-        }
+
+        if (!hasHeader || !hasImageData || !hasEnd)
+            throw new DocumentValidationException("The PNG image data is incomplete.");
     }
 
+    private static void ValidateJpegEndMarker(Stream stream)
+    {
+        if (stream.Length < 4)
+            throw new DocumentValidationException("The JPEG file is incomplete.");
+        stream.Position = stream.Length - 2;
+        Span<byte> endMarker = stackalloc byte[2];
+        if (!TryReadExactly(stream, endMarker) || !endMarker.SequenceEqual(new byte[] { 0xFF, 0xD9 }))
+            throw new DocumentValidationException("The JPEG file is incomplete.");
+    }
     private static void ValidateImageDimensions(uint width, uint height)
     {
         if (width == 0 || height == 0 || (ulong)width * height > MaximumImagePixels)
