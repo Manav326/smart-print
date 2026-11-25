@@ -11138,7 +11138,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                  item.PaperSize != "A4" ||
                  item.IsDuplex ||
                  item.Copies != 1 ||
-                 item.Orientation is not ("AUTO" or "PORTRAIT")))))
+                 item.Orientation is not ("AUTO" or "PORTRAIT"))))))
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
