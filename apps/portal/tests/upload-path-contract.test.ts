@@ -132,28 +132,33 @@ test("Private Printing progress uses short, plain-language customer messages", (
   assert.doesNotMatch(messages, /decrypting|authenticating|encrypted payload|local print queue/i);
 });
 
-test("prepared ID sheets defer batch privacy decisions to authoritative persisted jobs and tickets", () => {
+test("a Private document promotes only unclaimed local batch tickets and never downgrades a batch", () => {
   const localTicketStart = api.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
-  const localTicketEnd = api.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/', localTicketStart + 1);
+  const localTicketEnd = api.indexOf('agentApi.MapPost("/local-uploads/status-batch"', localTicketStart);
   assert.ok(localTicketStart >= 0, "the local upload-ticket admission route must exist");
   const ticketRoute = api.slice(localTicketStart, localTicketEnd > localTicketStart ? localTicketEnd : undefined);
-  assert.match(ticketRoute, /job\.BatchId == batchId && job\.PrivatePrinting != request\.PrivatePrinting/);
-  assert.match(ticketRoute, /ticket\.BatchId == batchId && ticket\.PrivatePrinting != request\.PrivatePrinting/);
-  assert.match(ticketRoute, /code = "batch_privacy_mode_mismatch"/);
-  assert.match(portalApi, /privatePrinting,/);
-  assert.match(portalApi, /"batch_privacy_mode_mismatch"/,
-    "a server-confirmed privacy mismatch is a pre-ticket rejection and clears the unused retry identity");
-  assert.match(portalApi, /printKind,/);
-  assert.doesNotMatch(customerApp, /uploadedBatch\.every\(item=>item\.job\.privatePrinting===true\)/,
-    "a stale or incomplete cached DTO must not pre-empt the API's authoritative batch-mode check");
-  assert.match(customerApp, /batchPrivacyMismatch=exception instanceof ApiError&&exception\.code==="batch_privacy_mode_mismatch"/);
-  assert.match(customerApp, /This batch already contains a Standard Printing file/);
-  assert.match(customerApp, /This batch already contains a Private Printing file/);
-
-  const successfulLocalAgentResponse = api.slice(
-    api.lastIndexOf("AlreadyCompleted = false,"),
-    api.indexOf('agentApi.MapPost("/local-uploads/status-batch"')
-  );
-  assert.match(successfulLocalAgentResponse, /job\.PrivatePrinting/,
-    "the first successful local Agent upload response must return the persisted privacy mode");
+  assert.match(ticketRoute, /CustomerPrintSessions[\s\S]{0,180}FOR UPDATE/,
+    "batch ticket reservations must serialize on the owning customer session");
+  assert.match(ticketRoute, /LocalPrintUploadTickets[\s\S]{0,220}FOR UPDATE/,
+    "existing tickets must be locked before a promotion decision");
+  assert.match(ticketRoute, /batchHasStandardContent/);
+  assert.match(ticketRoute, /batch_private_promotion_unavailable/);
+  assert.match(ticketRoute, /item\.ClaimedUtc is not null/);
+  assert.match(ticketRoute, /item\.AgentUploadAttempts > 0/);
+  assert.match(ticketRoute, /pendingTicket\.PrivatePrinting = true/);
+  assert.match(ticketRoute, /pendingTicket\.OriginalFileName = "Private document"/);
+  assert.match(ticketRoute, /batchAlreadyPrivate && !request\.PrivatePrinting/,
+    "a Private batch must never be downgraded by a Standard request");
+  assert.match(api, /ticket = await db\.LocalPrintUploadTickets\.AsNoTracking\(\)[\s\S]{0,180}SingleAsync/,
+    "the Agent claim response must reload the authoritative privacy mode after claiming");
+  assert.match(portalApi, /"batch_private_promotion_unavailable"/,
+    "the portal must clear an unused retry identity after a safe promotion rejection");
+  assert.match(customerApp, /uploadedBatch\.some\(item=>!item\.job\.privatePrinting\)/,
+    "ID Studio must not offer an unsafe promotion after Standard jobs already exist");
+  assert.match(customerApp, /Private mode is locked for this batch/,
+    "the UI must explain why the Private option is unavailable after Standard upload");
+  assert.match(customerApp, /effectivePrivatePrinting=privatePrinting\|\|containsIdDocument/,
+    "an ID document selected before upload promotes every file in the pending batch");
+  assert.match(privateRelayRules, /Rank\(requestedStage\) > Rank\(currentStage\)/);
 });
+
