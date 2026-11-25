@@ -36,8 +36,8 @@ public sealed class PlatformOperationalSettings
 
     public int Id { get; set; } = SingletonIdValue;
     public int TrialMaxMonthlyPrintJobs { get; set; } = DefaultTrialMaxMonthlyPrintJobs;
-    public int CloudCompletedDocumentRetentionDays { get; set; } = 7;
-    public int AgentCompletedDocumentRetentionDays { get; set; } = 7;
+    public int CloudCompletedDocumentRetentionDays { get; set; } = 3;
+    public int AgentCompletedDocumentRetentionDays { get; set; } = 3;
     public int AbandonedDocumentRetentionDays { get; set; } = 30;
     public int PendingLocalUploadRetentionDays { get; set; } = 30;
     public int ExpiredUploadTicketRetentionDays { get; set; } = 7;
