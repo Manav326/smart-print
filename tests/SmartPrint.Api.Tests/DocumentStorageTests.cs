@@ -206,7 +206,7 @@ public sealed class DocumentStorageTests
     }
 
     [Fact]
-    public async Task RejectsFilesLargerThanTwentyMegabytesBeforeReading()
+    public async Task RejectsFilesLargerThanFiftyMebibytesBeforeReading()
     {
         var root = CreateTemporaryDirectory();
         try
