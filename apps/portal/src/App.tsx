@@ -6121,6 +6121,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     // batch to Private. The API can also promote only unclaimed, untransferred
     // local tickets; it rejects promotion after Standard content has moved.
     if(incomingIdDocument) {
+      // ID Studio remains Private Printing only.
       setPrivatePrinting(true);
       setUploadMode("LOCAL");
       setUploadModeManuallySelected(true);
