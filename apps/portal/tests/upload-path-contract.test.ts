@@ -154,7 +154,7 @@ test("a Private document promotes only unclaimed local batch tickets and never d
     "an exact retry can promote its own pending Standard ticket rather than losing its idempotency identity");
   assert.match(ticketRoute, /promotedBatchTicketIds\.Contains\(racedTicket\.Id\)/,
     "a ticket discovered after a concurrent reservation must commit its promotion");
-  assert.match(ticketRoute, /pendingQueueReady/,
+  assert.match(ticketRoute, /pendingQueueReadiness\.Contains/,
     "every existing ticket's assigned queue must be eligible for Private output");
   assert.match(ticketRoute, /existing is not null && existing\.PrivatePrinting && !request\.PrivatePrinting[\s\S]{0,180}batch_privacy_mode_mismatch/,
     "a stale Standard retry for an existing Private ticket must restore the Private choice without losing identity");
