@@ -122,6 +122,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
             agentId,
             "agent-test-secret",
             DateTimeOffset.UtcNow));
+        var documentEncryptionKeyStore = new AgentDocumentEncryptionKeyStore(Path.Combine(root, "document-key.dpapi"));
 
         var queue = new AgentLocalQueueStore(queueRoot);
         await queue.InitializeAsync(CancellationToken.None);
@@ -146,7 +147,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                 services.AddSingleton<LocalAgentApiState>(state);
                 services.AddSingleton<LocalNetworkManager>(networkManager);
                 services.AddSingleton<AgentRuntimeReadiness>(runtimeReadiness);
-                services.AddSingleton(new AgentDocumentEncryptionKeyStore(Path.Combine(root, "document-key.dpapi")));
+                services.AddSingleton(documentEncryptionKeyStore);
                 services.AddSingleton<LocalAgentApiHostedService>();
                 services.AddSingleton<IHostedService>(provider =>
                     provider.GetRequiredService<LocalAgentApiHostedService>());
@@ -162,24 +163,52 @@ public sealed class LocalAgentUploadHttpIntegrationTests
             Assert.True(state.IsRunning, "The real Windows Agent local HTTP listener did not start.");
 
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            using var multipart = new MultipartFormDataContent();
-            using var fileContent = new ByteArrayContent(pdf);
-            fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
-            multipart.Add(fileContent, "file", "certificate-without-extension");
+            var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+            byte[] publicKeyBytes = Convert.FromBase64String(documentEncryptionKeyStore.GetOrCreatePublicKey());
+            byte[] wrappedKey;
+            try
+            {
+                using var publicRsa = RSA.Create();
+                publicRsa.ImportSubjectPublicKeyInfo(publicKeyBytes, out _);
+                wrappedKey = publicRsa.Encrypt(dataKey, RSAEncryptionPadding.OaepSHA256);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(publicKeyBytes);
+            }
+
+            using var plaintextSource = new MemoryStream(pdf, writable: false);
+            using var encryptedBody = new MemoryStream();
+            try
+            {
+                await Qsp2DocumentFormat.EncryptAsync(
+                    plaintextSource, encryptedBody, agentId, jobId, pdf.LongLength, dataKey);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(dataKey);
+            }
+            encryptedBody.Position = 0;
+            using var encryptedContent = new StreamContent(encryptedBody);
+            encryptedContent.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.smartprint.qsp2");
 
             using var request = new HttpRequestMessage(
                 HttpMethod.Post,
                 $"http://127.0.0.1:{LocalNetworkEndpointDiscovery.DefaultPort}/api/v1/local/uploads/{ticketId:D}")
             {
-                Content = multipart
+                Content = encryptedContent
             };
             request.Headers.Add("X-Print-Upload-Grant", "upload-grant-test");
+            request.Headers.Add("X-Print-Encrypted-Format", "QSP2");
+            request.Headers.Add("X-Print-Encrypted-Key", Convert.ToBase64String(wrappedKey));
+            request.Headers.Add("X-Print-Encrypted-Size", encryptedBody.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            CryptographicOperations.ZeroMemory(wrappedKey);
 
             using var response = await client.SendAsync(request);
             var responseBody = await response.Content.ReadAsStringAsync();
             Assert.True(
                 response.IsSuccessStatusCode,
-                $"The extensionless PDF failed at the hosted Agent multipart endpoint: HTTP {(int)response.StatusCode}: {responseBody}");
+                $"The extensionless PDF failed at the hosted Agent encrypted QSP2 endpoint: HTTP {(int)response.StatusCode}: {responseBody}");
 
             Assert.True(await claimSeen.Task.WaitAsync(TimeSpan.FromSeconds(5)));
             using var completedRequest = await completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -383,7 +412,10 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                     new Dictionary<string, string?>
                     {
                         ["Agent:ApiBaseUrl"] = "http://127.0.0.1:8080",
-                        ["Agent:LocalApi:Enabled"] = "true"
+                        ["Agent:LocalApi:Enabled"] = "true",
+                        // This stress fixture intentionally exercises the legacy
+                        // multipart compatibility path; production defaults to QSP2.
+                        ["Agent:LocalApi:RequireEncryptedStandardUploads"] = "false"
                     }))
                 .ConfigureLogging(logging => logging.ClearProviders())
                 .ConfigureServices((context, services) =>
