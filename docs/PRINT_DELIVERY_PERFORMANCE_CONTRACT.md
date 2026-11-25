@@ -73,3 +73,13 @@ Customer and shop-owner smoothness is the top product priority. Keep the shop-si
 - Test low-memory and high-CPU conditions. The UI must remain responsive, queued work must remain durable, and background work must throttle or pause safely.
 - Compare customer-visible time-to-queue and shop-visible time-to-first-action before and after changes. Report p50/p95, not only averages.
 - Do not introduce a new always-on service or infrastructure dependency without a measured resource budget, failure-mode review, and explicit justification.
+
+## Disaster recovery and backup isolation
+
+- The Docker backup must not stop/restart the API or portal; PostgreSQL uses an online consistent dump and document files are archived read-only.
+- The cloud document archive must exclude the `private-relay/` subtree and incomplete upload temporary files. Restore must reject a legacy archive containing Private relay content rather than silently restoring it.
+- Restore clears stale Private relay object/key references and marks only incomplete relay tickets failed with `RESTORE_CONTENT_EXCLUDED`. Job, payment, refund, invoice, and audit metadata remain available for reconciliation.
+- The Windows Agent DPAPI queue is outside Docker backup/restore. Never copy its protected files into a server backup or restore them to a different shop computer.
+- Standard document output timestamps are preserved. The 72-hour retention clock is never restarted by backup or restore; expired Standard sources must not become available again.
+- Restore must never trigger payment-provider calls, refund operations, Agent claims, or printer dispatch. Output-unconfirmed jobs remain subject to explicit reconciliation.
+- Use the synthetic mixed-mode fixture in `docs/DISASTER_RECOVERY_FIXTURE.md` and verify backup concurrency against a no-backup baseline. Do not claim zero bottleneck without p50/p95 and modest-PC resource measurements.
