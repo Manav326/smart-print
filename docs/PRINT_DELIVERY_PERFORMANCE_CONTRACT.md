@@ -41,3 +41,25 @@ This contract applies to every security, storage, payment, queue, Agent, and bac
 ## Rollout rule
 
 Changes must be introduced behind compatible state transitions and safe defaults. Keep production deployment and the main branch unchanged until tests, review, and staged operational verification are complete. If measurements show a regression in the normal print path, stop rollout and correct the design rather than accepting slower printing as the cost of security.
+
+## Machine-resource budget and smoothness priority
+
+Customer and shop-owner smoothness is the top product priority. Keep the shop-side footprint small enough for ordinary Windows shop PCs and modest networks; do not assume dedicated high-memory servers or GPU hardware.
+
+- Prefer one lightweight, bounded worker process or an existing service over introducing several always-on daemons. Do not add Redis, Kafka, Elasticsearch, a separate database, or a heavyweight scanner stack unless measured requirements prove they are necessary.
+- Reuse existing API, Agent, storage, and queue infrastructure where safe. Avoid parallel pipelines and duplicate copies of documents.
+- Use streaming I/O, bounded buffers, backpressure, and explicit per-process concurrency limits. Never buffer an entire upload in RAM merely to scan or parse it.
+- Keep CPU-intensive scanning, rendering, OCR, conversion, and thumbnail work off the Agent heartbeat and printer-dispatch threads. Run them with low priority and bounded concurrency; pause or throttle them when printing is active or the machine is under pressure.
+- Prefer remote/cloud scanning or parsing when an approved service already exists and the privacy, encryption, latency, and availability requirements are met. Do not make a new cloud dependency mandatory for basic local printing without a documented fallback.
+- Avoid polling loops and frequent status writes. Prefer event-driven wakeups, bounded retry backoff, and compact status updates.
+- Set measurable RAM, CPU, disk, and queue limits for API and Agent processes. Expose health/queue depth and resource pressure without high-frequency telemetry.
+- When a shop machine is resource constrained, prioritize active print jobs and Agent connectivity; defer non-urgent previews, indexing, backups, and maintenance.
+- If capacity is exhausted, reject or defer new work with a clear explanation and retry estimate rather than letting the entire application freeze.
+
+## Resource and experience acceptance tests
+
+- Measure idle and active CPU, resident memory, peak memory during a maximum-size upload, disk I/O, and network use on a documented modest shop-PC profile.
+- Run simultaneous print dispatch while uploads are being scanned/parsed and while backup/maintenance is active; prove printer dispatch and Agent heartbeat latency remain within agreed budgets.
+- Test low-memory and high-CPU conditions. The UI must remain responsive, queued work must remain durable, and background work must throttle or pause safely.
+- Compare customer-visible time-to-queue and shop-visible time-to-first-action before and after changes. Report p50/p95, not only averages.
+- Do not introduce a new always-on service or infrastructure dependency without a measured resource budget, failure-mode review, and explicit justification.
