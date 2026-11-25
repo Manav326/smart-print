@@ -5724,10 +5724,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         setUploadMode("CLOUD");
       }
       const batchPrivacyMismatch=exception instanceof ApiError&&exception.code==="batch_privacy_mode_mismatch";
-      const uploadError=batchPrivacyMismatch
-        ? containsIdDocument
-          ? "This batch already contains a Standard Printing file. Your ID sheet was not uploaded. Start a new Private Printing batch for it."
-          : "This batch already contains a Private Printing file. Start a new Standard Printing batch for this document."
+      const privatePromotionUnavailable=exception instanceof ApiError&&exception.code==="batch_private_promotion_unavailable";
+      const uploadError=privatePromotionUnavailable
+        ? "Private Printing cannot be enabled because Standard transfer or processing has already started for this batch. No privacy mode was changed. Start a new Private Printing batch."
+        : batchPrivacyMismatch
+          ? containsIdDocument
+            ? "This batch is already Private. Keep Private Printing selected for every additional file."
+            : "This batch already contains a Private Printing file. Keep Private Printing selected for every additional file."
         : exception instanceof LocalUploadOutcomeUnknownError
         ? privatePrinting
           ? "The shop computer is still preparing your secure file. Tap Retry to check its status."
@@ -6110,16 +6113,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(malformedPhotoDocument){setError("This saved Photo Studio sheet is missing its print details. Refresh the private document library and select it again.");return;}
     const incomingIdDocument=supported.some(isSmartPrintIdDocument);
     const incomingPhotoDocument=supported.some(isSmartPrintPhotoDocument);
-    // Selection is not a batch-mode authority. Allow the customer to select
-    // the ID sheet; the local-ticket API checks persisted jobs and pending
-    // tickets before admitting it, so a genuinely Standard batch stays blocked.
-    if(incomingIdDocument) {
-      // ID Studio remains Private Printing only.
-      setPrivatePrinting(true);
-      setUploadMode("LOCAL");
-      setUploadModeManuallySelected(true);
+    if(incomingIdDocument&&uploadedBatch.some(item=>!item.job.privatePrinting)) {
+      setError("This batch already contains Standard Printing uploads, so it can no longer be promoted safely. Start a new Private Printing batch for the ID document.");
+      return;
     }
-    // Prepared Photo Studio documents use the same current batch privacy choice.
+    // Selecting an ID document promotes all not-yet-uploaded files in this
+    // batch to Private. The API can also promote only unclaimed, untransferred
+    // local tickets; it rejects promotion after Standard content has moved.
+    if(incomingIdDocument) {    // Prepared Photo Studio documents use the same current batch privacy choice.
     // Only ID Studio imposes a mandatory Private Printing rule.
     for(const candidate of supported){
       const nativeGroup=nativeGroupNames?.[next.indexOf(candidate)]?.trim().slice(0,80);
@@ -6381,13 +6382,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>Choose how files are handled</strong></div><small>Applies to all files</small></div>
       <div className="customer-privacy-choice-grid">
         <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
-          <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted · development test PDF only":"Encrypted · shop-side source erased after verified output"}</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
+          <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted · development test PDF only":"Encrypted · shop-side source erased after verified output"}</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":uploadedBatch.length>0?"Unavailable for this batch":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
         </button>
         <button type="button" aria-pressed={!privatePrinting} disabled={busy||uploadedBatch.length>0} className={!privatePrinting?"customer-privacy-option standard selected":"customer-privacy-option standard"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(false);}}>
-          <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Normal print queue. 7-day auto-delete.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
+          <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Normal print queue. Files are deleted 72 hours after confirmed output.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
-      <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted on your device. The protected test PDF stays on this computer for up to 24 hours; it is not a physical print. Your original stays on your device.":"Encrypted on your device and decrypted only by the paired Windows Agent. The shop-side copy is erased after confirmed output. Your original stays on your device."}</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Uses the shop's normal print queue. The shop-side copy is deleted 7 days after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
+      {uploadedBatch.some(item=>!item.job.privatePrinting)&&<CustomerInlineNotice kind="info" title="Private mode is locked for this batch">Standard files have already been uploaded. To protect every document with Private Printing, start a new Private batch before uploading its files.</CustomerInlineNotice>}
+      <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted on your device. The protected test PDF stays on this computer for up to 24 hours; it is not a physical print. Your original stays on your device.":"Encrypted on your device and decrypted only by the paired Windows Agent. The shop-side copy is erased after confirmed output. Your original stays on your device."}</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Uses the shop's normal print queue. The shop-side copy is deleted 72 hours after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
       {!canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title="Private Printing unavailable">{!hasAssignedPrinter
         ?"The shop needs to assign an active printer."
         :!localAgent?.agentDeviceId||!localAgent.documentEncryptionPublicKey
