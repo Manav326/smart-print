@@ -71,7 +71,8 @@ public sealed class DocumentStorage : IDisposable
         string originalFileName,
         Stream input,
         long declaredLength,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool includePdfImageMetadata = false)
     {
         if (tenantId == Guid.Empty || documentId == Guid.Empty)
             throw new ArgumentException("A tenant and document identity are required.");
@@ -131,7 +132,8 @@ public sealed class DocumentStorage : IDisposable
             {
                 analysis = DocumentAnalyzer.Analyse(
                     document,
-                    Path.GetExtension(originalFileName).ToLowerInvariant());
+                    Path.GetExtension(originalFileName).ToLowerInvariant(),
+                    includePdfImageMetadata);
             }
 
             var storageKey = $"{tenantId:N}/{documentId:N}{analysis.Extension}";
