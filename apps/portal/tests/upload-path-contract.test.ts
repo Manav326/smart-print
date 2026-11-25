@@ -146,4 +146,11 @@ test("prepared ID sheets defer batch privacy decisions to authoritative persiste
     "a stale or incomplete cached DTO must not pre-empt the API's authoritative batch-mode check");
   assert.match(customerApp, /batchPrivacyMismatch=exception instanceof ApiError&&exception\.code==="batch_privacy_mode_mismatch"/);
   assert.match(customerApp, /This batch already contains a Standard Printing file/);
+
+  const successfulLocalAgentResponse = api.slice(
+    api.indexOf("AlreadyCompleted = false,"),
+    api.indexOf('agentApi.MapPost("/local-uploads/status-batch"')
+  );
+  assert.match(successfulLocalAgentResponse, /job\.PrivatePrinting/,
+    "the first successful local Agent upload response must return the persisted privacy mode");
 });
