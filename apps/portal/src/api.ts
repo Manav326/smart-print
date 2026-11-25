@@ -2028,6 +2028,9 @@ export async function uploadCustomerDocumentLocally(
     );
   }
   const keys = customerLocalUploadAttemptStorageKeys(sessionToken, file, batchId);
+  const hasExistingTicketIdentity = Boolean(
+    sessionStorage.getItem(keys.idempotency) && sessionStorage.getItem(keys.grant)
+  );
   const idempotencyKey = sessionStorage.getItem(keys.idempotency) || crypto.randomUUID();
   const grantToken = sessionStorage.getItem(keys.grant) || createLocalUploadGrantToken();
   sessionStorage.setItem(keys.idempotency, idempotencyKey);
@@ -2042,8 +2045,12 @@ export async function uploadCustomerDocumentLocally(
     if (exception instanceof ApiError && exception.status === 409 &&
         ["local_print_agent_unavailable", "local_print_printer_unavailable", "local_upload_printer_unavailable", "local_upload_printer_assignment_missing", "batch_local_agent_mismatch", "batch_privacy_mode_mismatch", "batch_private_promotion_unavailable", "private_printing_unavailable", "private_printing_physical_output_required"].includes(exception.code ?? "")) {
       // A rejected reservation can still refer to a ticket created by an earlier attempt.
-      // Preserve its idempotency key and grant; batch-scoped keys allow a deliberate new batch
-      // to start a distinct attempt without losing the original ticket's recovery identity.
+      // Keep that identity. A first-attempt rejection has no prior ticket to recover and may
+      // clear its unused identity so an enabled cloud fallback can use the normal cloud path.
+      if (!hasExistingTicketIdentity) {
+        sessionStorage.removeItem(keys.idempotency);
+        sessionStorage.removeItem(keys.grant);
+      }
       throw new LocalUploadPreflightError(exception.message, exception.status, exception.code);
     }
     if (!(exception instanceof ApiError) || exception.status === 0) {

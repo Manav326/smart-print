@@ -156,6 +156,8 @@ test("a Private document promotes only unclaimed local batch tickets and never d
     "a ticket discovered after a concurrent reservation must commit its promotion");
   assert.match(ticketRoute, /pendingQueueReady/,
     "every existing ticket's assigned queue must be eligible for Private output");
+  assert.match(ticketRoute, /existing is not null && existing\.PrivatePrinting && !request\.PrivatePrinting[\s\S]{0,180}batch_privacy_mode_mismatch/,
+    "a stale Standard retry for an existing Private ticket must restore the Private choice without losing identity");
   assert.match(ticketRoute, /batchAlreadyPrivate && !request\.PrivatePrinting/,
     "a Private batch must never be downgraded by a Standard request");
   assert.match(api, /ticket = await db\.LocalPrintUploadTickets\.AsNoTracking\(\)[\s\S]{0,180}SingleAsync/,
@@ -166,8 +168,12 @@ test("a Private document promotes only unclaimed local batch tickets and never d
   const reservationCatch = portalApi.slice(reservationCatchStart, reservationCatchEnd);
   assert.match(reservationCatch, /"batch_private_promotion_unavailable"/,
     "promotion rejection remains a known preflight result");
-  assert.doesNotMatch(reservationCatch, /sessionStorage\.removeItem|clearCustomerLocalUploadAttempt/,
-    "preflight rejection must preserve a possibly pre-existing ticket's retry identity");
+  assert.match(reservationCatch, /hasExistingTicketIdentity/,
+    "the portal must distinguish a first-attempt preflight from a retry that may already own a ticket");
+  assert.match(reservationCatch, /if \(!hasExistingTicketIdentity\)[\s\S]{0,180}sessionStorage\.removeItem/,
+    "only a first-attempt rejection may clear an unused identity to permit cloud fallback");
+  assert.match(reservationCatch, /hasExistingTicketIdentity[\s\S]{0,260}throw new LocalUploadPreflightError/,
+    "a retry rejection must retain its original idempotency key and grant");
   assert.match(portalApi, /checkout blocks adding this file[\s\S]{0,220}Keep its identity/,
     "checkout rejection must not discard an existing ticket's recovery identity");
   assert.match(customerApp, /privatePromotionUnavailable[\s\S]{0,180}exception instanceof ApiError \? exception\.message/,

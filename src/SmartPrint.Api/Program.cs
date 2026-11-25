@@ -10764,6 +10764,13 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         request.BatchId is null && existing.BatchId is Guid existingBatchId)
         batchId = existingBatchId;
 
+    if (existing is not null && existing.PrivatePrinting && !request.PrivatePrinting)
+        return Results.Conflict(new
+        {
+            code = "batch_privacy_mode_mismatch",
+            message = "This upload already belongs to a Private batch. Keep Private Printing selected and retry the same file; its original upload identity is preserved."
+        });
+
     // A Standard ticket may be promoted on an exact retry only through the
     // same locked batch-promotion transaction used for a newly selected Private file.
     if (existing is not null && !(request.PrivatePrinting && !existing.PrivatePrinting))
