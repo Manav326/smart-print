@@ -10760,7 +10760,13 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             item.TenantId == session.TenantId &&
             item.CustomerSessionId == session.Id &&
             item.IdempotencyKey == idempotencyKey, ct);
-    if (existing is not null)
+    if (existing is not null && request.PrivatePrinting && !existing.PrivatePrinting &&
+        request.BatchId is null && existing.BatchId is Guid existingBatchId)
+        batchId = existingBatchId;
+
+    // A Standard ticket may be promoted on an exact retry only through the
+    // same locked batch-promotion transaction used for a newly selected Private file.
+    if (existing is not null && !(request.PrivatePrinting && !existing.PrivatePrinting))
     {
         var existingGrantHash = Convert.FromHexString(existing.GrantHash);
         var suppliedGrantHash = Convert.FromHexString(grantHash);
@@ -11174,7 +11180,10 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             item.CustomerSessionId == session.Id && item.IdempotencyKey == idempotencyKey, ct);
     if (racedTicket is not null)
     {
-        await transaction.RollbackAsync(ct);
+        var promotingExistingTicket = existing is not null &&
+            existing.Id == racedTicket.Id &&
+            request.PrivatePrinting &&
+            !existing.PrivatePrinting;
         var racedCompletedPrivateTicket = racedTicket.PrivatePrinting && racedTicket.CompletedUtc is not null;
         var sameOriginalDocument = racedCompletedPrivateTicket ||
             (racedTicket.SizeBytes == request.SizeBytes &&
@@ -11199,7 +11208,14 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                 Convert.FromHexString(racedTicket.GrantHash),
                 Convert.FromHexString(grantHash));
         if (!sameRequest)
+        {
+            await transaction.RollbackAsync(ct);
             return Results.Conflict(new { code = "local_upload_idempotency_conflict", message = "This upload attempt key is already associated with a different document." });
+        }
+        if (promotingExistingTicket)
+            await transaction.CommitAsync(ct);
+        else
+            await transaction.RollbackAsync(ct);
         return Results.Ok(new
         {
             racedTicket.Id,
