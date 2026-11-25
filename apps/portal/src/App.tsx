@@ -5724,6 +5724,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         setUploadMode("CLOUD");
       }
       const batchPrivacyMismatch=exception instanceof ApiError&&exception.code==="batch_privacy_mode_mismatch";
+      if(batchPrivacyMismatch&&!containsIdDocument) {
+        // The API confirms that this batch is already Private; restore the
+        // customer control to the authoritative, non-downgradable mode.
+        setPrivatePrinting(true);
+        setUploadMode("LOCAL");
+        setUploadModeManuallySelected(true);
+      }
       const privatePromotionUnavailable=exception instanceof ApiError&&exception.code==="batch_private_promotion_unavailable";
       const uploadError=privatePromotionUnavailable
         ? "Private Printing cannot be enabled because Standard transfer or processing has already started for this batch. No privacy mode was changed. Start a new Private Printing batch."
