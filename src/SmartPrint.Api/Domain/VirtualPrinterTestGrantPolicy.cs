@@ -86,6 +86,20 @@ public static class VirtualPrinterTestGrantPolicy
         return PrinterTypePolicy.IsWorkingWindowsQueue(status);
     }
 
+    public static bool CanAuthorizeSpoolerSubmission(
+        string? outputMode,
+        string? outputType,
+        bool grantActive,
+        bool isProduction)
+    {
+        if (string.Equals(outputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase))
+            return !isProduction && grantActive &&
+                string.Equals(outputType, PrivatePrintingOutputPolicy.TestVirtual, StringComparison.OrdinalIgnoreCase);
+
+        return string.Equals(outputMode, PrinterTypePolicy.Physical, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(outputType, PrinterTypePolicy.Physical, StringComparison.OrdinalIgnoreCase);
+    }
+
     public static bool IsValidGrantLifetime(DateTimeOffset createdUtc, DateTimeOffset expiresUtc)
     {
         var lifetime = expiresUtc - createdUtc;
