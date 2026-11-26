@@ -30,6 +30,8 @@ Allow a platform administrator to authorise a specific shop's discovered Windows
 
 ## Required verification
 
+Automated coverage now includes a real child-process stdin/stdout pipe test for the one-shot AUTHORIZE_SPOOLER_SUBMISSION handshake (ALLOW, DENY and callback/transport failure), plus policy tests for grant expiry/revocation during document preparation and strict output-type/environment matching. Platform Operations also requires a fresh queue inventory, an online paired Agent and an enabled queue before approval; revocation requires an explicit confirmation and audit reason.
+
 1. Physical printer regression: unchanged selection, dispatch, spooler submission, and receipt.
 2. Three-shop isolation: A approved, B not approved, C approved then revoked.
 3. Grant expiry, explicit revocation, changed queue name, driver, port, and Agent pairing.
