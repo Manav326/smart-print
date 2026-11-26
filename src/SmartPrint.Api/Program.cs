@@ -1729,7 +1729,8 @@ shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext d
         return Results.Forbid();
     }
 
-    var onlineAfter = DateTimeOffset.UtcNow.AddMinutes(-2);
+    var now = DateTimeOffset.UtcNow;
+    var onlineAfter = now.AddMinutes(-2);
     var printers = await db.PrinterDevices.AsNoTracking()
         .Where(printer => printer.TenantId == tenantId)
         .OrderBy(printer => printer.DisplayName)
@@ -1740,13 +1741,22 @@ shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext d
             printer.Manufacturer,
             printer.Model,
             printer.ConnectionType,
-            OutputMode = environment.IsProduction() && printer.IsTestModeOverride ? "UNSUPPORTED_VIRTUAL" : printer.OutputMode,
+            OutputMode = printer.OutputMode,
+            VirtualTestGrantActive = !environment.IsProduction() &&
+                printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                printer.IdentityFingerprint != null &&
+                db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == printer.TenantId &&
+                    grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == printer.AgentDeviceId &&
+                    grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now),
             printer.ConnectionAddress,
             printer.QueueName,
             printer.IsDefault,
             printer.AgentDeviceId,
             printer.CapabilitiesJson,
-            IsTestModeOverride = printer.IsTestModeOverride && !environment.IsProduction(),
+            IsTestModeOverride = false,
             Status = printer.Status == "AgentRevoked"
                 ? "AgentRevoked"
                 : printer.AgentDeviceId != null &&
@@ -1876,8 +1886,18 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
 
     if (isActive && !printer.IsActive)
     {
-        if ((environment.IsProduction() && printer.IsTestModeOverride) ||
-            printer.OutputMode is not ("PHYSICAL" or "PDF_EXPORT") || printer.AgentDeviceId is null)
+        var selectionNow = DateTimeOffset.UtcNow;
+        var virtualGrantActive = !environment.IsProduction() &&
+            printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+            printer.AgentDeviceId is Guid grantAgentId &&
+            printer.IdentityFingerprint != null &&
+            await db.VirtualPrinterTestGrants.AnyAsync(grant =>
+                grant.TenantId == tenantId && grant.PrinterDeviceId == printer.Id &&
+                grant.AgentDeviceId == grantAgentId &&
+                grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                grant.RevokedUtc == null && grant.ExpiresUtc > selectionNow);
+        if (((printer.OutputMode is not ("PHYSICAL" or "PDF_EXPORT")) && !virtualGrantActive) ||
+            printer.AgentDeviceId is null)
         {
             await transaction.RollbackAsync(ct);
             return Results.Conflict(new
@@ -1887,7 +1907,6 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
             });
         }
 
-        var selectionNow = DateTimeOffset.UtcNow;
         var selectionAgent = await db.AgentDevices.AsNoTracking()
             .Where(agent => agent.Id == printer.AgentDeviceId && agent.TenantId == tenantId)
             .Select(agent => new
@@ -1909,7 +1928,8 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                 agentOnline,
                 selectionAgent?.RevokedUtc is not null,
                 selectionAgent?.LastSeenUtc,
-                selectionNow))
+                selectionNow,
+                virtualGrantActive))
         {
             var nextStep = !agentOnline
                 ? "Reconnect the shop Windows computer and wait for its Print Agent to report online."
