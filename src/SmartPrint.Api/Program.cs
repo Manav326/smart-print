@@ -1198,6 +1198,10 @@ customerApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.UpdatedUtc,
             item.PrivatePrinting,
             item.PrivateDocumentPurgedUtc,
+            OutputMode = db.PrinterDevices.AsNoTracking()
+                .Where(printer => printer.TenantId == item.TenantId && printer.Id == item.PrinterDeviceId)
+                .Select(printer => printer.OutputMode)
+                .FirstOrDefault(),
             OriginalFileName = item.PrivatePrinting
                 ? "Private document"
                 : db.PrintDocuments.AsNoTracking()
@@ -13591,6 +13595,10 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
             item.RejectedPageNumbersJson,
             item.PdfBrandingEnabled,
             item.OutputType,
+            OutputMode = db.PrinterDevices.AsNoTracking()
+                .Where(printer => printer.TenantId == item.TenantId && printer.Id == item.PrinterDeviceId)
+                .Select(printer => printer.OutputMode)
+                .FirstOrDefault(),
             item.OutputCompletedUtc,
             item.PrivateDocumentPurgedUtc,
             item.UpdatedUtc
@@ -13629,6 +13637,7 @@ publicApi.MapGet("/jobs/{jobId:guid}/status", async (
         storedJob.RejectedPageNumbersJson,
         storedJob.PdfBrandingEnabled,
         storedJob.OutputType,
+        storedJob.OutputMode,
         storedJob.OutputCompletedUtc,
         storedJob.PrivateDocumentPurgedUtc,
         storedJob.UpdatedUtc
