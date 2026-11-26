@@ -11,7 +11,8 @@ This repository uses one versioned GitHub release to produce the website downloa
    - `SmartPrint-Windows-Store-Setup.exe`: signed, offline x64 Store installer, only when the Windows signing certificate, WebView2 standalone URL and exact Partner Center publisher name are configured.
    - `SmartPrint-Android.apk`: website/direct-download Android package.
    - `SmartPrint-Android.aab`: signed Google Play App Bundle.
-   - `SHA256SUMS.txt`: checksums for the artifacts produced.
+   - `BUILD-INFO.txt`: exact source commit, release tag and workflow run provenance.
+   - `SHA256SUMS.txt`: checksums for every release binary and the build provenance file.
 4. The workflow creates a GitHub release. When Cloudflare R2 is configured, immutable versioned website assets are uploaded and verified there.
 5. Review the published GitHub release assets and test the exact binaries.
 6. Run **Actions → Publish SmartPrint to Microsoft Store and Google Play**, choose the tag and tracks, and set `confirm_publication=true`.
