@@ -202,6 +202,8 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         sizeCode:sheet.sizeCode,
         photoCount:sheet.photoCount,
         photosPerPage:sheet.photosPerPage,
+        photoOutputLayout:sheet.photoOutputLayout,
+        photoPaperFinish:sheet.photoPaperFinish,
         pageCount:Math.ceil(sheet.photoCount/sheet.photosPerPage),
         resolutionDpi:sheet.resolutionDpi??300,
         captionHeightMm:sheet.captionHeightMm,

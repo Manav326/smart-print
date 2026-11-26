@@ -133,7 +133,7 @@ test("Private Printing progress uses short, plain-language customer messages", (
   assert.match(messages, /Waiting to send your secure file/);
   assert.match(messages, /Checking file security/);
   assert.match(messages, /Checking that the file can be printed/);
-  assert.match(messages, /File secured on the shop computer · ready for printing/);
+  assert.match(messages, /Secure upload confirmed · awaiting shop review/);
   assert.doesNotMatch(messages, /decrypting|authenticating|encrypted payload|local print queue/i);
 });
 

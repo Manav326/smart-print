@@ -33,7 +33,7 @@ import PlatformAdminConsole from "./PlatformAdminConsole";
 import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
 import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./portal-routing";
 import {
-  ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
+  ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, hasPendingLocalCustomerUploadAttempt, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob, resumeShopUnprintedBatch,
   createAgentEnrollmentCode, createCustomerSession, createStation,
   createShopPhotoJob, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData,
@@ -5177,8 +5177,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
   },[localFallbackSuggested,localReady,localAgent?.endpoints.length,secureQueueFallbackEnabled,uploadModeManuallySelected,privatePrinting]);
 
-  const customerUploadUnavailable = privatePrinting
-    ? !canOfferPrivatePrinting
+  const selectedBatchRequiresPrivatePrinting=privatePrinting||files.some(isSmartPrintIdDocument);
+  const pendingPrivateRetryFiles=files.filter(candidate=>
+    !uploadedFileFingerprints.includes(customerFileFingerprint(candidate))
+  );
+  const hasPendingPrivateUploadIdentity=selectedBatchRequiresPrivatePrinting&&pendingPrivateRetryFiles.some(candidate=>
+    hasPendingLocalCustomerUploadAttempt(sessionToken,candidate,batchId||undefined)
+  );
+  const customerUploadUnavailable = selectedBatchRequiresPrivatePrinting
+    ? !canOfferPrivatePrinting&&!hasPendingPrivateUploadIdentity
     : !secureQueueFallbackEnabled && !localAgent?.endpoints.length;
 
   useEffect(()=>{
@@ -5540,8 +5547,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     // Do not reject an ID sheet from cached job.privatePrinting metadata here.
     if(containsIdDocument&&!privatePrinting)setPrivatePrinting(true);
     const effectiveUploadMode: "LOCAL"|"CLOUD"=effectivePrivatePrinting?"LOCAL":uploadMode;
-    if(effectivePrivatePrinting&&(!localAgent||!canOfferPrivatePrinting)) {
-      setError("Private Printing is not ready at this shop yet. No document has been uploaded. Ask the shop operator to reconnect the paired computer.");
+    if(effectivePrivatePrinting&&!canOfferPrivatePrinting&&!hasPendingPrivateUploadIdentity) {
+      setError("Private Printing is not ready at this shop yet. No new document has been uploaded. Ask the shop operator to reconnect the paired computer.");
       return;
     }
     if(effectivePrivatePrinting&&uploadMode!=="LOCAL")setUploadMode("LOCAL");
@@ -5597,6 +5604,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       });
     };
     const reportTransferProgress=(index:number,progress:{bytesSent:number;totalBytes:number;stage:string})=>{
+      if(progress.stage==="WAITING_FOR_SHOP") {
+        updateFileProgress(index,{
+          bytesSent:progress.bytesSent,
+          totalBytes:progress.totalBytes,
+          status:"WAITING_FOR_SHOP",
+          message:"Encrypted file received; waiting for shop confirmation"
+        });
+        return;
+      }
       updateFileProgress(index,{
         bytesSent:progress.bytesSent,
         totalBytes:progress.totalBytes,
@@ -5634,7 +5650,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           const photoSettings=photoSettingsByFileFingerprint[fingerprint];
           const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
           if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards must use Private Printing. No normal cloud upload is allowed.",409);
-          const uploadedItem=effectiveUploadMode==="LOCAL"&&localAgent
+          const uploadedItem=effectiveUploadMode==="LOCAL"&&(effectivePrivatePrinting||localAgent)
             ? await uploadCustomerDocumentLocally(
                 sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,
                 cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings,
@@ -6633,7 +6649,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           </>}
   </div>}
 </>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
-    {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
+    {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting&&uploadWaitingCount>0&&uploadFailedCount===0?"Resume secure upload":privatePrinting&&uploadFailedCount>0?"Retry pending secure uploads":privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
     {uploadProgress&&<section className="customer-upload-progress" aria-live="polite" aria-label="Upload progress">
       <div className="customer-upload-progress-header">
         <div><strong>{uploadConfirmedCount} of {uploadProgress.total} files uploaded</strong><span>{uploadFailedCount>0?`${uploadFailedCount} failed · Retry only failed files.`:uploadWaitingCount>0?`${uploadWaitingCount} waiting for the shop computer.`:uploadConfirmedCount===uploadProgress.total?"All files uploaded. Printing status is shown separately.":"Files upload in parallel."}</span></div>

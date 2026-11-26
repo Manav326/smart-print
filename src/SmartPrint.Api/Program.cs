@@ -6238,8 +6238,8 @@ agentApi.MapGet("/private-relays/pending", async (
                         grant.PrinterDeviceId == printer.Id && grant.AgentDeviceId == printer.AgentDeviceId &&
                         grant.IdentityFingerprint == printer.IdentityFingerprint &&
                         grant.RevokedUtc == null && grant.CreatedUtc <= now && grant.ExpiresUtc > now))) &&
-                  printer.LastSeenUtc != null && printer.LastSeenUtc >= now.AddMinutes(-2) &&
-                  (printer.Status == "Ready" || printer.Status == "Busy") &&
+                  // A private relay is being secured in the Agent's protected queue,
+                  // not sent to the printer. Printer readiness is rechecked at dispatch.
                   printer.QueueName != null && printer.QueueName != ""
             orderby ticket.PrivateRelayUploadedUtc
             select new AgentPrivateRelayItem(
@@ -6346,12 +6346,12 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     if (relay is null || string.IsNullOrWhiteSpace(relay.PrivateRelayStorageKey) ||
         string.IsNullOrWhiteSpace(relay.PrivateRelayWrappedKey))
         return Results.NotFound();
-    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+    if (!await IsPrivatePrintingQueueStagingAvailableAsync(
             db, environment, device.TenantId, device.Id, relay.PrinterDeviceId, ct))
         return Results.Conflict(new
         {
             code = "private_printing_output_policy_changed",
-            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document could be delivered. No payload was downloaded."
+            message = "The shop's secure Agent connection or approved Private Printing output configuration is unavailable. No payload was downloaded."
         });
 
     Stream ciphertext;
@@ -6433,12 +6433,12 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     if (ticket.CompletedUtc is not null)
         return await ExistingResultAsync(true);
 
-    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+    if (!await IsPrivatePrintingQueueStagingAvailableAsync(
             db, environment, ticket.TenantId, device.Id, ticket.PrinterDeviceId, ct))
         return Results.Conflict(new
         {
             code = "private_printing_output_policy_changed",
-            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted handoff completed. The protected local copy is retained for safe retry."
+            message = "The shop's secure Agent connection or approved Private Printing output configuration is unavailable. The protected local copy is retained for safe retry."
         });
 
     if (ticket.PrivateRelayFailedUtc is not null ||
@@ -6496,7 +6496,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
-                message = $"The saved Photo Studio sheet must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page photo raster."
+                message = $"The saved Photo Studio PDF does not match its selected photo size and output layout. Reopen Photo Studio and prepare the sheet again."
             });
     }
 
@@ -6589,6 +6589,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         CreatedUtc = now,
         UpdatedUtc = now
     };
+    PrivateRelayPhotoOutputRules.ApplyTicketOptions(job, locked);
     var document = new PrintDocument
     {
         TenantId = locked.TenantId,
@@ -6673,21 +6674,35 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
         string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 400)
         return Results.BadRequest(new { code = "private_relay_rejection_invalid" });
 
-    var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
-        item.Id == ticketId && item.TenantId == device.TenantId &&
-        item.AgentDeviceId == device.Id && item.PrivatePrinting, ct);
-    if (ticket is null) return Results.NotFound();
+    // Completion and rejection must serialize on the same ticket row. Without
+    // this lock, a late rejection could mark an already-completed ticket FAILED
+    // after the canonical PrintJob had been committed.
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
+        $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {ticketId} AND \"TenantId\" = {device.TenantId} AND \"AgentDeviceId\" = {device.Id} AND \"PrivatePrinting\" = TRUE FOR UPDATE")
+        .ToListAsync(ct);
+    var ticket = lockedTickets.SingleOrDefault();
+    if (ticket is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
     if (ticket.CompletedUtc is not null)
+    {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new { code = "private_relay_already_completed" });
+    }
     if (ticket.PrivateRelayFailedUtc is not null)
+    {
+        await transaction.CommitAsync(ct);
         return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = true });
+    }
 
-    if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
-        await storage.DeleteAsync(ticket.PrivateRelayStorageKey);
-    ticket.PrivateRelayStorageKey = null;
-    ticket.PrivateRelayWrappedKey = null;
-    ticket.PrivateRelayIv = null;
-    ticket.PrivateRelayUploadedUtc = null;
+    // Persist the terminal decision before deleting the external ciphertext.
+    // If storage is temporarily unavailable, PrivateRelayRetentionWorker sees the
+    // durable FAILED ticket and retries the purge without leaving the customer
+    // waiting on an upload that has already been rejected.
+    var rejectedRelayStorageKey = ticket.PrivateRelayStorageKey;
     ticket.PrivateRelayFailedUtc = DateTimeOffset.UtcNow;
     ticket.PrivateRelayStage = PrivateRelayProgressRules.Failed;
     ticket.PrivateRelayStageUpdatedUtc = ticket.PrivateRelayFailedUtc;
@@ -6695,6 +6710,30 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     ticket.PrivateRelayFailureMessage = request.Message.Trim();
     ticket.ExpiresUtc = ticket.PrivateRelayFailedUtc.Value;
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
+
+    if (!string.IsNullOrWhiteSpace(rejectedRelayStorageKey))
+    {
+        try
+        {
+            await storage.DeleteAsync(rejectedRelayStorageKey);
+            await db.LocalPrintUploadTickets
+                .Where(item => item.Id == ticket.Id &&
+                               item.TenantId == device.TenantId &&
+                               item.PrivateRelayFailedUtc != null &&
+                               item.PrivateRelayStorageKey == rejectedRelayStorageKey)
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(item => item.PrivateRelayStorageKey, (string?)null)
+                    .SetProperty(item => item.PrivateRelayWrappedKey, (string?)null)
+                    .SetProperty(item => item.PrivateRelayIv, (string?)null)
+                    .SetProperty(item => item.PrivateRelayUploadedUtc, (DateTimeOffset?)null), ct);
+        }
+        catch (IOException)
+        {
+            // PrivateRelayRetentionWorker retries this ciphertext purge.
+        }
+    }
+
     return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = false });
 });
 
@@ -7588,7 +7627,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
-                message = $"The Photo Studio PDF must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page photo raster."
+                message = $"The Photo Studio PDF does not match its selected photo size and output layout. Reopen Photo Studio and prepare the sheet again."
             });
     }
 
@@ -14009,6 +14048,56 @@ static async Task<bool> GetPrivatePrintingVirtualOutputEnabledAsync(
         .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
         .Select(item => (bool?)item.AllowPrivatePrintingVirtualOutput)
         .SingleOrDefaultAsync(ct) ?? false;
+}
+
+static async Task<bool> IsPrivatePrintingQueueStagingAvailableAsync(
+    SmartPrintDbContext db,
+    IHostEnvironment environment,
+    Guid tenantId,
+    Guid agentDeviceId,
+    Guid printerDeviceId,
+    CancellationToken ct)
+{
+    // Staging requires a live, authorised Agent and an eligible assigned output
+    // queue, but deliberately does not require the physical printer to be Ready
+    // or Busy. The document is secured locally first; print dispatch rechecks
+    // hardware state and all output constraints before any pages are released.
+    var allowVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+    var printer = await db.PrinterDevices.AsNoTracking()
+        .Where(item => item.Id == printerDeviceId && item.TenantId == tenantId)
+        .Select(item => new
+        {
+            item.AgentDeviceId,
+            item.IsActive,
+            item.QueueName,
+            item.OutputMode,
+            VirtualTestGrantActive = item.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                !environment.IsProduction() && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == item.TenantId && grant.PrinterDeviceId == item.Id &&
+                    grant.AgentDeviceId == item.AgentDeviceId && grant.IdentityFingerprint == item.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.CreatedUtc <= DateTimeOffset.UtcNow && grant.ExpiresUtc > DateTimeOffset.UtcNow)
+        })
+        .SingleOrDefaultAsync(ct);
+
+    var now = DateTimeOffset.UtcNow;
+    var agentConnected = await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
+        agent.Id == agentDeviceId &&
+        agent.TenantId == tenantId &&
+        agent.RevokedUtc == null &&
+        agent.Status != "Revoked" &&
+        agent.LastSeenUtc != null &&
+        agent.LastSeenUtc >= now.AddMinutes(-2), ct);
+
+    var privateOutputEligible = printer is not null &&
+        PrivatePrintingOutputPolicy.IsEligible(
+            allowVirtualOutput, environment.IsProduction(), printer.OutputMode, printer.VirtualTestGrantActive);
+
+    return PrivatePrintingRelayStagingRules.CanStage(
+        agentConnected,
+        printer?.AgentDeviceId == agentDeviceId,
+        printer?.IsActive == true,
+        !string.IsNullOrWhiteSpace(printer?.QueueName),
+        privateOutputEligible);
 }
 
 static async Task<bool> IsPrivatePrintingOutputQueueReadyAsync(
