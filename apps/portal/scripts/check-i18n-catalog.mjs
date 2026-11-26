@@ -48,6 +48,9 @@ if (registryStart < 0 || registryEnd < 0) throw new Error("Missing typed locale 
 const localeNames = source.slice(registryStart + "const uiCatalogs = {".length, registryEnd)
   .split(",").map(name => name.trim()).filter(Boolean);
 if (!localeNames.includes("english")) throw new Error("English fallback catalog must be registered");
+if (localeNames.join(",") !== "english,hindi,hinglish") {
+  throw new Error("Only English, Hindi and Hinglish may be selectable in this release");
+}
 const catalogs = Object.fromEntries(localeNames.map(name => [name, readCatalog(name)]));
 const baseKeys = [...catalogs.english.keys()];
 
