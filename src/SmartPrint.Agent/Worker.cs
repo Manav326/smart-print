@@ -164,8 +164,12 @@ public sealed class Worker(
                             cancellationToken);
                         if (!stagedCompletion.IsSuccessStatusCode)
                         {
-                            logger.LogWarning("Private relay completion for {JobNumber} returned HTTP {StatusCode}; its existing protected local copy is retained for acknowledgement retry.", ticket.JobNumber, (int)stagedCompletion.StatusCode);
-                            retryableFailure = true;
+                            if (!await RejectPermanentPrivateRelayCompletionAsync(
+                                    client, credentials, ticket, stagedCompletion, cancellationToken))
+                            {
+                                logger.LogWarning("Private relay completion for {JobNumber} returned HTTP {StatusCode}; its existing protected local copy is retained for acknowledgement retry.", ticket.JobNumber, (int)stagedCompletion.StatusCode);
+                                retryableFailure = true;
+                            }
                         }
                         else
                         {
@@ -298,8 +302,12 @@ public sealed class Worker(
                             cancellationToken);
                         if (!qsp2Completion.IsSuccessStatusCode)
                         {
-                            logger.LogWarning("QSP2 private relay completion for {JobNumber} returned HTTP {StatusCode}; the protected local copy is retained for retry.", ticket.JobNumber, (int)qsp2Completion.StatusCode);
-                            retryableFailure = true;
+                            if (!await RejectPermanentPrivateRelayCompletionAsync(
+                                    client, credentials, ticket, qsp2Completion, cancellationToken))
+                            {
+                                logger.LogWarning("QSP2 private relay completion for {JobNumber} returned HTTP {StatusCode}; the protected local copy is retained for retry.", ticket.JobNumber, (int)qsp2Completion.StatusCode);
+                                retryableFailure = true;
+                            }
                             continue;
                         }
 
@@ -412,8 +420,12 @@ public sealed class Worker(
                     cancellationToken);
                 if (!completion.IsSuccessStatusCode)
                 {
-                    logger.LogWarning("Private relay completion for {JobNumber} returned HTTP {StatusCode}; the protected local copy is retained for retry.", ticket.JobNumber, (int)completion.StatusCode);
-                    retryableFailure = true;
+                    if (!await RejectPermanentPrivateRelayCompletionAsync(
+                            client, credentials, ticket, completion, cancellationToken))
+                    {
+                        logger.LogWarning("Private relay completion for {JobNumber} returned HTTP {StatusCode}; the protected local copy is retained for retry.", ticket.JobNumber, (int)completion.StatusCode);
+                        retryableFailure = true;
+                    }
                     continue;
                 }
 
@@ -2108,6 +2120,56 @@ public sealed class Worker(
         var cloudState = await response.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
         if (cloudState?.Status == "COMPLETED")
             await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
+        return true;
+    }
+
+    private async Task<bool> RejectPermanentPrivateRelayCompletionAsync(
+        HttpClient client,
+        AgentCredentials credentials,
+        AgentPrivateRelayItem ticket,
+        HttpResponseMessage completion,
+        CancellationToken cancellationToken)
+    {
+        if (!PrivateRelayCompletionFailureRules.IsPermanentDocumentRejection(completion.StatusCode))
+            return false;
+
+        string? failureCode = null;
+        try
+        {
+            var body = await completion.Content.ReadAsStringAsync(cancellationToken);
+            using var payload = JsonDocument.Parse(body);
+            if (payload.RootElement.ValueKind == JsonValueKind.Object &&
+                payload.RootElement.TryGetProperty("code", out var codeElement) &&
+                codeElement.ValueKind == JsonValueKind.String)
+                failureCode = codeElement.GetString();
+        }
+        catch (JsonException)
+        {
+            // The status code is authoritative; malformed details use a safe
+            // generic customer message rather than retrying an invalid document.
+        }
+
+        var customerMessage = PrivateRelayCompletionFailureRules.CustomerMessage(failureCode);
+        using var rejection = await SendAgentRequestAsync(
+            client, credentials,
+            $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+            new AgentPrivateRelayRejectRequest("document_not_supported", customerMessage),
+            cancellationToken);
+        if (!rejection.IsSuccessStatusCode)
+        {
+            logger.LogWarning(
+                "Permanent validation rejection for private relay {JobNumber} could not be recorded (HTTP {StatusCode}); its protected local copy remains available for retry.",
+                ticket.JobNumber, (int)rejection.StatusCode);
+            return false;
+        }
+
+        // This ticket can no longer become a paid/printable job. Erase only its
+        // LOCAL_UPLOAD_STAGED protected copy; the store refuses to remove any
+        // finalized or otherwise transitioned queue entry.
+        var erased = await localQueueStore.DeleteRejectedLocalUploadAsync(ticket.PrintJobId, cancellationToken);
+        logger.LogWarning(
+            "Private relay {JobNumber} was rejected by document validation ({FailureCode}); protected staged copy erased: {Erased}.",
+            ticket.JobNumber, failureCode ?? "unknown_validation_error", erased);
         return true;
     }
 
