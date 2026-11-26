@@ -584,8 +584,12 @@ jobs:
               echo "::error::No verified SHA-256 entry found for $filename."
               return 1
             fi
-            local existing_json
-            if existing_json="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/$filename" --endpoint-url "$endpoint" --region auto --output json 2>/dev/null)"; then
+            local existing_json head_status
+            set +e
+            existing_json="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/$filename" --endpoint-url "$endpoint" --region auto --output json 2>&1)"
+            head_status=$?
+            set -e
+            if (( head_status == 0 )); then
               local existing_digest
               existing_digest="$(python -c 'import json,sys; print(json.load(sys.stdin).get("Metadata", {}).get("sha256", ""))' <<<"$existing_json")"
               if [[ "$existing_digest" == "$digest" ]]; then
@@ -593,6 +597,11 @@ jobs:
                 return 0
               fi
               echo "::error::Refusing to overwrite immutable R2 object $filename for tag $RELEASE_TAG."
+              return 1
+            elif [[ "$existing_json" =~ (404|NotFound|NoSuchKey) ]]; then
+              echo "No existing immutable R2 object found for $filename; uploading it."
+            else
+              echo "::error::Could not safely check whether immutable R2 object $filename exists: $existing_json"
               return 1
             fi
             aws s3 cp "artifacts/$filename" "s3://$CLOUDFLARE_R2_BUCKET/$object_prefix/$filename" \
@@ -614,14 +623,18 @@ jobs:
             upload_binary "SmartPrint-Android.aab"
           fi
           manifest_digest="$(sha256sum artifacts/SHA256SUMS.txt | awk '{print $1}')"
-          if existing_manifest_json="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/SHA256SUMS.txt" --endpoint-url "$endpoint" --region auto --output json 2>/dev/null)"; then
+          set +e
+          existing_manifest_json="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/SHA256SUMS.txt" --endpoint-url "$endpoint" --region auto --output json 2>&1)"
+          manifest_head_status=$?
+          set -e
+          if (( manifest_head_status == 0 )); then
             existing_manifest="$(python -c 'import json,sys; print(json.load(sys.stdin).get("Metadata", {}).get("sha256", ""))' <<<"$existing_manifest_json")"
             if [[ "$existing_manifest" != "$manifest_digest" ]]; then
               echo "::error::Refusing to overwrite immutable R2 checksum manifest for tag $RELEASE_TAG."
               exit 1
             fi
             echo "Immutable R2 checksum manifest already exists with the same SHA-256."
-          else
+          elif [[ "$existing_manifest_json" =~ (404|NotFound|NoSuchKey) ]]; then
             aws s3 cp artifacts/SHA256SUMS.txt "s3://$CLOUDFLARE_R2_BUCKET/$object_prefix/SHA256SUMS.txt" \
               --endpoint-url "$endpoint" \
               --region auto \
@@ -630,6 +643,9 @@ jobs:
               --content-disposition 'attachment; filename="SHA256SUMS.txt"' \
               --cache-control "public, max-age=31536000, immutable" \
               --metadata "sha256=$manifest_digest"
+          else
+            echo "::error::Could not safely check whether the immutable R2 checksum manifest exists: $existing_manifest_json"
+            exit 1
           fi
 
           # Verify stored object size, cache policy and SHA-256 metadata before
