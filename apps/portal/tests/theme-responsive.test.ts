@@ -176,7 +176,7 @@ test("light and dark palettes cover authentication, customer QR and public landi
   assert.match(photoStudio, /\.helpTooltipPanel\s*\{[^}]*display:grid[^}]*line-height:1\.65/s,
     "Photo Studio guidance must use readable line spacing in its contextual panel.");
   assert.match(photoStudioComponent, /aria-label=\{t\("Help: \{panel\}",\{panel:panelTitle\}\)\}/);
-  assert.match(photoStudioComponent, /role="region" aria-label=\{panelTitle\+" guidance"\}/,
+  assert.match(photoStudioComponent, /role="region" aria-label=\{t\("\{panel\} guidance",\{panel:panelTitle\}\)\}/,
     "Photo Studio helper content must be available in the accessible contextual-help region.");
 });
 
