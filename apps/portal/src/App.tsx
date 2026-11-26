@@ -161,6 +161,8 @@ export default function App() {
 }
 
 function ScopeAccessDenied({ scope, onSignOut, dark, onToggleTheme }: { scope: string; onSignOut: () => Promise<void>; dark: boolean; onToggleTheme: () => void }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [busy, setBusy] = useState(false);
   async function signOut() {
     setBusy(true);
@@ -3104,6 +3106,8 @@ function PricingPage({ pricing, onSave, busy }: {
   }) => void;
   busy: boolean;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [mono,setMono]=useState((pricing.monoPerSideMinor/100).toFixed(2));
   const [colour,setColour]=useState((pricing.colourPerSideMinor/100).toFixed(2));
   const [monoDuplex,setMonoDuplex]=useState((pricing.monoDuplexPerSheetMinor/100).toFixed(2));
@@ -3255,6 +3259,8 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   loadingOlderJobs: boolean;
   busyJobId: string | null;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [autoRefresh,setAutoRefresh]=useState(true);
   const [refreshSeconds,setRefreshSeconds]=useState(10);
   const [searchInput,setSearchInput]=useState(searchQuery);
@@ -3491,6 +3497,8 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   onPreview:(job:ShopPrintJob)=>void;
   onApply:(acceptedJobIds:string[],pdfBrandingEnabled:boolean)=>void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const hasIdDocument=jobs.some(job=>job.printKind==="ID_DOCUMENT");
   const [pdfBrandingEnabled,setPdfBrandingEnabled]=useState(()=>!hasIdDocument&&jobs.some(job=>job.pdfBrandingEnabled===true));
   const acceptedIds=jobs.filter(job=>decisions[job.id]??true).map(job=>job.id);
@@ -4827,6 +4835,8 @@ function postSmartPrintNativeMessage(message:string):boolean {
 }
 
 function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onPage:(sheet:number)=>void}) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const current=preview?.token===token?preview:null;
   return <div className="customer-native-pdf-preview">
     {current?.image
