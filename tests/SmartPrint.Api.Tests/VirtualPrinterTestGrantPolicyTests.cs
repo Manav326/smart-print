@@ -27,15 +27,16 @@ public sealed class VirtualPrinterTestGrantPolicyTests
     }
 
     [Fact]
-    public void GrantRequiresMatchingTenantAgentAndCurrentIdentity()
+    public void GrantRequiresMatchingShopAgentAndCurrentQueueIdentity()
     {
         var tenant = Guid.NewGuid();
         var agent = Guid.NewGuid();
         var fingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(agent, "Queue", "Driver", "ipp://host");
-        Assert.True(VirtualPrinterTestGrantPolicy.IsGrantActive(tenant, tenant, agent, agent, fingerprint, fingerprint, Now.AddDays(-1), Now.AddDays(1), null, Now));
-        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(tenant, Guid.NewGuid(), agent, agent, fingerprint, fingerprint, Now.AddDays(-1), Now.AddDays(1), null, Now));
-        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(tenant, tenant, Guid.NewGuid(), agent, fingerprint, fingerprint, Now.AddDays(-1), Now.AddDays(1), null, Now));
-        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(tenant, tenant, agent, agent, "changed", fingerprint, Now.AddDays(-1), Now.AddDays(1), null, Now));
+        Assert.True(Active(tenant, tenant, tenant, agent, agent, fingerprint, fingerprint));
+        Assert.False(Active(tenant, Guid.NewGuid(), tenant, agent, agent, fingerprint, fingerprint));
+        Assert.False(Active(tenant, tenant, Guid.NewGuid(), agent, agent, fingerprint, fingerprint));
+        Assert.False(Active(tenant, tenant, tenant, Guid.NewGuid(), agent, fingerprint, fingerprint));
+        Assert.False(Active(tenant, tenant, tenant, agent, agent, "changed", fingerprint));
     }
 
     [Fact]
@@ -44,9 +45,12 @@ public sealed class VirtualPrinterTestGrantPolicyTests
         var tenant = Guid.NewGuid();
         var agent = Guid.NewGuid();
         var fingerprint = "ABC";
-        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(tenant, tenant, agent, agent, fingerprint, fingerprint, Now.AddDays(-1), Now.AddDays(1), Now.AddHours(-1), Now));
-        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(tenant, tenant, agent, agent, fingerprint, fingerprint, Now.AddDays(-2), Now, null, Now));
-        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(tenant, tenant, agent, agent, fingerprint, fingerprint, Now.AddMinutes(1), Now.AddDays(1), null, Now));
+        Assert.False(Active(tenant, tenant, tenant, agent, agent, fingerprint, fingerprint,
+            createdUtc: Now.AddDays(-1), expiresUtc: Now.AddDays(1), revokedUtc: Now.AddHours(-1)));
+        Assert.False(Active(tenant, tenant, tenant, agent, agent, fingerprint, fingerprint,
+            createdUtc: Now.AddDays(-2), expiresUtc: Now));
+        Assert.False(Active(tenant, tenant, tenant, agent, agent, fingerprint, fingerprint,
+            createdUtc: Now.AddMinutes(1), expiresUtc: Now.AddDays(1)));
     }
 
     [Theory]
@@ -83,20 +87,12 @@ public sealed class VirtualPrinterTestGrantPolicyTests
         var fingerprintB = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(agentB, "IPP B", "Driver B", "ipp://b/print");
         var fingerprintC = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(agentC, "IPP C", "Driver C", "ipp://c/print");
 
-        // Shop A has an active grant.
-        Assert.True(VirtualPrinterTestGrantPolicy.IsGrantActive(
-            shopA, shopA, shopA, agentA, agentA, fingerprintA, fingerprintA,
-            Now.AddHours(-1), Now.AddDays(1), null, Now));
-
-        // Shop B cannot borrow Shop A's grant, even if an identifier is replayed.
-        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(
-            shopB, shopB, shopA, agentB, agentA, fingerprintB, fingerprintA,
-            Now.AddHours(-1), Now.AddDays(1), null, Now));
-
-        // Shop C was approved but the grant has since been revoked.
-        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(
-            shopC, shopC, shopC, agentC, agentC, fingerprintC, fingerprintC,
-            Now.AddHours(-1), Now.AddDays(1), Now.AddMinutes(-1), Now));
+        Assert.True(Active(shopA, shopA, shopA, agentA, agentA, fingerprintA, fingerprintA));
+        // Shop B attempts to borrow the grant record from Shop A.
+        Assert.False(Active(shopB, shopB, shopA, agentB, agentA, fingerprintB, fingerprintA));
+        // Shop C's previously valid approval is revoked.
+        Assert.False(Active(shopC, shopC, shopC, agentC, agentC, fingerprintC, fingerprintC,
+            revokedUtc: Now.AddMinutes(-1)));
     }
 
     [Fact]
@@ -107,4 +103,20 @@ public sealed class VirtualPrinterTestGrantPolicyTests
         Assert.False(VirtualPrinterTestGrantPolicy.IsValidGrantLifetime(Now, Now.AddDays(30).AddTicks(1)));
         Assert.False(VirtualPrinterTestGrantPolicy.IsValidGrantLifetime(Now.AddHours(1), Now));
     }
+
+    private static bool Active(
+        Guid tenantId,
+        Guid printerTenantId,
+        Guid grantTenantId,
+        Guid? printerAgentId,
+        Guid grantAgentId,
+        string? printerFingerprint,
+        string grantFingerprint,
+        DateTimeOffset? createdUtc = null,
+        DateTimeOffset? expiresUtc = null,
+        DateTimeOffset? revokedUtc = null) =>
+        VirtualPrinterTestGrantPolicy.IsGrantActive(
+            tenantId, printerTenantId, grantTenantId, printerAgentId, grantAgentId,
+            printerFingerprint, grantFingerprint,
+            createdUtc ?? Now.AddHours(-1), expiresUtc ?? Now.AddDays(1), revokedUtc, Now);
 }
