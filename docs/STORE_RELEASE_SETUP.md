@@ -35,9 +35,9 @@ If Microsoft rejects this dependency, stop the submission. The next decision wou
 
 ## Release provenance verification
 
-Each release includes a signed SLSA provenance attestation created by GitHub Actions. The release workflow attests the Windows and Android binaries plus `BUILD-INFO.txt`; the attestation bundle is included as `attestation.sigstore.json` in the GitHub release. The checksum manifest covers the stable binaries and build metadata, while the Sigstore bundle is independently signed. The bundle is not copied to immutable R2 storage because its timestamped signature can differ when a release workflow is retried. The Store publishing workflow verifies the relevant artifact attestation before it calls either Store API. The publishing runners require GitHub CLI 2.102.0 or newer for secure attestation verification.
+Each release includes a signed SLSA provenance attestation created by GitHub Actions. The release workflow attests the Windows and Android binaries plus `BUILD-INFO.txt`; the attestation bundle is included as `attestation.sigstore.json` in the GitHub release. The checksum manifest covers the stable binaries and build metadata, while the Sigstore bundle is independently signed. The bundle is not copied to immutable R2 storage because its timestamped signature can differ when a release workflow is retried. The Store publishing workflow verifies the relevant artifact attestation before it calls either Store API. The publishing runners require GitHub CLI 2.106.0 for secure attestation verification.
 
-You can independently verify a release artifact from a machine with GitHub CLI 2.102.0 or newer:
+You can independently verify a release artifact from a machine with GitHub CLI 2.106.0:
 
 ```powershell
 gh attestation verify .\SmartPrint-Windows-Store-Setup.exe --repo Manav326/smart-print --signer-workflow Manav326/smart-print/.github/workflows/release.yml
