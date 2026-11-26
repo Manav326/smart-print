@@ -6639,7 +6639,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                      const paperSize=event.currentTarget.value as CustomerFileSettings["paperSize"];
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,paperSize}}));
                    }}>
-                    <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
+                    <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">{t("Letter")}</option><option value="LEGAL">{t("Legal")}</option>
                   </select></label>
                   <label><span>{t("Orientation")}</span><select value={own.orientation} onChange={event=>{
                      const orientation=event.currentTarget.value as CustomerFileSettings["orientation"];
