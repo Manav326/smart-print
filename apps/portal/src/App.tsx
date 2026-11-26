@@ -585,7 +585,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       ? printers.find(candidate => candidate.id === replacePrinterId)
       : undefined;
     if (replacePrinterId && !replacedPrinter) {
-      setError("The selected printer list changed. Refresh and choose the replacement again.");
+      setError(t("The selected printer list changed. Refresh and choose the replacement again."));
       return false;
     }
     // The PrintersPage replacement dialog is the explicit owner confirmation.
@@ -692,7 +692,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setLocalAgentNeedsRepair(status.status === "IDENTITY_UNAVAILABLE");
 
       if (!status.serviceReachable) {
-        if (!silent) setError("The SmartPrint background service is not responding. Restart Windows or repair SmartPrint, then retry.");
+        if (!silent) setError(t("The SmartPrint background service is not responding. Restart Windows or repair SmartPrint, then retry."));
         return;
       }
 
@@ -712,7 +712,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           } else {
             setLocalAgentConflict(true);
             if (!allowPreviousShopReconnection) {
-              if (!silent) setError("This computer is still paired with another shop. Its owner must revoke it before you can connect it here.");
+              if (!silent) setError(t("This computer is still paired with another shop. Its owner must revoke it before you can connect it here."));
               return;
             }
 
@@ -1124,7 +1124,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     const selectedJobs=jobIds.map(id=>journeyJobs.find(job=>job.id===id));
     const resolvedJobs=selectedJobs.filter((job):job is ShopPrintJob=>job!==undefined);
     if(resolvedJobs.length!==jobIds.length){
-      setError("The selected files changed in the latest order refresh. Refresh the order and select the files again.");
+      setError(t("The selected files changed in the latest order refresh. Refresh the order and select the files again."));
       try{await reload();}catch{/* Keep the stale-selection message visible. */}
       return false;
     }
@@ -1151,7 +1151,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       try{
         await reload();
       }catch{
-        setError("The resume was authorised, but the order view could not refresh. Use Refresh to check the latest status; do not submit the same files again.");
+        setError(t("The resume was authorised, but the order view could not refresh. Use Refresh to check the latest status; do not submit the same files again."));
       }
       // The server has committed the authorisation. Return success even when
       // refreshing the view fails, so the selected files cannot be submitted twice.
@@ -1221,7 +1221,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     );
     if (reason === null) return;
     if (reason.trim().length < 3) {
-      setError("A rejection reason of at least 3 characters is required.");
+      setError(t("A rejection reason of at least 3 characters is required."));
       return;
     }
 
@@ -1355,7 +1355,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
   async function openShopPhotoStudioForJob(job:ShopPrintJob,returningFromPreview?:NonNullable<typeof preview>){
     if(!job.photoSourceAvailable||job.privatePrinting){
-      setError("This job has no shop-editable original photo. Private Printing files stay with the customer.");
+      setError(t("This job has no shop-editable original photo. Private Printing files stay with the customer."));
       return;
     }
     setBusyJobId(job.id);setError("");setToast("");
@@ -1448,7 +1448,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       const savedJob:ShopPrintJob={...editor.job,photoEditorSettingsJson:JSON.stringify(sheet.editorSettings??{}),printKind:"PHOTO",photoSizeCode:sheet.sizeCode,photoCount:sheet.photoCount,photosPerPage:sheet.photosPerPage,pageCount:Math.max(1,Math.ceil(sheet.photoCount/sheet.photosPerPage)),photoOutputLayout:sheet.photoOutputLayout,photoPaperFinish:sheet.photoPaperFinish,document:{...editor.job.document,originalFileName:sheet.file.name,mediaType:"application/pdf",sizeBytes:sheet.file.size}};
       setPreview({name:sheet.file.name,url:URL.createObjectURL(previewBlob),blob:previewBlob,mediaType,job:savedJob,readOnly:true});
     }catch{
-      setError("The prepared photo output was saved to the existing print job, but the queue could not refresh its preview. Refresh the queue before approving or printing.");
+      setError(t("The prepared photo output was saved to the existing print job, but the queue could not refresh its preview. Refresh the queue before approving or printing."));
     }finally{
       setBusyJobId(null);
     }
@@ -1879,7 +1879,7 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
     if(!candidate){setFile(null);return;}
     const inferredType=resolvePhotoSourceMimeType(candidate);
     if(!inferredType){
-      setFile(null);setError("Choose a JPG, JPEG or PNG image. Other formats are not supported by Photo Studio.");event.currentTarget.value="";return;
+      setFile(null);setError(t("Choose a JPG, JPEG or PNG image. Other formats are not supported by Photo Studio."));event.currentTarget.value="";return;
     }
     if(candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes){
       setFile(null);setError(`The original photo must be between 1 byte and ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB.`);event.currentTarget.value="";return;
@@ -1889,11 +1889,11 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
 
   function submit(event:FormEvent<HTMLFormElement>) {
     event.preventDefault();setError("");
-    if(!file){setError("Choose a photo before opening Photo Studio.");return;}
-    if(!enabledPhotoSizes){setError("Configure at least one photo size and per-photo rate in Pricing first.");return;}
-    if(!selectedPaymentEnabled){setError("Choose a payment method currently enabled by this shop.");return;}
-    if(recipientType==="EXISTING_CUSTOMER"&&!selectedCustomer){setError("Choose a customer already known to this shop.");return;}
-    if(recipientType==="WALK_IN"&&!recipientName.trim()){setError("Enter the walk-in customer's name.");return;}
+    if(!file){setError(t("Choose a photo before opening Photo Studio."));return;}
+    if(!enabledPhotoSizes){setError(t("Configure at least one photo size and per-photo rate in Pricing first."));return;}
+    if(!selectedPaymentEnabled){setError(t("Choose a payment method currently enabled by this shop."));return;}
+    if(recipientType==="EXISTING_CUSTOMER"&&!selectedCustomer){setError(t("Choose a customer already known to this shop."));return;}
+    if(recipientType==="WALK_IN"&&!recipientName.trim()){setError(t("Enter the walk-in customer's name."));return;}
     onContinue({
       source:file,recipientType,
       customerUserId:recipientType==="EXISTING_CUSTOMER"?selectedCustomer!.id:undefined,
@@ -5429,14 +5429,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             current.paperSize===payload.paperSize&&current.orientation===payload.orientation
             ?{...payload,requestedPageIndex:payload.pageIndex,loading:false}:current);
         }catch{
-          setError("The PDF preview could not be displayed. You can still upload the document.");
+          setError(t("The PDF preview could not be displayed. You can still upload the document."));
         }
       }else if(message.startsWith("CUSTOMER_PDF_PREVIEW_FAILED|")){
         const token=message.slice("CUSTOMER_PDF_PREVIEW_FAILED|".length).split("|",1)[0];
         setNativePdfPreview(current=>current?.token===token
           ?{...current,pageCount:0,image:"",thumbnails:[],loading:false}
           :current);
-        setError("The PDF preview could not be prepared. You can still upload the document.");
+        setError(t("The PDF preview could not be prepared. You can still upload the document."));
       }
     };
     const bridge=(window as Window & {
@@ -5613,7 +5613,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   async function upload() {
     if(batchLockedForPayment){
-      setError("This batch already has a payment attempt. Start a new batch for additional files.");
+      setError(t("This batch already has a payment attempt. Start a new batch for additional files."));
       return;
     }
     if(files.length===0)return;
@@ -5938,7 +5938,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       const selectedQuote=uploaded?nextQuotes[uploaded.job.id]??null:null;
       setQuote(selectedQuote??Object.values(nextQuotes)[0]??null);
       if(failures.length) setError(`Could not quote: ${failures.join(", ")}. Retry the batch quote.`);
-      else if(!Object.keys(nextQuotes).length) setError("No files are waiting for a quote.");
+      else if(!Object.keys(nextQuotes).length) setError(t("No files are waiting for a quote."));
     } catch(exception) {
       setError(exception instanceof ApiError?exception.message:"The shop could not calculate the batch quote.");
     } finally {setBusy(false);}
@@ -6098,12 +6098,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   function applyPhotoSheets(sheets:PreparedPhotoSheet[]) {
     if(!photoStudioSourceFingerprint||!sheets.length)return;
     const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===photoStudioSourceFingerprint);
-    if(index<0){setError("The source photo is no longer in this batch. Select it again.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
+    if(index<0){setError(t("The source photo is no longer in this batch. Select it again."));setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const generated=sheets.map(sheet=>sheet.file),nextFiles=[...files.slice(0,index),...generated,...files.slice(index+1)];
     const pending=nextFiles.filter(candidate=>!uploadedFileFingerprints.includes(customerFileFingerprint(candidate)));
     const existingBytes=uploadedBatch.reduce((sum,item)=>sum+item.document.sizeBytes,0);
     const capacityError=validateCustomerUploadBatchLimits(uploadedBatch.length,existingBytes,pending.map(candidate=>candidate.size));
-    if(capacityError){setError("Prepared photo sheets exceed the 50 MB per-file, 20-file or 500 MB batch limit. Reduce the copies or start a new batch.");setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
+    if(capacityError){setError(t("Prepared photo sheets exceed the 50 MB per-file, 20-file or 500 MB batch limit. Reduce the copies or start a new batch."));setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);return;}
     const group=groupNameForFile(files[index]),groups={...fileGroupNames},settings={...fileSettings},photos={...photoSettingsByFileFingerprint},previews={...photoPreviewPagesByFingerprint};
     delete groups[photoStudioSourceFingerprint];delete settings[photoStudioSourceFingerprint];delete photos[photoStudioSourceFingerprint];delete previews[photoStudioSourceFingerprint];
     for(const sheet of sheets){
@@ -6120,14 +6120,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   function openPhotoStudio(candidate:File){
     const fingerprint=customerFileFingerprint(candidate);
     if(uploadedFileFingerprints.includes(fingerprint)){
-      setError("This photo has already been sent to the shop. The shop can prepare it from the review queue; reopening it here would create a duplicate print request.");
+      setError(t("This photo has already been sent to the shop. The shop can prepare it from the review queue; reopening it here would create a duplicate print request."));
       return;
     }
-    if(!photoRatesAvailable){setError("Photo printing is not configured at this shop yet. Please ask the shop owner to enable photo pricing.");return;}
+    if(!photoRatesAvailable){setError(t("Photo printing is not configured at this shop yet. Please ask the shop owner to enable photo pricing."));return;}
     const identified=identifiedCustomerDocumentTypes.get(candidate);
     const mediaType=identified?.mediaType??resolvePhotoSourceMimeType(candidate);
     if(mediaType!=="image/jpeg"&&mediaType!=="image/png"){
-      setError("The file contents are not a supported JPEG or PNG photo.");
+      setError(t("The file contents are not a supported JPEG or PNG photo."));
       return;
     }
     const source=candidate.type.split(";")[0].trim().toLowerCase()===mediaType
@@ -6148,7 +6148,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     const token=smartPrintNativePdfPreviewTokens.get(candidate);
     if(!token){
       setNativePdfPreview(null);
-      setError("The PDF preview is unavailable. You can still upload the document.");
+      setError(t("The PDF preview is unavailable. You can still upload the document."));
       return;
     }
     const settings=settingsForFile(candidate);
@@ -6166,7 +6166,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         paperSize:settings.paperSize,orientation:settings.orientation,
         firstSourcePage:0,lastSourcePage:0,image:"",thumbnails:[],loading:false
       });
-      setError("The PDF preview is unavailable. You can still upload the document.");
+      setError(t("The PDF preview is unavailable. You can still upload the document."));
       return;
     }
     setError("");
@@ -6179,13 +6179,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     setNativePdfPreview({...current,requestedPageIndex:target,loading:true});
     if(!postCustomerPdfPreviewRequest(token,target,file)){
       setNativePdfPreview({...current,loading:false});
-      setError("The print layout sheet could not be opened.");
+      setError(t("The print layout sheet could not be opened."));
     }
   }
   async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
     setNotices([]);
     if(batchLockedForPayment){
-      setError("This batch already has a payment attempt. Start a new batch for additional files.");
+      setError(t("This batch already has a payment attempt. Start a new batch for additional files."));
       return;
     }
     if(nativePrintKinds?.length===next.length) {
@@ -6227,11 +6227,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         (candidate as File & {__smartPrintPhotoSettings?:CustomerPhotoSettings}).__smartPrintPhotoSettings
       )
     );
-    if(malformedPhotoDocument){setError("This saved Photo Studio sheet is missing its print details. Refresh the private document library and select it again.");return;}
+    if(malformedPhotoDocument){setError(t("This saved Photo Studio sheet is missing its print details. Refresh the private document library and select it again."));return;}
     const incomingIdDocument=supported.some(isSmartPrintIdDocument);
     const incomingPhotoDocument=supported.some(isSmartPrintPhotoDocument);
     if(incomingIdDocument&&uploadedBatch.some(item=>!item.job.privatePrinting)) {
-      setError("This batch already contains Standard Printing uploads, so it can no longer be promoted safely. Start a new Private Printing batch for the ID document.");
+      setError(t("This batch already contains Standard Printing uploads, so it can no longer be promoted safely. Start a new Private Printing batch for the ID document."));
       return;
     }
     // Selecting an ID document promotes all not-yet-uploaded files in this
@@ -6266,7 +6266,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       const ext=candidate.name.toLowerCase().match(/\.[^.]+$/)?.[0]??"";
       return ext!==detected.extension&&!(detected.extension===".jpg"&&ext===".jpeg");
     });
-    if(supported.length===0){setError("Choose printable PDF, JPG or PNG files.");return;}
+    if(supported.length===0){setError(t("Choose printable PDF, JPG or PNG files."));return;}
     const merged=new Map(selectedFilesRef.current.map(candidate=>[customerFileFingerprint(candidate),candidate]));
     for(const candidate of supported)merged.set(customerFileFingerprint(candidate),candidate);
     const selected=Array.from(merged.values());
