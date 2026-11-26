@@ -68,6 +68,8 @@ jobs:
   windows-setup:
     needs: validate-release-config
     runs-on: windows-latest
+    outputs:
+      store_available: ${{ steps.store-package.outputs.available }}
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
@@ -132,6 +134,79 @@ jobs:
             throw "The interim Windows beta package must not contain an unexpected or invalid Authenticode signature."
           }
           Write-Host "Verified: Windows beta installer is intentionally unsigned. SHA-256 will be published with the release."
+      - id: store-package
+        name: Build signed offline Microsoft Store installer when configured
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: \${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: \${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+          WEBVIEW2_STANDALONE_X64_URL: \${{ vars.WEBVIEW2_STANDALONE_X64_URL }}
+        run: |
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64) -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_PASSWORD)
+          $hasRuntimeUrl = -not [string]::IsNullOrWhiteSpace($env:WEBVIEW2_STANDALONE_X64_URL)
+          if (-not $hasCertificate -and -not $hasRuntimeUrl) {
+            "available=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Store package skipped: configure the Windows code-signing certificate and WebView2 standalone installer URL."
+            exit 0
+          }
+          if (-not $hasCertificate -or -not $hasRuntimeUrl) {
+            throw "Configure WINDOWS_CODESIGN_PFX_BASE64, WINDOWS_CODESIGN_PFX_PASSWORD and WEBVIEW2_STANDALONE_X64_URL together."
+          }
+          "available=true" >> $env:GITHUB_OUTPUT
+          $storeAgent = "artifacts/store-agent"
+          $storeDesktop = "artifacts/store-desktop"
+          New-Item -ItemType Directory -Force -Path $storeAgent, $storeDesktop | Out-Null
+          Copy-Item "artifacts/agent/*" $storeAgent -Recurse -Force
+          Copy-Item "artifacts/desktop/*" $storeDesktop -Recurse -Force
+          $runtime = Join-Path $storeDesktop "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          Invoke-WebRequest -Uri $env:WEBVIEW2_STANDALONE_X64_URL -OutFile $runtime -MaximumRedirection 10
+          $runtimeSignature = Get-AuthenticodeSignature -LiteralPath $runtime
+          if ($runtimeSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $runtimeSignature.SignerCertificate.Subject -notmatch "Microsoft") {
+            throw "WebView2 Evergreen Standalone Installer did not pass Microsoft Authenticode verification."
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-code-signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
+          $signtool = Get-ChildItem "\${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -File |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw "Windows SDK signtool.exe was not found." }
+          $peFiles = @(
+            Get-ChildItem $storeAgent, $storeDesktop -Recurse -File |
+              Where-Object { $_.Extension -in ".exe", ".dll", ".sys", ".ocx" -and $_.FullName -ne $runtime }
+          )
+          if ($peFiles.Count -eq 0) { throw "No SmartPrint PE binaries were found for signing." }
+          foreach ($file in $peFiles) {
+            & $signtool sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /f $pfxPath /p $env:WINDOWS_CODESIGN_PFX_PASSWORD $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Code signing failed for $($file.FullName)." }
+            & $signtool verify /pa /all $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($file.FullName)." }
+          }
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $isccArgs = @(
+            "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL",
+            "/DSmartPrintVersion=$env:RELEASE_TAG",
+            "/DSmartPrintBuildId=$env:GITHUB_RUN_NUMBER",
+            "/DSmartPrintAgentSourceDir=artifacts\store-agent",
+            "/DSmartPrintDesktopSourceDir=artifacts\store-desktop",
+            "/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Store-Setup",
+            "scripts/build-windows-installer.iss"
+          )
+          & $iscc @isccArgs
+          if ($LASTEXITCODE -ne 0) { throw "Offline Microsoft Store installer compilation failed." }
+          $installer = "artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe"
+          & $signtool sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /f $pfxPath /p $env:WINDOWS_CODESIGN_PFX_PASSWORD $installer
+          if ($LASTEXITCODE -ne 0) { throw "Final Microsoft Store installer signing failed." }
+          & $signtool verify /pa /all $installer
+          if ($LASTEXITCODE -ne 0) { throw "Final Microsoft Store installer signature verification failed." }
+          Remove-Item -LiteralPath $pfxPath -Force
+          Write-Host "Verified signed, offline x64 Microsoft Store installer."
+      - name: Upload signed Microsoft Store installer
+        if: steps.store-package.outputs.available == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-windows-store-release
+          path: artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe
+          if-no-files-found: error
+          retention-days: 5
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
@@ -220,7 +295,7 @@ jobs:
           printf '%s' "$ANDROID_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$key_file"
           test -s "$key_file"
           echo "ANDROID_SIGNING_KEYSTORE_FILE=$key_file" >> "$GITHUB_ENV"
-      - name: Build signed Android release APK
+      - name: Build signed Android APK and App Bundle
         if: steps.check-signing.outputs.available == 'true'
         shell: bash
         run: |
@@ -229,9 +304,12 @@ jobs:
             -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
             -PsmartPrintVersionCode="$GITHUB_RUN_NUMBER" \
             -PsmartPrintVersionName="$RELEASE_TAG" \
-            :app:testDebugUnitTest :app:assembleRelease
+            :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
           mkdir -p artifacts/android
           cp apps/android/app/build/outputs/apk/release/app-release.apk artifacts/android/SmartPrint-Android.apk
+          cp apps/android/app/build/outputs/bundle/release/app-release.aab artifacts/android/SmartPrint-Android.aab
+          jarsigner -verify -verbose -certs artifacts/android/SmartPrint-Android.aab >/tmp/smartprint-aab-signature.log
+          grep -q "jar verified" /tmp/smartprint-aab-signature.log
           apksigner_path="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort | tail -n 1)"
           test -n "$apksigner_path"
           verification_output="$("$apksigner_path" verify --verbose --print-certs artifacts/android/SmartPrint-Android.apk 2>&1)"
@@ -243,12 +321,14 @@ jobs:
             exit 1
           fi
           echo "Verified Android release certificate SHA-256: $certificate_fingerprint"
-      - name: Upload Android release APK
+      - name: Upload Android APK and AAB
         if: steps.check-signing.outputs.available == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: smartprint-android-release
-          path: artifacts/android/SmartPrint-Android.apk
+          path: |
+            artifacts/android/SmartPrint-Android.apk
+            artifacts/android/SmartPrint-Android.aab
           if-no-files-found: error
           retention-days: 5
 
@@ -261,13 +341,20 @@ jobs:
       - android-release
     env:
       ANDROID_RELEASE_AVAILABLE: ${{ needs.android-release.outputs.available }}
+      WINDOWS_STORE_PACKAGE_AVAILABLE: ${{ needs.windows-setup.outputs.store_available }}
     steps:
       - name: Download Windows installer
         uses: actions/download-artifact@v8
         with:
           name: smartprint-windows-release
           path: artifacts
-      - name: Download Android APK
+      - name: Download signed Microsoft Store installer
+        if: needs.windows-setup.outputs.store_available == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: smartprint-windows-store-release
+          path: artifacts
+      - name: Download Android APK and AAB
         if: needs.android-release.outputs.available == 'true'
         uses: actions/download-artifact@v8
         with:
@@ -279,8 +366,11 @@ jobs:
           set -euo pipefail
           cd artifacts
           files=(SmartPrint-Windows-Setup.exe)
+          if [[ "$WINDOWS_STORE_PACKAGE_AVAILABLE" == "true" ]]; then
+            files+=(SmartPrint-Windows-Store-Setup.exe)
+          fi
           if [[ "$ANDROID_RELEASE_AVAILABLE" == "true" ]]; then
-            files+=(SmartPrint-Android.apk)
+            files+=(SmartPrint-Android.apk SmartPrint-Android.aab)
           fi
           sha256sum "${files[@]}" > SHA256SUMS.txt
           sha256sum --check SHA256SUMS.txt
@@ -324,6 +414,8 @@ jobs:
           generated_assets = {
               "SmartPrint-Windows-Setup.exe",
               "SmartPrint-Android.apk",
+              "SmartPrint-Android.aab",
+              "SmartPrint-Windows-Store-Setup.exe",
               "SHA256SUMS.txt",
           }
           for asset in release.get("assets", []):
@@ -463,6 +555,9 @@ jobs:
           }
 
           upload_binary "SmartPrint-Windows-Setup.exe"
+          if [[ "$WINDOWS_STORE_PACKAGE_AVAILABLE" == "true" ]]; then
+            upload_binary "SmartPrint-Windows-Store-Setup.exe"
+          fi
           if [[ "$ANDROID_RELEASE_AVAILABLE" == "true" ]]; then
             upload_binary "SmartPrint-Android.apk"
           fi
@@ -489,6 +584,10 @@ jobs:
           endpoint = f"https://{os.environ['CLOUDFLARE_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
           artifacts = Path("artifacts")
           files = ["SmartPrint-Windows-Setup.exe"]
+          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
+              files.append("SmartPrint-Windows-Store-Setup.exe")
+          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
+              files.append("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
               files.append("SmartPrint-Android.apk")
 
@@ -584,8 +683,10 @@ jobs:
           token = os.environ["GH_TOKEN"]
           artifact_dir = Path("artifacts")
           binaries = {"SmartPrint-Windows-Setup.exe"}
+          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
+              binaries.add("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
-              binaries.add("SmartPrint-Android.apk")
+              binaries.update({"SmartPrint-Android.apk", "SmartPrint-Android.aab"})
           expected = binaries | {"SHA256SUMS.txt"}
           headers = {
               "Accept": "application/vnd.github+json",
@@ -641,9 +742,10 @@ jobs:
               published = json.loads(response.read())
           if published.get("draft") or published.get("tag_name") != tag:
               raise SystemExit("GitHub did not confirm publication of the verified stable release.")
-          android_status = "and signed Android APK" if "SmartPrint-Android.apk" in binaries else "without Android until signing is configured"
+          android_status = "and signed Android APK/AAB" if "SmartPrint-Android.apk" in binaries else "without Android until signing is configured"
+          windows_status = "and signed Store-ready Windows installer" if "SmartPrint-Windows-Store-Setup.exe" in binaries else "without Store-ready Windows installer until signing is configured"
           print(
-              f"Published {tag} with the unsigned Windows beta installer {android_status}. "
+              f"Published {tag} with the unsigned website Windows beta installer {android_status} {windows_status}. "
               "Older releases are not modified or deleted."
           )
           PY
