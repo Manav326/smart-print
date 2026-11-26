@@ -553,10 +553,10 @@ test("Photo Studio normalizes the live Number of copies input value on blur",()=
  const quantityField=quantityStart>=0 && quantityEnd>=0 ? studio.slice(quantityStart,quantityEnd+2) : "";
  assert.ok(quantityField,"Number of copies input must exist by its stable ID.");
  assert.match(quantityField,/type="number"/);
- assert.match(quantityField,/aria-label="Number of copies"/);
+ assert.match(quantityField,/aria-label=\{t\("Number of copies"\)\}/);
  assert.ok(quantityField,"Number of copies input must exist by its stable ID.");
  assert.match(quantityField,/type="number"/);
- assert.match(quantityField,/aria-label="Number of copies"/);
+ assert.match(quantityField,/aria-label=\{t\("Number of copies"\)\}/);
  assert.match(quantityField,/onBlur=\{event\s*=>/);
  assert.match(quantityField,/event\.currentTarget\.value/);
  assert.doesNotMatch(quantityField,/Number\(copiesInput\)/,
@@ -705,7 +705,7 @@ test("Photo Studio preview zoom is independent from crop zoom and print export",
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.ok(studio.includes("const [previewScale,setPreviewScale]=useState(1)"));
  assert.ok(studio.includes("transform: `scale(${previewScale})`"));
- assert.ok(studio.includes('aria-label="Preview zoom in"'));
+ assert.ok(studio.includes('aria-label={t("Preview zoom in")}'));
  assert.ok(studio.includes('id="photo-studio-reset-preview" onClick={() => setPreviewScale(1)}'));
  assert.ok(studio.includes('id="photo-studio-zoom"'));
  assert.ok(studio.includes("value={zoom} onChange="));
