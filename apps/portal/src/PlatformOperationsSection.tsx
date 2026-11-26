@@ -119,13 +119,13 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
     <section className="panel platform-ops-history">
       <div className="platform-ops-heading">
         <div><h3>{t("Shop-scoped virtual printer test access")}</h3><p>{t("Approve one discovered Windows virtual queue for one shop. Approval is bound to its Agent, queue, driver and port identity, expires after seven days by default, and never changes its printer type.")}</p></div>
-        <button className="subtle-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={14}/> Refresh</button>
+        <button className="subtle-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={14}/> {t("Refresh")}</button>
       </div>
-      <label className="platform-ops-reason"><span>Approval / revocation reason</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder="Reason required for the audit history"/></label>
+      <label className="platform-ops-reason"><span>{t("Approval / revocation reason")}</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder={t("Reason required for the audit history")}/></label>
       {error && <div className="inline-error" role="alert">{error}</div>}
       {success && <div className="inline-success" role="status">{success}</div>}
       {loading ? <div className="platform-plan-empty">Loading discovered virtual queues…</div> : queues.length === 0
-        ? <div className="platform-plan-empty">No unsupported virtual Windows queues are currently discovered.</div>
+        ? <div className="platform-plan-empty">{t("No unsupported virtual Windows queues are currently discovered.")}</div>
         : <div className="platform-ops-history-list">
             {queues.map(queue => {
               const activeGrant = queue.grants.find(grant => grant.isActive);
@@ -213,12 +213,12 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
     <section className="platform-ops-page">
       <div className="platform-ops-intro">
         <div>
-          <div className="platform-plan-kicker"><ShieldCheck size={14}/> PLATFORM POLICY</div>
+          <div className="platform-plan-kicker"><ShieldCheck size={14}/> {t("PLATFORM POLICY")}</div>
           <h2>{t("Operations, quotas and data retention")}</h2>
-          <p>Central controls enforced by the API and paired Windows Agents. Every change is persisted with an audit reason.</p>
+          <p>{t("Central controls enforced by the API and paired Windows Agents. Every change is persisted with an audit reason.")}</p>
         </div>
         <button className="secondary-button" onClick={() => void reload()} disabled={loading || saving}>
-          <RefreshCw size={14}/> Refresh
+          <RefreshCw size={14}/> {t("Refresh")}
         </button>
       </div>
 
@@ -231,7 +231,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
           <section className="panel platform-ops-panel">
             <div className="platform-ops-heading">
               <div><h3>{t("Monthly print quota and retention")}</h3><p>{t("Quota units are print jobs, not pages or copies. Paid plan limits remain versioned per plan.")}</p></div>
-              <span className="neutral-chip">Platform-managed</span>
+              <span className="neutral-chip">{t("Platform-managed")}</span>
             </div>
             <div className="platform-ops-grid">
               {fields.map(field => (
@@ -259,7 +259,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
               <span><strong>{t("Allow already-paid jobs to continue during suspension")}</strong><small>{t("Only jobs created and payment-verified before the latest suspension can be claimed. New orders and post-suspension payments remain blocked.")}</small></span>
             </label>
             <div className="platform-ops-save-row">
-              <label className="platform-ops-reason"><span>Audit reason</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder="Why are these platform settings changing?"/></label>
+              <label className="platform-ops-reason"><span>{t("Audit reason")}</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder={t("Why are these platform settings changing?")}/></label>
               <button className="primary-button" onClick={() => void save()} disabled={saving || loading}>
                 {saving ? <LoaderCircle size={14} className="platform-spin"/> : <Save size={14}/>} Save settings
               </button>
@@ -274,8 +274,8 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
           </section>
 
           <section className="panel platform-ops-history">
-            <div className="platform-ops-heading"><div><h3>Settings audit history</h3><p>Most recent platform-wide changes</p></div><span>{history.length} events</span></div>
-            {history.length === 0 ? <div className="platform-plan-empty">No operational settings changes have been recorded yet.</div> : (
+            <div className="platform-ops-heading"><div><h3>{t("Settings audit history")}</h3><p>{t("Most recent platform-wide changes")}</p></div><span>{history.length} events</span></div>
+            {history.length === 0 ? <div className="platform-plan-empty">{t("No operational settings changes have been recorded yet.")}</div> : (
               <div className="platform-ops-history-list">
                 {history.map(item => (
                   <details className="platform-ops-history-item" key={item.id}>
