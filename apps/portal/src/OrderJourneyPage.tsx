@@ -116,8 +116,8 @@ function FileActions({job,printers,agents,locale,onPreview,onApprove,onReject,on
     {canEditPhoto&&<button type="button" className={styles.miniAction} onClick={()=>onOpenPhotoStudio(job)}><ImageIcon size={12}/> Edit photo</button>}
     {job.status==="AWAITING_SHOP_APPROVAL"&&!job.batchId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onApprove(job)}><Check size={12}/> Accept</button>}
     {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&!job.batchId&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onReject(job)}><X size={12}/> Reject</button>}
-    {assignable&&<label className={styles.printerAssignment}>Printer
-      <select aria-label={"Assign printer for "+job.jobNumber} value={job.printerDeviceId??""} onChange={event=>onAssignPrinter(job,event.currentTarget.value)}>
+    {assignable&&<label className={styles.printerAssignment}>{t("Printer")}
+      <select aria-label={t("Assign printer for ") + job.jobNumber} value={job.printerDeviceId??""} onChange={event=>onAssignPrinter(job,event.currentTarget.value)}>
         <option value="">{t("Choose printer")}</option>
         {currentPrinter&&!assignablePrinters.some(printer=>printer.id===currentPrinter.id)&&<option value={currentPrinter.id} disabled>{currentPrinter.displayName} · currently unavailable</option>}
         {assignablePrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save as PDF · ":""}{printer.displayName}</option>)}
@@ -125,11 +125,11 @@ function FileActions({job,printers,agents,locale,onPreview,onApprove,onReject,on
     </label>}
     {expiredAgentLease&&<div className={styles.attentionLine} role="status">
       <AlertTriangle size={13}/>
-      <span>The previous computer's Agent lease expired before it finished receiving this file. Choose another ready printer to release the paid job; the file remains saved and does not need to be uploaded again.</span>
+      <span>{t("The previous computer's Agent lease expired before it finished receiving this file. Choose another ready printer to release the paid job; the file remains saved and does not need to be uploaded again.")}</span>
     </div>}
     {awaitingAgentDispatchCanBeReassigned&&<div className={styles.attentionLine} role="status">
       <AlertTriangle size={13}/>
-      <span>This job has not been submitted to Windows yet. Choose another ready printer to safely reroute it; no pages have been sent to the old queue.</span>
+      <span>{t("This job has not been submitted to Windows yet. Choose another ready printer to safely reroute it; no pages have been sent to the old queue.")}</span>
     </div>}
     {assignable&&assignablePrinters.length===0&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>{localDocumentNeedsOriginalAgent
       ?localDocumentAgentId
@@ -139,9 +139,9 @@ function FileActions({job,printers,agents,locale,onPreview,onApprove,onReject,on
     {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":job.outputMode==="UNSUPPORTED_VIRTUAL"?"Run virtual test":"Start printing"}</button>}
     {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canFinishOutput} title={manualQueueReconciliationAvailable?"The Agent restarted before Windows returned a spooler ID. Check the exact job in the selected Windows queue and inspect the paper output before confirming.":confirmationBlockedMessage} onClick={()=>onConfirmOutput(job)}><Check size={12}/> {manualQueueReconciliationAvailable?"Reconcile & confirm":"Confirm output"}</button>}
     {confirmable&&incompletePageProgress&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="alert"><AlertTriangle size={13}/><span>{confirmationBlockedMessage}</span></div>}
-    {confirmable&&job.failureCode==="SPOOLER_JOB_NO_LONGER_VISIBLE"&&(job.spoolerTotalPages??0)<=0&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>Windows no longer lists this job, but the page count is unknown. Automatic retry is blocked; inspect the full paper output before resolving.</span></div>}
+    {confirmable&&job.failureCode==="SPOOLER_JOB_NO_LONGER_VISIBLE"&&(job.spoolerTotalPages??0)<=0&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>{t("Windows no longer lists this job, but the page count is unknown. Automatic retry is blocked; inspect the full paper output before resolving.")}</span></div>}
     {confirmable&&manualQueueReconciliationAvailable&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>The Agent could not identify this Windows job. Manually check the {job.queueName} queue for {job.spoolerJobName}, then inspect every printed page before reconciling.</span></div>}
-    {confirmable&&spoolerRetained&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>Windows is still holding this print job. SmartPrint will enable confirmation after the Agent verifies that the held entry has cleared.</span></div>}
+    {confirmable&&spoolerRetained&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>{t("Windows is still holding this print job. SmartPrint will enable confirmation after the Agent verifies that the held entry has cleared.")}</span></div>}
     {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onRetryPdfExport(job)}><RotateCcw size={12}/> Save PDF again</button>}
     {canRefund&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onRefund(job)}><Wallet size={12}/> Refund</button>}
   </div>;
@@ -161,7 +161,7 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
   const singleFileReviewJob=journey.jobs.length===1&&!journey.batchId?journey.jobs[0]:null;
   const allOutputsReady=journey.jobs.length>0&&journey.jobs.every(job=>readyStatuses.has(job.status));
   const allVirtualTestsReady=journey.jobs.length>0&&journey.jobs.every(job=>job.status==="TEST_OUTPUT_READY"&&job.outputType==="TEST_VIRTUAL"&&job.outputMode==="UNSUPPORTED_VIRTUAL");
-  const headline=journey.isClosed?"No files moving forward":journey.attentionJobs.length?"Needs a quick check":allVirtualTestsReady?"Virtual test completed · not for collection":journey.stage==="received"?"New order received":journey.stage==="review"?"Your review is next":journey.stage==="payment"?"Waiting for payment":journey.stage==="printing"?"Order is being prepared":allOutputsReady?"Ready for collection":"Print output saved";
+  const headline=t(journey.isClosed?"No files moving forward":journey.attentionJobs.length?"Needs a quick check":allVirtualTestsReady?"Virtual test completed · not for collection":journey.stage==="received"?"New order received":journey.stage==="review"?"Your review is next":journey.stage==="payment"?"Waiting for payment":journey.stage==="printing"?"Order is being prepared":allOutputsReady?"Ready for collection":"Print output saved");
   const stageIndex=journey.isClosed?1:journey.stageIndex;
   const [filesExpanded,setFilesExpanded]=useState(false);
   const [selectedResumeJobIds,setSelectedResumeJobIds]=useState<string[]>([]);
@@ -195,44 +195,44 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
   }
   return <article className={styles.orderCard}>
     <div className={styles.orderCardTop}><div className={styles.orderIdentity}>
-      <div className={styles.orderEyebrow}><span>ORDER</span><span className={styles.orderReference}>{journey.reference}</span>{journey.batchId&&<span className={styles.batchBadge}>Batch · {journey.batchId.slice(0,8).toUpperCase()}</span>}{journey.privatePrinting&&<span className={styles.privateModeBadge}>Private · content hidden</span>}</div>
-      <h3>{journey.name}</h3><p><Clock3 size={13}/> Received {formatIstDateTime(journey.createdUtc)} · {journey.jobs.length} file(s) · {journey.acceptedCount} included · {journey.rejectedCount} excluded</p>
+      <div className={styles.orderEyebrow}><span>{t("ORDER")}</span><span className={styles.orderReference}>{journey.reference}</span>{journey.batchId&&<span className={styles.batchBadge}>Batch · {journey.batchId.slice(0,8).toUpperCase()}</span>}{journey.privatePrinting&&<span className={styles.privateModeBadge}>{t("Private · content hidden")}</span>}</div>
+      <h3>{journey.name}</h3><p><Clock3 size={13}/> {t("Received")} {formatIstDateTime(journey.createdUtc)} · {journey.jobs.length} file(s) · {journey.acceptedCount} included · {journey.rejectedCount} excluded</p>
     </div><div className={styles.currentStatus+" "+styles["tone"+journey.stage[0].toUpperCase()+journey.stage.slice(1)]}><span/><strong>{headline}</strong></div></div>
-    <div className={styles.miniProgress} aria-label={"Order progress: "+orderJourneyStageLabel(journey.stage)}>
+    <div className={styles.miniProgress} aria-label={t("Order progress: ")+t(orderJourneyStageLabel(journey.stage))}>
       {flowSteps.map((step,index)=><span key={step.id} className={styles.progressSegment+(index<=stageIndex?" "+styles.progressComplete:"")+(index===stageIndex?" "+styles.progressCurrent:"")}/>)}
     </div>
     <div className={styles.orderFacts}>
-      <div><strong>{journey.blackWhitePageCount}</strong><span>B&amp;W pages</span></div>
-      <div><strong>{journey.colourPageCount}</strong><span>Colour pages</span></div>
-      <div><strong>{journey.pageCount}</strong><span>Total output pages</span></div>
-      <div><strong>{money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</strong><span>{journey.payment?"payment total":"quoted value"}</span></div>
-      {journey.photoCount>0&&<div><strong>{journey.photoCount}</strong><span>Photos</span></div>}
-      {journey.photoPageCount>0&&<div><strong>{journey.photoPageCount}</strong><span>Photo layout pages</span></div>}
+      <div><strong>{journey.blackWhitePageCount}</strong><span>{t("B&W pages")}</span></div>
+      <div><strong>{journey.colourPageCount}</strong><span>{t("Colour pages")}</span></div>
+      <div><strong>{journey.pageCount}</strong><span>{t("Total output pages")}</span></div>
+      <div><strong>{money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</strong><span>{t(journey.payment?"payment total":"quoted value")}</span></div>
+      {journey.photoCount>0&&<div><strong>{journey.photoCount}</strong><span>{t("Photos")}</span></div>}
+      {journey.photoPageCount>0&&<div><strong>{journey.photoPageCount}</strong><span>{t("Photo layout pages")}</span></div>}
     </div>
     <div className={styles.orderSignals}>
-      <div className={styles.signalRow}><span className={styles.signalIcon+(journey.payment?.status==="VERIFIED"||journey.payment?.status==="PARTIALLY_REFUNDED"?" "+styles.signalGood:"")}><CreditCard size={15}/></span><div><strong>Payment</strong><small>{paymentLabel(journey.payment,journey.stage,locale)} · {money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</small></div></div>
+      <div className={styles.signalRow}><span className={styles.signalIcon+(journey.payment?.status==="VERIFIED"||journey.payment?.status==="PARTIALLY_REFUNDED"?" "+styles.signalGood:"")}><CreditCard size={15}/></span><div><strong>{t("Payment")}</strong><small>{paymentLabel(journey.payment,journey.stage,locale)} · {money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</small></div></div>
       <div className={styles.signalRow}><span className={styles.signalIcon+(printer.ready?" "+styles.signalGood:"")}><Printer size={15}/></span><div><strong>{printer.name}</strong><small>{printer.detail}</small></div></div>
-      {journey.attentionJobs.length>0&&<div className={styles.attentionLine}><AlertTriangle size={14}/><span>{journey.attentionJobs.length} file(s) need attention. Check the original output destination before retrying.</span></div>}
+      {journey.attentionJobs.length>0&&<div className={styles.attentionLine}><AlertTriangle size={14}/><span>{journey.attentionJobs.length} {t("file(s) need attention. Check the original output destination before retrying.")}</span></div>}
     </div>
     <div className={styles.cardWorkflowActions}>
-      {canReview&&<button type="button" className={styles.actionButton} onClick={()=>onReviewBatch(journey.batchId!)}><FileText size={14}/> Review all files</button>}
+      {canReview&&<button type="button" className={styles.actionButton} onClick={()=>onReviewBatch(journey.batchId!)}><FileText size={14}/> {t("Review all files")}</button>}
       {singleFileReviewJob?.status==="AWAITING_SHOP_APPROVAL"&&<>
-        <button type="button" className={styles.actionButton} onClick={()=>actions.onApprove(singleFileReviewJob)}><Check size={14}/> Accept file</button>
-        <button type="button" className={styles.actionButton} onClick={()=>actions.onReject(singleFileReviewJob)}><X size={14}/> Reject file</button>
+        <button type="button" className={styles.actionButton} onClick={()=>actions.onApprove(singleFileReviewJob)}><Check size={14}/> {t("Accept file")}</button>
+        <button type="button" className={styles.actionButton} onClick={()=>actions.onReject(singleFileReviewJob)}><X size={14}/> {t("Reject file")}</button>
       </>}
-      {singleFileReviewJob?.status==="AWAITING_PAYMENT"&&<button type="button" className={styles.actionButton} onClick={()=>actions.onReject(singleFileReviewJob)}><X size={14}/> Reject file</button>}
-      {journey.canVerifyPayment&&journey.payment&&<button type="button" className={styles.actionButton} onClick={()=>onVerifyPayment(journey.payment!)}><ShieldCheck size={14}/> Verify payment</button>}
+      {singleFileReviewJob?.status==="AWAITING_PAYMENT"&&<button type="button" className={styles.actionButton} onClick={()=>actions.onReject(singleFileReviewJob)}><X size={14}/> {t("Reject file")}</button>}
+      {journey.canVerifyPayment&&journey.payment&&<button type="button" className={styles.actionButton} onClick={()=>onVerifyPayment(journey.payment!)}><ShieldCheck size={14}/> {t("Verify payment")}</button>}
       {journey.isClosed&&<span className={styles.closedHint}>All files have a recorded final decision.</span>}
     </div>
     <div className={styles.orderFileList}>
       <button type="button" className={styles.fileDetailsToggle} aria-expanded={filesExpanded} aria-controls={"order-files-"+journey.key} onClick={()=>setFilesExpanded(value=>!value)}>
         <span><FileText size={13}/> File details &amp; actions</span>
-        <span>{journey.jobs.length} {journey.jobs.length===1?"file":"files"} <ChevronDown size={14} className={filesExpanded?styles.chevronOpen:""}/></span>
+        <span>{journey.jobs.length} {t(journey.jobs.length===1?"file":"files")} <ChevronDown size={14} className={filesExpanded?styles.chevronOpen:""}/></span>
       </button>
       {filesExpanded&&<div className={styles.orderFileDetails} id={"order-files-"+journey.key}>
-        {journey.batchId&&unprintedResumeCandidates.length>0&&<section className={styles.resumePanel} aria-label="Resume files verified as unprinted">
+        {journey.batchId&&unprintedResumeCandidates.length>0&&<section className={styles.resumePanel} aria-label={t("Resume files verified as unprinted")}>
           <div className={styles.resumePanelHeading}>
-            <strong>{virtualTestResume?"Retry virtual tests with zero output":"Resume files with zero pages printed"}</strong>
+            <strong>{t(virtualTestResume?"Retry virtual tests with zero output":"Resume files with zero pages printed")}</strong>
             <span>Only files with a fresh Windows queue-absence check, a known page total and a secured copy on the original computer appear here.</span>
           </div>
           <div className={styles.resumeCandidateList}>
@@ -264,7 +264,7 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
             <strong title={job.privatePrinting?undefined:job.document.originalFileName}>
               {job.privatePrinting?"Private file "+journey.jobs.slice(0,index+1).filter(item=>item.privatePrinting).length:job.document.originalFileName}
             </strong>
-            <span>{job.pageCount} page(s) · {job.copies} {job.copies===1?"copy":"copies"} · {orderJourneyStatusLabel(job.status)}</span>
+            <span>{job.pageCount} page(s) · {job.copies} {job.copies===1?"copy":"copies"} · {t(orderJourneyStatusLabel(job.status))}</span>
           </div>
           <FileActions job={job} printers={printers} agents={agents} locale={locale} {...actions}/>
         </div>)}
