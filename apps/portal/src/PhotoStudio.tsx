@@ -788,7 +788,7 @@ export default function PhotoStudio({
         resolutionDpi:300,editorSettings,
         previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))
       }]);
-    }catch(cause){setError(cause instanceof Error?cause.message:t("Photo sheet creation failed. Try again with this photo."));}
+    }catch(cause){setError(cause instanceof Error?t(cause.message):t("Photo sheet creation failed. Try again with this photo."));}
     finally{
       if(sharedPhotoTile){sharedPhotoTile.width=0;sharedPhotoTile.height=0;}
       if(outputCanvas){outputCanvas.width=0;outputCanvas.height=0;}
