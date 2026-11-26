@@ -8,7 +8,7 @@ SmartPrint UI copy is stored as pre-translated key/value catalogs. Runtime code 
 - `hindi` — `hi`, Devanagari
 - `hinglish` — `hi-Latn`, Roman-script Hinglish
 
-The first-use default remains Hinglish. A user's explicit choice is persisted in `smartprint-ui-locale`; older customer/shop/admin/public preference keys are read as migration fallbacks. The selector is generated from the locale registry.
+The first-use default remains English; Hindi and Hinglish are available as explicit choices. A user's explicit choice is persisted in `smartprint-ui-locale`; older customer/shop/admin/public preference keys are read as migration fallbacks. The selector is generated from the locale registry.
 
 ## Add a locale
 
