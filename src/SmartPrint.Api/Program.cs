@@ -6351,7 +6351,7 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
         return Results.Conflict(new
         {
             code = "private_printing_output_policy_changed",
-            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted document could be delivered. No payload was downloaded."
+            message = "The shop's secure Agent connection or approved Private Printing output configuration is unavailable. No payload was downloaded."
         });
 
     Stream ciphertext;
@@ -6438,7 +6438,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         return Results.Conflict(new
         {
             code = "private_printing_output_policy_changed",
-            message = "The shop's Private Printing output policy or printer readiness changed before the encrypted handoff completed. The protected local copy is retained for safe retry."
+            message = "The shop's secure Agent connection or approved Private Printing output configuration is unavailable. The protected local copy is retained for safe retry."
         });
 
     if (ticket.PrivateRelayFailedUtc is not null ||
