@@ -106,7 +106,7 @@ The Microsoft Store Submission API cannot create the first product or perform th
 3. Add the x64 EXE package using the versioned Store installer URL from a successful GitHub release:
    `https://<PUBLIC_DOWNLOAD_BASE_URL>/<tag>/SmartPrint-Windows-Store-Setup.exe`
 4. Use installer parameters:
-   `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`
+   `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG`
 5. Set architecture to **X64**, package type **EXE**, language **en-us**, and indicate that installer parameters are required.
 6. Disclose the Windows Agent NT service dependency in product declarations (the app installs/manages a Windows service). Do not declare this as false.
 7. Provide a valid privacy policy, support contact, website, app description, screenshots, logo and age rating. Confirm the listing's publisher identity is the intended individual/business identity.
