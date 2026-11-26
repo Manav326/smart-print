@@ -2,12 +2,13 @@ using System.IO;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Reflection;
+using System.Text;
 
 namespace SmartPrint.Agent;
 
 public interface IAgentChildProcessRunner
 {
-    Task<AgentChildProcessResult> ExecuteAsync(string command, string standardInput, TimeSpan timeout, CancellationToken cancellationToken);
+    Task<AgentChildProcessResult> ExecuteAsync(string command, string standardInput, TimeSpan timeout, CancellationToken cancellationToken, Func<CancellationToken, Task<bool>>? beforeSpoolerSubmission = null);
 }
 
 public sealed record AgentChildProcessResult(
@@ -30,7 +31,8 @@ public sealed class AgentChildProcessRunner : IAgentChildProcessRunner
         string command,
         string standardInput,
         TimeSpan timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<bool>>? beforeSpoolerSubmission = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
         ArgumentNullException.ThrowIfNull(standardInput);
@@ -51,28 +53,20 @@ public sealed class AgentChildProcessRunner : IAgentChildProcessRunner
                 "SmartPrint could not start its isolated Windows printer worker.", exception);
         }
 
-        var standardOutputTask = process.StandardOutput.ReadToEndAsync();
         var standardErrorTask = process.StandardError.ReadToEndAsync();
         var timedOut = false;
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(timeout);
+        var standardOutputTask = ReadStandardOutputAsync(
+            process, beforeSpoolerSubmission, timeoutSource.Token);
 
         try
         {
-            try
-            {
-                if (standardInput.Length > 0)
-                    await process.StandardInput.WriteAsync(standardInput.AsMemory(), timeoutSource.Token);
-                await process.StandardInput.FlushAsync(timeoutSource.Token);
-                process.StandardInput.Close();
-            }
-            catch (IOException) when (process.HasExited)
-            {
-                // A child which exits before consuming its small control request
-                // is still a normal, inspectable child-process failure.
-                try { process.StandardInput.Close(); } catch (IOException) { }
-            }
-
+            if (standardInput.Length > 0)
+                await process.StandardInput.WriteAsync(standardInput.AsMemory(), timeoutSource.Token);
+            await process.StandardInput.FlushAsync(timeoutSource.Token);
+            // Keep stdin open: the child requests a one-shot ALLOW/DENY decision
+            // after document preparation and immediately before StartDoc.
             await process.WaitForExitAsync(timeoutSource.Token);
         }
         catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested)
@@ -99,6 +93,49 @@ public sealed class AgentChildProcessRunner : IAgentChildProcessRunner
             await standardOutputTask,
             await standardErrorTask,
             timedOut);
+    }
+
+    private static async Task<string> ReadStandardOutputAsync(
+        Process process,
+        Func<CancellationToken, Task<bool>>? beforeSpoolerSubmission,
+        CancellationToken authorizationCancellationToken)
+    {
+        var output = new StringBuilder();
+        var authorizationRequested = false;
+        while (await process.StandardOutput.ReadLineAsync() is { } line)
+        {
+            output.AppendLine(line);
+            if (!string.Equals(line, "AUTHORIZE_SPOOLER_SUBMISSION", StringComparison.Ordinal))
+                continue;
+
+            // Fail closed if the child asks more than once or no parent
+            // authorization callback was supplied.
+            var allowed = false;
+            if (!authorizationRequested && beforeSpoolerSubmission is not null)
+            {
+                authorizationRequested = true;
+                try
+                {
+                    allowed = await beforeSpoolerSubmission(authorizationCancellationToken);
+                }
+                catch
+                {
+                    allowed = false;
+                }
+            }
+
+            try
+            {
+                await process.StandardInput.WriteLineAsync(allowed ? "ALLOW" : "DENY");
+                await process.StandardInput.FlushAsync();
+            }
+            catch (IOException) when (process.HasExited)
+            {
+                break;
+            }
+        }
+
+        return output.ToString();
     }
 
     private static ProcessStartInfo CreateStartInfo(string command)
