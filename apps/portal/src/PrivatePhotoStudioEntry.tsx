@@ -328,7 +328,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
               {document.thumbnailBase64
                 ? <img src={"data:image/jpeg;base64,"+document.thumbnailBase64} alt={t("Preview of {name}", { name: document.title })} style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>
                 : <div style={{display:"grid",placeItems:"center",height:"100%",fontSize:10,color:"#64748b"}}>{t("A4 PHOTO")}</div>}
-              <span style={{position:"absolute",left:3,right:3,bottom:4,fontSize:6,fontWeight:800,textAlign:"center",color:"#46536e",background:"rgba(255,255,255,.74)",padding:2}}>SmartPrint by QuantaEdge</span>
+              <span style={{position:"absolute",left:3,right:3,bottom:4,fontSize:6,fontWeight:800,textAlign:"center",color:"#46536e",background:"rgba(255,255,255,.74)",padding:2}}>{t("SmartPrint by QuantaEdge")}</span>
             </div>
             <div style={{minWidth:0,flex:1,display:"flex",flexDirection:"column",gap:5}}>
               <strong style={{fontSize:14,lineHeight:1.35,overflowWrap:"anywhere"}}>{document.title||t("Photo sheet")}</strong>
@@ -388,7 +388,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
           ? <div style={{position:"relative",width:"min(100%,620px)",maxHeight:"100%",aspectRatio:"210/297",background:"#fff",boxShadow:"0 12px 36px rgba(0,0,0,.4)"}}>
               <img src={"data:image/jpeg;base64,"+preview.image} alt={t("A4 photo-sheet preview, page {page}", { page: preview.pageIndex+1 })} style={{display:"block",width:"100%",height:"100%",objectFit:"contain"}}/>
               <div aria-hidden="true" style={{position:"absolute",inset:0,pointerEvents:"none",display:"grid",placeItems:"center",backgroundImage:"repeating-linear-gradient(135deg,transparent 0 66px,rgba(35,48,74,.035) 66px 68px)"}}>
-                <span style={{position:"absolute",left:"7%",right:"7%",top:"42%",transform:"rotate(-28deg)",fontSize:"clamp(10px,2vw,16px)",lineHeight:2.2,fontWeight:900,letterSpacing:".18em",textAlign:"center",color:"rgba(38,52,78,.15)"}}>SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW</span>
+                <span style={{position:"absolute",left:"7%",right:"7%",top:"42%",transform:"rotate(-28deg)",fontSize:"clamp(10px,2vw,16px)",lineHeight:2.2,fontWeight:900,letterSpacing:".18em",textAlign:"center",color:"rgba(38,52,78,.15)"}}>{t("SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW")}</span>
                 <strong style={{position:"absolute",left:"8%",right:"8%",bottom:"7%",padding:"8px 10px",border:"1px solid rgba(44,59,84,.22)",borderRadius:5,background:"rgba(255,255,255,.55)",color:"rgba(28,43,69,.72)",fontSize:"clamp(10px,1.8vw,15px)",letterSpacing:".12em",textAlign:"center"}}>SmartPrint by QuantaEdge</strong>
               </div>
             </div>
