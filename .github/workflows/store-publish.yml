@@ -125,6 +125,7 @@ jobs:
     environment: microsoft-store-production
     permissions:
       contents: read
+      attestations: read
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
       PUBLIC_DOWNLOAD_BASE_URL: ${{ vars.PUBLIC_DOWNLOAD_BASE_URL }}
@@ -150,6 +151,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $ghVersionText = (gh --version | Select-Object -First 1)
+          $ghVersion = [regex]::Match($ghVersionText, "[0-9]+\\.[0-9]+\\.[0-9]+").Value
+          if ([string]::IsNullOrWhiteSpace($ghVersion) -or [version]$ghVersion -lt [version]"2.102.0") {
+            throw "GitHub CLI 2.102.0 or newer is required for secure artifact-attestation verification."
+          }
           gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir artifacts --pattern "SmartPrint-Windows-Store-Setup.exe" --pattern "SHA256SUMS.txt" --pattern "BUILD-INFO.txt"
           if ($LASTEXITCODE -ne 0) { throw "Could not download the Store-ready Windows installer from the published GitHub release." }
           if (-not (Test-Path "artifacts/SmartPrint-Windows-Store-Setup.exe")) { throw "The signed Store-ready Windows installer is missing from this release." }
@@ -165,6 +171,8 @@ jobs:
           $parts = $expected -split "\s+"
           $actual = (Get-FileHash "artifacts/SmartPrint-Windows-Store-Setup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $parts[0].ToLowerInvariant()) { throw "Store installer checksum verification failed." }
+          gh attestation verify "artifacts/SmartPrint-Windows-Store-Setup.exe" --repo $env:GITHUB_REPOSITORY --signer-workflow "$env:GITHUB_REPOSITORY/.github/workflows/release.yml"
+          if ($LASTEXITCODE -ne 0) { throw "The Store installer does not have a valid attestation from the approved release workflow." }
           $signature = Get-AuthenticodeSignature -LiteralPath "artifacts/SmartPrint-Windows-Store-Setup.exe"
           if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) { throw "Store installer Authenticode signature is not valid." }
           if ([string]::IsNullOrWhiteSpace($env:SMARTPRINT_WINDOWS_PUBLISHER) -or $signature.SignerCertificate.Subject -notmatch [regex]::Escape($env:SMARTPRINT_WINDOWS_PUBLISHER)) { throw "Store installer signer does not contain the configured Partner Center publisher identity." }
@@ -253,6 +261,7 @@ jobs:
     environment: ${{ inputs.android_track == 'production' && 'google-play-production' || 'google-play-testing' }}
     permissions:
       contents: read
+      attestations: read
     env:
       RELEASE_SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
     steps:
@@ -269,6 +278,12 @@ jobs:
           test -s artifacts/BUILD-INFO.txt
           grep -E 'SmartPrint-Android[.]aab|BUILD-INFO[.]txt' artifacts/SHA256SUMS.txt | (cd artifacts && sha256sum --check)
           grep -Fx "source_commit=$RELEASE_SOURCE_SHA" artifacts/BUILD-INFO.txt
+          gh_version="$(gh --version | awk 'NR == 1 { print $3 }')"
+          if [[ "$(printf '%s\\n' 2.102.0 "$gh_version" | sort -V | head -n 1)" != "2.102.0" ]]; then
+            echo "::error::GitHub CLI 2.102.0 or newer is required for secure artifact-attestation verification."
+            exit 1
+          fi
+          gh attestation verify artifacts/SmartPrint-Android.aab --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml"
 
       - name: Upload Android App Bundle to Google Play
         uses: r0adkll/upload-google-play@v1.1.5
