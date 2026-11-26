@@ -2498,8 +2498,8 @@ function PrintersPage({
                   <div className="printer-card-top">
                     <div className="printer-card-icon"><Printer size={20}/></div>
                     <Status
-                      label={isUnsupportedVirtual ? "Not supported" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? "Available" : !agentOnline ? "Computer offline" : "Queue not ready"}
-                      tone={isUnsupportedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
+                      label={isUnsupportedVirtual && !isAuthorisedVirtual ? "Needs approval" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? (isAuthorisedVirtual ? "Test queue approved" : "Available") : !agentOnline ? "Computer offline" : "Queue not ready"}
+                      tone={isUnsupportedVirtual && !isAuthorisedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
                     />
                   </div>
                   <h3>{isUnsupportedVirtual ? (isAuthorisedVirtual ? "Virtual test · " : "Unsupported virtual · ") : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : printer.connectionType === "IPP" ? "IPP printer · " : ""}{printer.displayName}</h3>
