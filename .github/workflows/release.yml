@@ -154,7 +154,7 @@ jobs:
           }
           Write-Host "Verified: Windows beta installer is intentionally unsigned. SHA-256 will be published with the release."
       - id: store-package
-        name: Build signed offline Microsoft Store installer when configured
+        name: Build signed offline website and Microsoft Store installers when configured
         shell: pwsh
         env:
           WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
@@ -782,7 +782,7 @@ jobs:
           android_status = "and signed Android APK/AAB" if "SmartPrint-Android.aab" in binaries else "without Android until signing is configured"
           windows_status = "with signed offline website and Microsoft Store installers" if "SmartPrint-Windows-Store-Setup.exe" in binaries else "with unsigned website beta installer; Store-ready installer is not configured"
           print(
-              f"Published {tag} with the unsigned website Windows beta installer {android_status} {windows_status}. "
+              f"Published {tag} {windows_status} {android_status}. "
               "Older releases are not modified or deleted."
           )
           PY
