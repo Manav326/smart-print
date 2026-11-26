@@ -33,7 +33,14 @@ function readInitialLocale(): UiLocale {
     const saved = cookie ? resolveUiLocale(decodeURIComponent(cookie.slice(STORAGE_KEY.length + 1))) : null;
     if (saved) return saved;
   } catch {
-    // The first-use default remains safe when cookies are unavailable too.
+    // Continue to browser language detection when cookies are unavailable.
+  }
+  // Respect the browser's preferred language only when it maps to one of the
+  // explicitly supported locales. Unknown languages safely use English.
+  const browserLanguages = [...(window.navigator.languages ?? []), window.navigator.language];
+  for (const language of browserLanguages) {
+    const detected = resolveUiLocale(language);
+    if (detected) return detected;
   }
   return DEFAULT_UI_LOCALE;
 }
