@@ -28,6 +28,26 @@ jobs:
   validate-release-config:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out the exact release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+      - name: Verify the release tag resolves to a commit on main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          tag_commit="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [[ "$tag_commit" != "$head_commit" ]]; then
+            echo "::error::The checked-out commit does not match the requested release tag."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "::error::Release tags must point to a commit reachable from main."
+            exit 1
+          fi
       - name: Require a stable semantic-version tag
         shell: bash
         run: |
@@ -72,6 +92,8 @@ jobs:
       store_available: ${{ steps.store-package.outputs.available }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - uses: pnpm/action-setup@v6
         with:
           version: 10.18.0
@@ -154,7 +176,7 @@ jobs:
           }
           Write-Host "Verified: Windows beta installer is intentionally unsigned. SHA-256 will be published with the release."
       - id: store-package
-        name: Build signed offline website and Microsoft Store installers when configured
+        name: Build the separate signed offline Microsoft Store installer when configured
         shell: pwsh
         env:
           WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
@@ -222,13 +244,6 @@ jobs:
           $signToolCommand = 'SmartPrintSignTool="' + $signtool + '" sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /sha1 ' + $thumbprint + ' $f'
           $signToolArg = "--signtool=$signToolCommand"
 
-          $websiteArgs = @($signToolArg) + $commonArgs + @("/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Setup")
-          & $iscc @websiteArgs
-          if ($LASTEXITCODE -ne 0) { throw "Signed offline website installer compilation failed." }
-          $websiteInstaller = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
-          & $signtool verify /pa /all $websiteInstaller
-          if ($LASTEXITCODE -ne 0) { throw "Website installer signature verification failed." }
-
           $storeArgs = @($signToolArg) + $commonArgs + @("/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Store-Setup")
           & $iscc @storeArgs
           if ($LASTEXITCODE -ne 0) { throw "Signed offline Microsoft Store installer compilation failed." }
@@ -238,7 +253,7 @@ jobs:
 
           Remove-Item -LiteralPath $pfxPath -Force
           Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -Force
-          Write-Host "Verified signed offline website and Store installers, including signed uninstallers."
+          Write-Host "Verified the separate signed offline Microsoft Store installer, including its signed uninstaller. The website installer remains the intentionally unsigned direct-download build."
       - name: Upload signed Microsoft Store installer
         if: steps.store-package.outputs.available == 'true'
         uses: actions/upload-artifact@v7
@@ -259,10 +274,10 @@ jobs:
     needs: validate-release-config
     runs-on: ubuntu-latest
     env:
-      ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 || vars.ANDROID_SIGNING_KEYSTORE_BASE64 }}
-      ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD || vars.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
-      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS || vars.ANDROID_SIGNING_KEY_ALIAS }}
-      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD || vars.ANDROID_SIGNING_KEY_PASSWORD }}
+      ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+      ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
+      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
     outputs:
       available: ${{ steps.check-signing.outputs.available }}
     steps:
@@ -287,8 +302,8 @@ jobs:
             fi
           done
           if (( missing > 0 )); then
-            echo "::error::A signed Android APK is mandatory for a stable SmartPrint release."
-            echo "::error::Missing Android signing values: check the repository Actions secrets or variables named in this job."
+            echo "::error::A signed Android APK and AAB are mandatory for a stable SmartPrint release."
+            echo "::error::Missing Android signing values: configure the four repository Actions secrets documented in docs/STORE_RELEASE_SETUP.md."
             exit 1
           fi
           echo "available=true" >> "$GITHUB_OUTPUT"
@@ -296,6 +311,8 @@ jobs:
 
       - uses: actions/checkout@v7
         if: steps.check-signing.outputs.available == 'true'
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       # Android Gradle builds the exact shared offline Photo Studio portal.
       # Give that task the same Node/pnpm workspace used by the Windows build.
       - uses: pnpm/action-setup@v6
