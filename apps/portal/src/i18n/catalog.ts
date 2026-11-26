@@ -1202,7 +1202,24 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Create a QR station": "QR स्टेशन बनाएँ",
     "Give customers a clear entry point for this counter or printer.": "इस काउंटर या प्रिंटर के लिए ग्राहकों को एक स्पष्ट एंट्री पॉइंट दें।",
     "Private mode is locked for this batch": "इस बैच के लिए प्राइवेट मोड लॉक है",
-    "Refund summary": "रिफंड का सारांश",
+    "Refund summary": "रिफंड का सारांश",    "Connecting to your print shop": "आपकी प्रिंट शॉप से कनेक्ट हो रहे हैं",
+    "Creating a secure, time-limited session for this QR station.": "इस QR स्टेशन के लिए सुरक्षित और सीमित समय वाला सेशन बनाया जा रहा है।",
+    "STATION UNAVAILABLE": "स्टेशन उपलब्ध नहीं है",
+    "Shop unavailable": "शॉप उपलब्ध नहीं है",
+    "This QR station can't be reached": "इस QR स्टेशन से कनेक्ट नहीं हो पा रहा है",
+    "SECURE SESSION CREATED": "सुरक्षित सेशन बन गया",
+    "Shop connected.": "शॉप कनेक्ट हो गई।",
+    "Your phone is connected to this shop's print station.": "आपका फ़ोन इस शॉप के प्रिंट स्टेशन से कनेक्ट हो गया है।",
+    "Shop print counter": "शॉप प्रिंट काउंटर",
+    "Printer not selected": "प्रिंटर नहीं चुना गया",
+    "The shop will select a printer for your job.": "शॉप आपकी जॉब के लिए प्रिंटर चुनेगी।",
+    "Session ready": "सेशन तैयार है",
+    "Secure session · Expires {expires}": "सुरक्षित सेशन · समाप्ति {expires}",
+    "This session expires at {expires}. Your document access stays limited to this shop session.": "यह सेशन {expires} पर समाप्त होगा। आपके दस्तावेज़ों की पहुँच इसी शॉप सेशन तक सीमित है।",
+    "Secure customer printing": "सुरक्षित ग्राहक प्रिंटिंग",
+    "Your order history is saved. You can start another print session when ready.": "आपके ऑर्डर का इतिहास सेव है। तैयार होने पर आप नया प्रिंट सेशन शुरू कर सकते हैं।",
+    "Payment pending · Ask the customer to scan and pay the exact amount. Verify the actual credit in your UPI/bank app; this QR does not confirm payment.": "भुगतान बाकी है · ग्राहक से QR स्कैन करके सही राशि चुकाने को कहें। अपने UPI/बैंक ऐप में वास्तविक क्रेडिट जाँचें; यह QR भुगतान की पुष्टि नहीं करता।",
+
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -2000,6 +2017,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Give customers a clear entry point for this counter or printer.": "Is counter ya printer ke liye customers ko ek clear entry point dein.",
     "Private mode is locked for this batch": "Is batch ke liye Private mode locked hai",
     "Refund summary": "Refund summary",
+
   },
 };
 
