@@ -73,7 +73,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
 
   async function approve(queue: PlatformVirtualPrinterTestQueue) {
     if (reason.trim().length < 5) {
-      setError("Enter an approval reason of at least five characters.");
+      setError(t("Enter an approval reason of at least five characters."));
       return;
     }
     setBusyId(queue.id);
@@ -82,7 +82,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
     try {
       await approvePlatformVirtualPrinterTestQueue(tokens.accessToken, queue.tenantId, queue.id, reason.trim());
       setReason("");
-      setSuccess("Virtual queue approved for this shop for seven days. The queue identity remains virtual.");
+      setSuccess(t("Virtual queue approved for this shop for seven days. The queue identity remains virtual."));
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not approve this virtual printer.");
@@ -93,7 +93,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
 
   async function revoke(queue: PlatformVirtualPrinterTestQueue, grantId: string) {
     if (reason.trim().length < 5) {
-      setError("Enter a revocation reason of at least five characters.");
+      setError(t("Enter a revocation reason of at least five characters."));
       return;
     }
     const confirmed = window.confirm(
@@ -106,7 +106,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
     try {
       await revokePlatformVirtualPrinterTestGrant(tokens.accessToken, grantId, reason.trim());
       setReason("");
-      setSuccess("Virtual printer grant revoked. New dispatches will be denied.");
+      setSuccess(t("Virtual printer grant revoked. New dispatches will be denied."));
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not revoke this virtual printer grant.");
@@ -189,7 +189,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
   async function save() {
     if (!draft) return;
     if (reason.trim().length < 5) {
-      setError("Enter an audit reason of at least five characters.");
+      setError(t("Enter an audit reason of at least five characters."));
       return;
     }
     setSaving(true);
@@ -200,7 +200,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
       const saved = await updatePlatformOperationalSettings(tokens.accessToken, payload);
       setDraft(toDraft(saved));
       setReason("");
-      setSuccess("Platform settings saved. The API and connected Windows Agents will apply the updated values.");
+      setSuccess(t("Platform settings saved. The API and connected Windows Agents will apply the updated values."));
       setHistory(await getPlatformOperationalSettingsHistory(tokens.accessToken));
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not save platform settings.");
