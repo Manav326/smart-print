@@ -100,6 +100,12 @@ const screenMissingHinglish = [...screenHindi.keys()].filter(key => !screenHingl
 if (screenMissingHindi.length || screenMissingHinglish.length) {
   throw new Error("Screen translation dictionary drift. Hindi missing: " + screenMissingHindi.join(", ") + "; Hinglish missing: " + screenMissingHinglish.join(", "));
 }
+for (const [key, hindiValue] of screenHindi) {
+  const hinglishValue = screenHinglish.get(key);
+  if (placeholders(hindiValue) !== placeholders(hinglishValue)) {
+    throw new Error("Screen translation placeholder mismatch for " + key);
+  }
+}
 if (!source.includes("screenTextCatalogs[locale][sourceText] ?? sourceText")) {
   throw new Error("Screen copy must fall back to its English source text without runtime translation");
 }
