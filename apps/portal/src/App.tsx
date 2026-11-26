@@ -175,7 +175,7 @@ function ScopeAccessDenied({ scope, onSignOut, dark, onToggleTheme }: { scope: s
         <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/><a className="auth-home-link" href="/">{t("Back to website")}</a></div>
       </header>
       <section className="auth-card" style={{ maxWidth: 520, margin: "12vh auto" }}>
-        <div className="auth-card-heading"><div className="auth-card-icon"><ShieldCheck size={20}/></div><div><span>APPLICATION SCOPE MISMATCH</span><h2>Access not available</h2><p>This signed-in account is not authorized for {scope}.</p></div></div>
+        <div className="auth-card-heading"><div className="auth-card-icon"><ShieldCheck size={20}/></div><div><span>{t("APPLICATION SCOPE MISMATCH")}</span><h2>{t("Access not available")}</h2><p>This signed-in account is not authorized for {scope}.</p></div></div>
         <button className="auth-submit" onClick={() => void signOut()} disabled={busy}>{busy ? <span className="button-spinner"/> : "Sign out and use another account"} <ArrowRight size={16}/></button>
       </section>
     </main>
@@ -1721,7 +1721,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
         <div className="content-wrap">
           <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-line"/>SHOP WORKSPACE</div><h1>{active === "Overview" ? `Welcome, ${(profile?.ownerName || "there").split(" ")[0]}` : activePageTitle}</h1><p>{active === "Overview" ? "Your shop setup and operations, all in one place." : t(pageDescription(active))}</p></div>
+            <div><div className="eyebrow"><span className="eyebrow-line"/>{t("SHOP WORKSPACE")}</div><h1>{active === "Overview" ? `Welcome, ${(profile?.ownerName || "there").split(" ")[0]}` : activePageTitle}</h1><p>{active === "Overview" ? "Your shop setup and operations, all in one place." : t(pageDescription(active))}</p></div>
             <div className="heading-actions"><span className="date-chip"><Clock3 size={15}/>{today}</span>{active === "QR Stations" && <button className="primary-button" onClick={() => setModal("station")}><Plus size={16}/> Create QR station</button>}</div>
           </div>
 
@@ -1818,16 +1818,16 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
         <small>{job.photoCount} photos · {job.photoSizeCode} · {job.pageCount} A4 page(s)</small>
       </div>
       {payment.status==="VERIFIED"
-        ? <div className="file-review-note"><Check size={16}/><span>Payment is already verified. Continue from the Print Queue to assign a printer and explicitly dispatch the job.</span></div>
+        ? <div className="file-review-note"><Check size={16}/><span>{t("Payment is already verified. Continue from the Print Queue to assign a printer and explicitly dispatch the job.")}</span></div>
         : payment.method==="UPI"
           ? <div className="photo-order-upi">
-              {upiIntent?<QRCode value={upiIntent} size={184} level="M"/>:<p className="form-error">A UPI QR could not be prepared from the saved shop payment details. Open Payments and check the configured UPI ID.</p>}
+              {upiIntent?<QRCode value={upiIntent} size={184} level="M"/>:<p className="form-error">{t("A UPI QR could not be prepared from the saved shop payment details. Open Payments and check the configured UPI ID.")}</p>}
               <strong>{payment.payeeNameSnapshot||"Shop payment"}</strong>
               <span>{payment.upiIdSnapshot||"UPI ID not available"}</span>
               <small>{t("Payment pending · Ask the customer to scan and pay the exact amount. Verify the actual credit in your UPI/bank app; this QR does not confirm payment.")}</small>
             </div>
           : <div className="file-review-note"><Wallet size={16}/><span>Cash payment pending. Collect {amount} at the counter and mark it received only after the cash is physically in the shop.</span></div>}
-      <div className="form-hint">The job is already in your Print Queue. It cannot be dispatched until payment has been manually verified. Printing must then be started explicitly.</div>
+      <div className="form-hint">{t("The job is already in your Print Queue. It cannot be dispatched until payment has been manually verified. Printing must then be started explicitly.")}</div>
       <div className="modal-actions">
         <button type="button" className="secondary-button" onClick={onClose}>Done</button>
         <button type="button" className="primary-button" onClick={onOpenPayments}>Open Payments <ArrowRight size={15}/></button>
@@ -1908,21 +1908,21 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
       {file&&<div className="file-review-note"><ImageIcon size={16}/><span>{file.name} · {(file.size/1024/1024).toFixed(2)} MB. The original is not modified.</span></div>}
       <label>{t("Order for")}<select value={recipientType} onChange={event=>setRecipientType(event.currentTarget.value as "EXISTING_CUSTOMER"|"WALK_IN")}><option value="EXISTING_CUSTOMER">{t("Existing customer of this shop")}</option><option value="WALK_IN">{t("Walk-in customer")}</option></select></label>
       {recipientType==="EXISTING_CUSTOMER"&&<>
-        <label>Find a customer<div className="queue-search-form"><input aria-label="Search shop customers" value={customerSearch} onChange={event=>setCustomerSearch(event.currentTarget.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();void searchCustomers();}}} placeholder="Name or email"/><button type="button" className="secondary-button" onClick={()=>void searchCustomers()} disabled={loadingCustomers}>{loadingCustomers?"Searching…":"Search"}</button></div></label>
+        <label>{t("Find a customer")}<div className="queue-search-form"><input aria-label="Search shop customers" value={customerSearch} onChange={event=>setCustomerSearch(event.currentTarget.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();void searchCustomers();}}} placeholder="Name or email"/><button type="button" className="secondary-button" onClick={()=>void searchCustomers()} disabled={loadingCustomers}>{loadingCustomers?"Searching…":"Search"}</button></div></label>
         <label>{t("Select customer")}<select aria-label={t("Select shop customer")} value={selectedCustomerId} onChange={event=>setSelectedCustomerId(event.currentTarget.value)}><option value="">{t("Choose a customer")}</option>{customers.map(customer=><option key={customer.id} value={customer.id}>{customer.displayName} · {customer.maskedEmail}</option>)}</select></label>
         {customerError&&<p className="form-error" role="alert">{customerError}</p>}
-        {!loadingCustomers&&!customerError&&customers.length===0&&<p className="form-hint">No customers found for this shop. Choose Walk-in customer when appropriate.</p>}
+        {!loadingCustomers&&!customerError&&customers.length===0&&<p className="form-hint">{t("No customers found for this shop. Choose Walk-in customer when appropriate.")}</p>}
         {selectedCustomer&&<p className="form-hint">This order will be linked to {selectedCustomer.displayName}'s account and shop history. No customer login or QR session will be created.</p>}
       </>}
       {recipientType==="WALK_IN"&&<>
         <label>{t("Walk-in customer name")}<input value={recipientName} maxLength={160} onChange={event=>setRecipientName(event.currentTarget.value)} placeholder={t("Customer name")} required/></label>
         <label>{t("Contact number (optional)")}<input type="tel" maxLength={40} value={recipientPhone} onChange={event=>setRecipientPhone(event.currentTarget.value)} placeholder={t("Phone number")}/></label>
-        <p className="form-hint">A walk-in is saved only as a recipient on this shop's job. No global customer account is created.</p>
+        <p className="form-hint">{t("A walk-in is saved only as a recipient on this shop's job. No global customer account is created.")}</p>
       </>}
       <label>{t("Payment method")}<select aria-label={t("Photo order payment method")} value={paymentMethod} onChange={event=>setPaymentMethod(event.currentTarget.value as "UPI"|"CASH")}>{paymentSettings?.upiEnabled&&<option value="UPI">{t("UPI · verify receipt manually")}</option>}{paymentSettings?.cashEnabled&&<option value="CASH">{t("Cash at counter · mark received manually")}</option>}</select></label>
       <p className="form-hint">Payment will be recorded as pending. This action does not verify payment or start printing. The shop must verify the actual money received and explicitly dispatch the job.</p>
-      {!enabledPhotoSizes&&<p className="form-error" role="alert">No photo sizes are priced. Configure Photo Printing under Pricing before creating an order.</p>}
-      {!hasPaymentMethod&&<p className="form-error" role="alert">No payment method is enabled. Configure UPI or cash under Payment Settings.</p>}
+      {!enabledPhotoSizes&&<p className="form-error" role="alert">{t("No photo sizes are priced. Configure Photo Printing under Pricing before creating an order.")}</p>}
+      {!hasPaymentMethod&&<p className="form-error" role="alert">{t("No payment method is enabled. Configure UPI or cash under Payment Settings.")}</p>}
       {error&&<p className="form-error" role="alert">{error}</p>}
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={!canContinue}>Open Photo Studio <ArrowRight size={15}/></button></div>
     </form>
@@ -2242,7 +2242,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
       <div className="dashboard-grid">
         <section className="panel activity-empty-panel">
           <div className="panel-heading"><div><h2>Customer activity</h2><p>Recent uploads and quote requests from your QR stations</p></div><span className="neutral-chip">{printJobs.length} recent jobs</span></div>
-          {printJobs.length===0 ? <div className="activity-empty-content"><div className="activity-empty-art"><div className="activity-art-sheet"><FileText size={25}/><i/><i/><i/></div><div className="activity-art-printer"><Printer size={27}/></div><span className="activity-art-spark">✦</span></div><h3>Ready when your first customer is</h3><p>Set your prices and share a QR station. Customer uploads will appear here as soon as they arrive.</p><button className="text-action" onClick={() => onNavigate(printers.length ? "QR Stations" : "Printers")}>{printers.length ? "Open QR stations" : "Add your first printer"} <span>→</span></button></div> :
+          {printJobs.length===0 ? <div className="activity-empty-content"><div className="activity-empty-art"><div className="activity-art-sheet"><FileText size={25}/><i/><i/><i/></div><div className="activity-art-printer"><Printer size={27}/></div><span className="activity-art-spark">✦</span></div><h3>{t("Ready when your first customer is")}</h3><p>{t("Set your prices and share a QR station. Customer uploads will appear here as soon as they arrive.")}</p><button className="text-action" onClick={() => onNavigate(printers.length ? "QR Stations" : "Printers")}>{printers.length ? "Open QR stations" : "Add your first printer"} <span>→</span></button></div> :
             <div className="activity-job-list">
               {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.photosPerPage??"layout not recorded"} per A4 page · ${job.pageCount} A4 pages` : `${job.pageCount} pages`}</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/><small>{formatIstTime(job.createdUtc)}</small></div></div>)}
               <button className="text-action" onClick={()=>onNavigate("Print Queue")}>Open print queue <span>→</span></button>
@@ -2250,13 +2250,13 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
         </section>
         <section className="panel printer-panel">
           <div className="panel-heading"><div><h2>Printer setup</h2><p>Registered shop devices</p></div><button className="text-action" onClick={() => onNavigate("Printers")}>Manage <span>→</span></button></div>
-          <div className="printer-summary"><div className="printer-summary-icon"><Printer size={19}/></div><div><strong>{printers.length} registered</strong><span>Live hardware status awaits the local agent</span></div><div className="health-score neutral-score">—</div></div>
-          <div className="device-list">{printers.slice(0,4).map(printer=><Device key={printer.id} name={printer.displayName} detail={`${printer.manufacturer} · ${printer.connectionType}`} state={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/>)}{printers.length===0 && <div className="mini-empty">No printers registered yet.</div>}</div>
+          <div className="printer-summary"><div className="printer-summary-icon"><Printer size={19}/></div><div><strong>{printers.length} registered</strong><span>{t("Live hardware status awaits the local agent")}</span></div><div className="health-score neutral-score">—</div></div>
+          <div className="device-list">{printers.slice(0,4).map(printer=><Device key={printer.id} name={printer.displayName} detail={`${printer.manufacturer} · ${printer.connectionType}`} state={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/>)}{printers.length===0 && <div className="mini-empty">{t("No printers registered yet.")}</div>}</div>
           <button className="text-action full-action" onClick={() => onNavigate("Printers")}>View all printers <span>→</span></button>
         </section>
       </div>
       <section className="panel setup-panel">
-        <div className="panel-heading"><div><h2>Shop setup checklist</h2><p>Complete these steps before accepting customer print jobs.</p></div><span className="setup-count">{setupChecks.filter(check => check.complete).length} / {setupChecks.length} complete</span></div>
+        <div className="panel-heading"><div><h2>{t("Shop setup checklist")}</h2><p>{t("Complete these steps before accepting customer print jobs.")}</p></div><span className="setup-count">{setupChecks.filter(check => check.complete).length} / {setupChecks.length} complete</span></div>
         <div className="setup-checks">
           {setupChecks.map(check => <SetupCheck key={check.title} complete={check.complete} title={check.title} detail={check.detail} onClick={() => onNavigate(check.target)}/>)}
         </div>
@@ -2675,7 +2675,7 @@ function QrStationArtworkPreview({station,profile}:{station:QrStation;profile:Sh
   return <div id={`qr-station-${station.id}`} className="station-qr-area qr-station-preview">
     {posterSrc
       ?<img className="station-poster-preview" src={posterSrc} alt={`${station.displayName} QR poster preview for ${profile?.displayName?.trim()||station.displayName}`}/>
-      :<div className="station-poster-preview-loading" role="status">Preparing the matching QR poster preview…</div>}
+      :<div className="station-poster-preview-loading" role="status">{t("Preparing the matching QR poster preview…")}</div>}
     <div className="qr-preview-source" ref={previewQrHostRef} aria-hidden="true">
       <div className="qr-code-frame"><QRCode value={station.publicUrl??""} size={172} level="H" fgColor="#101c35" bgColor="#ffffff"/></div>
     </div>
@@ -2828,12 +2828,12 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
   return (
     <>
     <section className="panel collection-panel">
-      <div className="collection-header"><div><h2>Customer QR stations</h2><p>Each station has a permanent public link. Every scan creates a separate short-lived customer session.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Create station</button></div>
+      <div className="collection-header"><div><h2>{t("Customer QR stations")}</h2><p>{t("Each station has a permanent public link. Every scan creates a separate short-lived customer session.")}</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Create station</button></div>
       {stations.length===0 ? <EmptyModule icon={<QrCode size={24}/>} title={t("Your first QR station starts here")} text={t("Create a station for a counter or printer. The QR code identifies the station; every scan gets a separate expiring customer session.")} actionLabel={t("Create QR station")} onAction={onAdd}/> :
       <div className="station-grid">{stations.map(station=><article className="station-card" key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
         {station.publicUrl
           ?<QrStationArtworkPreview station={station} profile={profile}/>
-          :<div className="station-qr-area"><div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div></div>}
+          :<div className="station-qr-area"><div className="qr-missing"><QrCode size={34}/><strong>{t("QR code not stored")}</strong><span>{t("This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.")}</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div></div>}
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:station.isEnabled?"Disable station":"Enable station"}</button></div>
         {station.publicUrl && <>
            <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> {t("Copy link")}</button></div>
@@ -2856,7 +2856,7 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
                  ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}><Share2 size={15}/> {t("Share poster")}</button>
                  :<button className="secondary-button" disabled={!!busyResourceId||exportingStationId===station.id} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:exportFeedback[station.id]?.kind==="error"?<RefreshCw size={15}/>:<Share2 size={15}/>} {exportingStationId===station.id?"Preparing share…":exportFeedback[station.id]?.kind==="error"?"Retry share preparation":"Refresh share"}</button>}
              </div>
-             {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The poster is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
+             {!station.isEnabled&&<small className="qr-share-paused-note">{t("This station is disabled. The poster is marked “Temporarily paused” so customers are not led to an inactive service.")}</small>}
              {exportFeedback[station.id]&&<small className={"qr-share-feedback "+exportFeedback[station.id].kind} role="status" aria-live="polite">{exportFeedback[station.id].message}</small>}
              <small className="qr-poster-actions-help">The preview above is the exact poster used for printing, downloading and sharing. We prepare the selected file format when you open this panel, so Share is ready as a single action. The QR uses this station’s permanent public link, not a customer session token. If your device cannot share files, SmartPrint downloads the poster instead.</small>
            </details>
@@ -2900,7 +2900,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       {desktop ? <div className="desktop-agent-connect">
         <div className="agent-intro">
           <div className="agent-hero-icon"><Monitor size={22}/></div>
-          <div><div className="eyebrow"><span className="eyebrow-line"/>THIS COMPUTER</div><h2>Your print computer</h2><p>SmartPrint connects this computer to your shop automatically. The background print service stays active even when you close this window.</p></div>
+          <div><div className="eyebrow"><span className="eyebrow-line"/>{t("THIS COMPUTER")}</div><h2>{t("Your print computer")}</h2><p>{t("SmartPrint connects this computer to your shop automatically. The background print service stays active even when you close this window.")}</p></div>
         </div>
         <div className="desktop-agent-status">
           <span className={connected ? "desktop-agent-indicator connected" : localAgentConflict ? "desktop-agent-indicator conflict" : "desktop-agent-indicator"} />
@@ -2933,7 +2933,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       </div> : <>
       <div className="agent-intro">
         <div className="agent-hero-icon"><Monitor size={22}/></div>
-        <div><div className="eyebrow"><span className="eyebrow-line"/>LOCAL PRINT CONNECTIVITY</div><h2>Connect your shop computer</h2><p>Pair the Windows computer connected to your printers. SmartPrint will keep it ready to receive customer print orders.</p></div>
+        <div><div className="eyebrow"><span className="eyebrow-line"/>{t("LOCAL PRINT CONNECTIVITY")}</div><h2>{t("Connect your shop computer")}</h2><p>{t("Pair the Windows computer connected to your printers. SmartPrint will keep it ready to receive customer print orders.")}</p></div>
       </div>
       <div className="agent-steps">
         <div><span>01</span><strong>{t("Generate a pairing code")}</strong><small>{t("One-time code, valid for 10 minutes.")}</small></div>
@@ -2950,18 +2950,18 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
           ? <a className="secondary-button" href={windowsInstallerUrl}><Monitor size={14}/> {t("Download Windows installer")}</a>
           : <span className="subtle-button" aria-disabled="true">{releaseState === "loading" ? "Checking installer availability…" : releaseState === "error" ? "Installer availability temporarily unavailable" : "Windows installer not published"}</span>}
       </div>
-      <div className="agent-security-note"><ShieldCheck size={16}/><span>Your setup code works once and expires after 10 minutes. You can disconnect a computer from this page if it is replaced or lost.</span></div>
-      <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
+      <div className="agent-security-note"><ShieldCheck size={16}/><span>{t("Your setup code works once and expires after 10 minutes. You can disconnect a computer from this page if it is replaced or lost.")}</span></div>
+      <div className="agent-generate-row"><span>{t("Pairing codes are single use. Generating a new one does not revoke already paired computers.")}</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
       </>}
     </section>
     {desktop && <ShopConnectionPanel connected={connected} localApiReady={localAgentStatus?.localApiReachable===true}/>}
-    {!desktop && <section className="panel local-network-hint"><div className="local-network-mark"><Wifi size={20}/></div><div><h2>Shop connection</h2><p>Open SmartPrint on the Windows computer connected to your printers to choose and test the shop Wi-Fi or hotspot.</p></div></section>}
+    {!desktop && <section className="panel local-network-hint"><div className="local-network-mark"><Wifi size={20}/></div><div><h2>{t("Shop connection")}</h2><p>{t("Open SmartPrint on the Windows computer connected to your printers to choose and test the shop Wi-Fi or hotspot.")}</p></div></section>}
     <section className="panel agent-device-panel">
-      <div className="collection-header"><div><h2>Paired Windows computers</h2><p>Agent connection history and the number of discovered printer queues.</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} paired</span></div>
-      {agents.length===0?<div className="agent-empty"><Monitor size={25}/><strong>No Windows computer paired yet</strong><span>Generate a pairing code above and run the agent on the computer connected to your printers.</span></div>:
+      <div className="collection-header"><div><h2>{t("Paired Windows computers")}</h2><p>{t("Agent connection history and the number of discovered printer queues.")}</p></div><span className="setup-count">{agents.filter(agent=>!agent.revokedUtc).length} paired</span></div>
+      {agents.length===0?<div className="agent-empty"><Monitor size={25}/><strong>{t("No Windows computer paired yet")}</strong><span>{t("Generate a pairing code above and run the agent on the computer connected to your printers.")}</span></div>:
         <div className="agent-device-list">{agents.map(agent=><article className="agent-device-card" key={agent.id}>
           <div className="agent-device-icon"><Monitor size={19}/></div>
-          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>Shop connection found · run the phone check on the shop computer</small>:<small>Connect this computer to the shop Wi-Fi or hotspot to enable phone uploads</small>}</div>
+          <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>{t("Shop connection found · run the phone check on the shop computer")}</small>:<small>{t("Connect this computer to the shop Wi-Fi or hotspot to enable phone uploads")}</small>}</div>
           <Status label={agent.revokedUtc?"Revoked":agent.status} tone={agent.revokedUtc?"red":agent.status==="Online"?"green":"slate"}/>
           {!agent.revokedUtc&&<button className="subtle-button reject-action" disabled={busy} onClick={()=>onRevoke(agent)}>{t("Revoke")}</button>}
         </article>)}</div>}
@@ -3065,11 +3065,11 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
 
   return <section className="panel local-network-panel">
     <div className="local-network-heading">
-      <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>Customer upload connection</h2><p>Choose the Wi-Fi or hotspot customers will use to send documents.</p></div>
+      <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>{t("Customer upload connection")}</h2><p>{t("Choose the Wi-Fi or hotspot customers will use to send documents.")}</p></div>
       <Status label={loading?"Checking…":statusLabel} tone={loading?"slate":statusTone}/>
     </div>
     {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> Checking available connections…</div>:error&&!snapshot
-      ? <div className="local-network-empty"><Wifi size={20}/><div><strong>Could not check this computer</strong><p>SmartPrint is not responding yet. Make sure the desktop app is open, then try again.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Try again</button></div>
+      ? <div className="local-network-empty"><Wifi size={20}/><div><strong>{t("Could not check this computer")}</strong><p>{t("SmartPrint is not responding yet. Make sure the desktop app is open, then try again.")}</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Try again</button></div>
       : <>
       {snapshot?.networks.length?<>
         <label className="local-network-choice">Shop Wi-Fi or hotspot
@@ -3080,8 +3080,8 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
         </label>
         {selected
           ? <div className="local-network-selected"><Wifi size={17}/><span><strong>{selected.displayName}</strong><small>{selected.kind} · Used for customer document uploads</small></span><Check size={17}/></div>
-          : <p className="local-network-copy">Connect this computer to the Wi-Fi or hotspot customers will use, then select it here.</p>}
-        {!connected?<p className="local-network-copy">Connect this computer to your shop first. The phone check will be available when setup is complete.</p>:!localApiReady?<p className="local-network-copy">SmartPrint is preparing the shop connection. The phone check will be available when the print service is ready.</p>:<>
+          : <p className="local-network-copy">{t("Connect this computer to the Wi-Fi or hotspot customers will use, then select it here.")}</p>}
+        {!connected?<p className="local-network-copy">{t("Connect this computer to your shop first. The phone check will be available when setup is complete.")}</p>:!localApiReady?<p className="local-network-copy">{t("SmartPrint is preparing the shop connection. The phone check will be available when the print service is ready.")}</p>:<>
           <div className="local-network-actions">
             <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!hasSelectedNetwork||!localApiReady}>
               {saving?<span className="button-spinner"/>:<><QrCode size={16}/> Check with another phone</>}
@@ -3092,18 +3092,18 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
             <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
             <div><strong>{t("Use a second phone")}</strong><p>{t("Connect another phone to this same Wi-Fi or hotspot. In SmartPrint, open Your space → connected shop → Check shop Wi-Fi, then scan this QR.")}</p><small>{t("The phone sharing the hotspot cannot join it. No SmartPrint? Scan with your camera and open the link.")}</small><p>{t("This screen updates automatically when the phone connects.")}</p></div>
           </div>}
-          {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
-          {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>Local print pipeline ready</strong><small>Protected queue, print worker, cloud heartbeat and printer inventory are healthy. The assigned printer is checked separately for each QR station upload.</small></span></div>}
-          {localApiReady&&!readiness&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Agent update required</strong><small>This Agent version does not report queue and print-worker readiness. Update the Windows Print Agent to verify local upload readiness.</small></span></div>}
-          {localApiReady&&readiness&&!readiness.localUploadReady&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Print pipeline recovering</strong><small>{[
+          {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>{t("Phone test passed")}</strong><small>{t("A phone reached this shop connection recently. The check expires after ten minutes.")}</small></span></div>}
+          {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>{t("Local print pipeline ready")}</strong><small>{t("Protected queue, print worker, cloud heartbeat and printer inventory are healthy. The assigned printer is checked separately for each QR station upload.")}</small></span></div>}
+          {localApiReady&&!readiness&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>{t("Agent update required")}</strong><small>{t("This Agent version does not report queue and print-worker readiness. Update the Windows Print Agent to verify local upload readiness.")}</small></span></div>}
+          {localApiReady&&readiness&&!readiness.localUploadReady&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>{t("Print pipeline recovering")}</strong><small>{[
             readiness.queueInitialized?"":"Protected document queue is not ready",
             readiness.printWorkerRunning?"":"Print worker is not running",
             readiness.heartbeatFresh?"":"Cloud heartbeat is stale",
             readiness.printerInventoryFresh?"":"Printer inventory is stale"
           ].filter(Boolean).join(" · ")} {readiness.lastFailureCode?"(Last issue: "+readiness.lastFailureCode+") ":""}Retry after the shop computer/Agent has recovered.</small></span></div>}
-          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>Phone not connected yet</strong><small>Check that the second phone is on the selected Wi-Fi or hotspot. Some hotspots block devices from communicating; try shop Wi-Fi instead.</small></span></div>}
+          {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>{t("Phone not connected yet")}</strong><small>{t("Check that the second phone is on the selected Wi-Fi or hotspot. Some hotspots block devices from communicating; try shop Wi-Fi instead.")}</small></span></div>}
         </>}
-      </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>No shop connection found</strong><p>Connect this computer to the shop Wi-Fi or hotspot, then refresh.</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
+      </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>{t("No shop connection found")}</strong><p>{t("Connect this computer to the shop Wi-Fi or hotspot, then refresh.")}</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
     </>}
     {error&&<div className="local-network-error" role="alert">{error}</div>}
   </section>;
