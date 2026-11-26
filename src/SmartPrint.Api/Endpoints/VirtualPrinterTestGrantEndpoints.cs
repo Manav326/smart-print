@@ -142,7 +142,7 @@ public static class VirtualPrinterTestGrantEndpoints
                 .ToListAsync(ct);
             var printer = lockedPrinters.SingleOrDefault();
             if (printer is null) return Results.NotFound();
-            if (printer.OutputMode != PrinterTypePolicy.UnsupportedVirtual ||
+            if (!printer.IsActive || printer.OutputMode != PrinterTypePolicy.UnsupportedVirtual ||
                 printer.AgentDeviceId is not Guid agentId ||
                 string.IsNullOrWhiteSpace(printer.QueueName) ||
                 !PrinterTypePolicy.IsConnectedPrinterPort(printer.ConnectionAddress) ||
