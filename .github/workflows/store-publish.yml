@@ -90,13 +90,13 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: main
-      - name: Download the signed Windows Store artifact from the draft release
+      - name: Download the signed Windows Store artifact from the published release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir artifacts --pattern "SmartPrint-Windows-Store-Setup.exe" --pattern "SHA256SUMS.txt"
-          if ($LASTEXITCODE -ne 0) { throw "Could not download the Store-ready Windows installer from the GitHub draft release." }
+          if ($LASTEXITCODE -ne 0) { throw "Could not download the Store-ready Windows installer from the published GitHub release." }
           if (-not (Test-Path "artifacts/SmartPrint-Windows-Store-Setup.exe")) { throw "The signed Store-ready Windows installer is missing from this release." }
           if (-not (Test-Path "artifacts/SHA256SUMS.txt")) { throw "The release checksum manifest is missing." }
           $expected = (Get-Content "artifacts/SHA256SUMS.txt" | Where-Object { $_ -match "\s+\*?SmartPrint-Windows-Store-Setup\.exe$" } | Select-Object -First 1)
@@ -154,7 +154,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Download the signed Android App Bundle from the draft release
+      - name: Download the signed Android App Bundle from the published release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.release_tag }}
