@@ -101,29 +101,9 @@ public sealed class AgentConnectivityService(
                     : AgentPrinterSyncFailure.InvalidPrinterMetadata);
         }
 
-        var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
-            .SingleAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, cancellationToken);
-        var allowVirtualQueueTestMode = PrinterTypePolicy.IsTestModeEnabled(
-            operationalSettings.TreatWorkingVirtualQueuesAsPhysicalForTesting,
-            environment.IsProduction());
-        var normalized = validation.Printers.Select(discovered =>
-        {
-            var effectiveMode = PrinterTypePolicy.ResolveOutputMode(
-                discovered.OutputMode,
-                discovered.Status,
-                allowVirtualQueueTestMode,
-                discovered.PortName);
-            return discovered with
-            {
-                OutputMode = effectiveMode,
-                TestModeOverride = PrinterTypePolicy.IsTestModeOverride(
-                    discovered.OutputMode,
-                    effectiveMode,
-                    discovered.Status,
-                    allowVirtualQueueTestMode,
-                    discovered.PortName)
-            };
-        }).ToArray();
+        // Preserve the Agent's discovered output classification. Virtual queues are
+        // authorised separately by a tenant/printer/Agent/identity-bound grant.
+        var normalized = validation.Printers;
         var now = DateTimeOffset.UtcNow;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.Printer, cancellationToken);
@@ -180,7 +160,8 @@ public sealed class AgentConnectivityService(
                     Model = discovered.DriverName.Trim(),
                     ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName),
                     OutputMode = discovered.OutputMode,
-                    IsTestModeOverride = discovered.TestModeOverride,
+                    IdentityFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
+                        device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName),
                     ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim(),
                     QueueName = discovered.QueueName.Trim(),
                     IsDefault = discovered.IsDefault,
@@ -206,7 +187,8 @@ public sealed class AgentConnectivityService(
                 printer.Model = discovered.DriverName.Trim();
                 printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName);
                 printer.OutputMode = discovered.OutputMode;
-                printer.IsTestModeOverride = discovered.TestModeOverride;
+                printer.IdentityFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
+                    device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName);
                 printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName.Trim();
                 printer.IsDefault = discovered.IsDefault;
                 printer.CapabilitiesJson = discovered.CapabilitiesJson;
