@@ -7,8 +7,10 @@ import { useFileDownload } from "./download-manager";
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
 import "./public-landing.css";
+import { useLocale, translateUi } from "./i18n";
 
 export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
+  const { locale } = useLocale();
   const { release, state: releaseState, refresh } = usePublicRelease();
   const windowsDownloadUrl = release?.windowsAvailable && release.version
     ? getPublicDownloadPath("windows", release.version, release.downloadBaseUrl)
@@ -31,14 +33,14 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
         </a>
         <nav className="sp-public-nav" aria-label="Main navigation">
           <a href="#how-it-works">How it works</a>
-          <a href="#for-shops">For shops</a>
-          <a href="#for-customers">For customers</a>
+          <a href="#for-shops">{translateUi(locale,"public.forShops")}</a>
+          <a href="#for-customers">{translateUi(locale,"public.forCustomers")}</a>
           <a href="#downloads">Downloads</a>
         </nav>
         <ThemeToggleButton dark={dark} onToggle={onToggleTheme} className="sp-theme-toggle"/>
         <a className="sp-shop-entry" href="/shop">
           <span className="sp-shop-entry-icon"><Store size={18}/><Printer size={10}/></span>
-          <span>For print shops</span>
+          <span>{translateUi(locale,"public.forPrintShops")}</span>
           <ArrowUpRight size={15}/>
         </a>
       </header>
@@ -47,11 +49,11 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
         <section className="sp-hero">
           <div className="sp-hero-copy">
             <div className="sp-eyebrow"><span className="sp-eyebrow-dot"/> SMART PRINT BY QUANTAEDGE</div>
-            <h1>From their phone<br/>to <span>your printer.</span><br/>Without the back-and-forth.</h1>
-            <p className="sp-hero-lede">SmartPrint brings local print shops and customers together. Scan the shop QR, choose copies and colour for each file, and send an organised request for the shop to review.</p>
+            <h1>{translateUi(locale,"public.heroTitle")}</h1>
+            <p className="sp-hero-lede">{translateUi(locale,"public.heroDescription")}</p>
             <div className="sp-hero-actions">
-              <a className="sp-button-primary" href="/shop?mode=register">Bring your shop online <ArrowRight size={17}/></a>
-              <a className="sp-button-quiet" href="#how-it-works">See how it works <ChevronRight size={17}/></a>
+              <a className="sp-button-primary" href="/shop?mode=register">{translateUi(locale,"public.createShop")} <ArrowRight size={17}/></a>
+              <a className="sp-button-quiet" href="#how-it-works">{translateUi(locale,"public.seeHow")} <ChevronRight size={17}/></a>
             </div>
             <div className="sp-hero-trust"><span><ShieldCheck size={15}/> Shop-controlled print approval</span><span><LockKeyhole size={14}/> Shop-authorised job handoff</span></div>
           </div>
