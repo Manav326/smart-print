@@ -44,11 +44,14 @@ public static class VirtualPrinterTestGrantEndpoints
             var actorIds = grants.SelectMany(grant => new Guid?[]
                 { grant.ApprovedByUserId, grant.RevokedByUserId })
                 .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
-            var actorNames = await db.Users.AsNoTracking()
+            var actors = await db.Users.AsNoTracking()
                 .Where(user => actorIds.Contains(user.Id))
                 .Select(user => new { user.Id, user.DisplayName, user.UserName })
-                .ToDictionaryAsync(user => user.Id,
-                    user => !string.IsNullOrWhiteSpace(user.DisplayName) ? user.DisplayName : user.UserName ?? "Platform administrator", ct);
+                .ToListAsync(ct);
+            var actorNames = actors.ToDictionary(user => user.Id,
+                user => !string.IsNullOrWhiteSpace(user.DisplayName)
+                    ? user.DisplayName
+                    : user.UserName ?? "Platform administrator");
 
             return Results.Ok(queues.Select(queue => new
             {
