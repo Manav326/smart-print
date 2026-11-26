@@ -84,6 +84,693 @@ jobs:
           dotnet-version: 10.0.x
       - name: Install desktop and portal dependencies
         run: pnpm install --frozen-lockfile
+      - name: Apply the Git release tag as the single desktop version
+        shell: pwsh
+        run: |
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)
+        run: |
+          $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
+          pnpm --filter @smart-print/desktop build
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint desktop frontend build failed." }
+      - name: Build native Windows desktop executable
+        shell: pwsh
+        run: |
+          $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
+          pnpm --filter @smart-print/desktop exec tauri build --no-bundle --ci
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint native desktop build failed." }
+          $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
+          if (-not (Test-Path -LiteralPath $nativeExe)) { throw "The SmartPrint native desktop executable was not produced." }
+          New-Item -ItemType Directory -Force -Path artifacts/desktop | Out-Null
+          Copy-Item -LiteralPath $nativeExe -Destination "artifacts/desktop/SmartPrint.Desktop.exe"
+          Get-ChildItem -Path "apps/desktop/src-tauri/target/release" -Filter "*.dll" -File |
+            Copy-Item -Destination "artifacts/desktop" -Force
+      - name: Bundle the Microsoft WebView2 Evergreen bootstrapper
+        shell: pwsh
+        run: |
+          $bootstrapper = "artifacts/desktop/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $bootstrapper -MaximumRedirection 10
+          $signature = Get-AuthenticodeSignature -LiteralPath $bootstrapper
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
+            throw "The downloaded WebView2 prerequisite did not pass Microsoft Authenticode verification."
+          }
+      - name: Publish self-contained Windows Agent
+        shell: pwsh
+        run: |
+          dotnet publish src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/agent
+          if ($LASTEXITCODE -ne 0) { throw "Windows Agent publish failed." }
+          Copy-Item scripts/install-agent-service.ps1, scripts/uninstall-agent-service.ps1, scripts/verify-agent-local.ps1 artifacts/agent/
+      - name: Build SmartPrint Windows installer
+        shell: pwsh
+        env:
+          SMARTPRINT_WINDOWS_PUBLISHER: ${{ vars.SMARTPRINT_WINDOWS_PUBLISHER }}
+        run: |
+          choco install innosetup --no-progress -y
+          New-Item -ItemType Directory -Force -Path artifacts/agent-installer | Out-Null
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $version = $env:RELEASE_TAG -replace '^v', ''
+          $isccArgs = @("/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL", "/DSmartPrintVersion=$version", "/DSmartPrintBuildId=$env:GITHUB_RUN_NUMBER")
+          if (-not [string]::IsNullOrWhiteSpace($env:SMARTPRINT_WINDOWS_PUBLISHER)) { $isccArgs += "/DSmartPrintPublisher=$env:SMARTPRINT_WINDOWS_PUBLISHER" }
+          $isccArgs += "scripts/build-windows-installer.iss"
+          & $iscc @isccArgs
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint Windows installer compilation failed." }
+      - name: Confirm Windows installer is intentionally unsigned for the beta channel
+        shell: pwsh
+        run: |
+          $installer = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
+            throw "The interim Windows beta package must not contain an unexpected or invalid Authenticode signature."
+          }
+          Write-Host "Verified: Windows beta installer is intentionally unsigned. SHA-256 will be published with the release."
+      - id: store-package
+        name: Build signed offline Microsoft Store installer when configured
+        shell: pwsh
+        env:
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+          WEBVIEW2_STANDALONE_X64_URL: ${{ vars.WEBVIEW2_STANDALONE_X64_URL }}
+          SMARTPRINT_WINDOWS_PUBLISHER: ${{ vars.SMARTPRINT_WINDOWS_PUBLISHER }}
+        run: |
+          $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64) -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_PASSWORD)
+          $hasRuntimeUrl = -not [string]::IsNullOrWhiteSpace($env:WEBVIEW2_STANDALONE_X64_URL)
+          $hasPublisher = -not [string]::IsNullOrWhiteSpace($env:SMARTPRINT_WINDOWS_PUBLISHER)
+          if (-not $hasCertificate -and -not $hasRuntimeUrl -and -not $hasPublisher) {
+            "available=false" >> $env:GITHUB_OUTPUT
+            Write-Host "Store package skipped: configure the Windows code-signing certificate and WebView2 standalone installer URL."
+            exit 0
+          }
+          if (-not $hasCertificate -or -not $hasRuntimeUrl -or -not $hasPublisher) {
+            throw "Configure WINDOWS_CODESIGN_PFX_BASE64, WINDOWS_CODESIGN_PFX_PASSWORD, WEBVIEW2_STANDALONE_X64_URL and SMARTPRINT_WINDOWS_PUBLISHER together."
+          }
+          "available=true" >> $env:GITHUB_OUTPUT
+          $storeAgent = "artifacts/store-agent"
+          $storeDesktop = "artifacts/store-desktop"
+          New-Item -ItemType Directory -Force -Path $storeAgent, $storeDesktop | Out-Null
+          Copy-Item "artifacts/agent/*" $storeAgent -Recurse -Force
+          Copy-Item "artifacts/desktop/*" $storeDesktop -Recurse -Force
+          $runtime = Join-Path $storeDesktop "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          Invoke-WebRequest -Uri $env:WEBVIEW2_STANDALONE_X64_URL -OutFile $runtime -MaximumRedirection 10
+          $runtimeSignature = Get-AuthenticodeSignature -LiteralPath $runtime
+          if ($runtimeSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $runtimeSignature.SignerCertificate.Subject -notmatch "Microsoft") {
+            throw "WebView2 Evergreen Standalone Installer did not pass Microsoft Authenticode verification."
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-code-signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -File |
+            Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw "Windows SDK signtool.exe was not found." }
+          $peFiles = @(
+            Get-ChildItem $storeAgent, $storeDesktop -Recurse -File |
+              Where-Object { $_.Extension -in ".exe", ".dll", ".sys", ".ocx" -and $_.FullName -ne $runtime }
+          )
+          if ($peFiles.Count -eq 0) { throw "No SmartPrint PE binaries were found for signing." }
+          foreach ($file in $peFiles) {
+            & $signtool sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /f $pfxPath /p $env:WINDOWS_CODESIGN_PFX_PASSWORD $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Code signing failed for $($file.FullName)." }
+            & $signtool verify /pa /all $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($file.FullName)." }
+          }
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $isccArgs = @(
+            "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL",
+            "/DSmartPrintVersion=$($env:RELEASE_TAG -replace '^v', '')",
+            "/DSmartPrintBuildId=$env:GITHUB_RUN_NUMBER",
+            "/DSmartPrintAgentSourceDir=artifacts\store-agent",
+            "/DSmartPrintDesktopSourceDir=artifacts\store-desktop",
+            "/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Store-Setup",
+            "/DSmartPrintPublisher=$env:SMARTPRINT_WINDOWS_PUBLISHER",
+            "scripts/build-windows-installer.iss"
+          )
+          & $iscc @isccArgs
+          if ($LASTEXITCODE -ne 0) { throw "Offline Microsoft Store installer compilation failed." }
+          $installer = "artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe"
+          & $signtool sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /f $pfxPath /p $env:WINDOWS_CODESIGN_PFX_PASSWORD $installer
+          if ($LASTEXITCODE -ne 0) { throw "Final Microsoft Store installer signing failed." }
+          & $signtool verify /pa /all $installer
+          if ($LASTEXITCODE -ne 0) { throw "Final Microsoft Store installer signature verification failed." }
+          Remove-Item -LiteralPath $pfxPath -Force
+          Write-Host "Verified signed, offline x64 Microsoft Store installer."
+      - name: Upload signed Microsoft Store installer
+        if: steps.store-package.outputs.available == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-windows-store-release
+          path: artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe
+          if-no-files-found: error
+          retention-days: 5
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-windows-release
+          path: artifacts/agent-installer/SmartPrint-Windows-Setup.exe
+          if-no-files-found: error
+          retention-days: 5
+
+  android-release:
+    needs: validate-release-config
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_SIGNING_KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 || vars.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+      ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD || vars.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
+      ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS || vars.ANDROID_SIGNING_KEY_ALIAS }}
+      ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD || vars.ANDROID_SIGNING_KEY_PASSWORD }}
+    outputs:
+      available: ${{ steps.check-signing.outputs.available }}
+    steps:
+      - id: check-signing
+        name: Check Android release signing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          names=(
+            ANDROID_SIGNING_KEYSTORE_BASE64
+            ANDROID_SIGNING_KEYSTORE_PASSWORD
+            ANDROID_SIGNING_KEY_ALIAS
+            ANDROID_SIGNING_KEY_PASSWORD
+          )
+          present=0
+          missing=0
+          for name in "${names[@]}"; do
+            if [[ -n "${!name:-}" ]]; then
+              ((present+=1))
+            else
+              ((missing+=1))
+            fi
+          done
+          if (( missing > 0 )); then
+            echo "::error::A signed Android APK is mandatory for a stable SmartPrint release."
+            echo "::error::Missing Android signing values: check the repository Actions secrets or variables named in this job."
+            exit 1
+          fi
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "All Android signing inputs are present; the release job will build and verify the signed APK."
+
+      - uses: actions/checkout@v7
+        if: steps.check-signing.outputs.available == 'true'
+      # Android Gradle builds the exact shared offline Photo Studio portal.
+      # Give that task the same Node/pnpm workspace used by the Windows build.
+      - uses: pnpm/action-setup@v6
+        if: steps.check-signing.outputs.available == 'true'
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v7
+        if: steps.check-signing.outputs.available == 'true'
+        with:
+          node-version: "22"
+          cache: pnpm
+      - name: Install shared portal dependencies
+        if: steps.check-signing.outputs.available == 'true'
+        run: pnpm install --frozen-lockfile
+      - uses: actions/setup-java@v6
+        if: steps.check-signing.outputs.available == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v6
+        if: steps.check-signing.outputs.available == 'true'
+        with:
+          gradle-version: "8.13"
+      - uses: android-actions/setup-android@v4
+        if: steps.check-signing.outputs.available == 'true'
+        with:
+          packages: "platform-tools"
+      - name: Install Android SDK build tools
+        if: steps.check-signing.outputs.available == 'true'
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Prepare release keystore
+        if: steps.check-signing.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          key_file="$RUNNER_TEMP/smartprint-release.jks"
+          printf '%s' "$ANDROID_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$key_file"
+          test -s "$key_file"
+          echo "ANDROID_SIGNING_KEYSTORE_FILE=$key_file" >> "$GITHUB_ENV"
+      - name: Build signed Android APK and App Bundle
+        if: steps.check-signing.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gradle --no-daemon --console=plain -p apps/android \
+            -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
+            -PsmartPrintVersionCode="$GITHUB_RUN_NUMBER" \
+            -PsmartPrintVersionName="$RELEASE_TAG" \
+            :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
+          mkdir -p artifacts/android
+          cp apps/android/app/build/outputs/apk/release/app-release.apk artifacts/android/SmartPrint-Android.apk
+          cp apps/android/app/build/outputs/bundle/release/app-release.aab artifacts/android/SmartPrint-Android.aab
+          jarsigner -verify -verbose -certs artifacts/android/SmartPrint-Android.aab >/tmp/smartprint-aab-signature.log
+          grep -q "jar verified" /tmp/smartprint-aab-signature.log
+          apksigner_path="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort | tail -n 1)"
+          test -n "$apksigner_path"
+          verification_output="$("$apksigner_path" verify --verbose --print-certs artifacts/android/SmartPrint-Android.apk 2>&1)"
+          printf '%s\n' "$verification_output"
+          signer_count="$(awk -F': ' '/^Number of signers:/ { print $2; exit }' <<< "$verification_output")"
+          certificate_fingerprint="$(sed -nE 's/.*certificate SHA-256 digest: ([[:xdigit:]]{64}).*/\1/p' <<< "$verification_output" | head -n 1)"
+          if [[ "$signer_count" != "1" || ! "$certificate_fingerprint" =~ ^[[:xdigit:]]{64}$ ]]; then
+            echo "::error::Android APK signature verification did not report exactly one signing certificate fingerprint."
+            exit 1
+          fi
+          echo "Verified Android release certificate SHA-256: $certificate_fingerprint"
+      - name: Upload Android APK and AAB
+        if: steps.check-signing.outputs.available == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: smartprint-android-release
+          path: |
+            artifacts/android/SmartPrint-Android.apk
+            artifacts/android/SmartPrint-Android.aab
+          if-no-files-found: error
+          retention-days: 5
+
+  publish-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    needs:
+      - windows-setup
+      - android-release
+    env:
+      ANDROID_RELEASE_AVAILABLE: ${{ needs.android-release.outputs.available }}
+      WINDOWS_STORE_PACKAGE_AVAILABLE: ${{ needs.windows-setup.outputs.store_available }}
+    steps:
+      - name: Download Windows installer
+        uses: actions/download-artifact@v8
+        with:
+          name: smartprint-windows-release
+          path: artifacts
+      - name: Download signed Microsoft Store installer
+        if: needs.windows-setup.outputs.store_available == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: smartprint-windows-store-release
+          path: artifacts
+      - name: Download Android APK and AAB
+        if: needs.android-release.outputs.available == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: smartprint-android-release
+          path: artifacts
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd artifacts
+          files=(SmartPrint-Windows-Setup.exe)
+          if [[ "$WINDOWS_STORE_PACKAGE_AVAILABLE" == "true" ]]; then
+            files+=(SmartPrint-Windows-Store-Setup.exe)
+          fi
+          if [[ "$ANDROID_RELEASE_AVAILABLE" == "true" ]]; then
+            files+=(SmartPrint-Android.apk SmartPrint-Android.aab)
+          fi
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
+      - name: Prepare versioned release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from urllib.request import Request, urlopen
+
+          repository = os.environ["REPOSITORY"]
+          tag = os.environ["RELEASE_TAG"]
+          token = os.environ["GH_TOKEN"]
+          api = f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases?per_page=100"
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+
+          request = Request(api, headers=headers)
+          with urlopen(request, timeout=30) as response:
+              releases = json.loads(response.read())
+          release = next((item for item in releases if item.get("tag_name") == tag), None)
+          if release is None:
+              print(f"No existing release for {tag}; a new draft will be created.")
+              raise SystemExit(0)
+
+          if not release.get("draft"):
+              raise SystemExit(
+                  f"Release {tag} is already published. Published versions are immutable "
+                  "in this workflow; create a new version tag instead of replacing assets."
+              )
+
+          # Only remove the exact package assets generated by this workflow, and only from a draft.
+          generated_assets = {
+              "SmartPrint-Windows-Setup.exe",
+              "SmartPrint-Android.apk",
+              "SmartPrint-Android.aab",
+              "SmartPrint-Windows-Store-Setup.exe",
+              "SHA256SUMS.txt",
+          }
+          for asset in release.get("assets", []):
+              if asset.get("name") not in generated_assets:
+                  continue
+              delete_url = (
+                  f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases/assets/{asset['id']}"
+              )
+              delete_request = Request(delete_url, headers=headers, method="DELETE")
+              with urlopen(delete_request, timeout=30):
+                  pass
+          print(f"Existing draft {tag} prepared for a clean retry; published releases are untouched.")
+          PY
+      - name: Upload assets to an unpublished draft
+        uses: softprops/action-gh-release@v3
+        with:
+          token: ${{ github.token }}
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: SmartPrint ${{ inputs.release_tag || github.ref_name }}
+          draft: true
+          generate_release_notes: true
+          overwrite_files: false
+          fail_on_unmatched_files: true
+          files: artifacts/*
+      - name: Publish immutable release binaries to Cloudflare R2 when configured
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_EC2_METADATA_DISABLED: "true"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          any_r2_setting=0
+          for value in \
+            "$CLOUDFLARE_R2_ACCOUNT_ID" \
+            "$CLOUDFLARE_R2_BUCKET" \
+            "$PUBLIC_DOWNLOAD_BASE_URL" \
+            "$AWS_ACCESS_KEY_ID" \
+            "$AWS_SECRET_ACCESS_KEY"; do
+            if [[ -n "$value" ]]; then any_r2_setting=1; fi
+          done
+
+          if (( any_r2_setting == 0 )); then
+            echo "Cloudflare R2 is not configured; the verified GitHub release remains the download origin."
+            exit 0
+          fi
+
+          required=(
+            CLOUDFLARE_R2_ACCOUNT_ID
+            CLOUDFLARE_R2_BUCKET
+            PUBLIC_DOWNLOAD_BASE_URL
+            AWS_ACCESS_KEY_ID
+            AWS_SECRET_ACCESS_KEY
+          )
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::R2 publishing is partially configured; missing $name."
+              exit 1
+            fi
+          done
+
+          if [[ ! "$CLOUDFLARE_R2_ACCOUNT_ID" =~ ^[[:xdigit:]]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_R2_ACCOUNT_ID must be a 32-character Cloudflare account ID."
+            exit 1
+          fi
+
+          export R2_PUBLIC_ORIGIN
+          R2_PUBLIC_ORIGIN="$(python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+
+          value = os.environ["PUBLIC_DOWNLOAD_BASE_URL"].strip()
+          parsed = urlsplit(value)
+          try:
+              port = parsed.port
+          except ValueError as error:
+              raise SystemExit("PUBLIC_DOWNLOAD_BASE_URL has an invalid port.") from error
+          if (
+              parsed.scheme != "https"
+              or not parsed.hostname
+              or (port is not None and port != 443)
+              or parsed.username
+              or parsed.password
+              or parsed.path not in ("", "/")
+              or parsed.query
+              or parsed.fragment
+              or parsed.hostname.lower().endswith(".r2.dev")
+          ):
+              raise SystemExit(
+                  "PUBLIC_DOWNLOAD_BASE_URL must be an HTTPS R2 custom-domain origin "
+                  "(not r2.dev), without credentials, path, query or fragment."
+              )
+          print(f"{parsed.scheme}://{parsed.netloc}")
+          PY
+          )"
+          export SMARTPRINT_PORTAL_ORIGIN
+          SMARTPRINT_PORTAL_ORIGIN="$(python - <<'PY'
+          import os
+          from urllib.parse import urlsplit
+          value = os.environ["SMARTPRINT_PUBLIC_BASE_URL"].strip()
+          parsed = urlsplit(value)
+          print(f"{parsed.scheme}://{parsed.netloc}")
+          PY
+          )"
+
+          if ! command -v aws >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --yes awscli
+          fi
+          aws --version
+
+          endpoint="https://$CLOUDFLARE_R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          object_prefix="$RELEASE_TAG"
+
+          # CORS is configured once in the dedicated bucket's Cloudflare
+          # dashboard. The GitHub token intentionally has object-only scope;
+          # the public-domain probe below verifies the configured policy.
+
+          upload_binary() {
+            local filename="$1"
+            local digest
+            digest="$(awk -v wanted="$filename" '$2 == wanted || $2 == "*" wanted { print $1; exit }' artifacts/SHA256SUMS.txt)"
+            if [[ ! "$digest" =~ ^[[:xdigit:]]{64}$ ]]; then
+              echo "::error::No verified SHA-256 entry found for $filename."
+              return 1
+            fi
+            aws s3 cp "artifacts/$filename" "s3://$CLOUDFLARE_R2_BUCKET/$object_prefix/$filename" \
+              --endpoint-url "$endpoint" \
+              --region auto \
+              --only-show-errors \
+              --content-type "application/octet-stream" \
+              --content-disposition "attachment; filename=\"$filename\"" \
+              --cache-control "public, max-age=31536000, immutable" \
+              --metadata "sha256=$digest"
+          }
+
+          upload_binary "SmartPrint-Windows-Setup.exe"
+          if [[ "$WINDOWS_STORE_PACKAGE_AVAILABLE" == "true" ]]; then
+            upload_binary "SmartPrint-Windows-Store-Setup.exe"
+          fi
+          if [[ "$ANDROID_RELEASE_AVAILABLE" == "true" ]]; then
+            upload_binary "SmartPrint-Android.apk"
+            upload_binary "SmartPrint-Android.aab"
+          fi
+          aws s3 cp artifacts/SHA256SUMS.txt "s3://$CLOUDFLARE_R2_BUCKET/$object_prefix/SHA256SUMS.txt" \
+            --endpoint-url "$endpoint" \
+            --region auto \
+            --only-show-errors \
+            --content-type "text/plain; charset=utf-8" \
+            --content-disposition 'attachment; filename="SHA256SUMS.txt"' \
+            --cache-control "public, max-age=31536000, immutable"
+
+          # Verify stored object size, cache policy and SHA-256 metadata before
+          # publishing a stable release or exposing the version URL to customers.
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import subprocess
+          import tempfile
+          from pathlib import Path
+
+          bucket = os.environ["CLOUDFLARE_R2_BUCKET"]
+          prefix = os.environ["RELEASE_TAG"]
+          endpoint = f"https://{os.environ['CLOUDFLARE_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
+          artifacts = Path("artifacts")
+          files = ["SmartPrint-Windows-Setup.exe"]
+          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
+              files.append("SmartPrint-Windows-Store-Setup.exe")
+          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
+              files.append("SmartPrint-Windows-Store-Setup.exe")
+          if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
+              files.extend(["SmartPrint-Android.apk", "SmartPrint-Android.aab"])
+
+          def sha256_file(path: Path) -> str:
+              with path.open("rb") as stream:
+                  return hashlib.file_digest(stream, "sha256").hexdigest()
+
+          with tempfile.TemporaryDirectory(prefix="smartprint-r2-verify-") as temporary:
+              for filename in files:
+                  source = artifacts / filename
+                  digest = sha256_file(source)
+                  result = subprocess.run([
+                      "aws", "s3api", "head-object",
+                      "--bucket", bucket,
+                      "--key", f"{prefix}/{filename}",
+                      "--endpoint-url", endpoint,
+                      "--region", "auto",
+                      "--output", "json",
+                  ], check=True, capture_output=True, text=True)
+                  metadata = json.loads(result.stdout)
+                  if metadata.get("ContentLength") != source.stat().st_size:
+                      raise SystemExit(f"R2 object size mismatch for {filename}.")
+                  if metadata.get("Metadata", {}).get("sha256") != digest:
+                      raise SystemExit(f"R2 object SHA-256 metadata mismatch for {filename}.")
+                  cache_control = metadata.get("CacheControl", "")
+                  if "immutable" not in cache_control or "31536000" not in cache_control:
+                      raise SystemExit(f"R2 object cache policy is incorrect for {filename}.")
+
+                  # Verify the stored object bytes, not just the user metadata.
+                  downloaded = Path(temporary) / filename
+                  subprocess.run([
+                      "aws", "s3", "cp",
+                      f"s3://{bucket}/{prefix}/{filename}",
+                      str(downloaded),
+                      "--endpoint-url", endpoint,
+                      "--region", "auto",
+                      "--only-show-errors",
+                  ], check=True)
+                  if downloaded.stat().st_size != source.stat().st_size or sha256_file(downloaded) != digest:
+                      raise SystemExit(f"R2 stored object SHA-256 verification failed for {filename}.")
+          PY
+
+          # Probe the actual public custom domain, including byte ranges and CORS.
+          python - <<'PY'
+          import os
+          from urllib.request import Request, urlopen
+
+          base = os.environ["R2_PUBLIC_ORIGIN"].rstrip("/")
+          portal_origin = os.environ["SMARTPRINT_PORTAL_ORIGIN"]
+          tag = os.environ["RELEASE_TAG"]
+          files = ["SmartPrint-Windows-Setup.exe"]
+          if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
+              files.append("SmartPrint-Android.apk")
+
+          for filename in files:
+              url = f"{base}/{tag}/{filename}"
+              request = Request(url, headers={
+                  "Origin": portal_origin,
+                  "Range": "bytes=0-0",
+              })
+              with urlopen(request, timeout=45) as response:
+                  if response.status != 206:
+                      raise SystemExit(f"R2 public range probe for {filename} returned HTTP {response.status}, expected 206.")
+                  if response.headers.get("Access-Control-Allow-Origin") != portal_origin:
+                      raise SystemExit(f"R2 CORS did not allow the SmartPrint portal for {filename}.")
+                  if not response.headers.get("Content-Range", "").startswith("bytes 0-0/"):
+                      raise SystemExit(f"R2 public range response was invalid for {filename}.")
+                  if "immutable" not in response.headers.get("Cache-Control", ""):
+                      raise SystemExit(f"R2 public cache policy is missing for {filename}.")
+                  if len(response.read()) != 1:
+                      raise SystemExit(f"R2 public range body was invalid for {filename}.")
+              print(f"Verified public R2 custom-domain range/CORS delivery: {filename}")
+          PY
+
+          echo "Published and verified immutable R2 objects under $object_prefix/."
+          echo "Set PublicDownloads:PublicBaseUrl to $R2_PUBLIC_ORIGIN in the SmartPrint API deployment to activate direct edge delivery."
+      - name: Verify uploaded assets and publish the stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          repository = os.environ["REPOSITORY"]
+          tag = os.environ["RELEASE_TAG"]
+          token = os.environ["GH_TOKEN"]
+          artifact_dir = Path("artifacts")
+          binaries = {"SmartPrint-Windows-Setup.exe"}
+          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
+              binaries.add("SmartPrint-Windows-Store-Setup.exe")
+          if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
+              binaries.update({"SmartPrint-Android.apk", "SmartPrint-Android.aab"})
+          expected = binaries | {"SHA256SUMS.txt"}
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          checksums = {}
+          for line in (artifact_dir / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              digest, filename = line.split(maxsplit=1)
+              checksums[filename.lstrip("*")] = digest
+          if set(checksums) != binaries:
+              raise SystemExit(
+                  "SHA256SUMS.txt does not match the packages enabled for this release. "
+                  f"Expected {sorted(binaries)}, found {sorted(checksums)}."
+              )
+          for filename, expected_digest in checksums.items():
+              actual_digest = hashlib.sha256((artifact_dir / filename).read_bytes()).hexdigest()
+              if actual_digest != expected_digest:
+                  raise SystemExit(f"Local checksum verification failed for {filename}.")
+
+          releases_url = f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases?per_page=100"
+          with urlopen(Request(releases_url, headers=headers), timeout=30) as response:
+              releases = json.loads(response.read())
+          release = next((item for item in releases if item.get("tag_name") == tag), None)
+          if release is None or not release.get("draft"):
+              raise SystemExit("The release draft is missing, has the wrong tag, or is not unpublished.")
+
+          uploaded = {asset["name"]: asset for asset in release.get("assets", [])}
+          if set(uploaded) != expected:
+              raise SystemExit(
+                  "Release draft has an unexpected asset set. "
+                  f"Expected {sorted(expected)}, found {sorted(uploaded)}."
+              )
+          for filename in expected:
+              local_size = (artifact_dir / filename).stat().st_size
+              asset = uploaded[filename]
+              if local_size <= 0 or asset.get("size") != local_size:
+                  raise SystemExit(f"Uploaded asset size does not match the validated build: {filename}.")
+              digest = asset.get("digest")
+              if digest and filename in checksums and digest != f"sha256:{checksums[filename]}":
+                  raise SystemExit(f"GitHub's asset digest does not match SHA256SUMS.txt: {filename}.")
+
+          release_id = release["id"]
+          publish_url = f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases/{release_id}"
+          payload = json.dumps({"draft": False, "make_latest": "true"}).encode("utf-8")
+          publish_request = Request(
+              publish_url,
+              data=payload,
+              headers={**headers, "Content-Type": "application/json"},
+              method="PATCH",
+          )
+          with urlopen(publish_request, timeout=30) as response:
+              published = json.loads(response.read())
+          if published.get("draft") or published.get("tag_name") != tag:
+              raise SystemExit("GitHub did not confirm publication of the verified stable release.")
+          android_status = "and signed Android APK/AAB" if "SmartPrint-Android.aab" in binaries else "without Android until signing is configured"
+          windows_status = "and signed Store-ready Windows installer" if "SmartPrint-Windows-Store-Setup.exe" in binaries else "without Store-ready Windows installer until signing is configured"
+          print(
+              f"Published {tag} with the unsigned website Windows beta installer {android_status} {windows_status}. "
+              "Older releases are not modified or deleted."
+          )
+          PY
+) { throw "Release tag is not a stable semantic version." }
+          $configPath = "apps/desktop/src-tauri/tauri.conf.json"
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $config.version = $version
+          $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $configPath -Encoding utf8
+          $packagePath = "apps/desktop/package.json"
+          $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+          $package.version = $version
+          $package | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $packagePath -Encoding utf8
       - name: Build the native desktop frontend
         shell: pwsh
         run: |
