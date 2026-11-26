@@ -3344,7 +3344,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                   <strong>{batchPrinterConflict?"Multiple printer assignments":batchAssignmentIncomplete?(assignedPrinterIds.length?"Choose one printer":"Printer not assigned"):batchPrinterDisplayName}</strong>
                   <small>{lockedPrinterIds.length===1?"Locked to the printer already used for this batch":waiting.length===0?"No files awaiting review":`${waiting.length} ${waiting.length===1?"file":"files"} awaiting review`}</small>
                   {batchPrinter?.outputMode==="PDF_EXPORT"&&<small>Saves a PDF, not paper</small>}
-                  {batchPrinter?.outputMode==="UNSUPPORTED_VIRTUAL"&&<small className="queue-batch-printer-lock">Unsupported virtual driver. Assign a physical printer or the supported Microsoft Print to PDF test destination.</small>}
+                  {batchPrinter?.outputMode==="UNSUPPORTED_VIRTUAL"&&batchPrinter.virtualTestGrantActive!==true&&<small className="queue-batch-printer-lock">This virtual queue needs an active platform-admin test grant for this shop before it can receive jobs.</small>}
                 </>}
                 {assignmentJob&&<select
                   aria-label="Assign one printer for all files in batch"
