@@ -177,6 +177,10 @@ jobs:
           }
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-code-signing.pfx"
           [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
+          $pfxPassword = ConvertTo-SecureString $env:WINDOWS_CODESIGN_PFX_PASSWORD -AsPlainText -Force
+          $signingCertificate = @(Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $pfxPassword | Where-Object { $_.HasPrivateKey } | Select-Object -First 1)
+          if ($signingCertificate.Count -ne 1) { throw "The PFX did not import exactly one code-signing certificate with a private key." }
+          $thumbprint = $signingCertificate[0].Thumbprint
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -File |
             Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
           if (-not $signtool) { throw "Windows SDK signtool.exe was not found." }
@@ -186,7 +190,7 @@ jobs:
           )
           if ($peFiles.Count -eq 0) { throw "No SmartPrint PE binaries were found for signing." }
           foreach ($file in $peFiles) {
-            & $signtool sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /f $pfxPath /p $env:WINDOWS_CODESIGN_PFX_PASSWORD $file.FullName
+            & $signtool sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /sha1 $thumbprint $file.FullName
             if ($LASTEXITCODE -ne 0) { throw "Code signing failed for $($file.FullName)." }
             & $signtool verify /pa /all $file.FullName
             if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($file.FullName)." }
@@ -203,7 +207,7 @@ jobs:
             "/DSmartPrintSignToolName=SmartPrintSignTool",
             "scripts/build-windows-installer.iss"
           )
-          $signToolCommand = 'SmartPrintSignTool="' + $signtool + '" sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f "' + $pfxPath + '" /p "' + $env:WINDOWS_CODESIGN_PFX_PASSWORD + '" $f'
+          $signToolCommand = 'SmartPrintSignTool="' + $signtool + '" sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /sha1 ' + $thumbprint + ' $f'
           $isccArgs = @("--signtool=$signToolCommand") + $isccArgs
           & $iscc @isccArgs
           if ($LASTEXITCODE -ne 0) { throw "Offline Microsoft Store installer compilation/signing failed." }
@@ -211,7 +215,8 @@ jobs:
           & $signtool verify /pa /all $installer
           if ($LASTEXITCODE -ne 0) { throw "Final Microsoft Store installer signature verification failed." }
           Remove-Item -LiteralPath $pfxPath -Force
-          Write-Host "Verified signed, offline x64 Microsoft Store installer."
+          Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -Force
+          Write-Host "Verified signed, offline x64 Microsoft Store installer and signed uninstaller."
       - name: Upload signed Microsoft Store installer
         if: steps.store-package.outputs.available == 'true'
         uses: actions/upload-artifact@v7
