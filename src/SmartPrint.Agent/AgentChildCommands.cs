@@ -188,6 +188,14 @@ internal static class AgentChildCommands
                 CancellationToken.None,
                 () =>
                 {
+                    Console.Out.WriteLine("AUTHORIZE_SPOOLER_SUBMISSION");
+                    Console.Out.Flush();
+                    var decision = Console.In.ReadLine();
+                    if (!string.Equals(decision, "ALLOW", StringComparison.Ordinal))
+                        throw new PrintExecutionBlockedException(
+                            "SPOOLER_SUBMISSION_NOT_AUTHORISED",
+                            "The parent Agent did not authorise this queue immediately before Windows spooler submission.");
+
                     submissionStarting = true;
                     Console.Out.WriteLine("SUBMITTING");
                     Console.Out.Flush();
