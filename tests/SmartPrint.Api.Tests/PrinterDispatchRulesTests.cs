@@ -36,6 +36,20 @@ public sealed class PrinterDispatchRulesTests
             outputMode, status, grantActive, isProduction));
     }
 
+    [Fact]
+    public void FinalSpoolerAuthorisationMustMatchTheCurrentAttemptAndUnexpiredLease()
+    {
+        var now = new DateTimeOffset(2026, 11, 26, 8, 0, 0, TimeSpan.Zero);
+        Assert.True(PrinterDispatchRules.IsCurrentSpoolerSubmissionAttempt(
+            "VIRTUAL-TEST-123-A2", "VIRTUAL-TEST-123-A2", now.AddSeconds(1), now));
+        Assert.False(PrinterDispatchRules.IsCurrentSpoolerSubmissionAttempt(
+            "VIRTUAL-TEST-123-A2", "VIRTUAL-TEST-123-A1", now.AddSeconds(1), now));
+        Assert.False(PrinterDispatchRules.IsCurrentSpoolerSubmissionAttempt(
+            "VIRTUAL-TEST-123-A2", "VIRTUAL-TEST-123-A2", now, now));
+        Assert.False(PrinterDispatchRules.IsCurrentSpoolerSubmissionAttempt(
+            "VIRTUAL-TEST-123-A2", null, now.AddSeconds(1), now));
+    }
+
     [Theory]
     [InlineData("PDF_EXPORT", true)]
     [InlineData("PHYSICAL", false)]
