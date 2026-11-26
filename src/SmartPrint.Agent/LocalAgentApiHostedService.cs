@@ -963,7 +963,7 @@ public sealed class LocalAgentApiHostedService(
                 long receivedPayloadBytes = 0;
                 long uploadDurationMilliseconds = 0;
                 var existing = localQueueStore.Find(claim.PrintJobId);
-                DocumentAnalysis analysis;
+                DocumentAnalysis analysis = null!;
 
                 AgentClaimedJob CreateStagedJob(DocumentAnalysis detected) =>
                     new(
