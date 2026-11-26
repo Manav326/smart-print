@@ -109,6 +109,24 @@ for (const [key, hindiValue] of screenHindi) {
     throw new Error("Screen translation placeholder mismatch for " + key);
   }
 }
+
+const localizedScreens = [
+  "App.tsx",
+  "AuthScreen.tsx",
+  "CustomerUpiQr.tsx",
+  "OrderJourneyPage.tsx",
+  "PhotoStudio.tsx",
+  "PublicLandingPage.tsx",
+];
+for (const file of localizedScreens) {
+  const screenSource = readFileSync(resolve(root, "src", file), "utf8");
+  const usedKeys = [...screenSource.matchAll(/\\bt\\("(?:\\\\.|[^"\\\\])*"\\)/g)]
+    .map(match => JSON.parse(match[0].slice(2, -1)));
+  const missing = [...new Set(usedKeys.filter(key => !screenHindi.has(key) || !screenHinglish.has(key)))];
+  if (missing.length) {
+    throw new Error(file + " references untranslated screen copy: " + missing.join(", "));
+  }
+}
 if (!source.includes("screenTextCatalogs[locale][sourceText] ?? sourceText")) {
   throw new Error("Screen copy must fall back to its English source text without runtime translation");
 }
