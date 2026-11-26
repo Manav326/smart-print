@@ -95,6 +95,7 @@ test("saved Photo Studio sheets join the chooser selection and wait for the fina
   assert.match(main, /setChooserFileSelected\(file, !selected\)/);
   assert.match(app, /privatePrinting&&uploadWaitingCount>0&&uploadFailedCount===0\?"Resume secure upload":privatePrinting&&uploadFailedCount>0\?"Retry pending secure uploads":privatePrinting\?"Upload "\+pendingFilesCount\+" file\(s\) securely"/);
   assert.match(app, /hasPendingLocalCustomerUploadAttempt/);
+  assert.match(app, /selectedBatchRequiresPrivatePrinting&&pendingPrivateRetryFiles\.some/);
   assert.match(app, /!canOfferPrivatePrinting&&!hasPendingPrivateUploadIdentity/);
   assert.match(app, /effectivePrivatePrinting\|\|localAgent/);
   const api = read("../src/api.ts");
