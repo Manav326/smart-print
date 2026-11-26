@@ -100,6 +100,13 @@ $x64Packages = @($packages | Where-Object { @($_.architectures) -contains "X64" 
 if ($x64Packages.Count -ne 1) {
     throw "Expected exactly one existing X64 package in the Partner Center draft; found $($x64Packages.Count). Refusing to replace or remove other architectures."
 }
+$existingArchitectures = @($x64Packages[0].architectures)
+if ($existingArchitectures.Count -ne 1 -or $existingArchitectures[0] -ne "X64") {
+    throw "The existing Store package must target X64 only; refusing to patch a mixed-architecture package."
+}
+if ($x64Packages[0].packageType -ne "exe") {
+    throw "The existing Partner Center X64 package is not an EXE package; refusing to patch a different package type."
+}
 
 $package = @{
     packageUrl = $packageUrl
