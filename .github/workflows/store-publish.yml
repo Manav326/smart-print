@@ -85,6 +85,7 @@ jobs:
       MICROSOFT_STORE_SELLER_ID: ${{ vars.MICROSOFT_STORE_SELLER_ID }}
       MICROSOFT_STORE_TENANT_ID: ${{ vars.MICROSOFT_STORE_TENANT_ID }}
       MICROSOFT_STORE_CLIENT_ID: ${{ vars.MICROSOFT_STORE_CLIENT_ID }}
+      SMARTPRINT_WINDOWS_PUBLISHER: ${{ vars.SMARTPRINT_WINDOWS_PUBLISHER }}
       MICROSOFT_STORE_CLIENT_SECRET: ${{ secrets.MICROSOFT_STORE_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v7
@@ -104,6 +105,9 @@ jobs:
           $parts = $expected -split "\s+"
           $actual = (Get-FileHash "artifacts/SmartPrint-Windows-Store-Setup.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $parts[0].ToLowerInvariant()) { throw "Store installer checksum verification failed." }
+          $signature = Get-AuthenticodeSignature -LiteralPath "artifacts/SmartPrint-Windows-Store-Setup.exe"
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) { throw "Store installer Authenticode signature is not valid." }
+          if ([string]::IsNullOrWhiteSpace($env:SMARTPRINT_WINDOWS_PUBLISHER) -or -not $signature.SignerCertificate.Subject.Contains($env:SMARTPRINT_WINDOWS_PUBLISHER)) { throw "Store installer signer does not match the configured Partner Center publisher identity." }
 
       - name: Require complete Microsoft Store and R2 configuration
         shell: pwsh
@@ -112,7 +116,7 @@ jobs:
             "PUBLIC_DOWNLOAD_BASE_URL", "CLOUDFLARE_R2_ACCOUNT_ID", "CLOUDFLARE_R2_BUCKET",
             "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "MICROSOFT_STORE_PRODUCT_ID",
             "MICROSOFT_STORE_SELLER_ID", "MICROSOFT_STORE_TENANT_ID",
-            "MICROSOFT_STORE_CLIENT_ID", "MICROSOFT_STORE_CLIENT_SECRET"
+            "MICROSOFT_STORE_CLIENT_ID", "MICROSOFT_STORE_CLIENT_SECRET", "SMARTPRINT_WINDOWS_PUBLISHER"
           )
           $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
           if ($missing.Count -gt 0) { throw "Missing GitHub Actions variables/secrets: $($missing -join ', ')." }
