@@ -480,7 +480,6 @@ jobs:
           source_commit=$RELEASE_SOURCE_SHA
           workflow_run_id=$GITHUB_RUN_ID
           workflow_run_number=$GITHUB_RUN_NUMBER
-          workflow_attempt=$GITHUB_RUN_ATTEMPT
           EOF
           files=(SmartPrint-Windows-Setup.exe BUILD-INFO.txt)
           if [[ "$WINDOWS_STORE_PACKAGE_AVAILABLE" == "true" ]]; then
@@ -507,7 +506,6 @@ jobs:
           test -s "$ATTESTATION_BUNDLE"
           cp "$ATTESTATION_BUNDLE" artifacts/attestation.sigstore.json
           cd artifacts
-          sha256sum attestation.sigstore.json >> SHA256SUMS.txt
           sha256sum --check SHA256SUMS.txt
       - name: Prepare versioned release draft
         env:
@@ -720,7 +718,6 @@ jobs:
             upload_binary "SmartPrint-Android.aab"
           fi
           upload_binary "BUILD-INFO.txt"
-          upload_binary "attestation.sigstore.json"
           manifest_digest="$(sha256sum artifacts/SHA256SUMS.txt | awk '{print $1}')"
           set +e
           existing_manifest_json="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/SHA256SUMS.txt" --endpoint-url "$endpoint" --region auto --output json 2>&1)"
@@ -761,7 +758,7 @@ jobs:
           prefix = os.environ["RELEASE_TAG"]
           endpoint = f"https://{os.environ['CLOUDFLARE_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
           artifacts = Path("artifacts")
-          files = ["SmartPrint-Windows-Setup.exe", "BUILD-INFO.txt", "attestation.sigstore.json", "SHA256SUMS.txt"]
+          files = ["SmartPrint-Windows-Setup.exe", "BUILD-INFO.txt", "SHA256SUMS.txt"]
           if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
               files.append("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
@@ -813,7 +810,7 @@ jobs:
           base = os.environ["R2_PUBLIC_ORIGIN"].rstrip("/")
           portal_origin = os.environ["SMARTPRINT_PORTAL_ORIGIN"]
           tag = os.environ["RELEASE_TAG"]
-          files = ["SmartPrint-Windows-Setup.exe", "BUILD-INFO.txt", "attestation.sigstore.json", "SHA256SUMS.txt"]
+          files = ["SmartPrint-Windows-Setup.exe", "BUILD-INFO.txt", "SHA256SUMS.txt"]
           if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
               files.append("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
@@ -864,8 +861,8 @@ jobs:
               binaries.add("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
               binaries.update({"SmartPrint-Android.apk", "SmartPrint-Android.aab"})
-          provenance_assets = {"BUILD-INFO.txt", "attestation.sigstore.json"}
-          expected_assets = binaries | provenance_assets
+          checksum_assets = binaries | {"BUILD-INFO.txt"}
+          expected_assets = checksum_assets | {"attestation.sigstore.json"}
           expected = expected_assets | {"SHA256SUMS.txt"}
           headers = {
               "Accept": "application/vnd.github+json",
@@ -876,10 +873,10 @@ jobs:
           for line in (artifact_dir / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
               digest, filename = line.split(maxsplit=1)
               checksums[filename.lstrip("*")] = digest
-          if set(checksums) != expected_assets:
+          if set(checksums) != checksum_assets:
               raise SystemExit(
-                  "SHA256SUMS.txt does not match the release packages and provenance files. "
-                  f"Expected {sorted(expected_assets)}, found {sorted(checksums)}."
+                  "SHA256SUMS.txt does not match the stable release packages and build metadata. "
+                  f"Expected {sorted(checksum_assets)}, found {sorted(checksums)}."
               )
           for filename, expected_digest in checksums.items():
               actual_digest = hashlib.sha256((artifact_dir / filename).read_bytes()).hexdigest()
@@ -905,8 +902,9 @@ jobs:
               if local_size <= 0 or asset.get("size") != local_size:
                   raise SystemExit(f"Uploaded asset size does not match the validated build: {filename}.")
               digest = asset.get("digest")
-              if digest and filename in checksums and digest != f"sha256:{checksums[filename]}":
-                  raise SystemExit(f"GitHub's asset digest does not match SHA256SUMS.txt: {filename}.")
+              local_digest = hashlib.sha256((artifact_dir / filename).read_bytes()).hexdigest()
+              if digest and digest != f"sha256:{local_digest}":
+                  raise SystemExit(f"GitHub's uploaded asset digest does not match the local artifact: {filename}.")
 
           release_id = release["id"]
           publish_url = f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases/{release_id}"
