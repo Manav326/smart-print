@@ -141,7 +141,7 @@ The publishing script patches only the existing X64 package, commits the package
 ### G. Google Play Console (one-time manual setup)
 
 1. Create the SmartPrint app in [Google Play Console](https://play.google.com/console/) using package name `com.quantaedge.smartprint`.
-2. Enrol in Play App Signing and upload the first signed `SmartPrint-Android.aab` manually if needed to establish the app.
+2. Enrol in Play App Signing and upload the first signed `SmartPrint-Android.aab` manually through Play Console. The publishing action cannot create the package entry; use the same upload keystore that will be configured in GitHub Actions.
 3. Complete app access, content rating, Data Safety, privacy policy, ads declaration, target audience, app category, store listing, screenshots and required declarations.
 4. Enable the Google Play Android Developer API in a Google Cloud project.
 5. Create a service account and grant it only the required Play Console app/release permissions.
@@ -151,7 +151,7 @@ The publishing script patches only the existing X64 package, commits the package
 |---|---|
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Complete service-account JSON file contents, including braces |
 
-Do not commit the JSON key or paste it into chat. The app's package name is fixed in the workflow as `com.quantaedge.smartprint`.
+Do not commit the JSON key or paste it into chat. The app's package name is fixed in the workflow as `com.quantaedge.smartprint`. The workflow computes a monotonic `versionCode` as `ANDROID_VERSION_CODE_BASE + GITHUB_RUN_NUMBER`; if this is a new Play app, leave the variable unset (default base 100000). If the app has any previous Play uploads, set the variable to a value greater than the highest versionCode already used before enabling automation.
 
 For the Windows Store listing, prepare the app description, short description, category, age rating, 1:1 Store logo and current Windows screenshots. For a desktop-only EXE app, prepare:
 - **1:1 box-art Store logo:** PNG, square aspect ratio. Microsoft's EXE listing requires this asset; Partner Center validates the accepted pixel dimensions for the selected slot.
