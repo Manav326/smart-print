@@ -15,8 +15,9 @@ export function isAgentOnlineForShop(agent: AgentDevice, now = Date.now()): bool
 }
 
 /**
- * Mirrors the server's selection contract: both physical and PDF queues need a
- * fresh Agent heartbeat plus a fresh Ready/Busy Windows queue report.
+ * Mirrors the server's selection contract: physical and authorised virtual queues
+ * need a fresh Agent heartbeat plus a fresh Ready/Busy Windows queue report.
+ * PDF Export is a separate Agent-side file export and does not use queue readiness.
  */
 export function getPrinterReadinessReason(
   printer: PrinterDevice,
