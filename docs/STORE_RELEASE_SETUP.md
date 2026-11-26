@@ -12,7 +12,7 @@ This repository uses one versioned GitHub release to produce the website downloa
    - `SmartPrint-Android.apk`: website/direct-download Android package.
    - `SmartPrint-Android.aab`: signed Google Play App Bundle.
    - `SHA256SUMS.txt`: checksums for the artifacts produced.
-4. The workflow creates a GitHub draft release. When Cloudflare R2 is configured, immutable versioned website assets are uploaded and verified there.
+4. The workflow creates a GitHub release. When Cloudflare R2 is configured, immutable versioned website assets are uploaded and verified there.
 5. Review the draft assets and test the exact binaries.
 6. Run **Actions → Publish SmartPrint to Microsoft Store and Google Play**, choose the tag and tracks, and set `confirm_publication=true`.
 7. Microsoft receives the signed installer URL through the Store Submission API. Google Play receives the signed AAB. Production jobs use protected GitHub Environments.
@@ -44,7 +44,17 @@ The workflow signs the SmartPrint desktop/Agent PE binaries and final Store inst
 
 If the certificate is hardware-backed/non-exportable, do not export or weaken it. The current workflow expects an exportable PFX; ask for a Trusted Signing/HSM integration change before using a hardware-backed certificate.
 
-### B. WebView2 offline prerequisite
+### B. Windows publisher display name
+
+Add this GitHub repository Actions variable using the exact publisher name shown in Partner Center:
+
+| Variable | Value |
+|---|---|
+| `SMARTPRINT_WINDOWS_PUBLISHER` | Exact Partner Center publisher display name to embed in Windows installer metadata |
+
+Because the selected Microsoft developer account is Individual, confirm the public publisher identity shown in Partner Center before setting this value. The Store installer build is withheld until this value is supplied.
+
+### C. WebView2 offline prerequisite
 
 The Store installer must be standalone/offline. The existing website installer continues using its existing bootstrapper; the Store installer uses the Microsoft Evergreen **Standalone Installer x64**, not the small Evergreen Bootstrapper.
 
@@ -59,7 +69,7 @@ The Store installer must be standalone/offline. The existing website installer c
 
 The workflow downloads it during the Windows build and verifies Microsoft's Authenticode signature before including it. Do not use the Bootstrapper URL; it downloads the runtime during installation and is not an offline installer.
 
-### C. Existing website/R2 configuration
+### D. Existing website/R2 configuration
 
 The existing release workflow already expects these repository variables/secrets. Confirm they are configured and correct:
 
@@ -74,7 +84,7 @@ The existing release workflow already expects these repository variables/secrets
 
 The public download origin must be an HTTPS custom domain, not the `r2.dev` development URL. The workflow stores immutable objects under `/<tag>/filename`.
 
-### D. Android upload signing
+### E. Android upload signing
 
 The release build already expects the existing Android upload keystore and signing values. Confirm these four GitHub repository Actions secrets exist and correspond to the same keystore used for prior Android releases:
 
@@ -87,7 +97,7 @@ The release build already expects the existing Android upload keystore and signi
 
 Never generate a new upload key for a later release. Keep a secure offline backup of the keystore and passwords. If the existing key is lost, stop and plan Google's upload-key reset process rather than silently replacing it.
 
-### E. Microsoft Partner Center (one-time manual setup)
+### F. Microsoft Partner Center (one-time manual setup)
 
 The Microsoft Store Submission API cannot create the first product or perform the initial submission. Complete these actions once in [Partner Center](https://partner.microsoft.com/dashboard):
 
@@ -114,7 +124,7 @@ Create/associate a Microsoft Entra ID app with the Partner Center account and gr
 
 The publishing script patches only the existing X64 package, commits the package module, waits for package validation, then submits the package for Microsoft certification. It refuses to replace multiple architectures or create a competing active submission.
 
-### F. Google Play Console (one-time manual setup)
+### G. Google Play Console (one-time manual setup)
 
 1. Create the SmartPrint app in [Google Play Console](https://play.google.com/console/) using package name `com.quantaedge.smartprint`.
 2. Enrol in Play App Signing and upload the first signed `SmartPrint-Android.aab` manually if needed to establish the app.
@@ -149,10 +159,10 @@ The Play production workflow creates a 10% staged rollout (`inProgress`) rather 
 
 1. Ensure all required secrets/variables are present.
 2. Merge approved work to `main`; the existing main-CI automation creates a stable tag and runs the release build.
-3. Open the resulting GitHub draft release and review the installer, APK, AAB, Store installer (if configured), and checksums.
+3. Open the resulting GitHub release and review the installer, APK, AAB, Store installer (if configured), and checksums.
 4. Test the website installer on a clean Windows machine and install the AAB on test devices/Play internal track.
 5. Open **Actions → Publish SmartPrint to Microsoft Store and Google Play**.
-6. Enter the draft release tag, choose which Stores to publish, choose the Play track, and set `confirm_publication=true`.
+6. Enter the release tag, choose which Stores to publish, choose the Play track, and set `confirm_publication=true`.
 7. Approve the relevant GitHub Environment deployment.
 8. Follow certification/review status in Partner Center and Play Console.
 
