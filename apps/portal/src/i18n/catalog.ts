@@ -254,7 +254,27 @@ type LocaleMetadata = {
 const localeMetadata: Record<UiLocale, LocaleMetadata> = {
   english: { label: "English", nativeLabel: "English", lang: "en", dir: "ltr", aliases: ["en", "en-in", "en-us", "en-gb"], fallback: "english", default: false },
   hindi: { label: "Hindi", nativeLabel: "हिन्दी", lang: "hi", dir: "ltr", aliases: ["hi", "hi-in"], fallback: "english", default: false },
+    "UPI ID copied.": "UPI ID कॉपी हो गया।",
+    "Amount copied.": "राशि कॉपी हो गई।",
+    "Let customers connect through a secure QR station.": "ग्राहक सुरक्षित QR स्टेशन से जुड़ सकते हैं।",
+    "Bring different printer brands into one workspace.": "अलग-अलग ब्रांड के प्रिंटर एक ही वर्कस्पेस में जोड़ें।",
+    "Your connection is protected with encrypted authentication.": "आपका कनेक्शन एन्क्रिप्टेड ऑथेंटिकेशन से सुरक्षित है।",
+    "By continuing, you agree to the Smart Print service terms and privacy policy.": "आगे बढ़कर आप Smart Print की सेवा शर्तों और गोपनीयता नीति से सहमत होते हैं।",
+    "Thoughtfully made for print shops.": "प्रिंट शॉप के लिए सोच-समझकर बनाया गया।",
+    "At least 12 characters": "कम से कम 12 अक्षर",
+    "Hide password": "पासवर्ड छिपाएँ",
+    "Show password": "पासवर्ड दिखाएँ",
   hinglish: { label: "Hinglish", nativeLabel: "Hinglish", lang: "hi-Latn", dir: "ltr", aliases: ["hi-latn", "hi-latn-in"], fallback: "english", default: true },
+    "UPI ID copied.": "UPI ID copy ho gaya.",
+    "Amount copied.": "Amount copy ho gaya.",
+    "Let customers connect through a secure QR station.": "Customers secure QR station se connect kar sakte hain.",
+    "Bring different printer brands into one workspace.": "Different brands ke printers ek hi workspace mein laayein.",
+    "Your connection is protected with encrypted authentication.": "Aapka connection encrypted authentication se protected hai.",
+    "By continuing, you agree to the Smart Print service terms and privacy policy.": "Continue karne par aap Smart Print ki service terms aur privacy policy se agree karte hain.",
+    "Thoughtfully made for print shops.": "Print shops ke liye thoughtfully banaya gaya.",
+    "At least 12 characters": "Kam se kam 12 characters",
+    "Hide password": "Password hide karein",
+    "Show password": "Password dikhayein",
 };
 
 
