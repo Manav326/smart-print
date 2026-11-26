@@ -6884,7 +6884,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<CustomerInlineNotice kind="warning" title={t("No payment method available")}>{t("Ask the shop to enable UPI or cash at the counter.")}</CustomerInlineNotice>}
         {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>{t("UPI payment")}</button>}
         {paymentOptions.cashEnabled&&<button type="button" aria-pressed={paymentMethod==="CASH"} className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>{t("Cash at counter")}</button>}
-        <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:nativeAppMode?"Continue":"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
+        <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:nativeAppMode?t("Continue"):t("Continue with {method}",{method:paymentMethod==="UPI"?"UPI":"cash at counter"})}</button>
         
       </div>}
       {legacyIndividualPayment&&payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
@@ -6904,7 +6904,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             fileName={"smartprint-payment-"+payment.id.slice(0,12)+".png"}
           />
           <div className="customer-payment-reference">
-            <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={t("Enter transaction ID after paying")}/></label>
+            <label className="customer-reference-field">{t("UPI transaction ID (UTR)")}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={t("Enter transaction ID after paying")}/></label>
             <small className="customer-payment-reference-hint">{t("Find it in your UPI app under payment details or transaction history.")}</small>
             <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/> :nativeAppMode?t("Submit UTR"):t("Submit payment reference")}</button>
             <CustomerInlineNotice kind="warning" title={t("Bank security checks still apply")}>{t("Downloading the QR does not bypass bank or UPI checks.")}</CustomerInlineNotice>
@@ -6944,7 +6944,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>{t("UPI payment")}</button>}
         {paymentOptions.cashEnabled&&<button type="button" aria-pressed={paymentMethod==="CASH"} className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>{t("Cash at counter")}</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)||batchPayableItems.length===0} onClick={()=>void beginPayment(paymentMethod,true)}>
-          {busy?<span className="button-spinner"/>:nativeAppMode?"Pay accepted files":"Pay accepted files · "+money(batchPayableTotal,batchCheckoutCurrency)}
+          {busy?<span className="button-spinner"/>:nativeAppMode?t("Pay accepted files"):t("Pay accepted files · {amount}",{amount:money(batchPayableTotal,batchCheckoutCurrency)})}
         </button>
         
       </>}
