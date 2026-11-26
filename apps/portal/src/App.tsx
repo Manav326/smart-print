@@ -60,6 +60,7 @@ import OrderJourneyPage from "./OrderJourneyPage";
 import ShopAdPlacement from "./ShopAdPlacement";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
 import { getSubscriptionReminderState } from "./subscription-checkout-state";
+import { useLocale, translateUi } from "./i18n";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "station" | null;
@@ -180,6 +181,7 @@ function ScopeAccessDenied({ scope, onSignOut, dark, onToggleTheme }: { scope: s
 }
 
 function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthTokens; onSignOut: () => Promise<void>; dark: boolean; onToggleTheme: () => void }) {
+  const { locale } = useLocale();
   const [active, setActive] = useState<Section>(() => shopSectionFromPath(window.location.pathname));
 
   useEffect(() => {
@@ -1622,17 +1624,23 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         <nav className="primary-nav" aria-label="Shop navigation">
           {sectionGroups.map(({ label: groupLabel, items }) => (
             <div className="nav-group" key={groupLabel}>
-              <div className="nav-label">{groupLabel}</div>
+              <div className="nav-label">{translateUi(locale, groupLabel === "DAILY WORK" ? "nav.dailyWork" : groupLabel === "DEVICES & CONNECTIVITY" ? "nav.devices" : groupLabel === "BUSINESS" ? "nav.business" : "nav.insights")}</div>
               <div className="nav-group-items">
                 {items.map(label => {
                   const section = sections.find(item => item.label === label);
                   if (!section) return null;
                   const Icon = section.icon;
+                  const translatedLabel = translateUi(locale, ({
+                    "Order Journey":"nav.orderJourney","Overview":"nav.overview","Print Queue":"nav.printQueue",
+                    "Printers":"nav.printers","QR Stations":"nav.qrStations","Print Agent":"nav.printAgent",
+                    "Pricing":"nav.pricing","Subscription":"nav.subscription","Payments":"nav.payments",
+                    "Customers":"nav.customers","Reports":"nav.reports","Settings":"nav.settings"
+                  } as Record<Section,string>)[label]);
                   return (
-                    <button key={label} title={label} aria-label={label}
+                    <button key={label} title={translatedLabel} aria-label={translatedLabel}
                       className={active === label ? "nav-item active" : "nav-item"}
                       onClick={() => navAction(label)}>
-                      <Icon size={18} strokeWidth={1.8}/><span>{label}</span>
+                      <Icon size={18} strokeWidth={1.8}/><span>{translatedLabel}</span>
                     </button>
                   );
                 })}
@@ -4163,6 +4171,7 @@ function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
 }
 
 function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:boolean;onToggleTheme:()=>void}) {
+  const { locale } = useLocale();
   const [result,setResult]=useState<Awaited<ReturnType<typeof createCustomerSession>>|null>(null);
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
@@ -4276,9 +4285,9 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
   return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
     <header className="customer-entry-brand"><BrandLockup className="customer-entry-brand-lockup" /><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
     <main className={result ? "customer-entry-card customer-entry-card--upload" : "customer-entry-card"}>
-      {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?"Connecting…":"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
+      {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?translateUi(locale,"common.loading"):"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
-      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:"Welcome to "+result.shop.displayName}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
+      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:translateUi(locale,"customer.welcome",{shopName:result.shop.displayName})}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
@@ -4912,7 +4921,8 @@ function smartPrintNativeHeadline(status:string):string {
   }
 }
 
-function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,privatePrintingVirtualOutputEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,onStartNewSession}:{dark:boolean;publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;privatePrintingVirtualOutputEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;onStartNewSession:()=>void}) {
+function CustomerPrintFlow({
+  const { locale } = useLocale();dark,publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,privatePrintingVirtualOutputEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,onStartNewSession}:{dark:boolean;publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;privatePrintingVirtualOutputEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;onStartNewSession:()=>void}) {
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   // Private Printing is available only with a live paired Agent/key and a ready
   // physical queue, or an explicitly approved non-production virtual test queue.
@@ -6787,7 +6797,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         <span><strong>PDF footer selected by the shop.</strong> <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Reformatted or multi-copy exports may be flattened.</span><span>Ask for an unbranded single-copy export when PDF structure matters.</span></InfoTooltip></span>
       </div>}
       {!!jobStatus.timeline?.filter(event=>event.previousStatus!==event.newStatus).length&&<div className="customer-state-timeline">{jobStatus.timeline.filter(event=>event.previousStatus!==event.newStatus).map((event,index)=><div key={event.createdUtc+"-"+index}><i/><span><strong>{customerStatusLabel(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
-      {canStartNewSession&&<div className="customer-session-complete"><div><strong>Order finished</strong><span>Your order history is saved. You can start another print session when ready.</span></div><button className="customer-flow-button" onClick={onStartNewSession}><RefreshCw size={16}/> Start new session</button></div>}
+      {canStartNewSession&&<div className="customer-session-complete"><div><strong>{translateUi(locale,"customer.orderReceived")}</strong><span>Your order history is saved. You can start another print session when ready.</span></div><button className="customer-flow-button" onClick={onStartNewSession}><RefreshCw size={16}/> {translateUi(locale,"customer.startNewSession")}</button></div>}
 
       {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
