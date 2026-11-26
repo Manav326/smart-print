@@ -87,7 +87,7 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
     (!localDocumentNeedsOriginalAgent||
       (!!localDocumentAgentId&&printer.agentDeviceId===localDocumentAgentId))
   );
-  const confirmable=isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT");
+  const confirmable=job.outputType!=="TEST_VIRTUAL"&&isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT");
   const spoolerRetained=isRetainedSpoolerJob(job.spoolerStatus);
   const manualQueueReconciliationAvailable=canManuallyReconcileUncertainOutput(
     job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName
@@ -133,7 +133,7 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
         ?"This file is stored only on its original Windows computer. Reconnect that computer or ready another printer on the same PC; printers on other computers cannot receive this local-only file."
         :"This file is stored locally, but its original Windows computer is not identified. Reconnect the computer that received it before changing its printer."
       :"No selected printer is ready right now. This file stays in its order; reconnect a Windows computer or select another ready queue in Printers. You do not need to upload the file again."}</span></div>}
-    {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
+    {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":job.outputMode==="UNSUPPORTED_VIRTUAL"?"Run virtual test":"Start printing"}</button>}
     {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canFinishOutput} title={manualQueueReconciliationAvailable?"The Agent restarted before Windows returned a spooler ID. Check the exact job in the selected Windows queue and inspect the paper output before confirming.":confirmationBlockedMessage} onClick={()=>onConfirmOutput(job)}><Check size={12}/> {manualQueueReconciliationAvailable?"Reconcile & confirm":"Confirm output"}</button>}
     {confirmable&&incompletePageProgress&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="alert"><AlertTriangle size={13}/><span>{confirmationBlockedMessage}</span></div>}
     {confirmable&&job.failureCode==="SPOOLER_JOB_NO_LONGER_VISIBLE"&&(job.spoolerTotalPages??0)<=0&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>Windows no longer lists this job, but the page count is unknown. Automatic retry is blocked; inspect the full paper output before resolving.</span></div>}
@@ -165,7 +165,9 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
     const originalPrinter=printers.find(printer=>printer.id===job.printerDeviceId);
     const originalQueueReady=!!originalPrinter&&
       originalPrinter.agentDeviceId===job.claimedByAgentDeviceId&&
-      originalPrinter.outputMode==="PHYSICAL"&&isPrinterAvailableForShop(originalPrinter,agents);
+      ((originalPrinter.outputMode==="PHYSICAL"&&job.outputType==="PHYSICAL")||
+       (originalPrinter.outputMode==="UNSUPPORTED_VIRTUAL"&&job.outputType==="TEST_VIRTUAL"&&originalPrinter.virtualTestGrantActive===true))&&
+      isPrinterAvailableForShop(originalPrinter,agents);
     const verifiedPayment=job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED";
     return verifiedPayment&&canResumeUnprintedPhysicalJob(
       job.status,job.outputMode,job.outputType,job.spoolerStatus,job.failureCode,
@@ -177,6 +179,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
   const effectiveSelectedResumeJobIds=selectedResumeJobIds.filter(id=>
     unprintedResumeCandidates.some(job=>job.id===id)
   );
+  const virtualTestResume=unprintedResumeCandidates.some(job=>job.outputType==="TEST_VIRTUAL"&&job.outputMode==="UNSUPPORTED_VIRTUAL");
   async function resumeSelectedUnprintedFiles(){
     if(!journey.batchId||effectiveSelectedResumeJobIds.length===0||resumeBusy)return;
     setResumeBusy(true);
