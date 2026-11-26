@@ -115,7 +115,7 @@ test("shop operations, platform policy and plan administration copy is localized
   );
   assert.equal(
     translateUiText("hinglish", "Shop-scoped virtual printer test access"),
-    "Shop-scoped virtual printer test access",
+    "Ek shop ke liye limited virtual printer test access",
   );
   assert.equal(
     translateUiText("hindi", "What this subscription includes"),
