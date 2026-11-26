@@ -126,6 +126,8 @@ const localizedScreens = [
   "OrderJourneyPage.tsx",
   "PhotoStudio.tsx",
   "PublicLandingPage.tsx",
+  "PlatformAdminConsole.tsx",
+  "PlatformAdminAuthScreen.tsx",
   "PrivatePhotoStudioEntry.tsx",
 ];
 for (const file of localizedScreens) {
