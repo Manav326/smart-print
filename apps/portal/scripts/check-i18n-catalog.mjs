@@ -77,8 +77,8 @@ function readScreenCatalog(locale) {
   const end = commaEnd < 0 ? finalEnd : finalEnd < 0 ? commaEnd : Math.min(commaEnd, finalEnd);
   if (bodyStart <= 0 || end < 0) throw new Error("Unterminated screen-level dictionary for " + locale);
   const entries = [];
-  const entryPattern = /^("(?:\\\\.|[^"\\\\])*")\\s*:\\s*("(?:\\\\.|[^"\\\\])*"),?$/;
-  for (const line of source.slice(bodyStart, end).split("\\n")) {
+  const entryPattern = /^("(?:\\.|[^"\\])*")\s*:\s*("(?:\\.|[^"\\])*"),?$/;
+  for (const line of source.slice(bodyStart, end).split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     const match = entryPattern.exec(trimmed);
