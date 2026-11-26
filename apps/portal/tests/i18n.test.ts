@@ -36,7 +36,7 @@ test("document language and direction follow the selected locale", () => {
 
 test("typed catalog messages are translated in Hindi and Hinglish", () => {
   assert.equal(translateUi("hindi", "nav.overview"), "अवलोकन");
-  assert.equal(translateUi("hinglish", "nav.overview"), "Overview");
+  assert.equal(translateUi("hinglish", "nav.overview"), "Main jaankari");
   assert.equal(translateUi("english", "nav.overview"), "Overview");
 });
 
