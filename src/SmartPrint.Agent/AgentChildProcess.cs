@@ -27,6 +27,13 @@ public sealed class AgentChildProcessStartException(string message, Exception? i
 /// </summary>
 public sealed class AgentChildProcessRunner : IAgentChildProcessRunner
 {
+    private readonly Func<string, ProcessStartInfo> startInfoFactory;
+
+    public AgentChildProcessRunner(Func<string, ProcessStartInfo>? startInfoFactory = null)
+    {
+        this.startInfoFactory = startInfoFactory ?? CreateStartInfo;
+    }
+
     public async Task<AgentChildProcessResult> ExecuteAsync(
         string command,
         string standardInput,
@@ -39,7 +46,7 @@ public sealed class AgentChildProcessRunner : IAgentChildProcessRunner
         if (timeout <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(timeout));
 
-        using var process = new Process { StartInfo = CreateStartInfo(command) };
+        using var process = new Process { StartInfo = startInfoFactory(command) };
         try
         {
             if (!process.Start())
