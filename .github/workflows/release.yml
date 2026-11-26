@@ -423,11 +423,13 @@ jobs:
     permissions:
       contents: write
     needs:
+      - validate-release-config
       - windows-setup
       - android-release
     env:
       ANDROID_RELEASE_AVAILABLE: ${{ needs.android-release.outputs.available }}
       WINDOWS_STORE_PACKAGE_AVAILABLE: ${{ needs.windows-setup.outputs.store_available }}
+      RELEASE_SOURCE_SHA: ${{ needs.validate-release-config.outputs.source_sha }}
     steps:
       - name: Download Windows installer
         uses: actions/download-artifact@v8
@@ -446,12 +448,22 @@ jobs:
         with:
           name: smartprint-android-release
           path: artifacts
-      - name: Generate SHA-256 checksums
+      - name: Generate release provenance and SHA-256 checksums
         shell: bash
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+          RELEASE_SOURCE_SHA: ${{ needs.validate-release-config.outputs.source_sha }}
         run: |
           set -euo pipefail
           cd artifacts
-          files=(SmartPrint-Windows-Setup.exe)
+          cat > BUILD-INFO.txt <<EOF
+          release_tag=$RELEASE_TAG
+          source_commit=$RELEASE_SOURCE_SHA
+          workflow_run_id=$GITHUB_RUN_ID
+          workflow_run_number=$GITHUB_RUN_NUMBER
+          workflow_attempt=$GITHUB_RUN_ATTEMPT
+          EOF
+          files=(SmartPrint-Windows-Setup.exe BUILD-INFO.txt)
           if [[ "$WINDOWS_STORE_PACKAGE_AVAILABLE" == "true" ]]; then
             files+=(SmartPrint-Windows-Store-Setup.exe)
           fi
