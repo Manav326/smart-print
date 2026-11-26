@@ -197,7 +197,7 @@ public static class VirtualPrinterTestGrantEndpoints
 
         platform.MapDelete("/virtual-printer-test-grants/{grantId:guid}", async (
             Guid grantId,
-            VirtualPrinterTestGrantRevocationRequest request,
+            [Microsoft.AspNetCore.Mvc.FromBody] VirtualPrinterTestGrantRevocationRequest request,
             ClaimsPrincipal principal,
             SmartPrintDbContext db,
             IHostEnvironment environment,
