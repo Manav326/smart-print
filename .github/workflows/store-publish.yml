@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Existing stable GitHub draft release tag (for example v1.2.0)
+        description: Existing stable GitHub release tag (for example v1.2.0)
         required: true
         type: string
       publish_windows:
@@ -174,4 +174,4 @@ jobs:
           releaseFiles: artifacts/SmartPrint-Android.aab
           track: ${{ inputs.android_track }}
           status: ${{ inputs.android_track == 'production' && 'inProgress' || 'completed' }}
-          userFraction: ${{ inputs.android_track == 'production' && 0.1 || 1.0 }}
+          userFraction: ${{ inputs.android_track == 'production' && '0.1' || '' }}
