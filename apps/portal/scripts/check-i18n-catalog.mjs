@@ -120,7 +120,7 @@ const localizedScreens = [
 ];
 for (const file of localizedScreens) {
   const screenSource = readFileSync(resolve(root, "src", file), "utf8");
-  const usedKeys = [...screenSource.matchAll(/\\bt\\("(?:\\\\.|[^"\\\\])*"\\)/g)]
+  const usedKeys = [...screenSource.matchAll(/\bt\("(?:\\.|[^"\\])*"\)/g)]
     .map(match => JSON.parse(match[0].slice(2, -1)));
   const missing = [...new Set(usedKeys.filter(key => !screenHindi.has(key) || !screenHinglish.has(key)))];
   if (missing.length) {
