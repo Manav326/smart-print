@@ -33,7 +33,7 @@ import PlatformAdminConsole from "./PlatformAdminConsole";
 import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
 import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./portal-routing";
 import {
-  ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
+  ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, hasPendingLocalCustomerUploadAttempt, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
   confirmShopPrintOutput, dispatchShopPrintJob, resumeShopUnprintedBatch,
   createAgentEnrollmentCode, createCustomerSession, createStation,
   createShopPhotoJob, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData,
@@ -5177,8 +5177,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
   },[localFallbackSuggested,localReady,localAgent?.endpoints.length,secureQueueFallbackEnabled,uploadModeManuallySelected,privatePrinting]);
 
+  const pendingPrivateRetryFiles=files.filter(candidate=>
+    !uploadedFileFingerprints.includes(customerFileFingerprint(candidate))
+  );
+  const hasPendingPrivateUploadIdentity=privatePrinting&&pendingPrivateRetryFiles.length>0&&
+    pendingPrivateRetryFiles.every(candidate=>
+      hasPendingLocalCustomerUploadAttempt(sessionToken,candidate,batchId||undefined)
+    );
   const customerUploadUnavailable = privatePrinting
-    ? !canOfferPrivatePrinting
+    ? !canOfferPrivatePrinting&&!hasPendingPrivateUploadIdentity
     : !secureQueueFallbackEnabled && !localAgent?.endpoints.length;
 
   useEffect(()=>{
@@ -5540,8 +5547,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     // Do not reject an ID sheet from cached job.privatePrinting metadata here.
     if(containsIdDocument&&!privatePrinting)setPrivatePrinting(true);
     const effectiveUploadMode: "LOCAL"|"CLOUD"=effectivePrivatePrinting?"LOCAL":uploadMode;
-    if(effectivePrivatePrinting&&(!localAgent||!canOfferPrivatePrinting)) {
-      setError("Private Printing is not ready at this shop yet. No document has been uploaded. Ask the shop operator to reconnect the paired computer.");
+    if(effectivePrivatePrinting&&!canOfferPrivatePrinting&&!hasPendingPrivateUploadIdentity) {
+      setError("Private Printing is not ready at this shop yet. No new document has been uploaded. Ask the shop operator to reconnect the paired computer.");
       return;
     }
     if(effectivePrivatePrinting&&uploadMode!=="LOCAL")setUploadMode("LOCAL");
@@ -5634,7 +5641,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           const photoSettings=photoSettingsByFileFingerprint[fingerprint];
           const printKind=idDocument?"ID_DOCUMENT":photoSettings?"PHOTO":"DOCUMENT";
           if(idDocument&&!effectivePrivatePrinting) throw new ApiError("Prepared ID cards must use Private Printing. No normal cloud upload is allowed.",409);
-          const uploadedItem=effectiveUploadMode==="LOCAL"&&localAgent
+          const uploadedItem=effectiveUploadMode==="LOCAL"&&(effectivePrivatePrinting||localAgent)
             ? await uploadCustomerDocumentLocally(
                 sessionToken,candidate,localAgent,currentBatchId,batchGroupName,currentBatchName||undefined,
                 cloudAssistedPrintingEnabled,settings,effectivePrivatePrinting,localReady,printKind,photoSettings,
