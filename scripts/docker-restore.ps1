@@ -66,6 +66,7 @@ $temporaryDbPath = "/tmp/qrtoprint-restore-$stamp.dump"
 $temporaryDocumentsPath = "/tmp/qrtoprint-restore-$stamp.tar.gz"
 $temporaryEnvPath = Join-Path $repoRoot ('.env.pre-restore-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $backupHelper = $null
+$cleanupHelper = $null
 $apiContainer = $null
 $servicesStopped = $false
 $restoreStarted = $false
@@ -110,8 +111,11 @@ try {
     try {
         docker cp $documentsFile ($validator.Trim() + ':' + $temporaryDocumentsPath) | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Could not copy the document archive to the validator.' }
-        docker start -a $validator | Out-Null
+        $archiveEntries = docker start -a $validator
         if ($LASTEXITCODE -ne 0) { throw 'The encrypted-document archive is invalid or unreadable.' }
+        if ($archiveEntries -match '(^|/)\.?private-relay(/|$)') {
+            Write-Warning 'This is a legacy archive containing Private relay ciphertext. The restore extraction will explicitly exclude that subtree.'
+        }
     } finally { docker rm -f $validator | Out-Null }
 
     Write-Host 'Replacing PostgreSQL database...' -ForegroundColor Cyan
@@ -126,8 +130,61 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL restore failed. The API and portal remain stopped; inspect PostgreSQL logs before retrying.' }
     docker compose @composeBaseArgs exec -T db rm -f $temporaryDbPath | Out-Null
 
+    # Private relay ciphertext is intentionally absent from disaster backups.
+    # Clear stale ciphertext references and fail only incomplete relay tickets;
+    # keep job/payment/audit metadata and already-completed ticket history.
+    $privateRelayRecoverySql = @'
+UPDATE "LocalPrintUploadTickets"
+SET "PrivateRelayStorageKey" = CASE
+        -- Keep only the opaque locator for a ticket already at the local-queue
+        -- handoff stage. The ciphertext itself is excluded; this lets the Agent
+        -- finish acknowledgement from its existing DPAPI-protected local copy.
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN "PrivateRelayStorageKey"
+        ELSE NULL
+    END,
+    "PrivateRelayWrappedKey" = NULL,
+    "PrivateRelayIv" = NULL,
+    "PrivateRelayUploadedUtc" = CASE
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN "PrivateRelayUploadedUtc"
+        ELSE NULL
+    END,
+    "PrivateRelayFailedUtc" = CASE
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN COALESCE("PrivateRelayFailedUtc", NOW())
+        ELSE "PrivateRelayFailedUtc"
+    END,
+    "PrivateRelayFailureCode" = CASE
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN 'RESTORE_CONTENT_EXCLUDED'
+        ELSE "PrivateRelayFailureCode"
+    END,
+    "PrivateRelayFailureMessage" = CASE
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN 'Private relay content is intentionally excluded from disaster recovery. Re-upload the original file if the shop Agent had not secured its protected local copy.'
+        ELSE "PrivateRelayFailureMessage"
+    END,
+    "PrivateRelayStage" = CASE
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN 'FAILED'
+        ELSE "PrivateRelayStage"
+    END,
+    "PrivateRelayStageUpdatedUtc" = CASE
+        WHEN "CompletedUtc" IS NULL AND "PrivateRelayStage" NOT IN ('SECURING_LOCAL_QUEUE', 'READY')
+            THEN NOW()
+        ELSE "PrivateRelayStageUpdatedUtc"
+    END
+WHERE "PrivatePrinting" = TRUE AND
+      ("PrivateRelayStorageKey" IS NOT NULL OR
+       "PrivateRelayWrappedKey" IS NOT NULL OR
+       "PrivateRelayIv" IS NOT NULL);
+'@
+    docker compose @composeBaseArgs exec -T db psql -v ON_ERROR_STOP=1 -U $dbUser -d $dbName -c $privateRelayRecoverySql
+    if ($LASTEXITCODE -ne 0) { throw 'Could not safely invalidate Private relay references excluded from this restore.' }
+
     Write-Host 'Restoring encrypted cloud documents...' -ForegroundColor Cyan
-    $backupHelper = docker create --volumes-from ($apiContainer.Trim() + ':rw') alpine:3.20 sh -c ('mkdir -p /var/lib/qrtoprint/documents && find /var/lib/qrtoprint/documents -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf ' + $temporaryDocumentsPath + ' -C /var/lib/qrtoprint/documents && chown -R 1654:1654 /var/lib/qrtoprint/documents')
+    $backupHelper = docker create --volumes-from ($apiContainer.Trim() + ':rw') alpine:3.20 sh -c ('mkdir -p /var/lib/qrtoprint/documents && find /var/lib/qrtoprint/documents -mindepth 1 -maxdepth 1 -exec rm -rf {} + && tar -xzf ' + $temporaryDocumentsPath + ' --exclude=./private-relay --exclude=private-relay -C /var/lib/qrtoprint/documents && chown -R 1654:1654 /var/lib/qrtoprint/documents')
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($backupHelper)) { throw 'Could not create the document-volume restore helper.' }
     docker cp $documentsFile ($backupHelper.Trim() + ':' + $temporaryDocumentsPath) | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not copy the document archive to the restore helper.' }
@@ -135,6 +192,78 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Cloud document restore failed. The API and portal remain stopped.' }
     docker rm -f $backupHelper | Out-Null
     $backupHelper = $null
+
+    # An older database snapshot can contain Standard documents whose original
+    # 72-hour clock expired after the snapshot. Mark and remove those objects
+    # before the API is brought online, so restore never briefly revives them.
+    $purgeExpiredStandardSql = @'
+WITH expired AS (
+    SELECT document."Id", document."StorageKey", document."PhotoSourceStorageKey"
+    FROM "PrintDocuments" AS document
+    JOIN "PrintJobs" AS job
+      ON job."TenantId" = document."TenantId"
+     AND job."Id" = document."PrintJobId"
+    WHERE document."StorageMode" = 'CLOUD'
+      AND document."PurgedUtc" IS NULL
+      AND job."Status" = 'COMPLETED'
+      AND CASE
+            WHEN job."OutputType" = 'PDF_EXPORT' THEN job."OutputCompletedUtc"
+            ELSE job."OutputConfirmedUtc"
+          END <= NOW() - INTERVAL '72 hours'
+    ORDER BY document."Id"
+    LIMIT 100
+)
+UPDATE "PrintDocuments" AS document
+SET "PurgedUtc" = NOW(),
+    "PhotoSourceStorageKey" = NULL,
+    "PhotoSourceOriginalFileName" = NULL,
+    "PhotoSourceMediaType" = NULL,
+    "PhotoSourceSha256" = NULL,
+    "PhotoSourceSizeBytes" = NULL,
+    "PhotoEditorSettingsJson" = NULL
+FROM expired
+WHERE document."Id" = expired."Id"
+RETURNING expired."StorageKey", expired."PhotoSourceStorageKey";
+'@
+    while ($true) {
+        $expiredRows = docker compose @composeBaseArgs exec -T db psql -X -A -t -F '|' -v ON_ERROR_STOP=1 -U $dbUser -d $dbName -c $purgeExpiredStandardSql
+        if ($LASTEXITCODE -ne 0) { throw 'Could not enforce the original 72-hour Standard document retention during restore.' }
+        $expiredBatchStorageKeys = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        $rowCount = 0
+        foreach ($line in @($expiredRows)) {
+            $value = ([string]$line).Trim()
+            if ([string]::IsNullOrWhiteSpace($value)) { continue }
+            $rowCount++
+            $keys = $value -split '\|', 2
+            foreach ($key in $keys) {
+                $storageKey = $key.Trim()
+                if ([string]::IsNullOrWhiteSpace($storageKey)) { continue }
+                if ($storageKey -notmatch '^[0-9a-f]{32}/[0-9a-f]{32}\.[a-z0-9]{1,10}$') {
+                    throw 'An expired Standard document has a non-canonical storage key. Restore is stopped rather than deleting an untrusted path.'
+                }
+                [void]$expiredBatchStorageKeys.Add($storageKey)
+            }
+        }
+        if ($rowCount -eq 0) { break }
+
+        # Delete in bounded batches so even a very large historical backup cannot
+        # create an oversized shell command or an unbounded in-memory path list.
+        if ($expiredBatchStorageKeys.Count -gt 0) {
+            $expiredPaths = @($expiredBatchStorageKeys | ForEach-Object { '/var/lib/qrtoprint/documents/' + $_ })
+            $cleanupCommand = 'rm -f ' + ($expiredPaths -join ' ')
+            $cleanupHelper = docker create --volumes-from ($apiContainer.Trim() + ':rw') alpine:3.20 sh -c $cleanupCommand
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($cleanupHelper)) {
+                throw 'Could not create the expired-document cleanup helper.'
+            }
+            try {
+                docker start -a $cleanupHelper | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw 'Could not remove expired Standard document objects from the restored volume.' }
+            } finally {
+                docker rm -f $cleanupHelper | Out-Null
+                $cleanupHelper = $null
+            }
+        }
+    }
 
     Write-Host 'Starting SmartPrint services from the restored backup...' -ForegroundColor Cyan
     docker compose @composeBaseArgs up -d
@@ -151,9 +280,11 @@ try {
     $restoreSucceeded = $true
     Write-Host 'SmartPrint database and encrypted cloud documents have been restored successfully.' -ForegroundColor Green
     Write-Host "The previous .env was preserved at: $temporaryEnvPath"
+    Write-Host 'Private document content was not restored. Tickets already at local queue staging can finish acknowledgement from the Agent DPAPI copy; other incomplete tickets require re-upload.'
     Write-Host 'The Windows Agent local DPAPI queue is not part of this Docker backup; it remains on each shop computer.'
 } finally {
     if (-not [string]::IsNullOrWhiteSpace($backupHelper)) { docker rm -f $backupHelper | Out-Null }
+    if (-not [string]::IsNullOrWhiteSpace($cleanupHelper)) { docker rm -f $cleanupHelper | Out-Null }
     if (-not $restoreSucceeded -and $servicesStopped -and -not $restoreStarted) {
         Write-Warning 'Restore stopped before replacing the database; restarting the original API and portal.'
         if ($envReplaced -and (Test-Path -LiteralPath $temporaryEnvPath)) { Copy-Item -LiteralPath $temporaryEnvPath -Destination $envPath -Force }

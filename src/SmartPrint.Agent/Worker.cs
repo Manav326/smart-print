@@ -44,7 +44,7 @@ public sealed class Worker(
     private readonly string pdfExportDirectory = ResolvePdfExportDirectory(configuration);
     private readonly object retentionPolicySync = new();
     private TimeSpan completedDocumentRetention = TimeSpan.FromDays(
-        Math.Clamp(configuration.GetValue<int?>("Agent:CompletedDocumentRetentionDays") ?? 7, 1, 3650));
+        Math.Clamp(configuration.GetValue<int?>("Agent:CompletedDocumentRetentionDays") ?? 3, 1, 3650));
     private TimeSpan retentionSweepInterval = TimeSpan.FromHours(
         Math.Clamp(configuration.GetValue<int?>("Agent:RetentionSweepHours") ?? 1, 1, 24));
     private bool hasReceivedPlatformRetentionPolicy;
@@ -150,7 +150,7 @@ public sealed class Worker(
                     using (var stagedDocument = localQueueStore.OpenDocumentReadStream(
                         ticket.PrintJobId, credentials.AgentDeviceId))
                     {
-                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedDocument, ticket.FileExtension);
+                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedDocument, ticket.FileExtension, ticket.PrintKind == "PHOTO");
                         if (!string.Equals(stagedAnalysis.Extension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
                             !string.Equals(stagedAnalysis.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase))
                             throw new InvalidDataException("The protected local copy no longer matches the original file type.");
@@ -186,8 +186,28 @@ public sealed class Worker(
                     AgentCloudHttpTiming.DocumentResponseCompletionOption);
                 if (!contentResponse.IsSuccessStatusCode)
                 {
-                    logger.LogWarning("Encrypted relay payload for {JobNumber} returned HTTP {StatusCode}.", ticket.JobNumber, (int)contentResponse.StatusCode);
-                    retryableFailure = true;
+                    if (contentResponse.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        // After disaster recovery the relay ciphertext is intentionally
+                        // absent. If no DPAPI-protected local queue copy was found above,
+                        // fail this ticket explicitly so the customer can re-upload.
+                        using var excluded = await SendAgentRequestAsync(
+                            client, credentials,
+                            $"api/v1/agent/private-relays/{ticket.TicketId:D}/reject",
+                            new AgentPrivateRelayRejectRequest(
+                                "restore_content_excluded",
+                                "The private relay payload was intentionally excluded from disaster recovery and no protected local queue copy was available. Please upload the original file again."),
+                            cancellationToken);
+                        if (!excluded.IsSuccessStatusCode)
+                            retryableFailure = true;
+                        else
+                            logger.LogWarning("Private relay {JobNumber} was marked for re-upload because neither its relay payload nor a protected local queue copy was available after restore.", ticket.JobNumber);
+                    }
+                    else
+                    {
+                        logger.LogWarning("Encrypted relay payload for {JobNumber} returned HTTP {StatusCode}.", ticket.JobNumber, (int)contentResponse.StatusCode);
+                        retryableFailure = true;
+                    }
                     continue;
                 }
 
@@ -235,7 +255,7 @@ public sealed class Worker(
                         DocumentAnalysis qsp2Analysis;
                         try
                         {
-                            qsp2Analysis = DocumentAnalyzer.Analyse(qsp2Plaintext, ticket.FileExtension);
+                            qsp2Analysis = DocumentAnalyzer.Analyse(qsp2Plaintext, ticket.FileExtension, ticket.PrintKind == "PHOTO");
                         }
                         catch (DocumentValidationException exception)
                         {
@@ -322,7 +342,7 @@ public sealed class Worker(
                     throw new InvalidDataException("The decrypted private document failed its SHA-256 check.");
 
                 DocumentAnalysis analysis;
-                try { analysis = DocumentAnalyzer.Analyse(plaintext, ticket.FileExtension); }
+                try { analysis = DocumentAnalyzer.Analyse(plaintext, ticket.FileExtension, ticket.PrintKind == "PHOTO"); }
                 catch (DocumentValidationException exception)
                 {
                     using var rejected = await SendAgentRequestAsync(

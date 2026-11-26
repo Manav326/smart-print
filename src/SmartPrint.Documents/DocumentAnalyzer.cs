@@ -1,6 +1,5 @@
 using System.Buffers.Binary;
 using UglyToad.PdfPig;
-using StbImageSharp;
 
 namespace SmartPrint.Documents;
 
@@ -13,14 +12,13 @@ public sealed record DocumentAnalysis(
 public sealed class DocumentValidationException(string message) : Exception(message);
 
 /// <summary>
-/// Performs the authoritative supported-format, page-count and image-integrity checks.
+/// Performs lightweight format, container-framing, page-count and dimension checks. Raster decoding is deliberately delegated to the printer driver; feature-specific PDF layout inspection remains opt-in.
 /// Stream-based callers must supply a seekable stream so PDF parsing never falls back
 /// to copying an entire non-seekable network stream into memory.
 /// </summary>
 public static class DocumentAnalyzer
 {
     private const int MaximumPages = 500;
-    private const ulong MaximumImagePixels = 50_000_000UL;
     private const int MaximumSignatureSearchBytes = 1028;
 
     public static string? IdentifyExtension(ReadOnlySpan<byte> bytes)
@@ -46,11 +44,11 @@ public static class DocumentAnalyzer
     /// supplied array without copying it; new ingestion and storage paths should use
     /// the seekable Stream overload directly.
     /// </summary>
-    public static DocumentAnalysis Analyse(byte[] bytes, string filenameExtension = "")
+    public static DocumentAnalysis Analyse(byte[] bytes, string filenameExtension = "", bool includePdfImageMetadata = false)
     {
         ArgumentNullException.ThrowIfNull(bytes);
         using var stream = new MemoryStream(bytes, writable: false);
-        return Analyse(stream, filenameExtension);
+        return Analyse(stream, filenameExtension, includePdfImageMetadata);
     }
 
     /// <summary>
@@ -58,7 +56,7 @@ public static class DocumentAnalyzer
     /// file as another byte array. The input stream remains open and its original
     /// position is restored before returning.
     /// </summary>
-    public static DocumentAnalysis Analyse(Stream stream, string filenameExtension = "")
+    public static DocumentAnalysis Analyse(Stream stream, string filenameExtension = "", bool includePdfImageMetadata = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
         if (!stream.CanRead || !stream.CanSeek)
@@ -80,7 +78,7 @@ public static class DocumentAnalyzer
 
             return extension switch
             {
-                ".pdf" => AnalysePdf(stream),
+                ".pdf" => AnalysePdf(stream, includePdfImageMetadata),
                 ".png" => AnalysePng(stream),
                 ".jpg" or ".jpeg" => AnalyseJpeg(stream, extension),
                 _ => throw new DocumentValidationException("The file content is not a supported PDF, JPEG or PNG document.")
@@ -92,7 +90,7 @@ public static class DocumentAnalyzer
         }
     }
 
-    private static DocumentAnalysis AnalysePdf(Stream stream)
+    private static DocumentAnalysis AnalysePdf(Stream stream, bool includeEmbeddedImageMetadata)
     {
         if (stream.Length < 8)
             throw new DocumentValidationException("The PDF file is incomplete.");
@@ -108,21 +106,25 @@ public static class DocumentAnalyzer
 
             var pages = document.GetPages().Select(page =>
             {
-                var images = page.GetImages().Select(image =>
+                var images = new List<object>();
+                if (includeEmbeddedImageMetadata)
                 {
-                    var box = image.BoundingBox;
-                    return new
+                    foreach (var image in page.GetImages())
                     {
-                        widthInSamples = image.WidthInSamples,
-                        heightInSamples = image.HeightInSamples,
-                        leftPoints = Math.Round(box.Left, 2),
-                        bottomPoints = Math.Round(box.Bottom, 2),
-                        rightPoints = Math.Round(box.Right, 2),
-                        topPoints = Math.Round(box.Top, 2),
-                        rotationDegrees = Math.Round(box.Rotation, 2),
-                        isImageMask = image.IsImageMask
-                    };
-                }).ToArray();
+                        var box = image.BoundingBox;
+                        images.Add(new
+                        {
+                            widthInSamples = image.WidthInSamples,
+                            heightInSamples = image.HeightInSamples,
+                            leftPoints = Math.Round(box.Left, 2),
+                            bottomPoints = Math.Round(box.Bottom, 2),
+                            rightPoints = Math.Round(box.Right, 2),
+                            topPoints = Math.Round(box.Top, 2),
+                            rotationDegrees = Math.Round(box.Rotation, 2),
+                            isImageMask = image.IsImageMask
+                        });
+                    }
+                }
 
                 return new
                 {
@@ -163,7 +165,8 @@ public static class DocumentAnalyzer
         var width = BinaryPrimitives.ReadUInt32BigEndian(header.Slice(16, 4));
         var height = BinaryPrimitives.ReadUInt32BigEndian(header.Slice(20, 4));
         ValidateImageDimensions(width, height);
-        return DecodeAndAnalyseImage(stream, width, height, "image/png", ".png");
+        ValidatePngStructure(stream);
+        return CreateImageAnalysis(width, height, "image/png", ".png");
     }
 
     private static DocumentAnalysis AnalyseJpeg(Stream stream, string extension)
@@ -178,7 +181,8 @@ public static class DocumentAnalyzer
 
         var dimensions = ReadJpegDimensions(stream);
         ValidateImageDimensions(dimensions.Width, dimensions.Height);
-        return DecodeAndAnalyseImage(stream, dimensions.Width, dimensions.Height, "image/jpeg", extension);
+        ValidateJpegEndMarker(stream);
+        return CreateImageAnalysis(dimensions.Width, dimensions.Height, "image/jpeg", extension);
     }
 
     private static (uint Width, uint Height) ReadJpegDimensions(Stream stream)
@@ -236,55 +240,82 @@ public static class DocumentAnalyzer
         throw new DocumentValidationException("The JPEG image dimensions could not be read.");
     }
 
-    private static DocumentAnalysis DecodeAndAnalyseImage(
-        Stream stream,
-        uint expectedWidth,
-        uint expectedHeight,
-        string mediaType,
-        string extension)
+    // Ordinary image uploads need only trustworthy format and dimension metadata.
+    // The Windows printer driver performs raster decoding when the job is printed;
+    // decoding up to 50 million pixels here would create large transient RAM spikes.
+    private static DocumentAnalysis CreateImageAnalysis(
+        uint width, uint height, string mediaType, string extension) =>
+        new(1, ImagePageSize(width, height), mediaType, extension);
+
+    // Validate PNG chunk framing without inflating IDAT data into a pixel buffer.
+    // This catches truncated/malformed containers while keeping memory and CPU bounded.
+    private static void ValidatePngStructure(Stream stream)
     {
-        try
-        {
-            // Header inspection is inexpensive; a full decode proves that compressed
-            // pixel data is complete. Decode directly from the seekable source stream
-            // instead of first copying the compressed document into a byte array.
-            stream.Position = 0;
-            var imageInfo = ImageInfo.FromStream(stream);
-            if (imageInfo is null)
-                throw new DocumentValidationException("The image format could not be identified.");
-            var identified = imageInfo.Value;
+        stream.Position = 8;
+        var hasHeader = false;
+        var hasImageData = false;
+        var hasEnd = false;
+        var chunkCount = 0;
+        Span<byte> chunkHeader = stackalloc byte[8];
+        Span<byte> crc = stackalloc byte[4];
 
-            if (identified.Width != expectedWidth || identified.Height != expectedHeight)
-                throw new DocumentValidationException("The image dimensions do not match their file header.");
-
-            stream.Position = 0;
-            var decoded = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
-            var expectedDecodedBytes = checked((long)identified.Width * identified.Height * 4);
-            if (decoded.Width != identified.Width || decoded.Height != identified.Height ||
-                decoded.Data.LongLength != expectedDecodedBytes)
-                throw new DocumentValidationException("The image pixel data is incomplete or invalid.");
-
-            return new DocumentAnalysis(
-                1,
-                ImagePageSize((uint)decoded.Width, (uint)decoded.Height),
-                mediaType,
-                extension);
-        }
-        catch (DocumentValidationException)
+        while (stream.Position < stream.Length)
         {
-            throw;
+            if (++chunkCount > 4096 || !TryReadExactly(stream, chunkHeader))
+                throw new DocumentValidationException("The PNG file has an invalid chunk structure.");
+
+            var length = BinaryPrimitives.ReadUInt32BigEndian(chunkHeader[..4]);
+            var type = chunkHeader[4..8];
+            if (!hasHeader)
+            {
+                if (!type.SequenceEqual("IHDR"u8) || length != 13)
+                    throw new DocumentValidationException("The PNG image header is invalid.");
+                hasHeader = true;
+            }
+            else if (type.SequenceEqual("IHDR"u8))
+            {
+                throw new DocumentValidationException("The PNG file contains an unexpected second image header.");
+            }
+
+            var remainingBytes = stream.Length - stream.Position;
+            if (remainingBytes < 4 || (ulong)length > (ulong)(remainingBytes - 4))
+                throw new DocumentValidationException("The PNG file is incomplete.");
+
+            if (type.SequenceEqual("IDAT"u8))
+                hasImageData = true;
+
+            stream.Position += length;
+            if (!TryReadExactly(stream, crc))
+                throw new DocumentValidationException("The PNG file is incomplete.");
+
+            if (type.SequenceEqual("IEND"u8))
+            {
+                if (length != 0 || !hasImageData)
+                    throw new DocumentValidationException("The PNG image data is incomplete.");
+                hasEnd = true;
+                break;
+            }
         }
-        catch (Exception exception) when (exception is not OutOfMemoryException)
-        {
-            throw new DocumentValidationException("The image is damaged, incomplete or could not be fully decoded.");
-        }
+
+        if (!hasHeader || !hasImageData || !hasEnd)
+            throw new DocumentValidationException("The PNG image data is incomplete.");
     }
 
+    private static void ValidateJpegEndMarker(Stream stream)
+    {
+        if (stream.Length < 4)
+            throw new DocumentValidationException("The JPEG file is incomplete.");
+        stream.Position = stream.Length - 2;
+        Span<byte> endMarker = stackalloc byte[2];
+        if (!TryReadExactly(stream, endMarker) || !endMarker.SequenceEqual(new byte[] { 0xFF, 0xD9 }))
+            throw new DocumentValidationException("The JPEG file is incomplete.");
+    }
     private static void ValidateImageDimensions(uint width, uint height)
     {
-        if (width == 0 || height == 0 || (ulong)width * height > MaximumImagePixels)
+        if (width == 0 || height == 0 || width > DocumentImageLimits.MaximumDimension || height > DocumentImageLimits.MaximumDimension ||
+            (ulong)width * height > DocumentImageLimits.MaximumPixels)
         {
-            throw new DocumentValidationException("The image dimensions are invalid or too large to process safely.");
+            throw new DocumentValidationException("The image dimensions exceed the Windows Agent print limits.");
         }
     }
 

@@ -99,8 +99,10 @@ public static class PlatformOperationalSettingsEndpoints
         var errors = new Dictionary<string, string[]>();
         if (request.TrialMaxMonthlyPrintJobs is < 1 or > 10_000_000)
             errors["trialMaxMonthlyPrintJobs"] = ["Use a whole-number quota between 1 and 10,000,000 jobs."];
-        ValidateDays(errors, nameof(request.CloudCompletedDocumentRetentionDays), request.CloudCompletedDocumentRetentionDays);
-        ValidateDays(errors, nameof(request.AgentCompletedDocumentRetentionDays), request.AgentCompletedDocumentRetentionDays);
+        if (request.CloudCompletedDocumentRetentionDays != 3)
+            errors["cloudCompletedDocumentRetentionDays"] = ["Standard cloud documents must be retained for exactly 72 hours (3 days)."];
+        if (request.AgentCompletedDocumentRetentionDays != 3)
+            errors["agentCompletedDocumentRetentionDays"] = ["Standard Agent documents must be retained for exactly 72 hours (3 days)."];
         ValidateDays(errors, nameof(request.AbandonedDocumentRetentionDays), request.AbandonedDocumentRetentionDays);
         ValidateDays(errors, nameof(request.PendingLocalUploadRetentionDays), request.PendingLocalUploadRetentionDays);
         ValidateDays(errors, nameof(request.ExpiredUploadTicketRetentionDays), request.ExpiredUploadTicketRetentionDays);

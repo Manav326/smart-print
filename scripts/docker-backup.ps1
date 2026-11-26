@@ -47,18 +47,14 @@ $docsFile = Join-Path $resolvedBackup "qrtoprint-documents-$stamp.tar.gz"
 $envFile = Join-Path $resolvedBackup "qrtoprint-secrets-$stamp.env"
 $tempDbFile = "/tmp/qrtoprint-backup-$stamp.dump"
 $tempDocsFile = "/tmp/qrtoprint-documents-$stamp.tar.gz"
-$servicesStopped = $false
 $backupContainer = $null
 
 try {
-    Write-Host "Pausing API and portal writes for a consistent backup..." -ForegroundColor Cyan
-    docker compose @composeBaseArgs stop api portal
-    if ($LASTEXITCODE -ne 0) {
-        throw "Could not pause API and portal services."
-    }
-    $servicesStopped = $true
-
-    Write-Host "Exporting PostgreSQL..." -ForegroundColor Cyan
+    # pg_dump takes a consistent PostgreSQL snapshot while the API and portal
+    # remain online. Document objects are atomically published before their
+    # database references commit, so archive the volume after the dump. A
+    # concurrent retention sweep can only remove already-expired (>72h) files.
+    Write-Host "Exporting an online PostgreSQL snapshot (API and portal remain online)..." -ForegroundColor Cyan
     $dbUser = $values["POSTGRES_USER"]
     $dbName = $values["POSTGRES_DB"]
     docker compose @composeBaseArgs exec -T db pg_dump -U $dbUser -d $dbName -Fc -f $tempDbFile
@@ -77,7 +73,9 @@ try {
         throw "Could not locate the API container's persistent document volume."
     }
 
-    $backupContainer = docker create --volumes-from ($apiContainer.Trim() + ":ro") alpine:3.20 sh -c "tar -czf $tempDocsFile -C /var/lib/qrtoprint/documents ."
+    # Private relay ciphertext is deliberately excluded. Temporary upload files
+    # are not committed document objects and must not enter a recovery archive.
+    $backupContainer = docker create --volumes-from ($apiContainer.Trim() + ":ro") alpine:3.20 sh -c "tar -czf $tempDocsFile --exclude=./private-relay --exclude=*.upload.tmp --exclude=*.tmp -C /var/lib/qrtoprint/documents ."
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($backupContainer)) {
         throw "Could not create the read-only document archive container."
     }
@@ -108,17 +106,11 @@ try {
     Write-Host $dbFile
     Write-Host $docsFile
     Write-Host $envFile
+    Write-Host "The API and portal stayed online; Private relay content and temporary upload files were excluded." -ForegroundColor Cyan
     Write-Host "Keep all three files together in encrypted off-host storage."
 }
 finally {
     if (-not [string]::IsNullOrWhiteSpace($backupContainer)) {
         docker rm -f $backupContainer | Out-Null
-    }
-    if ($servicesStopped) {
-        Write-Host "Restarting API and portal..." -ForegroundColor Cyan
-        docker compose @composeBaseArgs start api portal
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Backup finished but the API/portal restart failed. Run docker compose up -d api portal."
-        }
     }
 }

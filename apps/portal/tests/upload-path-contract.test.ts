@@ -26,11 +26,16 @@ test("local ticket reservation enforces the same 50 MiB, 20-file and 500 MiB lim
   assert.match(api, /UploadLimits\.MaxBatchBytes/);
 });
 
-test("direct Agent LAN upload validates the ticket size before accepting either QSP2 or legacy payloads", () => {
+test("Standard direct Agent LAN uploads require authenticated QSP2 while Private keeps its QSP1 compatibility path", () => {
   assert.match(agentApi, /claim\.SizeBytes is <= 0 or > UploadLimits\.MaxFileBytes/);
   assert.match(agentApi, /Qsp2DocumentFormat\.GetEncryptedLength\(claim\.SizeBytes\)/);
+  assert.match(agentApi, /RequireEncryptedStandardUploads", true/);
+  assert.match(agentApi, /!claim\.PrivatePrinting[\s\S]{0,220}!isQsp2/);
   assert.match(agentApi, /claim\.SizeBytes\s*\+\s*UploadLimits\.PrivateRelayEncryptionOverheadBytes/);
   assert.match(agentApi, /localQueueStore\.EnqueueLocalUploadStreamingAsync\(/);
+  assert.match(portalApi, /hasPairedLocalEndpoint/);
+  assert.match(portalApi, /privatePrinting \|\| privateUpload/);
+  assert.match(portalApi, /Never fall back to plaintext on the local HTTP endpoint/);
 });
 
 test("encrypted Private Printing relay and worker enforce the original-file ceiling", () => {
@@ -78,7 +83,7 @@ test("Private Printing never starts a second relay while the same ticket is clai
   assert.match(api, /item\.PrivateRelayStage == PrivateRelayProgressRules\.WaitingForUpload[\s\S]{0,120}item\.PrivateRelayStage == PrivateRelayProgressRules\.ReceivingEncryptedPayload/);
   const relay = portalApi.slice(portalApi.indexOf("async function uploadCustomerPrivateRelay"), portalApi.indexOf("function createStreamingLocalMultipartBody"));
   const localUpload = portalApi.slice(portalApi.indexOf("export async function uploadCustomerDocumentLocally"));
-  assert.match(localUpload, /if \(privatePrinting\) break/);
+  assert.match(localUpload, /if \(privatePrinting \|\| privateUpload\) break/);
   assert.match(relay, /existing\.transferPath === "DIRECT_LAN"/);
   assert.match(relay, /existing\.transferPath === "CLOUD_RELAY"/);
   assert.match(relay, /has not started a second encrypted transfer/);
@@ -131,3 +136,75 @@ test("Private Printing progress uses short, plain-language customer messages", (
   assert.match(messages, /File secured on the shop computer · ready for printing/);
   assert.doesNotMatch(messages, /decrypting|authenticating|encrypted payload|local print queue/i);
 });
+
+test("a Private document promotes only unclaimed local batch tickets and never downgrades a batch", () => {
+  const localTicketStart = api.indexOf('publicApi.MapPost("/sessions/current/local-upload-tickets"');
+  const localTicketEnd = api.indexOf('agentApi.MapPost("/local-uploads/status-batch"', localTicketStart);
+  assert.ok(localTicketStart >= 0, "the local upload-ticket admission route must exist");
+  const ticketRoute = api.slice(localTicketStart, localTicketEnd > localTicketStart ? localTicketEnd : undefined);
+  assert.match(ticketRoute, /CustomerPrintSessions[\s\S]{0,180}FOR UPDATE/,
+    "batch ticket reservations must serialize on the owning customer session");
+  assert.match(ticketRoute, /LocalPrintUploadTickets[\s\S]{0,220}FOR UPDATE/,
+    "existing tickets must be locked before a promotion decision");
+  assert.match(ticketRoute, /batchHasStandardContent/);
+  assert.match(ticketRoute, /batch_private_promotion_unavailable/);
+  assert.match(ticketRoute, /item\.ClaimedUtc is not null/);
+  assert.match(ticketRoute, /item\.AgentUploadAttempts > 0/);
+  assert.match(ticketRoute, /item\.PrintKind == "PHOTO"/,
+    "only Photo Studio tickets that satisfy Private Printing's required A4 PDF layout may be promoted");
+  assert.match(ticketRoute, /PricingCalculator\.MaximumPhotosPerA4Sheet/);
+  assert.match(ticketRoute, /pendingTicket\.PrivatePrinting = true/);
+  assert.match(ticketRoute, /pendingTicket\.OriginalFileName = "Private document"/);
+  assert.match(ticketRoute, /existing is not null && request\.PrivatePrinting && !existing\.PrivatePrinting/,
+    "an exact retry can promote its own pending Standard ticket rather than losing its idempotency identity");
+  assert.match(ticketRoute, /promotedBatchTicketIds\.Contains\(racedTicket\.Id\)/,
+    "a ticket discovered after a concurrent reservation must commit its promotion");
+  assert.match(ticketRoute, /pendingQueueReadiness\.Contains/,
+    "every existing ticket's assigned queue must be eligible for Private output");
+  assert.match(ticketRoute, /existing is not null && existing\.PrivatePrinting && !request\.PrivatePrinting[\s\S]{0,180}batch_privacy_mode_mismatch/,
+    "a stale Standard retry for an existing Private ticket must restore the Private choice without losing identity");
+  assert.match(ticketRoute, /batchAlreadyPrivate && !request\.PrivatePrinting/,
+    "a Private batch must never be downgraded by a Standard request");
+  assert.match(api, /ticket = await db\.LocalPrintUploadTickets\.AsNoTracking\(\)[\s\S]{0,180}SingleAsync/,
+    "the Agent claim response must reload the authoritative privacy mode after claiming");
+  const localUploadStart = portalApi.indexOf("export async function uploadCustomerDocumentLocally");
+  const reservationCatchStart = portalApi.indexOf("  } catch (exception) {", localUploadStart);
+  const reservationCatchEnd = portalApi.indexOf("  if (isUncompletedLocalUploadTicketExpired", reservationCatchStart);
+  const reservationCatch = portalApi.slice(reservationCatchStart, reservationCatchEnd);
+  assert.match(reservationCatch, /"batch_private_promotion_unavailable"/,
+    "promotion rejection remains a known preflight result");
+  assert.match(reservationCatch, /hasExistingTicketIdentity/,
+    "the portal must distinguish a first-attempt preflight from a retry that may already own a ticket");
+  assert.match(reservationCatch, /if \(!hasExistingTicketIdentity\)[\s\S]{0,180}sessionStorage\.removeItem/,
+    "only a first-attempt rejection may clear an unused identity to permit cloud fallback");
+  assert.match(reservationCatch, /hasExistingTicketIdentity[\s\S]{0,260}throw new LocalUploadPreflightError/,
+    "a retry rejection must retain its original idempotency key and grant");
+  assert.match(portalApi, /Checkout blocks adding this file[\s\S]{0,220}Keep its identity/,
+    "checkout rejection must not discard an existing ticket's recovery identity");
+  assert.match(customerApp, /privatePromotionUnavailable[\s\S]{0,180}exception instanceof ApiError \? exception\.message/,
+    "the portal must show the server's specific queue or transfer reason rather than a misleading generic message");
+  assert.match(api, /do not submit the same document again unless you intentionally want a second print/,
+    "the customer must be warned against accidentally duplicating a Standard job");
+  assert.match(portalApi, /customerLocalUploadAttemptStorageKeys\(sessionToken, file, batchId\)/,
+    "local retry identity must be scoped to the original batch");
+  assert.match(portalApi, /legacyKey \+ "\." \+ batchId/,
+    "legacy retry identity must migrate into the current batch scope without being discarded");
+  assert.match(ticketRoute, /pendingQueueReadiness\.Contains/,
+    "Private queue readiness must be reused for tickets assigned to the same printer");
+  assert.match(ticketRoute, /standardTickets\.Select\(item => item\.PrinterDeviceId\)\.Distinct\(\)\.ToArray\(\)/,
+    "queue readiness must be loaded once for the batch's distinct printers, not queried once per file");
+  assert.match(ticketRoute, /PrivatePrintingOutputPolicy\.IsEligible/,
+    "the batched queue lookup must preserve the Private output eligibility policy");
+  assert.match(ticketRoute, /standardTickets\.All\(item => item\.AgentDeviceId == expectedAgentId\)/,
+    "the Agent key must be checked once for the batch rather than once per file");
+  assert.match(customerApp, /uploadedBatch\.some\(item=>!item\.job\.privatePrinting\)/,
+    "ID Studio must not offer an unsafe promotion after Standard jobs already exist");
+  assert.match(customerApp, /Private mode is locked for this batch/,
+    "the UI must explain why the Private option is unavailable after Standard upload");
+  assert.match(customerApp, /if\(batchPrivacyMismatch&&!containsIdDocument\)[\s\S]{0,220}setPrivatePrinting\(true\)/,
+    "a stale Standard choice must be restored to the server-confirmed Private batch mode");
+  assert.match(customerApp, /effectivePrivatePrinting=privatePrinting\|\|containsIdDocument/,
+    "an ID document selected before upload promotes every file in the pending batch");
+  assert.match(privateRelayRules, /Rank\(requestedStage\) > Rank\(currentStage\)/);
+});
+

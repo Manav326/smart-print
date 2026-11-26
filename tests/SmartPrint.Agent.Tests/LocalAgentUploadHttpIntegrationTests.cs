@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -12,10 +13,11 @@ using SmartPrint.Agent;
 using SmartPrint.Documents;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Writer;
+using Xunit.Abstractions;
 
 namespace SmartPrint.Agent.Tests;
 
-public sealed class LocalAgentUploadHttpIntegrationTests
+public sealed class LocalAgentUploadHttpIntegrationTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task HostedWindowsAgentAcceptsAnExtensionlessPdfThroughItsRealMultipartHttpRoute()
@@ -122,6 +124,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
             agentId,
             "agent-test-secret",
             DateTimeOffset.UtcNow));
+        var documentEncryptionKeyStore = new AgentDocumentEncryptionKeyStore(Path.Combine(root, "document-key.dpapi"));
 
         var queue = new AgentLocalQueueStore(queueRoot);
         await queue.InitializeAsync(CancellationToken.None);
@@ -146,7 +149,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                 services.AddSingleton<LocalAgentApiState>(state);
                 services.AddSingleton<LocalNetworkManager>(networkManager);
                 services.AddSingleton<AgentRuntimeReadiness>(runtimeReadiness);
-                services.AddSingleton(new AgentDocumentEncryptionKeyStore(Path.Combine(root, "document-key.dpapi")));
+                services.AddSingleton(documentEncryptionKeyStore);
                 services.AddSingleton<LocalAgentApiHostedService>();
                 services.AddSingleton<IHostedService>(provider =>
                     provider.GetRequiredService<LocalAgentApiHostedService>());
@@ -162,24 +165,52 @@ public sealed class LocalAgentUploadHttpIntegrationTests
             Assert.True(state.IsRunning, "The real Windows Agent local HTTP listener did not start.");
 
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            using var multipart = new MultipartFormDataContent();
-            using var fileContent = new ByteArrayContent(pdf);
-            fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
-            multipart.Add(fileContent, "file", "certificate-without-extension");
+            var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+            byte[] publicKeyBytes = Convert.FromBase64String(documentEncryptionKeyStore.GetOrCreatePublicKey());
+            byte[] wrappedKey;
+            try
+            {
+                using var publicRsa = RSA.Create();
+                publicRsa.ImportSubjectPublicKeyInfo(publicKeyBytes, out _);
+                wrappedKey = publicRsa.Encrypt(dataKey, RSAEncryptionPadding.OaepSHA256);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(publicKeyBytes);
+            }
+
+            using var plaintextSource = new MemoryStream(pdf, writable: false);
+            using var encryptedBody = new MemoryStream();
+            try
+            {
+                await Qsp2DocumentFormat.EncryptAsync(
+                    plaintextSource, encryptedBody, agentId, jobId, pdf.LongLength, dataKey);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(dataKey);
+            }
+            encryptedBody.Position = 0;
+            using var encryptedContent = new StreamContent(encryptedBody);
+            encryptedContent.Headers.ContentType = new MediaTypeHeaderValue("application/vnd.smartprint.qsp2");
 
             using var request = new HttpRequestMessage(
                 HttpMethod.Post,
                 $"http://127.0.0.1:{LocalNetworkEndpointDiscovery.DefaultPort}/api/v1/local/uploads/{ticketId:D}")
             {
-                Content = multipart
+                Content = encryptedContent
             };
             request.Headers.Add("X-Print-Upload-Grant", "upload-grant-test");
+            request.Headers.Add("X-Print-Encrypted-Format", "QSP2");
+            request.Headers.Add("X-Print-Encrypted-Key", Convert.ToBase64String(wrappedKey));
+            request.Headers.Add("X-Print-Encrypted-Size", encryptedBody.Length.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            CryptographicOperations.ZeroMemory(wrappedKey);
 
             using var response = await client.SendAsync(request);
             var responseBody = await response.Content.ReadAsStringAsync();
             Assert.True(
                 response.IsSuccessStatusCode,
-                $"The extensionless PDF failed at the hosted Agent multipart endpoint: HTTP {(int)response.StatusCode}: {responseBody}");
+                $"The extensionless PDF failed at the hosted Agent encrypted QSP2 endpoint: HTTP {(int)response.StatusCode}: {responseBody}");
 
             Assert.True(await claimSeen.Task.WaitAsync(TimeSpan.FromSeconds(5)));
             using var completedRequest = await completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -228,7 +259,8 @@ public sealed class LocalAgentUploadHttpIntegrationTests
     }
 
     [Fact]
-    public async Task HostedAgentStreamsTwentyFilesWithFiftyMiBMaximumAndFiveHundredMiBTotalThroughThreeConcurrentTransfers()
+    [Trait("Category", "UploadConcurrencyDiagnostic")]
+    public async Task HostedAgentStreamsTwentyFilesWithFiftyMiBMaximumAndFiveHundredMiBTotalThroughConfiguredConcurrentTransfers()
     {
         const int fileCount = 20;
         const long mebibyte = 1024L * 1024L;
@@ -248,6 +280,11 @@ public sealed class LocalAgentUploadHttpIntegrationTests
         var completionCounts = new ConcurrentDictionary<Guid, int>();
         var activeTransfers = 0;
         var maximumConcurrentTransfers = 0;
+        var configuredConcurrency = Environment.GetEnvironmentVariable("SMARTPRINT_UPLOAD_TEST_CONCURRENCY");
+        var concurrencyLimit = 3;
+        if (!string.IsNullOrWhiteSpace(configuredConcurrency) &&
+            (!int.TryParse(configuredConcurrency, out concurrencyLimit) || concurrencyLimit is < 1 or > 4))
+            throw new InvalidOperationException("SMARTPRINT_UPLOAD_TEST_CONCURRENCY must be an integer from 1 through 4.");
 
         try
         {
@@ -370,6 +407,8 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                 agentId,
                 "agent-test-secret",
                 DateTimeOffset.UtcNow));
+            var documentEncryptionKeyStore = new AgentDocumentEncryptionKeyStore(Path.Combine(root, "document-key.dpapi"));
+            var agentPublicKeyBytes = Convert.FromBase64String(documentEncryptionKeyStore.GetOrCreatePublicKey());
 
             var queue = new AgentLocalQueueStore(queueRoot);
             await queue.InitializeAsync(CancellationToken.None);
@@ -394,7 +433,7 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                     services.AddSingleton<LocalAgentApiState>(state);
                     services.AddSingleton<LocalNetworkManager>(networkManager);
                     services.AddSingleton<AgentRuntimeReadiness>(runtimeReadiness);
-                    services.AddSingleton(new AgentDocumentEncryptionKeyStore(Path.Combine(root, "document-key.dpapi")));
+                    services.AddSingleton(documentEncryptionKeyStore);
                     services.AddSingleton<LocalAgentApiHostedService>();
                     services.AddSingleton<IHostedService>(provider =>
                         provider.GetRequiredService<LocalAgentApiHostedService>());
@@ -415,31 +454,57 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                     DefaultRequestVersion = new Version(1, 1),
                     DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
                 };
-                using var concurrency = new SemaphoreSlim(3, 3);
+                using var concurrency = new SemaphoreSlim(concurrencyLimit, concurrencyLimit);
+                using var process = Process.GetCurrentProcess();
+                var processCpuBefore = process.TotalProcessorTime;
+                var allocatedBytesBefore = GC.GetTotalAllocatedBytes(precise: false);
+                var batchStopwatch = Stopwatch.StartNew();
                 var uploads = fixtures.Values.Select(async fixture =>
                 {
                     await concurrency.WaitAsync();
                     try
                     {
-                        using var multipart = new MultipartFormDataContent();
                         await using var source = File.OpenRead(fixture.Path);
-                        using var fileContent = new StreamContent(source, 1024 * 1024);
-                        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
-                        multipart.Add(fileContent, "file", fixture.Name);
+                        var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+                        byte[] wrappedKey;
+                        try
+                        {
+                            using var publicRsa = RSA.Create();
+                            publicRsa.ImportSubjectPublicKeyInfo(agentPublicKeyBytes, out _);
+                            wrappedKey = publicRsa.Encrypt(dataKey, RSAEncryptionPadding.OaepSHA256);
+                        }
+                        catch
+                        {
+                            CryptographicOperations.ZeroMemory(dataKey);
+                            throw;
+                        }
 
+                        using var encryptedContent = new Qsp2HttpContent(
+                            source, agentId, fixture.JobId, fixture.SizeBytes, dataKey);
                         using var request = new HttpRequestMessage(
                             HttpMethod.Post,
                             $"http://127.0.0.1:{LocalNetworkEndpointDiscovery.DefaultPort}/api/v1/local/uploads/{fixture.TicketId:D}")
                         {
-                            Content = multipart
+                            Content = encryptedContent
                         };
                         request.Headers.Add("X-Print-Upload-Grant", "upload-grant-test");
+                        request.Headers.Add("X-Print-Encrypted-Format", "QSP2");
+                        request.Headers.Add("X-Print-Encrypted-Key", Convert.ToBase64String(wrappedKey));
+                        request.Headers.Add("X-Print-Encrypted-Size", Qsp2DocumentFormat.GetEncryptedLength(fixture.SizeBytes).ToString(System.Globalization.CultureInfo.InvariantCulture));
 
-                        using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
-                        var responseBody = await response.Content.ReadAsStringAsync();
-                        Assert.True(
-                            response.IsSuccessStatusCode,
-                            $"{fixture.Name} failed through the hosted Agent multipart endpoint: HTTP {(int)response.StatusCode}: {responseBody}");
+                        try
+                        {
+                            using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+                            var responseBody = await response.Content.ReadAsStringAsync();
+                            Assert.True(
+                                response.IsSuccessStatusCode,
+                                $"{fixture.Name} failed through the hosted Agent encrypted QSP2 endpoint: HTTP {(int)response.StatusCode}: {responseBody}");
+                        }
+                        finally
+                        {
+                            CryptographicOperations.ZeroMemory(dataKey);
+                            CryptographicOperations.ZeroMemory(wrappedKey);
+                        }
                     }
                     finally
                     {
@@ -448,8 +513,14 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                 }).ToArray();
 
                 await Task.WhenAll(uploads);
+                batchStopwatch.Stop();
+                process.Refresh();
+                var processCpuMilliseconds = (process.TotalProcessorTime - processCpuBefore).TotalMilliseconds;
+                var allocatedBytes = Math.Max(0, GC.GetTotalAllocatedBytes(precise: false) - allocatedBytesBefore);
+                output.WriteLine(
+                    $"SMARTPRINT_PERF,scenario=C,configured_concurrency={concurrencyLimit},observed_concurrency={maximumConcurrentTransfers},batch_mib=500,files=20,elapsed_ms={batchStopwatch.Elapsed.TotalMilliseconds:F2},process_cpu_ms={processCpuMilliseconds:F2},allocated_bytes={allocatedBytes},working_set_bytes={process.WorkingSet64},peak_working_set_bytes={process.PeakWorkingSet64}");
 
-                Assert.Equal(3, maximumConcurrentTransfers);
+                Assert.Equal(concurrencyLimit, maximumConcurrentTransfers);
                 Assert.Equal(fileCount, completionCounts.Count);
                 Assert.All(completionCounts.Values, count => Assert.Equal(1, count));
 
@@ -481,6 +552,37 @@ public sealed class LocalAgentUploadHttpIntegrationTests
         }
     }
 
+
+    private sealed class Qsp2HttpContent : HttpContent
+    {
+        private readonly Stream plaintext;
+        private readonly Guid agentId;
+        private readonly Guid jobId;
+        private readonly long plaintextLength;
+        private readonly byte[] dataKey;
+
+        public Qsp2HttpContent(Stream plaintext, Guid agentId, Guid jobId, long plaintextLength, byte[] dataKey)
+        {
+            this.plaintext = plaintext;
+            this.agentId = agentId;
+            this.jobId = jobId;
+            this.plaintextLength = plaintextLength;
+            this.dataKey = dataKey;
+            Headers.ContentType = new MediaTypeHeaderValue("application/vnd.smartprint.qsp2");
+        }
+
+        protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        {
+            await Qsp2DocumentFormat.EncryptAsync(
+                plaintext, stream, agentId, jobId, plaintextLength, dataKey);
+        }
+
+        protected override bool TryComputeLength(out long length)
+        {
+            length = Qsp2DocumentFormat.GetEncryptedLength(plaintextLength);
+            return true;
+        }
+    }
 
     private static async Task WritePaddedPdfAsync(string path, long targetBytes)
     {

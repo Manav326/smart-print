@@ -62,8 +62,8 @@ public sealed class WindowsPrintExecutor
     private const uint DibRgbColors = 0;
     private const uint SrcCopy = 0x00CC0020;
     private const int Halftone = 4;
-    private const int MaxRasterDimension = 10_000;
-    private const long MaxRasterPixels = 24_000_000;
+    private const int MaxRasterDimension = (int)DocumentImageLimits.MaximumDimension;
+    private const long MaxRasterPixels = (long)DocumentImageLimits.MaximumPixels;
     private static readonly Lazy<bool> PdfiumInitialized = new(() =>
     {
         fpdfview.FPDF_InitLibrary();
