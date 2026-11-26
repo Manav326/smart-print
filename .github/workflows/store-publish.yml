@@ -180,16 +180,29 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.validate.outputs.source_sha }}
+      - name: Install verified GitHub CLI 2.106.0
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP "gh_2.106.0_windows_amd64.zip"
+          $extractRoot = Join-Path $env:RUNNER_TEMP "gh-2.106.0"
+          Invoke-WebRequest -Uri "https://github.com/cli/cli/releases/download/v2.106.0/gh_2.106.0_windows_amd64.zip" -OutFile $archive -TimeoutSec 300
+          $actualHash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -ne "d406f442ca0baa3d3e9c695e9cded1aa48e67dad3294b8947e5ab84f980b4844") { throw "GitHub CLI Windows archive SHA-256 verification failed." }
+          Expand-Archive -LiteralPath $archive -DestinationPath $extractRoot -Force
+          $ghDirectory = Join-Path $extractRoot "gh_2.106.0_windows_amd64\bin"
+          if (-not (Test-Path (Join-Path $ghDirectory "gh.exe"))) { throw "Verified GitHub CLI executable was not found after extraction." }
+          $ghDirectory >> $env:GITHUB_PATH
+          $env:PATH = "$ghDirectory;$env:PATH"
+          gh --version
+          if ((gh --version | Select-Object -First 1) -notmatch "2\.106\.0") { throw "Expected GitHub CLI 2.106.0." }
+
       - name: Download the signed Windows Store artifact from the published release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ghVersionText = (gh --version | Select-Object -First 1)
-          $ghVersion = [regex]::Match($ghVersionText, "[0-9]+[.][0-9]+[.][0-9]+").Value
-          if ([string]::IsNullOrWhiteSpace($ghVersion) -or [version]$ghVersion -lt [version]"2.102.0") {
-            throw "GitHub CLI 2.102.0 or newer is required for secure artifact-attestation verification."
-          }
+          if ($ghVersionText -notmatch "2\.106\.0") { throw "The verified GitHub CLI 2.106.0 installation is not active." }
           gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir artifacts --pattern "SmartPrint-Windows-Store-Setup.exe" --pattern "SHA256SUMS.txt" --pattern "BUILD-INFO.txt"
           if ($LASTEXITCODE -ne 0) { throw "Could not download the Store-ready Windows installer from the published GitHub release." }
           if (-not (Test-Path "artifacts/SmartPrint-Windows-Store-Setup.exe")) { throw "The signed Store-ready Windows installer is missing from this release." }
@@ -299,6 +312,25 @@ jobs:
     env:
       RELEASE_SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
     steps:
+      - name: Install verified GitHub CLI 2.106.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gh_2.106.0_linux_amd64.tar.gz"
+          extract_root="$RUNNER_TEMP/gh-2.106.0"
+          curl --fail --silent --show-error --location --retry 3 --retry-delay 2 \
+            "https://github.com/cli/cli/releases/download/v2.106.0/gh_2.106.0_linux_amd64.tar.gz" \
+            --output "$archive"
+          echo "a476449fa9625413c54a3734eded62e9e480e49f421ff08e7f3b3879c059a033  $archive" | sha256sum --check
+          mkdir -p "$extract_root"
+          tar -xzf "$archive" -C "$extract_root"
+          gh_directory="$extract_root/gh_2.106.0_linux_amd64/bin"
+          test -x "$gh_directory/gh"
+          echo "$gh_directory" >> "$GITHUB_PATH"
+          export PATH="$gh_directory:$PATH"
+          gh --version
+          gh --version | grep -F "2.106.0"
+
       - name: Download the signed Android App Bundle from the published release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -312,11 +344,7 @@ jobs:
           test -s artifacts/BUILD-INFO.txt
           grep -E 'SmartPrint-Android[.]aab|BUILD-INFO[.]txt' artifacts/SHA256SUMS.txt | (cd artifacts && sha256sum --check)
           grep -Fx "source_commit=$RELEASE_SOURCE_SHA" artifacts/BUILD-INFO.txt
-          gh_version="$(gh --version | awk 'NR == 1 { print $3 }')"
-          if [[ "$(printf '%s\n' 2.102.0 "$gh_version" | sort -V | head -n 1)" != "2.102.0" ]]; then
-            echo "::error::GitHub CLI 2.102.0 or newer is required for secure artifact-attestation verification."
-            exit 1
-          fi
+          gh --version | grep -F "2.106.0"
           gh attestation verify artifacts/SmartPrint-Android.aab --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-digest "$RELEASE_SOURCE_SHA" --deny-self-hosted-runners --predicate-type "https://slsa.dev/provenance/v1"
 
       - name: Upload Android App Bundle to Google Play
