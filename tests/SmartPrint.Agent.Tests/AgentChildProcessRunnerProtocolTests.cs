@@ -16,7 +16,7 @@ public sealed class AgentChildProcessRunnerProtocolTests
 
         var result = await runner.ExecuteAsync(
             "protocol-test",
-            "{\\"request\\":true}",
+            "{\"request\":true}",
             TimeSpan.FromSeconds(10),
             CancellationToken.None,
             _ =>
@@ -39,7 +39,7 @@ public sealed class AgentChildProcessRunnerProtocolTests
 
         var result = await runner.ExecuteAsync(
             "protocol-test",
-            "{\\"request\\":true}",
+            "{\"request\":true}",
             TimeSpan.FromSeconds(10),
             CancellationToken.None,
             _ => throw new HttpRequestException("simulated API outage"));
