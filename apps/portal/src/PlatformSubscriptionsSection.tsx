@@ -122,13 +122,13 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
     if (!assignTenant) return;
     const [planVersionId, billingInterval] = selectedOption.split("|");
     if (!planVersionId || !billingInterval || reason.trim().length < 10) {
-      setError("Choose a plan and provide a reason of at least 10 characters.");
+      setError(t("Choose a plan and provide a reason of at least 10 characters."));
       return;
     }
     const normalizedPaymentReference = paymentReference.trim();
     if (selectedAssignment?.requiresPayment &&
         (!paymentConfirmed || !/^[A-Za-z0-9_-]{4,100}$/.test(normalizedPaymentReference))) {
-      setError("Confirm that the payment was received and enter its transaction reference.");
+      setError(t("Confirm that the payment was received and enter its transaction reference."));
       return;
     }
     setBusy(true);
