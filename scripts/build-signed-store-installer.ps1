@@ -16,8 +16,12 @@ $storeDesktop = "artifacts/store-desktop"
 New-Item -ItemType Directory -Force -Path $storeAgent, $storeDesktop | Out-Null
 Copy-Item "artifacts/agent/*" $storeAgent -Recurse -Force
 Copy-Item "artifacts/desktop/*" $storeDesktop -Recurse -Force
+$runtimeUri = [Uri]$env:WEBVIEW2_STANDALONE_X64_URL
+if (-not $runtimeUri.IsAbsoluteUri -or $runtimeUri.Scheme -ne "https" -or -not [string]::IsNullOrWhiteSpace($runtimeUri.UserInfo)) {
+  throw "WEBVIEW2_STANDALONE_X64_URL must be an absolute HTTPS URL without embedded credentials."
+}
 $runtime = Join-Path $storeDesktop "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
-Invoke-WebRequest -Uri $env:WEBVIEW2_STANDALONE_X64_URL -OutFile $runtime -MaximumRedirection 10
+Invoke-WebRequest -Uri $runtimeUri -OutFile $runtime -MaximumRedirection 10 -TimeoutSec 300
 # The Evergreen bootstrapper is only a small network downloader. A
 # standalone x64 runtime is substantially larger; reject bootstrapper
 # URLs before packaging so the Store installer is genuinely offline.
