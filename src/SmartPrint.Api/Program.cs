@@ -4436,7 +4436,12 @@ shop.MapPost("/print-batches/{batchId:guid}/resume-unprinted", async (
     var printer = await db.PrinterDevices.AsNoTracking()
         .Where(item => item.Id == printerId && item.TenantId == tenantId &&
                        item.AgentDeviceId == agentId && item.IsActive &&
-                                              item.OutputMode == "PHYSICAL" &&
+                                              (item.OutputMode == "PHYSICAL" ||
+                        (!environment.IsProduction() && item.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                         db.VirtualPrinterTestGrants.Any(grant =>
+                             grant.TenantId == item.TenantId && grant.PrinterDeviceId == item.Id &&
+                             grant.AgentDeviceId == item.AgentDeviceId && grant.IdentityFingerprint == item.IdentityFingerprint &&
+                             grant.RevokedUtc == null && grant.ExpiresUtc > now))) &&
                        item.QueueName != null && item.QueueName != "" &&
                        item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
                        (item.Status == "Ready" || item.Status == "Busy"))
