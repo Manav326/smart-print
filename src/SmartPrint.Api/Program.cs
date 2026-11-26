@@ -1937,7 +1937,8 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                 selectionAgent?.RevokedUtc is not null,
                 selectionAgent?.LastSeenUtc,
                 selectionNow,
-                virtualGrantActive))
+                virtualGrantActive,
+                environment.IsProduction()))
         {
             var nextStep = !agentOnline
                 ? "Reconnect the shop Windows computer and wait for its Print Agent to report online."
