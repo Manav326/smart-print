@@ -17,7 +17,7 @@ import {
 import { readSidebarCollapsedPreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
 import { formatIstDate, formatIstDateTime } from "./date-time";
-import { useLocale, translateUiText } from "./i18n";
+import { LanguageSwitcher, useLocale, translateUiText } from "./i18n";
 
 type Section = "Overview" | "Tenants" | "Plans" | "Subscriptions" | "Operations" | "Advertising" | "Data & Network";
 
@@ -194,7 +194,8 @@ export default function PlatformAdminConsole({
             <span className="platform-session-pill"><i/> {t("Platform session secured")}</span>
             <span className="topbar-divider"/>
             <ThemeToggleButton dark={dark} onToggle={onToggleTheme} className="theme-toggle-compact"/>
-            <button className="icon-button" onClick={() => void signOut()} disabled={signingOut} title="Sign out" aria-label="Sign out">
+            <LanguageSwitcher compact/>
+            <button className="icon-button" onClick={() => void signOut()} disabled={signingOut} title={t("Sign out")} aria-label={t("Sign out")}>
               <LogOut size={17}/>
             </button>
           </div>
