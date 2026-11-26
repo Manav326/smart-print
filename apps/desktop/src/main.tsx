@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "../../portal/src/App";
 import { readDesktopSession, isDesktopApp } from "../../portal/src/desktop-bridge";
 import { storeTokens } from "../../portal/src/api";
+import { LanguageProvider } from "../../portal/src/i18n";
 import "../../portal/src/styles.css";
 import "./desktop.css";
 
@@ -42,7 +43,7 @@ async function start() {
   }
 
   ReactDOM.createRoot(root).render(
-    <React.StrictMode><App /></React.StrictMode>
+    <React.StrictMode><LanguageProvider><App /></LanguageProvider></React.StrictMode>
   );
 }
 
