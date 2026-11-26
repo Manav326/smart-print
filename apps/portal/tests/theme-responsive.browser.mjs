@@ -946,13 +946,18 @@ async function exercisePhotoStudioFeatureMatrix() {
     const canvas = editor.locator("canvas");
     await canvas.waitFor({ state: "visible" });
     assert.equal(await page.evaluate(() => document.body.style.overflow), "hidden");
-    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close Photo Studio");
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Language");
 
-    // Focus loop, Escape close, focus restoration and browser capture deterrents.
+    // The locale selector is now the first control; verify the focus trap wraps
+    // from it to the final editor action and back without skipping the close button.
+    const languageSelector = editor.getByRole("combobox", { name: "Language" });
     const closeButton = editor.getByRole("button", { name: "Close Photo Studio" });
-    await closeButton.focus();
+    assert.equal(await languageSelector.count(), 1);
+    assert.equal(await closeButton.count(), 1);
     await page.keyboard.press("Shift+Tab");
     assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim().includes("Prepare A4 sheet")), true);
+    await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Language");
     await page.keyboard.press("Tab");
     assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close Photo Studio");
     const shortcutPrevented = await page.evaluate(() => {
