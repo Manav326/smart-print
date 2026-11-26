@@ -6,7 +6,7 @@ import {
 import styles from "./PhotoStudio.module.css";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
-import { useLocale, translateUiText } from "./i18n";
+import { useLocale, translateUiText, formatUiCurrency } from "./i18n";
 import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdfBlob, getPhotoPaperPageGeometry, getPhotoSheetLayout, getPhotoSheetPhotoPositions, getPhotoCropFocusAfterDrag, hasSufficientPhotoResolution, type PhotoOutputLayout, type PhotoPaperFinish } from "./photo-studio-layout";
 
 export type PhotoStudioEditorSettings = {
@@ -70,8 +70,8 @@ type Adjustments = {
   saturation: number;
 };
 
-function formatPhotoRate(minor: number) {
-  return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(minor / 100);
+function formatPhotoRate(minor: number, locale: string) {
+  return formatUiCurrency(minor / 100, locale, "INR");
 }
 const MAX_FILE_BYTES = UPLOAD_LIMITS.maxFileBytes;
 const MAX_PHOTO_COUNT = UPLOAD_LIMITS.maxPhotoCount;
@@ -948,7 +948,7 @@ export default function PhotoStudio({
             </>}
             <label className={styles.fieldLabel}>Photo size
               <select id="photo-studio-photo-size" value={sizeId} onChange={event => setSizeId(event.target.value)}>
-                {availableSizes.map(item => <option key={item.id} value={item.id}>{item.label} · {item.detail}{mode === "private-library" ? "" : " · "+formatPhotoRate(photoPrices[item.id])+"/photo"}</option>)}
+                {availableSizes.map(item => <option key={item.id} value={item.id}>{item.label} · {item.detail}{mode === "private-library" ? "" : " · "+formatPhotoRate(photoPrices[item.id], locale)+"/photo"}</option>)}
               </select>
             </label>
             <label className={styles.fieldLabel}>Number of copies
@@ -1015,7 +1015,7 @@ export default function PhotoStudio({
               <div><span>{t("Preview page")}</span><strong>{previewPageIndex+1} of {outputPageCount}</strong></div>
               {!isPhotoPaperLayout && copies>photosPerPage&&copies%photosPerPage!==0&&<small>Final A4 page: {copies%photosPerPage} photos, with the remaining sheet area left blank.</small>}
               <small>Output: {outputDescription}</small>
-              {mode !== "private-library"&&<small title="Before the final shop quote">Est. subtotal: {formatPhotoRate((photoPrices[size.id] ?? 0) * copies)}</small>}
+              {mode !== "private-library"&&<small title="Before the final shop quote">Est. subtotal: {formatPhotoRate((photoPrices[size.id] ?? 0) * copies, locale)}</small>}
             </div>
           </>}
 
