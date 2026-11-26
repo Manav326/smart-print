@@ -20,33 +20,16 @@ public sealed class PrinterTypePolicyTests
     }
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public void LegacyGlobalOverrideIsAlwaysInert(bool configured, bool isProduction)
-    {
-        Assert.False(PrinterTypePolicy.IsTestModeEnabled(configured, isProduction));
-    }
-
-    [Theory]
     [InlineData("Ready")]
     [InlineData("Busy")]
     [InlineData("Offline")]
     [InlineData("Paused")]
     [InlineData("Error")]
     [InlineData("Unknown")]
-    public void VirtualQueueIdentityIsNeverPromotedByGlobalSettings(string status)
+    public void VirtualQueueIdentityIsNeverPromoted(string status)
     {
-        var resolved = PrinterTypePolicy.ResolveOutputMode(
-            PrinterTypePolicy.UnsupportedVirtual, status, treatWorkingVirtualQueuesAsPhysicalForTesting: true,
-            connectionPort: "http://192.168.31.171:10631/p/virtual");
-
-        Assert.Equal(PrinterTypePolicy.UnsupportedVirtual, resolved);
-        Assert.False(PrinterTypePolicy.IsTestModeOverride(
-            PrinterTypePolicy.UnsupportedVirtual, resolved, status,
-            treatWorkingVirtualQueuesAsPhysicalForTesting: true,
-            connectionPort: "http://192.168.31.171:10631/p/virtual"));
+        Assert.Equal(PrinterTypePolicy.UnsupportedVirtual,
+            PrinterTypePolicy.ResolveOutputMode(PrinterTypePolicy.UnsupportedVirtual));
     }
 
     [Theory]
@@ -55,11 +38,15 @@ public sealed class PrinterTypePolicyTests
     [InlineData("Unknown")]
     public void PdfExportAlwaysRemainsItsOwnOutputProfile(string status)
     {
-        Assert.Equal(
-            PrinterTypePolicy.PdfExport,
-            PrinterTypePolicy.ResolveOutputMode(
-                PrinterTypePolicy.PdfExport, status, treatWorkingVirtualQueuesAsPhysicalForTesting: true,
-                connectionPort: "PORTPROMPT:"));
+        Assert.Equal(PrinterTypePolicy.PdfExport,
+            PrinterTypePolicy.ResolveOutputMode(PrinterTypePolicy.PdfExport));
+    }
+
+    [Fact]
+    public void PhysicalQueueClassificationIsStable()
+    {
+        Assert.Equal(PrinterTypePolicy.Physical,
+            PrinterTypePolicy.ResolveOutputMode(PrinterTypePolicy.Physical));
     }
 
     [Theory]
