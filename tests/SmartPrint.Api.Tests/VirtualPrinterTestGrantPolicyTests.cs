@@ -27,6 +27,20 @@ public sealed class VirtualPrinterTestGrantPolicyTests
     }
 
     [Fact]
+    public void IppPortFingerprintPreservesCaseSensitivePathAndQuery()
+    {
+        var agent = Guid.NewGuid();
+        var original = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
+            agent, "Android Virtual", "Microsoft IPP Class Driver", "ipp://ANDROID.local:631/Printer/Office?mode=Color");
+        Assert.Equal(original, VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
+            agent, " android virtual ", "microsoft ipp class driver", "IPP://android.LOCAL:631/Printer/Office?mode=Color"));
+        Assert.NotEqual(original, VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
+            agent, "Android Virtual", "Microsoft IPP Class Driver", "ipp://android.local:631/printer/Office?mode=Color"));
+        Assert.NotEqual(original, VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
+            agent, "Android Virtual", "Microsoft IPP Class Driver", "ipp://android.local:631/Printer/Office?mode=color"));
+    }
+
+    [Fact]
     public void GrantRequiresMatchingShopAgentAndCurrentQueueIdentity()
     {
         var tenant = Guid.NewGuid();
