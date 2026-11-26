@@ -583,6 +583,17 @@ jobs:
               echo "::error::No verified SHA-256 entry found for $filename."
               return 1
             fi
+            local existing_json
+            if existing_json="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/$filename" --endpoint-url "$endpoint" --region auto --output json 2>/dev/null)"; then
+              local existing_digest
+              existing_digest="$(python -c 'import json,sys; print(json.load(sys.stdin).get("Metadata", {}).get("sha256", ""))' <<<"$existing_json")"
+              if [[ "$existing_digest" == "$digest" ]]; then
+                echo "Immutable R2 object already exists with the same SHA-256; leaving it unchanged: $filename"
+                return 0
+              fi
+              echo "::error::Refusing to overwrite immutable R2 object $filename for tag $RELEASE_TAG."
+              return 1
+            fi
             aws s3 cp "artifacts/$filename" "s3://$CLOUDFLARE_R2_BUCKET/$object_prefix/$filename" \
               --endpoint-url "$endpoint" \
               --region auto \
@@ -601,13 +612,24 @@ jobs:
             upload_binary "SmartPrint-Android.apk"
             upload_binary "SmartPrint-Android.aab"
           fi
-          aws s3 cp artifacts/SHA256SUMS.txt "s3://$CLOUDFLARE_R2_BUCKET/$object_prefix/SHA256SUMS.txt" \
-            --endpoint-url "$endpoint" \
-            --region auto \
-            --only-show-errors \
-            --content-type "text/plain; charset=utf-8" \
-            --content-disposition 'attachment; filename="SHA256SUMS.txt"' \
-            --cache-control "public, max-age=31536000, immutable"
+          manifest_digest="$(sha256sum artifacts/SHA256SUMS.txt | awk '{print $1}')"
+          existing_manifest="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/SHA256SUMS.txt" --endpoint-url "$endpoint" --region auto --query 'Metadata.sha256' --output text 2>/dev/null || true)"
+          if [[ -n "$existing_manifest" && "$existing_manifest" != "None" ]]; then
+            if [[ "$existing_manifest" != "$manifest_digest" ]]; then
+              echo "::error::Refusing to overwrite immutable R2 checksum manifest for tag $RELEASE_TAG."
+              exit 1
+            fi
+            echo "Immutable R2 checksum manifest already exists with the same SHA-256."
+          else
+            aws s3 cp artifacts/SHA256SUMS.txt "s3://$CLOUDFLARE_R2_BUCKET/$object_prefix/SHA256SUMS.txt" \
+              --endpoint-url "$endpoint" \
+              --region auto \
+              --only-show-errors \
+              --content-type "text/plain; charset=utf-8" \
+              --content-disposition 'attachment; filename="SHA256SUMS.txt"' \
+              --cache-control "public, max-age=31536000, immutable" \
+              --metadata "sha256=$manifest_digest"
+          fi
 
           # Verify stored object size, cache policy and SHA-256 metadata before
           # publishing a stable release or exposing the version URL to customers.
