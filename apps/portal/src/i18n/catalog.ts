@@ -1835,6 +1835,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Open Photo Studio from the SmartPrint Android app to preview saved sheets.": "सेव की गई शीट का प्रीव्यू देखने के लिए SmartPrint Android ऐप में Photo Studio खोलें।",
     "Enter a document name.": "दस्तावेज़ का नाम दर्ज करें।",
     "photo": "फोटो",
+    "Prepared ID card": "तैयार ID कार्ड",
 
   },
   hinglish: {
@@ -3298,6 +3299,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Open Photo Studio from the SmartPrint Android app to preview saved sheets.": "Saved sheets ka preview dekhne ke liye SmartPrint Android app mein Photo Studio kholein.",
     "Enter a document name.": "Document ka naam enter karein.",
     "photo": "photo",
+    "Prepared ID card": "Prepared ID card",
 
   },
 };
