@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useLocale, translateUiText } from "./i18n";
+import { useLocale, translateUiText, formatUiCurrency } from "./i18n";
 import { AlertTriangle, Check, ChevronDown, Clock3, CreditCard, Eye, FileText, History, Image as ImageIcon, Inbox, PackageCheck, Printer, RefreshCw, RotateCcw, ShieldCheck, Wallet, Wifi, X } from "lucide-react";
 import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./api";
 import { formatIstDateTime } from "./date-time";
@@ -30,7 +30,7 @@ const flowSteps: Array<{id:OrderJourneyStage;title:string;detail:string;icon:typ
   {id:"ready",title:"Ready",detail:"Output checked and complete",icon:PackageCheck}
 ];
 function tx(locale: string, value: string){return translateUiText(locale,value);}
-function money(value:number,currency:string){return new Intl.NumberFormat("en-IN",{style:"currency",currency:currency||"INR",maximumFractionDigits:2}).format(Math.max(0,value)/100);}
+function money(value:number,currency:string,locale:string){return formatUiCurrency(Math.max(0,value)/100,locale,currency||"INR");}
 function paymentLabel(payment:ShopPayment|null,stage:OrderJourneyStage,locale:string){
   if(!payment)return tx(locale,stage==="payment"?"Checkout not started":"Not due yet");
   switch(payment.status){
@@ -205,7 +205,7 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
       <div><strong>{journey.blackWhitePageCount}</strong><span>{t("B&W pages")}</span></div>
       <div><strong>{journey.colourPageCount}</strong><span>{t("Colour pages")}</span></div>
       <div><strong>{journey.pageCount}</strong><span>{t("Total output pages")}</span></div>
-      <div><strong>{money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</strong><span>{t(journey.payment?"payment total":"quoted value")}</span></div>
+      <div><strong>{money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency,locale)}</strong><span>{t(journey.payment?"payment total":"quoted value")}</span></div>
       {journey.photoCount>0&&<div><strong>{journey.photoCount}</strong><span>{t("Photos")}</span></div>}
       {journey.photoPageCount>0&&<div><strong>{journey.photoPageCount}</strong><span>{t("Photo layout pages")}</span></div>}
     </div>
