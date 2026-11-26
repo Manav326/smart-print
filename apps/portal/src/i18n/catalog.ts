@@ -1653,6 +1653,12 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Previous page": "पिछला पेज",
     "Page {page}": "पेज {page}",
     "Next page": "अगला पेज",
+    "Record refund and reject selected pages": "रिफंड दर्ज करें और चुने गए पेज अस्वीकार करें",
+    "Save shop identity": "शॉप की पहचान सेव करें",
+    "Current password": "मौजूदा पासवर्ड",
+    "Your PDF is ready.": "आपकी PDF तैयार है।",
+    "This request was cancelled.": "यह अनुरोध रद्द कर दिया गया।",
+
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -2933,6 +2939,12 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Previous page": "Pichhla page",
     "Page {page}": "Page {page}",
     "Next page": "Agla page",
+    "Record refund and reject selected pages": "Refund record karein aur selected pages reject karein",
+    "Save shop identity": "Shop identity save karein",
+    "Current password": "Current password",
+    "Your PDF is ready.": "Aapki PDF ready hai.",
+    "This request was cancelled.": "Yeh request cancel ho gayi.",
+
   },
 };
 
