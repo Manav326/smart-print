@@ -57,8 +57,8 @@ jobs:
           set -euo pipefail
           python -m pip install --disable-pip-version-check --quiet PyYAML==6.0.2
           python - <<'PY'
+          import os
           import pathlib
-          import tempfile
           import textwrap
           import yaml
 
@@ -82,7 +82,7 @@ jobs:
                       shell = str(step.get("shell", "")).lower()
                       source = step.get("run")
                       if shell in ("pwsh", "powershell") and isinstance(source, str):
-                          target = pathlib.Path(tempfile.gettempdir()) / f"smartprint-workflow-{path.stem}-{job_name}-{index}.ps1"
+                          target = pathlib.Path(os.environ["RUNNER_TEMP"]) / f"smartprint-workflow-{path.stem}-{job_name}-{index}.ps1"
                           target.write_text(textwrap.dedent(source), encoding="utf-8")
                           extracted += 1
           print(f"Parsed workflow YAML and extracted {extracted} inline PowerShell scripts for syntax validation.")
