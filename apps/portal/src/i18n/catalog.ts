@@ -961,6 +961,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Usage and limits": "उपयोग और सीमाएँ",
     "Live counts for this shop. Monthly print jobs use the UTC calendar month.": "इस शॉप के लाइव आँकड़े। मासिक प्रिंट जॉब UTC कैलेंडर महीने के अनुसार गिने जाते हैं।",
     "Maximum cloud document size": "क्लाउड दस्तावेज़ का अधिकतम आकार",
+    "Shop profile & branding": "शॉप प्रोफ़ाइल और ब्रांडिंग",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -1545,6 +1546,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Usage and limits": "Usage aur limits",
     "Live counts for this shop. Monthly print jobs use the UTC calendar month.": "Is shop ke live counts. Monthly print jobs UTC calendar month ke hisaab se count hote hain.",
     "Maximum cloud document size": "Maximum cloud document size",
+    "Shop profile & branding": "Shop profile aur branding",
   },
 };
 
