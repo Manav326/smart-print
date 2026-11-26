@@ -4504,14 +4504,15 @@ shop.MapPost("/print-batches/{batchId:guid}/resume-unprinted", async (
         var previousStatus = job.Status;
         var retryNumber = Math.Max(1, job.PrintDispatchAttempts + 1);
         var suffix = $"-{job.Id:N}-R{retryNumber}";
-        const string prefix = "SmartPrint-";
+        var isVirtualTestOutput = printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual;
+        var prefix = isVirtualTestOutput ? "VIRTUAL-TEST-" : "SmartPrint-";
         var availableJobNumberLength = Math.Max(0, 180 - prefix.Length - suffix.Length);
         var jobNumber = job.JobNumber.Length <= availableJobNumberLength
             ? job.JobNumber
             : job.JobNumber[..availableJobNumberLength];
 
         job.Status = "PRINT_AUTHORISED";
-        job.OutputType = "PHYSICAL";
+        job.OutputType = isVirtualTestOutput ? PrivatePrintingOutputPolicy.TestVirtual : "PHYSICAL";
         job.PrinterNameSnapshot = printer.DisplayName;
         job.PrinterQueueNameSnapshot = printer.QueueName;
         job.PrinterAgentNameSnapshot = agent.DeviceName;
@@ -4534,7 +4535,9 @@ shop.MapPost("/print-batches/{batchId:guid}/resume-unprinted", async (
             NewStatus = job.Status,
             ActorType = "ShopUser",
             ActorId = GetActorId(principal),
-            ReasonCode = "SHOP_OPERATOR_CONFIRMED_NO_PHYSICAL_OUTPUT_AND_RESUMED_FILE",
+            ReasonCode = isVirtualTestOutput
+                ? "SHOP_OPERATOR_CONFIRMED_NO_VIRTUAL_TEST_OUTPUT_AND_RESUMED_FILE"
+                : "SHOP_OPERATOR_CONFIRMED_NO_PHYSICAL_OUTPUT_AND_RESUMED_FILE",
             CreatedUtc = now
         });
     }
