@@ -1727,6 +1727,18 @@ public sealed class Worker(
                 SpoolerJobName = job.SpoolerJobName,
                 RejectedPageNumbers = rejectedPages
             };
+            // Revalidate the server-owned queue grant immediately before opening
+            // the Windows spooler. A stale local queue manifest is never authority.
+            using var spoolerAuthorisation = await SendAgentRequestAsync(
+                client, credentials,
+                $"api/v1/agent/jobs/{job.Id}/authorize-spooler-submission",
+                new { },
+                ct);
+            if (!spoolerAuthorisation.IsSuccessStatusCode)
+                throw new PrintExecutionBlockedException(
+                    "SPOOLER_SUBMISSION_NOT_AUTHORISED",
+                    "The server no longer authorises this printer queue for the current job. No Windows spooler submission was attempted.");
+
             var spoolerReceipt = await isolatedWindowsPrintExecutor.PrintAsync(
                 printEntry, credentials.AgentDeviceId, ct);
 
