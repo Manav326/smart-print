@@ -1797,6 +1797,8 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
   onClose:()=>void;
   onOpenPayments:()=>void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const {job,payment}=receipt;
   const amount=formatMoney(payment.amountMinor,payment.currency);
   const upiIntent=payment.method==="UPI"&&payment.status!=="VERIFIED"
@@ -1812,7 +1814,7 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
   return <Modal title="Photo order created" subtitle={`Job ${job.jobNumber} · ${job.recipientName}`} onClose={onClose}>
     <div className="photo-order-receipt">
       <div className="photo-order-receipt-summary">
-        <span>Server-calculated amount</span><strong>{amount}</strong>
+        <span>{t("Server-calculated amount")}</span><strong>{amount}</strong>
         <small>{job.photoCount} photos · {job.photoSizeCode} · {job.pageCount} A4 page(s)</small>
       </div>
       {payment.status==="VERIFIED"
@@ -1838,6 +1840,8 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
   token:string; paymentSettings:ShopPaymentSettings|null; photoPrices:Record<string,number>;
   onClose:()=>void; onContinue:(draft:ShopPhotoOrderDraft)=>void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [file,setFile]=useState<File|null>(null);
   const [recipientType,setRecipientType]=useState<"EXISTING_CUSTOMER"|"WALK_IN">("EXISTING_CUSTOMER");
   const [customers,setCustomers]=useState<ShopCustomer[]>([]);
@@ -1900,22 +1904,22 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
 
   return <Modal title="New photo order" subtitle="Upload a shop-owned original, prepare its A4 photo sheets and create one shop-scoped print job." onClose={onClose}>
     <form className="modal-form" onSubmit={submit}>
-      <label>Original photo<input aria-label="Choose original photo" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onChange={selectFile}/></label>
+      <label>{t("Original photo")}<input aria-label={t("Choose original photo")} type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onChange={selectFile}/></label>
       {file&&<div className="file-review-note"><ImageIcon size={16}/><span>{file.name} · {(file.size/1024/1024).toFixed(2)} MB. The original is not modified.</span></div>}
-      <label>Order for<select value={recipientType} onChange={event=>setRecipientType(event.currentTarget.value as "EXISTING_CUSTOMER"|"WALK_IN")}><option value="EXISTING_CUSTOMER">Existing customer of this shop</option><option value="WALK_IN">Walk-in customer</option></select></label>
+      <label>{t("Order for")}<select value={recipientType} onChange={event=>setRecipientType(event.currentTarget.value as "EXISTING_CUSTOMER"|"WALK_IN")}><option value="EXISTING_CUSTOMER">{t("Existing customer of this shop")}</option><option value="WALK_IN">{t("Walk-in customer")}</option></select></label>
       {recipientType==="EXISTING_CUSTOMER"&&<>
         <label>Find a customer<div className="queue-search-form"><input aria-label="Search shop customers" value={customerSearch} onChange={event=>setCustomerSearch(event.currentTarget.value)} onKeyDown={event=>{if(event.key==="Enter"){event.preventDefault();void searchCustomers();}}} placeholder="Name or email"/><button type="button" className="secondary-button" onClick={()=>void searchCustomers()} disabled={loadingCustomers}>{loadingCustomers?"Searching…":"Search"}</button></div></label>
-        <label>Select customer<select aria-label="Select shop customer" value={selectedCustomerId} onChange={event=>setSelectedCustomerId(event.currentTarget.value)}><option value="">Choose a customer</option>{customers.map(customer=><option key={customer.id} value={customer.id}>{customer.displayName} · {customer.maskedEmail}</option>)}</select></label>
+        <label>{t("Select customer")}<select aria-label={t("Select shop customer")} value={selectedCustomerId} onChange={event=>setSelectedCustomerId(event.currentTarget.value)}><option value="">{t("Choose a customer")}</option>{customers.map(customer=><option key={customer.id} value={customer.id}>{customer.displayName} · {customer.maskedEmail}</option>)}</select></label>
         {customerError&&<p className="form-error" role="alert">{customerError}</p>}
         {!loadingCustomers&&!customerError&&customers.length===0&&<p className="form-hint">No customers found for this shop. Choose Walk-in customer when appropriate.</p>}
         {selectedCustomer&&<p className="form-hint">This order will be linked to {selectedCustomer.displayName}'s account and shop history. No customer login or QR session will be created.</p>}
       </>}
       {recipientType==="WALK_IN"&&<>
-        <label>Walk-in customer name<input value={recipientName} maxLength={160} onChange={event=>setRecipientName(event.currentTarget.value)} placeholder="Customer name" required/></label>
-        <label>Contact number (optional)<input type="tel" maxLength={40} value={recipientPhone} onChange={event=>setRecipientPhone(event.currentTarget.value)} placeholder="Phone number"/></label>
+        <label>{t("Walk-in customer name")}<input value={recipientName} maxLength={160} onChange={event=>setRecipientName(event.currentTarget.value)} placeholder={t("Customer name")} required/></label>
+        <label>{t("Contact number (optional)")}<input type="tel" maxLength={40} value={recipientPhone} onChange={event=>setRecipientPhone(event.currentTarget.value)} placeholder={t("Phone number")}/></label>
         <p className="form-hint">A walk-in is saved only as a recipient on this shop's job. No global customer account is created.</p>
       </>}
-      <label>Payment method<select aria-label="Photo order payment method" value={paymentMethod} onChange={event=>setPaymentMethod(event.currentTarget.value as "UPI"|"CASH")}>{paymentSettings?.upiEnabled&&<option value="UPI">UPI · verify receipt manually</option>}{paymentSettings?.cashEnabled&&<option value="CASH">Cash at counter · mark received manually</option>}</select></label>
+      <label>{t("Payment method")}<select aria-label={t("Photo order payment method")} value={paymentMethod} onChange={event=>setPaymentMethod(event.currentTarget.value as "UPI"|"CASH")}>{paymentSettings?.upiEnabled&&<option value="UPI">{t("UPI · verify receipt manually")}</option>}{paymentSettings?.cashEnabled&&<option value="CASH">{t("Cash at counter · mark received manually")}</option>}</select></label>
       <p className="form-hint">Payment will be recorded as pending. This action does not verify payment or start printing. The shop must verify the actual money received and explicitly dispatch the job.</p>
       {!enabledPhotoSizes&&<p className="form-error" role="alert">No photo sizes are priced. Configure Photo Printing under Pricing before creating an order.</p>}
       {!hasPaymentMethod&&<p className="form-error" role="alert">No payment method is enabled. Configure UPI or cash under Payment Settings.</p>}
@@ -2310,6 +2314,8 @@ function formatCapabilityTimestamp(value?:string):string {
 }
 
 function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const snapshot=parsePrinterCapabilitySnapshot(printer.capabilitiesJson);
   const pages=Array.isArray(snapshot?.pagesPerSheet)
     ?snapshot.pagesPerSheet.filter(value=>Number.isInteger(value)&&value>=1&&value<=500):[];
@@ -2361,7 +2367,7 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   return (
     <div className="printer-capability-panel">
       <div className="printer-capability-heading">
-        <strong>Driver capabilities</strong>
+        <strong>{t("Driver capabilities")}</strong>
         <span>{snapshot?formatCapabilityTimestamp(snapshot.discoveredAtUtc):"Awaiting Agent discovery"}</span>
       </div>
       {snapshot&&<div className="printer-capability-tiles">
@@ -2374,23 +2380,23 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
         <summary>{snapshot?"Full capabilities & troubleshooting":"Capability diagnostics"}</summary>
         <div className="printer-diagnostic-content">
           <div className="printer-driver-identity">
-            <span>Installed driver</span>
+            <span>{t("Installed driver")}</span>
             <strong>{snapshot?.driverName||"Driver name not reported by Agent"}</strong>
             <small>{snapshot?.source==="WINDOWS_DRIVER"?"Read from the Windows print driver":"Capability source not reported"}</small>
           </div>
           <div className="printer-capability-facts">
-            <div><span>Colour printing</span><strong>{capabilityStateLabel(colourState)}</strong></div>
-            <div><span>Duplex printing</span><strong>{capabilityStateLabel(duplexState)}</strong></div>
-            <div><span>Page order for N-up</span><strong>{snapshot?.pagesPerSheetDirection||capabilityStateLabel(directionState)}</strong></div>
-            <div><span>Orientation</span><strong>{snapshot?.orientation?[
+            <div><span>{t("Colour printing")}</span><strong>{capabilityStateLabel(colourState)}</strong></div>
+            <div><span>{t("Duplex printing")}</span><strong>{capabilityStateLabel(duplexState)}</strong></div>
+            <div><span>{t("Page order for N-up")}</span><strong>{snapshot?.pagesPerSheetDirection||capabilityStateLabel(directionState)}</strong></div>
+            <div><span>{t("Orientation")}</span><strong>{snapshot?.orientation?[
               snapshot.orientation.portrait===true?"Portrait":null,
               snapshot.orientation.landscape===true?"Landscape":null
             ].filter(Boolean).join(" · ")||"Not reported":"Not reported"}</strong></div>
-            <div><span>Paper sizes</span><strong>{paperSizes.length?paperSizes.slice(0,10).join(", ")+(paperSizes.length>10?" +"+(paperSizes.length-10)+" more":""):"Not reported"}</strong></div>
-            <div><span>Photo media types</span><strong>{photoMediaTypes.length?photoMediaTypes.slice(0,8).join(", ")+(photoMediaTypes.length>8?" +"+(photoMediaTypes.length-8)+" more":""):photoMediaState==="unsupported"?"No matching glossy/matte stock":"Not reported"}</strong></div>
-            <div><span>Print Schema media</span><strong>{pageMediaTypes.length?pageMediaTypes.slice(0,8).join(", ")+(pageMediaTypes.length>8?" +"+(pageMediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
-            <div><span>All driver media types</span><strong>{mediaTypes.length?mediaTypes.slice(0,8).join(", ")+(mediaTypes.length>8?" +"+(mediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
-            <div><span>Resolutions</span><strong>{resolutions.length?resolutions.slice(0,8).join(", ")+(resolutions.length>8?" +"+(resolutions.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>{t("Paper sizes")}</span><strong>{paperSizes.length?paperSizes.slice(0,10).join(", ")+(paperSizes.length>10?" +"+(paperSizes.length-10)+" more":""):"Not reported"}</strong></div>
+            <div><span>{t("Photo media types")}</span><strong>{photoMediaTypes.length?photoMediaTypes.slice(0,8).join(", ")+(photoMediaTypes.length>8?" +"+(photoMediaTypes.length-8)+" more":""):photoMediaState==="unsupported"?"No matching glossy/matte stock":"Not reported"}</strong></div>
+            <div><span>{t("Print Schema media")}</span><strong>{pageMediaTypes.length?pageMediaTypes.slice(0,8).join(", ")+(pageMediaTypes.length>8?" +"+(pageMediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>{t("All driver media types")}</span><strong>{mediaTypes.length?mediaTypes.slice(0,8).join(", ")+(mediaTypes.length>8?" +"+(mediaTypes.length-8)+" more":""):"Not reported"}</strong></div>
+            <div><span>{t("Resolutions")}</span><strong>{resolutions.length?resolutions.slice(0,8).join(", ")+(resolutions.length>8?" +"+(resolutions.length-8)+" more":""):"Not reported"}</strong></div>
           </div>
           <div className={"printer-diagnostic-advice"+(statusIssue||!snapshot?" warning":"")} role="note">
             <strong>{statusIssue||!snapshot?"What to check":"Troubleshooting guidance"}</strong>
@@ -2882,6 +2888,8 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
 }) {
   const { locale } = useLocale();
   const t = (value: string) => translateUiText(locale, value);
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const { release, state: releaseState } = usePublicRelease();
   const windowsInstallerUrl = release?.windowsAvailable ? getPublicDownloadPath("windows") : null;
   const connected = Boolean(localAgentStatus?.paired && agents.some(agent =>
@@ -2937,9 +2945,9 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
         <button className="secondary-button" onClick={()=>void copyText(enrollmentCode.code)}><Copy size={14}/> Copy code</button>
       </div>}
       <div className="agent-command-panel">
-        <div><span>GUIDED WINDOWS INSTALLER</span><strong>Download and run SmartPrint Windows Setup on the shop computer.</strong><small>Run setup as administrator, enter the one-time pairing code in its wizard, and let it install and start the background service.</small></div>
+        <div><span>{t("GUIDED WINDOWS INSTALLER")}</span><strong>{t("Download and run SmartPrint Windows Setup on the shop computer.")}</strong><small>{t("Run setup as administrator, enter the one-time pairing code in its wizard, and let it install and start the background service.")}</small></div>
         {windowsInstallerUrl
-          ? <a className="secondary-button" href={windowsInstallerUrl}><Monitor size={14}/> Download Windows installer</a>
+          ? <a className="secondary-button" href={windowsInstallerUrl}><Monitor size={14}/> {t("Download Windows installer")}</a>
           : <span className="subtle-button" aria-disabled="true">{releaseState === "loading" ? "Checking installer availability…" : releaseState === "error" ? "Installer availability temporarily unavailable" : "Windows installer not published"}</span>}
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>Your setup code works once and expires after 10 minutes. You can disconnect a computer from this page if it is replaced or lost.</span></div>
@@ -2962,6 +2970,8 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
 }
 
 function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localApiReady:boolean}) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [snapshot,setSnapshot]=useState<DesktopLocalNetworkSnapshot|null>(null);
   const [agentStatus,setAgentStatus]=useState<DesktopAgentStatus|null>(null);
   const [loading,setLoading]=useState(true);
@@ -3064,7 +3074,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
       {snapshot?.networks.length?<>
         <label className="local-network-choice">Shop Wi-Fi or hotspot
           <select value={snapshot.selectedNetworkId??""} onChange={event=>void changeNetwork(event.target.value)} disabled={saving||!connected}>
-            <option value="">Choose the connection customers use</option>
+            <option value="">{t("Choose the connection customers use")}</option>
             {snapshot.networks.map(network=><option key={network.id} value={network.id}>{network.displayName}{network.kind&&network.displayName.toLowerCase()!==network.kind.toLowerCase()?" · "+network.kind:""}</option>)}
           </select>
         </label>
@@ -3269,6 +3279,8 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
 }) {
   const { locale } = useLocale();
   const t = (value: string) => translateUiText(locale, value);
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [autoRefresh,setAutoRefresh]=useState(true);
   const [refreshSeconds,setRefreshSeconds]=useState(10);
   const [searchInput,setSearchInput]=useState(searchQuery);
@@ -3381,12 +3393,12 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
               <td className="amount-cell">{totalAmount>0?formatMoney(totalAmount,first.currency):"Quote pending"}</td>
               <td><div className="queue-printer-cell">
                 {singleSavedPdfPath ? <>
-                  <strong>PDF saved</strong>
+                  <strong>{t("PDF saved")}</strong>
                   <small className="queue-pdf-path">{singleSavedPdfPath}</small>
                 </> : <>
                   <strong>{batchPrinterConflict?"Multiple printer assignments":batchAssignmentIncomplete?(assignedPrinterIds.length?"Choose one printer":"Printer not assigned"):batchPrinterDisplayName}</strong>
                   <small>{lockedPrinterIds.length===1?"Locked to the printer already used for this batch":waiting.length===0?"No files awaiting review":`${waiting.length} ${waiting.length===1?"file":"files"} awaiting review`}</small>
-                  {batchPrinter?.outputMode==="PDF_EXPORT"&&<small>Saves a PDF, not paper</small>}
+                  {batchPrinter?.outputMode==="PDF_EXPORT"&&<small>{t("Saves a PDF, not paper")}</small>}
                   {batchPrinter?.outputMode==="UNSUPPORTED_VIRTUAL"&&batchPrinter.virtualTestGrantActive!==true&&<small className="queue-batch-printer-lock">This virtual queue needs an active platform-admin test grant for this shop before it can receive jobs.</small>}
                 </>}
                 {assignmentJob&&<select
@@ -3430,12 +3442,12 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
               </div>}
               {!job.printerName&&job.storageMode==="LOCAL_AGENT"&&job.documentAgentDeviceName&&<div className="queue-batch-file-printer"><Printer size={13}/><strong>Stored on</strong><span>{job.documentAgentDeviceName}</span></div>}
               {batch.jobs.length > 1 && verifiedPdfExportPath(job) && <div className="queue-batch-file-output">
-                <span>Saved PDF location</span>
+                <span>{t("Saved PDF location")}</span>
                 <code>{verifiedPdfExportPath(job)}</code>
               </div>}
               {job.status==="LOCAL_QUEUE_READY"&&job.failureCode&&<div className="printer-duplicate-warning" role="status">
-                 <strong>Printing paused before submission</strong>
-                 <span>{printBlockMessage(job.failureCode)} The original document and requested settings remain unchanged. Reassign this batch to a compatible printer, or resolve the issue with the customer before changing any setting. A settings change must be sent as a revised quote and explicitly approved before output.</span>
+                 <strong>{t("Printing paused before submission")}</strong>
+                 <span>{printBlockMessage(job.failureCode)} {t("The original document and requested settings remain unchanged. Reassign this batch to a compatible printer, or resolve the issue with the customer before changing any setting. A settings change must be sent as a revised quote and explicitly approved before output.")}</span>
                </div>}
                <div className="queue-batch-file-actions">
                 {job.printKind==="DOCUMENT"&&["AWAITING_CONFIGURATION","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","QUOTE_EXPIRED","PAYMENT_REJECTED"].includes(job.status)&&<button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>{
@@ -3459,24 +3471,24 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {job.outputType!=="TEST_VIRTUAL"&&isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT")&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)||!(canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId,Date.now(),job.spoolerPagesPrinted??0,job.spoolerTotalPages??0)||canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName))} title={hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)?`Windows recorded ${job.spoolerPagesPrinted??0} of ${job.spoolerTotalPages} pages. Do not complete the file until the remainder is accounted for.`:canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"The Agent restarted before Windows returned a spooler ID. Check the selected Windows queue for this exact job name and physically inspect all paper output before continuing.":!canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId,Date.now(),job.spoolerPagesPrinted??0,job.spoolerTotalPages??0)?(isRetainedSpoolerJob(job.spoolerStatus)?"Windows still holds this job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared.":!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for a fresh Agent observation from after submission before confirming output.":(["QUEUED","SPOOLING","PRINTING"].includes((job.spoolerStatus??"").toUpperCase())?"Windows still reports this job in its queue or printing. Wait for a terminal state before confirming output.":spoolerStatusWarning(job.spoolerStatus,job.printerStatus)||"Confirm output only after Windows reports that the job printed or its queue entry was verified absent.")):undefined} onClick={()=>onConfirmOutput(job)}>{canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"Reconcile & confirm":"Confirm output"}</button>}
               </div>
               {editingSettingsJobId===job.id&&editingPrintSettings&&<div className="queue-settings-editor">
-                <div><strong>Review print options</strong><small>The revised quote must be approved by the customer before payment or printing.</small></div>
-                <label>Colour <select value={editingPrintSettings.colourMode} onChange={event=>{
+                <div><strong>{t("Review print options")}</strong><small>{t("The revised quote must be approved by the customer before payment or printing.")}</small></div>
+                <label>{t("Colour")} <select value={editingPrintSettings.colourMode} onChange={event=>{
                   const colourMode=event.currentTarget.value as CustomerPrintRequestSettings["colourMode"];
                   setEditingPrintSettings(current=>current?{...current,colourMode}:current);
-                }}><option value="Mono">B&W</option><option value="Colour">Colour</option></select></label>
-                <label>Sides <select value={editingPrintSettings.isDuplex?"DOUBLE":"SINGLE"} onChange={event=>{
+                }}><option value="Mono">{t("B&W")}</option><option value="Colour">{t("Colour")}</option></select></label>
+                <label>{t("Sides")} <select value={editingPrintSettings.isDuplex?"DOUBLE":"SINGLE"} onChange={event=>{
                   const isDuplex=event.currentTarget.value==="DOUBLE";
                   setEditingPrintSettings(current=>current?{...current,isDuplex}:current);
-                }}><option value="SINGLE">Single-sided</option><option value="DOUBLE">Double-sided</option></select></label>
-                <label>Copies <input type="number" min={1} max={100} value={editingPrintSettings.copies} onChange={event=>{
+                }}><option value="SINGLE">{t("Single-sided")}</option><option value="DOUBLE">{t("Double-sided")}</option></select></label>
+                <label>{t("Copies")} <input type="number" min={1} max={100} value={editingPrintSettings.copies} onChange={event=>{
                   const copies=Math.max(1,Math.min(100,Number(event.currentTarget.value)||1));
                   setEditingPrintSettings(current=>current?{...current,copies}:current);
                 }}/></label>
-                <label>Paper size <select value={editingPrintSettings.paperSize} onChange={event=>{
+                <label>{t("Paper size")} <select value={editingPrintSettings.paperSize} onChange={event=>{
                   const paperSize=event.currentTarget.value as CustomerPrintRequestSettings["paperSize"];
                   setEditingPrintSettings(current=>current?{...current,paperSize}:current);
-                }}><option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option></select></label>
-                <label>Orientation <select value={editingPrintSettings.orientation} onChange={event=>{
+                }}><option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">{t("Letter")}</option><option value="LEGAL">{t("Legal")}</option></select></label>
+                <label>{t("Orientation")} <select value={editingPrintSettings.orientation} onChange={event=>{
                   const orientation=event.currentTarget.value as CustomerPrintRequestSettings["orientation"];
                   setEditingPrintSettings(current=>current?{...current,orientation}:current);
                 }}><option value="AUTO">{t("Auto · follow document")}</option><option value="PORTRAIT">{t("Portrait")}</option><option value="LANDSCAPE">{t("Landscape")}</option></select></label>
@@ -3505,6 +3517,8 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   onPreview:(job:ShopPrintJob)=>void;
   onApply:(acceptedJobIds:string[],pdfBrandingEnabled:boolean)=>void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const { locale } = useLocale();
   const t = (value: string) => translateUiText(locale, value);
   const hasIdDocument=jobs.some(job=>job.printKind==="ID_DOCUMENT");
@@ -3574,8 +3588,8 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
     })}</div>
     <div className="batch-branding-setting">
       <div className="batch-branding-copy">
-        <strong>SmartPrint PDF footer <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Multi-copy or reformatted exports may be flattened.</span></InfoTooltip></strong>
-        <small>Add a footer only to eligible PDFs with clear bottom margins. New batches start off.</small>
+        <strong>{t("SmartPrint PDF footer")} <InfoTooltip label={t("PDF footer details")}><span>{t("Footer only appears on PDFs with a verified blank bottom margin.")}</span><span>{t("Digitally signed or interactive PDFs remain unchanged.")}</span><span>{t("Original uploads and physical prints are never altered.")}</span><span>{t("Image-to-PDF exports currently remain unbranded.")}</span><span>{t("Branding off preserves a single-copy full-document PDF byte-for-byte.")}</span><span>{t("Multi-copy or reformatted exports may be flattened.")}</span></InfoTooltip></strong>
+        <small>{t("Add a footer only to eligible PDFs with clear bottom margins. New batches start off.")}</small>
       </div>
       <label className="batch-branding-toggle">
         <input type="checkbox" checked={pdfBrandingEnabled&&!hasIdDocument} disabled={busy||hasIdDocument} onChange={event=>setPdfBrandingEnabled(event.currentTarget.checked)} aria-label="Add SmartPrint footer to PDF exports in this batch"/>
@@ -3633,6 +3647,8 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
   job:ShopPrintJob; token:string; busy:boolean; onClose:()=>void;
   onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string;rejectedPageNumbers:number[];idempotencyKey:string})=>void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [rejectedPages,setRejectedPages]=useState<Set<number>>(()=>{
     if(job.status==="REJECTED")return new Set<number>(Array.from({length:job.pageCount},(_,index)=>index+1));
     try{return new Set<number>(JSON.parse(job.rejectedPageNumbersJson||"[]") as number[]);}catch{return new Set<number>();}
@@ -3669,8 +3685,8 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
 
   return <Modal title={job.status==="REJECTED"?"Refund rejected file":"Review pages and refund"} subtitle={job.status==="REJECTED"?"All pages are selected because the shop rejected this entire file. Confirm the full-file refund before handoff.":"Every page starts accepted. Tick only pages to reject; selections can be undone before recording. Already refunded pages stay excluded."} onClose={onClose}>
     <div className="refund-summary-card">
-      <div><span>FILE</span><strong>{job.document.originalFileName}</strong></div>
-      <div><span>VERIFIED PAYMENT</span><strong>{formatMoney(job.payment?.amountMinor||job.quotedAmountMinor,job.payment?.currency||job.currency)}</strong></div>
+      <div><span>{t("FILE")}</span><strong>{job.document.originalFileName}</strong></div>
+      <div><span>{t("VERIFIED PAYMENT")}</span><strong>{formatMoney(job.payment?.amountMinor||job.quotedAmountMinor,job.payment?.currency||job.currency)}</strong></div>
     </div>
     <div className="refund-selection-actions">
       <span>Reject specific pages or the entire file.</span>
@@ -3686,9 +3702,9 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
       })}
     </div>
     <div className="page-refund-estimate">
-      {estimating?<span>Calculating the exact refund from the original quote…</span>:
+      {estimating?<span>{t("Calculating the exact refund from the original quote…")}</span>:
        estimateError?<span className="inline-error">{estimateError}</span>:
-       estimate?<><span>{estimate.acceptedPageCount} pages will remain in the print job.</span><strong>Return {formatMoney(additional,estimate.currency)}</strong><small>Cumulative returned: {formatMoney(estimate.cumulativeRefundAmountMinor,estimate.currency)} · remaining payment: {formatMoney(estimate.remainingPaidAmountMinor,estimate.currency)}</small></>:<span>Select page(s) to see the refund amount.</span>}
+       estimate?<><span>{t("{count} pages will remain in the print job.").replace("{count}", String(estimate.acceptedPageCount))}</span><strong>{t("Return {amount}").replace("{amount}", formatMoney(additional,estimate.currency))}</strong><small>{t("Cumulative returned: {returned} · remaining payment: {remaining}").replace("{returned}", formatMoney(estimate.cumulativeRefundAmountMinor,estimate.currency)).replace("{remaining}", formatMoney(estimate.remainingPaidAmountMinor,estimate.currency))}</small></>:<span>{t("Select page(s) to see the refund amount.")}</span>}
     </div>
     {estimate&&additional>0&&<form className="refund-form" onSubmit={event=>{
       event.preventDefault();
@@ -3698,9 +3714,9 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
       if(refundRequest.current?.signature!==signature)refundRequest.current={signature,key:crypto.randomUUID()};
       onSubmit({...payload,idempotencyKey:refundRequest.current.key});
     }}>
-      <label>Refund returned by<select value={method} onChange={event=>setMethod(event.target.value as "UPI"|"CASH")}><option value="UPI">UPI transfer</option><option value="CASH">Cash returned at counter</option></select></label>
-      {method==="UPI"&&<label>Refund transaction reference<input value={reference} onChange={event=>setReference(event.target.value)} maxLength={100} placeholder="Enter the refund UPI reference" required/></label>}
-      <label>Reason for rejecting these pages<textarea rows={3} maxLength={300} value={reason} onChange={event=>setReason(event.target.value)} required/></label>
+      <label>{t("Refund returned by")}<select value={method} onChange={event=>setMethod(event.target.value as "UPI"|"CASH")}><option value="UPI">{t("UPI transfer")}</option><option value="CASH">{t("Cash returned at counter")}</option></select></label>
+      {method==="UPI"&&<label>{t("Refund transaction reference")}<input value={reference} onChange={event=>setReference(event.target.value)} maxLength={100} placeholder={t("Enter the refund UPI reference")} required/></label>}
+      <label>{t("Reason for rejecting these pages")}<textarea rows={3} maxLength={300} value={reason} onChange={event=>setReason(event.target.value)} required/></label>
       <label className="refund-confirm-line"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/><span>I confirm that I have already returned the exact additional amount shown above. SmartPrint records the refund; it does not send money automatically.</span></label>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||estimating||!canSubmit}>{busy?<span className="button-spinner"/>:"Record refund and reject selected pages"}</button></div>
     </form>}
