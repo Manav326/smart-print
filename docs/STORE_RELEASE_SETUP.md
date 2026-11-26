@@ -4,17 +4,17 @@ This repository uses one versioned GitHub release to produce the website downloa
 
 ## Release flow
 
-1. Merge tested changes to \`main\`.
-2. The existing main-CI release automation creates a stable \`vX.Y.Z\` tag and runs \`.github/workflows/release.yml\`.
+1. Merge tested changes to `main`.
+2. The existing main-CI release automation creates a stable `vX.Y.Z` tag and runs `.github/workflows/release.yml`.
 3. The release workflow builds:
-   - \`SmartPrint-Windows-Setup.exe\`: existing website beta installer (kept separate).
-   - \`SmartPrint-Windows-Store-Setup.exe\`: signed, offline x64 Store installer, only when the Windows signing certificate and WebView2 standalone URL are configured.
-   - \`SmartPrint-Android.apk\`: website/direct-download Android package.
-   - \`SmartPrint-Android.aab\`: signed Google Play App Bundle.
-   - \`SHA256SUMS.txt\`: checksums for the artifacts produced.
+   - `SmartPrint-Windows-Setup.exe`: existing website beta installer (kept separate).
+   - `SmartPrint-Windows-Store-Setup.exe`: signed, offline x64 Store installer, only when the Windows signing certificate and WebView2 standalone URL are configured.
+   - `SmartPrint-Android.apk`: website/direct-download Android package.
+   - `SmartPrint-Android.aab`: signed Google Play App Bundle.
+   - `SHA256SUMS.txt`: checksums for the artifacts produced.
 4. The workflow creates a GitHub draft release. When Cloudflare R2 is configured, immutable versioned website assets are uploaded and verified there.
 5. Review the draft assets and test the exact binaries.
-6. Run **Actions → Publish SmartPrint to Microsoft Store and Google Play**, choose the tag and tracks, and set \`confirm_publication=true\`.
+6. Run **Actions → Publish SmartPrint to Microsoft Store and Google Play**, choose the tag and tracks, and set `confirm_publication=true`.
 7. Microsoft receives the signed installer URL through the Store Submission API. Google Play receives the signed AAB. Production jobs use protected GitHub Environments.
 
 A PR merge never submits an app to either public Store. A stable release build and a separate explicit publishing dispatch are required.
@@ -29,16 +29,16 @@ Export an installable PFX (PKCS#12) containing the private key and certificate c
 
 Convert the PFX file to a single-line Base64 value locally:
 
-\`\`\`powershell
+```powershell
 [Convert]::ToBase64String([IO.File]::ReadAllBytes("C:\secure\SmartPrint-CodeSigning.pfx")) | Set-Clipboard
-\`\`\`
+```
 
 Add these GitHub repository Actions secrets:
 
 | Secret | Value |
 |---|---|
-| \`WINDOWS_CODESIGN_PFX_BASE64\` | Single-line Base64 of the PFX file |
-| \`WINDOWS_CODESIGN_PFX_PASSWORD\` | PFX export password |
+| `WINDOWS_CODESIGN_PFX_BASE64` | Single-line Base64 of the PFX file |
+| `WINDOWS_CODESIGN_PFX_PASSWORD` | PFX export password |
 
 The workflow signs the SmartPrint desktop/Agent PE binaries and final Store installer with SHA-256 and an RFC 3161 timestamp, then verifies each signature. The Microsoft WebView2 runtime remains Microsoft-signed and is verified, not re-signed.
 
@@ -55,7 +55,7 @@ The Store installer must be standalone/offline. The existing website installer c
 
 | Variable | Value |
 |---|---|
-| \`WEBVIEW2_STANDALONE_X64_URL\` | Direct HTTPS URL for Microsoft's Evergreen Standalone Installer x64 |
+| `WEBVIEW2_STANDALONE_X64_URL` | Direct HTTPS URL for Microsoft's Evergreen Standalone Installer x64 |
 
 The workflow downloads it during the Windows build and verifies Microsoft's Authenticode signature before including it. Do not use the Bootstrapper URL; it downloads the runtime during installation and is not an offline installer.
 
@@ -65,14 +65,14 @@ The existing release workflow already expects these repository variables/secrets
 
 | Name | GitHub location | Purpose |
 |---|---|---|
-| \`SMARTPRINT_PUBLIC_BASE_URL\` | Variable | Canonical HTTPS SmartPrint API/portal origin |
-| \`PUBLIC_DOWNLOAD_BASE_URL\` | Variable | Canonical HTTPS public R2 custom-domain origin |
-| \`CLOUDFLARE_R2_ACCOUNT_ID\` | Variable | 32-character Cloudflare account ID |
-| \`CLOUDFLARE_R2_BUCKET\` | Variable | Release bucket |
-| \`CLOUDFLARE_R2_ACCESS_KEY_ID\` | Secret | R2 object access key |
-| \`CLOUDFLARE_R2_SECRET_ACCESS_KEY\` | Secret | R2 object secret |
+| `SMARTPRINT_PUBLIC_BASE_URL` | Variable | Canonical HTTPS SmartPrint API/portal origin |
+| `PUBLIC_DOWNLOAD_BASE_URL` | Variable | Canonical HTTPS public R2 custom-domain origin |
+| `CLOUDFLARE_R2_ACCOUNT_ID` | Variable | 32-character Cloudflare account ID |
+| `CLOUDFLARE_R2_BUCKET` | Variable | Release bucket |
+| `CLOUDFLARE_R2_ACCESS_KEY_ID` | Secret | R2 object access key |
+| `CLOUDFLARE_R2_SECRET_ACCESS_KEY` | Secret | R2 object secret |
 
-The public download origin must be an HTTPS custom domain, not the \`r2.dev\` development URL. The workflow stores immutable objects under \`/<tag>/filename\`.
+The public download origin must be an HTTPS custom domain, not the `r2.dev` development URL. The workflow stores immutable objects under `/<tag>/filename`.
 
 ### D. Android upload signing
 
@@ -80,10 +80,10 @@ The release build already expects the existing Android upload keystore and signi
 
 | Secret | Format |
 |---|---|
-| \`ANDROID_SIGNING_KEYSTORE_BASE64\` | Single-line Base64 of the existing \`.jks\`/\`.keystore\` file |
-| \`ANDROID_SIGNING_KEYSTORE_PASSWORD\` | Keystore password |
-| \`ANDROID_SIGNING_KEY_ALIAS\` | Existing key alias |
-| \`ANDROID_SIGNING_KEY_PASSWORD\` | Key password |
+| `ANDROID_SIGNING_KEYSTORE_BASE64` | Single-line Base64 of the existing `.jks`/`.keystore` file |
+| `ANDROID_SIGNING_KEYSTORE_PASSWORD` | Keystore password |
+| `ANDROID_SIGNING_KEY_ALIAS` | Existing key alias |
+| `ANDROID_SIGNING_KEY_PASSWORD` | Key password |
 
 Never generate a new upload key for a later release. Keep a secure offline backup of the keystore and passwords. If the existing key is lost, stop and plan Google's upload-key reset process rather than silently replacing it.
 
@@ -94,9 +94,9 @@ The Microsoft Store Submission API cannot create the first product or perform th
 1. Reserve the product name **SmartPrint** as an **EXE/MSI app**.
 2. Create and complete the first submission manually, including the age-rating questionnaire, Store listing, package details and declarations.
 3. Add the x64 EXE package using the versioned Store installer URL from a successful GitHub release:
-   \`https://<PUBLIC_DOWNLOAD_BASE_URL>/<tag>/SmartPrint-Windows-Store-Setup.exe\`
+   `https://<PUBLIC_DOWNLOAD_BASE_URL>/<tag>/SmartPrint-Windows-Store-Setup.exe`
 4. Use installer parameters:
-   \`/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-\`
+   `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-`
 5. Set architecture to **X64**, package type **EXE**, language **en-us**, and indicate that installer parameters are required.
 6. Disclose the Windows Agent NT service dependency in product declarations (the app installs/manages a Windows service). Do not declare this as false.
 7. Provide a valid privacy policy, support contact, website, app description, screenshots, logo and age rating. Confirm the listing's publisher identity is the intended individual/business identity.
@@ -106,18 +106,18 @@ Create/associate a Microsoft Entra ID app with the Partner Center account and gr
 
 | Name | GitHub location | Value |
 |---|---|---|
-| \`MICROSOFT_STORE_PRODUCT_ID\` | Variable | Product ID from Partner Center |
-| \`MICROSOFT_STORE_SELLER_ID\` | Variable | Seller account ID from Partner Center |
-| \`MICROSOFT_STORE_TENANT_ID\` | Variable | Entra tenant ID |
-| \`MICROSOFT_STORE_CLIENT_ID\` | Variable | Entra application/client ID |
-| \`MICROSOFT_STORE_CLIENT_SECRET\` | Secret | Entra client-secret **value** (not secret ID) |
+| `MICROSOFT_STORE_PRODUCT_ID` | Variable | Product ID from Partner Center |
+| `MICROSOFT_STORE_SELLER_ID` | Variable | Seller account ID from Partner Center |
+| `MICROSOFT_STORE_TENANT_ID` | Variable | Entra tenant ID |
+| `MICROSOFT_STORE_CLIENT_ID` | Variable | Entra application/client ID |
+| `MICROSOFT_STORE_CLIENT_SECRET` | Secret | Entra client-secret **value** (not secret ID) |
 
 The publishing script patches only the existing X64 package, commits the package module, waits for package validation, then submits the package for Microsoft certification. It refuses to replace multiple architectures or create a competing active submission.
 
 ### F. Google Play Console (one-time manual setup)
 
-1. Create the SmartPrint app in [Google Play Console](https://play.google.com/console/) using package name \`com.quantaedge.smartprint\`.
-2. Enrol in Play App Signing and upload the first signed \`SmartPrint-Android.aab\` manually if needed to establish the app.
+1. Create the SmartPrint app in [Google Play Console](https://play.google.com/console/) using package name `com.quantaedge.smartprint`.
+2. Enrol in Play App Signing and upload the first signed `SmartPrint-Android.aab` manually if needed to establish the app.
 3. Complete app access, content rating, Data Safety, privacy policy, ads declaration, target audience, app category, store listing, screenshots and required declarations.
 4. Enable the Google Play Android Developer API in a Google Cloud project.
 5. Create a service account and grant it only the required Play Console app/release permissions.
@@ -125,9 +125,9 @@ The publishing script patches only the existing X64 package, commits the package
 
 | Secret | Value |
 |---|---|
-| \`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON\` | Complete service-account JSON file contents, including braces |
+| `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Complete service-account JSON file contents, including braces |
 
-Do not commit the JSON key or paste it into chat. The app's package name is fixed in the workflow as \`com.quantaedge.smartprint\`.
+Do not commit the JSON key or paste it into chat. The app's package name is fixed in the workflow as `com.quantaedge.smartprint`.
 
 If this is a personal Play developer account created after 13 November 2023, Google may require at least 12 opted-in closed-testers for 14 continuous days before production access. Complete the Play Console testing requirement before selecting production.
 
@@ -137,28 +137,28 @@ Create these repository Environments under **Settings → Environments**:
 
 | Environment | Use |
 |---|---|
-| \`microsoft-store-production\` | Windows Store submission |
-| \`google-play-testing\` | Internal/closed Play tracks |
-| \`google-play-production\` | Production Play rollout |
+| `microsoft-store-production` | Windows Store submission |
+| `google-play-testing` | Internal/closed Play tracks |
+| `google-play-production` | Production Play rollout |
 
-Configure required reviewers for \`microsoft-store-production\` and \`google-play-production\`. Restrict deployment branches to \`main\` and stable release tags where supported. The workflow also requires \`confirm_publication=true\`; do not rely on that input instead of environment protection.
+Configure required reviewers for `microsoft-store-production` and `google-play-production`. Restrict deployment branches to `main` and stable release tags where supported. The workflow also requires `confirm_publication=true`; do not rely on that input instead of environment protection.
 
-The Play production workflow creates a 10% staged rollout (\`inProgress\`) rather than immediately releasing to 100%. Complete the rollout in Play Console after monitoring the initial cohort.
+The Play production workflow creates a 10% staged rollout (`inProgress`) rather than immediately releasing to 100%. Complete the rollout in Play Console after monitoring the initial cohort.
 
 ## Running a release
 
 1. Ensure all required secrets/variables are present.
-2. Merge approved work to \`main\`; the existing main-CI automation creates a stable tag and runs the release build.
+2. Merge approved work to `main`; the existing main-CI automation creates a stable tag and runs the release build.
 3. Open the resulting GitHub draft release and review the installer, APK, AAB, Store installer (if configured), and checksums.
 4. Test the website installer on a clean Windows machine and install the AAB on test devices/Play internal track.
 5. Open **Actions → Publish SmartPrint to Microsoft Store and Google Play**.
-6. Enter the draft release tag, choose which Stores to publish, choose the Play track, and set \`confirm_publication=true\`.
+6. Enter the draft release tag, choose which Stores to publish, choose the Play track, and set `confirm_publication=true`.
 7. Approve the relevant GitHub Environment deployment.
 8. Follow certification/review status in Partner Center and Play Console.
 
 ## Future updates
 
-For every feature or bug-fix release, increment the stable semantic version (new \`vX.Y.Z\` tag). The existing release automation creates the binaries from the exact tested commit. The same publishing workflow updates the X64 Microsoft Store package URL and uploads the AAB to the selected Play track. Do not overwrite an already-published release or reuse an old tag. Keep the package ID \`com.quantaedge.smartprint\` and Android upload key unchanged.
+For every feature or bug-fix release, increment the stable semantic version (new `vX.Y.Z` tag). The existing release automation creates the binaries from the exact tested commit. The same publishing workflow updates the X64 Microsoft Store package URL and uploads the AAB to the selected Play track. Do not overwrite an already-published release or reuse an old tag. Keep the package ID `com.quantaedge.smartprint` and Android upload key unchanged.
 
 ## What this automation does not do
 
