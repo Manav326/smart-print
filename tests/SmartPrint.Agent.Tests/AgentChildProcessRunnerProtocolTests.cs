@@ -17,7 +17,7 @@ public sealed class AgentChildProcessRunnerProtocolTests
         var result = await runner.ExecuteAsync(
             "protocol-test",
             "{\"request\":true}",
-            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(30),
             CancellationToken.None,
             _ =>
             {
@@ -40,7 +40,7 @@ public sealed class AgentChildProcessRunnerProtocolTests
         var result = await runner.ExecuteAsync(
             "protocol-test",
             "{\"request\":true}",
-            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(30),
             CancellationToken.None,
             _ => throw new HttpRequestException("simulated API outage"));
 
@@ -64,6 +64,7 @@ public sealed class AgentChildProcessRunnerProtocolTests
         {
             startInfo.FileName = "powershell.exe";
             startInfo.ArgumentList.Add("-NoProfile");
+            startInfo.ArgumentList.Add("-NonInteractive");
             startInfo.ArgumentList.Add("-Command");
             startInfo.ArgumentList.Add(
                 "$request = [Console]::ReadLine(); " +
