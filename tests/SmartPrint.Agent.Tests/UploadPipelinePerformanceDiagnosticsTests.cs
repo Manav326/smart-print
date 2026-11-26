@@ -19,7 +19,7 @@ public sealed class UploadPipelinePerformanceDiagnosticsTests(ITestOutputHelper 
     private const int MeasuredIterations = 3;
 
     [Fact]
-    [Trait("Category", "PerformanceDiagnostic")]
+    [Trait("Category", "UploadPerformanceDiagnostic")]
     public async Task MeasureQsp2RecordSizesDiskStagesQueuePersistenceAndCryptoConcurrency()
     {
         Assert.True(OperatingSystem.IsWindows(), "These diagnostics require the Windows Agent runner and DPAPI.");
