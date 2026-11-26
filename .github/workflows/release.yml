@@ -599,8 +599,6 @@ jobs:
           files = ["SmartPrint-Windows-Setup.exe"]
           if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
               files.append("SmartPrint-Windows-Store-Setup.exe")
-          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
-              files.append("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
               files.extend(["SmartPrint-Android.apk", "SmartPrint-Android.aab"])
 
@@ -652,8 +650,10 @@ jobs:
           portal_origin = os.environ["SMARTPRINT_PORTAL_ORIGIN"]
           tag = os.environ["RELEASE_TAG"]
           files = ["SmartPrint-Windows-Setup.exe"]
+          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
+              files.append("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
-              files.append("SmartPrint-Android.apk")
+              files.extend(["SmartPrint-Android.apk", "SmartPrint-Android.aab"])
 
           for filename in files:
               url = f"{base}/{tag}/{filename}"
