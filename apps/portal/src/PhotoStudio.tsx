@@ -709,7 +709,7 @@ export default function PhotoStudio({
   async function createPrintSheets(){
     if(!image||busyRef.current)return;
     const parsedCopies=Number(copiesInput);
-    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose 1–"+maxCopies+" whole copies.");return;}
+    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError(t("Choose 1–")+maxCopies+t(" whole copies."));return;}
     const pages = Math.ceil(parsedCopies / outputPhotosPerPage);
     busyRef.current=true;setBusy(true);setError("");
     setPreparationProgress("Preparing page 1 of "+pages+"…");
@@ -788,7 +788,7 @@ export default function PhotoStudio({
         resolutionDpi:300,editorSettings,
         previewPages:jpegPages.map(jpeg=>new Blob([jpeg],{type:"image/jpeg"}))
       }]);
-    }catch(cause){setError(cause instanceof Error?cause.message:"Photo sheet creation failed. Try again with this photo.");}
+    }catch(cause){setError(cause instanceof Error?cause.message:t("Photo sheet creation failed. Try again with this photo."));}
     finally{
       if(sharedPhotoTile){sharedPhotoTile.width=0;sharedPhotoTile.height=0;}
       if(outputCanvas){outputCanvas.width=0;outputCanvas.height=0;}
@@ -922,7 +922,7 @@ export default function PhotoStudio({
 
           {backgroundPanel && <>
             <div className={styles.backgroundPreviewRow} data-testid="photo-studio-background-state"><span>{t("Sampled background")}</span><strong>{sourceBackgroundColor?sourceBackgroundColor.toUpperCase():"Not selected"}</strong>{sourceBackgroundColor&&<i style={{background:sourceBackgroundColor}}/>}</div>
-            <button type="button" id="photo-studio-pick-background" className={styles.secondaryButton} onClick={()=>{setPickingBackground(true);setError("");}}><Pipette size={14}/>{pickingBackground?t("Click the background in the preview…"):t("Pick background from photo")}</button>
+            <button type="buttont(" id=")photo-studio-pick-backgroundt(" className={styles.secondaryButton} onClick={()=>{setPickingBackground(true);setError(")t(");}}><Pipette size={14}/>{pickingBackground?t(")Click the background in the preview…"):t("Pick background from photo")}</button>
             <label className={styles.fieldLabel}>{t("Replacement background")}<input id="photo-studio-replacement-background" type="color" value={targetBackgroundColor} onChange={event=>setTargetBackgroundColor(event.target.value)}/></label>
             <div className={styles.backgroundPresets}>{["#ffffff","#f3f6fa","#dcecff","#dff3e7","#f6eadb"].map(color=><button key={color} type="button" style={{background:color}} aria-label={t("Set background ")+color} aria-pressed={targetBackgroundColor===color} onClick={()=>setTargetBackgroundColor(color)}/>)}</div>
             <label className={styles.rangeControl}>{t("Background tolerance")}<output>{backgroundTolerance}</output><input id="photo-studio-background-tolerance" type="range" min="5" max="90" value={backgroundTolerance} onChange={event=>setBackgroundTolerance(Number(event.target.value))}/></label>
