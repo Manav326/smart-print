@@ -29,5 +29,5 @@ The installer checks WebView2 before launching the desktop application and insta
 Uninstallation invokes the matching Agent service uninstall script. The installer must not remove customer print queues or user-owned print data.
 
 References:
-- [Inno Setup Setup Exit Codes](https://jrsoftware.org/ishelp/index.php?topic=setupexitcodes)
-- [Inno Setup Setup Command-Line Parameters](https://jrsoftware.org/ishelp/index.php?topic=setupcmdline)
+- [Inno Setup Setup Exit Codes](https://jrsoftware.org/inno-setup/documentation/topic_setupexitcodes.htm)
+- [Inno Setup Setup Command-Line Parameters](https://jrsoftware.org/inno-setup/documentation/topic_setupcmdline.htm)
