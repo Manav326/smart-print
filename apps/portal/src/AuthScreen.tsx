@@ -33,7 +33,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
     event.preventDefault();
     setError("");
     if (mode === "register" && password.length < 12) {
-      setError("Use at least 12 characters for your password.");
+      setError(t("Use at least 12 characters for your password."));
       return;
     }
 
