@@ -3090,7 +3090,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
           </div>
           {test&&<div className="local-phone-test">
             <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
-            <div><strong>Use a second phone</strong><p>Connect another phone to this same Wi-Fi or hotspot. In SmartPrint, open Your space → connected shop → Check shop Wi-Fi, then scan this QR.</p><small>The phone sharing the hotspot cannot join it. No SmartPrint? Scan with your camera and open the link.</small><p>This screen updates automatically when the phone connects.</p></div>
+            <div><strong>{t("Use a second phone")}</strong><p>{t("Connect another phone to this same Wi-Fi or hotspot. In SmartPrint, open Your space → connected shop → Check shop Wi-Fi, then scan this QR.")}</p><small>{t("The phone sharing the hotspot cannot join it. No SmartPrint? Scan with your camera and open the link.")}</small><p>{t("This screen updates automatically when the phone connects.")}</p></div>
           </div>}
           {phoneTestPassed&&<div className="local-network-result success"><Check size={17}/><span><strong>Phone test passed</strong><small>A phone reached this shop connection recently. The check expires after ten minutes.</small></span></div>}
           {localApiReady&&readiness?.localUploadReady===true&&<div className="local-network-result success"><Check size={17}/><span><strong>Local print pipeline ready</strong><small>Protected queue, print worker, cloud heartbeat and printer inventory are healthy. The assigned printer is checked separately for each QR station upload.</small></span></div>}
@@ -3459,7 +3459,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                     isDuplex:job.isDuplex,
                     orientation:(["AUTO","PORTRAIT","LANDSCAPE"].includes(job.orientation??"AUTO")?job.orientation??"AUTO":"AUTO") as CustomerPrintRequestSettings["orientation"]
                   });
-                }}>Adjust options</button>}
+                }}>{t("Adjust options")}</button>}
                 <button className="subtle-button" disabled={busyJobId===job.id||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source · preview disabled":"Preview original"}</button>
                 {job.status==="COMPLETED"&&job.outputType==="PDF_EXPORT"&&verifiedPdfExportPath(job)&&job.outputFileName&&job.outputSha256?.length===64&&(job.outputSizeBytes??0)>0&&(job.outputSizeBytes??0)<=100*1024*1024&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onPreviewOutput(job)}>Preview saved PDF</button>}
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
@@ -3689,7 +3689,7 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
       <div><span>{t("VERIFIED PAYMENT")}</span><strong>{formatMoney(job.payment?.amountMinor||job.quotedAmountMinor,job.payment?.currency||job.currency)}</strong></div>
     </div>
     <div className="refund-selection-actions">
-      <span>Reject specific pages or the entire file.</span>
+      <span>{t("Reject specific pages or the entire file.")}</span>
       <button type="button" className="secondary-button reject-action" disabled={busy} onClick={()=>setRejectedPages(new Set(Array.from({length:job.pageCount},(_,index)=>index+1)))}>Reject entire file · refund all pages</button>
     </div>
     <div className="page-refund-grid" role="group" aria-label="Pages to reject">
@@ -3934,11 +3934,13 @@ function HelpSupportModal({ onClose, onNavigate }: { onClose: () => void; onNavi
 function StationModal({ busy, printers, onClose, onSubmit }: {
   busy:boolean; printers:PrinterDevice[]; onClose:()=>void; onSubmit:(v:{displayName:string;printerDeviceId?:string})=>void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [displayName,setDisplayName]=useState("Front counter");
   const [printerDeviceId,setPrinterDeviceId]=useState("");
   return <Modal title="Create a QR station" subtitle="Give customers a clear entry point for this counter or printer." onClose={onClose}>
     <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,printerDeviceId:printerDeviceId||undefined});}}>
-      <label>Station name<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="e.g. Front counter" required maxLength={120}/></label>
+      <label>{t("Station name")}<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder={t("e.g. Front counter")} required maxLength={120}/></label>
       <label>Default printer <span className="field-hint">Optional · only approved virtual test queues are included</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">No default printer</option>{printers.filter(printer=>printer.isActive&&(printer.outputMode!=="UNSUPPORTED_VIRTUAL"||printer.virtualTestGrantActive===true)).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
       <div className="modal-note"><QrCode size={15}/> The QR contains a public station identifier, not a permanent print authorisation. Every scan creates an expiring customer session. Only enabled printers are offered as defaults; you can also assign a printer to each paid job in the queue.</div>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!displayName.trim()}>{busy?<span className="button-spinner"/>:"Create station"}</button></div>
@@ -4413,6 +4415,8 @@ async function requestSmartPrintNativeLocalNetworkAccess():Promise<"granted"|"de
 }
 
 function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssistedPrintingEnabled}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void;onUnavailable:()=>void;cloudAssistedPrintingEnabled:boolean}) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
@@ -4644,7 +4648,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
 
   return <section className="entry-local-agent">
     <div className="entry-local-agent-head">
-      <div><strong>{nativeAppMode?"Shop Wi-Fi":"Shop Wi-Fi connection"}</strong><span>Optional local connection check</span></div>
+      <div><strong>{t(nativeAppMode?"Shop Wi-Fi":"Shop Wi-Fi connection")}</strong><span>{t("Optional local connection check")}</span></div>
       <Status label={label} tone={tone}/>
     </div>
     {!nativeAppMode&&<p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>}
@@ -4872,7 +4876,7 @@ function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:N
       : <div className="customer-native-pdf-empty">
           {current===null||current.loading
             ? <><span className="button-spinner"/><span>Preparing print layout preview…</span></>
-            : <><FileText size={22}/><strong>Preview unavailable</strong><span>The print layout could not be previewed on this device. You can still upload the original PDF.</span></>}
+            : <><FileText size={22}/><strong>{t("Preview unavailable")}</strong><span>{t("The print layout could not be previewed on this device. You can still upload the original PDF.")}</span></>}
         </div>}
     {current?.image&&<div className="customer-native-pdf-layout-note">
       <strong>{current.pagesPerSheet}-up print layout · {current.pagesPerSheetDirection}</strong>
@@ -6576,7 +6580,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                  const paperSize=event.currentTarget.value as CustomerGroupSettings["paperSize"];
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),paperSize}}));
                }}>
-                <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
+                <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">{t("Letter")}</option><option value="LEGAL">{t("Legal")}</option>
               </select></label>
               <label><span>{t("Orientation")}</span><select value={defaults.orientation} onChange={event=>{
                  const orientation=event.currentTarget.value as CustomerGroupSettings["orientation"];
@@ -6804,7 +6808,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {acceptedQuoteEntries.length>0&&<details className="customer-batch-quote-details">
         <summary><span>{t("See price breakdown")}</span><small>{t("Documents, ID cards and photos")}</small></summary>
         <div className="customer-batch-print-breakdown">
-          <div><span><strong>Normal documents</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {money(batchQuoteBreakdown.normalDocumentMonoAmountMinor,batchQuoteCurrency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {money(batchQuoteBreakdown.normalDocumentColourAmountMinor,batchQuoteCurrency)}</small></span><strong>{money(batchQuoteBreakdown.normalDocumentAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>{t("Normal documents")}</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {money(batchQuoteBreakdown.normalDocumentMonoAmountMinor,batchQuoteCurrency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {money(batchQuoteBreakdown.normalDocumentColourAmountMinor,batchQuoteCurrency)}</small></span><strong>{money(batchQuoteBreakdown.normalDocumentAmountMinor,batchQuoteCurrency)}</strong></div>
           <div><span><strong>{t("ID cards")}</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{money(batchQuoteBreakdown.idCardAmountMinor,batchQuoteCurrency)}</strong></div>
           <div><span><strong>{t("Photo printing")}</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{money(batchQuoteBreakdown.photoAmountMinor,batchQuoteCurrency)}</strong></div>
           <div className="customer-batch-print-total"><span><strong>{t("Total output")}</strong><small>{t("Page sides and prepared A4 sheets, grouped by print type")}</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
@@ -6844,7 +6848,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{money(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {money(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">
         <ShieldCheck size={16}/>
-        <span><strong>PDF footer selected by the shop.</strong> <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Reformatted or multi-copy exports may be flattened.</span><span>Ask for an unbranded single-copy export when PDF structure matters.</span></InfoTooltip></span>
+        <span><strong>{t("PDF footer selected by the shop.")}</strong> <InfoTooltip label={t("PDF footer details")}><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>{t("Reformatted or multi-copy exports may be flattened.")}</span><span>{t("Ask for an unbranded single-copy export when PDF structure matters.")}</span></InfoTooltip></span>
       </div>}
       {!!jobStatus.timeline?.filter(event=>event.previousStatus!==event.newStatus).length&&<div className="customer-state-timeline">{jobStatus.timeline.filter(event=>event.previousStatus!==event.newStatus).map((event,index)=><div key={event.createdUtc+"-"+index}><i/><span><strong>{customerStatusLabel(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
       {canStartNewSession&&<div className="customer-session-complete"><div><strong>{translateUi(locale,"customer.orderReceived")}</strong><span>Your order history is saved. You can start another print session when ready.</span></div><button className="customer-flow-button" onClick={onStartNewSession}><RefreshCw size={16}/> {translateUi(locale,"customer.startNewSession")}</button></div>}
