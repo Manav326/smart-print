@@ -65,6 +65,43 @@ for (const [locale, catalog] of Object.entries(catalogs)) {
     }
   }
 }
+
+const screenRegistryStart = source.indexOf("const screenTextCatalogs:");
+if (screenRegistryStart < 0) throw new Error("Missing screen-level translation dictionaries");
+function readScreenCatalog(locale) {
+  const localeStart = source.indexOf("  " + locale + ": {", screenRegistryStart);
+  if (localeStart < 0) throw new Error("Missing screen-level dictionary for " + locale);
+  const bodyStart = source.indexOf("\\n", localeStart) + 1;
+  const end = source.indexOf("\\n  },", bodyStart);
+  if (bodyStart <= 0 || end < 0) throw new Error("Unterminated screen-level dictionary for " + locale);
+  const entries = [];
+  for (const line of source.slice(bodyStart, end).split("\\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const match = trimmed.match(/^("(?:\\\\.|[^"]) *")\\s*:\\s*("(?:\\\\.|[^"])*")\\s*,?$/);
+    const exact = trimmed.match(/^("(?:\\\\.|[^"])*")\\s*:\\s*("(?:\\\\.|[^"])*")\\s*,?$/);
+    if (!exact) throw new Error("Invalid screen-level key/value entry in " + locale + ": " + trimmed);
+    entries.push([JSON.parse(exact[1]), JSON.parse(exact[2])]);
+  }
+  const keys = entries.map(([key]) => key);
+  const duplicates = keys.filter((key, index) => keys.indexOf(key) !== index);
+  if (duplicates.length) throw new Error(locale + " screen dictionary has duplicate keys: " + [...new Set(duplicates)].join(", "));
+  for (const [key, value] of entries) {
+    if (!key.trim() || !value.trim()) throw new Error(locale + " screen dictionary contains a blank key/value");
+  }
+  return new Map(entries);
+}
+const screenHindi = readScreenCatalog("hindi");
+const screenHinglish = readScreenCatalog("hinglish");
+const screenMissingHindi = [...screenHinglish.keys()].filter(key => !screenHindi.has(key));
+const screenMissingHinglish = [...screenHindi.keys()].filter(key => !screenHinglish.has(key));
+if (screenMissingHindi.length || screenMissingHinglish.length) {
+  throw new Error("Screen translation dictionary drift. Hindi missing: " + screenMissingHindi.join(", ") + "; Hinglish missing: " + screenMissingHinglish.join(", "));
+}
+if (!source.includes("screenTextCatalogs[locale][sourceText] ?? sourceText")) {
+  throw new Error("Screen copy must fall back to its English source text without runtime translation");
+}
+
 const metadataStart = source.indexOf("const localeMetadata:");
 const metadataEnd = source.indexOf("};", metadataStart);
 if (metadataStart < 0 || metadataEnd < 0) throw new Error("Missing locale metadata registry");
@@ -75,4 +112,4 @@ for (const locale of localeNames) {
 if (!source.includes("Object.entries(localeMetadata).map")) {
   throw new Error("Language selector options must be derived from the locale registry");
 }
-console.log("i18n catalog check passed: " + baseKeys.length + " keys × " + localeNames.length + " locales; no missing keys, blank values, duplicate keys, or placeholder mismatches.");
+console.log("i18n catalog check passed: " + baseKeys.length + " keyed messages × " + localeNames.length + " locales and " + screenHindi.size + " screen-copy pairs; no catalog drift or blank translations.");
