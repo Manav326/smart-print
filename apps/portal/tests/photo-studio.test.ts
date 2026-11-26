@@ -184,7 +184,7 @@ test("Photo Studio locks background scroll and supports accessible keyboard dism
  assert.match(studio,/document\.body\.style\.overflow = "hidden"/);
  assert.match(studio,/event\.key === "Escape"/);
  assert.match(studio,/event\.key !== "Tab"/);
- assert.match(studio,/disabled=\{busy\} aria-label="Close Photo Studio"/);
+ assert.match(studio,/disabled=\{busy\} aria-label=\{t\("Close Photo Studio"\)\}/);
  assert.match(css,/@media\(max-width:390px\)[\s\S]*?topbarMeta span:last-child\{display:none\}/);
 });
 
@@ -606,7 +606,7 @@ test("Photo Studio browser acceptance covers every editor tool and failure recov
 test("Photo Studio text layers are independently selectable, editable, draggable and included in the A4 PDF",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.match(studio,/id="photo-studio-tool-text"/);
- assert.match(studio,/title="Add, select and position text on the A4 sheet"/);
+ assert.match(studio,/title=\{t\("Add, select and position text on the A4 sheet"\)\}/);
  assert.doesNotMatch(studio,/id="photo-studio-tool-text"[^>]*disabled=/);
  assert.match(studio,/id="photo-studio-add-text"/);
  assert.match(studio,/id="photo-studio-text-content"/);
