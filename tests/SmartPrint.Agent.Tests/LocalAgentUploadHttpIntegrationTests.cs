@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -12,10 +13,11 @@ using SmartPrint.Agent;
 using SmartPrint.Documents;
 using UglyToad.PdfPig.Content;
 using UglyToad.PdfPig.Writer;
+using Xunit.Abstractions;
 
 namespace SmartPrint.Agent.Tests;
 
-public sealed class LocalAgentUploadHttpIntegrationTests
+public sealed class LocalAgentUploadHttpIntegrationTests(ITestOutputHelper output)
 {
     [Fact]
     public async Task HostedWindowsAgentAcceptsAnExtensionlessPdfThroughItsRealMultipartHttpRoute()
@@ -257,7 +259,8 @@ public sealed class LocalAgentUploadHttpIntegrationTests
     }
 
     [Fact]
-    public async Task HostedAgentStreamsTwentyFilesWithFiftyMiBMaximumAndFiveHundredMiBTotalThroughThreeConcurrentTransfers()
+    [Trait("Category", "UploadConcurrencyDiagnostic")]
+    public async Task HostedAgentStreamsTwentyFilesWithFiftyMiBMaximumAndFiveHundredMiBTotalThroughConfiguredConcurrentTransfers()
     {
         const int fileCount = 20;
         const long mebibyte = 1024L * 1024L;
@@ -277,6 +280,11 @@ public sealed class LocalAgentUploadHttpIntegrationTests
         var completionCounts = new ConcurrentDictionary<Guid, int>();
         var activeTransfers = 0;
         var maximumConcurrentTransfers = 0;
+        var configuredConcurrency = Environment.GetEnvironmentVariable("SMARTPRINT_UPLOAD_TEST_CONCURRENCY");
+        var concurrencyLimit = 3;
+        if (!string.IsNullOrWhiteSpace(configuredConcurrency) &&
+            (!int.TryParse(configuredConcurrency, out concurrencyLimit) || concurrencyLimit is < 1 or > 4))
+            throw new InvalidOperationException("SMARTPRINT_UPLOAD_TEST_CONCURRENCY must be an integer from 1 through 4.");
 
         try
         {
@@ -446,7 +454,11 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                     DefaultRequestVersion = new Version(1, 1),
                     DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrLower
                 };
-                using var concurrency = new SemaphoreSlim(3, 3);
+                using var concurrency = new SemaphoreSlim(concurrencyLimit, concurrencyLimit);
+                using var process = Process.GetCurrentProcess();
+                var processCpuBefore = process.TotalProcessorTime;
+                var allocatedBytesBefore = GC.GetTotalAllocatedBytes(precise: false);
+                var batchStopwatch = Stopwatch.StartNew();
                 var uploads = fixtures.Values.Select(async fixture =>
                 {
                     await concurrency.WaitAsync();
@@ -501,8 +513,14 @@ public sealed class LocalAgentUploadHttpIntegrationTests
                 }).ToArray();
 
                 await Task.WhenAll(uploads);
+                batchStopwatch.Stop();
+                process.Refresh();
+                var processCpuMilliseconds = (process.TotalProcessorTime - processCpuBefore).TotalMilliseconds;
+                var allocatedBytes = Math.Max(0, GC.GetTotalAllocatedBytes(precise: false) - allocatedBytesBefore);
+                output.WriteLine(
+                    $"SMARTPRINT_PERF,scenario=C,configured_concurrency={concurrencyLimit},observed_concurrency={maximumConcurrentTransfers},batch_mib=500,files=20,elapsed_ms={batchStopwatch.Elapsed.TotalMilliseconds:F2},process_cpu_ms={processCpuMilliseconds:F2},allocated_bytes={allocatedBytes},working_set_bytes={process.WorkingSet64},peak_working_set_bytes={process.PeakWorkingSet64}");
 
-                Assert.Equal(3, maximumConcurrentTransfers);
+                Assert.Equal(concurrencyLimit, maximumConcurrentTransfers);
                 Assert.Equal(fileCount, completionCounts.Count);
                 Assert.All(completionCounts.Values, count => Assert.Equal(1, count));
 

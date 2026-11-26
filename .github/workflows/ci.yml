@@ -494,7 +494,29 @@ jobs:
           SMARTPRINT_EPSON_L360_SPOOLER_OUTPUT: ${{ steps.epson_l360_setup.outputs.spooler_output_path }}
           SMARTPRINT_EPSON_L360_CAPABILITIES_OUTPUT: artifacts/epson-l360/epson-l360-capabilities.json
           SMARTPRINT_EPSON_L360_PRINT_MANIFEST: artifacts/epson-l360/shop-owner-print-workflow.json
-        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
+        run: dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --filter "Category!=UploadPerformanceDiagnostic&Category!=UploadConcurrencyDiagnostic" --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
+      - name: Run QSP2 cryptography and Agent disk diagnostics (scenarios A and B)
+        id: upload_perf_ab
+        if: ${{ !cancelled() && steps.agent_tests.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --no-build --no-restore --filter "Category=UploadPerformanceDiagnostic" --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
+          if ($LASTEXITCODE -ne 0) { throw "QSP2 cryptography or Agent staging/queue performance diagnostics failed." }
+      - name: Compare full 500 MiB batch at concurrency 1 to 4 (three repetitions each)
+        id: upload_perf_concurrency
+        if: ${{ !cancelled() && steps.upload_perf_ab.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $filter = "FullyQualifiedName~HostedAgentStreamsTwentyFilesWithFiftyMiBMaximumAndFiveHundredMiBTotalThroughConfiguredConcurrentTransfers"
+          foreach ($concurrency in @(1, 2, 3, 4)) {
+            foreach ($repetition in @(1, 2, 3)) {
+              Write-Host "SMARTPRINT_PERF_START,scenario=C,configured_concurrency=$concurrency,repetition=$repetition,batch_mib=500,files=20"
+              $env:SMARTPRINT_UPLOAD_TEST_CONCURRENCY = [string]$concurrency
+              dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release --no-build --no-restore --filter $filter --logger "console;verbosity=normal" -- "xUnit.ReporterSwitch=verbose" "xUnit.ShowLiveOutput=true" "xUnit.StopOnFail=false" "xUnit.ParallelizeTestCollections=false" "xUnit.MaxParallelThreads=1"
+              if ($LASTEXITCODE -ne 0) { throw "Upload concurrency diagnostic failed at concurrency=$concurrency, repetition=$repetition." }
+            }
+          }
+          Remove-Item Env:\SMARTPRINT_UPLOAD_TEST_CONCURRENCY -ErrorAction SilentlyContinue
       - name: Collect Epson L360 capability, driver and spooler evidence
         id: epson_l360_capture
         if: ${{ always() && steps.epson_l360_setup.outcome == 'success' && steps.epson_l360_capability_probe.outcome == 'success' }}
