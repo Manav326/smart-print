@@ -258,7 +258,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($file.FullName)." }
           }
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          Remove-Item -LiteralPath "artifacts/agent-installer/SmartPrint-Windows-Setup.exe" -Force -ErrorAction SilentlyContinue
+          # Keep the already-built unsigned website installer untouched.
           Remove-Item -LiteralPath "artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe" -Force -ErrorAction SilentlyContinue
           $commonArgs = @(
             "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL",
