@@ -135,6 +135,8 @@ function formatPrice(value: number | null, currency: string): string {
 }
 
 export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [plans, setPlans] = useState<PlatformPlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState("");
   const [creating, setCreating] = useState(false);
@@ -292,7 +294,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
       <div className="platform-plans-intro">
         <div>
           <div className="platform-plan-kicker"><Layers3 size={14}/> COMMERCIAL CATALOGUE</div>
-          <h2>Plans and entitlements</h2>
+          <h2>{t("Plans and entitlements")}</h2>
           <p>Configure plan pricing and product capabilities. Changes are versioned so published terms remain stable.</p>
         </div>
         <div className="platform-plans-actions">
@@ -349,13 +351,13 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
               </div>
               <div className="platform-plan-meta-grid">
                 <Field label="Plan code" hint="Stable uppercase identifier">
-                  <input value={code} onChange={event => setCode(event.target.value)} placeholder="e.g. STARTER" maxLength={40}/>
+                  <input value={code} onChange={event => setCode(event.target.value)} placeholder={t("e.g. STARTER")} maxLength={40}/>
                 </Field>
                 <Field label="Plan name">
-                  <input value={name} onChange={event => setName(event.target.value)} placeholder="Plan name" maxLength={100}/>
+                  <input value={name} onChange={event => setName(event.target.value)} placeholder={t("Plan name")} maxLength={100}/>
                 </Field>
                 <Field label="Description" wide>
-                  <textarea value={description} onChange={event => setDescription(event.target.value)} placeholder="What this subscription includes" rows={2} maxLength={500}/>
+                  <textarea value={description} onChange={event => setDescription(event.target.value)} placeholder={t("What this subscription includes")} rows={2} maxLength={500}/>
                 </Field>
               </div>
               <PlanVersionEditor form={form} onChange={changeForm}/>
@@ -413,7 +415,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                     </div>
                     {hasDraft && (
                       <div className="platform-plan-publish-row">
-                        <div><strong>Ready to publish?</strong><span>At least one price is required. Enter zero for an explicit free plan.</span></div>
+                        <div><strong>{t("Ready to publish?")}</strong><span>{t("At least one price is required. Enter zero for an explicit free plan.")}</span></div>
                         <button className="secondary-button" onClick={() => void publishDraft()} disabled={Boolean(busy) || (currentDraft?.monthlyPriceMinor == null && currentDraft?.annualPriceMinor == null)}>
                           {busy === "publish" ? <LoaderCircle size={14} className="platform-spin"/> : <Sparkles size={14}/>} Publish version
                         </button>
@@ -425,7 +427,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
             </>
           ) : (
             <section className="panel platform-plan-panel platform-plan-empty-editor">
-              <Layers3 size={24}/><h3>Select or create a plan</h3><p>Choose a plan from the catalogue to inspect its versions and configure draft terms.</p>
+              <Layers3 size={24}/><h3>{t("Select or create a plan")}</h3><p>{t("Choose a plan from the catalogue to inspect its versions and configure draft terms.")}</p>
             </section>
           )}
         </div>
@@ -484,17 +486,17 @@ function PlanVersionEditor({ form, onChange }: {
     <div className="platform-plan-version-editor">
       <div className="platform-plan-subheading"><div><h4>Pricing</h4><p>Enter amounts in {currencyLabel}; SmartPrint stores the currency's minor units.</p></div><Field label="Currency"><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder="INR"/></Field></div>
       <div className="platform-plan-meta-grid">
-        <Field label={`Monthly price (${currencyLabel})`}><input type="number" min="0" step={priceStep} value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="e.g. 149"/></Field>
-        <Field label={`Annual price (${currencyLabel})`}><input type="number" min="0" step={priceStep} value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="e.g. 1499"/></Field>
+        <Field label={t("Monthly price ({currency})").replace("{currency}",currencyLabel)}><input type="number" min="0" step={priceStep} value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="e.g. 149"/></Field>
+        <Field label={t("Annual price ({currency})").replace("{currency}",currencyLabel)}><input type="number" min="0" step={priceStep} value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="e.g. 1499"/></Field>
       </div>
 
       <div className="platform-plan-subheading"><div><h4>Usage limits</h4><p>Blank means no configured cap; positive numbers enforce the configured limit when enforcement is connected.</p></div><span className="platform-plan-unlimited">Optional limits</span></div>
       <div className="platform-plan-meta-grid platform-plan-limits-grid">
-        <Field label="Printers"><input type="number" min="1" step="1" value={form.maxPrinters} onChange={event => onChange("maxPrinters", event.target.value)} placeholder="No configured cap"/></Field>
-        <Field label="Agent computers"><input type="number" min="1" step="1" value={form.maxAgentDevices} onChange={event => onChange("maxAgentDevices", event.target.value)} placeholder="No configured cap"/></Field>
-        <Field label="QR stations"><input type="number" min="1" step="1" value={form.maxQrStations} onChange={event => onChange("maxQrStations", event.target.value)} placeholder="No configured cap"/></Field>
-        <Field label="Print jobs / month"><input type="number" min="1" step="1" value={form.maxMonthlyPrintJobs} onChange={event => onChange("maxMonthlyPrintJobs", event.target.value)} placeholder="No configured cap"/></Field>
-        <Field label="Maximum document size · bytes"><input type="number" min="1" step="1" value={form.maxDocumentBytes} onChange={event => onChange("maxDocumentBytes", event.target.value)} placeholder="No configured cap"/></Field>
+        <Field label={t("Printers")}><input type="number" min="1" step="1" value={form.maxPrinters} onChange={event => onChange("maxPrinters", event.target.value)} placeholder={t("No configured cap")}/></Field>
+        <Field label={t("Agent computers")}><input type="number" min="1" step="1" value={form.maxAgentDevices} onChange={event => onChange("maxAgentDevices", event.target.value)} placeholder="No configured cap"/></Field>
+        <Field label={t("QR stations")}><input type="number" min="1" step="1" value={form.maxQrStations} onChange={event => onChange("maxQrStations", event.target.value)} placeholder="No configured cap"/></Field>
+        <Field label={t("Print jobs / month")}><input type="number" min="1" step="1" value={form.maxMonthlyPrintJobs} onChange={event => onChange("maxMonthlyPrintJobs", event.target.value)} placeholder="No configured cap"/></Field>
+        <Field label={t("Maximum document size · bytes")}><input type="number" min="1" step="1" value={form.maxDocumentBytes} onChange={event => onChange("maxDocumentBytes", event.target.value)} placeholder="No configured cap"/></Field>
       </div>
 
       <div className="platform-plan-subheading"><div><h4>Product capabilities</h4><p>Saved centrally and intended to be evaluated by the server.</p></div></div>
