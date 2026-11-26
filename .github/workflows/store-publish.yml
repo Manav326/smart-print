@@ -117,8 +117,8 @@ jobs:
           $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
           if ($missing.Count -gt 0) { throw "Missing GitHub Actions variables/secrets: $($missing -join ', ')." }
           $origin = [Uri]$env:PUBLIC_DOWNLOAD_BASE_URL
-          if ($origin.Scheme -ne "https" -or $origin.AbsolutePath -notin @("", "/") -or $origin.Query -or $origin.Fragment -or $origin.UserInfo) {
-            throw "PUBLIC_DOWNLOAD_BASE_URL must be a canonical HTTPS custom-domain origin."
+          if ($origin.Scheme -ne "https" -or $origin.Query -or $origin.Fragment -or $origin.UserInfo) {
+            throw "PUBLIC_DOWNLOAD_BASE_URL must be a canonical HTTPS custom-domain URL without query, fragment or embedded credentials."
           }
           if ($env:CLOUDFLARE_R2_ACCOUNT_ID -notmatch "^[0-9a-fA-F]{32}$") { throw "CLOUDFLARE_R2_ACCOUNT_ID must be 32 hexadecimal characters." }
 
