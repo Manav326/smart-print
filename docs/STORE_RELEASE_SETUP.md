@@ -110,7 +110,9 @@ The Microsoft Store Submission API cannot create the first product or perform th
 5. Set architecture to **X64**, package type **EXE**, language **en-us**, and indicate that installer parameters are required.
 6. Disclose the Windows Agent NT service dependency in product declarations (the app installs/manages a Windows service). Do not declare this as false.
 7. Provide a valid privacy policy, support contact, website, app description, screenshots, logo and age rating. Confirm the listing's publisher identity is the intended individual/business identity.
-8. Save and submit the initial listing through Partner Center. The API automation becomes available after this first submission is completed.
+8. Save and submit the initial listing through Partner Center. The API automation becomes available after this first submission is completed. If SmartPrint has already been submitted and is currently in certification, do not create a duplicate submission; wait for the current one to complete before using the API workflow.
+
+**Privacy policy and contact details:** the repository currently contains a private-printing-specific privacy explainer, but I did not find a complete public SmartPrint product privacy policy. That page is not a substitute for the overall policy. Supply a public HTTPS privacy-policy URL that accurately describes document/photo handling, uploads, account data, diagnostics, retention and deletion. Also supply the public support URL and support email. Enter these in Partner Center's Store listing/properties and Google Play Console's App content/Data Safety and Store listing. Do not publish until the policy matches the actual production data practices.
 
 Create/associate a Microsoft Entra ID app with the Partner Center account and grant it the Partner Center **Manager** role as documented by Microsoft. Create a client secret. Add:
 
@@ -138,6 +140,8 @@ The publishing script patches only the existing X64 package, commits the package
 | `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` | Complete service-account JSON file contents, including braces |
 
 Do not commit the JSON key or paste it into chat. The app's package name is fixed in the workflow as `com.quantaedge.smartprint`.
+
+For the Windows Store listing, prepare the app description, short description, category, age rating, 1:1 Store logo and current Windows screenshots. Partner Center's listing editor validates the exact image dimensions and file types for each asset slot; use those displayed requirements rather than resizing one image into every slot.
 
 If this is a personal Play developer account created after 13 November 2023, Google may require at least 12 opted-in closed-testers for 14 continuous days before production access. Complete the Play Console testing requirement before selecting production.
 
