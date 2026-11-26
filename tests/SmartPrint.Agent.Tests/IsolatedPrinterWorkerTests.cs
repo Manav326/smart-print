@@ -128,7 +128,7 @@ public sealed class IsolatedPrinterWorkerTests
                 {
                     return new AgentChildProcessResult(
                         10,
-                        "READY\nAUTHORIZE_SPOOLER_SUBMISSION\nBLOCKED|{\\"code\\":\\"SPOOLER_SUBMISSION_NOT_AUTHORISED\\",\\"message\\":\\"Denied by parent Agent.\\"}",
+                        "READY\nAUTHORIZE_SPOOLER_SUBMISSION\nBLOCKED|{\"code\":\"SPOOLER_SUBMISSION_NOT_AUTHORISED\",\"message\":\"Denied by parent Agent.\"}",
                         string.Empty,
                         false);
                 }
