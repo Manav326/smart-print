@@ -4944,6 +4944,7 @@ function smartPrintNativeHeadline(status:string):string {
 function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,privatePrintingVirtualOutputEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,onStartNewSession}:{dark:boolean;publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;privatePrintingVirtualOutputEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;onStartNewSession:()=>void}) {
   const { locale } = useLocale();
   const t = (value: string) => translateUiText(locale, value);
+  const money = (minor: number, currency: string) => formatUiCurrency(minor / 100, locale, currency);
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   // Private Printing is available only with a live paired Agent/key and a ready
   // physical queue, or an explicitly approved non-production virtual test queue.
@@ -6381,9 +6382,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     shouldBlockQuoteRefreshForStatus(statusForBatchItem(entry.item))
   );
   const batchQuoteTotalDisplay=acceptedQuoteEntries.length>0
-    ?formatMoney(batchQuoteTotal,batchQuoteCurrency)
+    ?money(batchQuoteTotal,batchQuoteCurrency)
     :batchQuoteNeedsRefresh>0||hasAcceptedQuoteLocked?"—"
-      :quoteRows.some(entry=>!entry.excluded)?"Pending":formatMoney(0,batchQuoteCurrency);
+      :quoteRows.some(entry=>!entry.excluded)?"Pending":money(0,batchQuoteCurrency);
   const acceptedBatchRows=quoteRows.filter(entry=>!entry.excluded);
   const batchQuoteCounts={
     documents:acceptedBatchRows.filter(entry=>normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind)==="DOCUMENT").length,
@@ -6709,7 +6710,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
           {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} aria-pressed={uploaded.job.id===item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
-            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??batchStatuses[item.job.id]?.printKind??item.job.printKind)}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(item.job.pageCount,printSettingsByJobId[item.job.id]?.copies??item.job.copies,printSettingsByJobId[item.job.id]?.pagesPerSheet??item.job.pagesPerSheet??1,printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)} · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?formatMoney(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
+            <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??batchStatuses[item.job.id]?.printKind??item.job.printKind)}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(item.job.pageCount,printSettingsByJobId[item.job.id]?.copies??item.job.copies,printSettingsByJobId[item.job.id]?.pagesPerSheet??item.job.pagesPerSheet??1,printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)} · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?money(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":customerStatusLabel(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
               tone={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"amber":customerStatusTone(statusForBatchItem(item))}
@@ -6746,7 +6747,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           const printKind=normalizedCustomerPrintKind(entry.quote?.printKind??printKindsByJobId[entry.item.job.id]??entry.item.job.printKind);
           const detail=entry.quote
             ? entry.quote.printKind==="PHOTO"
-              ? (entry.quote.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote.photoSizeCode)+" · "+(entry.quote.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote.pageCount+" A4 pages · "+formatMoney(entry.quote.photoUnitPriceMinor??0,entry.quote.currency)+" per photo"
+              ? (entry.quote.photoCount??0)+" × "+customerPhotoSizeLabel(entry.quote.photoSizeCode)+" · "+(entry.quote.photosPerPage??"layout not recorded")+" per A4 page · "+entry.quote.pageCount+" A4 pages · "+money(entry.quote.photoUnitPriceMinor??0,entry.quote.currency)+" per photo"
               : entry.quote.printKind==="ID_DOCUMENT"
                 ? entry.quote.pageCount+" A4 portrait "+(entry.quote.pageCount===1?"sheet":"sheets")+" × "+entry.quote.copies+" copy · "+entry.quote.colourMode+" · Single-sided"
                 : entry.quote.pageCount+" source pages · "+customerDocumentOutputSummary(entry.quote.pageCount,entry.quote.copies,entry.quote.pagesPerSheet??1,entry.quote.isDuplex)+" · "+entry.quote.colourMode+" · "+(entry.quote.isDuplex?"Double-sided":"Single-sided")+" · "+entry.quote!.paperSize+" · "+(entry.quote!.orientation==="LANDSCAPE"?"Landscape":entry.quote!.orientation==="PORTRAIT"?"Portrait":"Auto orientation")
@@ -6762,7 +6763,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             :needsFreshQuote?"—"
               :!entry.quote?"Pending"
                 :quoteExpired?"See order status"
-                  :formatMoney(entry.quote.quotedAmountMinor,entry.quote.currency);
+                  :money(entry.quote.quotedAmountMinor,entry.quote.currency);
           return <div className="customer-batch-quote-line" key={entry.item.job.id}>
             <span className="customer-batch-quote-line-copy">
               <span className="customer-batch-quote-line-top"><strong>{resolveCustomerDocumentName(entry.item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={printKind}/><span className={"customer-batch-quote-line-state "+(entry.excluded?"excluded":needsFreshQuote?"refresh":"included")}>{lineState}</span></span>
@@ -6775,9 +6776,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {acceptedQuoteEntries.length>0&&<details className="customer-batch-quote-details">
         <summary><span>{t("See price breakdown")}</span><small>{t("Documents, ID cards and photos")}</small></summary>
         <div className="customer-batch-print-breakdown">
-          <div><span><strong>Normal documents</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,batchQuoteCurrency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,batchQuoteCurrency)}</small></span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,batchQuoteCurrency)}</strong></div>
-          <div><span><strong>{t("ID cards")}</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,batchQuoteCurrency)}</strong></div>
-          <div><span><strong>{t("Photo printing")}</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>Normal documents</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {money(batchQuoteBreakdown.normalDocumentMonoAmountMinor,batchQuoteCurrency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {money(batchQuoteBreakdown.normalDocumentColourAmountMinor,batchQuoteCurrency)}</small></span><strong>{money(batchQuoteBreakdown.normalDocumentAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>{t("ID cards")}</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{money(batchQuoteBreakdown.idCardAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>{t("Photo printing")}</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{money(batchQuoteBreakdown.photoAmountMinor,batchQuoteCurrency)}</strong></div>
           <div className="customer-batch-print-total"><span><strong>{t("Total output")}</strong><small>{t("Page sides and prepared A4 sheets, grouped by print type")}</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
         </div>
       </details>}
@@ -6812,7 +6813,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Shop copy removed</strong>The test output is not physical fulfilment and is not ready for collection.</span></div>}
       {jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the shop copy</strong>Your pages are printed. SmartPrint is securely removing the shop copy.</span></div>}
       {jobStatus.privatePrinting&&jobStatus.status!=="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Shop copy removed</strong>Your file has been removed from the shop computer. The original on your device is unchanged.</span></div>}
-      {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
+      {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{money(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {money(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">
         <ShieldCheck size={16}/>
         <span><strong>PDF footer selected by the shop.</strong> <InfoTooltip label="PDF footer details"><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>Reformatted or multi-copy exports may be flattened.</span><span>Ask for an unbranded single-copy export when PDF structure matters.</span></InfoTooltip></span>
@@ -6821,7 +6822,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {canStartNewSession&&<div className="customer-session-complete"><div><strong>{translateUi(locale,"customer.orderReceived")}</strong><span>Your order history is saved. You can start another print session when ready.</span></div><button className="customer-flow-button" onClick={onStartNewSession}><RefreshCw size={16}/> {translateUi(locale,"customer.startNewSession")}</button></div>}
 
       {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
-        <div className="customer-pay-heading"><span>{t("PAY THE SHOP")}</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
+        <div className="customer-pay-heading"><span>{t("PAY THE SHOP")}</span><strong>{money(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
         {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title={t("Cash at counter unavailable")}>{t("Choose UPI or ask the shop whether cash can be enabled.")}</CustomerInlineNotice>}
         {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<CustomerInlineNotice kind="warning" title={t("No payment method available")}>{t("Ask the shop to enable UPI or cash at the counter.")}</CustomerInlineNotice>}
         {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>{t("UPI payment")}</button>}
@@ -6830,7 +6831,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         
       </div>}
       {legacyIndividualPayment&&payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
-        <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
+        <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{money(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
         {payment.method==="UPI"&&payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<>
           <CustomerUpiQr
             uri={buildCustomerUpiIntent({
@@ -6841,7 +6842,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             })}
             payeeName={payment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}
             upiId={payment.upiIdSnapshot||paymentOptions.upiId||""}
-            amount={formatMoney(payment.amountMinor,payment.currency)}
+            amount={money(payment.amountMinor,payment.currency)}
             amountMinor={payment.amountMinor}
             fileName={"smartprint-payment-"+payment.id.slice(0,12)+".png"}
           />
@@ -6861,7 +6862,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {batchCheckoutVisible&&<section className="customer-pay-panel customer-batch-checkout-panel">
       <div className="customer-pay-heading">
         <span>{batchCheckoutHeading} · {batchCheckoutFileCount} FILE(S)</span>
-        <strong>{formatMoney(batchCheckoutAmount,batchCheckoutCurrency)}</strong>
+        <strong>{money(batchCheckoutAmount,batchCheckoutCurrency)}</strong>
       </div>
       <div className="customer-batch-checkout-lines">
         {batchCheckoutLineItems.map(item=>{
@@ -6872,13 +6873,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           const refunded=batchCheckoutUsesPayment?(allocation?.refundedAmountMinor??0):0;
           const lineStatus=batchCheckoutUsesPayment?allocation?.status:"Included in this checkout";
           return <div key={item.job.id}>
-            <span>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??item.job.printKind)}/><small>{lineStatus?String(lineStatus).replaceAll("_"," "):"Allocation loading"}{refunded>0? ` · ${formatMoney(refunded,item.job.currency)} refunded` : ""}</small></span>
-            <strong>{formatMoney(amount,item.job.currency)}</strong>
+            <span>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??item.job.printKind)}/><small>{lineStatus?String(lineStatus).replaceAll("_"," "):"Allocation loading"}{refunded>0? ` · ${money(refunded,item.job.currency)} refunded` : ""}</small></span>
+            <strong>{money(amount,item.job.currency)}</strong>
           </div>;
         })}
       </div>
       {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<CustomerInlineNotice kind="info" title={t("Checking payment breakdown")}>{t("Review the full file list before paying or submitting a reference.")}</CustomerInlineNotice>}
-      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<CustomerInlineNotice kind="info" title="Refund summary">Refunded: {formatMoney(batchPaymentRefundedTotal,batchCheckoutCurrency)} · Remaining: {formatMoney(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</CustomerInlineNotice>}
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<CustomerInlineNotice kind="info" title="Refund summary">Refunded: {money(batchPaymentRefundedTotal,batchCheckoutCurrency)} · Remaining: {money(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</CustomerInlineNotice>}
       {!batchCheckoutUsesPayment&&<>
         {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">The previous batch payment was rejected. {batchPayment.rejectionReason||"Check with the shop before trying again."}</p>}
         {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title={t("Cash at counter unavailable")}>{t("Choose UPI or ask the shop whether cash can be enabled.")}</CustomerInlineNotice>}
@@ -6886,7 +6887,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>{t("UPI payment")}</button>}
         {paymentOptions.cashEnabled&&<button type="button" aria-pressed={paymentMethod==="CASH"} className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>{t("Cash at counter")}</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)||batchPayableItems.length===0} onClick={()=>void beginPayment(paymentMethod,true)}>
-          {busy?<span className="button-spinner"/>:nativeAppMode?"Pay accepted files":"Pay accepted files · "+formatMoney(batchPayableTotal,batchCheckoutCurrency)}
+          {busy?<span className="button-spinner"/>:nativeAppMode?"Pay accepted files":"Pay accepted files · "+money(batchPayableTotal,batchCheckoutCurrency)}
         </button>
         
       </>}
@@ -6900,7 +6901,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           })}
           payeeName={batchPayment.payeeNameSnapshot||paymentOptions.payeeName||"Shop"}
           upiId={batchPayment.upiIdSnapshot||paymentOptions.upiId||""}
-          amount={formatMoney(batchPayment.amountMinor,batchPayment.currency)}
+          amount={money(batchPayment.amountMinor,batchPayment.currency)}
           amountMinor={batchPayment.amountMinor}
           fileName={"smartprint-batch-payment-"+batchPayment.id.slice(0,12)+".png"}
         />
