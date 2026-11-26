@@ -4036,10 +4036,11 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
             message = "Private Printing requires a connected physical printer. Virtual printers are available only for enabled non-production test output."
         });
 
+    var isVirtualPrinterTestOutput = ready.OutputMode == PrinterTypePolicy.UnsupportedVirtual;
     var isPrivateTestOutput = job.PrivatePrinting && ready.OutputMode == "PDF_EXPORT";
     var previous = job.Status;
     job.Status = "PRINT_AUTHORISED";
-    job.OutputType = isPrivateTestOutput
+    job.OutputType = isVirtualPrinterTestOutput || isPrivateTestOutput
         ? PrivatePrintingOutputPolicy.TestVirtual
         : ready.OutputMode;
     job.PrinterNameSnapshot = ready.DisplayName;
@@ -4048,7 +4049,9 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
     job.PrinterSnapshotUtc = now;
     job.SpoolerJobName = ready.OutputMode == "PDF_EXPORT"
         ? $"{(isPrivateTestOutput ? "PRIVATE-TEST-PDF" : "PDF-EXPORT")}-{job.JobNumber}-{job.Id:N}"
-        : $"SmartPrint-{job.JobNumber}-{job.Id:N}";
+        : isVirtualPrinterTestOutput
+            ? $"VIRTUAL-TEST-{job.JobNumber}-{job.Id:N}"
+            : $"SmartPrint-{job.JobNumber}-{job.Id:N}";
     job.SpoolerJobId = null;
     job.SpoolerStatus = "AWAITING_AGENT";
     job.PrintDispatchLeaseExpiresUtc = null;
@@ -8598,6 +8601,23 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     }
 
     var previous = job.Status;
+    if (job.OutputType == PrivatePrintingOutputPolicy.TestVirtual &&
+        string.Equals(request.SpoolerStatus, "PRINTED", StringComparison.OrdinalIgnoreCase))
+    {
+        job.Status = "TEST_OUTPUT_READY";
+        job.OutputCompletedUtc = now;
+        job.OutputConfirmedUtc = null;
+        if (job.PrivatePrinting)
+            job.PrivateDocumentPurgeRequestedUtc ??= now;
+        db.PrintJobEvents.Add(new PrintJobEvent
+        {
+            TenantId = device.TenantId, PrintJobId = job.Id, PreviousStatus = previous,
+            NewStatus = job.Status, ActorType = "PrintAgent", ActorId = device.Id,
+            ReasonCode = "VIRTUAL_PRINTER_TEST_OUTPUT_CONFIRMED_BY_WINDOWS_SPOOLER", CreatedUtc = now
+        });
+        await db.SaveChangesAsync(ct);
+        return Results.Ok(new { job.Id, job.Status, job.OutputType, job.OutputCompletedUtc, job.SpoolerStatus });
+    }
     job.Status = request.SpoolerStatus == "PRINTING" ? "PRINTING" : "SPOOLER_ACCEPTED";
     if (previous != job.Status)
         db.PrintJobEvents.Add(new PrintJobEvent
