@@ -97,8 +97,7 @@ public sealed class AddShopScopedVirtualPrinterTestGrants : Migration
             table: "VirtualPrinterTestGrants",
             column: "RevokedByUserId");
 
-        // Retire the legacy global override immediately. The columns remain mapped
-        // temporarily for a safe rolling upgrade, but no runtime policy may use them.
+        // Clear any legacy global override values before dropping the obsolete columns.
         migrationBuilder.Sql("""
             UPDATE "PlatformOperationalSettings"
             SET "TreatWorkingVirtualQueuesAsPhysicalForTesting" = FALSE
