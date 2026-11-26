@@ -14,7 +14,7 @@ This repository uses one versioned GitHub release to produce the website downloa
    - `BUILD-INFO.txt`: exact source commit, release tag and workflow run provenance.
    - `attestation.sigstore.json`: signed SLSA provenance bundle for the release binaries and build metadata.
    - `SHA256SUMS.txt`: checksums for every release binary and build metadata (the Sigstore bundle is independently signed).
-4. The workflow creates a GitHub release. When Cloudflare R2 is configured, immutable versioned website assets are uploaded and verified there.
+4. The workflow creates a GitHub release. When Cloudflare R2 is configured, immutable versioned binaries, build metadata and the checksum manifest are uploaded and verified there. The signed Sigstore bundle remains a GitHub release asset because its timestamped bytes can change on a retry.
 5. Review the published GitHub release assets and test the exact binaries.
 6. Run **Actions → Publish SmartPrint to Microsoft Store and Google Play**, choose the tag and tracks, and set `confirm_publication=true`.
 7. Microsoft receives the signed installer URL through the Store Submission API. Google Play receives the signed AAB. Production jobs use protected GitHub Environments.
@@ -206,7 +206,7 @@ The Play production workflow creates a 10% staged rollout (`inProgress`) rather 
 
 For every feature or bug-fix release, increment the stable semantic version (new `vX.Y.Z` tag). The existing release automation creates the binaries from the exact tested commit. The same publishing workflow updates the X64 Microsoft Store package URL and uploads the AAB to the selected Play track. Do not overwrite an already-published release or reuse an old tag. Keep the package ID `com.quantaedge.smartprint` and Android upload key unchanged.
 
-If a release build fails after uploading immutable R2 objects, rerun the **same GitHub Actions workflow run** (Actions → failed run → Re-run jobs). Do not start a second workflow_dispatch for the same tag: `GITHUB_RUN_NUMBER` contributes to the Android versionCode and Agent side-by-side folder name, so a new run for the same tag intentionally produces different bytes and the immutable R2 guard will reject it. If the same tag has already been published, create a new semantic version instead.
+If a release build fails after uploading immutable R2 objects, rerun the **same GitHub Actions workflow run** (Actions → failed run → Re-run jobs). Do not start a second workflow_dispatch for the same tag: `GITHUB_RUN_NUMBER` contributes to the Android versionCode and Agent side-by-side folder name, so a new run for the same tag intentionally produces different bytes and the immutable R2 guard will reject it. The source SHA, run ID, run number and build metadata remain stable across retries; the timestamped Sigstore bundle is regenerated only as a GitHub release asset and is deliberately excluded from immutable R2 storage. If any binary or stable metadata bytes differ from objects already uploaded, the immutable guard must fail closed—do not bypass it; create a new semantic version after investigating. If the same tag has already been published, create a new semantic version instead.
 
 
 
