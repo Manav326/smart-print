@@ -116,6 +116,45 @@ public sealed class VirtualPrinterTestGrantPolicyTests
             revokedUtc: Now.AddMinutes(-1)));
     }
 
+    [Theory]
+    [InlineData("UNSUPPORTED_VIRTUAL", "TEST_VIRTUAL", true, false, true)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "TEST_VIRTUAL", false, false, false)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "PHYSICAL", true, false, false)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "TEST_VIRTUAL", true, true, false)]
+    [InlineData("PHYSICAL", "PHYSICAL", false, false, true)]
+    [InlineData("PHYSICAL", "TEST_VIRTUAL", true, false, false)]
+    [InlineData("PDF_EXPORT", "PDF_EXPORT", true, false, false)]
+    public void FinalSubmissionRequiresMatchingOutputClassificationAndEnvironment(
+        string outputMode, string outputType, bool grantActive, bool isProduction, bool expected)
+    {
+        Assert.Equal(expected, VirtualPrinterTestGrantPolicy.CanAuthorizeSpoolerSubmission(
+            outputMode, outputType, grantActive, isProduction));
+    }
+
+    [Fact]
+    public void GrantRevokedOrExpiredDuringDocumentPreparationIsInactiveAtSubmissionBoundary()
+    {
+        var tenant = Guid.NewGuid();
+        var agent = Guid.NewGuid();
+        const string fingerprint = "queue-identity";
+        var preparedUtc = Now;
+        var submittedUtc = preparedUtc.AddMinutes(1);
+
+        Assert.True(VirtualPrinterTestGrantPolicy.IsGrantActive(
+            tenant, tenant, tenant, agent, agent, fingerprint, fingerprint,
+            preparedUtc.AddMinutes(-1), submittedUtc.AddMinutes(1), null, preparedUtc));
+
+        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(
+            tenant, tenant, tenant, agent, agent, fingerprint, fingerprint,
+            preparedUtc.AddMinutes(-1), submittedUtc.AddMinutes(1), preparedUtc.AddSeconds(30), submittedUtc));
+        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(
+            tenant, tenant, tenant, agent, agent, fingerprint, fingerprint,
+            preparedUtc.AddMinutes(-1), preparedUtc, null, submittedUtc));
+        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(
+            tenant, tenant, tenant, agent, agent, fingerprint, "changed-queue",
+            preparedUtc.AddMinutes(-1), submittedUtc.AddMinutes(1), null, submittedUtc));
+    }
+
     [Fact]
     public void GrantLifetimeMustBeBetweenOneHourAndThirtyDays()
     {
