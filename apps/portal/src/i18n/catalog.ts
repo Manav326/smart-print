@@ -370,9 +370,9 @@ type LocaleMetadata = {
 };
 
 const localeMetadata: Record<UiLocale, LocaleMetadata> = {
-  english: { label: "English", nativeLabel: "English", lang: "en", dir: "ltr", aliases: ["en", "en-in", "en-us", "en-gb"], fallback: "english", default: false },
+  english: { label: "English", nativeLabel: "English", lang: "en", dir: "ltr", aliases: ["en", "en-in", "en-us", "en-gb"], fallback: "english", default: true },
   hindi: { label: "Hindi", nativeLabel: "हिन्दी", lang: "hi", dir: "ltr", aliases: ["hi", "hi-in"], fallback: "english", default: false },
-  hinglish: { label: "Hinglish", nativeLabel: "Hinglish", lang: "hi-Latn", dir: "ltr", aliases: ["hi-latn", "hi-latn-in"], fallback: "english", default: true },
+  hinglish: { label: "Hinglish", nativeLabel: "Hinglish", lang: "hi-Latn", dir: "ltr", aliases: ["hi-latn", "hi-latn-in"], fallback: "english", default: false },
 };
 
 /** Static pretranslated screen copy. Unknown strings safely retain their English source. */
