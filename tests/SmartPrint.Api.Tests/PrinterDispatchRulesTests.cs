@@ -24,6 +24,19 @@ public sealed class PrinterDispatchRulesTests
     }
 
     [Theory]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Ready", false, false, false)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Busy", true, false, true)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Ready", false, true, false)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Offline", true, false, false)]
+    [InlineData("PHYSICAL", "Ready", false, true, true)]
+    public void VirtualQueueDispatchRequiresGrantAndNonProduction(
+        string outputMode, string status, bool grantActive, bool isProduction, bool expected)
+    {
+        Assert.Equal(expected, PrinterDispatchRules.IsDispatchableStatus(
+            outputMode, status, grantActive, isProduction));
+    }
+
+    [Theory]
     [InlineData("PDF_EXPORT", true)]
     [InlineData("PHYSICAL", false)]
     [InlineData("pdf_export", true)]
