@@ -189,7 +189,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
       </div>
 
       {error && <div className="inline-error" role="alert">{error}</div>}
-      {success && <div className="inline-success" role="status"><CheckCircle2 size={15}/><span>{success}</span><button className="icon-button" onClick={() => setSuccess("")} aria-label="Dismiss"><X size={14}/></button></div>}
+      {success && <div className="inline-success" role="status"><CheckCircle2 size={15}/><span>{success}</span><button className="icon-button" onClick={() => setSuccess("")} aria-label={t("Dismiss")}><X size={14}/></button></div>}
 
       <section className="panel platform-tenants-panel">
         <div className="platform-tenants-heading">
@@ -197,7 +197,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
           <span className="neutral-chip">{page?.totalCount ?? 0} shops</span>
         </div>
         <div className="platform-tenant-filters">
-          <label className="platform-search"><Search size={15}/><input value={search} onChange={event => { setSearch(event.target.value); setPageNumber(1); }} placeholder="Search shop name or tenant slug"/></label>
+          <label className="platform-search"><Search size={15}/><input value={search} onChange={event => { setSearch(event.target.value); setPageNumber(1); }} placeholder={t("Search shop name or tenant slug")}/></label>
           <span className="platform-status-filter"><ShieldCheck size={14}/> {t("Platform-only controls")}</span>
         </div>
 
@@ -232,8 +232,8 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
         {page && <div className="platform-pagination">
           <span>Page {page.page} · {page.totalCount.toLocaleString("en-IN")} shops</span>
           <div>
-            <button className="icon-button" onClick={() => setPageNumber(value => Math.max(1, value - 1))} disabled={page.page <= 1 || loading} aria-label="Previous page"><ChevronLeft size={17}/></button>
-            <button className="icon-button" onClick={() => setPageNumber(value => value + 1)} disabled={page.page * page.pageSize >= page.totalCount || loading} aria-label="Next page"><ChevronRight size={17}/></button>
+            <button className="icon-button" onClick={() => setPageNumber(value => Math.max(1, value - 1))} disabled={page.page <= 1 || loading} aria-label={t("Previous page")}><ChevronLeft size={17}/></button>
+            <button className="icon-button" onClick={() => setPageNumber(value => value + 1)} disabled={page.page * page.pageSize >= page.totalCount || loading} aria-label={t("Next page")}><ChevronRight size={17}/></button>
           </div>
         </div>}
       </section>
