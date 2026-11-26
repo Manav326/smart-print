@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import PrivatePhotoStudioEntry from "./PrivatePhotoStudioEntry";
 import { applyThemePreference, readDarkModePreference } from "./ui-preferences";
-import { LanguageProvider, LanguageSwitcher } from "./i18n";
+import { LanguageProvider } from "./i18n";
 
 export default function PhotoStudioOfflineApp() {
   const [dark, setDark] = useState(readDarkModePreference);
@@ -19,5 +19,5 @@ export default function PhotoStudioOfflineApp() {
     return () => window.removeEventListener("smartprint-theme-change", syncNativeTheme);
   }, []);
 
-  return <LanguageProvider><PrivatePhotoStudioEntry dark={dark} /><LanguageSwitcher /></LanguageProvider>;
+  return <LanguageProvider><PrivatePhotoStudioEntry dark={dark} /></LanguageProvider>;
 }
