@@ -5,6 +5,16 @@ public static class PrinterDispatchRules
     // The "Microsoft Print to PDF" destination is rendered by the paired Agent
     // into its protected output directory. It is not submitted to a Windows
     // virtual spooler queue, so WMI inventory freshness is not a dispatch input.
+    public static bool IsCurrentSpoolerSubmissionAttempt(
+        string? currentSpoolerJobName,
+        string? requestedSpoolerJobName,
+        DateTimeOffset? leaseExpiresUtc,
+        DateTimeOffset now) =>
+        !string.IsNullOrWhiteSpace(currentSpoolerJobName) &&
+        !string.IsNullOrWhiteSpace(requestedSpoolerJobName) &&
+        string.Equals(currentSpoolerJobName, requestedSpoolerJobName, StringComparison.Ordinal) &&
+        leaseExpiresUtc is DateTimeOffset lease && lease > now;
+
     public static bool CanDispatchWithStaleInventory(string? outputMode) =>
         string.Equals(outputMode, "PDF_EXPORT", StringComparison.OrdinalIgnoreCase);
 
