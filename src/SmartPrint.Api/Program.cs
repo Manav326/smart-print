@@ -9250,7 +9250,6 @@ agentApi.MapPost("/printers/sync", async (
     // a separate, server-owned permission and never promotes a virtual queue
     // into the PHYSICAL output type.
     var normalized = validation.Printers
-        .Select(discovered => discovered with { TestModeOverride = false })
         .OrderBy(printer => printer.OutputMode == "PHYSICAL" ? 0 : printer.OutputMode == "PDF_EXPORT" ? 1 : 2)
         .ThenByDescending(printer => (printer.Status is "Ready" or "Busy"))
         .ThenByDescending(printer => printer.IsDefault)
