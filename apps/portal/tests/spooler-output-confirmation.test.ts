@@ -153,9 +153,11 @@ test("Order Journey and Print Queue use the same physical-output eligibility and
   const expected = /canConfirmPhysicalOutput\(\s*job\.status,\s*job\.spoolerStatus,\s*job\.spoolerSubmittedUtc,\s*job\.spoolerObservedUtc,\s*job\.printerStatus,\s*job\.failureCode,\s*job\.spoolerJobId,\s*Date\.now\(\),\s*job\.spoolerPagesPrinted\s*\?\?\s*0,\s*job\.spoolerTotalPages\s*\?\?\s*0\s*\)/;
   for (const source of [orderJourney, printQueue]) {
     assert.match(source, /isPhysicalOutputConfirmationStatus\(job\.status\)/);
+    assert.match(source, /job\.outputType!==\"TEST_VIRTUAL\"/);
     assert.match(source, expected);
     assert.match(source, /canManuallyReconcileUncertainOutput\(\s*job\.status/);
   }
+  assert.match(orderJourney, /originalPrinter\.outputMode===\"UNSUPPORTED_VIRTUAL\"&&job\.outputType===\"TEST_VIRTUAL\"&&originalPrinter\.virtualTestGrantActive===true/);
 });
 
 test("initial Agent acceptance receipts cannot supply terminal PRINTED proof", () => {
