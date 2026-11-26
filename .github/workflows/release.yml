@@ -641,3 +641,124 @@ jobs:
                   if downloaded.stat().st_size != source.stat().st_size or sha256_file(downloaded) != digest:
                       raise SystemExit(f"R2 stored object SHA-256 verification failed for {filename}.")
           PY
+          # Probe the actual public custom domain, including byte ranges and CORS.
+          python - <<'PY'
+          import os
+          from urllib.request import Request, urlopen
+
+          base = os.environ["R2_PUBLIC_ORIGIN"].rstrip("/")
+          portal_origin = os.environ["SMARTPRINT_PORTAL_ORIGIN"]
+          tag = os.environ["RELEASE_TAG"]
+          files = ["SmartPrint-Windows-Setup.exe"]
+          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
+              files.append("SmartPrint-Windows-Store-Setup.exe")
+          if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
+              files.extend(["SmartPrint-Android.apk", "SmartPrint-Android.aab"])
+
+          for filename in files:
+              url = f"{base}/{tag}/{filename}"
+              request = Request(url, headers={
+                  "Origin": portal_origin,
+                  "Range": "bytes=0-0",
+              })
+              with urlopen(request, timeout=45) as response:
+                  if response.status != 206:
+                      raise SystemExit(f"R2 public range probe for {filename} returned HTTP {response.status}, expected 206.")
+                  if response.headers.get("Access-Control-Allow-Origin") != portal_origin:
+                      raise SystemExit(f"R2 CORS did not allow the SmartPrint portal for {filename}.")
+                  if not response.headers.get("Content-Range", "").startswith("bytes 0-0/"):
+                      raise SystemExit(f"R2 public range response was invalid for {filename}.")
+                  if "immutable" not in response.headers.get("Cache-Control", ""):
+                      raise SystemExit(f"R2 public cache policy is missing for {filename}.")
+                  if len(response.read()) != 1:
+                      raise SystemExit(f"R2 public range body was invalid for {filename}.")
+              print(f"Verified public R2 custom-domain range/CORS delivery: {filename}")
+          PY
+
+          echo "Published and verified immutable R2 objects under $object_prefix/."
+          echo "Set PublicDownloads:PublicBaseUrl to $R2_PUBLIC_ORIGIN in the SmartPrint API deployment to activate direct edge delivery."
+      - name: Verify uploaded assets and publish the stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+
+          repository = os.environ["REPOSITORY"]
+          tag = os.environ["RELEASE_TAG"]
+          token = os.environ["GH_TOKEN"]
+          artifact_dir = Path("artifacts")
+          binaries = {"SmartPrint-Windows-Setup.exe"}
+          if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
+              binaries.add("SmartPrint-Windows-Store-Setup.exe")
+          if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
+              binaries.update({"SmartPrint-Android.apk", "SmartPrint-Android.aab"})
+          expected = binaries | {"SHA256SUMS.txt"}
+          headers = {
+              "Accept": "application/vnd.github+json",
+              "Authorization": f"Bearer {token}",
+              "X-GitHub-Api-Version": "2022-11-28",
+          }
+          checksums = {}
+          for line in (artifact_dir / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
+              digest, filename = line.split(maxsplit=1)
+              checksums[filename.lstrip("*")] = digest
+          if set(checksums) != binaries:
+              raise SystemExit(
+                  "SHA256SUMS.txt does not match the packages enabled for this release. "
+                  f"Expected {sorted(binaries)}, found {sorted(checksums)}."
+              )
+          for filename, expected_digest in checksums.items():
+              actual_digest = hashlib.sha256((artifact_dir / filename).read_bytes()).hexdigest()
+              if actual_digest != expected_digest:
+                  raise SystemExit(f"Local checksum verification failed for {filename}.")
+
+          releases_url = f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases?per_page=100"
+          with urlopen(Request(releases_url, headers=headers), timeout=30) as response:
+              releases = json.loads(response.read())
+          release = next((item for item in releases if item.get("tag_name") == tag), None)
+          if release is None or not release.get("draft"):
+              raise SystemExit("The release draft is missing, has the wrong tag, or is not unpublished.")
+
+          uploaded = {asset["name"]: asset for asset in release.get("assets", [])}
+          if set(uploaded) != expected:
+              raise SystemExit(
+                  "Release draft has an unexpected asset set. "
+                  f"Expected {sorted(expected)}, found {sorted(uploaded)}."
+              )
+          for filename in expected:
+              local_size = (artifact_dir / filename).stat().st_size
+              asset = uploaded[filename]
+              if local_size <= 0 or asset.get("size") != local_size:
+                  raise SystemExit(f"Uploaded asset size does not match the validated build: {filename}.")
+              digest = asset.get("digest")
+              if digest and filename in checksums and digest != f"sha256:{checksums[filename]}":
+                  raise SystemExit(f"GitHub's asset digest does not match SHA256SUMS.txt: {filename}.")
+
+          release_id = release["id"]
+          publish_url = f"{os.environ['GITHUB_API_URL'].rstrip('/')}/repos/{repository}/releases/{release_id}"
+          payload = json.dumps({"draft": False, "make_latest": "true"}).encode("utf-8")
+          publish_request = Request(
+              publish_url,
+              data=payload,
+              headers={**headers, "Content-Type": "application/json"},
+              method="PATCH",
+          )
+          with urlopen(publish_request, timeout=30) as response:
+              published = json.loads(response.read())
+          if published.get("draft") or published.get("tag_name") != tag:
+              raise SystemExit("GitHub did not confirm publication of the verified stable release.")
+          android_status = "and signed Android APK/AAB" if "SmartPrint-Android.aab" in binaries else "without Android until signing is configured"
+          windows_status = "and signed Store-ready Windows installer" if "SmartPrint-Windows-Store-Setup.exe" in binaries else "without Store-ready Windows installer until signing is configured"
+          print(
+              f"Published {tag} with the unsigned website Windows beta installer {android_status} {windows_status}. "
+              "Older releases are not modified or deleted."
+          )
+          PY
