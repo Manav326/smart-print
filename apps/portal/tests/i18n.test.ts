@@ -82,6 +82,19 @@ test("standalone private Photo Studio copy is translated without changing saved 
   );
 });
 
+test("customer QR session states are translated while shop names and session values stay dynamic", () => {
+  assert.equal(translateUiText("hindi", "Connecting to your print shop"), "आपकी प्रिंट शॉप से कनेक्ट हो रहे हैं");
+  assert.equal(translateUiText("hinglish", "Shop connected."), "Shop connect ho gayi.");
+  assert.equal(
+    translateUiText("hindi", "Secure session · Expires {expires}", { expires: "6:30 PM" }),
+    "सुरक्षित सेशन · समाप्ति 6:30 PM",
+  );
+  assert.equal(
+    translateUiText("hinglish", "Your order history is saved. You can start another print session when ready."),
+    "Aapki order history save hai. Taiyaar hone par naya print session shuru kar sakte hain.",
+  );
+});
+
 test("number, currency and date formatting use the selected locale", () => {
   assert.equal(typeof formatUiNumber(1234.5, "hindi"), "string");
   assert.match(formatUiCurrency(1234.5, "english", "INR"), /1,234\.50/);
