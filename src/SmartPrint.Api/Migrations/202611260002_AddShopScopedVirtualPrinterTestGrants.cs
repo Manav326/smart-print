@@ -104,7 +104,8 @@ public sealed class AddShopScopedVirtualPrinterTestGrants : Migration
             WHERE "TreatWorkingVirtualQueuesAsPhysicalForTesting" = TRUE;
 
             UPDATE "PrinterDevices"
-            SET "IsTestModeOverride" = FALSE
+            SET "OutputMode" = 'UNSUPPORTED_VIRTUAL',
+                "IsTestModeOverride" = FALSE
             WHERE "IsTestModeOverride" = TRUE;
             """);
 
