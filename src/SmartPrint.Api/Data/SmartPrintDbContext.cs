@@ -395,6 +395,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
             entity.Property(x => x.RevocationReason).HasMaxLength(500);
             entity.HasIndex(x => new { x.TenantId, x.PrinterDeviceId, x.CreatedUtc });
+            entity.HasIndex(x => new { x.TenantId, x.AgentDeviceId });
             entity.HasIndex(x => new { x.TenantId, x.PrinterDeviceId, x.ExpiresUtc })
                 .HasFilter("\"RevokedUtc\" IS NULL");
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
