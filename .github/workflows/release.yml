@@ -438,6 +438,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
     needs:
       - validate-release-config
       - windows-setup
@@ -488,6 +491,24 @@ jobs:
           fi
           sha256sum "${files[@]}" > SHA256SUMS.txt
           sha256sum --check SHA256SUMS.txt
+      - id: attest
+        name: Generate signed SLSA build provenance for release binaries
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            artifacts/SmartPrint-*
+            artifacts/BUILD-INFO.txt
+      - name: Add the attestation bundle to release assets and checksums
+        shell: bash
+        env:
+          ATTESTATION_BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -s "$ATTESTATION_BUNDLE"
+          cp "$ATTESTATION_BUNDLE" artifacts/attestation.sigstore.json
+          cd artifacts
+          sha256sum attestation.sigstore.json >> SHA256SUMS.txt
+          sha256sum --check SHA256SUMS.txt
       - name: Prepare versioned release draft
         env:
           GH_TOKEN: ${{ github.token }}
@@ -530,6 +551,8 @@ jobs:
               "SmartPrint-Android.apk",
               "SmartPrint-Android.aab",
               "SmartPrint-Windows-Store-Setup.exe",
+              "BUILD-INFO.txt",
+              "attestation.sigstore.json",
               "SHA256SUMS.txt",
           }
           for asset in release.get("assets", []):
