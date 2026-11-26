@@ -76,7 +76,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
             <div className="sp-art-shop">
               <div className="sp-art-shop-head"><span className="sp-art-shop-icon"><Store size={16}/></span><div><b>{t("Your print shop")}</b><small>{t("Workspace connected")}</small></div><i/></div>
               <div className="sp-art-printer"><span><Printer size={25}/></span><div><b>{t("Shop printer")}</b><small>{t("Ready for the next job")}</small></div><em><Check size={12}/></em></div>
-              <div className="sp-art-shop-foot"><span><Wifi size={12}/> Agent online</span><span>{t("Job received")}</span></div>
+              <div className="sp-art-shop-foot"><span><Wifi size={12}/> {t("Agent online")}</span><span>{t("Job received")}</span></div>
               <div className="sp-art-shop-caption">{t("YOUR SHOP")}</div>
             </div>
             <div className="sp-art-floating sp-art-floating-one"><QrCode size={16}/><span>{t("Scan to start")}</span></div>
@@ -120,9 +120,9 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
           <article className="sp-audience-card sp-customer-card" id="for-customers">
             <div className="sp-audience-kicker"><Smartphone size={15}/> {t("FOR CUSTOMERS")}</div>
             <h2>{t("Printing starts")}<br/>{t("where you are.")}</h2>
-            <p>Use your phone to connect to a nearby participating shop. Upload documents, review the print details and follow the job without passing files around.</p>
+            <p>{t("Use your phone to connect to a nearby participating shop. Upload documents, review the print details and follow the job without passing files around.")}</p>
             <ul><li><Check/> {t("Scan the shop's QR code")}</li><li><Check/> {t("Upload supported documents")}</li><li><Check/> {t("Review the quote and track the job")}</li></ul>
-            <div className="sp-audience-visual sp-customer-visual"><div className="sp-customer-mini-phone"><div/><span><FileText size={24}/></span><b>Your document</b><small>Ready to submit</small></div><div className="sp-customer-mini-cloud"><Cloud size={34}/><span>Connected to shop</span></div></div>
+            <div className="sp-audience-visual sp-customer-visual"><div className="sp-customer-mini-phone"><div/><span><FileText size={24}/></span><b>{t("Your document")}</b><small>{t("Ready to submit")}</small></div><div className="sp-customer-mini-cloud"><Cloud size={34}/><span>{t("Connected to shop")}</span></div></div>
             <a href="#downloads" className="sp-text-link">{t("Explore the Android app")} <ArrowRight size={16}/></a>
           </article>
           <article className="sp-audience-card sp-shop-card" id="for-shops">
@@ -130,7 +130,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
             <h2>{t("Your counter.")}<br/>{t("Your workflow.")}</h2>
             <p>{t("Keep incoming print requests, pricing, printers and shop approvals in one workspace built around the way local print shops operate.")}</p>
             <ul><li><Check/> {t("Manage QR stations and printers")}</li><li><Check/> {t("Review jobs before authorising them")}</li><li><Check/> {t("Keep control of shop payments and output")}</li></ul>
-            <div className="sp-audience-visual sp-shop-visual"><div className="sp-shop-mini-window"><div className="sp-window-dots"><i/><i/><i/></div><div className="sp-mini-stat-row"><span/><span/><span/></div><div className="sp-mini-job"><FileText size={15}/><span/><em>IN REVIEW</em></div><div className="sp-mini-job"><Printer size={15}/><span/><em>APPROVED</em></div></div></div>
+            <div className="sp-audience-visual sp-shop-visual"><div className="sp-shop-mini-window"><div className="sp-window-dots"><i/><i/><i/></div><div className="sp-mini-stat-row"><span/><span/><span/></div><div className="sp-mini-job"><FileText size={15}/><span/><em>{t("IN REVIEW")}</em></div><div className="sp-mini-job"><Printer size={15}/><span/><em>{t("APPROVED")}</em></div></div></div>
             <a href="/shop" className="sp-text-link">{t("Open your shop workspace")} <ArrowRight size={16}/></a>
           </article>
         </section>
@@ -139,10 +139,10 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
           <div className="sp-connection-copy">
             <div className="sp-eyebrow">{t("BUILT AROUND YOUR SHOP")}</div>
             <h2>{t("Your printers stay at your shop. Your workflow gets connected.")}</h2>
-            <p>The SmartPrint Windows Agent connects the shop computer to the workspace. It discovers installed printer queues and receives only jobs authorised by the shop.</p>
+            <p>{t("The SmartPrint Windows Agent connects the shop computer to the workspace. It discovers installed printer queues and receives only jobs authorised by the shop.")}</p>
             <div className="sp-connection-points"><span><Check/> {t("Your existing Windows printer setup")}</span><span><Check/> {t("Shop-controlled job authorisation")}</span><span><Check/> {t("Local or cloud-assisted document transfer")}</span></div>
           </div>
-          <div className="sp-connection-visual"><div className="sp-device-card"><Monitor size={29}/><b>Shop computer</b><small>SmartPrint Agent</small><span className="sp-online"><i/> Connected</span></div><div className="sp-connection-line"><span/><span/><span/></div><div className="sp-device-printer"><Printer size={35}/><b>Installed printer</b><small>Shop's printer queue</small></div><div className="sp-secure-pill"><LockKeyhole size={12}/> Authorised connection</div></div>
+          <div className="sp-connection-visual"><div className="sp-device-card"><Monitor size={29}/><b>{t("Shop computer")}</b><small>SmartPrint Agent</small><span className="sp-online"><i/> {t("Connected")}</span></div><div className="sp-connection-line"><span/><span/><span/></div><div className="sp-device-printer"><Printer size={35}/><b>{t("Installed printer")}</b><small>{t("Shop's printer queue")}</small></div><div className="sp-secure-pill"><LockKeyhole size={12}/> {t("Authorised connection")}</div></div>
         </section>
 
         <section className="sp-download-section" id="downloads">
@@ -157,30 +157,30 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
               <div className="sp-download-label-row">
                 <div className="sp-download-platform">{t("FOR SHOP OWNERS · WINDOWS 10/11")}</div>
                 <span className={windowsDownloadUrl ? "sp-download-tag sp-download-tag-available" : "sp-download-tag sp-download-tag-coming"}>
-                  {releaseState === "loading" ? "Checking" : releaseState === "error" ? "Temporarily unavailable" : windowsDownloadUrl ? "Available" : "Coming soon"}
+                  {releaseState === "loading" ? t("Checking") : releaseState === "error" ? t("Temporarily unavailable") : windowsDownloadUrl ? t("Available") : t("Coming soon")}
                 </span>
               </div>
               <h3>{t("SmartPrint for Windows")}</h3><p>{t("Install the shop Agent on the computer connected to your printers. The guided setup will help connect it to your shop workspace.")}</p>
-              <DownloadAction platform="windows" label="Download Windows installer" available={Boolean(windowsDownloadUrl)} downloadUrl={windowsDownloadUrl} fallbackDownloadUrl={windowsFallbackDownloadUrl} releaseState={releaseState} onRefresh={refresh}/>
+              <DownloadAction platform="windows" label={t("Download Windows installer")} available={Boolean(windowsDownloadUrl)} downloadUrl={windowsDownloadUrl} fallbackDownloadUrl={windowsFallbackDownloadUrl} releaseState={releaseState} onRefresh={refresh}/>
               <small className="sp-download-note">{t("Windows x64 · Guided installation · Official stable release")}</small>
-              <p className="sp-download-security-note">The interim Windows beta installer is unsigned. Windows may show an Unknown Publisher or SmartScreen prompt; some managed devices may block unsigned installers.</p>
+              <p className="sp-download-security-note">{t("The interim Windows beta installer is unsigned. Windows may show an Unknown Publisher or SmartScreen prompt; some managed devices may block unsigned installers.")}</p>
             </article>
             <article className="sp-download-card">
               <div className="sp-download-icon sp-android-icon"><Smartphone size={25}/></div>
               <div className="sp-download-label-row">
                 <div className="sp-download-platform">{t("FOR CUSTOMERS · ANDROID")}</div>
                 <span className={androidDownloadUrl ? "sp-download-tag sp-download-tag-available" : "sp-download-tag sp-download-tag-coming"}>
-                  {releaseState === "loading" ? "Checking" : releaseState === "error" ? "Temporarily unavailable" : androidDownloadUrl ? "Available" : "Coming soon"}
+                  {releaseState === "loading" ? t("Checking") : releaseState === "error" ? t("Temporarily unavailable") : androidDownloadUrl ? t("Available") : t("Coming soon")}
                 </span>
               </div>
               <h3>{t("SmartPrint for Android")}</h3><p>{t("Scan shop QR codes, organise documents in your library and send files through the connected SmartPrint customer journey.")}</p>
-              <DownloadAction platform="android" label="Download signed Android APK" available={Boolean(androidDownloadUrl)} downloadUrl={androidDownloadUrl} fallbackDownloadUrl={androidFallbackDownloadUrl} releaseState={releaseState} onRefresh={refresh}/>
+              <DownloadAction platform="android" label={t("Download signed Android APK")} available={Boolean(androidDownloadUrl)} downloadUrl={androidDownloadUrl} fallbackDownloadUrl={androidFallbackDownloadUrl} releaseState={releaseState} onRefresh={refresh}/>
               <small className="sp-download-note">{t("Android 8.0 or later · Production-signed APK")}</small>
               <p className="sp-release-pending">{androidDownloadUrl
-                ? `Latest stable release: ${release?.version ?? "published"}.`
+                ? t("Latest stable release: {version}.").replace("{version}",release?.version??"published")
                 : releaseState === "error"
-                  ? "Download information is temporarily unavailable. Retry to check again."
-                  : "The signed APK download appears automatically when the latest stable release contains the verified Android package."}</p>
+                  ? t("Download information is temporarily unavailable. Retry to check again.")
+                   : t("The signed APK download appears automatically when the latest stable release contains the verified Android package.")}</p>
             </article>
           </div>
           <p className="sp-download-footnote"><ShieldCheck size={14}/> {t("Downloads are delivered securely from this SmartPrint website.")}</p>
@@ -284,7 +284,7 @@ function DownloadAction({
 
   if (download.status === "downloading") {
     return (
-      <div className="sp-download-progress" role="group" aria-label={`${label} progress`}>
+      <div className="sp-download-progress" role="group" aria-label={t("Download progress for {label}").replace("{label}",label)}>
         <div className="sp-download-progress-heading">
           <span><span className="sp-download-live-dot"/> {t("Downloading")}</span>
           <strong>{percent === null ? t("In progress") : `${percent}%`}</strong>
@@ -317,8 +317,8 @@ function DownloadAction({
   if (download.status === "error" || download.status === "cancelled") {
     return (
       <div className={download.status === "error" ? "sp-download-result sp-download-result-error" : "sp-download-result"}>
-        <p role="status">{download.status === "cancelled" ? "Download cancelled." : download.errorMessage ?? "The download could not be completed."}</p>
-        <button type="button" onClick={() => void start(resolvedDownloadUrl, fallbackDownloadUrl)}><RotateCcw size={14}/> {download.status === "cancelled" ? "Try again" : "Retry download"}</button>
+        <p role="status">{download.status === "cancelled" ? t("Download cancelled.") : download.errorMessage ?? t("The download could not be completed.")}</p>
+        <button type="button" onClick={() => void start(resolvedDownloadUrl, fallbackDownloadUrl)}><RotateCcw size={14}/> {download.status === "cancelled" ? t("Try again") : t("Retry download")}</button>
       </div>
     );
   }
