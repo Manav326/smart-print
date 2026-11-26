@@ -237,11 +237,11 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
         });
         setCreating(false);
         await reload(result.id);
-        setSuccess("Plan created. Its first version is still a draft and is not available for subscription assignment.");
+        setSuccess(t("Plan created. Its first version is still a draft and is not available for subscription assignment."));
       } else if (selectedPlan) {
         await savePlatformPlanDraft(tokens.accessToken, selectedPlan.id, version);
         await reload(selectedPlan.id);
-        setSuccess("Draft version saved. Published versions and existing subscriptions remain unchanged.");
+        setSuccess(t("Draft version saved. Published versions and existing subscriptions remain unchanged."));
       }
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not save the plan.");
@@ -262,7 +262,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
         isActive: active
       });
       await reload(selectedPlan.id);
-      setSuccess("Plan details updated.");
+      setSuccess(t("Plan details updated."));
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not update plan details.");
     } finally {
