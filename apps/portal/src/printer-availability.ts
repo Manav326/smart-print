@@ -15,15 +15,17 @@ export function isAgentOnlineForShop(agent: AgentDevice, now = Date.now()): bool
 }
 
 /**
- * Mirrors the server's selection contract: both physical and PDF queues need a
- * fresh Agent heartbeat plus a fresh Ready/Busy Windows queue report.
+ * Mirrors the server's selection contract: physical and authorised virtual queues
+ * need a fresh Agent heartbeat plus a fresh Ready/Busy Windows queue report.
+ * PDF Export is a separate Agent-side file export and does not use queue readiness.
  */
 export function getPrinterReadinessReason(
   printer: PrinterDevice,
   agents: readonly AgentDevice[],
   now = Date.now()
 ): string | null {
-  if (printer.outputMode === "UNSUPPORTED_VIRTUAL") return "Unsupported Windows output queue";
+  const authorisedVirtual = printer.outputMode === "UNSUPPORTED_VIRTUAL" && printer.virtualTestGrantActive === true;
+  if (printer.outputMode === "UNSUPPORTED_VIRTUAL" && !authorisedVirtual) return "Unsupported Windows output queue";
   if (!printer.agentDeviceId) return "Waiting for Print Agent discovery";
 
   const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
@@ -36,7 +38,7 @@ export function getPrinterReadinessReason(
     return null;
   }
 
-  if (printer.outputMode !== "PHYSICAL")
+  if (printer.outputMode !== "PHYSICAL" && !authorisedVirtual)
     return "Unsupported Windows output queue";
   if (!hasRecentHeartbeat(printer.lastSeenUtc, now)) return "Windows printer queue has not reported recently";
   const queueStatus = printer.status.toLowerCase();

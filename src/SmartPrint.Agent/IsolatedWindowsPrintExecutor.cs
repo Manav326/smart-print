@@ -35,8 +35,10 @@ public sealed class IsolatedWindowsPrintExecutor
     public async Task<SpoolerPrintReceipt> PrintAsync(
         AgentLocalQueueEntry entry,
         Guid agentDeviceId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<CancellationToken, Task<bool>> beforeSpoolerSubmission)
     {
+        ArgumentNullException.ThrowIfNull(beforeSpoolerSubmission);
         var request = JsonSerializer.Serialize(new PrintJobChildRequest(
             entry.JobId, agentDeviceId, entry.QueueName ?? string.Empty, entry.SpoolerJobName ?? string.Empty), JsonOptions);
 
@@ -44,7 +46,7 @@ public sealed class IsolatedWindowsPrintExecutor
         try
         {
             child = await childProcessRunner.ExecuteAsync(
-                "--print-job", request, printTimeout, cancellationToken);
+                "--print-job", request, printTimeout, cancellationToken, beforeSpoolerSubmission);
         }
         catch (AgentChildProcessStartException exception)
         {

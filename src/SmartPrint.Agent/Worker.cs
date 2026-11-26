@@ -1727,8 +1727,22 @@ public sealed class Worker(
                 SpoolerJobName = job.SpoolerJobName,
                 RejectedPageNumbers = rejectedPages
             };
+            // The isolated child calls this only after document preparation and
+            // immediately before StartDoc. The child blocks until this server check
+            // returns ALLOW; failures are DENY and never reach the Windows spooler.
             var spoolerReceipt = await isolatedWindowsPrintExecutor.PrintAsync(
-                printEntry, credentials.AgentDeviceId, ct);
+                printEntry,
+                credentials.AgentDeviceId,
+                ct,
+                async authorizationCt =>
+                {
+                    using var authorization = await SendAgentRequestAsync(
+                        client, credentials,
+                        $"api/v1/agent/jobs/{job.Id}/authorize-spooler-submission",
+                        new { spoolerJobName = job.SpoolerJobName },
+                        authorizationCt);
+                    return authorization.IsSuccessStatusCode;
+                });
 
             await localQueueStore.MarkSpoolerAcceptedAsync(job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, ct);
             await ReportSpoolerAcceptedAsync(client, credentials, job.Id, spoolerReceipt.JobId, spoolerReceipt.DocumentName, "QUEUED", ct);
@@ -1736,7 +1750,7 @@ public sealed class Worker(
         catch (PrintExecutionBlockedException ex)
         {
             await localQueueStore.MarkReadyAfterBlockedAsync(job.Id, ex.ReasonCode, CancellationToken.None);
-            await ReportPrintBlockedAsync(client, credentials, job.Id, ex.ReasonCode, ex.Message, CancellationToken.None);
+            await ReportPrintBlockedAsync(client, credentials, job.Id, job.SpoolerJobName, ex.ReasonCode, ex.Message, CancellationToken.None);
             logger.LogWarning(ex, "Pre-submission output block for {JobNumber}.", job.JobNumber);
         }
         catch (PrintSubmissionUncertainException ex)
@@ -2048,7 +2062,8 @@ public sealed class Worker(
         }
 
         var cloudState = await response.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
-        if (cloudState?.Status == "COMPLETED")
+        if (cloudState?.Status == "COMPLETED" ||
+            (cloudState?.Status == "TEST_OUTPUT_READY" && localQueueStore.Find(jobId)?.PrivatePrinting != true))
             await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
     }
 
@@ -2066,10 +2081,10 @@ public sealed class Worker(
             await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
     }
 
-    private async Task ReportPrintBlockedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, string code, string message, CancellationToken ct)
+    private async Task ReportPrintBlockedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, string spoolerJobName, string code, string message, CancellationToken ct)
     {
         using var response = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{jobId}/print-blocked",
-            new AgentPrintBlockedRequest(code, message.Length > 300 ? message[..300] : message), ct);
+            new { reasonCode = code, message = message.Length > 300 ? message[..300] : message, spoolerJobName }, ct);
         if (!response.IsSuccessStatusCode) logger.LogWarning("Print block for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);
     }
 
@@ -2077,11 +2092,14 @@ public sealed class Worker(
     {
         var localEntry = localQueueStore.Find(jobId);
         using var response = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{jobId}/output-unconfirmed",
-            new AgentPrintBlockedRequest(
-                code,
-                message.Length > 300 ? message[..300] : message,
-                localEntry?.SpoolerPagesPrinted,
-                localEntry?.SpoolerTotalPages), ct);
+            new
+            {
+                reasonCode = code,
+                message = message.Length > 300 ? message[..300] : message,
+                pagesPrinted = localEntry?.SpoolerPagesPrinted,
+                totalPages = localEntry?.SpoolerTotalPages,
+                spoolerJobName = localEntry?.SpoolerJobName
+            }, ct);
         if (!response.IsSuccessStatusCode)
         {
             logger.LogWarning("Output reconciliation for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);

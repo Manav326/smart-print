@@ -396,7 +396,7 @@ public sealed class PostgresMigrationUpgradeTests
             Assert.Equal("UNSUPPORTED_VIRTUAL", savedUnsupportedQueue.OutputMode);
             Assert.Equal("IPP", savedUnsupportedQueue.ConnectionType);
             Assert.False(savedUnsupportedQueue.IsActive);
-            Assert.False(savedUnsupportedQueue.IsTestModeOverride);
+            Assert.Null(savedUnsupportedQueue.IdentityFingerprint);
         }
 
         // A rollback to the old two-value output-mode constraint must be blocked,

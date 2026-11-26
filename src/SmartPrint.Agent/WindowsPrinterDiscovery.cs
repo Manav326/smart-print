@@ -469,9 +469,9 @@ public sealed class WindowsPrinterDiscovery
     public static string ResolveDetectedOutputMode(string queueName, string? driverName, string? portName)
     {
         // Some Android/IPP bridge queues present a virtual endpoint through a
-        // Microsoft IPP Windows driver. Keep that transport distinct from a
-        // physical IPP printer; the platform's audited test setting may promote
-        // a working queue to physical dispatch after inventory reaches the API.
+        // Microsoft IPP Windows driver. Keep that identity distinct from a
+        // physical IPP printer; only a current shop-scoped grant can authorise
+        // this discovered queue for the shared non-production spooler pipeline.
         var textLooksVirtual = queueName.Contains("virtual", StringComparison.OrdinalIgnoreCase) ||
             (driverName?.Contains("virtual", StringComparison.OrdinalIgnoreCase) ?? false);
         var portIsVirtualEndpoint = Uri.TryCreate(portName, UriKind.Absolute, out var endpoint) &&

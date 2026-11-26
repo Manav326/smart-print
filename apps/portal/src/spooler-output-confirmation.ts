@@ -86,9 +86,12 @@ export function canResumeUnprintedPhysicalJob(
   outputConfirmedUtc?: string | null, dispatchLeaseExpiresUtc?: string | null,
   localQueueReceivedUtc?: string | null, originalQueueReady = false, nowUtcMs = Date.now()
 ): boolean {
+  const physicalOutput = normalizeStatus(outputMode) === "PHYSICAL" &&
+    normalizeStatus(outputType) === "PHYSICAL";
+  const virtualTestOutput = normalizeStatus(outputMode) === "UNSUPPORTED_VIRTUAL" &&
+    normalizeStatus(outputType) === "TEST_VIRTUAL";
   return normalizeStatus(jobStatus) === "OUTPUT_UNCONFIRMED" &&
-    normalizeStatus(outputMode) === "PHYSICAL" &&
-    normalizeStatus(outputType) === "PHYSICAL" &&
+    (physicalOutput || virtualTestOutput) &&
     normalizeStatus(spoolerStatus) === "OUTPUT_UNCONFIRMED" &&
     isVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId) &&
     (pagesPrinted ?? 0) === 0 && (totalPages ?? 0) > 0 &&

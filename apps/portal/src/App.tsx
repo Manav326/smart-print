@@ -1030,23 +1030,28 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
   async function dispatchPrintJob(job: ShopPrintJob) {
     const pdfExport = job.outputMode === "PDF_EXPORT";
+    const virtualTestOutput = job.outputMode === "UNSUPPORTED_VIRTUAL";
     const privateTestOutput = Boolean(job.privatePrinting && pdfExport);
-    const ok = await confirmInApp(privateTestOutput
-      ? `Create a non-production Private Printing test PDF for ${job.jobNumber}? The Agent stores it in its protected test folder for up to 24 hours. This is not a physical print and cannot be collected as a printed order.`
-      : pdfExport
-        ? `Save a PDF for ${job.jobNumber} in the shop's QRtoPrint Exports folder? No Windows printer dialog will be opened.`
-        : `Start printing ${job.jobNumber} on ${job.printerName || "the assigned printer"}? SmartPrint will send this job once. Please check the actual pages before marking the order complete.`,
-      privateTestOutput ? "Create private test PDF?" : pdfExport ? "Save PDF export?" : "Start printing?",
-      privateTestOutput ? "Create test PDF" : pdfExport ? "Save PDF" : "Start printing");
+    const ok = await confirmInApp(virtualTestOutput
+      ? `Run a non-production virtual printer test for ${job.jobNumber} on ${job.printerName || "the assigned virtual queue"}? It uses the existing Windows spooler pipeline. The result is recorded as test output, not physical fulfilment or a collection-ready print.`
+      : privateTestOutput
+        ? `Create a non-production Private Printing test PDF for ${job.jobNumber}? The Agent stores it in its protected test folder for up to 24 hours. This is not a physical print and cannot be collected as a printed order.`
+        : pdfExport
+          ? `Save a PDF for ${job.jobNumber} in the shop's QRtoPrint Exports folder? No Windows printer dialog will be opened.`
+          : `Start printing ${job.jobNumber} on ${job.printerName || "the assigned printer"}? SmartPrint will send this job once. Please check the actual pages before marking the order complete.`,
+      virtualTestOutput ? "Run virtual printer test?" : privateTestOutput ? "Create private test PDF?" : pdfExport ? "Save PDF export?" : "Start printing?",
+      virtualTestOutput ? "Run virtual test" : privateTestOutput ? "Create test PDF" : pdfExport ? "Save PDF" : "Start printing");
     if (!ok) return;
     setBusyJobId(job.id); setError("");
     try {
       await dispatchShopPrintJob(tokens.accessToken, job.id);
-      setToast(privateTestOutput
-        ? "Private test PDF authorised. The Agent will save a protected local test artifact; no physical print is recorded."
-        : pdfExport
-          ? "PDF export authorised. The Windows Agent will create the PDF in the shop's export folder."
-          : "Print authorised. Waiting for the shop computer to receive this job; SmartPrint will update the order automatically.");
+      setToast(virtualTestOutput
+        ? "Virtual printer test authorised. The existing Windows spooler pipeline will run; no physical fulfilment will be recorded."
+        : privateTestOutput
+          ? "Private test PDF authorised. The Agent will save a protected local test artifact; no physical print is recorded."
+          : pdfExport
+            ? "PDF export authorised. The Windows Agent will create the PDF in the shop's export folder."
+            : "Print authorised. Waiting for the shop computer to receive this job; SmartPrint will update the order automatically.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not start printing.");
@@ -1123,17 +1128,22 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     const labels=resolvedJobs.map(job=>job.privatePrinting
       ?`Private file ${++privateFileIndex}`
       :job.document.originalFileName);
+    const virtualTestOutput=resolvedJobs.some(job=>job.outputMode==="UNSUPPORTED_VIRTUAL"&&job.outputType==="TEST_VIRTUAL");
     const ok=await confirmInApp(
-      `Only continue after checking the ORIGINAL Windows queue and physical output tray for every selected file and verifying that none produced paper. Selected files: ${labels.join("; ")}. Any file that printed even one page must not be retried here.`,
-      "Confirm no physical pages were produced",
-      "I checked; resume selected files"
+      virtualTestOutput
+        ? `Only continue after verifying that each exact job is absent from the ORIGINAL virtual Windows queue and that no test output artifact was created. Selected files: ${labels.join("; ")}. Any file with recorded output or an unknown page count must not be retried here.`
+        : `Only continue after checking the ORIGINAL Windows queue and physical output tray for every selected file and verifying that none produced paper. Selected files: ${labels.join("; ")}. Any file that printed even one page must not be retried here.`,
+      virtualTestOutput ? "Confirm no virtual test output was produced" : "Confirm no physical pages were produced",
+      virtualTestOutput ? "I checked; retry virtual tests" : "I checked; resume selected files"
     );
     if(!ok)return false;
     setBusyJobId(`resume-unprinted-${batchId}`);
     setError("");
     try{
       const result=await resumeShopUnprintedBatch(tokens.accessToken,batchId,jobIds);
-      setToast(`${result.resumedCount} verified-unprinted file(s) authorised to resume on ${result.printerName}.`);
+      setToast(virtualTestOutput
+        ? `${result.resumedCount} virtual test job(s) authorised to retry on ${result.printerName}.`
+        : `${result.resumedCount} verified-unprinted file(s) authorised to resume on ${result.printerName}.`);
       try{
         await reload();
       }catch{
@@ -2173,7 +2183,8 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   onNavigate: (section: Section) => void;
 }) {
   const activePrinters = printers.filter(printer =>
-    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT")
+    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT" ||
+      (printer.outputMode === "UNSUPPORTED_VIRTUAL" && printer.virtualTestGrantActive === true))
   );
   const todayKey = istDateKey(new Date());
   const jobsToday = printJobs.filter(job => istDateKey(job.createdUtc) === todayKey);
@@ -2386,7 +2397,8 @@ function PrintersPage({
   const [pendingReplacement, setPendingReplacement] = useState<PrinterDevice | null>(null);
   const [replacePrinterId, setReplacePrinterId] = useState("");
   const selectedPrinters = printers.filter(printer =>
-    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT")
+    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT" ||
+      (printer.outputMode === "UNSUPPORTED_VIRTUAL" && printer.virtualTestGrantActive === true))
   );
   const selectablePrinters = printers.filter(printer =>
     !printer.isActive && isPrinterReadyForSelection(printer, agents)
@@ -2452,7 +2464,8 @@ function PrintersPage({
             {printers.map(printer => {
               const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
               const isUnsupportedVirtual = printer.outputMode === "UNSUPPORTED_VIRTUAL";
-              const isSelected = printer.isActive && !isUnsupportedVirtual;
+              const isAuthorisedVirtual = isUnsupportedVirtual && printer.virtualTestGrantActive === true;
+              const isSelected = printer.isActive && (!isUnsupportedVirtual || isAuthorisedVirtual);
               const canSelect = isPrinterReadyForSelection(printer, agents);
               const agentLastSeen = agent?.lastSeenUtc ? Date.parse(agent.lastSeenUtc) : Number.NaN;
               const agentOnline = !!agent && !agent.revokedUtc && agent.status === "Online" &&
@@ -2462,8 +2475,8 @@ function PrintersPage({
                 (Number.isFinite(printerLastSeen) && printerLastSeen > Date.now() - 2 * 60 * 1000);
               const queueReady = printer.outputMode === "PDF_EXPORT" ||
                 printer.status === "Ready" || printer.status === "Busy";
-              const selectionBlockReason = isUnsupportedVirtual
-                ? "This virtual/document driver is visible but is not supported for SmartPrint output."
+              const selectionBlockReason = isUnsupportedVirtual && !isAuthorisedVirtual
+                ? "This virtual queue needs an active platform-admin test grant for this shop before it can be selected."
                 : !printer.agentDeviceId
                   ? "Keep the Print Agent connected. This Windows queue has not been linked yet."
                   : !agentOnline
@@ -2478,7 +2491,9 @@ function PrintersPage({
                     other.agentDeviceId === printer.agentDeviceId && !!other.connectionAddress &&
                     other.connectionAddress.trim().toLowerCase() === printer.connectionAddress!.trim().toLowerCase())
                 : [];
-              const ownerStatus = !printer.agentDeviceId
+              const ownerStatus = isAuthorisedVirtual
+                ? "Platform-approved virtual test queue"
+                : !printer.agentDeviceId
                 ? "Waiting for Print Agent discovery"
                 : !agentOnline
                   ? "Windows computer not currently connected"
@@ -2494,24 +2509,24 @@ function PrintersPage({
                   <div className="printer-card-top">
                     <div className="printer-card-icon"><Printer size={20}/></div>
                     <Status
-                      label={isUnsupportedVirtual ? "Not supported" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? "Available" : !agentOnline ? "Computer offline" : "Queue not ready"}
-                      tone={isUnsupportedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
+                      label={isUnsupportedVirtual && !isAuthorisedVirtual ? "Needs approval" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? (isAuthorisedVirtual ? "Test queue approved" : "Available") : !agentOnline ? "Computer offline" : "Queue not ready"}
+                      tone={isUnsupportedVirtual && !isAuthorisedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
                     />
                   </div>
-                  <h3>{isUnsupportedVirtual ? "Unsupported virtual · " : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : printer.isTestModeOverride ? "Test physical · " : printer.connectionType === "IPP" ? "IPP printer · " : ""}{printer.displayName}</h3>
+                  <h3>{isUnsupportedVirtual ? (isAuthorisedVirtual ? "Virtual test · " : "Unsupported virtual · ") : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : printer.connectionType === "IPP" ? "IPP printer · " : ""}{printer.displayName}</h3>
                   <p>{isUnsupportedVirtual
-                    ? "This virtual Windows queue is visible but not approved for SmartPrint output. The platform test override is currently off or Windows has not reported it Ready/Busy."
+                    ? isAuthorisedVirtual
+                      ? "Approved for this shop's non-production test use. Jobs use the existing Windows spooler pipeline and are recorded as test output, not physical fulfilment."
+                      : "This virtual Windows queue is visible but requires platform-admin approval for this shop before it can be selected."
                     : printer.outputMode === "PDF_EXPORT"
                       ? "Supported Microsoft Print to PDF destination. SmartPrint creates the PDF directly on this connected computer; physical printer status is not used."
-                      : printer.isTestModeOverride
-                        ? `Temporary test policy: this working virtual queue is dispatched through its existing Windows queue as a physical output. Transport remains ${printer.connectionType}.`
-                        : printer.connectionType === "IPP"
-                          ? `IPP-connected Windows queue · installed driver ${printer.model}`
-                          : printer.manufacturer === "Windows"
-                            ? `Installed Windows driver · ${printer.model}`
-                            : `${printer.manufacturer} · ${printer.model}`}</p>
+                      : printer.connectionType === "IPP"
+                        ? `IPP-connected Windows queue · installed driver ${printer.model}`
+                        : printer.manufacturer === "Windows"
+                          ? `Installed Windows driver · ${printer.model}`
+                          : `${printer.manufacturer} · ${printer.model}`}</p>
                   <div className="printer-meta">
-                    <span>{printer.isTestModeOverride ? "Platform test override · treated as physical" : ownerStatus}{printer.isDefault ? " · Default Windows queue" : ""}</span>
+                    <span>{ownerStatus}{printer.isDefault ? " · Default Windows queue" : ""}</span>
                     <span>{printer.queueName || printer.connectionAddress || "Connection details not reported"}</span>
                     <span>Print Agent · {agent?.deviceName || "Not linked"}</span>
                   </div>
@@ -2524,7 +2539,7 @@ function PrintersPage({
                   )}
                   <div className="printer-card-footer">
                     <span className={isSelected ? "enabled-label" : "disabled-label"}>
-                      {isSelected ? "Selected for new jobs" : isUnsupportedVirtual ? "Visible · not selectable" : "Not selected"}
+                      {isSelected ? "Selected for new jobs" : isUnsupportedVirtual && !isAuthorisedVirtual ? "Visible · awaiting approval" : "Not selected"}
                     </span>
                     {isSelected ? (
                       <button
@@ -3340,7 +3355,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                   <strong>{batchPrinterConflict?"Multiple printer assignments":batchAssignmentIncomplete?(assignedPrinterIds.length?"Choose one printer":"Printer not assigned"):batchPrinterDisplayName}</strong>
                   <small>{lockedPrinterIds.length===1?"Locked to the printer already used for this batch":waiting.length===0?"No files awaiting review":`${waiting.length} ${waiting.length===1?"file":"files"} awaiting review`}</small>
                   {batchPrinter?.outputMode==="PDF_EXPORT"&&<small>Saves a PDF, not paper</small>}
-                  {batchPrinter?.outputMode==="UNSUPPORTED_VIRTUAL"&&<small className="queue-batch-printer-lock">Unsupported virtual driver. Assign a physical printer or the supported Microsoft Print to PDF test destination.</small>}
+                  {batchPrinter?.outputMode==="UNSUPPORTED_VIRTUAL"&&batchPrinter.virtualTestGrantActive!==true&&<small className="queue-batch-printer-lock">This virtual queue needs an active platform-admin test grant for this shop before it can receive jobs.</small>}
                 </>}
                 {assignmentJob&&<select
                   aria-label="Assign one printer for all files in batch"
@@ -3365,15 +3380,16 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
             </tr>
             {expanded&&<tr className="queue-batch-detail-row"><td colSpan={8}><div className="queue-batch-files">{batch.jobs.map(job=><article className="queue-batch-file-card" key={job.id}>
               <div className="queue-batch-file-main">
-                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours.":"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.photoPaperFinish==="GLOSSY"?"Glossy":job.photoPaperFinish==="MATTE"?"Matte":"Plain"} · ${job.photoOutputLayout==="PHOTO_PAPER"?"individual photo paper":"A4 photo paper"} · ${job.pageCount} ${job.photoOutputLayout==="PHOTO_PAPER"?"photo-paper pages":"A4 pages"}` : `${job.batchGroupName??"Loose files"} · ${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)} · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
+                <div><div className="queue-batch-file-title"><strong>{job.document.originalFileName}</strong>{job.privatePrinting&&<span className="private-printing-tag" title={job.outputType==="TEST_VIRTUAL"?(job.outputMode==="UNSUPPORTED_VIRTUAL"?"Non-production virtual printer test only. Not physical fulfilment. The protected source is erased after the Agent verifies the spooler output.":"Non-production test PDF only. Not physical fulfilment. The protected source is erased after the Agent verifies the test artifact; the test PDF is retained locally for up to 24 hours."):"The paired shop computer erases the private working copy after physical output is confirmed. The original file on the customer device is not deleted."}>Private · auto-delete</span>}<PrintKindTag printKind={job.printKind}/>{job.origin==="SHOP_OWNER"&&<span className="print-kind-tag print-kind-tag--photo">Shop-created</span>}</div><small>{job.origin==="SHOP_OWNER"?`Recipient: ${job.recipientName||"Walk-in"}${job.recipientPhone?" · "+job.recipientPhone:""} · Shop-originated order`:"Customer QR order"} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.photoPaperFinish==="GLOSSY"?"Glossy":job.photoPaperFinish==="MATTE"?"Matte":"Plain"} · ${job.photoOutputLayout==="PHOTO_PAPER"?"individual photo paper":"A4 photo paper"} · ${job.pageCount} ${job.photoOutputLayout==="PHOTO_PAPER"?"photo-paper pages":"A4 pages"}` : `${job.batchGroupName??"Loose files"} · ${customerDocumentOutputSummary(job.pageCount,job.copies,job.pagesPerSheet??1,job.isDuplex)} · ${job.colourMode} · ${job.isDuplex?"Double-sided":"Single-sided"} · ${job.paperSize||"A4"} · ${job.orientation??"AUTO"}`}</small></div>
                 <Status label={prettyStatus(job.status)} tone={job.status==="REJECTED"?"red":job.status==="COMPLETED"||job.status==="LOCAL_QUEUE_READY"?"green":job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/>
                 <strong className="amount-cell">{job.quotedAmountMinor>0?formatMoney(job.quotedAmountMinor,job.currency):"—"}</strong>
               </div>
               {job.printerName&&<div className="queue-batch-file-printer">
                 <Printer size={13}/>
-                <strong>{job.outputType==="TEST_VIRTUAL"?"Private test PDF":job.outputMode==="PDF_EXPORT"?"Save as PDF":job.outputConfirmedUtc||job.status==="COMPLETED"?"Printed on":job.spoolerJobId?"Sent to":"Assigned printer"}</strong>
+                <strong>{job.outputType==="TEST_VIRTUAL"?(job.outputMode==="UNSUPPORTED_VIRTUAL"?"Virtual printer test":"Private test PDF"):job.outputMode==="PDF_EXPORT"?"Save as PDF":job.outputConfirmedUtc||job.status==="COMPLETED"?"Printed on":job.spoolerJobId?"Sent to":"Assigned printer"}</strong>
                 <span>{job.outputMode==="PDF_EXPORT"?job.printerAgentName||"Shop computer":job.printerName}</span>
-                {job.outputMode==="PDF_EXPORT"&&<small>{job.outputType==="TEST_VIRTUAL"?"Test virtual printer: ":"Virtual printer: "}{job.printerName}{job.outputType==="TEST_VIRTUAL"?" · Not physical fulfilment":""}</small>}
+                {job.outputMode==="PDF_EXPORT"&&<small>{job.outputType==="TEST_VIRTUAL"?"Test PDF destination: ":"PDF destination: "}{job.printerName}{job.outputType==="TEST_VIRTUAL"?" · Not physical fulfilment":""}</small>}
+                {job.outputMode==="UNSUPPORTED_VIRTUAL"&&job.outputType==="TEST_VIRTUAL"&&<small>Test queue: {job.printerName} · Not physical fulfilment</small>}
                 {job.queueName&&job.queueName!==job.printerName&&<small>Windows queue: {job.queueName}</small>}
                 {job.printerAgentName&&job.outputMode!=="PDF_EXPORT"&&<small>Shop computer: {job.printerAgentName}</small>}
                 {job.printerSnapshotUtc&&<small>Output destination recorded: {formatIstDateTime(job.printerSnapshotUtc)}</small>}
@@ -3406,9 +3422,9 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}
                 {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button>}
                 {(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>{job.status==="REJECTED"?"Refund rejected file":"Review pages / refund"}</button>}
-                {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.privatePrinting&&job.outputMode==="PDF_EXPORT"?"Create test PDF":job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
+                {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="UNSUPPORTED_VIRTUAL"?"Run virtual test":job.privatePrinting&&job.outputMode==="PDF_EXPORT"?"Create test PDF":job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
                 {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>{job.privatePrinting&&job.outputType==="TEST_VIRTUAL"?"Retry test PDF":"Save PDF again"}</button>}
-                {isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT")&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)||!(canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId,Date.now(),job.spoolerPagesPrinted??0,job.spoolerTotalPages??0)||canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName))} title={hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)?`Windows recorded ${job.spoolerPagesPrinted??0} of ${job.spoolerTotalPages} pages. Do not complete the file until the remainder is accounted for.`:canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"The Agent restarted before Windows returned a spooler ID. Check the selected Windows queue for this exact job name and physically inspect all paper output before continuing.":!canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId,Date.now(),job.spoolerPagesPrinted??0,job.spoolerTotalPages??0)?(isRetainedSpoolerJob(job.spoolerStatus)?"Windows still holds this job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared.":!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for a fresh Agent observation from after submission before confirming output.":(["QUEUED","SPOOLING","PRINTING"].includes((job.spoolerStatus??"").toUpperCase())?"Windows still reports this job in its queue or printing. Wait for a terminal state before confirming output.":spoolerStatusWarning(job.spoolerStatus,job.printerStatus)||"Confirm output only after Windows reports that the job printed or its queue entry was verified absent.")):undefined} onClick={()=>onConfirmOutput(job)}>{canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"Reconcile & confirm":"Confirm output"}</button>}
+                {job.outputType!=="TEST_VIRTUAL"&&isPhysicalOutputConfirmationStatus(job.status)&&(job.status!=="OUTPUT_UNCONFIRMED"||job.outputMode!=="PDF_EXPORT")&&<button className="subtle-button approve-action" disabled={busyJobId===job.id||hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)||!(canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId,Date.now(),job.spoolerPagesPrinted??0,job.spoolerTotalPages??0)||canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName))} title={hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)?`Windows recorded ${job.spoolerPagesPrinted??0} of ${job.spoolerTotalPages} pages. Do not complete the file until the remainder is accounted for.`:canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"The Agent restarted before Windows returned a spooler ID. Check the selected Windows queue for this exact job name and physically inspect all paper output before continuing.":!canConfirmPhysicalOutput(job.status,job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.printerStatus,job.failureCode,job.spoolerJobId,Date.now(),job.spoolerPagesPrinted??0,job.spoolerTotalPages??0)?(isRetainedSpoolerJob(job.spoolerStatus)?"Windows still holds this job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared.":!hasVerifiedAgentSpoolerObservation(job.spoolerStatus,job.spoolerSubmittedUtc,job.spoolerObservedUtc,job.failureCode,job.spoolerJobId)?"Waiting for a fresh Agent observation from after submission before confirming output.":(["QUEUED","SPOOLING","PRINTING"].includes((job.spoolerStatus??"").toUpperCase())?"Windows still reports this job in its queue or printing. Wait for a terminal state before confirming output.":spoolerStatusWarning(job.spoolerStatus,job.printerStatus)||"Confirm output only after Windows reports that the job printed or its queue entry was verified absent.")):undefined} onClick={()=>onConfirmOutput(job)}>{canManuallyReconcileUncertainOutput(job.status,job.spoolerStatus,job.failureCode,job.spoolerJobId,job.queueName,job.spoolerJobName)?"Reconcile & confirm":"Confirm output"}</button>}
               </div>
               {editingSettingsJobId===job.id&&editingPrintSettings&&<div className="queue-settings-editor">
                 <div><strong>Review print options</strong><small>The revised quote must be approved by the customer before payment or printing.</small></div>
@@ -3871,7 +3887,7 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
   return <Modal title="Create a QR station" subtitle="Give customers a clear entry point for this counter or printer." onClose={onClose}>
     <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,printerDeviceId:printerDeviceId||undefined});}}>
       <label>Station name<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="e.g. Front counter" required maxLength={120}/></label>
-      <label>Default printer <span className="field-hint">Optional · unsupported virtual/document drivers are excluded</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">No default printer</option>{printers.filter(printer=>printer.isActive&&printer.outputMode!=="UNSUPPORTED_VIRTUAL").map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
+      <label>Default printer <span className="field-hint">Optional · only approved virtual test queues are included</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">No default printer</option>{printers.filter(printer=>printer.isActive&&(printer.outputMode!=="UNSUPPORTED_VIRTUAL"||printer.virtualTestGrantActive===true)).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
       <div className="modal-note"><QrCode size={15}/> The QR contains a public station identifier, not a permanent print authorisation. Every scan creates an expiring customer session. Only enabled printers are offered as defaults; you can also assign a printer to each paid job in the queue.</div>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!displayName.trim()}>{busy?<span className="button-spinner"/>:"Create station"}</button></div>
     </form>
@@ -6739,9 +6755,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
       {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
     {jobStatus&&<div className="customer-job-state" role="status" aria-live="polite"><div className="customer-job-state-top"><Status label={customerStatusLabel(jobStatus.status)} tone={customerStatusTone(jobStatus.status)}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
-      <strong>{jobStatus.status==="TEST_OUTPUT_READY"?"Development test PDF generated · no physical print was made":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Shop computer is preparing your file":jobStatus.status==="LOCAL_QUEUE_READY"?"Your file is ready for printing":jobStatus.status==="PRINT_AUTHORISED"?"Waiting for the shop computer":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
+      <strong>{jobStatus.status==="TEST_OUTPUT_READY"?(jobStatus.outputMode==="UNSUPPORTED_VIRTUAL"?"Virtual printer test completed · no physical print was made":"Development test PDF generated · no physical print was made"):jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?"Your print is ready — your document has been removed from the shop computer":jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?"Your print is ready — removing your document from the shop computer":nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?"Your request is with the shop":jobStatus.status==="AWAITING_PAYMENT"?"Your quote is ready for payment":jobStatus.status==="LOCAL_QUEUE_CLAIMED"?"Shop computer is preparing your file":jobStatus.status==="LOCAL_QUEUE_READY"?"Your file is ready for printing":jobStatus.status==="PRINT_AUTHORISED"?"Waiting for the shop computer":jobStatus.status==="PRINT_SUBMITTING"?"Your document is being sent to the printer":jobStatus.status==="SPOOLER_ACCEPTED"?"The printer queue accepted your document":jobStatus.status==="PRINTING"?"Your document is printing":jobStatus.status==="OUTPUT_UNCONFIRMED"?"The shop is checking your print":jobStatus.status==="COMPLETED"?"Your print is ready":jobStatus.status==="PDF_EXPORTED"?"Your PDF is ready":jobStatus.status==="REFUNDED"?"This file was fully refunded":jobStatus.status==="CANCELLED"?"This request was cancelled":jobStatus.status==="FAILED"?"This request could not be completed":jobStatus.status==="PAID_AUTHORISED"?"Your payment is verified":jobStatus.status==="REJECTED"?"The shop could not accept this request":jobStatus.status==="QUOTE_EXPIRED"?"Your quote has expired":"Your request is being reviewed"}</strong>
       <small className="customer-job-updated">Last updated · {formatIstDateTime(jobStatus.updatedUtc)}</small>
-      <p>{jobStatus.status==="TEST_OUTPUT_READY"?"This was a test only. No physical pages were printed."
+      <p>{jobStatus.status==="TEST_OUTPUT_READY"?(jobStatus.outputMode==="UNSUPPORTED_VIRTUAL"?"The authorised virtual Windows queue completed the test through the normal spooler path. This is not physical fulfilment and is not ready for collection.":"This was a test only. No physical pages were printed.")
         :jobStatus.status==="AWAITING_SHOP_APPROVAL"?"The shop is reviewing your files. No payment has been collected."
         :jobStatus.status==="AWAITING_PAYMENT"?"Your files are accepted. Complete payment to continue."
         :jobStatus.status==="AWAITING_COUNTER_PAYMENT"?"Please pay at the shop counter."
@@ -6761,8 +6777,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         :jobStatus.status==="REJECTED"?"The shop could not accept this file. Please ask the shop for help."
         :jobStatus.status==="QUOTE_EXPIRED"?"The price has expired. Please request a fresh quote."
         :"Your request is being processed. Refresh to check again."}</p>
-      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the shop copy</strong>The test PDF is ready. The shop copy is being securely removed.</span></div>}
-      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Shop copy removed</strong>The test file is not a physical print and is not ready for collection.</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the shop copy</strong>The authorised test output is ready. The shop copy is being securely removed.</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Shop copy removed</strong>The test output is not physical fulfilment and is not ready for collection.</span></div>}
       {jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the shop copy</strong>Your pages are printed. SmartPrint is securely removing the shop copy.</span></div>}
       {jobStatus.privatePrinting&&jobStatus.status!=="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Shop copy removed</strong>Your file has been removed from the shop computer. The original on your device is unchanged.</span></div>}
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{formatMoney(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {formatMoney(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}

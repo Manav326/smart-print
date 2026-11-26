@@ -19,67 +19,25 @@ public sealed class PrinterTypePolicyTests
         Assert.Equal(expected, PrinterTypePolicy.ResolveConnectionType(port));
     }
 
-    [Theory]
-    [InlineData(false, false, false)]
-    [InlineData(false, true, false)]
-    [InlineData(true, false, true)]
-    [InlineData(true, true, false)]
-    public void VirtualQueueTestOverrideIsOnlyEnabledOutsideProduction(
-        bool configured, bool isProduction, bool expected)
+    [Fact]
+    public void VirtualQueueIdentityIsNeverPromoted()
     {
-        Assert.Equal(expected, PrinterTypePolicy.IsTestModeEnabled(configured, isProduction));
-    }
-
-    [Theory]
-    [InlineData("Ready", true)]
-    [InlineData("Busy", true)]
-    [InlineData("Offline", false)]
-    [InlineData("Paused", false)]
-    [InlineData("Error", false)]
-    [InlineData("Unknown", false)]
-    public void OnlyWorkingWindowsQueueStatesCanBeTemporarilyPromoted(string status, bool working)
-    {
-        var resolved = PrinterTypePolicy.ResolveOutputMode(
-            PrinterTypePolicy.UnsupportedVirtual, status, treatWorkingVirtualQueuesAsPhysicalForTesting: true,
-            connectionPort: "http://192.168.31.171:10631/p/virtual");
-
-        Assert.Equal(working ? PrinterTypePolicy.Physical : PrinterTypePolicy.UnsupportedVirtual, resolved);
-        Assert.Equal(working, PrinterTypePolicy.IsTestModeOverride(
-            PrinterTypePolicy.UnsupportedVirtual,
-            resolved,
-            status,
-            treatWorkingVirtualQueuesAsPhysicalForTesting: true,
-            connectionPort: "http://192.168.31.171:10631/p/virtual"));
+        Assert.Equal(PrinterTypePolicy.UnsupportedVirtual,
+            PrinterTypePolicy.ResolveOutputMode(PrinterTypePolicy.UnsupportedVirtual));
     }
 
     [Fact]
-    public void DisabledTestPolicyNeverPromotesAnUnsupportedVirtualQueue()
+    public void PdfExportAlwaysRemainsItsOwnOutputProfile()
     {
-        Assert.Equal(
-            PrinterTypePolicy.UnsupportedVirtual,
-            PrinterTypePolicy.ResolveOutputMode(
-                PrinterTypePolicy.UnsupportedVirtual, "Ready", treatWorkingVirtualQueuesAsPhysicalForTesting: false,
-                connectionPort: "USB001"));
+        Assert.Equal(PrinterTypePolicy.PdfExport,
+            PrinterTypePolicy.ResolveOutputMode(PrinterTypePolicy.PdfExport));
     }
 
-    [Theory]
-    [InlineData("Ready")]
-    [InlineData("Busy")]
-    [InlineData("Offline")]
-    [InlineData("Unknown")]
-    public void PdfExportAlwaysRemainsItsOwnOutputProfile(string status)
+    [Fact]
+    public void PhysicalQueueClassificationIsStable()
     {
-        Assert.Equal(
-            PrinterTypePolicy.PdfExport,
-            PrinterTypePolicy.ResolveOutputMode(
-                PrinterTypePolicy.PdfExport, status, treatWorkingVirtualQueuesAsPhysicalForTesting: true,
-                connectionPort: "PORTPROMPT:"));
-        Assert.False(PrinterTypePolicy.IsTestModeOverride(
-            PrinterTypePolicy.PdfExport,
-            PrinterTypePolicy.PdfExport,
-            status,
-            treatWorkingVirtualQueuesAsPhysicalForTesting: true,
-            connectionPort: "PORTPROMPT:"));
+        Assert.Equal(PrinterTypePolicy.Physical,
+            PrinterTypePolicy.ResolveOutputMode(PrinterTypePolicy.Physical));
     }
 
     [Theory]
@@ -87,30 +45,9 @@ public sealed class PrinterTypePolicyTests
     [InlineData("PORTPROMPT:")]
     [InlineData("NUL:")]
     [InlineData(null)]
-    public void FileAndPromptSinksAreNeverPromotedEvenWhenWindowsReportsReady(string? port)
+    public void FileAndPromptSinksAreNotConnectedPrinterPorts(string? port)
     {
-        var resolved = PrinterTypePolicy.ResolveOutputMode(
-            PrinterTypePolicy.UnsupportedVirtual,
-            "Ready",
-            treatWorkingVirtualQueuesAsPhysicalForTesting: true,
-            connectionPort: port);
-
-        Assert.Equal(PrinterTypePolicy.UnsupportedVirtual, resolved);
-        Assert.False(PrinterTypePolicy.IsTestModeOverride(
-            PrinterTypePolicy.UnsupportedVirtual,
-            resolved,
-            "Ready",
-            treatWorkingVirtualQueuesAsPhysicalForTesting: true,
-            connectionPort: port));
-    }
-
-    [Fact]
-    public void PhysicalQueueClassificationDoesNotDependOnTheTestOverride()
-    {
-        Assert.Equal(
-            PrinterTypePolicy.Physical,
-            PrinterTypePolicy.ResolveOutputMode(
-                PrinterTypePolicy.Physical, "Ready", treatWorkingVirtualQueuesAsPhysicalForTesting: false));
+        Assert.False(PrinterTypePolicy.IsConnectedPrinterPort(port));
     }
 
     [Theory]

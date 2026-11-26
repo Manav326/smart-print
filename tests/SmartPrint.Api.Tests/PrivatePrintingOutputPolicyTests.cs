@@ -34,6 +34,23 @@ public sealed class PrivatePrintingOutputPolicyTests
     }
 
     [Fact]
+    public void UnsupportedVirtualQueueRequiresItsOwnShopScopedGrant()
+    {
+        Assert.False(PrivatePrintingOutputPolicy.IsEligible(
+            allowVirtualOutput: true, isProduction: false,
+            outputMode: PrinterTypePolicy.UnsupportedVirtual, virtualTestGrantActive: false));
+        Assert.True(PrivatePrintingOutputPolicy.IsEligible(
+            allowVirtualOutput: false, isProduction: false,
+            outputMode: PrinterTypePolicy.UnsupportedVirtual, virtualTestGrantActive: true));
+        Assert.True(PrivatePrintingOutputPolicy.IsVirtualTestOutput(
+            allowVirtualOutput: false, isProduction: false,
+            outputMode: PrinterTypePolicy.UnsupportedVirtual, virtualTestGrantActive: true));
+        Assert.False(PrivatePrintingOutputPolicy.IsEligible(
+            allowVirtualOutput: false, isProduction: true,
+            outputMode: PrinterTypePolicy.UnsupportedVirtual, virtualTestGrantActive: true));
+    }
+
+    [Fact]
     public void ProductionAlwaysRejectsVirtualPrinterEvenWhenSettingIsEnabled()
     {
         Assert.False(PrivatePrintingOutputPolicy.IsEligible(

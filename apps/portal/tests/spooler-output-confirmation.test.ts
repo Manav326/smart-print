@@ -107,6 +107,25 @@ test("only fresh zero-page physical queue absences with a local copy can be resu
   ), false);
 });
 
+test("authorised virtual test output can resume only with its original approved queue", () => {
+  const eligible = [
+    "OUTPUT_UNCONFIRMED","UNSUPPORTED_VIRTUAL","TEST_VIRTUAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",true,nowUtc
+  ] as const;
+  assert.equal(canResumeUnprintedPhysicalJob(...eligible), true);
+  assert.equal(canResumeUnprintedPhysicalJob(
+    "OUTPUT_UNCONFIRMED","UNSUPPORTED_VIRTUAL","TEST_VIRTUAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",false,nowUtc
+  ), false);
+  assert.equal(canResumeUnprintedPhysicalJob(
+    "OUTPUT_UNCONFIRMED","UNSUPPORTED_VIRTUAL","PHYSICAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",true,nowUtc
+  ), false);
+});
+
 test("an Agent restart without a spooler ID is uncertain and requires manual queue reconciliation", () => {
   assert.equal(isVerifiedSpoolerAbsenceReport("AGENT_RESTART_DURING_PRINT_SUBMISSION", null), false);
   assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "UNKNOWN", submittedUtc, observedUtc, "Ready", "AGENT_RESTART_DURING_PRINT_SUBMISSION", null, nowUtc), false);
@@ -134,9 +153,11 @@ test("Order Journey and Print Queue use the same physical-output eligibility and
   const expected = /canConfirmPhysicalOutput\(\s*job\.status,\s*job\.spoolerStatus,\s*job\.spoolerSubmittedUtc,\s*job\.spoolerObservedUtc,\s*job\.printerStatus,\s*job\.failureCode,\s*job\.spoolerJobId,\s*Date\.now\(\),\s*job\.spoolerPagesPrinted\s*\?\?\s*0,\s*job\.spoolerTotalPages\s*\?\?\s*0\s*\)/;
   for (const source of [orderJourney, printQueue]) {
     assert.match(source, /isPhysicalOutputConfirmationStatus\(job\.status\)/);
+    assert.match(source, /job\.outputType!==\"TEST_VIRTUAL\"/);
     assert.match(source, expected);
     assert.match(source, /canManuallyReconcileUncertainOutput\(\s*job\.status/);
   }
+  assert.match(orderJourney, /originalPrinter\.outputMode===\"UNSUPPORTED_VIRTUAL\"&&job\.outputType===\"TEST_VIRTUAL\"&&originalPrinter\.virtualTestGrantActive===true/);
 });
 
 test("initial Agent acceptance receipts cannot supply terminal PRINTED proof", () => {
@@ -170,4 +191,22 @@ test("the API gates completion and private-source purge on fresh output proof or
   assert.ok(verified >= 0 && manual >= 0 && completed > verified && completed > manual && purge > verified && purge > manual);
   assert.match(route, /manualQueueReconciliationConfirmed/);
   assert.match(route, /SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT_AFTER_QUEUE_RECONCILIATION/);
+});
+
+
+test("virtual test output is never presented as ready for customer collection", () => {
+  const orderJourney = read("../src/OrderJourneyPage.tsx");
+  assert.match(orderJourney, /const readyStatuses = new Set\(\["COMPLETED","PDF_EXPORTED"\]\)/);
+  assert.match(orderJourney, /job\.status==="TEST_OUTPUT_READY"&&job\.outputType==="TEST_VIRTUAL"&&job\.outputMode==="UNSUPPORTED_VIRTUAL"/);
+  assert.match(orderJourney, /Virtual test completed · not for collection/);
+  assert.match(orderJourney, /job\.outputType!=="TEST_VIRTUAL"/);
+});
+
+
+test("customer status explicitly distinguishes virtual test completion from printed collection orders", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /TEST_OUTPUT_READY:"Test complete"/);
+  assert.match(app, /Virtual printer test completed · no physical print was made/);
+  assert.match(app, /This is not physical fulfilment and is not ready for collection/);
+  assert.match(app, /case "TEST_OUTPUT_READY": return "Test complete"/);
 });

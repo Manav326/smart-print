@@ -257,6 +257,15 @@ public sealed class SpoolerOutputConfirmationPolicyTests
         Assert.False(CanResume(spoolerStatus: "PRINTING"));
         Assert.False(CanResume(status: "PRINTING"));
         Assert.False(CanResume(outputType: "PDF_EXPORT"));
+        Assert.False(CanResume(outputType: "TEST_VIRTUAL"));
+        Assert.True(SpoolerOutputConfirmationPolicy.CanResumeUnprintedPhysicalJob(
+            "OUTPUT_UNCONFIRMED", "TEST_VIRTUAL", "OUTPUT_UNCONFIRMED",
+            "SPOOLER_JOB_NO_LONGER_VISIBLE", 17, 0, 12, SubmittedUtc,
+            ObservedUtc, null, null, NowUtc, allowTestVirtualOutput: true));
+        Assert.False(SpoolerOutputConfirmationPolicy.CanResumeUnprintedPhysicalJob(
+            "OUTPUT_UNCONFIRMED", "TEST_VIRTUAL", "OUTPUT_UNCONFIRMED",
+            "SPOOLER_JOB_NO_LONGER_VISIBLE", 17, 0, 12, SubmittedUtc,
+            ObservedUtc, null, null, NowUtc));
         Assert.False(CanResume(outputConfirmed: NowUtc));
         Assert.False(CanResume(dispatchLease: NowUtc.AddMinutes(1)));
         Assert.False(CanResume(observed: NowUtc.AddMinutes(-11)));

@@ -6,46 +6,16 @@ public static class PrinterTypePolicy
     public const string PdfExport = "PDF_EXPORT";
     public const string UnsupportedVirtual = "UNSUPPORTED_VIRTUAL";
 
-    // This override is a non-production test facility, never a production
-    // printer classification rule even if a stale database value is enabled.
-    public static bool IsTestModeEnabled(bool configured, bool isProduction) =>
-        configured && !isProduction;
-
     public static bool IsWorkingWindowsQueue(string? status) =>
         string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "Busy", StringComparison.OrdinalIgnoreCase);
 
-    public static string ResolveOutputMode(
-        string? discoveredOutputMode,
-        string? queueStatus,
-        bool treatWorkingVirtualQueuesAsPhysicalForTesting,
-        string? connectionPort = null)
-    {
-        if (string.Equals(discoveredOutputMode, PdfExport, StringComparison.OrdinalIgnoreCase))
-            return PdfExport;
-
-        if (string.Equals(discoveredOutputMode, UnsupportedVirtual, StringComparison.OrdinalIgnoreCase) &&
-            treatWorkingVirtualQueuesAsPhysicalForTesting &&
-            IsWorkingWindowsQueue(queueStatus) &&
-            IsConnectedPrinterPort(connectionPort))
-            return Physical;
-
-        return string.Equals(discoveredOutputMode, Physical, StringComparison.OrdinalIgnoreCase)
-            ? Physical
-            : UnsupportedVirtual;
-    }
-
-    public static bool IsTestModeOverride(
-        string? discoveredOutputMode,
-        string? effectiveOutputMode,
-        string? queueStatus,
-        bool treatWorkingVirtualQueuesAsPhysicalForTesting,
-        string? connectionPort = null) =>
-        treatWorkingVirtualQueuesAsPhysicalForTesting &&
-        string.Equals(discoveredOutputMode, UnsupportedVirtual, StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(effectiveOutputMode, Physical, StringComparison.OrdinalIgnoreCase) &&
-        IsWorkingWindowsQueue(queueStatus) &&
-        IsConnectedPrinterPort(connectionPort);
+    public static string ResolveOutputMode(string? discoveredOutputMode) =>
+        string.Equals(discoveredOutputMode, PdfExport, StringComparison.OrdinalIgnoreCase)
+            ? PdfExport
+            : string.Equals(discoveredOutputMode, Physical, StringComparison.OrdinalIgnoreCase)
+                ? Physical
+                : UnsupportedVirtual;
 
     public static bool IsConnectedPrinterPort(string? connectionPort)
     {

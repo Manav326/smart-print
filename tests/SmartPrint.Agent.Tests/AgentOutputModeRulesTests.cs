@@ -17,6 +17,18 @@ public sealed class AgentOutputModeRulesTests
         Assert.Equal(expected, AgentOutputModeRules.IsPdfExport(dispatchOutputMode));
     }
 
+    [Theory]
+    [InlineData("UNSUPPORTED_VIRTUAL", false)]
+    [InlineData("TEST_VIRTUAL", false)]
+    [InlineData("PHYSICAL", false)]
+    [InlineData("PDF_EXPORT", true)]
+    public void AuthorisedVirtualAndPhysicalQueuesShareTheWindowsSpoolerPath(string outputMode, bool isPdfExport)
+    {
+        // Worker.ProcessAuthorizedPrintJobAsync uses ExportPdfAsync only for
+        // PDF_EXPORT; every other server-authorised mode reaches PrintAsync.
+        Assert.Equal(isPdfExport, AgentOutputModeRules.IsPdfExport(outputMode));
+    }
+
     [Fact]
     public void PhysicalDispatchCannotBeOverriddenByAnUploadTimeVirtualQueueMarker()
     {

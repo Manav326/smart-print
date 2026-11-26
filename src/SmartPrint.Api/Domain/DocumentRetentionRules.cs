@@ -16,6 +16,9 @@ public static class DocumentRetentionRules
         if (!string.Equals(storageMode, "CLOUD", StringComparison.OrdinalIgnoreCase) || purgedUtc is not null)
             return false;
 
+        if (string.Equals(jobStatus, "TEST_OUTPUT_READY", StringComparison.OrdinalIgnoreCase))
+            return outputCompletedUtc is not null && outputCompletedUtc <= completedCutoffUtc;
+
         if (string.Equals(jobStatus, "COMPLETED", StringComparison.OrdinalIgnoreCase))
         {
             var completionUtc = outputConfirmedUtc ?? outputCompletedUtc;

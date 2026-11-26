@@ -20,7 +20,34 @@ public sealed class PrinterDispatchRulesTests
     [InlineData("PHYSICAL", "Error", false)]
     public void AppliesOutputModeSpecificDispatchability(string outputMode, string status, bool expected)
     {
-        Assert.Equal(expected, PrinterDispatchRules.IsDispatchableStatus(outputMode, status));
+        Assert.Equal(expected, PrinterDispatchRules.IsDispatchableStatus(outputMode, status, false, false));
+    }
+
+    [Theory]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Ready", false, false, false)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Busy", true, false, true)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Ready", false, true, false)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Offline", true, false, false)]
+    [InlineData("PHYSICAL", "Ready", false, true, true)]
+    public void VirtualQueueDispatchRequiresGrantAndNonProduction(
+        string outputMode, string status, bool grantActive, bool isProduction, bool expected)
+    {
+        Assert.Equal(expected, PrinterDispatchRules.IsDispatchableStatus(
+            outputMode, status, grantActive, isProduction));
+    }
+
+    [Fact]
+    public void FinalSpoolerAuthorisationMustMatchTheCurrentAttemptAndUnexpiredLease()
+    {
+        var now = new DateTimeOffset(2026, 11, 26, 8, 0, 0, TimeSpan.Zero);
+        Assert.True(PrinterDispatchRules.IsCurrentSpoolerSubmissionAttempt(
+            "VIRTUAL-TEST-123-A2", "VIRTUAL-TEST-123-A2", now.AddSeconds(1), now));
+        Assert.False(PrinterDispatchRules.IsCurrentSpoolerSubmissionAttempt(
+            "VIRTUAL-TEST-123-A2", "VIRTUAL-TEST-123-A1", now.AddSeconds(1), now));
+        Assert.False(PrinterDispatchRules.IsCurrentSpoolerSubmissionAttempt(
+            "VIRTUAL-TEST-123-A2", "VIRTUAL-TEST-123-A2", now, now));
+        Assert.False(PrinterDispatchRules.IsCurrentSpoolerSubmissionAttempt(
+            "VIRTUAL-TEST-123-A2", null, now.AddSeconds(1), now));
     }
 
     [Theory]

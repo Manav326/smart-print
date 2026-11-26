@@ -4,11 +4,15 @@ import { formatIstDateTime } from "./date-time";
 import {
   getPlatformOperationalSettings,
   getPlatformOperationalSettingsHistory,
+  getPlatformVirtualPrinterTestQueues,
+  approvePlatformVirtualPrinterTestQueue,
+  revokePlatformVirtualPrinterTestGrant,
   updatePlatformOperationalSettings,
   type AuthTokens,
   type PlatformOperationalSettings,
   type PlatformOperationalSettingsAudit,
-  type PlatformOperationalSettingsInput
+  type PlatformOperationalSettingsInput,
+  type PlatformVirtualPrinterTestQueue
 } from "./api";
 
 type NumericKey =
@@ -42,6 +46,107 @@ function toDraft(value: PlatformOperationalSettings): Draft {
   delete draft.updatedByUserId;
   delete draft.updatedUtc;
   return draft as Draft;
+}
+
+function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
+  const [queues, setQueues] = useState<PlatformVirtualPrinterTestQueue[]>([]);
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  async function reload() {
+    setLoading(true);
+    setError("");
+    try {
+      setQueues(await getPlatformVirtualPrinterTestQueues(tokens.accessToken));
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not load virtual printer queues.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void reload(); }, [tokens.accessToken]);
+
+  async function approve(queue: PlatformVirtualPrinterTestQueue) {
+    if (reason.trim().length < 5) {
+      setError("Enter an approval reason of at least five characters.");
+      return;
+    }
+    setBusyId(queue.id);
+    setError("");
+    setSuccess("");
+    try {
+      await approvePlatformVirtualPrinterTestQueue(tokens.accessToken, queue.tenantId, queue.id, reason.trim());
+      setReason("");
+      setSuccess("Virtual queue approved for this shop for seven days. The queue identity remains virtual.");
+      await reload();
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not approve this virtual printer.");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  async function revoke(queue: PlatformVirtualPrinterTestQueue, grantId: string) {
+    if (reason.trim().length < 5) {
+      setError("Enter a revocation reason of at least five characters.");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Revoke virtual test access for ${queue.displayName} at ${queue.shopName}? New dispatch authorisations will be denied immediately. A job already authorised at the Windows spooler boundary may still be in progress and must be reconciled; revocation does not erase output already produced.`
+    );
+    if (!confirmed) return;
+    setBusyId(queue.id);
+    setError("");
+    setSuccess("");
+    try {
+      await revokePlatformVirtualPrinterTestGrant(tokens.accessToken, grantId, reason.trim());
+      setReason("");
+      setSuccess("Virtual printer grant revoked. New dispatches will be denied.");
+      await reload();
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not revoke this virtual printer grant.");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  return (
+    <section className="panel platform-ops-history">
+      <div className="platform-ops-heading">
+        <div><h3>Shop-scoped virtual printer test access</h3><p>Approve one discovered Windows virtual queue for one shop. Approval is bound to its Agent, queue, driver and port identity, expires after seven days by default, and never changes its printer type.</p></div>
+        <button className="subtle-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={14}/> Refresh</button>
+      </div>
+      <label className="platform-ops-reason"><span>Approval / revocation reason</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder="Reason required for the audit history"/></label>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      {success && <div className="inline-success" role="status">{success}</div>}
+      {loading ? <div className="platform-plan-empty">Loading discovered virtual queues…</div> : queues.length === 0
+        ? <div className="platform-plan-empty">No unsupported virtual Windows queues are currently discovered.</div>
+        : <div className="platform-ops-history-list">
+            {queues.map(queue => {
+              const activeGrant = queue.grants.find(grant => grant.isActive);
+              const latestGrant = queue.grants[0];
+              const queueFresh = !!queue.lastSeenUtc && Date.parse(queue.lastSeenUtc) >= Date.now() - 2 * 60 * 1000;
+              const ready = queue.isActive && queueFresh && queue.agentOnline && (queue.status === "Ready" || queue.status === "Busy");
+              return (
+                <article className="platform-ops-history-item" key={queue.tenantId + ":" + queue.id}>
+                  <div className="platform-ops-heading">
+                    <div><strong>{queue.shopName} · {queue.displayName}</strong><small>{queue.shopSlug} · {queue.model} · {queue.connectionType} · Queue state: {queue.status} · {queue.isActive ? "Enabled" : "Disabled"}</small><small>Windows queue: {queue.queueName || "Not reported"} · IPP endpoint / port: {queue.connectionAddress || "Not reported"}</small><small>Paired Agent: {queue.agentDeviceId || "Not paired"} · {queue.agentOnline ? "Online" : "Offline / stale"}{queue.agentLastSeenUtc ? " · last seen " + formatIstDateTime(queue.agentLastSeenUtc) : ""}</small><small>Queue inventory: {queueFresh ? "Fresh" : "Stale / not reported"} · Identity: <code title={queue.identityFingerprint || "Identity unavailable"}>{queue.identityFingerprint ? queue.identityFingerprint.slice(0, 16) + "…" : "Unavailable"}</code></small></div>
+                    <span className="neutral-chip">{activeGrant ? ready ? "Approved · ready" : "Grant active · unavailable" : "Not approved"}</span>
+                  </div>
+                  {activeGrant
+                    ? <div><small>Active grant · approved {formatIstDateTime(activeGrant.createdUtc)} by {activeGrant.approvedByName} · expires {formatIstDateTime(activeGrant.expiresUtc)}</small><small>Approval reason: {activeGrant.reason}</small><div className="platform-ops-save-row"><button className="subtle-button" disabled={!!busyId} onClick={() => void revoke(queue, activeGrant.id)}>{busyId === queue.id ? <LoaderCircle size={14} className="platform-spin"/> : "Revoke approval"}</button></div></div>
+                    : <div><small>{latestGrant?.revokedUtc ? "Last grant revoked: " + (latestGrant.revocationReason || latestGrant.reason) : !queue.isActive ? "This printer is disabled in the shop. Enable it before requesting a test grant." : !queue.agentOnline ? "The paired Windows Agent is offline or its heartbeat is stale." : !queueFresh ? "Waiting for a fresh Windows queue inventory report." : "No active approval. Queue must be Ready or Busy before approval."}</small><div className="platform-ops-save-row"><button className="primary-button" disabled={!!busyId || !ready || !queue.agentDeviceId || !queue.identityFingerprint} onClick={() => void approve(queue)}>{busyId === queue.id ? <LoaderCircle size={14} className="platform-spin"/> : <ShieldCheck size={14}/>} Approve for 7 days</button></div></div>}
+                  {queue.grants.length > 0 && <details><summary>Approval history · {queue.grants.length} record(s)</summary><ul>{queue.grants.map(grant => <li key={grant.id}><strong>{grant.isActive ? "Active" : grant.revokedUtc ? "Revoked" : "Inactive · expired or identity changed"}</strong> · {formatIstDateTime(grant.createdUtc)} · expires {formatIstDateTime(grant.expiresUtc)} · approved by {grant.approvedByName} · {grant.reason}{grant.revokedUtc ? ` · revoked ${formatIstDateTime(grant.revokedUtc)} by ${grant.revokedByName || "system"}: ${grant.revocationReason || "No reason recorded"}` : ""}</li>)}</ul></details>}
+                </article>
+              );
+            })}
+          </div>}
+    </section>
+  );
 }
 
 export default function PlatformOperationsSection({ tokens }: { tokens: AuthTokens }) {
@@ -135,14 +240,6 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
               ))}
             </div>
             <label className="platform-ops-toggle">
-              <input type="checkbox" checked={draft.treatWorkingVirtualQueuesAsPhysicalForTesting}
-                onChange={event => {
-                  const checked = event.target.checked;
-                  setDraft(current => current ? { ...current, treatWorkingVirtualQueuesAsPhysicalForTesting: checked } : current);
-                }}/>
-              <span><strong>Treat working virtual Windows queues as physical (testing)</strong><small>Platform-wide test override. When enabled, an otherwise unsupported virtual Windows queue is temporarily selectable and dispatched through its existing Windows queue only when Windows reports Ready or Busy. This includes IPP destinations such as /p/virtual. The connection remains labelled IPP or its detected transport; the override does not change Microsoft Print to PDF, which always follows the separate PDF Export workflow. Turn this off to return those queues to visible but unsupported on the next successful printer sync. Use only for controlled testing; some virtual drivers may display prompts or behave differently from physical printers.</small></span>
-            </label>
-            <label className="platform-ops-toggle">
               <input type="checkbox" checked={draft.allowPrivatePrintingVirtualOutput}
                 onChange={event => {
                   const checked = event.target.checked;
@@ -165,6 +262,8 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
               </button>
             </div>
           </section>
+
+          <VirtualPrinterTestGrantPanel tokens={tokens}/>
 
           <section className="panel platform-ops-policy-note">
             <AlertTriangle size={17}/>
