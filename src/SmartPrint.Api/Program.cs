@@ -3582,7 +3582,12 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
                        item.TenantId == tenantId &&
                        item.IsActive &&
                        item.AgentDeviceId != null &&
-                                              (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT") &&
+                                              (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT" ||
+                        (!environment.IsProduction() && item.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                         db.VirtualPrinterTestGrants.Any(grant => grant.TenantId == item.TenantId &&
+                             grant.PrinterDeviceId == item.Id && grant.AgentDeviceId == item.AgentDeviceId &&
+                             grant.IdentityFingerprint == item.IdentityFingerprint &&
+                             grant.RevokedUtc == null && grant.ExpiresUtc > now))) &&
                        ((item.OutputMode == "PDF_EXPORT" && !selectedJob.PrivatePrinting) ||
                         (item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
                          (item.Status == "Ready" || item.Status == "Busy"))) &&
@@ -3598,7 +3603,12 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
             item.DisplayName,
             item.QueueName,
             item.AgentDeviceId,
-            item.OutputMode
+            item.OutputMode,
+            VirtualTestGrantActive = item.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                !environment.IsProduction() && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == item.TenantId && grant.PrinterDeviceId == item.Id &&
+                    grant.AgentDeviceId == item.AgentDeviceId && grant.IdentityFingerprint == item.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now)
         })
         .SingleOrDefaultAsync(ct);
 
@@ -3613,7 +3623,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
     }
     var allowPrivateVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
     if (selectedJob.PrivatePrinting &&
-        !PrivatePrintingOutputPolicy.IsEligible(allowPrivateVirtualOutput, environment.IsProduction(), printer.OutputMode))
+        !PrivatePrintingOutputPolicy.IsEligible(allowPrivateVirtualOutput, environment.IsProduction(), printer.OutputMode, printer.VirtualTestGrantActive))
     {
         await transaction.RollbackAsync(ct);
         return Results.Conflict(new
@@ -3994,7 +4004,16 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
                (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                 (printer.Status == "Ready" || printer.Status == "Busy"))) &&
               agent.RevokedUtc == null && agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter
-        select new { printer.DisplayName, printer.QueueName, printer.OutputMode, AgentId = agent.Id, AgentName = agent.DeviceName }
+        select new
+        {
+            printer.DisplayName, printer.QueueName, printer.OutputMode,
+            AgentId = agent.Id, AgentName = agent.DeviceName,
+            VirtualTestGrantActive = printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                !environment.IsProduction() && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == printer.TenantId && grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == printer.AgentDeviceId && grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now)
+        }
     ).SingleOrDefaultAsync(ct);
     var verified = await db.PrintPayments.AnyAsync(x => x.TenantId == tenantId && x.PrintJobId == job.Id &&
         (x.Status == "VERIFIED" || x.Status == "PARTIALLY_REFUNDED"), ct);
@@ -4002,7 +4021,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
         return Results.Conflict(new { code = "print_prerequisites_not_met", message = "Verified payment and the same paired computer's live printer queue are required." });
     var allowPrivateVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
     if (job.PrivatePrinting &&
-        !PrivatePrintingOutputPolicy.IsEligible(allowPrivateVirtualOutput, environment.IsProduction(), ready.OutputMode))
+        !PrivatePrintingOutputPolicy.IsEligible(allowPrivateVirtualOutput, environment.IsProduction(), ready.OutputMode, ready.VirtualTestGrantActive))
         return Results.Conflict(new
         {
             code = "private_printing_physical_output_required",
