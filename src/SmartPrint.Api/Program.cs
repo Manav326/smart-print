@@ -1436,6 +1436,7 @@ shop.MapGet("/subscription", async (
     ClaimsPrincipal principal,
     SmartPrintDbContext db,
     TenantEntitlementService entitlements,
+    IHostEnvironment environment,
     CancellationToken ct) =>
 {
     if (!TryGetTenantId(principal, out var tenantId))
@@ -4451,7 +4452,7 @@ shop.MapPost("/print-batches/{batchId:guid}/resume-unprinted", async (
                        item.QueueName != null && item.QueueName != "" &&
                        item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
                        (item.Status == "Ready" || item.Status == "Busy"))
-        .Select(item => new { item.Id, item.DisplayName, item.QueueName, item.AgentDeviceId })
+        .Select(item => new { item.Id, item.DisplayName, item.QueueName, item.AgentDeviceId, item.OutputMode })
         .SingleOrDefaultAsync(ct);
     var agent = await db.AgentDevices.AsNoTracking()
         .Where(item => item.Id == agentId && item.TenantId == tenantId &&
