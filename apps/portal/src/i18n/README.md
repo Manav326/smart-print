@@ -14,7 +14,7 @@ The first-use default remains Hinglish. A user's explicit choice is persisted in
 
 1. Add a complete key/value catalog in `catalog.ts`, typed as `Record<keyof typeof english, string>`. Keep message keys identical to English.
 2. Add that catalog to `uiCatalogs`.
-3. Add its display name, native name, BCP 47 language tag, aliases, English fallback, and default flag to `localeMetadata`.
+3. Add its display name, native name, BCP 47 language tag, text direction (`ltr` or `rtl`), aliases, English fallback, and default flag to `localeMetadata`.
 4. Run `pnpm --dir apps/portal check:i18n` and `pnpm --dir apps/portal typecheck`.
 
 The selector and locale union are derived from the registry. The catalog checker discovers registered catalogs automatically and rejects missing/extra keys, duplicate keys, blank translations, and interpolation-placeholder mismatches.
