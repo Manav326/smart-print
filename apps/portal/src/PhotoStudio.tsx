@@ -803,12 +803,12 @@ export default function PhotoStudio({
     ? `${size.label} · ${photoPaperFinish.toLowerCase()} photo paper`
     : `${size.label} · ${photoPaperFinish.toLowerCase()} A4 sheets`;
   const footerHint = mode === "private-library"
-    ? (isPhotoPaperLayout ? "Original stays private · individual photo-paper prints saved here." : "Original stays private · "+photoPaperFinish.toLowerCase()+" A4 photo sheets saved here.")
+    ? (isPhotoPaperLayout ? t("Original stays private · individual photo-paper prints saved here.") : t("Original stays private · {finish} A4 photo sheets saved here.",{finish:t(photoPaperFinish==="GLOSSY"?"Glossy":photoPaperFinish==="MATTE"?"Matte":"Plain")}))
     : mode === "shop-create"
-      ? "New order · Verify payment before printing."
+      ? t("New order · Verify payment before printing.")
       : mode === "shop"
-        ? "Replace the unpaid job photo PDF; approval and dispatch still apply."
-        : "Prepared photo output replaces this upload; original stays untouched.";
+        ? t("Replace the unpaid job photo PDF; approval and dispatch still apply.")
+        : t("Prepared photo output replaces this upload; original stays untouched.");
   const actionLabel = mode === "private-library" ? t("Save private sheet") : mode === "shop-create" ? t("Create photo order") : mode === "shop" ? t("Save sheet to this job") : t("Prepare A4 sheet");
   const outputActionLabel = isPhotoPaperLayout ? (mode === "private-library" ? t("Save photo-paper prints") : mode === "shop" ? t("Save photo-paper prints to this job") : t("Prepare photo-paper prints")) : actionLabel;
   const busyLabel = preparationProgress ? t(preparationProgress) : mode === "private-library" ? t("Saving privately…") : mode === "shop-create" ? t("Creating photo order…") : mode === "shop" ? t("Saving to the existing job…") : t("Preparing your photo output…");
