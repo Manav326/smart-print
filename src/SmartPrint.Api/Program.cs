@@ -8371,6 +8371,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/authorize-spooler-submission", async (
         select new
         {
             job.PrivatePrinting,
+            job.OutputType,
             printer.Id,
             printer.OutputMode,
             printer.IdentityFingerprint,
@@ -8391,10 +8392,10 @@ agentApi.MapPost("/jobs/{jobId:guid}/authorize-spooler-submission", async (
             grant.AgentDeviceId == device.Id &&
             grant.IdentityFingerprint == output.IdentityFingerprint &&
             grant.RevokedUtc == null && grant.CreatedUtc <= now && grant.ExpiresUtc > now, ct);
-        if (!grantActive)
-            return Results.Conflict(new { code = "virtual_printer_test_grant_expired_or_revoked", message = "The shop-scoped virtual printer test grant is no longer active. No Windows spooler submission was attempted." });
+        if (!grantActive || output.OutputType != PrivatePrintingOutputPolicy.TestVirtual)
+            return Results.Conflict(new { code = "virtual_printer_test_grant_expired_or_revoked", message = "The shop-scoped virtual printer test grant or test-output classification is no longer valid. No Windows spooler submission was attempted." });
     }
-    else if (output.OutputMode != PrinterTypePolicy.Physical)
+    else if (output.OutputMode != PrinterTypePolicy.Physical || output.OutputType != PrinterTypePolicy.Physical)
     {
         return Results.Conflict(new { code = "unsupported_spooler_output_mode" });
     }
