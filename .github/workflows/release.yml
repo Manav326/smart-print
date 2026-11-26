@@ -31,7 +31,7 @@ jobs:
       source_sha: ${{ steps.verify-tag.outputs.source_sha }}
     steps:
       - name: Check out the exact release tag
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
@@ -99,17 +99,17 @@ jobs:
     outputs:
       store_available: ${{ steps.store-package.outputs.available }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.validate-release-config.outputs.source_sha }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
         with:
           version: 10.18.0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
         with:
           dotnet-version: 10.0.x
       - name: Install desktop and portal dependencies
@@ -194,14 +194,14 @@ jobs:
         run: ./scripts/build-signed-store-installer.ps1
       - name: Upload signed Microsoft Store installer
         if: steps.store-package.outputs.available == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: smartprint-windows-store-release
           path: artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe
           if-no-files-found: error
           retention-days: 5
       - name: Upload Windows installer
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: smartprint-windows-release
           path: artifacts/agent-installer/SmartPrint-Windows-Setup.exe
@@ -248,7 +248,7 @@ jobs:
           echo "available=true" >> "$GITHUB_OUTPUT"
           echo "All Android signing inputs are present; the release job will build and verify the signed APK."
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: steps.check-signing.outputs.available == 'true'
         with:
           ref: ${{ needs.validate-release-config.outputs.source_sha }}
@@ -258,7 +258,7 @@ jobs:
         if: steps.check-signing.outputs.available == 'true'
         with:
           version: 10.18.0
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         if: steps.check-signing.outputs.available == 'true'
         with:
           node-version: "22"
@@ -266,7 +266,7 @@ jobs:
       - name: Install shared portal dependencies
         if: steps.check-signing.outputs.available == 'true'
         run: pnpm install --frozen-lockfile
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
         if: steps.check-signing.outputs.available == 'true'
         with:
           distribution: temurin
@@ -334,7 +334,7 @@ jobs:
           echo "Verified Android release certificate SHA-256: $certificate_fingerprint"
       - name: Upload Android APK and AAB
         if: steps.check-signing.outputs.available == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: smartprint-android-release
           path: |
@@ -360,19 +360,19 @@ jobs:
       RELEASE_SOURCE_SHA: ${{ needs.validate-release-config.outputs.source_sha }}
     steps:
       - name: Download Windows installer
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: smartprint-windows-release
           path: artifacts
       - name: Download signed Microsoft Store installer
         if: needs.windows-setup.outputs.store_available == 'true'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: smartprint-windows-store-release
           path: artifacts
       - name: Download Android APK and AAB
         if: needs.android-release.outputs.available == 'true'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: smartprint-android-release
           path: artifacts
