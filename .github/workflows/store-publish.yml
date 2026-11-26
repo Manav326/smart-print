@@ -52,13 +52,13 @@ jobs:
             echo "::error::Store publication must be dispatched from main."
             exit 1
           fi
-      - id: verify-release-tag
-        name: Check out and verify the exact release tag
+      - name: Check out the exact release tag
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
           fetch-depth: 0
-      - name: Require explicit publication confirmation and a stable tag
+      - id: verify-release-tag
+        name: Verify the release tag and publication confirmation
         shell: bash
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
