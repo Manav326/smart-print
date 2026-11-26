@@ -388,10 +388,10 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  assert.match(studio,/const protect = mode !== "private-library"/);
  assert.match(studio,/setDesktopContentProtection\(protect\)/);
  assert.match(studio,/previewProtection/);
- assert.match(studio,/const actionLabel = mode === "private-library" \? "Save private sheet"/);
+ assert.match(studio,/const actionLabel = mode === "private-library" \? t\("Save private sheet"\)/);
  const studioCss=read("../src/PhotoStudio.module.css");
  assert.match(studioCss,/\.previewProtection::before/);
- assert.match(studio,/mode === "private-library" \? "Save private sheet"/);
+ assert.match(studio,/mode === "private-library" \? t\("Save private sheet"\)/);
  assert.match(studio,/mode === "shop-create" \? "Create photo order"/);
  assert.match(studio,/mode === "shop" \? "Save sheet to this job"/);
  assert.match(studio,/: "Prepare A4 sheet"/);
