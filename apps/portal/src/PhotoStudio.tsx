@@ -6,7 +6,7 @@ import {
 import styles from "./PhotoStudio.module.css";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
-import { useLocale, translateUiText, formatUiCurrency } from "./i18n";
+import { LanguageSwitcher, useLocale, translateUiText, formatUiCurrency } from "./i18n";
 import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdfBlob, getPhotoPaperPageGeometry, getPhotoSheetLayout, getPhotoSheetPhotoPositions, getPhotoCropFocusAfterDrag, hasSufficientPhotoResolution, type PhotoOutputLayout, type PhotoPaperFinish } from "./photo-studio-layout";
 
 export type PhotoStudioEditorSettings = {
@@ -823,7 +823,7 @@ export default function PhotoStudio({
           <span><strong id="photo-studio-title">{t("Photo Studio")}</strong><small>{mode === "private-library" ? t("PRIVATE · ON THIS DEVICE") : mode === "shop-create" ? t("SHOP · NEW PHOTO ORDER") : mode === "shop" ? t("SHOP · EDIT EXISTING JOB") : t("CUSTOMER · BEFORE UPLOAD")}</small></span>
         </div>
         <div className={styles.topbarMeta}><span>{isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm ${t("photo")}` : "A4 · 210 × 297 mm"}</span><span>{t("PDF target · 300 DPI")}</span></div>
-        <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label={t("Close Photo Studio")} title={t("Close")}><X size={18}/></button>
+        <LanguageSwitcher compact/><button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label={t("Close Photo Studio")} title={t("Close")}><X size={18}/></button>
       </header>
 
       <div className={styles.editor}>
