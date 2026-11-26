@@ -7,7 +7,7 @@ import { useFileDownload } from "./download-manager";
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
 import "./public-landing.css";
-import { useLocale, translateUi, translateUiText } from "./i18n";
+import { LanguageSwitcher, useLocale, translateUi, translateUiText } from "./i18n";
 
 export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
   const { locale } = useLocale();
@@ -39,6 +39,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
           <a href="#downloads">{t("Downloads")}</a>
         </nav>
         <ThemeToggleButton dark={dark} onToggle={onToggleTheme} className="sp-theme-toggle"/>
+        <LanguageSwitcher compact/>
         <a className="sp-shop-entry" href="/shop">
           <span className="sp-shop-entry-icon"><Store size={18}/><Printer size={10}/></span>
           <span>{translateUi(locale,"public.forPrintShops")}</span>
