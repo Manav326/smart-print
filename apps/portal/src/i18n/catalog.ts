@@ -239,6 +239,7 @@ const hinglish: Record<keyof typeof english, string> = {
 const uiCatalogs = { english, hindi, hinglish } as const;
 
 export type UiLocale = keyof typeof uiCatalogs;
+export type MessageKey = keyof typeof english;
 export type MessageValues = Record<string, string | number>;
 type LocaleMetadata = {
   label: string;
@@ -298,7 +299,7 @@ export const UI_MESSAGE_KEYS = Object.keys(english) as Array<keyof typeof englis
 
 export function hasUiTranslation(key: string, localeValue: unknown): boolean {
   const locale = normalizeUiLocale(localeValue);
-  return Object.prototype.hasOwnProperty.call(uiCatalogs[locale], key);
+  return Object.prototype.hasOwnProperty.call(uiCatalogs[locale], key) || Object.prototype.hasOwnProperty.call(uiCatalogs[localeMetadata[locale].fallback], key);
 }
 
 export function translateUiPlural(
