@@ -41,6 +41,7 @@ const fields: Array<{ key: NumericKey; label: string; hint: string; min: number;
 ];
 
 type Draft = Omit<PlatformOperationalSettings, "updatedByUserId" | "updatedUtc">;
+import { useLocale, translateUiText } from "./i18n";
 function toDraft(value: PlatformOperationalSettings): Draft {
   const draft: Partial<PlatformOperationalSettings> = { ...value };
   delete draft.updatedByUserId;
@@ -117,7 +118,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
   return (
     <section className="panel platform-ops-history">
       <div className="platform-ops-heading">
-        <div><h3>Shop-scoped virtual printer test access</h3><p>Approve one discovered Windows virtual queue for one shop. Approval is bound to its Agent, queue, driver and port identity, expires after seven days by default, and never changes its printer type.</p></div>
+        <div><h3>{t("Shop-scoped virtual printer test access")}</h3><p>{t("Approve one discovered Windows virtual queue for one shop. Approval is bound to its Agent, queue, driver and port identity, expires after seven days by default, and never changes its printer type.")}</p></div>
         <button className="subtle-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={14}/> Refresh</button>
       </div>
       <label className="platform-ops-reason"><span>Approval / revocation reason</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder="Reason required for the audit history"/></label>
@@ -150,6 +151,8 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
 }
 
 export default function PlatformOperationsSection({ tokens }: { tokens: AuthTokens }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [history, setHistory] = useState<PlatformOperationalSettingsAudit[]>([]);
   const [reason, setReason] = useState("");
@@ -211,7 +214,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
       <div className="platform-ops-intro">
         <div>
           <div className="platform-plan-kicker"><ShieldCheck size={14}/> PLATFORM POLICY</div>
-          <h2>Operations, quotas and data retention</h2>
+          <h2>{t("Operations, quotas and data retention")}</h2>
           <p>Central controls enforced by the API and paired Windows Agents. Every change is persisted with an audit reason.</p>
         </div>
         <button className="secondary-button" onClick={() => void reload()} disabled={loading || saving}>
@@ -227,7 +230,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
         <>
           <section className="panel platform-ops-panel">
             <div className="platform-ops-heading">
-              <div><h3>Monthly print quota and retention</h3><p>Quota units are print jobs, not pages or copies. Paid plan limits remain versioned per plan.</p></div>
+              <div><h3>{t("Monthly print quota and retention")}</h3><p>{t("Quota units are print jobs, not pages or copies. Paid plan limits remain versioned per plan.")}</p></div>
               <span className="neutral-chip">Platform-managed</span>
             </div>
             <div className="platform-ops-grid">
@@ -245,7 +248,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
                   const checked = event.target.checked;
                   setDraft(current => current ? { ...current, allowPrivatePrintingVirtualOutput: checked } : current);
                 }}/>
-              <span><strong>Allow Microsoft Print to PDF for Private Printing tests</strong><small>Non-production only. The Agent currently recognizes Microsoft Print to PDF as its supported virtual test queue. Other virtual drivers remain ineligible until their unattended output behaviour is explicitly validated. Production APIs always reject virtual output, even if this setting is accidentally enabled.</small></span>
+              <span><strong>{t("Allow Microsoft Print to PDF for Private Printing tests")}</strong><small>{t("Non-production only. The Agent currently recognizes Microsoft Print to PDF as its supported virtual test queue. Other virtual drivers remain ineligible until their unattended output behaviour is explicitly validated. Production APIs always reject virtual output, even if this setting is accidentally enabled.")}</small></span>
             </label>
             <label className="platform-ops-toggle">
               <input type="checkbox" checked={draft.allowPaidJobClaimsWhenSuspended}
@@ -253,7 +256,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
                   const checked = event.target.checked;
                   setDraft(current => current ? { ...current, allowPaidJobClaimsWhenSuspended: checked } : current);
                 }}/>
-              <span><strong>Allow already-paid jobs to continue during suspension</strong><small>Only jobs created and payment-verified before the latest suspension can be claimed. New orders and post-suspension payments remain blocked.</small></span>
+              <span><strong>{t("Allow already-paid jobs to continue during suspension")}</strong><small>{t("Only jobs created and payment-verified before the latest suspension can be claimed. New orders and post-suspension payments remain blocked.")}</small></span>
             </label>
             <div className="platform-ops-save-row">
               <label className="platform-ops-reason"><span>Audit reason</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder="Why are these platform settings changing?"/></label>
@@ -267,7 +270,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
 
           <section className="panel platform-ops-policy-note">
             <AlertTriangle size={17}/>
-            <div><strong>Safety behaviour</strong><p>Output-unconfirmed and unfinished jobs are never automatically deleted. Completed Standard Printing documents are deleted 72 hours after confirmed output. Eligible abandoned files are purged only after the abandonment window and once financial holds clear. Private Printing source files are removed only after verified physical output or a verified non-production test output and the paired Agent acknowledges deletion. Test PDFs are not physical fulfilment and are separately retained in protected local storage for 24 hours. Permanent tenant deactivation is blocked until unsettled print and financial work is resolved.</p></div>
+            <div><strong>{t("Safety behaviour")}</strong><p>{t("Output-unconfirmed and unfinished jobs are never automatically deleted. Completed Standard Printing documents are deleted 72 hours after confirmed output. Eligible abandoned files are purged only after the abandonment window and once financial holds clear. Private Printing source files are removed only after verified physical output or a verified non-production test output and the paired Agent acknowledges deletion. Test PDFs are not physical fulfilment and are separately retained in protected local storage for 24 hours. Permanent tenant deactivation is blocked until unsettled print and financial work is resolved.")}</p></div>
           </section>
 
           <section className="panel platform-ops-history">
