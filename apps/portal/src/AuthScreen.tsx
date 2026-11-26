@@ -5,8 +5,10 @@ import { isDesktopApp } from "./desktop-bridge";
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
 import ShopGoogleSignInButton from "./ShopGoogleSignInButton";
+import { useLocale, translateUi } from "./i18n";
 
 export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { onAuthenticated: (tokens: AuthTokens) => void; dark: boolean; onToggleTheme: () => void }) {
+  const { locale } = useLocale();
   const desktop = isDesktopApp();
   const initialMode = window.location.pathname.replace(/\/+$/, "") === "/signup" || new URLSearchParams(window.location.search).get("mode") === "register" ? "register" : "signin";
   const [mode, setMode] = useState<"signin" | "register">(initialMode);
@@ -58,7 +60,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
       <div className="auth-glow auth-glow-one"/><div className="auth-glow auth-glow-two"/>
       <header className="auth-topbar">
         <BrandLockup className="auth-brand" />
-        <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/>{!desktop && <a className="auth-home-link" href="/"><ArrowLeft size={14}/> Back to website</a>}<span className="auth-top-note"><ShieldCheck size={15}/> Secure Smart Print workspace</span></div>
+        <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/>{!desktop && <a className="auth-home-link" href="/"><ArrowLeft size={14}/> {translateUi(locale,"auth.backToWebsite")}</a>}<span className="auth-top-note"><ShieldCheck size={15}/> {translateUi(locale,"auth.secureWorkspace")}</span></div>
       </header>
       <main className="auth-layout">
         <section className="auth-story">
@@ -73,20 +75,20 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
           <div className="auth-proof"><span className="proof-line"/><span>BUILT FOR INDEPENDENT PRINT SHOPS</span></div>
         </section>
         <section className="auth-card">
-          <div className="auth-card-heading"><div className="auth-card-icon"><Store size={20}/></div><div><span>WELCOME TO SMART PRINT</span><h2>{mode === "signin" ? "Welcome back" : "Set up your shop"}</h2><p>{mode === "signin" ? "Sign in to pick up where you left off." : "Create your shop workspace in a few steps."}</p></div></div>
-          <div className="auth-tabs"><button className={mode === "signin" ? "selected" : ""} onClick={() => {setMode("signin");setError("");}}>Sign in</button><button className={mode === "register" ? "selected" : ""} onClick={() => {setMode("register");setError("");}}>Create shop</button></div>
+          <div className="auth-card-heading"><div className="auth-card-icon"><Store size={20}/></div><div><span>WELCOME TO SMART PRINT</span><h2>{translateUi(locale,mode === "signin" ? "auth.welcomeBack" : "auth.setupShop")}</h2><p>{translateUi(locale,mode === "signin" ? "auth.signInHint" : "auth.createShopHint")}</p></div></div>
+          <div className="auth-tabs"><button className={mode === "signin" ? "selected" : ""} onClick={() => {setMode("signin");setError("");}}>{translateUi(locale,"auth.signIn")}</button><button className={mode === "register" ? "selected" : ""} onClick={() => {setMode("register");setError("");}}>{translateUi(locale,"auth.createAccount")}</button></div>
           <form className="auth-form" onSubmit={submit}>
             {mode === "register" && <>
-              <label>Shop or business name<div className="auth-input"><Store size={16}/><input value={businessName} onChange={e=>setBusinessName(e.target.value)} placeholder="e.g. City Print House" required maxLength={180}/></div></label>
-              <label>Your name<div className="auth-input"><UserRound size={16}/><input value={ownerName} onChange={e=>setOwnerName(e.target.value)} placeholder="Shop owner name" required maxLength={160}/></div></label>
+              <label>{translateUi(locale,"auth.businessName")}<div className="auth-input"><Store size={16}/><input value={businessName} onChange={e=>setBusinessName(e.target.value)} placeholder={translateUi(locale,"auth.shopNamePlaceholder")} required maxLength={180}/></div></label>
+              <label>{translateUi(locale,"auth.shopOwnerName")}<div className="auth-input"><UserRound size={16}/><input value={ownerName} onChange={e=>setOwnerName(e.target.value)} placeholder={translateUi(locale,"auth.shopOwnerName")} required maxLength={160}/></div></label>
             </>}
-            <label>Email address<div className="auth-input"><Mail size={16}/><input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@yourshop.com" required maxLength={256}/></div></label>
-            <label>Password<div className="auth-input"><LockKeyhole size={16}/><input type={showPassword ? "text" : "password"} autoComplete={mode === "signin" ? "current-password" : "new-password"} value={password} onChange={e=>setPassword(e.target.value)} placeholder={mode === "signin" ? "Your password" : "At least 12 characters"} required minLength={mode === "register" ? 12 : 1}/><button type="button" className="password-eye" aria-label={showPassword ? "Hide password" : "Show password"} onClick={()=>setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}</button></div></label>
+            <label>{translateUi(locale,"auth.email")}<div className="auth-input"><Mail size={16}/><input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder={translateUi(locale,"auth.emailPlaceholder")} required maxLength={256}/></div></label>
+            <label>{translateUi(locale,"auth.password")}<div className="auth-input"><LockKeyhole size={16}/><input type={showPassword ? "text" : "password"} autoComplete={mode === "signin" ? "current-password" : "new-password"} value={password} onChange={e=>setPassword(e.target.value)} placeholder={mode === "signin" ? translateUi(locale,"auth.passwordPlaceholder") : "At least 12 characters"} required minLength={mode === "register" ? 12 : 1}/><button type="button" className="password-eye" aria-label={showPassword ? "Hide password" : "Show password"} onClick={()=>setShowPassword(!showPassword)}>{showPassword ? <EyeOff size={16}/> : <Eye size={16}/>}</button></div></label>
             {error && <div className="auth-error" role="alert">{error}</div>}
-            <button className="auth-submit" type="submit" disabled={busy}>{busy ? <span className="button-spinner"/> : <>{mode === "signin" ? "Sign in to workspace" : "Create my shop"}<ArrowRight size={16}/></>}</button>
+            <button className="auth-submit" type="submit" disabled={busy}>{busy ? <span className="button-spinner"/> : <>{translateUi(locale,mode === "signin" ? "auth.signIn" : "auth.createAccount")}<ArrowRight size={16}/></>}</button>
           </form>
           {mode === "signin" && <ShopGoogleSignInButton onAuthenticated={authenticateWithGoogle} />}
-          {mode === "register" ? <div className="trial-note"><ShieldCheck size={15}/> Your shop starts with a 14-day trial. No payment is collected during registration.</div> : <div className="auth-secure-note"><LockKeyhole size={13}/> Your connection is protected with encrypted authentication.</div>}
+          {mode === "register" ? <div className="trial-note"><ShieldCheck size={15}/> {translateUi(locale,"auth.trialNote")}</div> : <div className="auth-secure-note"><LockKeyhole size={13}/> Your connection is protected with encrypted authentication.</div>}
           <div className="auth-card-footer">By continuing, you agree to the Smart Print service terms and privacy policy.</div>
         </section>
       </main>
