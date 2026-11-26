@@ -100,7 +100,7 @@ $package = @{
     languages = @("en-us")
     architectures = @("X64")
     isSilentInstall = $false
-    installerParameters = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-"
+    installerParameters = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG"
     genericDocUrl = $documentationUrl
     errorDetails = @()
     packageType = "exe"
@@ -112,7 +112,7 @@ if ([string]::IsNullOrWhiteSpace($packageId)) {
 
 Write-Host "Updating only the existing X64 package for $ReleaseTag."
 $null = Invoke-StoreApi -Method PATCH -Path "$packagesPath/$packageId" -Body $package
-$null = Invoke-StoreApi -Method POST -Path "$packagesPath/commit" -Body @{}
+$null = Invoke-StoreApi -Method POST -Path "$packagesPath/commit"
 
 Write-Host "Waiting for Microsoft Store package validation."
 $ready = $false
@@ -137,7 +137,7 @@ if (-not $ready) {
 }
 
 Write-Host "Submitting the validated Windows package for Microsoft certification."
-$submission = Invoke-StoreApi -Method POST -Path "/submission/v1/product/$ProductId/submit" -Body @{}
+$submission = Invoke-StoreApi -Method POST -Path "/submission/v1/product/$ProductId/submit"
 $submissionId = $submission.responseData.submissionId
 if ([string]::IsNullOrWhiteSpace($submissionId)) {
     throw "Microsoft Store API did not return a submission ID. Check Partner Center before retrying."
