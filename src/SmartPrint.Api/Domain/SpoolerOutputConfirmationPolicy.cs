@@ -165,10 +165,14 @@ public static class SpoolerOutputConfirmationPolicy
         DateTimeOffset? spoolerObservedUtc,
         DateTimeOffset? outputConfirmedUtc,
         DateTimeOffset? dispatchLeaseExpiresUtc,
-        DateTimeOffset nowUtc)
+        DateTimeOffset nowUtc,
+        bool allowTestVirtualOutput = false)
     {
+        var normalizedOutputType = Normalize(outputType);
+        var supportedOutputType = string.Equals(normalizedOutputType, "PHYSICAL", StringComparison.OrdinalIgnoreCase) ||
+            (allowTestVirtualOutput && string.Equals(normalizedOutputType, "TEST_VIRTUAL", StringComparison.OrdinalIgnoreCase));
         return string.Equals(Normalize(jobStatus), "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(Normalize(outputType), "PHYSICAL", StringComparison.OrdinalIgnoreCase) &&
+            supportedOutputType &&
             string.Equals(Normalize(spoolerStatus), "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase) &&
             IsVerifiedSpoolerAbsenceReport(failureCode, spoolerJobId) &&
             pagesPrinted == 0 &&
