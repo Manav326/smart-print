@@ -16,13 +16,16 @@
 #ifndef SmartPrintOutputBaseFilename
   #define SmartPrintOutputBaseFilename "SmartPrint-Windows-Setup"
 #endif
+#ifndef SmartPrintPublisher
+  #define SmartPrintPublisher "QuantaEdge"
+#endif
 
 [Setup]
 SourceDir=..\
 AppId={{A7F2E9CA-2C3A-4E58-AE63-26E6B7B0DDF1}
 AppName=Smart Print
 AppVersion={#SmartPrintVersion}
-AppPublisher=QuantaEdge
+AppPublisher={#SmartPrintPublisher}
 DefaultDirName={autopf}\SmartPrint
 DefaultGroupName=Smart Print
 DisableProgramGroupPage=yes
