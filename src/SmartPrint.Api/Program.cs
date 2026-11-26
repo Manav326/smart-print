@@ -6674,14 +6674,29 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
         string.IsNullOrWhiteSpace(request.Message) || request.Message.Length > 400)
         return Results.BadRequest(new { code = "private_relay_rejection_invalid" });
 
-    var ticket = await db.LocalPrintUploadTickets.SingleOrDefaultAsync(item =>
-        item.Id == ticketId && item.TenantId == device.TenantId &&
-        item.AgentDeviceId == device.Id && item.PrivatePrinting, ct);
-    if (ticket is null) return Results.NotFound();
+    // Completion and rejection must serialize on the same ticket row. Without
+    // this lock, a late rejection could mark an already-completed ticket FAILED
+    // after the canonical PrintJob had been committed.
+    await using var transaction = await db.Database.BeginTransactionAsync(ct);
+    var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
+        $"SELECT * FROM \\"LocalPrintUploadTickets\\" WHERE \\"Id\\" = {ticketId} AND \\"TenantId\\" = {device.TenantId} AND \\"AgentDeviceId\\" = {device.Id} AND \\"PrivatePrinting\\" = TRUE FOR UPDATE")
+        .ToListAsync(ct);
+    var ticket = lockedTickets.SingleOrDefault();
+    if (ticket is null)
+    {
+        await transaction.RollbackAsync(ct);
+        return Results.NotFound();
+    }
     if (ticket.CompletedUtc is not null)
+    {
+        await transaction.RollbackAsync(ct);
         return Results.Conflict(new { code = "private_relay_already_completed" });
+    }
     if (ticket.PrivateRelayFailedUtc is not null)
+    {
+        await transaction.CommitAsync(ct);
         return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = true });
+    }
 
     if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
         await storage.DeleteAsync(ticket.PrivateRelayStorageKey);
@@ -6696,6 +6711,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     ticket.PrivateRelayFailureMessage = request.Message.Trim();
     ticket.ExpiresUtc = ticket.PrivateRelayFailedUtc.Value;
     await db.SaveChangesAsync(ct);
+    await transaction.CommitAsync(ct);
     return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = false });
 });
 
