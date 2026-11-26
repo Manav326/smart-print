@@ -162,7 +162,7 @@ export default function App() {
 
 function ScopeAccessDenied({ scope, onSignOut, dark, onToggleTheme }: { scope: string; onSignOut: () => Promise<void>; dark: boolean; onToggleTheme: () => void }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: Record<string,string|number> = {}) => translateUiText(locale, value, values);
   const [busy, setBusy] = useState(false);
   async function signOut() {
     setBusy(true);
@@ -172,11 +172,11 @@ function ScopeAccessDenied({ scope, onSignOut, dark, onToggleTheme }: { scope: s
     <main className="auth-screen">
       <header className="auth-topbar">
         <BrandLockup className="auth-brand" />
-        <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/><a className="auth-home-link" href="/">{t("Back to website")}</a></div>
+        <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/><LanguageSwitcher compact/><a className="auth-home-link" href="/">{t("Back to website")}</a></div>
       </header>
       <section className="auth-card" style={{ maxWidth: 520, margin: "12vh auto" }}>
-        <div className="auth-card-heading"><div className="auth-card-icon"><ShieldCheck size={20}/></div><div><span>{t("APPLICATION SCOPE MISMATCH")}</span><h2>{t("Access not available")}</h2><p>This signed-in account is not authorized for {scope}.</p></div></div>
-        <button className="auth-submit" onClick={() => void signOut()} disabled={busy}>{busy ? <span className="button-spinner"/> : "Sign out and use another account"} <ArrowRight size={16}/></button>
+        <div className="auth-card-heading"><div className="auth-card-icon"><ShieldCheck size={20}/></div><div><span>{t("APPLICATION SCOPE MISMATCH")}</span><h2>{t("Access not available")}</h2><p>{t("This signed-in account is not authorized for {scope}.",{scope})}</p></div></div>
+        <button className="auth-submit" onClick={() => void signOut()} disabled={busy}>{busy ? <span className="button-spinner"/> : t("Sign out and use another account")} <ArrowRight size={16}/></button>
       </section>
     </main>
   );
@@ -4345,7 +4345,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
 
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
-    <header className="customer-entry-brand"><BrandLockup className="customer-entry-brand-lockup" /><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
+    <header className="customer-entry-brand"><BrandLockup className="customer-entry-brand-lockup" /><div style={{display:"flex",alignItems:"center",gap:8}}><LanguageSwitcher compact/><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></div></header>
     <main className={result ? "customer-entry-card customer-entry-card--upload" : "customer-entry-card"}>
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?translateUi(locale,"common.loading"):t("Connecting to your print shop")}</h1>{!nativeAppMode&&<p>{t("Creating a secure, time-limited session for this QR station.")}</p>}</>:
       error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">{t("STATION UNAVAILABLE")}</div><h1>{nativeAppMode?t("Shop unavailable"):t("This QR station can't be reached")}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>{t("Try again")}</button></>:
