@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useLocale, translateUiText } from "./i18n";
 import { AlertTriangle, Check, ChevronDown, Clock3, CreditCard, Eye, FileText, History, Image as ImageIcon, Inbox, PackageCheck, Printer, RefreshCw, RotateCcw, ShieldCheck, Wallet, Wifi, X } from "lucide-react";
 import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./api";
 import { formatIstDateTime } from "./date-time";
@@ -28,42 +29,43 @@ const flowSteps: Array<{id:OrderJourneyStage;title:string;detail:string;icon:typ
   {id:"printing",title:"Printing",detail:"Shop computer prints",icon:Printer},
   {id:"ready",title:"Ready",detail:"Output checked and complete",icon:PackageCheck}
 ];
+function tx(locale: string, value: string){return translateUiText(locale,value);}
 function money(value:number,currency:string){return new Intl.NumberFormat("en-IN",{style:"currency",currency:currency||"INR",maximumFractionDigits:2}).format(Math.max(0,value)/100);}
-function paymentLabel(payment:ShopPayment|null,stage:OrderJourneyStage){
-  if(!payment)return stage==="payment"?"Checkout not started":"Not due yet";
+function paymentLabel(payment:ShopPayment|null,stage:OrderJourneyStage,locale:string){
+  if(!payment)return tx(locale,stage==="payment"?"Checkout not started":"Not due yet");
   switch(payment.status){
-    case "AWAITING_CUSTOMER_PAYMENT":return "Waiting for customer payment";
-    case "CUSTOMER_REPORTED":return "Customer says paid · confirm receipt";
-    case "CASH_AWAITING_PAYMENT":return "Cash due at counter";
-    case "VERIFIED":return "Payment received";
-    case "PARTIALLY_REFUNDED":return "Partly refunded";
-    case "REJECTED":return "Payment not confirmed · customer may retry";
-    case "REFUNDED":return "Payment returned";
-    default:return "Payment update";
+    case "AWAITING_CUSTOMER_PAYMENT":return tx(locale,"Waiting for customer payment");
+    case "CUSTOMER_REPORTED":return tx(locale,"Customer says paid · confirm receipt");
+    case "CASH_AWAITING_PAYMENT":return tx(locale,"Cash due at counter");
+    case "VERIFIED":return tx(locale,"Payment received");
+    case "PARTIALLY_REFUNDED":return tx(locale,"Partly refunded");
+    case "REJECTED":return tx(locale,"Payment not confirmed · customer may retry");
+    case "REFUNDED":return tx(locale,"Payment returned");
+    default:return tx(locale,"Payment update");
   }
 }
-function printerSummary(jobs:ShopPrintJob[],printers:PrinterDevice[],agents:AgentDevice[]){
+function printerSummary(jobs:ShopPrintJob[],printers:PrinterDevice[],agents:AgentDevice[],locale:string){
   const active=jobs.filter(job=>!["REJECTED","REFUNDED","CANCELLED"].includes(job.status));
   const ids=new Set(active.map(job=>job.printerDeviceId).filter((id):id is string=>!!id));
-  if(!ids.size)return {name:"Printer not assigned",detail:"Assign one before dispatch",ready:false};
-  if(ids.size>1)return {name:"Multiple printers assigned",detail:"Use one printer for this batch before dispatch",ready:false};
+  if(!ids.size)return {name:tx(locale,"Printer not assigned"),detail:tx(locale,"Assign one before dispatch"),ready:false};
+  if(ids.size>1)return {name:tx(locale,"Multiple printers assigned"),detail:tx(locale,"Use one printer for this batch before dispatch"),ready:false};
   const assigned=printers.filter(printer=>ids.has(printer.id));
   const connected=assigned.filter(printer=>isPrinterAvailableForShop(printer,agents));
   const names=Array.from(new Set(assigned.map(printer=>printer.displayName).filter(Boolean)));
   if(connected.length)
-    return {name:names.join(", ")||"Assigned printer",detail:"Windows queue ready · shop computer online",ready:true};
+    return {name:names.join(", ")||tx(locale,"Assigned printer"),detail:tx(locale,"Windows queue ready · shop computer online"),ready:true};
   const unavailable=assigned[0];
-  const reason=unavailable?getPrinterAvailabilityReason(unavailable,agents):"Assigned printer is no longer registered";
-  return {name:names.join(", ")||"Assigned printer",detail:reason??"Printer availability is not confirmed",ready:false};
+  const reason=unavailable?getPrinterAvailabilityReason(unavailable,agents):tx(locale,"Assigned printer is no longer registered");
+  return {name:names.join(", ")||"Assigned printer",detail:reason??tx(locale,"Printer availability is not confirmed"),ready:false};
 }
-function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,onAssignPrinter,onDispatch,onConfirmOutput,onRetryPdfExport,onHistory,onOpenPhotoStudio}:{
+function FileActions({job,printers,agents,locale,onPreview,onApprove,onReject,onRefund,onAssignPrinter,onDispatch,onConfirmOutput,onRetryPdfExport,onHistory,onOpenPhotoStudio}:{
   job:ShopPrintJob;printers:PrinterDevice[];agents:AgentDevice[];
   onPreview:(job:ShopPrintJob)=>void;onApprove:(job:ShopPrintJob)=>void;onReject:(job:ShopPrintJob)=>void;
   onRefund:(job:ShopPrintJob)=>void;onAssignPrinter:(job:ShopPrintJob,printerId:string)=>void;
   onDispatch:(job:ShopPrintJob)=>void;onConfirmOutput:(job:ShopPrintJob)=>void;
   onRetryPdfExport:(job:ShopPrintJob)=>void;onHistory:(job:ShopPrintJob)=>void;onOpenPhotoStudio:(job:ShopPrintJob)=>void;
 }){
-  const canEditPhoto=job.photoSourceAvailable===true&&!job.privatePrinting&&job.status==="AWAITING_SHOP_APPROVAL";
+  const t=(value:string)=>tx(locale,value);\n  const canEditPhoto=job.photoSourceAvailable===true&&!job.privatePrinting&&job.status==="AWAITING_SHOP_APPROVAL";
   const canRefund=(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&["VERIFIED","PARTIALLY_REFUNDED"].includes(job.payment?.status??"")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId;
   const expiredAgentLease = job.status==="LOCAL_QUEUE_CLAIMED" &&
     (!job.agentLeaseExpiresUtc || Date.parse(job.agentLeaseExpiresUtc)<=Date.now());
@@ -115,7 +117,7 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
     {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&!job.batchId&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onReject(job)}><X size={12}/> Reject</button>}
     {assignable&&<label className={styles.printerAssignment}>Printer
       <select aria-label={"Assign printer for "+job.jobNumber} value={job.printerDeviceId??""} onChange={event=>onAssignPrinter(job,event.currentTarget.value)}>
-        <option value="">Choose printer</option>
+        <option value="">{t("Choose printer")}</option>
         {currentPrinter&&!assignablePrinters.some(printer=>printer.id===currentPrinter.id)&&<option value={currentPrinter.id} disabled>{currentPrinter.displayName} · currently unavailable</option>}
         {assignablePrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save as PDF · ":""}{printer.displayName}</option>)}
       </select>
@@ -143,8 +145,8 @@ function FileActions({job,printers,agents,onPreview,onApprove,onReject,onRefund,
     {canRefund&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onRefund(job)}><Wallet size={12}/> Refund</button>}
   </div>;
 }
-function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...actions}:{
-  journey:ReturnType<typeof buildShopOrderJourneys>[number];printers:PrinterDevice[];agents:AgentDevice[];
+function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment,...actions}:{
+  journey:ReturnType<typeof buildShopOrderJourneys>[number];printers:PrinterDevice[];agents:AgentDevice[];locale:string;
   onReviewBatch:(batchId:string)=>void;onVerifyPayment:(payment:ShopPayment)=>void;
   onPreview:(job:ShopPrintJob)=>void;onApprove:(job:ShopPrintJob)=>void;onReject:(job:ShopPrintJob)=>void;
   onRefund:(job:ShopPrintJob)=>void;onAssignPrinter:(job:ShopPrintJob,printerId:string)=>void;
@@ -152,7 +154,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
   onRetryPdfExport:(job:ShopPrintJob)=>void;onHistory:(job:ShopPrintJob)=>void;onOpenPhotoStudio:(job:ShopPrintJob)=>void;
   onResumeUnprintedBatch:(batchId:string,jobIds:string[])=>Promise<boolean>;
 }){
-  const printer=printerSummary(journey.jobs,printers,agents);
+  const t=(value:string)=>tx(locale,value);\n  const printer=printerSummary(journey.jobs,printers,agents,locale);
   const canReview=journey.canReview&&!!journey.batchId;
   const singleFileReviewJob=journey.jobs.length===1&&!journey.batchId?journey.jobs[0]:null;
   const allOutputsReady=journey.jobs.length>0&&journey.jobs.every(job=>readyStatuses.has(job.status));
@@ -206,7 +208,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
       {journey.photoPageCount>0&&<div><strong>{journey.photoPageCount}</strong><span>Photo layout pages</span></div>}
     </div>
     <div className={styles.orderSignals}>
-      <div className={styles.signalRow}><span className={styles.signalIcon+(journey.payment?.status==="VERIFIED"||journey.payment?.status==="PARTIALLY_REFUNDED"?" "+styles.signalGood:"")}><CreditCard size={15}/></span><div><strong>Payment</strong><small>{paymentLabel(journey.payment,journey.stage)} · {money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</small></div></div>
+      <div className={styles.signalRow}><span className={styles.signalIcon+(journey.payment?.status==="VERIFIED"||journey.payment?.status==="PARTIALLY_REFUNDED"?" "+styles.signalGood:"")}><CreditCard size={15}/></span><div><strong>Payment</strong><small>{paymentLabel(journey.payment,journey.stage,locale)} · {money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</small></div></div>
       <div className={styles.signalRow}><span className={styles.signalIcon+(printer.ready?" "+styles.signalGood:"")}><Printer size={15}/></span><div><strong>{printer.name}</strong><small>{printer.detail}</small></div></div>
       {journey.attentionJobs.length>0&&<div className={styles.attentionLine}><AlertTriangle size={14}/><span>{journey.attentionJobs.length} file(s) need attention. Check the original output destination before retrying.</span></div>}
     </div>
@@ -262,13 +264,13 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
             </strong>
             <span>{job.pageCount} page(s) · {job.copies} {job.copies===1?"copy":"copies"} · {orderJourneyStatusLabel(job.status)}</span>
           </div>
-          <FileActions job={job} printers={printers} agents={agents} {...actions}/>
+          <FileActions job={job} printers={printers} agents={agents} locale={locale} {...actions}/>
         </div>)}
       </div>}
     </div>
   </article>;
 }
-export default function OrderJourneyPage({jobs,payments,printers,agents,refreshing,onRefresh,onNavigate,onReviewBatch,onVerifyPayment,...actions}:Props){
+export default function OrderJourneyPage({jobs,payments,printers,agents,refreshing,onRefresh,onNavigate,onReviewBatch,onVerifyPayment,...actions}:Props){\n  const { locale } = useLocale();\n  const t=(value:string)=>tx(locale,value);
   const [stageFilter,setStageFilter]=useState<OrderJourneyStage|"all">("all");
   const [query,setQuery]=useState("");
   const journeys=useMemo(()=>buildShopOrderJourneys(jobs,payments),[jobs,payments]);
@@ -288,13 +290,13 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
 
   return <div className={styles.journeyPage}>
     <header className={styles.pageHero}>
-      <div><div className={styles.eyebrow}><span className={styles.livePulse}/> LIVE ORDER CONTROL</div><p>Workload, payments and print status at a glance.</p></div>
-      <div className={styles.heroActions}><span className={styles.liveLabel}><span/> Live shop view</span><button type="button" className={styles.refreshButton} onClick={onRefresh} disabled={refreshing}><RefreshCw size={15} className={refreshing?styles.spinning:""}/>{refreshing?"Refreshing":"Refresh"}</button></div>
+      <div><div className={styles.eyebrow}><span className={styles.livePulse}/> LIVE ORDER CONTROL</div><p>{t("Workload, payments and print status at a glance.")}</p></div>
+      <div className={styles.heroActions}><span className={styles.liveLabel}><span/> Live shop view</span><button type="button" className={styles.refreshButton} onClick={onRefresh} disabled={refreshing}><RefreshCw size={15} className={refreshing?styles.spinning:""}/>{refreshing?t("Refreshing"):t("Refresh")}</button></div>
     </header>
 
-    <section className={styles.stageFilters} aria-label="Filter orders by stage">
+    <section className={styles.stageFilters} aria-label={t("Filter orders by stage")}>
       <button type="button" aria-pressed={stageFilter==="all"} className={styles.stageFilterButton+(stageFilter==="all"?" "+styles.stageFilterSelected:"")} onClick={()=>setStageFilter("all")}>
-        <span>All stages</span><strong>{journeys.length}</strong>
+        <span>{t("All stages")}</span><strong>{journeys.length}</strong>
       </button>
       {flowSteps.map(step=>{const Icon=step.icon,count=counts[step.id],selected=stageFilter===step.id;return <button type="button" key={step.id} aria-pressed={selected} className={styles.stageFilterButton+(selected?" "+styles.stageFilterSelected:"")} onClick={()=>setStageFilter(current=>current===step.id?"all":step.id)}>
         <Icon size={14}/><span>{step.title}</span><strong>{count}</strong>
@@ -303,21 +305,21 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
 
     <section className={styles.operationsStrip} aria-label="Shop operations summary">
       <div className={styles.operationsLabel}><span className={styles.operationsGlyph}><Wifi size={15}/></span><div><strong>{inMotion} active orders</strong><small>{readyForCollection} ready for collection · {paymentsToVerify} payments to verify</small></div></div>
-      <div className={styles.operationMetric}><strong>{agentsOnline}</strong><span>Agents online</span></div>
-      <div className={styles.operationMetric}><strong>{reachable}</strong><span>Printers reachable</span></div>
+      <div className={styles.operationMetric}><strong>{agentsOnline}</strong><span>{t("Agents online")}</span></div>
+      <div className={styles.operationMetric}><strong>{reachable}</strong><span>{t("Printers reachable")}</span></div>
       <button type="button" className={styles.subtleLink} onClick={()=>onNavigate("Print Agent")}>Shop computer</button>
     </section>
 
     <section className={styles.ordersSection}>
-      <div className={styles.ordersHeading}><div><span className={styles.panelEyebrow}>YOUR CUSTOMERS</span><h3>Order journeys</h3><p>Search by batch ID, order ID, file name or folder name.</p></div><span className={styles.ordersCount}>{filteredJourneys.length} of {journeys.length} orders</span></div>
+      <div className={styles.ordersHeading}><div><span className={styles.panelEyebrow}>{t("YOUR CUSTOMERS")}</span><h3>{t("Order journeys")}</h3><p>{t("Search by batch ID, order ID, file name or folder name.")}</p></div><span className={styles.ordersCount}>{filteredJourneys.length} of {journeys.length} orders</span></div>
       <div className={styles.orderFilters}>
-        <label className={styles.orderSearch}><span>Find an order</span><input value={query} onChange={event=>setQuery(event.currentTarget.value)} placeholder="Batch ID, order ID, file or folder name" aria-label="Search order journey"/></label>
+        <label className={styles.orderSearch}><span>{t("Find an order")}</span><input value={query} onChange={event=>setQuery(event.currentTarget.value)} placeholder={t("Batch ID, order ID, file or folder name")} aria-label={t("Search order journey")}/></label>
         <button type="button" className={styles.clearFilters} disabled={stageFilter==="all"&&!query} onClick={()=>{setStageFilter("all");setQuery("");}}>Clear filters</button>
       </div>
-      {journeys.length===0?<div className={styles.emptyState}><h3>Your first customer order will appear here</h3><p>Share a QR station with your customers. Their orders will appear here as one easy-to-follow journey.</p></div>
-      :filteredJourneys.length===0?<div className={styles.emptyState}><h3>No matching orders</h3><p>Try another batch, order, file or folder name, or clear the current filters.</p><button type="button" className={styles.actionButton} onClick={()=>{setStageFilter("all");setQuery("");}}>Clear filters</button></div>
-      :<div className={styles.orderList}>{filteredJourneys.map(j=><OrderCard key={j.key} journey={j} printers={printers} agents={agents} onReviewBatch={onReviewBatch} onVerifyPayment={onVerifyPayment} {...actions}/>)}</div>}
+      {journeys.length===0?<div className={styles.emptyState}><h3>{t("Your first customer order will appear here")}</h3><p>{t("Share a QR station with your customers. Their orders will appear here as one easy-to-follow journey.")}</p></div>
+      :filteredJourneys.length===0?<div className={styles.emptyState}><h3>No matching orders</h3><p>{t("Try another batch, order, file or folder name, or clear the current filters.")}</p><button type="button" className={styles.actionButton} onClick={()=>{setStageFilter("all");setQuery("");}}>Clear filters</button></div>
+      :<div className={styles.orderList}>{filteredJourneys.map(j=><OrderCard key={j.key} journey={j} printers={printers} agents={agents} locale={locale} onReviewBatch={onReviewBatch} onVerifyPayment={onVerifyPayment} {...actions}/>)}</div>}
     </section>
-    <footer className={styles.journeyFooter}><span>Output accuracy matters.</span> A printer accepting a job does not prove paper was produced. Physical orders become complete only after the shop confirms the actual pages.</footer>
+    <footer className={styles.journeyFooter}><span>{t("Output accuracy matters.")}</span> A printer accepting a job does not prove paper was produced. Physical orders become complete only after the shop confirms the actual pages.</footer>
   </div>;
 }
