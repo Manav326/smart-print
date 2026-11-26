@@ -828,12 +828,12 @@ export default function PhotoStudio({
 
       <div className={styles.editor}>
         <nav className={styles.toolRail} aria-label={t("Photo editing tools")} title={t("Scroll horizontally on small screens to see all tools")} tabIndex={0}>
-          <button type="button" id="photo-studio-tool-sheet" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
-          <button type="button" id="photo-studio-tool-crop" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
-          <button type="button" id="photo-studio-tool-looks" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
-          <span className={styles.toolRailSectionLabel}>Advanced</span>
-          <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} title="Add, select and position text on the A4 sheet"><Type size={17}/><span>Text</span></button>
-          <button type="button" id="photo-studio-tool-background" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"} title="Advanced: replace a plain photo background"><PaintBucket size={17}/><span>Background</span></button>
+          <button type="button" id="photo-studio-tool-sheet" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>{t("Sheet")}</span></button>
+          <button type="button" id="photo-studio-tool-crop" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>{t("Crop")}</span></button>
+          <button type="button" id="photo-studio-tool-looks" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>{t("Looks")}</span></button>
+          <span className={styles.toolRailSectionLabel}>{t("Advanced")}</span>
+          <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} title={t("Add, select and position text on the A4 sheet")}><Type size={17}/><span>{t("Text")}</span></button>
+          <button type="button" id="photo-studio-tool-background" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"} title={t("Advanced: replace a plain photo background")}><PaintBucket size={17}/><span>{t("Background")}</span></button>
         </nav>
 
         <aside className={styles.toolPanel} data-testid="photo-studio-tool-panel">
@@ -853,20 +853,20 @@ export default function PhotoStudio({
               {cropPanel&&<>
                 <p>{t("Drag a photo to reframe it. Use the sliders for precise positioning.")}</p>
                 <p>{t("Crop zoom changes the print. Preview zoom changes only the editor view.")}</p>
-                <p>300-DPI output cannot restore detail missing from the source. Your original remains unchanged.</p>
+                <p>{t("300-DPI output cannot restore detail missing from the source. Your original remains unchanged.")}</p>
               </>}
               {lookPanel&&<>
-                <p>Choose a print-friendly starting point, then fine-tune brightness, contrast and colour. Use Reset look to return to Natural; Reset crop only changes framing.</p>
+                <p>{t("Choose a print-friendly starting point, then fine-tune brightness, contrast and colour. Use Reset look to return to Natural; Reset crop only changes framing.")}</p>
                 {LOOKS.map(item=><p key={item.id}><strong>{item.label}:</strong> {item.note}</p>)}
                 <p>{t("Adjustments are applied to the prepared output, not to your source file.")}</p>
               </>}
               {textPanel&&<>
-                <p>Add a text layer, select it on the preview, and drag it into position. Use the controls to change its wording, size, colour and weight, or switch on Bold text.</p>
-                <p>Text layers are included in the prepared PDF. Name and date-of-birth captions are separate, optional fields and are only printed when enabled in Sheet.</p>
+                <p>{t("Add a text layer, select it on the preview, and drag it into position. Use the controls to change its wording, size, colour and weight, or switch on Bold text.")}</p>
+                <p>{t("Text layers are included in the prepared PDF. Name and date-of-birth captions are separate, optional fields and are only printed when enabled in Sheet.")}</p>
               </>}
               {backgroundPanel&&<>
-                <p>Pick a flat background colour from inside a photo, choose a replacement colour, and adjust tolerance. SmartPrint changes only similar pixels connected to the image edges.</p>
-                <p>This is a colour-key tool, not AI subject recognition. Use an evenly lit plain background and inspect hair and shoulder edges carefully. Reset restores the original background.</p>
+                <p>{t("Pick a flat background colour from inside a photo, choose a replacement colour, and adjust tolerance. SmartPrint changes only similar pixels connected to the image edges.")}</p>
+                <p>{t("This is a colour-key tool, not AI subject recognition. Use an evenly lit plain background and inspect hair and shoulder edges carefully. Reset restores the original background.")}</p>
               </>}
               {activeTool==="sheet"&&<>
                 <p>{t("Set photo size, copy count and layout. Auto fits the safest A4 grid; manual density applies only when full-size photos fit.")}</p>
@@ -890,21 +890,21 @@ export default function PhotoStudio({
               </button>)}
             </div>
             <button type="button" id="photo-studio-reset-look" className={styles.secondaryButton} onClick={() => selectLook("natural")}><RotateCcw size={14}/> {t("Reset look")}</button>
-            <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input id="photo-studio-brightness" type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
-            <label className={styles.rangeControl}>Contrast <output>{adjustments.contrast}%</output><input id="photo-studio-contrast" type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
-            <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input id="photo-studio-colour" type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>{t("Brightness")} <output>{adjustments.brightness}%</output><input id="photo-studio-brightness" type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>{t("Contrast")} <output>{adjustments.contrast}%</output><input id="photo-studio-contrast" type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
+            <label className={styles.rangeControl}>{t("Colour")} <output>{adjustments.saturation}%</output><input id="photo-studio-colour" type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
           </>}
 
           {textPanel && <>
             <button type="button" id="photo-studio-add-text" className={styles.secondaryButton} onClick={addTextLayer}><Type size={14}/> {t("Add text")}</button>
             {selectedTextLayer ? <>
-              <label className={styles.fieldLabel}>Text content
+              <label className={styles.fieldLabel}>{t("Text content")}
                 <input id="photo-studio-text-content" type="text" maxLength={120} value={selectedTextLayer.text} onChange={event=>updateSelectedTextLayer({text:event.target.value})} placeholder={t("Enter text to print on the sheet")}/>
               </label>
               <label className={styles.rangeControl}>{t("Font size")} <output>{selectedTextLayer.fontSizePt} pt</output>
                 <input id="photo-studio-text-font-size" type="range" min="6" max="36" step="1" value={selectedTextLayer.fontSizePt} onChange={event=>updateSelectedTextLayer({fontSizePt:Number(event.target.value)})}/>
               </label>
-              <label className={styles.fieldLabel}>Text colour
+              <label className={styles.fieldLabel}>{t("Text colour")}
                 <input id="photo-studio-text-colour" type="color" value={selectedTextLayer.color} onChange={event=>updateSelectedTextLayer({color:event.target.value})}/>
               </label>
               <label className={styles.captionOptIn}>
@@ -915,16 +915,16 @@ export default function PhotoStudio({
 
             </> : null}
             {includeFormDetails && <>
-              <label className={styles.fieldLabel}>{t("Caption font size")}<select id="photo-studio-caption-font-size" value={captionFontSizePt} onChange={event=>setCaptionFontSizePt(Number(event.target.value))}><option value={5}>5 pt · Compact</option><option value={6}>6 pt · Standard</option><option value={7}>7 pt · Large</option></select></label>
+              <label className={styles.fieldLabel}>{t("Caption font size")}<select id="photo-studio-caption-font-size" value={captionFontSizePt} onChange={event=>setCaptionFontSizePt(Number(event.target.value))}><option value={5}>5 pt · {t("Compact")}</option><option value={6}>6 pt · {t("Standard")}</option><option value={7}>7 pt · {t("Large")}</option></select></label>
               <label className={styles.fieldLabel}>{t("Caption colour")}<input id="photo-studio-caption-colour" type="color" value={captionColor} onChange={event=>setCaptionColor(event.target.value)}/></label>
             </>}
           </>}
 
           {backgroundPanel && <>
             <div className={styles.backgroundPreviewRow} data-testid="photo-studio-background-state"><span>{t("Sampled background")}</span><strong>{sourceBackgroundColor?sourceBackgroundColor.toUpperCase():"Not selected"}</strong>{sourceBackgroundColor&&<i style={{background:sourceBackgroundColor}}/>}</div>
-            <button type="button" id="photo-studio-pick-background" className={styles.secondaryButton} onClick={()=>{setPickingBackground(true);setError("");}}><Pipette size={14}/>{pickingBackground?"Click the background in the preview…":"Pick background from photo"}</button>
+            <button type="button" id="photo-studio-pick-background" className={styles.secondaryButton} onClick={()=>{setPickingBackground(true);setError("");}}><Pipette size={14}/>{pickingBackground?t("Click the background in the preview…"):t("Pick background from photo")}</button>
             <label className={styles.fieldLabel}>{t("Replacement background")}<input id="photo-studio-replacement-background" type="color" value={targetBackgroundColor} onChange={event=>setTargetBackgroundColor(event.target.value)}/></label>
-            <div className={styles.backgroundPresets}>{["#ffffff","#f3f6fa","#dcecff","#dff3e7","#f6eadb"].map(color=><button key={color} type="button" style={{background:color}} aria-label={"Set background "+color} aria-pressed={targetBackgroundColor===color} onClick={()=>setTargetBackgroundColor(color)}/>)}</div>
+            <div className={styles.backgroundPresets}>{["#ffffff","#f3f6fa","#dcecff","#dff3e7","#f6eadb"].map(color=><button key={color} type="button" style={{background:color}} aria-label={t("Set background ")+color} aria-pressed={targetBackgroundColor===color} onClick={()=>setTargetBackgroundColor(color)}/>)}</div>
             <label className={styles.rangeControl}>{t("Background tolerance")}<output>{backgroundTolerance}</output><input id="photo-studio-background-tolerance" type="range" min="5" max="90" value={backgroundTolerance} onChange={event=>setBackgroundTolerance(Number(event.target.value))}/></label>
             <button type="button" id="photo-studio-reset-background" className={styles.secondaryButton} onClick={()=>{setSourceBackgroundColor(null);setPickingBackground(false);setBackgroundTolerance(30);setTargetBackgroundColor("#ffffff");}}>{t("Reset background")}</button>
           </>}
