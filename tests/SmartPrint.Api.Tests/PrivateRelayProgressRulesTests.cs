@@ -69,10 +69,10 @@ public sealed class PrivateRelayProgressRulesTests
         Assert.Contains("checking file security",
             PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.DecryptingAndAuthenticating),
             StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("file secured on the shop computer",
+        Assert.Contains("secure upload confirmed",
             PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Ready),
             StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("ready for printing",
+        Assert.Contains("awaiting shop review",
             PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Ready),
             StringComparison.OrdinalIgnoreCase);
     }
