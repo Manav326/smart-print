@@ -60,7 +60,7 @@ import OrderJourneyPage from "./OrderJourneyPage";
 import ShopAdPlacement from "./ShopAdPlacement";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
 import { getSubscriptionReminderState } from "./subscription-checkout-state";
-import { useLocale, translateUi, translateUiText } from "./i18n";
+import { useLocale, translateUi, translateUiText, formatUiCurrency, formatUiNumber, formatUiDate } from "./i18n";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "station" | null;
@@ -1109,7 +1109,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       await confirmShopPrintOutput(tokens.accessToken, job.id, manualQueueReconciliation);
       setToast(manualQueueReconciliation
         ? "Output manually reconciled after checking the Windows queue and physical pages."
-        : "Physical output confirmed by the shop operator.");
+        : "Physical {t("output confirmed")} by the shop operator.");
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not confirm physical output.");
@@ -1924,6 +1924,10 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
 }
 
 function CustomersPage({ token }: { token: string }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
+  const money = (minor: number, currency: string) => formatUiCurrency(minor / 100, locale, currency);
+  const date = (value: string | number | Date) => formatUiDate(value, locale, { dateStyle: "medium", timeStyle: "short", timeZone: IST_TIME_ZONE });
   const [searchDraft, setSearchDraft] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -1985,13 +1989,13 @@ function CustomersPage({ token }: { token: string }) {
     <section className="customers-workspace">
       <div className="customers-intro">
         <div>
-          <span className="reports-eyebrow">SHOP RELATIONSHIPS</span>
-          <h2>Customer directory</h2>
-          <p>Signed-in SmartPrint customers who have connected to this shop. Guest sessions stay anonymous.</p>
+          <span className="reports-eyebrow">{t("SHOP RELATIONSHIPS")}</span>
+          <h2>{t("Customer directory")}</h2>
+          <p>{t("Signed-in SmartPrint customers who have connected to this shop. Guest sessions stay anonymous.")}</p>
         </div>
         <div className="customers-total">
           <strong>{result?.totalCount ?? "—"}</strong>
-          <span>linked customers</span>
+          <span>{t("linked customers")}</span>
         </div>
       </div>
 
@@ -2003,67 +2007,67 @@ function CustomersPage({ token }: { token: string }) {
         <label className="search-field customers-search">
           <Search size={14}/>
           <input value={searchDraft} onChange={event => setSearchDraft(event.target.value)}
-            placeholder="Search customer name or email" aria-label="Search customer name or email"/>
+            placeholder={t("Search customer name or email")} aria-label={t("Search customer name or email")}/>
         </label>
-        <button className="primary-button" type="submit"><Search size={14}/> Search</button>
+        <button className="primary-button" type="submit"><Search size={14}/> {t("Search")}</button>
         <button className="secondary-button" type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}>
           <Activity size={14}/> Refresh
         </button>
       </form>
 
       {error && <div className="inline-error" role="alert">{error}</div>}
-      {loading && !result ? <div className="panel reports-loading"><span className="button-spinner"/> Loading customers…</div> : null}
+      {loading && !result ? <div className="panel reports-loading"><span className="button-spinner"/> {t("Loading customers…")}</div> : null}
       {!loading && !error && result?.items.length === 0 && (
         <div className="panel customers-empty">
           <span className="customers-empty-icon"><Users size={24}/></span>
-          <h3>{search ? "No matching customers" : "No signed-in customers yet"}</h3>
+          <h3>{search ? t(search ? "No matching customers" : "No signed-in customers yet")}</h3>
           <p>{search
-            ? "Try another name or email search."
-            : "When a customer signs in before scanning this shop's QR code, their shop-specific activity will appear here. Guest jobs are intentionally not identified or linked."}</p>
+            ? t("Try another name or email search.")
+            : t("When a customer signs in before scanning this shop's QR code, their shop-specific activity will appear here. Guest jobs are intentionally not identified or linked.")}</p>
         </div>
       )}
 
       {result && result.items.length > 0 && (
         <div className="panel customers-table-panel">
           <div className="panel-heading customers-panel-heading">
-            <div><h2>Customers connected to this shop</h2><p>Only activity created through this shop's QR sessions is included.</p></div>
-            <span className="neutral-chip">{result.totalCount} total</span>
+            <div><h2>{t("Customers connected to this shop")}</h2><p>{t("Only activity created through this shop's QR sessions is included.")}</p></div>
+            <span className="neutral-chip">{result.totalCount} {t("total")}</span>
           </div>
           <div className="table-scroll">
             <table className="customers-table">
-              <thead><tr><th>CUSTOMER</th><th>PRINT JOBS</th><th>COMPLETED</th><th>LAST QR SESSION</th><th>HISTORY</th></tr></thead>
+              <thead><tr><th>{t("CUSTOMER")}</th><th>{t("PRINT JOBS")}</th><th>{t("COMPLETED")}</th><th>{t("LAST QR SESSION")}</th><th>{t("HISTORY")}</th></tr></thead>
               <tbody>
                 {result.items.map(customer => (
                   <tr key={customer.id}>
-                    <td><div className="customer-cell"><strong>{customer.displayName || "SmartPrint customer"}</strong><span>{customer.maskedEmail}</span></div></td>
-                    <td><strong className="customers-number">{customer.printJobCount}</strong><small className="customers-subvalue">{customer.sessionCount} QR sessions</small></td>
-                    <td><strong className="customers-number">{customer.completedJobCount}</strong><small className="customers-subvalue">output confirmed</small></td>
-                    <td><span className="customers-date">{formatIstDateTime(customer.lastSeenUtc)}</span></td>
-                    <td><button type="button" className="customers-history-button" onClick={() => void openHistory(customer)}>View history <ArrowRight size={13}/></button></td>
+                    <td><div className="customer-cell"><strong>{customer.displayName || t("SmartPrint customer")}</strong><span>{customer.maskedEmail}</span></div></td>
+                    <td><strong className="customers-number">{customer.printJobCount}</strong><small className="customers-subvalue">{customer.sessionCount} {t("QR sessions")}</small></td>
+                    <td><strong className="customers-number">{customer.completedJobCount}</strong><small className="customers-subvalue">{t("output confirmed")}</small></td>
+                    <td><span className="customers-date">{date(customer.lastSeenUtc)}</span></td>
+                    <td><button type="button" className="customers-history-button" onClick={() => void openHistory(customer)}>{t("View history")} <ArrowRight size={13}/></button></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <div className="table-footer customers-pagination">
-            <span>Showing <strong>{firstRow}–{lastRow}</strong> of <strong>{result.totalCount}</strong></span>
-            <div><button type="button" disabled={page <= 1 || loading} onClick={() => setPage(value => Math.max(1, value - 1))}>← Previous</button>
+            <span>{t("Showing")} <strong>{firstRow}–{lastRow}</strong> {t("of")} <strong>{result.totalCount}</strong></span>
+            <div><button type="button" disabled={page <= 1 || loading} onClick={() => setPage(value => Math.max(1, value - 1))}>{t("← Previous")}</button>
               <span>{page} / {totalPages}</span>
-              <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage(value => Math.min(totalPages, value + 1))}>Next →</button></div>
+              <button type="button" disabled={page >= totalPages || loading} onClick={() => setPage(value => Math.min(totalPages, value + 1))}>{t("Next →")}</button></div>
           </div>
         </div>
       )}
 
       {selectedCustomer && (
-        <Modal title={selectedCustomer.displayName || "SmartPrint customer"}
+        <Modal title={selectedCustomer.displayName || t("SmartPrint customer")}
           subtitle={selectedCustomer.maskedEmail + " · Only this shop's print history"}
           onClose={closeHistory}>
           <div className="customer-history-modal">
-            {historyLoading && <div className="reports-loading"><span className="button-spinner"/> Loading print history…</div>}
+            {historyLoading && <div className="reports-loading"><span className="button-spinner"/> {t("Loading print history…")}</div>}
             {historyError && <div className="inline-error" role="alert">{historyError}</div>}
             {history && (
               <>
-                <div className="customer-history-summary"><strong>{history.totalJobs}</strong><span>print jobs at this shop</span></div>
+                <div className="customer-history-summary"><strong>{history.totalJobs}</strong><span>{t("print jobs at this shop")}</span></div>
                 {history.jobs.length === 0
                   ? <div className="empty-search">No print jobs are available for this customer yet.</div>
                   : <div className="customer-history-list">
@@ -2077,15 +2081,15 @@ function CustomersPage({ token }: { token: string }) {
                       return (
                         <article className="customer-history-row" key={job.id}>
                           <div className="customer-history-heading">
-                            <div><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/><span>{job.jobNumber} · {formatIstDateTime(job.createdUtc)}</span></div>
+                            <div><strong>{job.document.originalFileName}</strong><PrintKindTag printKind={job.printKind}/><span>{job.jobNumber} · {date(job.createdUtc)}</span></div>
                             <Status label={prettyStatus(job.status)} tone={tone}/>
                           </div>
                           <div className="customer-history-facts">
                             <span>{job.printKind==="PHOTO"?`Photo sheet · ${job.photoCount??0} × ${job.photoSizeCode??"photo"} · ${job.photosPerPage??"layout not recorded"} per A4 page · ${job.pageCount} A4 pages`:`${job.pageCount} pages · ${job.copies} copies`}</span>
-                            <strong>{formatMoney(job.quotedAmountMinor, job.currency)}</strong>
+                            <strong>{money(job.quotedAmountMinor, job.currency)}</strong>
                           </div>
                           {job.payment && <div className="customer-history-payment">
-                            {job.payment.status.replaceAll("_", " ")} · {job.payment.method} · Net recorded: {formatMoney(netPaid, job.payment.currency)}
+                            {job.payment.status.replaceAll("_", " ")} · {job.payment.method} · Net recorded: {money(netPaid, job.payment.currency)}
                             {job.payment.refundedAmountMinor > 0 ? " · Refund recorded" : ""}
                           </div>}
                           <div className="customer-history-output">{job.outputType === "PDF_EXPORT"
@@ -2105,6 +2109,11 @@ function CustomersPage({ token }: { token: string }) {
 }
 
 function ReportsPage({ token }: { token: string }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
+  const money = (minor: number, currency: string) => formatUiCurrency(minor / 100, locale, currency);
+  const number = (value: number) => formatUiNumber(value, locale);
+  const date = (value: string | number | Date) => formatUiDate(value, locale, { dateStyle: "medium", timeStyle: "short", timeZone: IST_TIME_ZONE });
   const [days, setDays] = useState<7 | 30 | 90>(30);
   const [summary, setSummary] = useState<ShopReportSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2132,54 +2141,54 @@ function ReportsPage({ token }: { token: string }) {
   return (
     <section className="reports-workspace">
       <div className="reports-toolbar">
-        <div><span className="reports-eyebrow">SHOP PERFORMANCE</span><h2>Operations report</h2><p>Live figures from this shop\u2019s recorded print jobs and verified collections.</p></div>
+        <div><span className="reports-eyebrow">{t("SHOP PERFORMANCE")}</span><h2>{t("Operations report")}</h2><p>{t("Live figures from this shop’s recorded print jobs and verified collections.")}</p></div>
         <div className="reports-controls">
           <label className="reports-period">Period
-            <select aria-label="Reporting period" value={days} onChange={event => setDays(Number(event.target.value) as 7 | 30 | 90)}>
-              <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option>
+            <select aria-label={t("Reporting period")} value={days} onChange={event => setDays(Number(event.target.value) as 7 | 30 | 90)}>
+              <option value={7}>{t("Last 7 days")}</option><option value={30}>{t("Last 30 days")}</option><option value={90}>{t("Last 90 days")}</option>
             </select>
           </label>
-          <button className="secondary-button reports-refresh" type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}><Activity size={14}/> Refresh</button>
+          <button className="secondary-button reports-refresh" type="button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}><Activity size={14}/> {t("Refresh")}</button>
         </div>
       </div>
       {error && <div className="inline-error" role="alert">{error}</div>}
-      {loading && !summary ? <div className="panel reports-loading"><span className="button-spinner"/> Loading shop activity…</div> : null}
-      {!loading && !summary && !error ? <div className="panel reports-loading">No report data is available for this period yet.</div> : null}
+      {loading && !summary ? <div className="panel reports-loading"><span className="button-spinner"/> {t("Loading shop activity…")}</div> : null}
+      {!loading && !summary && !error ? <div className="panel reports-loading">{t("No report data is available for this period yet.")}</div> : null}
       {summary && <>
         <div className="stat-grid reports-stat-grid">
-          <Metric icon={<FileText size={18}/>} label="Print jobs" value={summary.totalJobs.toLocaleString("en-IN")} note={`Created in the last ${summary.periodDays} days`} accent="blue"/>
-          <Metric icon={<Check size={18}/>} label="Output confirmed" value={summary.completedJobs.toLocaleString("en-IN")} note="Physically confirmed by shop operators" accent="mint"/>
-          <Metric icon={<Printer size={18}/>} label="Pages requested" value={summary.pagesRequested.toLocaleString("en-IN")} note="Page count × requested copies" accent="violet"/>
-          <Metric icon={<Wallet size={18}/>} label="Payments to review" value={summary.pendingPaymentCount.toLocaleString("en-IN")} note="Open UPI/cash attempts across all dates" accent="amber"/>
+          <Metric icon={<FileText size={18}/>} label={t("Print jobs")} value={number(summary.totalJobs)} note={t("Created in the last {days} days").replace("{days}", String(summary.periodDays))} accent="blue"/>
+          <Metric icon={<Check size={18}/>} label={t("Output confirmed")} value={number(summary.completedJobs)} note={t("Physically confirmed by shop operators")} accent="mint"/>
+          <Metric icon={<Printer size={18}/>} label={t("Pages requested")} value={number(summary.pagesRequested)} note={t("Page count × requested copies")} accent="violet"/>
+          <Metric icon={<Wallet size={18}/>} label={t("Payments to review")} value={number(summary.pendingPaymentCount)} note={t("Open UPI/cash attempts across all dates")} accent="amber"/>
         </div>
         <div className="reports-grid">
           <section className="panel reports-panel">
-            <div className="panel-heading"><div><h2>Job status breakdown</h2><p>Current status of jobs created during this period</p></div><span className="neutral-chip">{summary.totalJobs} jobs</span></div>
-            {summary.jobsByStatus.length === 0 ? <div className="reports-empty">No print jobs were created in this period.</div> :
+            <div className="panel-heading"><div><h2>{t("Job status breakdown")}</h2><p>{t("Current status of jobs created during this period")}</p></div><span className="neutral-chip">{summary.totalJobs} {t("jobs")}</span></div>
+            {summary.jobsByStatus.length === 0 ? <div className="reports-empty">{t("No print jobs were created in this period.")}</div> :
               <div className="report-status-list">{summary.jobsByStatus.map(item => <div className="report-status-row" key={item.status}>
-                <div className="report-status-label"><span>{prettyStatus(item.status)}</span><strong>{item.count.toLocaleString("en-IN")}</strong></div>
+                <div className="report-status-label"><span>{prettyStatus(item.status)}</span><strong>{number(item.count)}</strong></div>
                 <div className="report-status-track"><span style={{ width: `${Math.max(2, item.count / statusMaximum * 100)}%` }}/></div>
               </div>)}</div>}
           </section>
           <section className="panel reports-panel">
-            <div className="panel-heading"><div><h2>Verified collections</h2><p>Shop-confirmed payments, grouped separately by currency</p></div><span className="neutral-chip">Verified only</span></div>
-            {summary.verifiedCollectionsByMethod.length === 0 ? <div className="reports-empty">No payments have been verified in this period. Unverified UPI references are not included.</div> :
+            <div className="panel-heading"><div><h2>{t("Verified collections")}</h2><p>{t("Shop-confirmed payments, grouped separately by currency")}</p></div><span className="neutral-chip">{t("Verified only")}</span></div>
+            {summary.verifiedCollectionsByMethod.length === 0 ? <div className="reports-empty">{t("No payments have been verified in this period. Unverified UPI references are not included.")}</div> :
               <div className="report-collection-list">{summary.verifiedCollectionsByMethod.map(item => <div className="report-collection-row" key={`${item.currency}-${item.method}`}>
-                <div><strong>{item.method === "UPI" ? "UPI" : "Cash at counter"}</strong><small>{item.paymentCount} verified {item.paymentCount === 1 ? "payment" : "payments"}</small></div>
-                <strong className="report-collection-amount">{formatMoney(item.amountMinor, item.currency)}</strong>
+                <div><strong>{item.method === "UPI" ? "UPI" : t("Cash at counter")}</strong><small>{item.paymentCount} {t(item.paymentCount === 1 ? "payment" : "payments")} {t("verified")}</small></div>
+                <strong className="report-collection-amount">{money(item.amountMinor, item.currency)}</strong>
               </div>)}</div>}
           </section>
           <section className="panel reports-panel">
-            <div className="panel-heading"><div><h2>Refunds recorded</h2><p>Refunds the shop confirmed sending during this period</p></div><span className="neutral-chip">Recorded as sent</span></div>
-            {summary.refundsRecordedByMethod.length === 0 ? <div className="reports-empty">No refunds were recorded as sent during this period.</div> :
+            <div className="panel-heading"><div><h2>{t("Refunds recorded")}</h2><p>{t("Refunds the shop confirmed sending during this period")}</p></div><span className="neutral-chip">{t("Recorded as sent")}</span></div>
+            {summary.refundsRecordedByMethod.length === 0 ? <div className="reports-empty">{t("No refunds were recorded as sent during this period.")}</div> :
               <div className="report-collection-list">{summary.refundsRecordedByMethod.map(item => <div className="report-collection-row" key={`refund-${item.currency}-${item.method}`}>
-                <div><strong>{item.method === "UPI" ? "UPI refund" : "Cash refund"}</strong><small>{item.refundCount} recorded {item.refundCount === 1 ? "refund" : "refunds"}</small></div>
-                <strong className="report-collection-amount">{formatMoney(item.amountMinor, item.currency)}</strong>
+                <div><strong>{item.method === "UPI" ? t(item.method === "UPI" ? "UPI refund" : "Cash refund")}</strong><small>{item.refundCount} {t(item.refundCount === 1 ? "refund" : "refunds")} {t("recorded")}</small></div>
+                <strong className="report-collection-amount">{money(item.amountMinor, item.currency)}</strong>
               </div>)}</div>}
           </section>
         </div>
         {summary.outputUnconfirmedJobs > 0 && <div className="report-caution"><ShieldCheck size={16}/><span><strong>{summary.outputUnconfirmedJobs} output-unconfirmed {summary.outputUnconfirmedJobs === 1 ? "job" : "jobs"}.</strong> Check the actual pages before any manual retry. These jobs are not counted as completed.</span></div>}
-        <div className="reports-footnote">Report window: {formatIstDateTime(summary.fromUtc)} – {formatIstDateTime(summary.toUtc)}. Job counts use creation time, gross collections use payment verification time, and refunds use the date the shop recorded sending them. Pages requested are not a claim of pages physically printed. A UPI reference is excluded until the shop verifies the receipt.</div>
+        <div className="reports-footnote">Report window: {date(summary.fromUtc)} – {date(summary.toUtc)}. Job counts use creation time, gross collections use payment verification time, and refunds use the date the shop recorded sending them. Pages requested are not a claim of pages physically printed. A UPI reference is excluded until the shop verifies the receipt.</div>
       </>}
     </section>
   );
