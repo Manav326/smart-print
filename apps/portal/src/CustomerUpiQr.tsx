@@ -104,7 +104,7 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
   </div>}
   {uri&&<button type="button" className="secondary-button customer-upi-download" onClick={()=>void download()} disabled={busy}><Download size={15}/>{busy?t("Preparing QR…"):t("Download QR image")}</button>}
   {status&&<small className={"customer-upi-download-status "+statusTone} role="status">{statusTone==="success"?<Check size={13}/>:<Info size={13}/>} {status}</small>}
-  {error&&<small className="customer-upi-download-error" role="alert">{error}</small>}
+  {error&&<small className="customer-upi-download-error" role="alert">{t(error)}</small>}
   {uri&&<a href={uri} className="customer-flow-button customer-upi-open">{t("Open UPI app")}</a>}
  </div>;
 }
