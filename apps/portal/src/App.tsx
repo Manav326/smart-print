@@ -3148,7 +3148,7 @@ function PricingPage({ pricing, onSave, busy }: {
       </div>
       <div className="pricing-group-heading"><strong>Minimum order</strong><span>Applied if the calculated print total is lower</span></div>
       <label htmlFor="pricing-minimum-charge">Minimum job charge <span className="price-input-wrap minimum-price"><span aria-hidden="true">₹</span><input type="number" min="0" max="100000" step="0.01" aria-label="Minimum job charge" id="pricing-minimum-charge" value={minimum} onChange={e=>setMinimum(e.target.value)}/></span></label>
-      <div className="pricing-group-heading"><strong>Photo printing</strong><span>Price per finished photo · ₹0 disables a size</span></div><div className="pricing-input-grid photo-pricing-grid"><label htmlFor="pricing-photo-35x45">35 × 45 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="35 × 45 mm" id="pricing-photo-35x45" value={photo35x45} onChange={e=>setPhoto35x45(e.target.value)}/></span></label><label htmlFor="pricing-photo-25x35">25 × 35 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="25 × 35 mm" id="pricing-photo-25x35" value={photo25x35} onChange={e=>setPhoto25x35(e.target.value)}/></span></label><label htmlFor="pricing-photo-2x2">2 × 2 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="2 × 2 inch" id="pricing-photo-2x2" value={photo2x2} onChange={e=>setPhoto2x2(e.target.value)}/></span></label><label htmlFor="pricing-photo-4x6">4 × 6 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="4 × 6 inch" id="pricing-photo-4x6" value={photo4x6} onChange={e=>setPhoto4x6(e.target.value)}/></span></label></div><div className="settings-summary"><ShieldCheck size={16}/><span>Photo rates are per finished photo, not per A4 sheet. The quote records the rate used.</span></div>
+      <div className="pricing-group-heading"><strong>{t("Photo printing")}</strong><span>Price per finished photo · ₹0 disables a size</span></div><div className="pricing-input-grid photo-pricing-grid"><label htmlFor="pricing-photo-35x45">35 × 45 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="35 × 45 mm" id="pricing-photo-35x45" value={photo35x45} onChange={e=>setPhoto35x45(e.target.value)}/></span></label><label htmlFor="pricing-photo-25x35">25 × 35 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="25 × 35 mm" id="pricing-photo-25x35" value={photo25x35} onChange={e=>setPhoto25x35(e.target.value)}/></span></label><label htmlFor="pricing-photo-2x2">2 × 2 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="2 × 2 inch" id="pricing-photo-2x2" value={photo2x2} onChange={e=>setPhoto2x2(e.target.value)}/></span></label><label htmlFor="pricing-photo-4x6">4 × 6 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="4 × 6 inch" id="pricing-photo-4x6" value={photo4x6} onChange={e=>setPhoto4x6(e.target.value)}/></span></label></div><div className="settings-summary"><ShieldCheck size={16}/><span>Photo rates are per finished photo, not per A4 sheet. The quote records the rate used.</span></div>
        <div className="pricing-group-heading"><strong>ID card printing</strong><span>Price per prepared ID card · ₹0 disables ID card quotes</span></div>
        <label htmlFor="pricing-id-document">Prepared ID card (one A4 sheet) <span className="price-input-wrap minimum-price"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Prepared ID card" id="pricing-id-document" value={idDocumentPrice} onChange={e=>setIdDocumentPrice(e.target.value)}/></span></label>
        <div className="settings-summary"><ShieldCheck size={16}/><span>ID cards use this dedicated flat rate, independent of ordinary document page prices and minimum job charge.</span></div>
@@ -3465,7 +3465,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 <label>Orientation <select value={editingPrintSettings.orientation} onChange={event=>{
                   const orientation=event.currentTarget.value as CustomerPrintRequestSettings["orientation"];
                   setEditingPrintSettings(current=>current?{...current,orientation}:current);
-                }}><option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option></select></label>
+                }}><option value="AUTO">{t("Auto · follow document")}</option><option value="PORTRAIT">{t("Portrait")}</option><option value="LANDSCAPE">{t("Landscape")}</option></select></label>
                 <div className="queue-settings-actions">
                   <button className="secondary-button" type="button" onClick={()=>{setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>Cancel</button>
                   <button className="primary-button" type="button" disabled={busyJobId===job.id||!editingPrintSettings} onClick={()=>{if(editingPrintSettings)void onUpdateSettings(job,editingPrintSettings);setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>Send revised quote</button>
@@ -3516,7 +3516,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
       <div className="batch-review-overview-heading"><div><span>REVIEW SUMMARY</span><strong>{jobs.length} {jobs.length===1?"file":"files"} in this batch</strong><small>Included files stay in one checkout. Excluded files will not be charged.</small></div><div className="batch-review-total"><small>Accepted value · valid quotes only</small><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong></div></div>
       <div className="batch-review-stats">
         <span className="included"><b>{acceptedCount}</b> included</span>
-        <span className="excluded"><b>{rejectedCount}</b> excluded</span>
+        <span className="excluded"><b>{rejectedCount}</b> {t("excluded")}</span>
         <span className="output"><b>{acceptedOutputSides}</b> document output sides</span>
         {acceptedIdSheets>0&&<span className="id-cards"><b>{acceptedIdSheets}</b> ID-card A4 sheets</span>}
         {acceptedPhotoPages>0&&<span className="photos"><b>{acceptedPhotoPages}</b> photo A4 pages</span>}
@@ -4841,9 +4841,9 @@ function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:N
       <span>PDF pages {current.firstSourcePage}–{current.lastSourcePage} appear on this output sheet. Page order follows the selected driver direction; final margins and page fitting are controlled by the printer driver. The original PDF is sent to the printer driver unchanged.</span>
     </div>}
     {current&&current.pageCount>1&&<div className="customer-native-pdf-controls">
-      <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>Previous sheet</button>
+      <button type="button" disabled={current.loading||current.pageIndex<=0} onClick={()=>onPage(current.pageIndex-1)}>{t("Previous sheet")}</button>
       <span>Sheet {current.pageIndex+1} of {current.pageCount}</span>
-      <button type="button" disabled={current.loading||current.pageIndex>=current.pageCount-1} onClick={()=>onPage(current.pageIndex+1)}>Next sheet</button>
+      <button type="button" disabled={current.loading||current.pageIndex>=current.pageCount-1} onClick={()=>onPage(current.pageIndex+1)}>{t("Next sheet")}</button>
     </div>}
   </div>;
 }
@@ -4933,6 +4933,7 @@ function smartPrintNativeHeadline(status:string):string {
 
 function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,privatePrintingVirtualOutputEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,onStartNewSession}:{dark:boolean;publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;privatePrintingVirtualOutputEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;onStartNewSession:()=>void}) {
   const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   // Private Printing is available only with a live paired Agent/key and a ready
   // physical queue, or an explicitly approved non-production virtual test queue.
@@ -6410,8 +6411,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const photoPriceMap={"35x45":photoPricing?.photo35x45Minor??0,"25x35":photoPricing?.photo25x35Minor??0,"2x2":photoPricing?.photo2x2Minor??0,"4x6":photoPricing?.photo4x6Minor??0};
   const photoAlreadyUploaded=Boolean(file&&uploadedFileFingerprints.includes(customerFileFingerprint(file)));
   return <>{photoStudioSource&&<PhotoStudio source={photoStudioSource} mode="customer" dark={dark} photoPrices={photoPriceMap} onCancel={()=>{setPhotoStudioSource(null);setPhotoStudioSourceFingerprint(null);}} onApply={applyPhotoSheets}/>}<section className="customer-print-flow">
-    {previousItems.length>0&&<section className="customer-previous-order" aria-label="Previous print request">
-      <div className="customer-previous-order-heading"><div><span>PREVIOUS REQUEST</span><strong>From your earlier QR session</strong></div><span className="customer-previous-order-readonly">Read only</span></div>
+    {previousItems.length>0&&<section className="customer-previous-order" aria-label={t("Previous print request")}>
+      <div className="customer-previous-order-heading"><div><span>{t("PREVIOUS REQUEST")}</span><strong>{t("From your earlier QR session")}</strong></div><span className="customer-previous-order-readonly">{t("Read only")}</span></div>
       <p>This request is separate from your current session. Its status is restored for reference only; printing, payment and file changes are not available here.</p>
       <div className="customer-previous-order-list">
         {previousItems.map(item=>{
@@ -6423,12 +6424,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           </div>;
         })}
       </div>
-      {previousHistoryUnavailable&&<CustomerInlineNotice kind="warning" title="Earlier status unavailable">Check with the shop before uploading the same document again.</CustomerInlineNotice>}
+      {previousHistoryUnavailable&&<CustomerInlineNotice kind="warning" title={t("Earlier status unavailable")}>{t("Check with the shop before uploading the same document again.")}</CustomerInlineNotice>}
       <small className="customer-previous-order-footnote">Your earlier order remains attached to its original shop session. Document contents stay private; this panel restores status metadata only.</small>
     </section>}
     <div className="customer-flow-heading"><div><span>STEP 1</span><h2>{nativeAppMode?"Add files":"Add documents or images"}</h2></div><span className="upload-limit">PDF/JPG/PNG · Up to {UPLOAD_LIMITS.maxBatchFiles} files / {UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB</span></div>
-    <section className="customer-privacy-choice" aria-label="Document privacy choice">
-      <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>Choose how files are handled</strong></div><small>Applies to all files</small></div>
+    <section className="customer-privacy-choice" aria-label={t("Document privacy choice")}>
+      <div className="customer-privacy-choice-heading"><div><span>{nativeAppMode?"PRIVACY":"CHOOSE YOUR PRIVACY"}</span><strong>{t("Choose how files are handled")}</strong></div><small>{t("Applies to all files")}</small></div>
       <div className="customer-privacy-choice-grid">
         <button type="button" aria-pressed={privatePrinting} disabled={busy||uploadedBatch.length>0||!canOfferPrivatePrinting} className={privatePrinting?"customer-privacy-option private selected":"customer-privacy-option private"} onClick={()=>{setPrivacyChoiceManuallySelected(true);setPrivatePrinting(true);setUploadMode("LOCAL");setUploadModeManuallySelected(true);}}>
           <span className="customer-privacy-option-icon"><ShieldCheck size={22}/></span><span className="customer-privacy-option-copy"><strong>Private Printing</strong><small>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted · development test PDF only":"Encrypted · shop-side source erased after verified output"}</small></span><span className="customer-privacy-option-state">{privatePrinting?"Selected":uploadedBatch.length>0?"Unavailable for this batch":canOfferPrivatePrinting?"Choose private":"Shop setup needed"}</span>
@@ -6439,7 +6440,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       </div>
       {uploadedBatch.some(item=>!item.job.privatePrinting)&&<CustomerInlineNotice kind="info" title="Private mode is locked for this batch">Standard files have already been uploaded. To protect every document with Private Printing, start a new Private batch before uploading its files.</CustomerInlineNotice>}
       <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted on your device. The protected test PDF stays on this computer for up to 24 hours; it is not a physical print. Your original stays on your device.":"Encrypted on your device and decrypted only by the paired Windows Agent. The shop-side copy is erased after confirmed output. Your original stays on your device."}</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Uses the shop's normal print queue. The shop-side copy is deleted 72 hours after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
-      {!canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title="Private Printing unavailable">{!hasAssignedPrinter
+      {!canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title={t("Private Printing unavailable")}>{!hasAssignedPrinter
         ?"The shop needs to assign an active printer."
         :!localAgent?.agentDeviceId||!localAgent.documentEncryptionPublicKey
           ?"The paired shop computer must be online and publish its encryption key."
@@ -6448,34 +6449,34 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             :privateVirtualTestMode
               ?"The Company Main Admin must enable virtual test output."
               :"The shop needs an eligible physical printer."}</CustomerInlineNotice>}
-      {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>Private Printing is on.</strong></span></div>}
+      {privatePrinting&&<div className="customer-private-confirmation"><ShieldCheck size={16}/><span><strong>{t("Private Printing is on.")}</strong></span></div>}
       {files.some(isSmartPrintPhotoDocument)&&<div className="customer-private-confirmation" role="status">
         <ShieldCheck size={16}/>
         <span>{privatePrinting
-          ? <><strong>Private Printing selected.</strong> <InfoTooltip label="Change printing method"><span>You can still choose Standard Printing above before uploading.</span></InfoTooltip></>
-          : <strong>Standard Printing selected.</strong>}</span>
+          ? <><strong>{t("Private Printing selected.")}</strong> <InfoTooltip label={t("Change printing method")}><span>{t("You can still choose Standard Printing above before uploading.")}</span></InfoTooltip></>
+          : <strong>{t("Standard Printing selected.")}</strong>}</span>
       </div>}
     </section>
     {privatePrinting
       ? <div className="customer-private-transfer-note"><Lock size={16}/><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"End-to-end encrypted · development test PDF only · not physical fulfilment":"End-to-end encrypted · physical printer required"}</span></div>
       : <div className="customer-upload-modes">
-      <div className="customer-upload-mode-heading"><strong>How your files reach the shop</strong><small>Choose a connection method. Your privacy setting above stays the same.</small></div>
+      <div className="customer-upload-mode-heading"><strong>{t("How your files reach the shop")}</strong><small>{t("Choose a connection method. Your privacy setting above stays the same.")}</small></div>
       {localAgent?.endpoints.length
         ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>Shop Wi-Fi · local transfer</strong><small>Direct transfer over shop Wi-Fi</small></button>
-        : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>Shop Wi-Fi · local transfer</strong><small>Unavailable</small></button>}
+        : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>{t("Shop Wi-Fi · local transfer")}</strong><small>{t("Unavailable")}</small></button>}
       {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>Encrypted online transfer · print when ready</small></button>}
     </div>}
-    {customerUploadUnavailable&&<CustomerInlineNotice kind="warning" title="Secure upload unavailable">No file was uploaded. Ask the shop to reconnect its print service, then retry.</CustomerInlineNotice>}
-    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title="Encrypted online relay">No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.</CustomerInlineNotice>}
-    {batchLockedForPayment&&<CustomerInlineNotice kind="warning" title="This batch is locked">Payment has started. Add more documents in a new batch.</CustomerInlineNotice>}
-    <div className="customer-upload-picker-grid" aria-label="Choose documents or folders"
+    {customerUploadUnavailable&&<CustomerInlineNotice kind="warning" title={t("Secure upload unavailable")}>{t("No file was uploaded. Ask the shop to reconnect its print service, then retry.")}</CustomerInlineNotice>}
+    {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title={t("Encrypted online relay")}>{t("No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.")}</CustomerInlineNotice>}
+    {batchLockedForPayment&&<CustomerInlineNotice kind="warning" title={t("This batch is locked")}>{t("Payment has started. Add more documents in a new batch.")}</CustomerInlineNotice>}
+    <div className="customer-upload-picker-grid" aria-label={t("Choose documents or folders")}
       onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
       onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
         <input type="file" multiple disabled={batchLockedForPayment} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>{nativeAppMode?"Select files":"Select documents or images"}</strong>
-        <small>PDF, JPG or PNG</small>
+        <small>{t("PDF, JPG or PNG")}</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
         <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":undefined} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
@@ -6484,15 +6485,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         <small>{nativeAppMode?"Select multiple folders":"One folder at a time"}</small>
       </label>
     </div>
-    {notices.length>0&&<div className="customer-inline-notices" aria-label="File selection messages">
+    {notices.length>0&&<div className="customer-inline-notices" aria-label={t("File selection messages")}>
       {notices.map((item,index)=><CustomerInlineNotice
         key={item.kind+"-"+index}
         kind={item.kind}
         title={item.kind==="warning"?"Some files were skipped":"File details"}
       >{item.message}</CustomerInlineNotice>)}
     </div>}
-    {files.length>0&&<div className="customer-selected-files" aria-label="Selected files and print settings">
-      <div className="customer-selected-files-head"><strong>{files.length} selected</strong><span>{formatBytes(files.reduce((total,item)=>total+item.size,0))} in this selection</span></div>
+    {files.length>0&&<div className="customer-selected-files" aria-label={t("Selected files and print settings")}>
+      <div className="customer-selected-files-head"><strong>{files.length} {t("selected")}</strong><span>{formatBytes(files.reduce((total,item)=>total+item.size,0))} {t("in this selection")}</span></div>
       <div className="customer-batch-groups">{uploadGroups.map(group=>{
         const defaults=defaultsForGroup(group.name);
         const isIdStudioGroup=group.files.length>0&&group.files.every(isSmartPrintIdDocument);
@@ -6501,22 +6502,22 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             <div className="customer-folder-title"><FolderOpen size={16}/><span><strong>{group.name}</strong><small>{group.files.length} file(s)</small></span></div>
             {isIdStudioGroup
               ? <div className="customer-folder-defaults">
-                <div><span>ID sheet</span><strong className="customer-paper-default">A4 portrait · 1 copy · Single-sided</strong></div>
-                <div><span>Print mode</span><div className="customer-choice-row">
+                <div><span>{t("ID sheet")}</span><strong className="customer-paper-default">{t("A4 portrait · 1 copy · Single-sided")}</strong></div>
+                <div><span>{t("Print mode")}</span><div className="customer-choice-row">
                   <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
                   <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
                 </div></div>
               </div>
               : <div className="customer-folder-defaults">
-              <div><span>Colour</span><div className="customer-choice-row">
+              <div><span>{t("Colour")}</span><div className="customer-choice-row">
                 <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
                 <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
               </div></div>
-              <div><span>Sides</span><div className="customer-choice-row">
-                <button type="button" aria-pressed={!defaults.isDuplex} className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>Single</button>
-                <button type="button" aria-pressed={defaults.isDuplex} className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>Double</button>
+              <div><span>{t("Sides")}</span><div className="customer-choice-row">
+                <button type="button" aria-pressed={!defaults.isDuplex} className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>{t("Single")}</button>
+                <button type="button" aria-pressed={defaults.isDuplex} className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>{t("Double")}</button>
               </div></div>
-              <label className="customer-folder-copies"><span>Copies · all files</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies}
+              <label className="customer-folder-copies"><span>{t("Copies · all files")}</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies}
                  onChange={event=>{
                    const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
                    setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
@@ -6525,28 +6526,28 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                    const copies=normalizeCustomerCopies(event.currentTarget.value);
                    setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
                  }}/></label>
-              <div><span>Paper</span><strong className="customer-paper-default">{defaults.advancedEnabled?defaults.paperSize:"A4"}</strong></div>
+              <div><span>{t("Paper")}</span><strong className="customer-paper-default">{defaults.advancedEnabled?defaults.paperSize:"A4"}</strong></div>
               <label className="customer-advanced-toggle"><input type="checkbox" checked={defaults.advancedEnabled} onChange={event=>{
                  const advancedEnabled=event.currentTarget.checked;
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),advancedEnabled}}));
-               }}/><span>Advanced settings</span></label>
+               }}/><span>{t("Advanced settings")}</span></label>
             </div>}
             {!isIdStudioGroup&&defaults.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
-              <label><span>Paper size</span><select value={defaults.paperSize} onChange={event=>{
+              <label><span>{t("Paper size")}</span><select value={defaults.paperSize} onChange={event=>{
                  const paperSize=event.currentTarget.value as CustomerGroupSettings["paperSize"];
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),paperSize}}));
                }}>
                 <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
               </select></label>
-              <label><span>Orientation</span><select value={defaults.orientation} onChange={event=>{
+              <label><span>{t("Orientation")}</span><select value={defaults.orientation} onChange={event=>{
                  const orientation=event.currentTarget.value as CustomerGroupSettings["orientation"];
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),orientation}}));
                }}>
-                <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
+                <option value="AUTO">{t("Auto · follow document")}</option><option value="PORTRAIT">{t("Portrait")}</option><option value="LANDSCAPE">{t("Landscape")}</option>
               </select></label>
               {nupOptions.length>0&&group.files.some(candidate=>
                 isCustomerPdf(candidate)&&!isSmartPrintIdDocument(candidate)&&!isSmartPrintPhotoDocument(candidate)
-              )&&<label><span>Pages per sheet</span><select value={defaults.pagesPerSheet??1} onChange={event=>{
+              )&&<label><span>{t("Pages per sheet")}</span><select value={defaults.pagesPerSheet??1} onChange={event=>{
                  const pagesPerSheet=Number(event.currentTarget.value)||1;
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),pagesPerSheet}}));
                }}>
@@ -6566,7 +6567,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
               <button type="button" aria-pressed={selectedFileIndex===index} title={selected.name} className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
               {!isSmartPrintIdDocument(selected)&&<button type="button" aria-pressed={own.custom} aria-label={`Use ${own.custom?"folder":"custom"} settings for ${selected.name}`} className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation,pagesPerSheet:defaults.pagesPerSheet}:{})}}))}>{own.custom?"Custom":"Folder"}</button>}
-              <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title="Remove from this selection" disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>Remove</span></button>
+              <button type="button" className="customer-file-remove" aria-label={`Remove ${selected.name} from this selection`} title={t("Remove from this selection")} disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>{t("Remove")}</span></button>
               {own.custom&&!isSmartPrintIdDocument(selected)&&<div className="customer-file-overrides">
                 <label className="customer-folder-copies"><span>Copies</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
                    onChange={event=>{
@@ -6582,28 +6583,28 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                   <button type="button" aria-pressed={own.colourMode==="Colour"} className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
                 </div>
                 <div className="customer-choice-row">
-                  <button type="button" aria-pressed={!own.isDuplex} className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>Single</button>
-                  <button type="button" aria-pressed={own.isDuplex} className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>Double</button>
+                  <button type="button" aria-pressed={!own.isDuplex} className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>{t("Single")}</button>
+                  <button type="button" aria-pressed={own.isDuplex} className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>{t("Double")}</button>
                 </div>
-                <div><span>Paper</span><strong className="customer-paper-default">{own.advancedEnabled?own.paperSize:"A4"}</strong></div>
+                <div><span>{t("Paper")}</span><strong className="customer-paper-default">{own.advancedEnabled?own.paperSize:"A4"}</strong></div>
                 <label className="customer-advanced-toggle"><input type="checkbox" checked={own.advancedEnabled} onChange={event=>{
                    const advancedEnabled=event.currentTarget.checked;
                    setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,advancedEnabled}}));
-                 }}/><span>Advanced settings</span></label>
+                 }}/><span>{t("Advanced settings")}</span></label>
                 {own.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
-                  <label><span>Paper size</span><select value={own.paperSize} onChange={event=>{
+                  <label><span>{t("Paper size")}</span><select value={own.paperSize} onChange={event=>{
                      const paperSize=event.currentTarget.value as CustomerFileSettings["paperSize"];
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,paperSize}}));
                    }}>
                     <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">Letter</option><option value="LEGAL">Legal</option>
                   </select></label>
-                  <label><span>Orientation</span><select value={own.orientation} onChange={event=>{
+                  <label><span>{t("Orientation")}</span><select value={own.orientation} onChange={event=>{
                      const orientation=event.currentTarget.value as CustomerFileSettings["orientation"];
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,orientation}}));
                    }}>
-                    <option value="AUTO">Auto · follow document</option><option value="PORTRAIT">Portrait</option><option value="LANDSCAPE">Landscape</option>
+                    <option value="AUTO">{t("Auto · follow document")}</option><option value="PORTRAIT">{t("Portrait")}</option><option value="LANDSCAPE">{t("Landscape")}</option>
                   </select></label>
-                  {nupOptions.length>0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<label><span>Pages per sheet</span><select value={own.pagesPerSheet??1} onChange={event=>{
+                  {nupOptions.length>0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<label><span>{t("Pages per sheet")}</span><select value={own.pagesPerSheet??1} onChange={event=>{
                      const pagesPerSheet=Number(event.currentTarget.value)||1;
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,pagesPerSheet}}));
                    }}>
@@ -6619,25 +6620,25 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       })}</div>
     </div>}
     {files.length>0&&!privatePrinting&&<label className="customer-batch-name-field">
-  <span>Give this batch a name <small>Optional · shown to the shop</small></span>
+  <span>{t("Give this batch a name")} <small>{t("Optional · shown to the shop")}</small></span>
   <input type="text" value={batchName} maxLength={50}
-    placeholder="e.g. Manjeet - College Notes"
+    placeholder={t("e.g. Manjeet - College Notes")}
     disabled={busy||uploadedBatch.length>0}
     onChange={event=>setBatchName(event.target.value)}
   />
 </label>}
 {files.length>0&&<small className="customer-upload-local-note">Folder defaults apply. <InfoTooltip label="Folder settings"><span>Settings apply to every file in this folder. Use Custom on a file to change its settings.</span></InfoTooltip></small>}
     {files.length>0&&!privatePrinting&&uploadMode==="LOCAL"&&localAgent&&(localReady
-      ?<CustomerInlineNotice kind="warning" title="Local transfer is not encrypted">{secureQueueFallbackEnabled
+      ?<CustomerInlineNotice kind="warning" title={t("Local transfer is not encrypted")}>{secureQueueFallbackEnabled
           ?"Shop Wi-Fi uses HTTP. Choose HTTPS or Private Printing for an encrypted transfer."
           :canOfferPrivatePrinting
             ?"Shop Wi-Fi uses HTTP. Choose Private Printing for an encrypted transfer."
             :"Shop Wi-Fi uses HTTP. This transfer is not encrypted in transit."}</CustomerInlineNotice>
-      :<CustomerInlineNotice kind="info" title="Check shop Wi-Fi">Tap Check shop Wi-Fi above and allow local-network access.</CustomerInlineNotice>)}
-    {files.length>0&&uploadMode==="CLOUD"&&<CustomerInlineNotice kind="info" title="Secure HTTPS transfer">Your files are encrypted while being sent to the shop.</CustomerInlineNotice>}
+      :<CustomerInlineNotice kind="info" title={t("Check shop Wi-Fi")}>Tap Check shop Wi-Fi above and allow local-network access.</CustomerInlineNotice>)}
+    {files.length>0&&uploadMode==="CLOUD"&&<CustomerInlineNotice kind="info" title={t("Secure HTTPS transfer")}>{t("Your files are encrypted while being sent to the shop.")}</CustomerInlineNotice>}
     {previewUrl&&file&&<div className="customer-file-preview" role="region" aria-label={`Preview for ${file.name}`}><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?"This photo has already been submitted to the shop.":"Open Photo Studio"} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?"Already sent to shop":"Open Photo Studio"}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<CustomerInlineNotice kind="info" title="Photo printing unavailable">Ask the shop to enable photo printing and set its rates.</CustomerInlineNotice>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<CustomerInlineNotice kind="info" title="Photo already sent">The shop can prepare it from the review queue. No second upload is needed.</CustomerInlineNotice>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Photo sheet prepared for this shop</strong><span>Preview unavailable. <InfoTooltip label="Prepared PDF"><span>The prepared PDF stays in your print workflow.</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">Preview unavailable. <InfoTooltip label="Upload status"><span>You can still upload this file normally.</span></InfoTooltip></small>:<>
   <iframe src={browserNupPreview?.url||previewUrl} title={browserNupPreview?.url?file.name+" N-up print preview":file.name+" preview"}/>
-  {browserNupPreview&&<div className="customer-nup-browser-preview" role="region" aria-label="Pages per sheet preview">
+  {browserNupPreview&&<div className="customer-nup-browser-preview" role="region" aria-label={t("Pages per sheet preview")}>
     {browserNupPreview.loading
       ? <span>Preparing {browserNupPreview.pagesPerSheet}-up sheet preview…</span>
       : browserNupPreview.failed
@@ -6646,15 +6647,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             <strong>{browserNupPreview.pagesPerSheet}-up preview · Output sheet {browserNupPreview.sheetIndex+1} of {browserNupPreview.sheetCount}</strong>
             <span>PDF pages {browserNupPreview.firstSourcePage}–{browserNupPreview.lastSourcePage} appear on this output sheet.</span>
             {browserNupPreview.sheetCount>1&&<div className="customer-nup-browser-preview-controls">
-              <button type="button" disabled={browserNupPreview.sheetIndex<=0} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.max(0,index-1))}>Previous sheet</button>
-              <button type="button" disabled={browserNupPreview.sheetIndex>=browserNupPreview.sheetCount-1} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.min(browserNupPreview.sheetCount-1,index+1))}>Next sheet</button>
+              <button type="button" disabled={browserNupPreview.sheetIndex<=0} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.max(0,index-1))}>{t("Previous sheet")}</button>
+              <button type="button" disabled={browserNupPreview.sheetIndex>=browserNupPreview.sheetCount-1} onClick={()=>setBrowserNupPreviewSheetIndex(index=>Math.min(browserNupPreview.sheetCount-1,index+1))}>{t("Next sheet")}</button>
             </div>}
             <small>Page order follows {browserNupPreview.pagesPerSheetDirection}. This visual preview does not replace driver-specific margins or page fitting. The original PDF is uploaded unchanged; the selected Windows printer driver applies the physical N-up layout.</small>
           </>}
   </div>}
 </>:isCustomerImage(file)?<img className="customer-original-image-preview" src={previewUrl} alt={file.name}/>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>Preview unavailable</strong><span>This file remains attached to the print workflow.</span></div>}</div>}
     {files.length>0&&<button className="customer-flow-button" disabled={busy||customerUploadUnavailable||pendingFilesCount===0||(!privatePrinting&&uploadMode==="LOCAL"&&!localReady)} onClick={()=>void upload()}>{busy?<span className="button-spinner"/>:<><UploadIcon/>{privatePrinting?"Upload "+pendingFilesCount+" file(s) securely":uploadMode==="LOCAL"&&localAgent?.endpoints?.length?"Upload "+pendingFilesCount+" file(s) to shop":"Upload "+pendingFilesCount+" file(s)"}</>}</button>}
-    {uploadProgress&&<section className="customer-upload-progress" aria-live="polite" aria-label="Upload progress">
+    {uploadProgress&&<section className="customer-upload-progress" aria-live="polite" aria-label={t("Upload progress")}>
       <div className="customer-upload-progress-header">
         <div><strong>{uploadConfirmedCount} of {uploadProgress.total} files uploaded</strong><span>{uploadFailedCount>0?`${uploadFailedCount} failed · Retry only failed files.`:uploadWaitingCount>0?`${uploadWaitingCount} waiting for the shop computer.`:uploadConfirmedCount===uploadProgress.total?"All files uploaded. Printing status is shown separately.":"Files upload in parallel."}</span></div>
         <span className="customer-upload-progress-count">{Math.round(
@@ -6707,27 +6708,27 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         </section>)}
       </div>}
       <div className="uploaded-document-card"><div className="uploaded-document-icon"><FileText size={18}/></div><div><div className="uploaded-document-title"><strong>{resolveCustomerDocumentName(uploaded,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[uploaded.job.id]??batchStatuses[uploaded.job.id]?.printKind??uploaded.job.printKind)}/></div><span>{(photoSettingsByJobId[uploaded.job.id]||batchStatuses[uploaded.job.id]?.printKind==="PHOTO"||uploaded.job.printKind==="PHOTO")?`${photoSettingsByJobId[uploaded.job.id]?.photoCount??batchStatuses[uploaded.job.id]?.photoCount??uploaded.job.photoCount??0} photos · ${photoSettingsByJobId[uploaded.job.id]?.sizeCode??batchStatuses[uploaded.job.id]?.photoSizeCode??uploaded.job.photoSizeCode??""} · ${uploaded.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(uploaded.job.pageCount,printSettingsByJobId[uploaded.job.id]?.copies??uploaded.job.copies,printSettingsByJobId[uploaded.job.id]?.pagesPerSheet??uploaded.job.pagesPerSheet??1,printSettingsByJobId[uploaded.job.id]?.isDuplex??uploaded.job.isDuplex??false)}`} · {formatBytes(uploaded.document.sizeBytes)} · Validated</span></div><Status label={customerStatusLabel(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")} tone={customerStatusTone(batchStatuses[uploaded.job.id]?.status??jobStatus?.status??uploaded.job.status??"UPLOADED")}/></div>
-      {batchId&&hasLegacyIndividualPayment&&<CustomerInlineNotice kind="warning" title="Individual payment already exists">Resolve that payment before paying for this batch to avoid a duplicate charge.</CustomerInlineNotice>}
+      {batchId&&hasLegacyIndividualPayment&&<CustomerInlineNotice kind="warning" title={t("Individual payment already exists")}>{t("Resolve that payment before paying for this batch to avoid a duplicate charge.")}</CustomerInlineNotice>}
       {canCalculateBatch&&<div className="customer-batch-quote-action">
-        <div className="customer-flow-heading customer-config-heading"><div><span>STEP 2</span><h2>Review batch settings</h2></div><small>{quoteItems.length} files</small></div>
+        <div className="customer-flow-heading customer-config-heading"><div><span>{t("STEP 2")}</span><h2>{t("Review batch settings")}</h2></div><small>{quoteItems.length} files</small></div>
         <button className="customer-flow-button" disabled={busy} onClick={()=>void getQuote()}>{busy?<span className="button-spinner"/>:"Calculate batch quote"}</button>
       </div>}
     </>}
     {error&&<div className="customer-flow-error" role="alert"><AlertTriangle size={16} aria-hidden="true"/><span>{error}</span></div>}
     {(quoteEntries.length>0||batchQuoteNeedsRefresh>0)&&<section className="customer-quote-card customer-batch-quote-card" aria-label="Batch quote summary">
       <div className="customer-batch-quote-heading">
-        <div className="customer-batch-quote-title"><span>BATCH QUOTE</span><strong>{batchQuoteTotalDisplay}</strong><small>{batchQuoteSummary} {batchQuoteNeedsRefresh>0?batchQuoteNeedsRefresh+" need a fresh quote. ":""}Excluded files are not charged.</small></div>
+        <div className="customer-batch-quote-title"><span>{t("BATCH QUOTE")}</span><strong>{batchQuoteTotalDisplay}</strong><small>{batchQuoteSummary} {batchQuoteNeedsRefresh>0?batchQuoteNeedsRefresh+" need a fresh quote. ":""}{t("Excluded files are not charged.")}</small></div>
         <span className="customer-batch-quote-validity">{batchQuoteNeedsRefresh>0?"Review required":"Quote for review"}</span>
       </div>
       <div className="customer-batch-quote-categories" aria-label="Files included in this quote">
-        <span className="customer-batch-quote-chip included"><b>{acceptedQuoteEntries.length}</b> priced</span>
-        {batchQuoteNeedsRefresh>0&&<span className="customer-batch-quote-chip refresh"><b>{batchQuoteNeedsRefresh}</b> quote needed</span>}
-        {batchQuoteCounts.excluded>0&&<span className="customer-batch-quote-chip excluded"><b>{batchQuoteCounts.excluded}</b> excluded</span>}
-        {batchQuoteCounts.documents>0&&<span className="customer-batch-quote-chip document"><b>{batchQuoteCounts.documents}</b> documents</span>}
-        {batchQuoteCounts.idCards>0&&<span className="customer-batch-quote-chip id-card"><b>{batchQuoteCounts.idCards}</b> ID cards</span>}
-        {batchQuoteCounts.photos>0&&<span className="customer-batch-quote-chip photo"><b>{batchQuoteCounts.photos}</b> photo jobs</span>}
+        <span className="customer-batch-quote-chip included"><b>{acceptedQuoteEntries.length}</b> {t("priced")}</span>
+        {batchQuoteNeedsRefresh>0&&<span className="customer-batch-quote-chip refresh"><b>{batchQuoteNeedsRefresh}</b> {t("quote needed")}</span>}
+        {batchQuoteCounts.excluded>0&&<span className="customer-batch-quote-chip excluded"><b>{batchQuoteCounts.excluded}</b> {t("excluded")}</span>}
+        {batchQuoteCounts.documents>0&&<span className="customer-batch-quote-chip document"><b>{batchQuoteCounts.documents}</b> {t("documents")}</span>}
+        {batchQuoteCounts.idCards>0&&<span className="customer-batch-quote-chip id-card"><b>{batchQuoteCounts.idCards}</b> {t("ID cards")}</span>}
+        {batchQuoteCounts.photos>0&&<span className="customer-batch-quote-chip photo"><b>{batchQuoteCounts.photos}</b> {t("photo jobs")}</span>}
       </div>
-      <div className="customer-batch-quote-lines" aria-label="File-by-file prices">
+      <div className="customer-batch-quote-lines" aria-label={t("File-by-file prices")}>
         {quoteRows.map(entry=>{
           const status=statusForBatchItem(entry.item);
           const quoteExpired=Boolean(entry.quote)&&quoteExpiredForBatchItem(entry.item);
@@ -6762,12 +6763,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         })}
       </div>
       {acceptedQuoteEntries.length>0&&<details className="customer-batch-quote-details">
-        <summary><span>See price breakdown</span><small>Documents, ID cards and photos</small></summary>
+        <summary><span>{t("See price breakdown")}</span><small>{t("Documents, ID cards and photos")}</small></summary>
         <div className="customer-batch-print-breakdown">
           <div><span><strong>Normal documents</strong><small>{batchQuoteBreakdown.normalDocumentFileCount} files · {batchQuoteBreakdown.normalDocumentSourcePages} source pages → {batchQuoteBreakdown.normalDocumentOutputPages} output sides after N-up and copies</small><small>B&W · {batchQuoteBreakdown.normalDocumentMonoOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentMonoAmountMinor,batchQuoteCurrency)} · Colour · {batchQuoteBreakdown.normalDocumentColourOutputPages} sides · {formatMoney(batchQuoteBreakdown.normalDocumentColourAmountMinor,batchQuoteCurrency)}</small></span><strong>{formatMoney(batchQuoteBreakdown.normalDocumentAmountMinor,batchQuoteCurrency)}</strong></div>
-          <div><span><strong>ID cards</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,batchQuoteCurrency)}</strong></div>
-          <div><span><strong>Photo printing</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,batchQuoteCurrency)}</strong></div>
-          <div className="customer-batch-print-total"><span><strong>Total output</strong><small>Page sides and prepared A4 sheets, grouped by print type</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
+          <div><span><strong>{t("ID cards")}</strong><small>{batchQuoteBreakdown.idCardCount} jobs · {batchQuoteBreakdown.idCardSheets} prepared A4 sheets</small></span><strong>{formatMoney(batchQuoteBreakdown.idCardAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div><span><strong>{t("Photo printing")}</strong><small>{batchQuoteBreakdown.finishedPhotos} finished photos · {batchQuoteBreakdown.photoPages} A4 pages</small></span><strong>{formatMoney(batchQuoteBreakdown.photoAmountMinor,batchQuoteCurrency)}</strong></div>
+          <div className="customer-batch-print-total"><span><strong>{t("Total output")}</strong><small>{t("Page sides and prepared A4 sheets, grouped by print type")}</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
         </div>
       </details>}
       <p className="customer-payment-model-note customer-quote-explanation">{batchQuoteNeedsRefresh>0?"Only files with a current quote are included in this displayed total. Calculate a fresh quote for the highlighted files before sending the batch to the shop. ":""}This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing is priced per finished photo; the A4 page count is shown for planning.</span><span>Duplex printing can place two output sides on one physical sheet.</span><span>Rejected or refunded files are excluded from the total.</span></InfoTooltip></p>
@@ -6810,11 +6811,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       {canStartNewSession&&<div className="customer-session-complete"><div><strong>{translateUi(locale,"customer.orderReceived")}</strong><span>Your order history is saved. You can start another print session when ready.</span></div><button className="customer-flow-button" onClick={onStartNewSession}><RefreshCw size={16}/> {translateUi(locale,"customer.startNewSession")}</button></div>}
 
       {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
-        <div className="customer-pay-heading"><span>PAY THE SHOP</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
-        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title="Cash at counter unavailable">Choose UPI or ask the shop whether cash can be enabled.</CustomerInlineNotice>}
-        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<CustomerInlineNotice kind="warning" title="No payment method available">Ask the shop to enable UPI or cash at the counter.</CustomerInlineNotice>}
-        {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
-        {paymentOptions.cashEnabled&&<button type="button" aria-pressed={paymentMethod==="CASH"} className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
+        <div className="customer-pay-heading"><span>{t("PAY THE SHOP")}</span><strong>{formatMoney(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
+        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title={t("Cash at counter unavailable")}>{t("Choose UPI or ask the shop whether cash can be enabled.")}</CustomerInlineNotice>}
+        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<CustomerInlineNotice kind="warning" title={t("No payment method available")}>{t("Ask the shop to enable UPI or cash at the counter.")}</CustomerInlineNotice>}
+        {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>{t("UPI payment")}</button>}
+        {paymentOptions.cashEnabled&&<button type="button" aria-pressed={paymentMethod==="CASH"} className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>{t("Cash at counter")}</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)} onClick={()=>void beginPayment(paymentMethod)}>{busy?<span className="button-spinner"/>:nativeAppMode?"Continue":"Continue with "+(paymentMethod==="UPI"?"UPI":"cash at counter")}</button>
         
       </div>}
@@ -6835,10 +6836,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             fileName={"smartprint-payment-"+payment.id.slice(0,12)+".png"}
           />
           <div className="customer-payment-reference">
-            <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter transaction ID after paying"/></label>
-            <small className="customer-payment-reference-hint">Find it in your UPI app under payment details or transaction history.</small>
+            <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={t("Enter transaction ID after paying")}/></label>
+            <small className="customer-payment-reference-hint">{t("Find it in your UPI app under payment details or transaction history.")}</small>
             <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
-            <CustomerInlineNotice kind="warning" title="Bank security checks still apply">Downloading the QR does not bypass bank or UPI checks.</CustomerInlineNotice>
+            <CustomerInlineNotice kind="warning" title={t("Bank security checks still apply")}>{t("Downloading the QR does not bypass bank or UPI checks.")}</CustomerInlineNotice>
           </div>
         </>}
         {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>{nativeAppMode?"Pay at counter · Await confirmation.":"Pay at the shop counter. The shop will confirm receipt before authorising the job."}</p>}
@@ -6866,14 +6867,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           </div>;
         })}
       </div>
-      {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<CustomerInlineNotice kind="info" title="Checking payment breakdown">Review the full file list before paying or submitting a reference.</CustomerInlineNotice>}
+      {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<CustomerInlineNotice kind="info" title={t("Checking payment breakdown")}>{t("Review the full file list before paying or submitting a reference.")}</CustomerInlineNotice>}
       {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<CustomerInlineNotice kind="info" title="Refund summary">Refunded: {formatMoney(batchPaymentRefundedTotal,batchCheckoutCurrency)} · Remaining: {formatMoney(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</CustomerInlineNotice>}
       {!batchCheckoutUsesPayment&&<>
         {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">The previous batch payment was rejected. {batchPayment.rejectionReason||"Check with the shop before trying again."}</p>}
-        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title="Cash at counter unavailable">Choose UPI or ask the shop whether cash can be enabled.</CustomerInlineNotice>}
-        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<CustomerInlineNotice kind="warning" title="No payment method available">Ask the shop to enable UPI or cash at the counter.</CustomerInlineNotice>}
-        {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>UPI payment</button>}
-        {paymentOptions.cashEnabled&&<button type="button" aria-pressed={paymentMethod==="CASH"} className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>Cash at counter</button>}
+        {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title={t("Cash at counter unavailable")}>{t("Choose UPI or ask the shop whether cash can be enabled.")}</CustomerInlineNotice>}
+        {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<CustomerInlineNotice kind="warning" title={t("No payment method available")}>{t("Ask the shop to enable UPI or cash at the counter.")}</CustomerInlineNotice>}
+        {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>{t("UPI payment")}</button>}
+        {paymentOptions.cashEnabled&&<button type="button" aria-pressed={paymentMethod==="CASH"} className={paymentMethod==="CASH"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("CASH")}>{t("Cash at counter")}</button>}
         <button className="customer-flow-button" disabled={busy||(!paymentOptions.upiEnabled&&!paymentOptions.cashEnabled)||batchPayableItems.length===0} onClick={()=>void beginPayment(paymentMethod,true)}>
           {busy?<span className="button-spinner"/>:nativeAppMode?"Pay accepted files":"Pay accepted files · "+formatMoney(batchPayableTotal,batchCheckoutCurrency)}
         </button>
@@ -6894,15 +6895,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           fileName={"smartprint-batch-payment-"+batchPayment.id.slice(0,12)+".png"}
         />
         <div className="customer-payment-reference">
-          <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder="Enter transaction ID after paying"/></label>
-            <small className="customer-payment-reference-hint">Find it in your UPI app under payment details or transaction history.</small>
+          <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={t("Enter transaction ID after paying")}/></label>
+            <small className="customer-payment-reference-hint">{t("Find it in your UPI app under payment details or transaction history.")}</small>
           <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
-          <CustomerInlineNotice kind="warning" title="Bank security checks still apply">The shop verifies payment. A downloaded QR does not bypass bank or UPI checks.</CustomerInlineNotice>
+          <CustomerInlineNotice kind="warning" title={t("Bank security checks still apply")}>The shop verifies payment. A downloaded QR does not bypass bank or UPI checks.</CustomerInlineNotice>
         </div>
       </>}
       {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.</p>}
-      {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.</p>}
-      {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> Batch payment verified. Accepted files are authorised for the shop's print queue.</div>}
+      {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>{t("Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.")}</p>}
+      {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> {t("Batch payment verified. Accepted files are authorised for the shop's print queue.")}</div>}
     </section>}
     <div className="customer-payment-boundary"><ShieldCheck size={15}/><span>{resolveCustomerUploadStatusMessage({
       jobStatus:jobStatus?.status??(uploaded?batchStatuses[uploaded.job.id]?.status??uploaded.job.status:null),
