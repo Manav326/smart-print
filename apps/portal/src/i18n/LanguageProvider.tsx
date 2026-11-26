@@ -74,12 +74,13 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     setReady(true);
     const onStorage = (event: StorageEvent) => {
       if (event.key === STORAGE_KEY) {
-        applyLocale(event.newValue === null ? DEFAULT_UI_LOCALE : resolveUiLocale(event.newValue) ?? locale, false);
+        const next = event.newValue === null ? DEFAULT_UI_LOCALE : resolveUiLocale(event.newValue);
+        if (next) applyLocale(next, false);
       }
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [applyLocale, locale]);
+  }, [applyLocale]);
 
   const value = useMemo(() => ({ locale, setLocale, ready }), [locale, setLocale, ready]);
   return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
