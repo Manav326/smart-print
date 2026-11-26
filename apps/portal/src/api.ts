@@ -1767,7 +1767,7 @@ async function uploadCustomerPrivateRelay(
   file: File,
   ticket: CustomerLocalUploadTicket,
   grantToken: string,
-  privateUpload: PrivateQsp2UploadFactory,
+  privateUpload: PrivateQsp2UploadFactory | null,
   onStage?: CustomerPrivateRelayStageCallback
 ): Promise<UploadedPrintJob> {
   // A direct LAN request may have completed even if its response was lost.
@@ -1840,6 +1840,12 @@ async function uploadCustomerPrivateRelay(
     }
     throw new LocalUploadOutcomeUnknownError(
       "The original "+activeTransferLabel+" transfer is still being reconciled: "+lastStageMessage+". Retry this same file to check its existing ticket; SmartPrint has not started a second encrypted transfer."
+    );
+  }
+
+  if (!privateUpload) {
+    throw new LocalUploadOutcomeUnknownError(
+      "The original Private Printing ticket is saved. The paired shop computer must reconnect before an unstarted encrypted transfer can resume; no cloud or plaintext fallback was used."
     );
   }
 
@@ -2007,7 +2013,7 @@ function isPrivateLocalAgentEndpoint(value: string): URL | null {
 export async function uploadCustomerDocumentLocally(
   sessionToken: string,
   file: File,
-  localAgent: CustomerLocalAgentApi,
+  localAgent: CustomerLocalAgentApi | null,
   batchId?: string,
   batchGroupName?: string,
   batchName?: string,
@@ -2173,15 +2179,21 @@ export async function uploadCustomerDocumentLocally(
 
   const form = privatePrinting ? null : new FormData();
   let privateUpload: PrivateQsp2UploadFactory | null = null;
-  const hasPairedLocalEndpoint =
-    ticket.agentDeviceId === localAgent.agentDeviceId && localAgent.endpoints.length > 0;
+  const hasPairedLocalEndpoint = Boolean(
+    localAgent && ticket.agentDeviceId === localAgent.agentDeviceId && localAgent.endpoints.length > 0
+  );
   // Standard documents sent directly over shop Wi-Fi use the same bounded,
   // authenticated QSP2 stream as Private Printing. The cloud HTTPS recovery
   // route remains available when the Agent key/endpoint is unavailable.
   if (!ticket.completed && (privatePrinting || hasPairedLocalEndpoint)) {
-    if (!localAgent.documentEncryptionPublicKey) {
+    if (!localAgent?.documentEncryptionPublicKey) {
       if (privatePrinting) {
-        throw new LocalUploadPreflightError("This shop has not enabled its private document-encryption key yet. No document was uploaded.", 409, "private_printing_unavailable");
+        // A ticket that already exists can still be reconciled without current
+        // printer readiness or a fresh Agent key snapshot. The status endpoint
+        // decides whether a transfer already exists; no new payload is sent.
+        return uploadCustomerPrivateRelay(
+          sessionToken, file, ticket, grantToken, null, onStage
+        );
       }
     } else {
       privateUpload = await preparePrivateQsp2Upload(file, {
@@ -2198,7 +2210,7 @@ export async function uploadCustomerDocumentLocally(
   if (!ticket.completed && form) {
     form.append("file", file, file.name);
   }
-  if (ticket.agentDeviceId === localAgent.agentDeviceId && (!privatePrinting || localNetworkReady)) {
+  if (localAgent && ticket.agentDeviceId === localAgent.agentDeviceId && (!privatePrinting || localNetworkReady)) {
     for (const value of localAgent.endpoints.slice(0, privatePrinting ? 3 : 8)) {
     // Never fall back to plaintext on the local HTTP endpoint. If this Agent
     // has no published encryption key, continue through the existing HTTPS path.
@@ -2303,8 +2315,6 @@ export async function uploadCustomerDocumentLocally(
   }
 
   if (privatePrinting) {
-    if (!privateUpload)
-      throw new LocalUploadOutcomeUnknownError("Private Printing is waiting for its encrypted upload to be prepared. Retry this same file.");
     return uploadCustomerPrivateRelay(
       sessionToken, file, ticket, grantToken, privateUpload, onStage
     );
