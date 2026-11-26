@@ -821,17 +821,17 @@ export default function PhotoStudio({
           <span><strong id="photo-studio-title">Photo Studio</strong><small>{mode === "private-library" ? "PRIVATE · ON THIS DEVICE" : mode === "shop-create" ? "SHOP · NEW PHOTO ORDER" : mode === "shop" ? "SHOP · EDIT EXISTING JOB" : "CUSTOMER · BEFORE UPLOAD"}</small></span>
         </div>
         <div className={styles.topbarMeta}><span>{isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm photo` : "A4 · 210 × 297 mm"}</span><span>PDF target · 300 DPI</span></div>
-        <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label={t("Close Photo Studio")} title="Close"><X size={18}/></button>
+        <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label={t("Close Photo Studio")} title={t("Close")}><X size={18}/></button>
       </header>
 
       <div className={styles.editor}>
         <nav className={styles.toolRail} aria-label={t("Photo editing tools")} title={t("Scroll horizontally on small screens to see all tools")} tabIndex={0}>
-          <button type="button" id="photo-studio-tool-sheet" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
-          <button type="button" id="photo-studio-tool-crop" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
-          <button type="button" id="photo-studio-tool-looks" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
+          <button type="button" id="photo-studio-tool-sheet" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>{t("Sheet")}</span></button>
+          <button type="button" id="photo-studio-tool-crop" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>{t("Crop")}</span></button>
+          <button type="button" id="photo-studio-tool-looks" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>{t("Looks")}</span></button>
           <span className={styles.toolRailSectionLabel}>Advanced</span>
-          <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} title="Add, select and position text on the A4 sheet"><Type size={17}/><span>Text</span></button>
-          <button type="button" id="photo-studio-tool-background" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"} title="Advanced: replace a plain photo background"><PaintBucket size={17}/><span>Background</span></button>
+          <button type="button" id="photo-studio-tool-text" className={activeTool==="text"?styles.toolActive:""} onClick={()=>setActiveTool("text")} aria-pressed={activeTool==="text"} title="Add, select and position text on the A4 sheet"><Type size={17}/><span>{t("Text")}</span></button>
+          <button type="button" id="photo-studio-tool-background" className={activeTool==="background"?styles.toolActive:""} onClick={()=>setActiveTool("background")} aria-pressed={activeTool==="background"} title="Advanced: replace a plain photo background"><PaintBucket size={17}/><span>{t("Background")}</span></button>
         </nav>
 
         <aside className={styles.toolPanel} data-testid="photo-studio-tool-panel">
@@ -946,7 +946,7 @@ export default function PhotoStudio({
             </>}
             <label className={styles.fieldLabel}>{t("Photo size")}
               <select id="photo-studio-photo-size" value={sizeId} onChange={event => setSizeId(event.target.value)}>
-                {availableSizes.map(item => <option key={item.id} value={item.id}>{item.label} · {item.detail}{mode === "private-library" ? "" : " · "+formatPhotoRate(photoPrices[item.id])+"/photo"}</option>)}
+                {availableSizes.map(item => <option key={item.id} value={item.id}>{t(item.label)} · {t(item.detail)}{mode === "private-library" ? "" : " · "+formatPhotoRate(photoPrices[item.id])+"/photo"}</option>)}
               </select>
             </label>
             <label className={styles.fieldLabel}>{t("Number of copies")}
@@ -1083,7 +1083,7 @@ export default function PhotoStudio({
                   onPointerUp={handleTextLayerPointerUp}
                   onPointerCancel={handleTextLayerPointerUp}
                 >{layer.text||" "}</button>)}
-              </div> : <div className={styles.loadingState} role={imageError ? "alert" : "status"}>{imageError || "Preparing your photo…"}</div>}
+              </div> : <div className={styles.loadingState} role={imageError ? "alert" : "status"}>{t(imageError || "Preparing your photo…")}</div>}
             </div>
           </div>
           <div className={styles.canvasFooter}>
@@ -1096,11 +1096,11 @@ export default function PhotoStudio({
       </div>
 
       <footer className={styles.footer}>
-        <div className={styles.footerHint}><Check size={14}/> {footerHint}</div>
+        <div className={styles.footerHint}><Check size={14}/> {t(footerHint)}</div>
         <div className={styles.footerActions}>
           <button type="button" id="photo-studio-cancel" className={styles.cancelButton} onClick={onCancel} disabled={busy}>{t("Cancel")}</button>
           <button type="button" id="photo-studio-apply" className={styles.applyButton} onClick={() => void createPrintSheets()} disabled={!image || busy || !!imageError || availableSizes.length === 0 || !copiesInputValid} aria-live="polite">
-            {busy ? busyLabel : outputActionLabel} <Check size={15}/>
+            {busy ? t(busyLabel) : t(outputActionLabel)} <Check size={15}/>
           </button>
         </div>
       </footer>
