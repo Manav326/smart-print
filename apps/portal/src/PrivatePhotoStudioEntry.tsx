@@ -218,7 +218,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         : "savePhotoStudioDocument|"+encoded);
     }catch(cause){
       setSaving(false);
-      setError(cause instanceof Error?cause.message:t("The private photo sheet could not be transferred to this device."));
+      setError(cause instanceof Error?t(cause.message):t("The private photo sheet could not be transferred to this device."));
     }
   }
 
