@@ -42,6 +42,8 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.verify-release-tag.outputs.source_sha }}
     steps:
       - name: Require dispatch from the protected main branch
         shell: bash
@@ -50,7 +52,8 @@ jobs:
             echo "::error::Store publication must be dispatched from main."
             exit 1
           fi
-      - name: Check out and verify the exact release tag
+      - id: verify-release-tag
+        name: Check out and verify the exact release tag
         uses: actions/checkout@v7
         with:
           ref: ${{ inputs.release_tag }}
@@ -74,6 +77,7 @@ jobs:
             echo "::error::The selected release tag must resolve to a commit reachable from main."
             exit 1
           fi
+          echo "source_sha=$tag_commit" >> "$GITHUB_OUTPUT"
           [[ "$CONFIRM_PUBLICATION" == "true" ]] || {
             echo "::error::Set confirm_publication=true only after reviewing the release artifacts."
             exit 1
@@ -105,19 +109,26 @@ jobs:
       MICROSOFT_STORE_CLIENT_ID: ${{ vars.MICROSOFT_STORE_CLIENT_ID }}
       SMARTPRINT_WINDOWS_PUBLISHER: ${{ vars.SMARTPRINT_WINDOWS_PUBLISHER }}
       MICROSOFT_STORE_CLIENT_SECRET: ${{ secrets.MICROSOFT_STORE_CLIENT_SECRET }}
+      RELEASE_SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.release_tag }}
+          ref: ${{ needs.validate.outputs.source_sha }}
       - name: Download the signed Windows Store artifact from the published release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir artifacts --pattern "SmartPrint-Windows-Store-Setup.exe" --pattern "SHA256SUMS.txt"
+          gh release download $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --dir artifacts --pattern "SmartPrint-Windows-Store-Setup.exe" --pattern "SHA256SUMS.txt" --pattern "BUILD-INFO.txt"
           if ($LASTEXITCODE -ne 0) { throw "Could not download the Store-ready Windows installer from the published GitHub release." }
           if (-not (Test-Path "artifacts/SmartPrint-Windows-Store-Setup.exe")) { throw "The signed Store-ready Windows installer is missing from this release." }
           if (-not (Test-Path "artifacts/SHA256SUMS.txt")) { throw "The release checksum manifest is missing." }
+          if (-not (Test-Path "artifacts/BUILD-INFO.txt")) { throw "The release build provenance file is missing." }
+          $buildInfoHash = (Get-FileHash "artifacts/BUILD-INFO.txt" -Algorithm SHA256).Hash.ToLowerInvariant()
+          $buildInfoExpected = (Get-Content "artifacts/SHA256SUMS.txt" | Where-Object { $_ -match "\s+\*?BUILD-INFO\.txt$" } | Select-Object -First 1)
+          if (-not $buildInfoExpected -or $buildInfoHash -ne (($buildInfoExpected -split "\s+")[0]).ToLowerInvariant()) { throw "Release build provenance checksum verification failed." }
+          $sourceLine = Get-Content "artifacts/BUILD-INFO.txt" | Where-Object { $_ -match "^source_commit=" } | Select-Object -First 1
+          if (-not $sourceLine -or $sourceLine.Substring("source_commit=".Length) -ne $env:RELEASE_SOURCE_SHA) { throw "Release artifacts were not built from the exact validated release tag commit." }
           $expected = (Get-Content "artifacts/SHA256SUMS.txt" | Where-Object { $_ -match "\s+\*?SmartPrint-Windows-Store-Setup\.exe$" } | Select-Object -First 1)
           if (-not $expected) { throw "No SHA-256 checksum exists for the Store installer." }
           $parts = $expected -split "\s+"
