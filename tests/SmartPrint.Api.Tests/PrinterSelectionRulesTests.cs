@@ -44,6 +44,19 @@ public sealed class PrinterSelectionRulesTests
             outputMode, "Ready", Now, true, false, Now, Now));
     }
 
+    [Theory]
+    [InlineData(true, "Ready", true)]
+    [InlineData(true, "Busy", true)]
+    [InlineData(true, "Offline", false)]
+    [InlineData(false, "Ready", false)]
+    public void VirtualQueueRequiresAnActiveGrantAndFreshReadyStatus(
+        bool grantActive, string status, bool expected)
+    {
+        Assert.Equal(expected, PrinterSelectionRules.CanSelect(
+            "UNSUPPORTED_VIRTUAL", status, Now.AddSeconds(-30), true, false,
+            Now.AddSeconds(-30), Now, grantActive));
+    }
+
     [Fact]
     public void RejectsAnOfflineOrRevokedAgent()
     {
