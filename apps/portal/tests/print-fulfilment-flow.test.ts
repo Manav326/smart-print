@@ -14,6 +14,14 @@ test("customer upload sends the selected file settings to both storage paths", (
   assert.match(api, /orientation: settings\.orientation/);
 });
 
+test("resuming an already received private relay preserves completed transfer progress", () => {
+  const api = read("../src/api.ts");
+  const app = read("../src/App.tsx");
+  assert.match(api, /existing\.state === "PENDING" && existing\.transferPath === "CLOUD_RELAY"[\s\S]{0,260}bytesSent: file\.size,[\s\S]{0,100}stage: "WAITING_FOR_SHOP"/);
+  assert.match(app, /progress\.stage==="WAITING_FOR_SHOP"[\s\S]{0,220}status:"WAITING_FOR_SHOP"/);
+  assert.match(app, /Encrypted file received; waiting for shop confirmation/);
+});
+
 test("Private Printing relays only the encrypted print document and required quote metadata", () => {
   const api = read("../src/api.ts");
   const ticketStart = api.indexOf("async function requestCustomerLocalUploadTicket(");
