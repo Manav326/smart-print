@@ -50,7 +50,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
       await storeTokens(tokens, "shop");
       onAuthenticated(tokens);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Something went wrong. Please try again."));
+      setError(exception instanceof Error ? exception.message : "Something went wrong. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -77,7 +77,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
         </section>
         <section className="auth-card">
           <div className="auth-card-heading"><div className="auth-card-icon"><Store size={20}/></div><div><span>{t("WELCOME TO SMART PRINT")}</span><h2>{translateUi(locale,mode === "signin" ? "auth.welcomeBack" : "auth.setupShop")}</h2><p>{translateUi(locale,mode === "signin" ? "auth.signInHint" : "auth.createShopHint")}</p></div></div>
-          <div className="auth-tabst("><button className={mode === ")signint(" ? ")selectedt(" : ")t("} onClick={() => {setMode(")signin");setError("");}}>{translateUi(locale,"auth.signInt(")}</button><button className={mode === ")registert(" ? ")selectedt(" : ")t("} onClick={() => {setMode(")register");setError("");}}>{translateUi(locale,"auth.createAccount")}</button></div>
+          <div className="auth-tabs"><button className={mode === "signin" ? "selected" : ""} onClick={() => {setMode("signin");setError("");}}>{translateUi(locale,"auth.signIn")}</button><button className={mode === "register" ? "selected" : ""} onClick={() => {setMode("register");setError("");}}>{translateUi(locale,"auth.createAccount")}</button></div>
           <form className="auth-form" onSubmit={submit}>
             {mode === "register" && <>
               <label>{translateUi(locale,"auth.businessName")}<div className="auth-input"><Store size={16}/><input value={businessName} onChange={e=>setBusinessName(e.target.value)} placeholder={translateUi(locale,"auth.shopNamePlaceholder")} required maxLength={180}/></div></label>
