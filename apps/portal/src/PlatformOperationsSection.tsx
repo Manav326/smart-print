@@ -4,11 +4,15 @@ import { formatIstDateTime } from "./date-time";
 import {
   getPlatformOperationalSettings,
   getPlatformOperationalSettingsHistory,
+  getPlatformVirtualPrinterTestQueues,
+  approvePlatformVirtualPrinterTestQueue,
+  revokePlatformVirtualPrinterTestGrant,
   updatePlatformOperationalSettings,
   type AuthTokens,
   type PlatformOperationalSettings,
   type PlatformOperationalSettingsAudit,
-  type PlatformOperationalSettingsInput
+  type PlatformOperationalSettingsInput,
+  type PlatformVirtualPrinterTestQueue
 } from "./api";
 
 type NumericKey =
@@ -42,6 +46,101 @@ function toDraft(value: PlatformOperationalSettings): Draft {
   delete draft.updatedByUserId;
   delete draft.updatedUtc;
   return draft as Draft;
+}
+
+function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
+  const [queues, setQueues] = useState<PlatformVirtualPrinterTestQueue[]>([]);
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState("");
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+
+  async function reload() {
+    setLoading(true);
+    setError("");
+    try {
+      setQueues(await getPlatformVirtualPrinterTestQueues(tokens.accessToken));
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not load virtual printer queues.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void reload(); }, [tokens.accessToken]);
+
+  async function approve(queue: PlatformVirtualPrinterTestQueue) {
+    if (reason.trim().length < 5) {
+      setError("Enter an approval reason of at least five characters.");
+      return;
+    }
+    setBusyId(queue.id);
+    setError("");
+    setSuccess("");
+    try {
+      await approvePlatformVirtualPrinterTestQueue(tokens.accessToken, queue.tenantId, queue.id, reason.trim());
+      setReason("");
+      setSuccess("Virtual queue approved for this shop for seven days. The queue identity remains virtual.");
+      await reload();
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not approve this virtual printer.");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  async function revoke(queue: PlatformVirtualPrinterTestQueue, grantId: string) {
+    if (reason.trim().length < 5) {
+      setError("Enter a revocation reason of at least five characters.");
+      return;
+    }
+    setBusyId(queue.id);
+    setError("");
+    setSuccess("");
+    try {
+      await revokePlatformVirtualPrinterTestGrant(tokens.accessToken, grantId, reason.trim());
+      setReason("");
+      setSuccess("Virtual printer grant revoked. New dispatches will be denied.");
+      await reload();
+    } catch (exception) {
+      setError(exception instanceof Error ? exception.message : "Could not revoke this virtual printer grant.");
+    } finally {
+      setBusyId("");
+    }
+  }
+
+  return (
+    <section className="panel platform-ops-history">
+      <div className="platform-ops-heading">
+        <div><h3>Shop-scoped virtual printer test access</h3><p>Approve one discovered Windows virtual queue for one shop. Approval is bound to its Agent, queue, driver and port identity, expires after seven days by default, and never changes its printer type.</p></div>
+        <button className="subtle-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={14}/> Refresh</button>
+      </div>
+      <label className="platform-ops-reason"><span>Approval / revocation reason</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder="Reason required for the audit history"/></label>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      {success && <div className="inline-success" role="status">{success}</div>}
+      {loading ? <div className="platform-plan-empty">Loading discovered virtual queues…</div> : queues.length === 0
+        ? <div className="platform-plan-empty">No unsupported virtual Windows queues are currently discovered.</div>
+        : <div className="platform-ops-history-list">
+            {queues.map(queue => {
+              const activeGrant = queue.grants.find(grant => grant.isActive);
+              const latestGrant = queue.grants[0];
+              const ready = queue.status === "Ready" || queue.status === "Busy";
+              return (
+                <article className="platform-ops-history-item" key={queue.tenantId + ":" + queue.id}>
+                  <div className="platform-ops-heading">
+                    <div><strong>{queue.shopName} · {queue.displayName}</strong><small>{queue.shopSlug} · {queue.model} · {queue.connectionType} · {queue.status}</small><small>{queue.queueName || queue.connectionAddress || "Port not reported"} · Agent {queue.agentDeviceId || "not paired"}</small></div>
+                    <span className="neutral-chip">{activeGrant ? "Approved" : "Not approved"}</span>
+                  </div>
+                  {activeGrant
+                    ? <div><small>Approved {formatIstDateTime(activeGrant.createdUtc)} · expires {formatIstDateTime(activeGrant.expiresUtc)} · {activeGrant.reason}</small><div className="platform-ops-save-row"><button className="subtle-button" disabled={!!busyId} onClick={() => void revoke(queue, activeGrant.id)}>{busyId === queue.id ? <LoaderCircle size={14} className="platform-spin"/> : "Revoke approval"}</button></div></div>
+                    : <div><small>{latestGrant?.revokedUtc ? "Last grant revoked: " + (latestGrant.revocationReason || latestGrant.reason) : "No active approval. Queue must be paired and Ready/Busy before approval."}</small><div className="platform-ops-save-row"><button className="primary-button" disabled={!!busyId || !ready || !queue.agentDeviceId || !queue.identityFingerprint} onClick={() => void approve(queue)}>{busyId === queue.id ? <LoaderCircle size={14} className="platform-spin"/> : <ShieldCheck size={14}/>} Approve for 7 days</button></div></div>}
+                </article>
+              );
+            })}
+          </div>}
+    </section>
+  );
 }
 
 export default function PlatformOperationsSection({ tokens }: { tokens: AuthTokens }) {
@@ -157,6 +256,8 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
               </button>
             </div>
           </section>
+
+          <VirtualPrinterTestGrantPanel tokens={tokens}/>
 
           <section className="panel platform-ops-policy-note">
             <AlertTriangle size={17}/>
