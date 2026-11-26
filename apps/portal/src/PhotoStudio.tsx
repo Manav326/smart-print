@@ -822,8 +822,8 @@ export default function PhotoStudio({
           <span className={styles.brandMark}><ImageIcon size={17}/></span>
           <span><strong id="photo-studio-title">Photo Studio</strong><small>{mode === "private-library" ? "PRIVATE · ON THIS DEVICE" : mode === "shop-create" ? "SHOP · NEW PHOTO ORDER" : mode === "shop" ? "SHOP · EDIT EXISTING JOB" : "CUSTOMER · BEFORE UPLOAD"}</small></span>
         </div>
-        <div className={styles.topbarMeta}><span>{isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm photo` : "A4 · 210 × 297 mm"}</span><span>PDF target · 300 DPI</span></div>
-        <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label="Close Photo Studio" title="Close"><X size={18}/></button>
+        <div className={styles.topbarMeta}><span>{isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm photo` : "A4 · 210 × 297 mm"}</span><span>{t("PDF target · 300 DPI")}</span></div>
+        <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label={t("Close Photo Studio")} title={t("Close")}><X size={18}/></button>
       </header>
 
       <div className={styles.editor}>
@@ -851,14 +851,14 @@ export default function PhotoStudio({
             </div>
             {openHelpTool===activeTool&&<div id="photo-studio-help-panel" className={styles.helpTooltipPanel} role="region" aria-label={panelTitle+" guidance"}>
               {cropPanel&&<>
-                <p>Drag a photo to reframe it. Use the sliders for precise positioning.</p>
-                <p>Crop zoom changes the print. Preview zoom changes only the editor view.</p>
+                <p>{t("Drag a photo to reframe it. Use the sliders for precise positioning.")}</p>
+                <p>{t("Crop zoom changes the print. Preview zoom changes only the editor view.")}</p>
                 <p>300-DPI output cannot restore detail missing from the source. Your original remains unchanged.</p>
               </>}
               {lookPanel&&<>
                 <p>Choose a print-friendly starting point, then fine-tune brightness, contrast and colour. Use Reset look to return to Natural; Reset crop only changes framing.</p>
                 {LOOKS.map(item=><p key={item.id}><strong>{item.label}:</strong> {item.note}</p>)}
-                <p>Adjustments are applied to the prepared output, not to your source file.</p>
+                <p>{t("Adjustments are applied to the prepared output, not to your source file.")}</p>
               </>}
               {textPanel&&<>
                 <p>Add a text layer, select it on the preview, and drag it into position. Use the controls to change its wording, size, colour and weight, or switch on Bold text.</p>
@@ -869,18 +869,18 @@ export default function PhotoStudio({
                 <p>This is a colour-key tool, not AI subject recognition. Use an evenly lit plain background and inspect hair and shoulder edges carefully. Reset restores the original background.</p>
               </>}
               {activeTool==="sheet"&&<>
-                <p>Set photo size, copy count and layout. Auto fits the safest A4 grid; manual density applies only when full-size photos fit.</p>
-                <p>A4 places copies at physical size; the last sheet may have blank slots. Photo paper creates one print per sheet.</p>
-                <p>Name and DOB captions are optional. The shop confirms price and printer compatibility before printing.</p>
+                <p>{t("Set photo size, copy count and layout. Auto fits the safest A4 grid; manual density applies only when full-size photos fit.")}</p>
+                <p>{t("A4 places copies at physical size; the last sheet may have blank slots. Photo paper creates one print per sheet.")}</p>
+                <p>{t("Name and DOB captions are optional. The shop confirms price and printer compatibility before printing.")}</p>
               </>}
             </div>}
           </div>
 
           {cropPanel && <>
-            <label className={styles.rangeControl}>Zoom <output>{zoom.toFixed(1)}×</output><input id="photo-studio-zoom" type="range" min="1" max="3" step="0.05" value={zoom} onChange={event => setZoom(Number(event.target.value))}/></label>
-            <label className={styles.rangeControl}>Horizontal position <output>{focusX}%</output><input id="photo-studio-horizontal-position" type="range" min="0" max="100" value={focusX} onChange={event => setFocusX(Number(event.target.value))}/></label>
-            <label className={styles.rangeControl}>Vertical position <output>{focusY}%</output><input id="photo-studio-vertical-position" type="range" min="0" max="100" value={focusY} onChange={event => setFocusY(Number(event.target.value))}/></label>
-            <button type="button" id="photo-studio-reset-crop" className={styles.secondaryButton} onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); }}><RotateCcw size={14}/> Reset crop</button>
+            <label className={styles.rangeControl}>{t("Zoom")} <output>{zoom.toFixed(1)}×</output><input id="photo-studio-zoom" type="range" min="1" max="3" step="0.05" value={zoom} onChange={event => setZoom(Number(event.target.value))}/></label>
+            <label className={styles.rangeControl}>{t("Horizontal position")} <output>{focusX}%</output><input id="photo-studio-horizontal-position" type="range" min="0" max="100" value={focusX} onChange={event => setFocusX(Number(event.target.value))}/></label>
+            <label className={styles.rangeControl}>{t("Vertical position")} <output>{focusY}%</output><input id="photo-studio-vertical-position" type="range" min="0" max="100" value={focusY} onChange={event => setFocusY(Number(event.target.value))}/></label>
+            <button type="button" id="photo-studio-reset-crop" className={styles.secondaryButton} onClick={() => { setZoom(1); setFocusX(50); setFocusY(50); }}><RotateCcw size={14}/> {t("Reset crop")}</button>
           </>}
 
           {lookPanel && <>
@@ -889,19 +889,19 @@ export default function PhotoStudio({
                 <span className={styles.lookSwatch + " " + styles["look_" + item.id]}/><strong>{item.label}</strong>
               </button>)}
             </div>
-            <button type="button" id="photo-studio-reset-look" className={styles.secondaryButton} onClick={() => selectLook("natural")}><RotateCcw size={14}/> Reset look</button>
+            <button type="button" id="photo-studio-reset-look" className={styles.secondaryButton} onClick={() => selectLook("natural")}><RotateCcw size={14}/> {t("Reset look")}</button>
             <label className={styles.rangeControl}>Brightness <output>{adjustments.brightness}%</output><input id="photo-studio-brightness" type="range" min="70" max="130" value={adjustments.brightness} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, brightness: Number(event.target.value) })); }}/></label>
             <label className={styles.rangeControl}>Contrast <output>{adjustments.contrast}%</output><input id="photo-studio-contrast" type="range" min="70" max="140" value={adjustments.contrast} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, contrast: Number(event.target.value) })); }}/></label>
             <label className={styles.rangeControl}>Colour <output>{adjustments.saturation}%</output><input id="photo-studio-colour" type="range" min="0" max="160" value={adjustments.saturation} onChange={event => { setLook("custom"); setAdjustments(current => ({ ...current, saturation: Number(event.target.value) })); }}/></label>
           </>}
 
           {textPanel && <>
-            <button type="button" id="photo-studio-add-text" className={styles.secondaryButton} onClick={addTextLayer}><Type size={14}/> Add text</button>
+            <button type="button" id="photo-studio-add-text" className={styles.secondaryButton} onClick={addTextLayer}><Type size={14}/> {t("Add text")}</button>
             {selectedTextLayer ? <>
               <label className={styles.fieldLabel}>Text content
                 <input id="photo-studio-text-content" type="text" maxLength={120} value={selectedTextLayer.text} onChange={event=>updateSelectedTextLayer({text:event.target.value})} placeholder={t("Enter text to print on the sheet")}/>
               </label>
-              <label className={styles.rangeControl}>Font size <output>{selectedTextLayer.fontSizePt} pt</output>
+              <label className={styles.rangeControl}>{t("Font size")} <output>{selectedTextLayer.fontSizePt} pt</output>
                 <input id="photo-studio-text-font-size" type="range" min="6" max="36" step="1" value={selectedTextLayer.fontSizePt} onChange={event=>updateSelectedTextLayer({fontSizePt:Number(event.target.value)})}/>
               </label>
               <label className={styles.fieldLabel}>Text colour
@@ -909,9 +909,9 @@ export default function PhotoStudio({
               </label>
               <label className={styles.captionOptIn}>
                 <input id="photo-studio-text-bold" type="checkbox" checked={selectedTextLayer.bold} onChange={event=>updateSelectedTextLayer({bold:event.target.checked})}/>
-                <span><strong>Bold text</strong></span>
+                <span><strong>{t("Bold text")}</strong></span>
               </label>
-              <button type="button" id="photo-studio-remove-text" className={styles.secondaryButton} onClick={removeSelectedTextLayer}><X size={14}/> Remove selected text</button>
+              <button type="button" id="photo-studio-remove-text" className={styles.secondaryButton} onClick={removeSelectedTextLayer}><X size={14}/> {t("Remove selected text")}</button>
 
             </> : null}
             {includeFormDetails && <>
@@ -936,7 +936,7 @@ export default function PhotoStudio({
                 setIncludeFormDetails(enabled);
                 if(!enabled){setPhotoName("");setDateOfBirth("");}
               }}/>
-              <span><strong>Print name and date of birth below each photo</strong></span>
+              <span><strong>{t("Print name and date of birth below each photo")}</strong></span>
             </label>
             {includeFormDetails&&<>
               <label className={styles.fieldLabel}>Name for form (optional)
@@ -976,9 +976,9 @@ export default function PhotoStudio({
             </label>
             <small className={styles.fieldHint}>{t("Same photo, multiple copies.")}</small>
             {!copiesInputValid&&<div className={styles.editorHelp} role="status">Enter 1–{maxCopies} whole copies.</div>}
-            {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.</div>}
+            {availableSizes.length===0&&<div className={styles.editorHelp} role="alert">{t("Photo printing is not enabled for any size at this shop. Ask the shop owner to configure a photo rate before preparing a sheet.")}</div>}
             <div className={styles.fieldLabel}>Paper and output
-              <div className={styles.photoOutputChoices} role="group" aria-label="Photo output type">
+              <div className={styles.photoOutputChoices} role="group" aria-label={t("Photo output type")}>
                 <button type="button" id="photo-studio-output-a4" className={photoOutputLayout === "A4_SHEET" ? styles.photoOutputChoiceActive : styles.photoOutputChoice} aria-pressed={photoOutputLayout === "A4_SHEET"} onClick={() => setPhotoOutputLayout("A4_SHEET")}>
                   <strong>{t("A4 sheets")}</strong>
                   <span>{t("Multiple copies per A4 sheet.")}</span>
@@ -991,9 +991,9 @@ export default function PhotoStudio({
             </div>
             <label className={styles.fieldLabel}>Paper finish
               <select id="photo-studio-photo-paper-finish" value={photoPaperFinish} onChange={event => setPhotoPaperFinish(event.target.value as PhotoPaperFinish)}>
-                {!isPhotoPaperLayout && <option value="PLAIN">Plain</option>}
-                <option value="GLOSSY">Glossy</option>
-                <option value="MATTE">Matte</option>
+                {!isPhotoPaperLayout && <option value="PLAIN">{t("Plain")}</option>}
+                <option value="GLOSSY">{t("Glossy")}</option>
+                <option value="MATTE">{t("Matte")}</option>
               </select>
             </label>
             <small className={styles.fieldHint}>{isPhotoPaperLayout
@@ -1002,7 +1002,7 @@ export default function PhotoStudio({
             {!isPhotoPaperLayout && <label className={styles.fieldLabel}>Photos per A4 page
               <select id="photo-studio-photos-per-page" value={photosPerPageInput} onChange={event=>setPhotosPerPageInput(event.target.value)}>
                 <option value="auto">Fit as many as possible ({maximumLayout.perSheet})</option>
-                {Array.from({length:maximumLayout.perSheet},(_,index)=>index+1).map(count=><option key={count} value={String(count)}>{count} per page</option>)}
+                {Array.from({length:maximumLayout.perSheet},(_,index)=>index+1).map(count=><option key={count} value={String(count)}>{count} {t("per page")}</option>)}
               </select>
             </label>}
             <div className={styles.sheetSummary} data-testid="photo-studio-sheet-summary">
@@ -1013,9 +1013,9 @@ export default function PhotoStudio({
               </>}
               <div><span>{isPhotoPaperLayout ? "Individual photo prints" : "A4 pages in this job"}</span><strong>{isPhotoPaperLayout ? copies : sheetCount}</strong></div>
               <div><span>{t("Preview page")}</span><strong>{previewPageIndex+1} of {outputPageCount}</strong></div>
-              {!isPhotoPaperLayout && copies>photosPerPage&&copies%photosPerPage!==0&&<small>Final A4 page: {copies%photosPerPage} photos, with the remaining sheet area left blank.</small>}
+              {!isPhotoPaperLayout && copies>photosPerPage&&copies%photosPerPage!==0&&<small>{t("Final A4 page: {count} photos, with the remaining sheet area left blank.").replace("{count}", String(copies%photosPerPage))}</small>}
               <small>Output: {outputDescription}</small>
-              {mode !== "private-library"&&<small title="Before the final shop quote">Est. subtotal: {formatPhotoRate((photoPrices[size.id] ?? 0) * copies, locale)}</small>}
+              {mode !== "private-library"&&<small title={t("Before the final shop quote")}>{t("Est. subtotal")}: {formatPhotoRate((photoPrices[size.id] ?? 0) * copies, locale)}</small>}
             </div>
           </>}
 
@@ -1034,7 +1034,7 @@ export default function PhotoStudio({
             <span className={styles.zoomLabel} data-testid="photo-studio-preview-zoom">{previewScale.toFixed(1)}×</span>
             <button type="button" onClick={() => setPreviewScale(value => Math.min(2, Number((value + 0.1).toFixed(2))))} disabled={previewScale >= 2} aria-label={t("Preview zoom in")}><ZoomIn size={15}/></button>
             <span className={styles.toolbarDivider}/>
-            <button type="button" id="photo-studio-reset-preview" onClick={() => setPreviewScale(1)}><RotateCcw size={14}/> Reset preview</button>
+            <button type="button" id="photo-studio-reset-preview" onClick={() => setPreviewScale(1)}><RotateCcw size={14}/> {t("Reset preview")}</button>
           </div>
           <div className={styles.canvasViewport}>
             {pickingBackground&&<div className={styles.pickInstruction}>{t("Click a flat background area in the photo to sample its colour.")}</div>}
@@ -1092,7 +1092,7 @@ export default function PhotoStudio({
             <span>{size.label} · {size.widthMm} × {size.heightMm} mm</span>
             <span>{copies} copies · {isPhotoPaperLayout ? copies + " photo-paper sheets" : sheetCount + " A4 pages"}</span>
             <small>{isPhotoPaperLayout ? `Photo ${previewPageIndex+1} of ${outputPageCount}` : `Page ${previewPageIndex+1}: ${previewPhotoCount} copies`}</small>
-            {resolutionMessage && <small className={`${styles.sourceQuality} ${resolutionIsSufficient ? "" : styles.sourceQualityWarning}`} data-testid="photo-studio-source-quality" role="status"><strong>Source: </strong>{resolutionMessage}</small>}
+            {resolutionMessage && <small className={`${styles.sourceQuality} ${resolutionIsSufficient ? "" : styles.sourceQualityWarning}`} data-testid="photo-studio-source-quality" role="status"><strong>{t("Source:")} </strong>{resolutionMessage}</small>}
           </div>
         </main>
       </div>
