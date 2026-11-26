@@ -1659,6 +1659,13 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Your PDF is ready.": "आपकी PDF तैयार है।",
     "This request was cancelled.": "यह अनुरोध रद्द कर दिया गया।",
 
+    "Sign out": "साइन आउट करें",
+    "Active": "सक्रिय",
+    "Suspended": "निलंबित",
+    "Inactive": "निष्क्रिय",
+    "This account is not authorized for platform administration. Use your shop sign-in at /shop.": "यह अकाउंट प्लेटफ़ॉर्म प्रशासन के लिए अधिकृत नहीं है। /shop पर अपने शॉप अकाउंट से साइन इन करें।",
+    "Unable to sign in to platform administration.": "प्लेटफ़ॉर्म प्रशासन में साइन इन नहीं हो सका।",
+    "Password": "पासवर्ड",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -2945,6 +2952,13 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Your PDF is ready.": "Aapki PDF ready hai.",
     "This request was cancelled.": "Yeh request cancel ho gayi.",
 
+    "Sign out": "Sign out karein",
+    "Active": "Active",
+    "Suspended": "Suspended",
+    "Inactive": "Inactive",
+    "This account is not authorized for platform administration. Use your shop sign-in at /shop.": "Yeh account platform administration ke liye authorized nahi hai. /shop par apne shop account se sign in karein.",
+    "Unable to sign in to platform administration.": "Platform administration mein sign in nahi ho saka.",
+    "Password": "Password",
   },
 };
 
