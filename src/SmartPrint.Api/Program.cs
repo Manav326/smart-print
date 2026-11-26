@@ -310,6 +310,7 @@ var platform = app.MapGroup("/api/v1/platform")
 platform.MapSubscriptionPlanEndpoints();
 platform.MapPlatformSubscriptionEndpoints();
 platform.MapPlatformOperationalSettingsEndpoints();
+platform.MapVirtualPrinterTestGrantEndpoints();
 platform.MapPlatformAdvertisingEndpoints();
 platform.MapPlatformDataTransferEndpoints();
 
@@ -9073,34 +9074,11 @@ agentApi.MapPost("/printers/sync", async (
         });
     }
 
-    var operationalSettings = await db.PlatformOperationalSettings.AsNoTracking()
-        .SingleAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, ct);
-
-    // The platform test setting is the only path that promotes an unsupported
-    // virtual queue. It requires a working Windows status, is never active in
-    // production, and never changes the connection type or PDF Export profile.
-    var allowVirtualQueueTestMode = PrinterTypePolicy.IsTestModeEnabled(
-        operationalSettings.TreatWorkingVirtualQueuesAsPhysicalForTesting,
-        environment.IsProduction());
+    // Persist the Agent's actual discovery classification. A test grant is
+    // a separate, server-owned permission and never promotes a virtual queue
+    // into the PHYSICAL output type.
     var normalized = validation.Printers
-        .Select(discovered =>
-        {
-            var effectiveMode = PrinterTypePolicy.ResolveOutputMode(
-                discovered.OutputMode,
-                discovered.Status,
-                allowVirtualQueueTestMode,
-                discovered.PortName);
-            return discovered with
-            {
-                OutputMode = effectiveMode,
-                TestModeOverride = PrinterTypePolicy.IsTestModeOverride(
-                    discovered.OutputMode,
-                    effectiveMode,
-                    discovered.Status,
-                    allowVirtualQueueTestMode,
-                    discovered.PortName)
-            };
-        })
+        .Select(discovered => discovered with { TestModeOverride = false })
         .OrderBy(printer => printer.OutputMode == "PHYSICAL" ? 0 : printer.OutputMode == "PDF_EXPORT" ? 1 : 2)
         .ThenByDescending(printer => (printer.Status is "Ready" or "Busy"))
         .ThenByDescending(printer => printer.IsDefault)
@@ -9169,7 +9147,9 @@ agentApi.MapPost("/printers/sync", async (
                 Model = discovered.DriverName,
                 ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName),
                 OutputMode = discovered.OutputMode,
-                IsTestModeOverride = discovered.TestModeOverride,
+                IsTestModeOverride = false,
+                IdentityFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
+                    device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName),
                 ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName,
                 QueueName = discovered.QueueName,
                 IsDefault = discovered.IsDefault,
@@ -9198,7 +9178,9 @@ agentApi.MapPost("/printers/sync", async (
             printer.Model = discovered.DriverName;
             printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName);
             printer.OutputMode = discovered.OutputMode;
-            printer.IsTestModeOverride = discovered.TestModeOverride;
+            printer.IsTestModeOverride = false;
+            printer.IdentityFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
+                device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName);
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName;
             printer.IsDefault = discovered.IsDefault;
             printer.CapabilitiesJson = AgentPrinterSyncRules.ResolveCapabilitiesJson(
