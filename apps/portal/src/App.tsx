@@ -1882,7 +1882,7 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
       setFile(null);setError(t("Choose a JPG, JPEG or PNG image. Other formats are not supported by Photo Studio."));event.currentTarget.value="";return;
     }
     if(candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes){
-      setFile(null);setError(`The original photo must be between 1 byte and ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB.`);event.currentTarget.value="";return;
+      setFile(null);setError(t("The original photo must be between 1 byte and {max} MB.").replace("{max}", String(UPLOAD_LIMITS.maxFileBytes / (1024 * 1024))));event.currentTarget.value="";return;
     }
     setFile(candidate.type===inferredType?candidate:new File([candidate],candidate.name,{type:inferredType,lastModified:candidate.lastModified}));
   }
@@ -5631,7 +5631,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
     if(effectivePrivatePrinting&&uploadMode!=="LOCAL")setUploadMode("LOCAL");
     if(effectiveUploadMode==="LOCAL"&&!effectivePrivatePrinting&&!localReady) {
-      setError(nativeAppMode ? "Check shop Wi-Fi." : "Check shop Wi-Fi access above before starting a direct local upload.");
+      setError(nativeAppMode ? t("Check shop Wi-Fi.") : t("Check shop Wi-Fi access above before starting a direct local upload."));
       return;
     }
     let currentBatchId=batchId||crypto.randomUUID();
@@ -5649,7 +5649,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
     }
     const pending=files.filter(candidate=>!completedFingerprints.has(customerFileFingerprint(candidate)));
-    if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
+    if(pending.length===0){setError(nativeAppMode ? t("Files already uploaded. Choose more.") : t("All selected files are already uploaded. Choose another document or folder."));return;}
     const currentBatchBytes=results.reduce((sum,item)=>sum+item.document.sizeBytes,0);
     const uploadCapacityError=validateCustomerUploadBatchLimits(results.length,currentBatchBytes,pending.map(candidate=>candidate.size));
     if(uploadCapacityError){setError(uploadCapacityError.code==="FILE_SIZE"?t("One selected file exceeds the 50 MB per-file upload limit."):uploadCapacityError.code==="FILE_COUNT"?t("A print batch can contain up to 20 files."):t("A print batch can contain up to 500 MB in total."));return;}
@@ -6066,12 +6066,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     } catch(exception) {
       if(batchId)await refreshBatchStatuses();
       setError(exception instanceof ApiError && exception.code==="batch_uploads_still_processing"
-        ? "One of your files is still being prepared. Please wait a moment, then try again. No payment has been started."
+        ? t("One of your files is still being prepared. Please wait a moment, then try again. No payment has been started.")
         : exception instanceof ApiError && exception.code==="batch_review_not_complete"
-          ? "The shop is still reviewing your files. Payment will be ready when the review is complete."
+          ? t("The shop is still reviewing your files. Payment will be ready when the review is complete.")
           : exception instanceof ApiError
             ? exception.message
-            : "Could not start this payment method.");
+            : t("Could not start this payment method."));
     } finally {setBusy(false);}
   }
 
@@ -6279,9 +6279,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         const oversized=pending[capacityError.fileIndex]??supported.find(candidate=>candidate.size<=0||candidate.size>UPLOAD_LIMITS.maxFileBytes);
         setError(oversized?`“${oversized.name}” exceeds the ${UPLOAD_LIMITS.maxFileBytes / (1024 * 1024)} MB per-file limit.`:"Choose a valid, non-empty file.");
       } else if(capacityError.code==="FILE_COUNT"){
-        setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchFiles} files maximum.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchFiles} files.`);
+        setError(nativeAppMode ? t("{count} files maximum.").replace("{count}", String(UPLOAD_LIMITS.maxBatchFiles)) : t("This batch can contain up to {count} files.").replace("{count}", String(UPLOAD_LIMITS.maxBatchFiles)));
       } else {
-        setError(nativeAppMode ? `${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB batch limit.` : `This batch can contain up to ${UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024)} MB in total.`);
+        setError(nativeAppMode ? t("{size} MB batch limit.").replace("{size}", String(UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024))) : t("This batch can contain up to {size} MB in total.").replace("{size}", String(UPLOAD_LIMITS.maxBatchBytes / (1024 * 1024))));
       }
       return;
     }
