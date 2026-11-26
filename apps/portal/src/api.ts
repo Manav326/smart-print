@@ -3176,7 +3176,6 @@ export interface PlatformOperationalSettingsInput {
   agentRetentionSweepHours: number;
   allowPaidJobClaimsWhenSuspended: boolean;
   allowPrivatePrintingVirtualOutput: boolean;
-  treatWorkingVirtualQueuesAsPhysicalForTesting: boolean;
   reason: string;
 }
 
