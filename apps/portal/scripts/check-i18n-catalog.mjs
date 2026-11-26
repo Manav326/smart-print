@@ -5,14 +5,14 @@ import { dirname, resolve } from "node:path";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const source = readFileSync(resolve(root, "src/i18n/catalog.ts"), "utf8");
 
-function readCatalog(name, declaration, terminator) {
-  const start = source.indexOf(declaration);
+function readCatalog(name) {
+  const start = source.indexOf("const " + name);
   if (start < 0) throw new Error("Missing catalog declaration: " + name);
-  const end = source.indexOf(terminator, start);
-  if (end < 0) throw new Error("Unterminated catalog declaration: " + name);
-  const lines = source.slice(start, end).split("\n");
+  const bodyStart = source.indexOf("{", start);
+  const end = source.indexOf("\n}", bodyStart);
+  if (bodyStart < 0 || end < 0) throw new Error("Unterminated catalog declaration: " + name);
   const entries = [];
-  for (const line of lines) {
+  for (const line of source.slice(bodyStart, end).split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith('"')) continue;
     const keyEnd = trimmed.indexOf('"', 1);
@@ -42,15 +42,18 @@ function placeholders(value) {
   return found.sort().join("|");
 }
 
-const catalogs = {
-  english: readCatalog("English", "const english = {", "} as const;"),
-  hindi: readCatalog("Hindi", "const hindi:", ";\n\nconst hinglish"),
-  hinglish: readCatalog("Hinglish", "const hinglish:", ";\n\nconst uiCatalogs"),
-};
+const registryStart = source.indexOf("const uiCatalogs = {");
+const registryEnd = source.indexOf("} as const;", registryStart);
+if (registryStart < 0 || registryEnd < 0) throw new Error("Missing typed locale catalog registry");
+const localeNames = source.slice(registryStart + "const uiCatalogs = {".length, registryEnd)
+  .split(",").map(name => name.trim()).filter(Boolean);
+if (!localeNames.includes("english")) throw new Error("English fallback catalog must be registered");
+const catalogs = Object.fromEntries(localeNames.map(name => [name, readCatalog(name)]));
 const baseKeys = [...catalogs.english.keys()];
+
 for (const [locale, catalog] of Object.entries(catalogs)) {
-  const missing = baseKeys.filter((key) => !catalog.has(key));
-  const extra = [...catalog.keys()].filter((key) => !catalogs.english.has(key));
+  const missing = baseKeys.filter(key => !catalog.has(key));
+  const extra = [...catalog.keys()].filter(key => !catalogs.english.has(key));
   if (missing.length || extra.length) {
     throw new Error(locale + " catalog drift. Missing: " + missing.join(", ") + "; extra: " + extra.join(", "));
   }
@@ -62,7 +65,14 @@ for (const [locale, catalog] of Object.entries(catalogs)) {
     }
   }
 }
-for (const required of ['english: {', 'hindi: {', 'hinglish: {', 'aliases: ["hi"]', 'aliases: ["hi-latn"]']) {
-  if (!source.includes(required)) throw new Error("Locale registry contract missing: " + required);
+const metadataStart = source.indexOf("const localeMetadata:");
+const metadataEnd = source.indexOf("};", metadataStart);
+if (metadataStart < 0 || metadataEnd < 0) throw new Error("Missing locale metadata registry");
+const metadata = source.slice(metadataStart, metadataEnd);
+for (const locale of localeNames) {
+  if (!metadata.includes(locale + ": {")) throw new Error(locale + " is missing locale metadata");
 }
-console.log("i18n catalog check passed: " + baseKeys.length + " keys × 3 locales; no missing keys, blank values, duplicate keys, or placeholder mismatches.");
+if (!source.includes("Object.entries(localeMetadata).map")) {
+  throw new Error("Language selector options must be derived from the locale registry");
+}
+console.log("i18n catalog check passed: " + baseKeys.length + " keys × " + localeNames.length + " locales; no missing keys, blank values, duplicate keys, or placeholder mismatches.");
