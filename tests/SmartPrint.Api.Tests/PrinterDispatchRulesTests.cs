@@ -20,7 +20,7 @@ public sealed class PrinterDispatchRulesTests
     [InlineData("PHYSICAL", "Error", false)]
     public void AppliesOutputModeSpecificDispatchability(string outputMode, string status, bool expected)
     {
-        Assert.Equal(expected, PrinterDispatchRules.IsDispatchableStatus(outputMode, status));
+        Assert.Equal(expected, PrinterDispatchRules.IsDispatchableStatus(outputMode, status, false, false));
     }
 
     [Theory]
