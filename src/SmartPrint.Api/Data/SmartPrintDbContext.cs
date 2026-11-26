@@ -28,6 +28,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<ShopSubscriptionPayment> ShopSubscriptionPayments => Set<ShopSubscriptionPayment>();
     public DbSet<RazorpayWebhookEvent> RazorpayWebhookEvents => Set<RazorpayWebhookEvent>();
     public DbSet<PrinterDevice> PrinterDevices => Set<PrinterDevice>();
+    public DbSet<VirtualPrinterTestGrant> VirtualPrinterTestGrants => Set<VirtualPrinterTestGrant>();
     public DbSet<QrStation> QrStations => Set<QrStation>();
     public DbSet<CustomerPrintSession> CustomerPrintSessions => Set<CustomerPrintSession>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
@@ -366,6 +367,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.Model).HasMaxLength(120).IsRequired();
             entity.Property(x => x.ConnectionType).HasMaxLength(24).IsRequired();
             entity.Property(x => x.OutputMode).HasMaxLength(20).IsRequired();
+            entity.Property(x => x.IdentityFingerprint).HasMaxLength(64);
             entity.Property(x => x.IsTestModeOverride).HasDefaultValue(false);
             entity.Property(x => x.ConnectionAddress).HasMaxLength(255);
             entity.Property(x => x.QueueName).HasMaxLength(160);
@@ -381,6 +383,33 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<VirtualPrinterTestGrant>(entity =>
+        {
+            entity.ToTable("VirtualPrinterTestGrants", table =>
+            {
+                table.HasCheckConstraint("CK_VirtualPrinterTestGrants_Expiry", "\"ExpiresUtc\" > \"CreatedUtc\"");
+                table.HasCheckConstraint("CK_VirtualPrinterTestGrants_Revocation", "\"RevokedUtc\" IS NULL OR \"RevokedUtc\" >= \"CreatedUtc\"");
+            });
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.IdentityFingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.RevocationReason).HasMaxLength(500);
+            entity.HasIndex(x => new { x.TenantId, x.PrinterDeviceId, x.CreatedUtc });
+            entity.HasIndex(x => new { x.TenantId, x.PrinterDeviceId, x.ExpiresUtc })
+                .HasFilter("\"RevokedUtc\" IS NULL");
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<PrinterDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.PrinterDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AgentDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.AgentDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.ApprovedByUserId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.RevokedByUserId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<QrStation>(entity =>
