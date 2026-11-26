@@ -825,7 +825,7 @@ export default function PhotoStudio({
       </header>
 
       <div className={styles.editor}>
-        <nav className={styles.toolRail} aria-label="Photo editing tools" title="Scroll horizontally on small screens to see all tools" tabIndex={0}>
+        <nav className={styles.toolRail} aria-label={t("Photo editing tools")} title={t("Scroll horizontally on small screens to see all tools")} tabIndex={0}>
           <button type="button" id="photo-studio-tool-sheet" className={activeTool === "sheet" ? styles.toolActive : ""} onClick={() => setActiveTool("sheet")} aria-pressed={activeTool === "sheet"}><ImageIcon size={17}/><span>Sheet</span></button>
           <button type="button" id="photo-studio-tool-crop" className={activeTool === "crop" ? styles.toolActive : ""} onClick={() => setActiveTool("crop")} aria-pressed={activeTool === "crop"}><Crop size={17}/><span>Crop</span></button>
           <button type="button" id="photo-studio-tool-looks" className={activeTool === "look" ? styles.toolActive : ""} onClick={() => setActiveTool("look")} aria-pressed={activeTool === "look"}><Sparkles size={17}/><span>Looks</span></button>
