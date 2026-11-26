@@ -100,8 +100,8 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         setInitialSettings(undefined);
         setInputKey(value=>value+1);
         setStatus(message.startsWith("PHOTO_UPDATED|")
-          ? "Your photo sheet was updated privately. Its saved print details are retained."
-          : "Saved privately on this device. Connect to a shop whenever you are ready to print.");
+          ? t("Your photo sheet was updated privately. Its saved print details are retained.")
+          : t("Saved privately on this device. Connect to a shop whenever you are ready to print."));
         setError("");
         refreshLibrary();
       }else if(message.startsWith("PHOTO_SAVE_FAILED|")||message.startsWith("PHOTO_UPDATE_FAILED|")){
