@@ -29,7 +29,7 @@ const flowSteps: Array<{id:OrderJourneyStage;title:string;detail:string;icon:typ
   {id:"printing",title:"Printing",detail:"Shop computer prints",icon:Printer},
   {id:"ready",title:"Ready",detail:"Output checked and complete",icon:PackageCheck}
 ];
-function tx(locale: string, value: string){return translateUiText(locale,value);}
+function tx(locale: string, value: string, values: Record<string,string|number> = {}){return translateUiText(locale,value,values);}
 function money(value:number,currency:string,locale:string){return formatUiCurrency(Math.max(0,value)/100,locale,currency||"INR");}
 function paymentLabel(payment:ShopPayment|null,stage:OrderJourneyStage,locale:string){
   if(!payment)return tx(locale,stage==="payment"?"Checkout not started":"Not due yet");
@@ -65,7 +65,7 @@ function FileActions({job,printers,agents,locale,onPreview,onApprove,onReject,on
   onDispatch:(job:ShopPrintJob)=>void;onConfirmOutput:(job:ShopPrintJob)=>void;
   onRetryPdfExport:(job:ShopPrintJob)=>void;onHistory:(job:ShopPrintJob)=>void;onOpenPhotoStudio:(job:ShopPrintJob)=>void;
 }){
-  const t=(value:string)=>tx(locale,value);
+  const t=(value:string,values:Record<string,string|number> = {})=>tx(locale,value,values);
   const canEditPhoto=job.photoSourceAvailable===true&&!job.privatePrinting&&job.status==="AWAITING_SHOP_APPROVAL";
   const canRefund=(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&["VERIFIED","PARTIALLY_REFUNDED"].includes(job.payment?.status??"")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId;
   const expiredAgentLease = job.status==="LOCAL_QUEUE_CLAIMED" &&
@@ -111,16 +111,16 @@ function FileActions({job,printers,agents,locale,onPreview,onApprove,onReject,on
       :"Confirm output only after Windows reports printed output or verified queue absence."
     :undefined;
   return <div className={styles.fileActionPanel}>
-    {!job.privatePrinting&&<button type="button" className={styles.miniAction} onClick={()=>onPreview(job)}><Eye size={12}/> Preview</button>}
-    <button type="button" className={styles.miniAction} onClick={()=>onHistory(job)}><History size={12}/> History</button>
-    {canEditPhoto&&<button type="button" className={styles.miniAction} onClick={()=>onOpenPhotoStudio(job)}><ImageIcon size={12}/> Edit photo</button>}
-    {job.status==="AWAITING_SHOP_APPROVAL"&&!job.batchId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onApprove(job)}><Check size={12}/> Accept</button>}
-    {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&!job.batchId&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onReject(job)}><X size={12}/> Reject</button>}
+    {!job.privatePrinting&&<button type="button" className={styles.miniAction} onClick={()=>onPreview(job)}><Eye size={12}/> {t("Preview")}</button>}
+    <button type="button" className={styles.miniAction} onClick={()=>onHistory(job)}><History size={12}/> {t("History")}</button>
+    {canEditPhoto&&<button type="button" className={styles.miniAction} onClick={()=>onOpenPhotoStudio(job)}><ImageIcon size={12}/> {t("Edit photo")}</button>}
+    {job.status==="AWAITING_SHOP_APPROVAL"&&!job.batchId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onApprove(job)}><Check size={12}/> {t("Accept")}</button>}
+    {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&!job.batchId&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onReject(job)}><X size={12}/> {t("Reject")}</button>}
     {assignable&&<label className={styles.printerAssignment}>{t("Printer")}
       <select aria-label={t("Assign printer for ") + job.jobNumber} value={job.printerDeviceId??""} onChange={event=>onAssignPrinter(job,event.currentTarget.value)}>
         <option value="">{t("Choose printer")}</option>
-        {currentPrinter&&!assignablePrinters.some(printer=>printer.id===currentPrinter.id)&&<option value={currentPrinter.id} disabled>{currentPrinter.displayName} · currently unavailable</option>}
-        {assignablePrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Save as PDF · ":""}{printer.displayName}</option>)}
+        {currentPrinter&&!assignablePrinters.some(printer=>printer.id===currentPrinter.id)&&<option value={currentPrinter.id} disabled>{currentPrinter.displayName} · {t("currently unavailable")}</option>}
+        {assignablePrinters.map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?t("Save as PDF · "):""}{printer.displayName}</option>)}
       </select>
     </label>}
     {expiredAgentLease&&<div className={styles.attentionLine} role="status">
@@ -133,17 +133,17 @@ function FileActions({job,printers,agents,locale,onPreview,onApprove,onReject,on
     </div>}
     {assignable&&assignablePrinters.length===0&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>{localDocumentNeedsOriginalAgent
       ?localDocumentAgentId
-        ?"This file is stored only on its original Windows computer. Reconnect that computer or ready another printer on the same PC; printers on other computers cannot receive this local-only file."
-        :"This file is stored locally, but its original Windows computer is not identified. Reconnect the computer that received it before changing its printer."
-      :"No selected printer is ready right now. This file stays in its order; reconnect a Windows computer or select another ready queue in Printers. You do not need to upload the file again."}</span></div>}
-    {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{job.outputMode==="PDF_EXPORT"?"Save PDF":job.outputMode==="UNSUPPORTED_VIRTUAL"?"Run virtual test":"Start printing"}</button>}
-    {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canFinishOutput} title={manualQueueReconciliationAvailable?"The Agent restarted before Windows returned a spooler ID. Check the exact job in the selected Windows queue and inspect the paper output before confirming.":confirmationBlockedMessage} onClick={()=>onConfirmOutput(job)}><Check size={12}/> {manualQueueReconciliationAvailable?"Reconcile & confirm":"Confirm output"}</button>}
-    {confirmable&&incompletePageProgress&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="alert"><AlertTriangle size={13}/><span>{confirmationBlockedMessage}</span></div>}
+        ?t("This file is stored only on its original Windows computer. Reconnect that computer or ready another printer on the same PC; printers on other computers cannot receive this local-only file.")
+        :t("This file is stored locally, but its original Windows computer is not identified. Reconnect the computer that received it before changing its printer.")
+      :t("No selected printer is ready right now. This file stays in its order; reconnect a Windows computer or select another ready queue in Printers. You do not need to upload the file again.")}</span></div>}
+    {job.status==="LOCAL_QUEUE_READY"&&job.printerDeviceId&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onDispatch(job)}><Printer size={12}/>{t(job.outputMode==="PDF_EXPORT"?"Save PDF":job.outputMode==="UNSUPPORTED_VIRTUAL"?"Run virtual test":"Start printing")}</button>}
+    {confirmable&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} disabled={!canFinishOutput} title={manualQueueReconciliationAvailable?t("The Agent restarted before Windows returned a spooler ID. Check the exact job in the selected Windows queue and inspect the paper output before confirming."):confirmationBlockedMessage?t(confirmationBlockedMessage):undefined} onClick={()=>onConfirmOutput(job)}><Check size={12}/> {t(manualQueueReconciliationAvailable?"Reconcile & confirm":"Confirm output")}</button>}
+    {confirmable&&incompletePageProgress&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="alert"><AlertTriangle size={13}/><span>{confirmationBlockedMessage?t(confirmationBlockedMessage):""}</span></div>}
     {confirmable&&job.failureCode==="SPOOLER_JOB_NO_LONGER_VISIBLE"&&(job.spoolerTotalPages??0)<=0&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>{t("Windows no longer lists this job, but the page count is unknown. Automatic retry is blocked; inspect the full paper output before resolving.")}</span></div>}
-    {confirmable&&manualQueueReconciliationAvailable&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>The Agent could not identify this Windows job. Manually check the {job.queueName} queue for {job.spoolerJobName}, then inspect every printed page before reconciling.</span></div>}
+    {confirmable&&manualQueueReconciliationAvailable&&<div className={styles.attentionLine} role="status"><AlertTriangle size={13}/><span>{t("The Agent could not identify this Windows job. Manually check the {queue} queue for {job}, then inspect every printed page before reconciling.",{queue:job.queueName,job:job.spoolerJobName})}</span></div>}
     {confirmable&&spoolerRetained&&<div className={styles.attentionLine+" "+styles.confirmationBlocked} role="status"><AlertTriangle size={13}/><span>{t("Windows is still holding this print job. SmartPrint will enable confirmation after the Agent verifies that the held entry has cleared.")}</span></div>}
-    {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onRetryPdfExport(job)}><RotateCcw size={12}/> Save PDF again</button>}
-    {canRefund&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onRefund(job)}><Wallet size={12}/> Refund</button>}
+    {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button type="button" className={styles.miniAction+" "+styles.miniApprove} onClick={()=>onRetryPdfExport(job)}><RotateCcw size={12}/> {t("Save PDF again")}</button>}
+    {canRefund&&<button type="button" className={styles.miniAction+" "+styles.miniReject} onClick={()=>onRefund(job)}><Wallet size={12}/> {t("Refund")}</button>}
   </div>;
 }
 function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment,...actions}:{
