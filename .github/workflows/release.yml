@@ -157,7 +157,7 @@ jobs:
           $hasPublisher = -not [string]::IsNullOrWhiteSpace($env:SMARTPRINT_WINDOWS_PUBLISHER)
           if (-not $hasCertificate -and -not $hasRuntimeUrl -and -not $hasPublisher) {
             "available=false" >> $env:GITHUB_OUTPUT
-            Write-Host "Store package skipped: configure the Windows code-signing certificate and WebView2 standalone installer URL."
+            Write-Host "Signed Windows packages skipped: configure the code-signing certificate, WebView2 standalone installer URL and Partner Center publisher name."
             exit 0
           }
           if (-not $hasCertificate -or -not $hasRuntimeUrl -or -not $hasPublisher) {
@@ -196,27 +196,36 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($file.FullName)." }
           }
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          $isccArgs = @(
+          $commonArgs = @(
             "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL",
             "/DSmartPrintVersion=$($env:RELEASE_TAG -replace '^v', '')",
             "/DSmartPrintBuildId=$env:GITHUB_RUN_NUMBER",
             "/DSmartPrintAgentSourceDir=artifacts\store-agent",
             "/DSmartPrintDesktopSourceDir=artifacts\store-desktop",
-            "/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Store-Setup",
             "/DSmartPrintPublisher=$env:SMARTPRINT_WINDOWS_PUBLISHER",
             "/DSmartPrintSignToolName=SmartPrintSignTool",
             "scripts/build-windows-installer.iss"
           )
           $signToolCommand = 'SmartPrintSignTool="' + $signtool + '" sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /sha1 ' + $thumbprint + ' $f'
-          $isccArgs = @("--signtool=$signToolCommand") + $isccArgs
-          & $iscc @isccArgs
-          if ($LASTEXITCODE -ne 0) { throw "Offline Microsoft Store installer compilation/signing failed." }
-          $installer = "artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe"
-          & $signtool verify /pa /all $installer
-          if ($LASTEXITCODE -ne 0) { throw "Final Microsoft Store installer signature verification failed." }
+          $signToolArg = "--signtool=$signToolCommand"
+
+          $websiteArgs = @($signToolArg) + $commonArgs + @("/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Setup")
+          & $iscc @websiteArgs
+          if ($LASTEXITCODE -ne 0) { throw "Signed offline website installer compilation failed." }
+          $websiteInstaller = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
+          & $signtool verify /pa /all $websiteInstaller
+          if ($LASTEXITCODE -ne 0) { throw "Website installer signature verification failed." }
+
+          $storeArgs = @($signToolArg) + $commonArgs + @("/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Store-Setup")
+          & $iscc @storeArgs
+          if ($LASTEXITCODE -ne 0) { throw "Signed offline Microsoft Store installer compilation failed." }
+          $storeInstaller = "artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe"
+          & $signtool verify /pa /all $storeInstaller
+          if ($LASTEXITCODE -ne 0) { throw "Microsoft Store installer signature verification failed." }
+
           Remove-Item -LiteralPath $pfxPath -Force
           Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -Force
-          Write-Host "Verified signed, offline x64 Microsoft Store installer and signed uninstaller."
+          Write-Host "Verified signed offline website and Store installers, including signed uninstallers."
       - name: Upload signed Microsoft Store installer
         if: steps.store-package.outputs.available == 'true'
         uses: actions/upload-artifact@v7
@@ -761,7 +770,7 @@ jobs:
           if published.get("draft") or published.get("tag_name") != tag:
               raise SystemExit("GitHub did not confirm publication of the verified stable release.")
           android_status = "and signed Android APK/AAB" if "SmartPrint-Android.aab" in binaries else "without Android until signing is configured"
-          windows_status = "and signed Store-ready Windows installer" if "SmartPrint-Windows-Store-Setup.exe" in binaries else "without Store-ready Windows installer until signing is configured"
+          windows_status = "with signed offline website and Microsoft Store installers" if "SmartPrint-Windows-Store-Setup.exe" in binaries else "with unsigned website beta installer; Store-ready installer is not configured"
           print(
               f"Published {tag} with the unsigned website Windows beta installer {android_status} {windows_status}. "
               "Older releases are not modified or deleted."
