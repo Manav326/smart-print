@@ -3785,7 +3785,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
 export function translateUiText(localeValue: unknown, sourceText: string, values: MessageValues = {}): string {
   const locale = normalizeUiLocale(localeValue);
   const template = screenTextCatalogs[locale][sourceText] ?? sourceText;
-  return template.replace(/\\{([a-zA-Z][a-zA-Z0-9_]*)\\}/g, (match, name: string) =>
+  return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (match, name: string) =>
     Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match
   );
 }
