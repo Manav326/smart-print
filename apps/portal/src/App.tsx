@@ -2414,6 +2414,8 @@ function PrintersPage({
   onToggle: (printer: PrinterDevice, replacePrinterId?: string) => Promise<boolean>;
   onOpenAgent: () => void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [pendingReplacement, setPendingReplacement] = useState<PrinterDevice | null>(null);
   const [replacePrinterId, setReplacePrinterId] = useState("");
   const selectedPrinters = printers.filter(printer =>
@@ -2444,11 +2446,11 @@ function PrintersPage({
       <section className="panel collection-panel">
         <div className="collection-header">
           <div>
-            <h2>Detected printer connections and Windows queues</h2>
+            <h2>{t("Detected printer connections and Windows queues")}</h2>
             <p>USB, LAN, shared and IPP connections are discovered through Windows. Connection type tells you how the queue is reached; output type tells you whether SmartPrint sends a physical print job, creates a PDF, or keeps an unsupported virtual queue visible. Your plan limit applies only to selected output queues.</p>
           </div>
           <div className="printer-discovery-guidance" role="note">
-            <strong>Adding a new printer</strong>
+            <strong>{t("Adding a new printer")}</strong>
             <span>Connect the printer by USB or to the shop network. In Windows Settings → Printers &amp; scanners, choose Add device and install the manufacturer's driver if Windows asks. Keep the SmartPrint Print Agent running; it lists the queue automatically, usually within 30 seconds. If the printer is connected to another PC, pair that PC's SmartPrint Print Agent to this shop from the Print Agent page. You do not manually register the printer here.</span>
           </div>
         </div>
@@ -2474,7 +2476,7 @@ function PrintersPage({
         {printers.length === 0 ? (
           <EmptyModule
             icon={<Printer size={24}/>}
-            title="No Windows printer queues reported yet"
+            title={t("No Windows printer queues reported yet")}
             text="Connect the printer and add it in Windows Settings → Printers & scanners. Install its driver if Windows asks, then keep the SmartPrint Print Agent running. If the printer is on another PC, pair that PC's Print Agent to this shop from the Print Agent page. New queues appear automatically after the next scan."
             actionLabel="Check Print Agent"
             onAction={onOpenAgent}
@@ -2553,7 +2555,7 @@ function PrintersPage({
                   <PrinterCapabilityPanel printer={printer}/>
                   {possibleDuplicates.length > 0 && (
                     <div className="printer-duplicate-warning" role="note">
-                      <strong>Same Windows port</strong>
+                      <strong>{t("Same Windows port")}</strong>
                       <span>{possibleDuplicates.map(item => item.displayName).join(", ")} use the same Windows port. These are separate queues and can have different driver settings or output behaviour.</span>
                     </div>
                   )}
@@ -2610,7 +2612,7 @@ function PrintersPage({
       </section>
       {pendingReplacement && (
         <Modal
-          title="Replace a selected printer"
+          title={t("Replace a selected printer")}
           subtitle={`Select which current queue to replace with ${pendingReplacement.displayName}.`}
           onClose={() => { if (!busyResourceId) { setPendingReplacement(null); setReplacePrinterId(""); } }}
         >
@@ -2618,7 +2620,7 @@ function PrintersPage({
             <label>
               Queue to replace
               <select value={replacePrinterId} onChange={event => setReplacePrinterId(event.target.value)}>
-                <option value="">Choose a selected queue</option>
+                <option value="">{t("Choose a selected queue")}</option>
                 {selectedPrinters.map(printer => <option key={printer.id} value={printer.id}>{printer.displayName}</option>)}
               </select>
             </label>
@@ -2627,7 +2629,7 @@ function PrintersPage({
               <span>The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Files stored only on the original Windows computer stay there; choose another queue on that same PC or finish those files before replacing the computer.</span>
             </div>
             <div className="modal-actions">
-              <button type="button" className="secondary-button" disabled={!!busyResourceId} onClick={() => { setPendingReplacement(null); setReplacePrinterId(""); }}>Cancel</button>
+              <button type="button" className="secondary-button" disabled={!!busyResourceId} onClick={() => { setPendingReplacement(null); setReplacePrinterId(""); }}>{t("Cancel")}</button>
               <button type="button" className="primary-button" disabled={!!busyResourceId || !replacePrinterId} onClick={() => void confirmReplacement()}>
                 {busyResourceId === pendingReplacement.id ? <span className="button-spinner"/> : "Replace selected queue"}
               </button>
@@ -2677,6 +2679,8 @@ function QrStationArtworkPreview({station,profile}:{station:QrStation;profile:Sh
 function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGenerate }: {
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [printingStationId,setPrintingStationId]=useState<string|null>(null);
   const [printingArtwork,setPrintingArtwork]=useState<{stationId:string;artwork:QrStationArtworkSource}|null>(null);
   const [formatByStation,setFormatByStation]=useState<Record<string,QrStationImageFormat>>({});
@@ -2826,16 +2830,16 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
           :<div className="station-qr-area"><div className="qr-missing"><QrCode size={34}/><strong>QR code not stored</strong><span>This older station needs a one-time QR replacement. Its existing printed code cannot be recovered from the old hash.</span><button className="secondary-button" disabled={!!busyResourceId} onClick={()=>onGenerate(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:"Reissue permanent QR"}</button></div></div>}
         <div className="station-foot"><span>Code ending ···{station.publicCodeHint}</span><button className="subtle-button" disabled={!!busyResourceId} onClick={()=>onToggle(station)}>{busyResourceId===station.id?<span className="button-spinner"/>:station.isEnabled?"Disable station":"Enable station"}</button></div>
         {station.publicUrl && <>
-           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> Copy link</button></div>
+           <div className="station-actions"><button className="secondary-button" onClick={()=>void copyStationUrl(station)}> <Copy size={14}/> {t("Copy link")}</button></div>
            {copyFeedback[station.id]&&<small className={"qr-share-feedback "+copyFeedback[station.id].kind} role="status" aria-live="polite">{copyFeedback[station.id].message}</small>}
            <details className="qr-poster-actions" onToggle={event=>{if(event.currentTarget.open)void prepareStationShare(station);}}>
-             <summary><Printer size={15}/> Print / download QR poster <span>Print · PNG / JPG · Share</span></summary>
+             <summary><Printer size={15}/> {t("Print / download QR poster")} <span>{t("Print · PNG / JPG · Share")}</span></summary>
              <div className="qr-poster-format-row">
                <label htmlFor={`qr-poster-format-${station.id}`}>
-                 <span>File format <small>Download and Share only · Print uses the poster as shown</small></span>
+                 <span>{t("File format")} <small>{t("Download and Share only · Print uses the poster as shown")}</small></span>
                  <select id={`qr-poster-format-${station.id}`} value={imageFormatFor(station)} onChange={event=>{const format=event.currentTarget.value as QrStationImageFormat;setFormatByStation(current=>({...current,[station.id]:format}));setPreparedShareImage(current=>current?.stationId===station.id?null:current);void prepareStationShare(station,format);}} disabled={!!exportingStationId}>
-                   <option value="png">PNG · best QR clarity</option>
-                   <option value="jpg">JPG · smaller file</option>
+                   <option value="png">{t("PNG · best QR clarity")}</option>
+                   <option value="jpg">{t("JPG · smaller file")}</option>
                  </select>
                </label>
              </div>
@@ -2843,7 +2847,7 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
                <button className="primary-button" disabled={!!printingStationId||!!exportingStationId||!!busyResourceId} onClick={()=>void prepareStationPrint(station)}>{printingStationId===station.id?<span className="button-spinner"/>:<Printer size={15}/>} Print poster</button>
                <button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>void exportStationImage(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:<Download size={15}/>} Download poster</button>
                {preparedShareImage?.stationId===station.id&&preparedShareImage.signature===stationImageSignature(station)
-                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}><Share2 size={15}/> Share poster</button>
+                 ?<button className="secondary-button" disabled={!!exportingStationId||!!busyResourceId} onClick={()=>sharePreparedStationImage(station)}><Share2 size={15}/> {t("Share poster")}</button>
                  :<button className="secondary-button" disabled={!!busyResourceId||exportingStationId===station.id} onClick={()=>void prepareStationShare(station)}>{exportingStationId===station.id?<span className="button-spinner"/>:exportFeedback[station.id]?.kind==="error"?<RefreshCw size={15}/>:<Share2 size={15}/>} {exportingStationId===station.id?"Preparing share…":exportFeedback[station.id]?.kind==="error"?"Retry share preparation":"Refresh share"}</button>}
              </div>
              {!station.isEnabled&&<small className="qr-share-paused-note">This station is disabled. The poster is marked “Temporarily paused” so customers are not led to an inactive service.</small>}
@@ -2876,6 +2880,8 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
   onConnect:()=>void;
   onReconnectAfterRevocation:()=>void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const { release, state: releaseState } = usePublicRelease();
   const windowsInstallerUrl = release?.windowsAvailable ? getPublicDownloadPath("windows") : null;
   const connected = Boolean(localAgentStatus?.paired && agents.some(agent =>
@@ -2891,30 +2897,30 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
         <div className="desktop-agent-status">
           <span className={connected ? "desktop-agent-indicator connected" : localAgentConflict ? "desktop-agent-indicator conflict" : "desktop-agent-indicator"} />
           <div><strong>{connected ? "Connected to this shop" : localAgentRevoked ? "Disconnected by the shop owner" : localAgentNeedsRepair ? "Connection needs repair" : localAgentEnrollmentIssue ? (localAgentConflict ? "Existing shop pairing needs revocation" : "Connection needs attention") : localAgentConflict ? "Connected to another shop" : localAgentOwnershipChecking ? "Checking shop registration" : localAgentStatus?.serviceReachable ? "Ready to connect" : "Print service not responding"}</strong>
-            <small>{connected ? (localAgentStatus?.localApiReachable === false ? "Connected to your shop. Cloud printing remains available; local-network uploads are reconnecting automatically." : "Printer discovery and job hand-off are managed by the SmartPrint service.") : localAgentRevoked ? "This computer was revoked and will not reconnect automatically. Select Reconnect this computer when your shop is ready; no pairing code is needed." : localAgentNeedsRepair ? "Windows could not read this computer's saved pairing. Check the paired-computer list below; revoke its old entry if it is still active, then select Repair connection. No code entry is needed." : localAgentEnrollmentIssue ? localAgentEnrollmentIssue.message : localAgentConflict ? "This computer is still connected to another shop. Ask its previous owner to disconnect it before connecting it here." : localAgentOwnershipChecking ? "SmartPrint is verifying this computer's saved registration with your shop. It will not transfer or re-enroll it while ownership is uncertain." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "SmartPrint is starting or reconnecting its background service. It will retry automatically."}</small>
+            <small>{connected ? (localAgentStatus?.localApiReachable === false ? "Connected to your shop. Cloud printing remains available; local-network uploads are reconnecting automatically." : "Printer discovery and job hand-off are managed by the SmartPrint service.") : localAgentRevoked ? "This computer was revoked and will not reconnect automatically. Select {t("Reconnect this computer")} when your shop is ready; no pairing code is needed." : localAgentNeedsRepair ? "Windows could not read this computer's saved pairing. Check the paired-computer list below; revoke its old entry if it is still active, then select {t("Repair connection")}. No code entry is needed." : localAgentEnrollmentIssue ? localAgentEnrollmentIssue.message : localAgentConflict ? "This computer is still connected to another shop. Ask its previous owner to disconnect it before connecting it here." : localAgentOwnershipChecking ? "SmartPrint is verifying this computer's saved registration with your shop. It will not transfer or re-enroll it while ownership is uncertain." : localAgentStatus?.serviceReachable ? "Your owner session will authorize a one-time connection. No pairing code is shown." : "SmartPrint is starting or reconnecting its background service. It will retry automatically."}</small>
           </div>
         </div>
         <div className="desktop-agent-actions">
           {localAgentConflict ? (
             <button className="primary-button" disabled={busy} onClick={onReconnectAfterRevocation}>
-              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> I’ve had the previous shop revoke this computer</>}
+              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> {t("I’ve had the previous shop revoke this computer")}</>}
             </button>
           ) : localAgentOwnershipChecking ? (
-            <span role="status" aria-live="polite">Checking shop registration…</span>
+            <span role="status" aria-live="polite">{t("Checking shop registration…")}</span>
           ) : localAgentRevoked ? (
             <button className="primary-button" disabled={busy} onClick={onConnect}>
-              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> Reconnect this computer</>}
+              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> {t("Reconnect this computer")}</>}
             </button>
           ) : localAgentNeedsRepair ? (
             <button className="primary-button" disabled={busy} onClick={onConnect}>
-              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> Repair connection</>}
+              {busy ? <span className="button-spinner"/> : <><RotateCcw size={15}/> {t("Repair connection")}</>}
             </button>
           ) : (
             <button className="primary-button" disabled={busy || connected || Boolean(localAgentStatus?.paired)} onClick={onConnect}>
               {busy ? <span className="button-spinner"/> : <><Monitor size={15}/>{localAgentStatus?.serviceReachable ? "Connect this computer" : "Retry connection"}</>}
             </button>
           )}
-          <span>This computer will handle print orders for your shop while connected.</span>
+          <span>{t("This computer will handle print orders for your shop while connected.")}</span>
         </div>
       </div> : <>
       <div className="agent-intro">
@@ -2922,12 +2928,12 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
         <div><div className="eyebrow"><span className="eyebrow-line"/>LOCAL PRINT CONNECTIVITY</div><h2>Connect your shop computer</h2><p>Pair the Windows computer connected to your printers. SmartPrint will keep it ready to receive customer print orders.</p></div>
       </div>
       <div className="agent-steps">
-        <div><span>01</span><strong>Generate a pairing code</strong><small>One-time code, valid for 10 minutes.</small></div>
-        <div><span>02</span><strong>Run the guided Windows installer</strong><small>Enter the code in the setup wizard. No PowerShell commands are required.</small></div>
-        <div><span>03</span><strong>Confirm the connection</strong><small>Return here and wait for the computer heartbeat and printer discovery.</small></div>
+        <div><span>01</span><strong>{t("Generate a pairing code")}</strong><small>{t("One-time code, valid for 10 minutes.")}</small></div>
+        <div><span>02</span><strong>{t("Run the guided Windows installer")}</strong><small>{t("Enter the code in the setup wizard. No PowerShell commands are required.")}</small></div>
+        <div><span>03</span><strong>{t("Confirm the connection")}</strong><small>{t("Return here and wait for the computer heartbeat and printer discovery.")}</small></div>
       </div>
       {enrollmentCode&&<div className="agent-code-panel">
-        <div><span>ONE-TIME PAIRING CODE</span><strong>{enrollmentCode.code}</strong><small>Expires {formatIstTime(enrollmentCode.expiresUtc)}</small></div>
+        <div><span>{t("ONE-TIME PAIRING CODE")}</span><strong>{enrollmentCode.code}</strong><small>Expires {formatIstTime(enrollmentCode.expiresUtc)}</small></div>
         <button className="secondary-button" onClick={()=>void copyText(enrollmentCode.code)}><Copy size={14}/> Copy code</button>
       </div>}
       <div className="agent-command-panel">
@@ -2949,7 +2955,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
           <div className="agent-device-icon"><Monitor size={19}/></div>
           <div className="agent-device-copy"><strong>{agent.deviceName}</strong><span>{agent.printerCount} printer {agent.printerCount===1?"queue":"queues"} discovered · Paired {formatIstDate(agent.createdUtc)}</span><small>{agent.lastSeenUtc?("Last contact "+formatIstDateTime(agent.lastSeenUtc)):"No heartbeat received yet"}</small>{agent.localEndpoints?.length?<small>Shop connection found · run the phone check on the shop computer</small>:<small>Connect this computer to the shop Wi-Fi or hotspot to enable phone uploads</small>}</div>
           <Status label={agent.revokedUtc?"Revoked":agent.status} tone={agent.revokedUtc?"red":agent.status==="Online"?"green":"slate"}/>
-          {!agent.revokedUtc&&<button className="subtle-button reject-action" disabled={busy} onClick={()=>onRevoke(agent)}>Revoke</button>}
+          {!agent.revokedUtc&&<button className="subtle-button reject-action" disabled={busy} onClick={()=>onRevoke(agent)}>{t("Revoke")}</button>}
         </article>)}</div>}
     </section>
   </div>;
@@ -3174,6 +3180,8 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   busy:boolean;
   busyJobId:string|null;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [upiEnabled,setUpiEnabled]=useState(settings.upiEnabled);
   const [upiId,setUpiId]=useState(settings.upiId||"");
   const [payeeName,setPayeeName]=useState(settings.payeeName||"");
@@ -3194,8 +3202,8 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
       <div className="payment-method-card">
         <div className="payment-method-heading"><div className="payment-method-icon"><Wallet size={19}/></div><div><strong>UPI · QR and payment app</strong><small>Configure your shop's own UPI ID. Payments are not auto-verified.</small></div><label className="switch"><input id="payment-upi-enabled" type="checkbox" aria-label="Enable UPI QR and payment app" checked={upiEnabled} onChange={event=>setUpiEnabled(event.target.checked)}/><span aria-hidden="true"/></label></div>
         {upiEnabled&&<div className="payment-settings-fields">
-          <label>Shop UPI ID<input value={upiId} onChange={event=>setUpiId(event.target.value)} placeholder="yourshop@bank"/></label>
-          <label>Payee / business name<input value={payeeName} onChange={event=>setPayeeName(event.target.value)} maxLength={120} placeholder="Name shown in customer's UPI app"/></label>
+          <label>{t("Shop UPI ID")}<input value={upiId} onChange={event=>setUpiId(event.target.value)} placeholder="yourshop@bank"/></label>
+          <label>{t("Payee / business name")}<input value={payeeName} onChange={event=>setPayeeName(event.target.value)} maxLength={120} placeholder={t("Name shown in customer's UPI app")}/></label>
         </div>}
       </div>
       <div className="payment-method-card">
@@ -3210,7 +3218,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
     </section>
     <section className="panel payment-review-panel">
       <div className="collection-header"><div><h2>Payment verification</h2><p>Review UPI references and confirm cash collected before a job becomes payment-authorised.</p></div><span className="setup-count">{pending.length} need review</span></div>
-      {payments.length===0?<EmptyModule icon={<Wallet size={24}/>} title="No print payments yet" text="When customers choose UPI or cash for a shop-approved job, the payment attempt will appear here."/>:
+      {payments.length===0?<EmptyModule icon={<Wallet size={24}/>} title={t("No print payments yet")} text={t("When customers choose UPI or cash for a shop-approved job, the payment attempt will appear here.")}/>:
       <div className="payment-record-list">{payments.map(payment=><article className="payment-record" key={payment.id}>
         <div className="payment-record-head"><div><strong>{payment.batchPaymentId?(`Batch checkout · ${payment.batchFileCount??1} files`):payment.jobNumber}</strong><small>{payment.documentName}</small></div><div className="payment-record-amount-wrap"><div className="payment-record-amount">{formatMoney(payment.amountMinor,payment.currency)}</div>{(payment.refundedAmountMinor??0)>0&&<small className="payment-record-refund-summary">Refund recorded: {formatMoney(payment.refundedAmountMinor??0,payment.currency)} · Net retained: {formatMoney(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</small>}</div></div>
         {payment.origin==="SHOP_OWNER"&&<div className="payment-reference-details"><span>Shop-created order recipient</span><strong>{payment.recipientName||"Walk-in"}{payment.recipientPhone?" · "+payment.recipientPhone:""}</strong><small>This photo order was created in the shop workspace, not uploaded through a customer QR session.</small></div>}
@@ -3223,7 +3231,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
     </section>
     <section className="panel refund-audit-panel">
       <div className="collection-header"><div><h2>Refund audit log</h2><p>Every shopkeeper-recorded file refund, with its exact amount, return method, reason and operator.</p></div><span className="setup-count">{refunds.length} recorded</span></div>
-      {refunds.length===0?<EmptyModule icon={<RotateCcw size={24}/>} title="No refunds recorded" text="When a shopkeeper rejects a paid file and records its return, the audit entry will appear here."/>:
+      {refunds.length===0?<EmptyModule icon={<RotateCcw size={24}/>} title={t("No refunds recorded")} text={t("When a shopkeeper rejects a paid file and records its return, the audit entry will appear here.")}/>:
       <div className="payment-record-list">{refunds.map(refund=><article className="payment-record refund-record" key={refund.id}>
         <div className="payment-record-head"><div><strong>{refund.jobNumber}</strong><small>{refund.documentName}</small></div><div className="payment-record-amount">{formatMoney(refund.amountMinor,refund.currency)}</div></div>
         <div className="payment-record-meta"><span>{refund.method} refund</span><span>{formatIstDateTime(refund.refundedUtc)}</span><Status label="Recorded as sent" tone="green"/></div>
@@ -3802,19 +3810,21 @@ function formatBytes(bytes:number) {
 }
 
 function SettingsPage({ profile, onSave, busy }: { profile:ShopProfile; onSave:(v:{displayName:string;logoUrl:string|null;accentColor:string})=>void; busy:boolean }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [displayName,setDisplayName]=useState(profile.displayName);
   const [logoUrl,setLogoUrl]=useState(profile.logoUrl || "");
   const [accentColor,setAccentColor]=useState(profile.accentColor || "#7662E8");
   useEffect(()=>{setDisplayName(profile.displayName);setLogoUrl(profile.logoUrl||"");setAccentColor(profile.accentColor||"#7662E8");},[profile]);
-  return <section className="panel settings-panel"><div className="settings-intro"><div className="settings-icon"><Settings size={20}/></div><div><h2>Shop profile &amp; branding</h2><p>Update the shop name and brand customers see when they connect through your QR stations.</p></div></div>
+  return <section className="panel settings-panel"><div className="settings-intro"><div className="settings-icon"><Settings size={20}/></div><div><h2>{t("Shop profile & branding")}</h2><p>Update the shop name and brand customers see when they connect through your QR stations.</p></div></div>
     <form className="settings-form" onSubmit={event=>{event.preventDefault();onSave({displayName:displayName.trim(),logoUrl:logoUrl.trim()||null,accentColor});}}>
-      <label>Customer-facing shop name<input value={displayName} onChange={e=>setDisplayName(e.target.value)} required maxLength={180}/></label>
-      <label>Logo URL <span className="field-hint">Optional · secure HTTPS image URL</span><input type="url" value={logoUrl} onChange={e=>setLogoUrl(e.target.value)} placeholder="https://example.com/logo.png"/></label>
+      <label>{t("Customer-facing shop name")}<input value={displayName} onChange={e=>setDisplayName(e.target.value)} required maxLength={180}/></label>
+      <label>{t("Logo URL")} <span className="field-hint">{t("Optional · secure HTTPS image URL")}</span><input type="url" value={logoUrl} onChange={e=>setLogoUrl(e.target.value)} placeholder="https://example.com/logo.png"/></label>
       <label>Brand accent colour<div className="colour-picker-row"><input type="color" value={accentColor} onChange={e=>setAccentColor(e.target.value)}/><input value={accentColor} onChange={e=>setAccentColor(e.target.value)} pattern="^#[0-9A-Fa-f]{6}$" required/></div></label>
-      <div className="settings-summary"><ShieldCheck size={16}/><span>Standard Smart Print branding is active. Full white-label branding is a paid plan upgrade.</span></div>
+      <div className="settings-summary"><ShieldCheck size={16}/><span>{t("Standard Smart Print branding is active. Full white-label branding is a paid plan upgrade.")}</span></div>
       <div className="settings-actions"><button className="primary-button" disabled={busy}>{busy?<span className="button-spinner"/>:"Save shop identity"}</button></div>
     </form>
-    <div className="settings-meta"><span>Shop slug</span><strong>{profile.slug}</strong><span>Currency</span><strong>{profile.currency}</strong><span>Time zone</span><strong>{profile.timeZone}</strong></div>
+    <div className="settings-meta"><span>{t("Shop slug")}</span><strong>{profile.slug}</strong><span>{t("Currency")}</span><strong>{profile.currency}</strong><span>{t("Time zone")}</span><strong>{profile.timeZone}</strong></div>
   </section>;
 }
 
@@ -3951,6 +3961,8 @@ function normalizedCustomerPrintKind(value:string|null|undefined):"DOCUMENT"|"PH
 
 function initials(value:string) { return value.trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()||"").join("") || "SP"; }
 function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscriptionSummary; token: string; onUpdated: (summary: ShopSubscriptionSummary) => void }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const { subscription, plan, entitlements, usage } = summary;
   const status = subscription.status.toLowerCase();
   const statusTone = status === "active" ? "tone-success" : status === "trial" ? "tone-warning" : status === "expired" ? "tone-danger" : "tone-neutral";
@@ -3965,7 +3977,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
       <div className="subscription-hero-grid">
         <section className="panel subscription-current-panel">
           <div className="subscription-panel-top">
-            <span className="subscription-eyebrow">CURRENT SUBSCRIPTION</span>
+            <span className="subscription-eyebrow">{t("CURRENT SUBSCRIPTION")}</span>
             <span className={`subscription-status ${statusTone}`}>{subscription.status}</span>
           </div>
           <h2>{planName}</h2>
@@ -3973,12 +3985,12 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
             {plan ? `Plan ${plan.code} · version ${plan.version} · ${plan.status}` : "A versioned plan has not yet been assigned to this shop."}
           </p>
           <div className="subscription-period">
-            <div><span>Billing interval</span><strong>{subscription.billingInterval}</strong></div>
-            <div><span>Current period</span><strong>{periodStart} – {periodEnd}</strong></div>
+            <div><span>{t("Billing interval")}</span><strong>{subscription.billingInterval}</strong></div>
+            <div><span>{t("Current period")}</span><strong>{periodStart} – {periodEnd}</strong></div>
           </div>
           <div className="subscription-prices">
-            <div><span>Monthly plan price</span><strong>{price(plan?.monthlyPriceMinor, plan?.currency ?? "INR")}</strong></div>
-            <div><span>Annual plan price</span><strong>{price(plan?.annualPriceMinor, plan?.currency ?? "INR")}</strong></div>
+            <div><span>{t("Monthly plan price")}</span><strong>{price(plan?.monthlyPriceMinor, plan?.currency ?? "INR")}</strong></div>
+            <div><span>{t("Annual plan price")}</span><strong>{price(plan?.annualPriceMinor, plan?.currency ?? "INR")}</strong></div>
           </div>
           {!entitlements.isAccessActive && (
             <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>{status === "expired" ? "Your subscription expired. Renew using the plans below to restore access. Existing customer payment records and completed jobs remain available." : "Shop access is currently restricted. Review your account status or contact SmartPrint support for assistance."}</span></div>
@@ -3989,7 +4001,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
         </section>
 
         <section className="panel subscription-feature-panel">
-          <div className="panel-heading"><div><h2>Included capabilities</h2><p>Resolved from the version assigned to your subscription</p></div></div>
+          <div className="panel-heading"><div><h2>{t("Included capabilities")}</h2><p>{t("Resolved from the version assigned to your subscription")}</p></div></div>
           <div className="subscription-feature-list">
             <FeatureLine label="Cloud-assisted printing" enabled={plan?.cloudAssistedPrintingEnabled ?? entitlements.cloudAssistedPrintingEnabled}/>
             <FeatureLine label="White-label experience" enabled={plan?.whiteLabelEnabled ?? entitlements.whiteLabelEnabled}/>
@@ -4006,7 +4018,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
 
       <section className="panel subscription-usage-panel">
         <div className="subscription-usage-heading">
-          <div><h2>Usage and limits</h2><p>Live counts for this shop. Monthly print jobs use the UTC calendar month.</p></div>
+          <div><h2>{t("Usage and limits")}</h2><p>{t("Live counts for this shop. Monthly print jobs use the UTC calendar month.")}</p></div>
           <span className="subscription-updated">Updated {formatIstTime(summary.generatedUtc)}</span>
         </div>
         <div className="subscription-usage-grid">
@@ -4016,7 +4028,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
           <UsageMeter label="Print jobs this month" used={usage.monthlyPrintJobCount} maximum={entitlements.maxMonthlyPrintJobs}/>
         </div>
         <div className="subscription-document-limit">
-          <span>Maximum cloud document size</span>
+          <span>{t("Maximum cloud document size")}</span>
           <strong>{entitlements.maxDocumentBytes == null ? "No configured cap" : `${(entitlements.maxDocumentBytes / (1024 * 1024)).toLocaleString("en-IN", { maximumFractionDigits: 2 })} MB`}</strong>
         </div>
         <div className="subscription-usage-footnote">Printer quota applies only to selected supported output queues. All Windows queues discovered by your Print Agent remain visible, including unselected alternatives, and you can replace a selected queue without losing its discovery record. QR stations and paired computers follow their own plan limits.</div>
