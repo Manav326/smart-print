@@ -2212,6 +2212,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Preparing": "Taiyaar ho raha hai",
     "Progress shows file transfer, not printing. A file is complete only after SmartPrint confirms it. Successful files stay saved if another file fails.": "Progress file transfer dikhata hai, printing nahi. SmartPrint confirm kare tabhi file complete hai. Doosri file fail ho toh bhi successful files saved rahengi.",
 
+    "Photo Studio": "Photo Studio",
+    "Connecting to your print shop": "Aapki print shop se connect ho rahe hain",
   },
 };
 
@@ -2297,5 +2299,3 @@ export function formatUiDate(value: Date | number | string, localeValue: unknown
 export function formatUiCurrency(value: number, localeValue: unknown, currency = "INR"): string {
   return new Intl.NumberFormat(getUiLocaleLanguage(localeValue), { style: "currency", currency }).format(value);
 }
-    "Photo Studio": "Photo Studio",
-    "Connecting to your print shop": "Aapki print shop se connect ho rahe hain",
