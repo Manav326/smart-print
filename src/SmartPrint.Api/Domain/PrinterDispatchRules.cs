@@ -8,17 +8,24 @@ public static class PrinterDispatchRules
     public static bool CanDispatchWithStaleInventory(string? outputMode) =>
         string.Equals(outputMode, "PDF_EXPORT", StringComparison.OrdinalIgnoreCase);
 
-    public static bool IsDispatchableStatus(string? outputMode, string? status)
+    public static bool IsDispatchableStatus(
+        string? outputMode,
+        string? status,
+        bool virtualTestGrantActive = false,
+        bool isProduction = false)
     {
-        if (string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(status, "Busy", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+        var readyOrBusy = string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(status, "Busy", StringComparison.OrdinalIgnoreCase);
+
+        if (string.Equals(outputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase))
+            return !isProduction && virtualTestGrantActive && readyOrBusy;
+
+        if (string.Equals(outputMode, PrinterTypePolicy.Physical, StringComparison.OrdinalIgnoreCase))
+            return readyOrBusy;
 
         // Older Agents may have recorded Unknown before PDF_EXPORT became
         // a first-class output mode. The API also requires a live Agent heartbeat.
         return CanDispatchWithStaleInventory(outputMode) &&
-               string.Equals(status, "Unknown", StringComparison.OrdinalIgnoreCase);
+               (readyOrBusy || string.Equals(status, "Unknown", StringComparison.OrdinalIgnoreCase));
     }
 }
