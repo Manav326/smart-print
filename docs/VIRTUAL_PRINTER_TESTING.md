@@ -18,6 +18,15 @@ Allow a platform administrator to authorise a specific shop's discovered Windows
 - PDF Export remains a separate output mode and workflow.
 - Private Printing keeps its protected relay, acknowledgement, and purge guarantees.
 
+## Implemented enforcement points
+
+- Discovery stores `UNSUPPORTED_VIRTUAL` and a SHA-256 identity fingerprint; it never upgrades the queue to `PHYSICAL`.
+- Platform administrators approve/revoke time-bounded grants for one tenant, printer and paired Agent. Reasons and actor/timestamps are retained.
+- Shop selection, QR-station assignment, job assignment, Agent claim, Private Printing relay and the final pre-spooler authorization all check the current grant and identity.
+- The Agent uses its existing `WindowsPrintExecutor.PrintAsync` path for both physical and authorised virtual queues. Only `PDF_EXPORT` uses the separate PDF-export path.
+- Virtual test output is recorded as `TEST_VIRTUAL` / `TEST_OUTPUT_READY`, never as physical fulfilment. The ordinary physical-output confirmation endpoint rejects it.
+- Standard and Private Printing retain the existing verified spooler receipt, retry/idempotency and protected-source cleanup rules. PDF export remains separate.
+
 ## Required verification
 
 1. Physical printer regression: unchanged selection, dispatch, spooler submission, and receipt.
