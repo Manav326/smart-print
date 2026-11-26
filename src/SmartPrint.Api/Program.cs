@@ -14026,13 +14026,12 @@ static async Task<bool> IsPrivatePrintingQueueStagingAvailableAsync(
     // hardware state and all output constraints before any pages are released.
     var allowVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
     var printer = await db.PrinterDevices.AsNoTracking()
-        .Where(item => item.Id == printerDeviceId &&
-                       item.TenantId == tenantId &&
-                       item.AgentDeviceId == agentDeviceId &&
-                       item.IsActive &&
-                       item.QueueName != null && item.QueueName != "")
+        .Where(item => item.Id == printerDeviceId && item.TenantId == tenantId)
         .Select(item => new
         {
+            item.AgentDeviceId,
+            item.IsActive,
+            item.QueueName,
             item.OutputMode,
             VirtualTestGrantActive = item.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
                 !environment.IsProduction() && db.VirtualPrinterTestGrants.Any(grant =>
@@ -14041,19 +14040,26 @@ static async Task<bool> IsPrivatePrintingQueueStagingAvailableAsync(
                     grant.RevokedUtc == null && grant.CreatedUtc <= DateTimeOffset.UtcNow && grant.ExpiresUtc > DateTimeOffset.UtcNow)
         })
         .SingleOrDefaultAsync(ct);
-    if (printer is null ||
-        !PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput, environment.IsProduction(), printer.OutputMode, printer.VirtualTestGrantActive))
-        return false;
 
     var now = DateTimeOffset.UtcNow;
-    return await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
+    var agentConnected = await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
         agent.Id == agentDeviceId &&
         agent.TenantId == tenantId &&
         agent.RevokedUtc == null &&
         agent.Status != "Revoked" &&
         agent.LastSeenUtc != null &&
         agent.LastSeenUtc >= now.AddMinutes(-2), ct);
+
+    var privateOutputEligible = printer is not null &&
+        PrivatePrintingOutputPolicy.IsEligible(
+            allowVirtualOutput, environment.IsProduction(), printer.OutputMode, printer.VirtualTestGrantActive);
+
+    return PrivatePrintingRelayStagingRules.CanStage(
+        agentConnected,
+        printer?.AgentDeviceId == agentDeviceId,
+        printer?.IsActive == true,
+        !string.IsNullOrWhiteSpace(printer?.QueueName),
+        privateOutputEligible);
 }
 
 static async Task<bool> IsPrivatePrintingOutputQueueReadyAsync(
