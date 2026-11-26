@@ -2173,7 +2173,8 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   onNavigate: (section: Section) => void;
 }) {
   const activePrinters = printers.filter(printer =>
-    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT")
+    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT" ||
+      (printer.outputMode === "UNSUPPORTED_VIRTUAL" && printer.virtualTestGrantActive === true))
   );
   const todayKey = istDateKey(new Date());
   const jobsToday = printJobs.filter(job => istDateKey(job.createdUtc) === todayKey);
@@ -2452,7 +2453,8 @@ function PrintersPage({
             {printers.map(printer => {
               const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
               const isUnsupportedVirtual = printer.outputMode === "UNSUPPORTED_VIRTUAL";
-              const isSelected = printer.isActive && !isUnsupportedVirtual;
+              const isAuthorisedVirtual = isUnsupportedVirtual && printer.virtualTestGrantActive === true;
+              const isSelected = printer.isActive && (!isUnsupportedVirtual || isAuthorisedVirtual);
               const canSelect = isPrinterReadyForSelection(printer, agents);
               const agentLastSeen = agent?.lastSeenUtc ? Date.parse(agent.lastSeenUtc) : Number.NaN;
               const agentOnline = !!agent && !agent.revokedUtc && agent.status === "Online" &&
@@ -2462,8 +2464,8 @@ function PrintersPage({
                 (Number.isFinite(printerLastSeen) && printerLastSeen > Date.now() - 2 * 60 * 1000);
               const queueReady = printer.outputMode === "PDF_EXPORT" ||
                 printer.status === "Ready" || printer.status === "Busy";
-              const selectionBlockReason = isUnsupportedVirtual
-                ? "This virtual/document driver is visible but is not supported for SmartPrint output."
+              const selectionBlockReason = isUnsupportedVirtual && !isAuthorisedVirtual
+                ? "This virtual queue needs an active platform-admin test grant for this shop before it can be selected."
                 : !printer.agentDeviceId
                   ? "Keep the Print Agent connected. This Windows queue has not been linked yet."
                   : !agentOnline
@@ -2478,7 +2480,9 @@ function PrintersPage({
                     other.agentDeviceId === printer.agentDeviceId && !!other.connectionAddress &&
                     other.connectionAddress.trim().toLowerCase() === printer.connectionAddress!.trim().toLowerCase())
                 : [];
-              const ownerStatus = !printer.agentDeviceId
+              const ownerStatus = isAuthorisedVirtual
+                ? "Platform-approved virtual test queue"
+                : !printer.agentDeviceId
                 ? "Waiting for Print Agent discovery"
                 : !agentOnline
                   ? "Windows computer not currently connected"
@@ -2498,20 +2502,20 @@ function PrintersPage({
                       tone={isUnsupportedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
                     />
                   </div>
-                  <h3>{isUnsupportedVirtual ? "Unsupported virtual · " : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : printer.isTestModeOverride ? "Test physical · " : printer.connectionType === "IPP" ? "IPP printer · " : ""}{printer.displayName}</h3>
+                  <h3>{isUnsupportedVirtual ? (isAuthorisedVirtual ? "Virtual test · " : "Unsupported virtual · ") : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : printer.connectionType === "IPP" ? "IPP printer · " : ""}{printer.displayName}</h3>
                   <p>{isUnsupportedVirtual
-                    ? "This virtual Windows queue is visible but not approved for SmartPrint output. The platform test override is currently off or Windows has not reported it Ready/Busy."
+                    ? isAuthorisedVirtual
+                      ? "Approved for this shop's non-production test use. Jobs use the existing Windows spooler pipeline and are recorded as test output, not physical fulfilment."
+                      : "This virtual Windows queue is visible but requires platform-admin approval for this shop before it can be selected."
                     : printer.outputMode === "PDF_EXPORT"
                       ? "Supported Microsoft Print to PDF destination. SmartPrint creates the PDF directly on this connected computer; physical printer status is not used."
-                      : printer.isTestModeOverride
-                        ? `Temporary test policy: this working virtual queue is dispatched through its existing Windows queue as a physical output. Transport remains ${printer.connectionType}.`
-                        : printer.connectionType === "IPP"
-                          ? `IPP-connected Windows queue · installed driver ${printer.model}`
-                          : printer.manufacturer === "Windows"
-                            ? `Installed Windows driver · ${printer.model}`
-                            : `${printer.manufacturer} · ${printer.model}`}</p>
+                      : printer.connectionType === "IPP"
+                        ? `IPP-connected Windows queue · installed driver ${printer.model}`
+                        : printer.manufacturer === "Windows"
+                          ? `Installed Windows driver · ${printer.model}`
+                          : `${printer.manufacturer} · ${printer.model}`}</p>
                   <div className="printer-meta">
-                    <span>{printer.isTestModeOverride ? "Platform test override · treated as physical" : ownerStatus}{printer.isDefault ? " · Default Windows queue" : ""}</span>
+                    <span>{ownerStatus}{printer.isDefault ? " · Default Windows queue" : ""}</span>
                     <span>{printer.queueName || printer.connectionAddress || "Connection details not reported"}</span>
                     <span>Print Agent · {agent?.deviceName || "Not linked"}</span>
                   </div>
@@ -2524,7 +2528,7 @@ function PrintersPage({
                   )}
                   <div className="printer-card-footer">
                     <span className={isSelected ? "enabled-label" : "disabled-label"}>
-                      {isSelected ? "Selected for new jobs" : isUnsupportedVirtual ? "Visible · not selectable" : "Not selected"}
+                      {isSelected ? "Selected for new jobs" : isUnsupportedVirtual && !isAuthorisedVirtual ? "Visible · awaiting approval" : "Not selected"}
                     </span>
                     {isSelected ? (
                       <button
@@ -3871,7 +3875,7 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
   return <Modal title="Create a QR station" subtitle="Give customers a clear entry point for this counter or printer." onClose={onClose}>
     <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,printerDeviceId:printerDeviceId||undefined});}}>
       <label>Station name<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder="e.g. Front counter" required maxLength={120}/></label>
-      <label>Default printer <span className="field-hint">Optional · unsupported virtual/document drivers are excluded</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">No default printer</option>{printers.filter(printer=>printer.isActive&&printer.outputMode!=="UNSUPPORTED_VIRTUAL").map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
+      <label>Default printer <span className="field-hint">Optional · only approved virtual test queues are included</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">No default printer</option>{printers.filter(printer=>printer.isActive&&(printer.outputMode!=="UNSUPPORTED_VIRTUAL"||printer.virtualTestGrantActive===true)).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
       <div className="modal-note"><QrCode size={15}/> The QR contains a public station identifier, not a permanent print authorisation. Every scan creates an expiring customer session. Only enabled printers are offered as defaults; you can also assign a printer to each paid job in the queue.</div>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!displayName.trim()}>{busy?<span className="button-spinner"/>:"Create station"}</button></div>
     </form>
