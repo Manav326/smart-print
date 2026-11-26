@@ -1,7 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent, type CSSProperties } from "react";
 import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } from "./PhotoStudio";
 import { resolvePhotoSourceMimeType } from "./photo-source-policy";
-import { useLocale, translateUiText } from "./i18n";
+import { LanguageSwitcher, useLocale, translateUiText } from "./i18n";
 
 type PrivatePhotoStudioBridge = {
   postMessage: (value: string) => void;
@@ -300,7 +300,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
           <h1 style={{fontSize:26,lineHeight:1.2,margin:"7px 0 4px"}}>{t("Photo Studio")}</h1>
           <p style={{fontSize:13,lineHeight:1.5,margin:0,color:"var(--muted,#64748b)"}}>{t("Your private photo sheets, saved on this device.")}</p>
         </div>
-        <button type="button" onClick={refreshLibrary} disabled={libraryLoading} style={{border:"1px solid var(--border,#dbe2ec)",background:"var(--card,#fff)",color:"inherit",borderRadius:10,padding:"9px 12px",fontWeight:700}}>{t("Refresh")}</button>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}><LanguageSwitcher compact/><button type="button" onClick={refreshLibrary} disabled={libraryLoading} style={{border:"1px solid var(--border,#dbe2ec)",background:"var(--card,#fff)",color:"inherit",borderRadius:10,padding:"9px 12px",fontWeight:700}}>{t("Refresh")}</button></div>
       </header>
 
       <section style={{padding:17,border:"1px solid var(--border,#dbe2ec)",borderRadius:16,background:"var(--card,#fff)",marginBottom:18,boxShadow:"0 8px 24px rgba(20,38,66,.05)"}}>
@@ -315,7 +315,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
       <section>
         <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,marginBottom:10}}>
           <h2 style={{fontSize:18,margin:0}}>{t("Saved photo documents")}</h2>
-          <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{documents.length} saved</span>
+          <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{t("{count} saved",{count:documents.length})}</span>
         </div>
         {libraryLoading&&<p role="status" style={{fontSize:13,color:"var(--muted,#64748b)"}}>{t("Loading your private documents…")}</p>}
         {!libraryLoading&&documents.length===0&&<div style={{padding:22,border:"1px dashed var(--border,#c8d1df)",borderRadius:14,textAlign:"center",background:"var(--card,#fff)"}}>
@@ -331,8 +331,8 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
               <span style={{position:"absolute",left:3,right:3,bottom:4,fontSize:6,fontWeight:800,textAlign:"center",color:"#46536e",background:"rgba(255,255,255,.74)",padding:2}}>SmartPrint by QuantaEdge</span>
             </div>
             <div style={{minWidth:0,flex:1,display:"flex",flexDirection:"column",gap:5}}>
-              <strong style={{fontSize:14,lineHeight:1.35,overflowWrap:"anywhere"}}>{document.title||"Photo sheet"}</strong>
-              <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{photoSizeLabel(document.sizeCode)} · {document.photoCount} photos · {document.photosPerPage} per A4 sheet</span>
+              <strong style={{fontSize:14,lineHeight:1.35,overflowWrap:"anywhere"}}>{document.title||t("Photo sheet")}</strong>
+              <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{t(photoSizeLabel(document.sizeCode))} · {t("{count} photos · {perPage} per A4 sheet",{count:document.photoCount,perPage:document.photosPerPage})}</span>
               <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{document.pageCount} A4 {t(document.pageCount===1?"page":"pages")} · {document.resolutionDpi||300} DPI</span>
               <div style={{display:"flex",alignItems:"center",gap:8,marginTop:"auto",flexWrap:"wrap"}}>
                 <button type="button" onClick={()=>openPreview(document)} style={{padding:"7px 12px",borderRadius:8,border:0,background:"var(--accent,#4f5fc4)",color:"#fff",fontSize:12,fontWeight:750}}>{t("View")}</button>
@@ -349,8 +349,8 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
       </section>
 
       <p style={{fontSize:11,lineHeight:1.5,color:"var(--muted,#64748b)",marginTop:18}}>{t("To print a saved sheet: tap Back to Home, scan the shop's QR code, then select the sheet under Photo Studio private documents in the shop's file picker. The preview carries SmartPrint security and QuantaEdge branding; the actual print sheet is clean.")}</p>
-      {status&&<p role="status" style={{fontSize:12,color:"var(--accent,#5366c9)",marginTop:12}}>{status}</p>}
-      {error&&<p role="alert" style={{fontSize:12,color:"#bd3434",marginTop:12}}>{error}</p>}
+      {status&&<p role="status" style={{fontSize:12,color:"var(--accent,#5366c9)",marginTop:12}}>{t(status)}</p>}
+      {error&&<p role="alert" style={{fontSize:12,color:"#bd3434",marginTop:12}}>{t(error)}</p>}
     </section>
 
     {renameTarget&&<div role="presentation" onClick={event=>{if(event.target===event.currentTarget)setRenameTarget(null);}} style={{position:"fixed",inset:0,zIndex:1000,display:"grid",placeItems:"center",padding:18,background:"rgba(10,18,32,.52)"}}>
@@ -381,7 +381,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
           <strong style={{fontSize:14,display:"block",overflowWrap:"anywhere"}}>{preview.title}</strong>
           <span style={{fontSize:11,opacity:.78}}>{t("Private preview · Page {page} of {pages}", { page: preview.pageIndex+1, pages: preview.pageCount })}</span>
         </div>
-        <button type="button" onClick={closePreview} style={{padding:"8px 12px",border:"1px solid #ffffff55",borderRadius:8,background:"transparent",color:"#fff"}}>{t("Close")}</button>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}><LanguageSwitcher compact/><button type="button" onClick={closePreview} style={{padding:"8px 12px",border:"1px solid #ffffff55",borderRadius:8,background:"transparent",color:"#fff"}}>{t("Close")}</button></div>
       </header>
       <div style={{minHeight:0,display:"grid",placeItems:"center",overflow:"auto"}}>
         {preview.image
