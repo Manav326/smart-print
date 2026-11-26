@@ -50,6 +50,8 @@ function photoSizeLabel(sizeCode:string):string {
 }
 
 function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
+  const { locale } = useLocale();
+  const t = (value: string, values: Record<string, string | number> = {}) => translateUiText(locale, value, values);
   const [source,setSource]=useState<File|null>(null);
   const [saving,setSaving]=useState(false);
   const [status,setStatus]=useState("");
