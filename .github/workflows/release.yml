@@ -855,7 +855,7 @@ jobs:
           if published.get("draft") or published.get("tag_name") != tag:
               raise SystemExit("GitHub did not confirm publication of the verified stable release.")
           android_status = "and signed Android APK/AAB" if "SmartPrint-Android.aab" in binaries else "without Android until signing is configured"
-          windows_status = "with signed offline website and Microsoft Store installers" if "SmartPrint-Windows-Store-Setup.exe" in binaries else "with unsigned website beta installer; Store-ready installer is not configured"
+          windows_status = "with intentionally unsigned website installer and separate signed offline Microsoft Store installer" if "SmartPrint-Windows-Store-Setup.exe" in binaries else "with intentionally unsigned website beta installer; Store-ready installer is not configured"
           print(
               f"Published {tag} {windows_status} {android_status}. "
               "Older releases are not modified or deleted."
