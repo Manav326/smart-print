@@ -1007,7 +1007,7 @@ test("customer upload page uses a consistent responsive layout for every conditi
   assert.match(app, /cloudAssistedPrintingEnabled\?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"/);
   assert.match(app, /Boolean\(localAgent\?\.endpoints\.length\)&&message&&checkStatus/);
   assert.doesNotMatch(app, /title="Shop connection unavailable"/);
-  assert.match(app, /CustomerInlineNotice kind="info" title="Private Printing unavailable"/);
+  assert.match(app, /CustomerInlineNotice kind="info" title=\{t\("Private Printing unavailable"\)\}/);
   assert.match(app, /The paired shop computer must be online and publish its encryption key/);
   assert.doesNotMatch(app, /className="customer-privacy-unavailable"/);
   assert.doesNotMatch(css, /customer-privacy-unavailable/);
