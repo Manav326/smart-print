@@ -173,7 +173,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
         setSelectedPlanId("");
       }
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not load subscription plans.");
+      setError(exception instanceof Error ? exception.message : t("Could not load subscription plans."));
     } finally {
       setLoading(false);
     }
@@ -244,7 +244,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
         setSuccess(t("Draft version saved. Published versions and existing subscriptions remain unchanged."));
       }
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not save the plan.");
+      setError(exception instanceof Error ? exception.message : t("Could not save the plan."));
     } finally {
       setBusy("");
     }
@@ -264,7 +264,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
       await reload(selectedPlan.id);
       setSuccess(t("Plan details updated."));
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not update plan details.");
+      setError(exception instanceof Error ? exception.message : t("Could not update plan details."));
     } finally {
       setBusy("");
     }
@@ -280,7 +280,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
       await reload(selectedPlan.id);
       setSuccess(`Version ${currentDraft.version} published. New subscriptions can now use these terms.`);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not publish this plan version.");
+      setError(exception instanceof Error ? exception.message : t("Could not publish this plan version."));
     } finally {
       setBusy("");
     }
@@ -326,7 +326,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                     type="button"
                     className={selectedPlanId === plan.id && !creating ? "platform-plan-list-item selected" : "platform-plan-list-item"}
                     key={plan.id}
-                    onClick={() => { setCreating(false); setSelectedPlanId(plan.id); setSuccess(""); setError(""); }}
+                    onClick={() => { setCreating(false); setSelectedPlanId(plan.id); setSuccess("t("); setError(")"); }}
                   >
                     <span className="platform-plan-list-icon">{plan.isSystemPlan ? <LockKeyhole size={16}/> : <Layers3 size={16}/>}</span>
                     <span className="platform-plan-list-copy">
