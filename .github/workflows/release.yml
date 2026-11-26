@@ -27,13 +27,16 @@ env:
 jobs:
   validate-release-config:
     runs-on: ubuntu-latest
+    outputs:
+      source_sha: ${{ steps.verify-tag.outputs.source_sha }}
     steps:
       - name: Check out the exact release tag
         uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
           fetch-depth: 0
-      - name: Verify the release tag resolves to a commit on main
+      - id: verify-tag
+        name: Verify the release tag resolves to a commit on main
         shell: bash
         run: |
           set -euo pipefail
@@ -48,6 +51,7 @@ jobs:
             echo "::error::Release tags must point to a commit reachable from main."
             exit 1
           fi
+          echo "source_sha=$tag_commit" >> "$GITHUB_OUTPUT"
       - name: Require a stable semantic-version tag
         shell: bash
         run: |
@@ -93,7 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.validate-release-config.outputs.source_sha }}
       - uses: pnpm/action-setup@v6
         with:
           version: 10.18.0
@@ -337,7 +341,7 @@ jobs:
       - uses: actions/checkout@v7
         if: steps.check-signing.outputs.available == 'true'
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.validate-release-config.outputs.source_sha }}
       # Android Gradle builds the exact shared offline Photo Studio portal.
       # Give that task the same Node/pnpm workspace used by the Windows build.
       - uses: pnpm/action-setup@v6
