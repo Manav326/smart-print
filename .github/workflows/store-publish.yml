@@ -134,14 +134,15 @@ jobs:
           $file = "artifacts/SmartPrint-Windows-Store-Setup.exe"
           $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
           $key = "$env:RELEASE_TAG/SmartPrint-Windows-Store-Setup.exe"
-          $existingJson = aws s3api head-object --bucket $env:CLOUDFLARE_R2_BUCKET --key $key --endpoint-url $endpoint --region auto --output json 2>$null
-          if ($LASTEXITCODE -eq 0) {
+          $existingJson = aws s3api head-object --bucket $env:CLOUDFLARE_R2_BUCKET --key $key --endpoint-url $endpoint --region auto --output json 2>&1
+          $headExitCode = $LASTEXITCODE
+          if ($headExitCode -eq 0) {
             $existing = $existingJson | ConvertFrom-Json
             if ($existing.Metadata.sha256 -ne $hash -or $existing.ContentLength -ne (Get-Item $file).Length) {
               throw "Refusing to overwrite an immutable R2 Store package URL for this release tag."
             }
             Write-Host "The immutable Store package already exists with the same SHA-256; leaving it unchanged."
-          } else {
+          } elseif (($existingJson -join " ") -match "(404|NotFound|NoSuchKey)") {
             aws s3 cp $file "s3://$env:CLOUDFLARE_R2_BUCKET/$key" --endpoint-url $endpoint --region auto --only-show-errors --content-type "application/octet-stream" --content-disposition 'attachment; filename="SmartPrint-Windows-Store-Setup.exe"' --cache-control "public, max-age=31536000, immutable" --metadata "sha256=$hash"
             if ($LASTEXITCODE -ne 0) { throw "Cloudflare R2 upload failed." }
             $headJson = aws s3api head-object --bucket $env:CLOUDFLARE_R2_BUCKET --key $key --endpoint-url $endpoint --region auto --output json
@@ -150,6 +151,8 @@ jobs:
             if ($head.Metadata.sha256 -ne $hash -or $head.ContentLength -ne (Get-Item $file).Length) {
               throw "Cloudflare R2 object verification failed."
             }
+          } else {
+            throw "Could not safely check whether the immutable R2 Store package exists: $($existingJson -join ' ')"
           }
           $publicUrl = "$($env:PUBLIC_DOWNLOAD_BASE_URL.TrimEnd('/'))/$env:RELEASE_TAG/SmartPrint-Windows-Store-Setup.exe"
           $response = Invoke-WebRequest -Uri $publicUrl -Method Head -MaximumRedirection 5
