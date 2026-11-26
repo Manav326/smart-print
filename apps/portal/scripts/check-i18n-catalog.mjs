@@ -129,6 +129,10 @@ const localizedScreens = [
   "PlatformAdminConsole.tsx",
   "PlatformAdminAuthScreen.tsx",
   "PrivatePhotoStudioEntry.tsx",
+  "PlatformDataNetworkSection.tsx",
+  "PlatformOperationsSection.tsx",
+  "PlatformPlansSection.tsx",
+  "PlatformSubscriptionsSection.tsx",
 ];
 for (const file of localizedScreens) {
   const screenSource = readFileSync(resolve(root, "src", file), "utf8");
