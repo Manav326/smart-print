@@ -81,6 +81,119 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task PersistsAuthenticatedCustomerQsp2DirectlyWithoutPlaintextStaging()
+    {
+        var root = CreateTemporaryDirectory();
+        var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+        try
+        {
+            var builder = new PdfDocumentBuilder();
+            builder.AddPage(PageSize.A4);
+            var bytes = builder.Build();
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var agentScopeId = Guid.NewGuid();
+            var job = CreateJob(bytes) with
+            {
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT"
+            };
+
+            using var encrypted = new MemoryStream();
+            using var source = new MemoryStream(bytes, writable: false);
+            await Qsp2DocumentFormat.EncryptAsync(
+                source, encrypted, agentScopeId, job.Id, bytes.LongLength, dataKey);
+            encrypted.Position = 0;
+
+            var entry = await store.EnqueueLocalUploadQsp2StreamingAsync(
+                job.Id,
+                agentScopeId,
+                bytes.LongLength,
+                job.Sha256,
+                encrypted,
+                dataKey,
+                (document, _) =>
+                {
+                    var analysis = DocumentAnalyzer.Analyse(document, ".pdf");
+                    Assert.Equal(1, analysis.PageCount);
+                    return Task.FromResult<AgentClaimedJob?>(job with
+                    {
+                        PageCount = analysis.PageCount,
+                        MediaType = analysis.MediaType
+                    });
+                },
+                CancellationToken.None);
+
+            Assert.Equal("LOCAL_UPLOAD_STAGED", entry.State);
+            Assert.Equal(agentScopeId, entry.DocumentScopeId);
+            Assert.Equal(bytes, store.ReadDocument(job.Id));
+            Assert.Equal("QLQ2", System.Text.Encoding.ASCII.GetString(
+                await File.ReadAllBytesAsync(entry.DocumentPath), 0, 4));
+            Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+            Assert.Single(Directory.GetFiles(root, "*.qdoc"));
+            Assert.Single(Directory.GetFiles(root, "*.json"));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dataKey);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DirectQsp2QueueImportRejectsTamperingBeforePublishingManifest()
+    {
+        var root = CreateTemporaryDirectory();
+        var dataKey = RandomNumberGenerator.GetBytes(Qsp2DocumentFormat.DataKeySizeBytes);
+        try
+        {
+            var builder = new PdfDocumentBuilder();
+            builder.AddPage(PageSize.A4);
+            var bytes = builder.Build();
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var agentScopeId = Guid.NewGuid();
+            var job = CreateJob(bytes) with
+            {
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT"
+            };
+
+            using var encrypted = new MemoryStream();
+            using var source = new MemoryStream(bytes, writable: false);
+            await Qsp2DocumentFormat.EncryptAsync(
+                source, encrypted, agentScopeId, job.Id, bytes.LongLength, dataKey);
+            var tampered = encrypted.ToArray();
+            var recordCipherOffset = Qsp2DocumentFormat.HeaderSizeBytes +
+                Qsp2DocumentFormat.HeaderMacSizeBytes + sizeof(uint);
+            tampered[recordCipherOffset] ^= 0x20;
+            using var corruptedInput = new MemoryStream(tampered, writable: false);
+
+            await Assert.ThrowsAsync<InvalidDataException>(() =>
+                store.EnqueueLocalUploadQsp2StreamingAsync(
+                    job.Id,
+                    agentScopeId,
+                    bytes.LongLength,
+                    job.Sha256,
+                    corruptedInput,
+                    dataKey,
+                    (document, _) => Task.FromResult<AgentClaimedJob?>(job),
+                    CancellationToken.None));
+
+            Assert.Null(store.Find(job.Id));
+            Assert.Empty(Directory.GetFiles(root, "*.qdoc"));
+            Assert.Empty(Directory.GetFiles(root, "*.json"));
+            Assert.Empty(Directory.GetFiles(root, "*.tmp"));
+            CryptographicOperations.ZeroMemory(tampered);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(dataKey);
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task StreamedQsp2QueueRejectsRecordTampering()
     {
         var root = CreateTemporaryDirectory();
