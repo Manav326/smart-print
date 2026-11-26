@@ -3597,20 +3597,24 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
       </label>
     </div>
     <p className="batch-review-next-step">{quoteRefreshRequiredCount>0?quoteRefreshRequiredCount+" accepted file(s) need a new quote before customer checkout. ":""}Applying this review saves the file decisions. It does not collect payment or send files to a printer.</p>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>Keep reviewing</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled&&!hasIdDocument)}>{busy?<span className="button-spinner"/>:"Save batch review"}</button></div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose} disabled={busy}>{t("Keep reviewing")}</button><button className="primary-button" disabled={busy||jobs.length===0} onClick={()=>onApply(acceptedIds,pdfBrandingEnabled&&!hasIdDocument)}>{busy?<span className="button-spinner"/>:"Save batch review"}</button></div>
   </Modal>;
 }
 
 function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEvent[];onClose:()=>void}) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   return <Modal title={job.jobNumber} subtitle={job.privatePrinting?"Private print · audit history":`Audit history · ${job.document.originalFileName}`} onClose={onClose}>
-    <div className="shop-history-list">{events.length===0?<p>No recorded events yet.</p>:events.map(event=><div key={event.id}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"Customer":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>
-    <div className="modal-actions"><button className="secondary-button" onClick={onClose}>Close history</button></div>
+    <div className="shop-history-list">{events.length===0?<p>{t("No recorded events yet.")}</p>:events.map(event=><div key={event.id}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"Customer":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>
+    <div className="modal-actions"><button className="secondary-button" onClick={onClose}>{t("Close history")}</button></div>
   </Modal>;
 }
 
 function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,isSavedOutput=false,focusEditOnMount=false,onClose,onApprove,onReject,onRefund,onEditPhoto}:{
   name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;isSavedOutput?:boolean;focusEditOnMount?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;onEditPhoto?:()=>void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const editPhotoButtonRef=useRef<HTMLButtonElement|null>(null);
   const isImage=mediaType==="image/jpeg"||mediaType==="image/png";
   useEffect(()=>{
@@ -3630,15 +3634,15 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,isSavedOutp
   const subtitle = isSavedOutput ? "Saved PDF output · Read-only preview" : readOnly ? `Read-only preview · ${previewSummary}` : job.batchId ? `File review · Batch ${job.batchId.slice(0,8).toUpperCase()} · ${previewSummary}` : previewSummary;
   return <Modal title={name} subtitle={subtitle} onClose={onClose}>
     <ShopDocumentPreviewSurface name={name} url={url} mediaType={mediaType} printKind={job.printKind}/>
-    {onEditPhoto&&<div className="file-review-note"><ImageIcon size={16}/><span>Open the same Photo Studio used by customers to crop, improve the background, add form details and prepare this photo for shop printing.</span><button ref={editPhotoButtonRef} className="secondary-button" onClick={onEditPhoto}>Enhance photo for printing</button></div>}
-    {!readOnly&&isImage&&job.status==="AWAITING_SHOP_APPROVAL"&&job.storageMode==="LOCAL_AGENT"&&<div className="file-review-note"><ShieldCheck size={16}/><span>This original is stored only on the paired shop computer. It remains local; this version does not copy it to cloud storage for editing.</span></div>}
-    {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? "This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview." : "Review this file independently. Accepting or rejecting it will not change any other file in the batch."}</span></div>}
-    {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&<div className="file-refund-note"><Wallet size={16}/><span>Paid amount: <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. A refund can be recorded while this file has not yet been handed to the shop computer.</span></div>}
+    {onEditPhoto&&<div className="file-review-note"><ImageIcon size={16}/><span>{t("Open the same Photo Studio used by customers to crop, improve the background, add form details and prepare this photo for shop printing.")}</span><button ref={editPhotoButtonRef} className="secondary-button" onClick={onEditPhoto}>{t("Enhance photo for printing")}</button></div>}
+    {!readOnly&&isImage&&job.status==="AWAITING_SHOP_APPROVAL"&&job.storageMode==="LOCAL_AGENT"&&<div className="file-review-note"><ShieldCheck size={16}/><span>{t("This original is stored only on the paired shop computer. It remains local; this version does not copy it to cloud storage for editing.")}</span></div>}
+    {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<div className="file-review-note"><Check size={16}/><span>{readOnly ? t("This preview is part of the batch review. Keep or change this file's decision in the batch panel after closing the preview.") : t("Review this file independently. Accepting or rejecting it will not change any other file in the batch.")}</span></div>}
+    {job.status==="PAID_AUTHORISED"&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&<div className="file-refund-note"><Wallet size={16}/><span>{t("Paid amount:")} <strong>{formatMoney(job.payment.amountMinor,job.payment.currency)}</strong>. {t("A refund can be recorded while this file has not yet been handed to the shop computer.")}</span></div>}
     <div className="modal-actions">
-      {!readOnly&&job.status==="AWAITING_SHOP_APPROVAL"&&<button className="primary-button" onClick={onApprove}><Check size={15}/> Accept this file</button>}
-      {!readOnly&&["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="secondary-button reject-action" onClick={onReject}><X size={15}/> Reject this file</button>}
+      {!readOnly&&job.status==="AWAITING_SHOP_APPROVAL"&&<button className="primary-button" onClick={onApprove}><Check size={15}/> {t("Accept this file")}</button>}
+      {!readOnly&&["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="secondary-button reject-action" onClick={onReject}><X size={15}/> {t("Reject this file")}</button>}
       {!readOnly&&(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="secondary-button reject-action" onClick={onRefund}><RotateCcw size={15}/> {job.status==="REJECTED"?"Refund rejected file":"Review pages & refund"}</button>}
-      <button className="secondary-button" onClick={onClose}>Close preview</button>
+      <button className="secondary-button" onClick={onClose}>{t("Close preview")}</button>
     </div>
   </Modal>;
 }
@@ -3683,14 +3687,14 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
     setRejectedPages(current=>{const next=new Set(current);if(checked)next.add(page);else next.delete(page);return next;});
   };
 
-  return <Modal title={job.status==="REJECTED"?"Refund rejected file":"Review pages and refund"} subtitle={job.status==="REJECTED"?"All pages are selected because the shop rejected this entire file. Confirm the full-file refund before handoff.":"Every page starts accepted. Tick only pages to reject; selections can be undone before recording. Already refunded pages stay excluded."} onClose={onClose}>
+  return <Modal title={t(job.status==="REJECTED"?"Refund rejected file":"Review pages and refund")} subtitle={t(job.status==="REJECTED"?"All pages are selected because the shop rejected this entire file. Confirm the full-file refund before handoff.":"Every page starts accepted. Tick only pages to reject; selections can be undone before recording. Already refunded pages stay excluded.")} onClose={onClose}>
     <div className="refund-summary-card">
       <div><span>{t("FILE")}</span><strong>{job.document.originalFileName}</strong></div>
       <div><span>{t("VERIFIED PAYMENT")}</span><strong>{formatMoney(job.payment?.amountMinor||job.quotedAmountMinor,job.payment?.currency||job.currency)}</strong></div>
     </div>
     <div className="refund-selection-actions">
       <span>{t("Reject specific pages or the entire file.")}</span>
-      <button type="button" className="secondary-button reject-action" disabled={busy} onClick={()=>setRejectedPages(new Set(Array.from({length:job.pageCount},(_,index)=>index+1)))}>Reject entire file · refund all pages</button>
+      <button type="button" className="secondary-button reject-action" disabled={busy} onClick={()=>setRejectedPages(new Set(Array.from({length:job.pageCount},(_,index)=>index+1)))}>{t("Reject entire file · refund all pages")}</button>
     </div>
     <div className="page-refund-grid" role="group" aria-label="Pages to reject">
       {Array.from({length:job.pageCount},(_,index)=>index+1).map(page=>{
@@ -3717,10 +3721,10 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
       <label>{t("Refund returned by")}<select value={method} onChange={event=>setMethod(event.target.value as "UPI"|"CASH")}><option value="UPI">{t("UPI transfer")}</option><option value="CASH">{t("Cash returned at counter")}</option></select></label>
       {method==="UPI"&&<label>{t("Refund transaction reference")}<input value={reference} onChange={event=>setReference(event.target.value)} maxLength={100} placeholder={t("Enter the refund UPI reference")} required/></label>}
       <label>{t("Reason for rejecting these pages")}<textarea rows={3} maxLength={300} value={reason} onChange={event=>setReason(event.target.value)} required/></label>
-      <label className="refund-confirm-line"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/><span>I confirm that I have already returned the exact additional amount shown above. SmartPrint records the refund; it does not send money automatically.</span></label>
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||estimating||!canSubmit}>{busy?<span className="button-spinner"/>:"Record refund and reject selected pages"}</button></div>
+      <label className="refund-confirm-line"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/><span>{t("I confirm that I have already returned the exact additional amount shown above. SmartPrint records the refund; it does not send money automatically.")}</span></label>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||estimating||!canSubmit}>{busy?<span className="button-spinner"/>:t("Record refund and reject selected pages")}</button></div>
     </form>}
-    {estimate&&additional===0&&<div className="refund-form"><p>Select at least one additional page that produces a positive refund from the original quote. No page is rejected until a refund can be recorded.</p><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Close</button></div></div>}
+    {estimate&&additional===0&&<div className="refund-form"><p>{t("Select at least one additional page that produces a positive refund from the original quote. No page is rejected until a refund can be recorded.")}</p><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>{t("Close")}</button></div></div>}
   </Modal>;
 }
 
@@ -3832,13 +3836,13 @@ function SettingsPage({ profile, onSave, busy }: { profile:ShopProfile; onSave:(
   const [logoUrl,setLogoUrl]=useState(profile.logoUrl || "");
   const [accentColor,setAccentColor]=useState(profile.accentColor || "#7662E8");
   useEffect(()=>{setDisplayName(profile.displayName);setLogoUrl(profile.logoUrl||"");setAccentColor(profile.accentColor||"#7662E8");},[profile]);
-  return <section className="panel settings-panel"><div className="settings-intro"><div className="settings-icon"><Settings size={20}/></div><div><h2>{t("Shop profile & branding")}</h2><p>Update the shop name and brand customers see when they connect through your QR stations.</p></div></div>
+  return <section className="panel settings-panel"><div className="settings-intro"><div className="settings-icon"><Settings size={20}/></div><div><h2>{t("Shop profile & branding")}</h2><p>{t("Update the shop name and brand customers see when they connect through your QR stations.")}</p></div></div>
     <form className="settings-form" onSubmit={event=>{event.preventDefault();onSave({displayName:displayName.trim(),logoUrl:logoUrl.trim()||null,accentColor});}}>
       <label>{t("Customer-facing shop name")}<input value={displayName} onChange={e=>setDisplayName(e.target.value)} required maxLength={180}/></label>
       <label>{t("Logo URL")} <span className="field-hint">{t("Optional · secure HTTPS image URL")}</span><input type="url" value={logoUrl} onChange={e=>setLogoUrl(e.target.value)} placeholder="https://example.com/logo.png"/></label>
-      <label>Brand accent colour<div className="colour-picker-row"><input type="color" value={accentColor} onChange={e=>setAccentColor(e.target.value)}/><input value={accentColor} onChange={e=>setAccentColor(e.target.value)} pattern="^#[0-9A-Fa-f]{6}$" required/></div></label>
+      <label>{t("Brand accent colour")}<div className="colour-picker-row"><input type="color" value={accentColor} onChange={e=>setAccentColor(e.target.value)}/><input value={accentColor} onChange={e=>setAccentColor(e.target.value)} pattern="^#[0-9A-Fa-f]{6}$" required/></div></label>
       <div className="settings-summary"><ShieldCheck size={16}/><span>{t("Standard Smart Print branding is active. Full white-label branding is a paid plan upgrade.")}</span></div>
-      <div className="settings-actions"><button className="primary-button" disabled={busy}>{busy?<span className="button-spinner"/>:"Save shop identity"}</button></div>
+      <div className="settings-actions"><button className="primary-button" disabled={busy}>{busy?<span className="button-spinner"/>:t("Save shop identity")}</button></div>
     </form>
     <div className="settings-meta"><span>{t("Shop slug")}</span><strong>{profile.slug}</strong><span>{t("Currency")}</span><strong>{profile.currency}</strong><span>{t("Time zone")}</span><strong>{profile.timeZone}</strong></div>
   </section>;
@@ -3875,11 +3879,11 @@ function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
           setSaveError(exception instanceof Error ? exception.message : "Could not update your personal details.");
         }
       }}>
-        <label>Your name
+        <label>{t("Your name")}
           <input value={ownerName} onChange={event => setOwnerName(event.target.value)}
             autoComplete="name" maxLength={160} required/>
         </label>
-        <label>Sign-in email
+        <label>{t("Sign-in email")}
           <input type="email" value={email}
             onChange={event => setEmail(event.currentTarget.value)}
             onInput={event => setEmail(event.currentTarget.value)}
@@ -3888,9 +3892,9 @@ function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
         {emailChanged && <>
           <div className="modal-note account-email-change-note">
             <ShieldCheck size={16}/>
-            <span>This address becomes your sign-in email immediately. Make sure it is correct. Your current password is required to confirm the change.</span>
+            <span>{t("This address becomes your sign-in email immediately. Make sure it is correct. Your current password is required to confirm the change.")}</span>
           </div>
-          <label>Current password
+          <label>{t("Current password")}
             <input type="password" value={currentPassword}
               onChange={event => setCurrentPassword(event.target.value)}
               autoComplete="current-password" required/>
@@ -3945,7 +3949,7 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
   return <Modal title={t("Create a QR station")} subtitle={t("Give customers a clear entry point for this counter or printer.")} onClose={onClose}>
     <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,printerDeviceId:printerDeviceId||undefined});}}>
       <label>{t("Station name")}<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder={t("e.g. Front counter")} required maxLength={120}/></label>
-      <label>Default printer <span className="field-hint">Optional · only approved virtual test queues are included</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">No default printer</option>{printers.filter(printer=>printer.isActive&&(printer.outputMode!=="UNSUPPORTED_VIRTUAL"||printer.virtualTestGrantActive===true)).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
+      <label>{t("Default printer")} <span className="field-hint">Optional · only approved virtual test queues are included</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">{t("No default printer")}</option>{printers.filter(printer=>printer.isActive&&(printer.outputMode!=="UNSUPPORTED_VIRTUAL"||printer.virtualTestGrantActive===true)).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
       <div className="modal-note"><QrCode size={15}/> The QR contains a public station identifier, not a permanent print authorisation. Every scan creates an expiring customer session. Only enabled printers are offered as defaults; you can also assign a printer to each paid job in the queue.</div>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!displayName.trim()}>{busy?<span className="button-spinner"/>:"Create station"}</button></div>
     </form>
@@ -4018,7 +4022,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
             <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>{status === "expired" ? "Your subscription expired. Renew using the plans below to restore access. Existing customer payment records and completed jobs remain available." : "Shop access is currently restricted. Review your account status or contact SmartPrint support for assistance."}</span></div>
           )}
           {entitlements.isLegacyUnconfigured && entitlements.isAccessActive && (
-            <div className="subscription-legacy-note"><ShieldCheck size={15}/><span>This subscription predates plan assignment. Existing shop access is being preserved until its terms are explicitly assigned.</span></div>
+            <div className="subscription-legacy-note"><ShieldCheck size={15}/><span>{t("This subscription predates plan assignment. Existing shop access is being preserved until its terms are explicitly assigned.")}</span></div>
           )}
         </section>
 
@@ -4031,7 +4035,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
           </div>
           <div className="subscription-upgrade-note">
             <CreditCard size={15}/>
-            <span>Manage your SmartPrint subscription securely with Razorpay. Customer print payments remain separate and continue to be handled by your shop.</span>
+            <span>{t("Manage your SmartPrint subscription securely with Razorpay. Customer print payments remain separate and continue to be handled by your shop.")}</span>
           </div>
         </section>
       </div>
@@ -4656,7 +4660,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
       <div><strong>{t(nativeAppMode?"Shop Wi-Fi":"Shop Wi-Fi connection")}</strong><span>{t("Optional local connection check")}</span></div>
       <Status label={label} tone={tone}/>
     </div>
-    {!nativeAppMode&&<p>Check whether this phone can reach the shop's local print computer. This check does not upload your document.</p>}
+    {!nativeAppMode&&<p>{t("Check whether this phone can reach the shop's local print computer. This check does not upload your document.")}</p>}
     {!localAgent?.endpoints.length
       ? <div className="entry-local-agent-message" role="status"><strong>Local transfer unavailable.</strong> {message}</div>
       : checkStatus==="insecure"
