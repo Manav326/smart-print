@@ -88,8 +88,7 @@ public sealed record AgentPrinterDiscoveryRequest(
     string Status,
     bool IsDefault,
     string OutputMode = "PHYSICAL",
-    string CapabilitiesJson = "{}",
-    bool TestModeOverride = false);
+    string CapabilitiesJson = "{}");
 
 public sealed record AgentPrinterSyncRequest(IReadOnlyList<AgentPrinterDiscoveryRequest> Printers);
 
