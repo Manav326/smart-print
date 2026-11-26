@@ -46,7 +46,7 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
    if(!copied)throw new Error(t("Clipboard access is unavailable."));
    setStatusTone("success");
    setStatus(t(label === "UPI ID" ? "UPI ID copied." : "Amount copied."));
-  }catch(e){setError(e instanceof Error?e.message:t("Could not copy ")+label.toLowerCase()+".");}
+  }catch(e){setError(e instanceof Error?e.message:t("Could not copy {label}.").replace("{label}", label.toLowerCase()));}
  }
 
  async function download(){
