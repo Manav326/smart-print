@@ -344,7 +344,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     }
     const status = exception instanceof ApiError ? exception.status : 0;
     setApiConnectionState(status === 0 ? "offline" : status >= 500 ? "degraded" : "connected");
-    setError(exception instanceof Error ? exception.message : fallback);
+    setError(exception instanceof Error ? t(exception.message) : fallback);
   }
 
   async function refreshPrintQueue() {
@@ -562,7 +562,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
   async function signOut() {
     try { await logout(tokens.accessToken); } catch { /* Local sign-out still clears the session. */ }
     try { await onSignOut(); }
-    catch (exception) { setError(exception instanceof Error ? exception.message : t("Could not clear the secure desktop session.")); }
+    catch (exception) { setError(exception instanceof Error ? t(exception.message) : t("Could not clear the secure desktop session.")); }
   }
 
   async function submitStation(values: { displayName: string; printerDeviceId?: string }) {
@@ -573,7 +573,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setModal(null);
       setToast("QR station created. Save or print its QR code now.");
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not create QR station."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not create QR station."));
     } finally {
       setBusy(false);
     }
@@ -610,7 +610,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       if (exception instanceof ApiError && exception.status === 409) {
         try { await reload(); } catch { /* Keep the original action error visible. */ }
       }
-      setError(exception instanceof Error ? exception.message : t("Could not update printer."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not update printer."));
       return false;
     } finally {
       setBusyResourceId(null);
@@ -630,7 +630,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setStations(current => current.map(item => item.id === station.id ? { ...item, isEnabled: updated.isEnabled } : item));
       setToast(updated.isEnabled ? "QR station enabled." : "QR station disabled. Existing customer sessions are unchanged.");
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not update QR station."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not update QR station."));
     } finally {
       setBusyResourceId(null);
     }
@@ -649,7 +649,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         : item));
       setToast("New QR code generated. The previous code is now invalid.");
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not generate a QR code."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not generate a QR code."));
     } finally {
       setBusyResourceId(null);
     }
@@ -664,7 +664,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setEnrollmentCode(code);
       setToast("One-time pairing code generated. It expires in 10 minutes.");
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not generate an agent pairing code."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not generate an agent pairing code."));
     } finally {
       setAgentBusy(false);
     }
@@ -788,7 +788,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         setLocalAgentRevoked(false);
         setLocalAgentNeedsRepair(false);
         setLocalAgentOwnershipChecking(false);
-        if (!silent) setError(exception.message);
+        if (!silent) setError(t(exception.message));
       } else if (!silent) {
         const message = exception instanceof Error ? exception.message : "Could not connect this computer to the shop.";
         setError(message);
@@ -994,7 +994,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setToast("Agent access revoked.");
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not revoke this agent."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not revoke this agent."));
     } finally {
       setAgentBusy(false);
     }
@@ -1011,7 +1011,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setToast(`${assignment.printerName} assigned to ${assignment.assignedJobCount} file(s) in this batch. The paired computer can now receive the documents.`);
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not assign this printer."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not assign this printer."));
     } finally {
       setBusyJobId(null);
     }
@@ -1026,7 +1026,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setToast(`Revised quote ${formatMoney(revised.quotedAmountMinor,revised.currency)} sent to the customer for approval. Printing remains paused until approval and release.`);
       await reload();
     } catch(exception) {
-      setError(exception instanceof Error?exception.message:t("Could not revise this print request."));
+      setError(exception instanceof Error?t(exception.message):t("Could not revise this print request."));
     } finally {
       setBusyJobId(null);
     }
@@ -1058,7 +1058,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             : "Print authorised. Waiting for the shop computer to receive this job; SmartPrint will update the order automatically.");
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not start printing."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not start printing."));
     } finally { setBusyJobId(null); }
   }
 
@@ -1083,7 +1083,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         : "PDF export retry authorised. The Windows Agent will save the PDF locally.");
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not retry this PDF export."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not retry this PDF export."));
     } finally {
       setBusyJobId(null);
     }
@@ -1114,7 +1114,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         : t("Physical output confirmed by the shop operator."));
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not confirm physical output."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not confirm physical output."));
     } finally { setBusyJobId(null); }
   }
 
@@ -1157,7 +1157,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       // refreshing the view fails, so the selected files cannot be submitted twice.
       return true;
     }catch(exception){
-      setError(exception instanceof Error?exception.message:t("Could not resume the selected files."));
+      setError(exception instanceof Error?t(exception.message):t("Could not resume the selected files."));
       try{await reload();}catch{/* Preserve the original action error. */}
       return false;
     }finally{
@@ -1175,7 +1175,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setPaymentSettings(updated);
       setToast("Shop payment settings saved. Customer print revenue continues to go directly to your shop.");
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not save shop payment settings."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not save shop payment settings."));
     } finally {
       setBusy(false);
     }
@@ -1201,7 +1201,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         : "Payment verified. The job is paid/authorised; printing still requires printer assignment and an explicit dispatch.");
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not verify this payment."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not verify this payment."));
     } finally {
       setBusyJobId(null);
     }
@@ -1234,7 +1234,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         : "Payment report rejected. The customer can choose a new payment attempt.");
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not reject this payment."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not reject this payment."));
     } finally {
       setBusyJobId(null);
     }
@@ -1247,7 +1247,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setToast("Shop identity updated.");
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not update shop identity."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not update shop identity."));
     } finally {
       setBusy(false);
     }
@@ -1286,7 +1286,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setPricing(updated);
       setToast("Print rate card saved. New quotes will use this pricing version.");
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not save print prices."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not save print prices."));
     } finally {
       setBusy(false);
     }
@@ -1320,7 +1320,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         isSavedOutput
       });
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not open the document."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not open the document."));
     } finally {
       setBusyJobId(null);
     }
@@ -1389,7 +1389,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       }
       setFocusShopPhotoEdit(false);
       setShopPhotoStudio({source,job,initialSettings,returnPreview});
-    }catch(exception){setError(exception instanceof Error?exception.message:t("Could not open Photo Studio for this file."));}
+    }catch(exception){setError(exception instanceof Error?t(exception.message):t("Could not open Photo Studio for this file."));}
     finally{setBusyJobId(null);}
   }
 
@@ -1431,7 +1431,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         await replaceShopPhotoDocument(tokens.accessToken,editor.job.id,sheet.file,sheet.sizeCode,sheet.photoCount,sheet.photosPerPage,JSON.stringify(sheet.editorSettings??{}),sheet.photoOutputLayout,sheet.photoPaperFinish);
       }
     }catch(exception){
-      setError(exception instanceof Error?exception.message:t("Could not save the enhanced photo sheet."));
+      setError(exception instanceof Error?t(exception.message):t("Could not save the enhanced photo sheet."));
       throw exception;
     }
 
@@ -1461,7 +1461,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       const events = await getShopJobEvents(tokens.accessToken, job.id);
       setEventHistory({ job, events });
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not load job history."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not load job history."));
     } finally {
       setBusyJobId(null);
     }
@@ -1476,7 +1476,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setToast(result.nextStep || "Shop approval saved. This job is awaiting verified payment.");
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not approve this job."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not approve this job."));
     } finally {
       setBusyJobId(null);
     }
@@ -1495,7 +1495,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         setPreview(null);
       }
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not reject this job."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not reject this job."));
     } finally {
       setBusyJobId(null);
     }
@@ -1537,7 +1537,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         :`Batch review saved: ${acceptCount} accepted and ${rejectCount} rejected. All accepted files remain part of one checkout.`);
     } catch(exception) {
       await reload().catch(()=>undefined);
-      setError(exception instanceof Error?exception.message:t("Could not apply this batch review. The decisions were not changed; refresh and retry the same review."));
+      setError(exception instanceof Error?t(exception.message):t("Could not apply this batch review. The decisions were not changed; refresh and retry the same review."));
     } finally {
       setBusyJobId(null);
     }
@@ -1558,7 +1558,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       }
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not record this refund."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not record this refund."));
     } finally {
       setBusyJobId(null);
     }
@@ -1589,7 +1589,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setBatchReviewRetry(waiting.some(job => batchReviewRetryIds.includes(job.id)));
       setBatchReviewJobs(waiting);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not load every file in this batch. No review decisions were changed."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not load every file in this batch. No review decisions were changed."));
     } finally {
       setBatchReviewLoadingId(current => current === batchId ? null : current);
     }
@@ -1956,7 +1956,7 @@ function CustomersPage({ token }: { token: string }) {
     void getShopCustomers(token, { search, page, pageSize })
       .then(value => { if (current) setResult(value); })
       .catch(exception => {
-        if (current) setError(exception instanceof Error ? exception.message : t("Could not load shop customers."));
+        if (current) setError(exception instanceof Error ? t(exception.message) : t("Could not load shop customers."));
       })
       .finally(() => { if (current) setLoading(false); });
     return () => { current = false; };
@@ -2136,7 +2136,7 @@ function ReportsPage({ token }: { token: string }) {
       .then(result => { if (current) setSummary(result); })
       .catch(exception => {
         if (current) {
-          setError(exception instanceof Error ? exception.message : t("Could not load shop reports."));
+          setError(exception instanceof Error ? t(exception.message) : t("Could not load shop reports."));
         }
       })
       .finally(() => { if (current) setLoading(false); });
@@ -2991,7 +2991,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
       setError("");
       return next;
     } catch(exception) {
-      setError(exception instanceof Error?exception.message:t("Could not check the shop connection."));
+      setError(exception instanceof Error?t(exception.message):t("Could not check the shop connection."));
       return null;
     } finally { setLoading(false); }
   }
@@ -3045,14 +3045,14 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
     if(!interfaceId)return;
     setSaving(true);setError("");setTest(null);setVerified(false);setExpired(false);
     try {setSnapshot(await selectLocalNetwork(interfaceId));}
-    catch(exception){setError(exception instanceof Error?exception.message:t("Could not select this connection."));}
+    catch(exception){setError(exception instanceof Error?t(exception.message):t("Could not select this connection."));}
     finally{setSaving(false);}
   }
 
   async function beginPhoneTest() {
     setSaving(true);setError("");setExpired(false);setVerified(false);
     try {setTest(await startLocalPhoneTest());}
-    catch(exception){setError(exception instanceof Error?exception.message:t("Could not start the phone check."));}
+    catch(exception){setError(exception instanceof Error?t(exception.message):t("Could not start the phone check."));}
     finally{setSaving(false);}
   }
 
@@ -4281,7 +4281,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       sessionStorage.removeItem("qrtoprint.customer-session");
     };
     void restore().catch(exception=>{
-      if(mounted)setError(exception instanceof Error?exception.message:t("This QR station is unavailable."));
+      if(mounted)setError(exception instanceof Error?t(exception.message):t("This QR station is unavailable."));
     }).finally(()=>{if(mounted)setLoading(false);});
     return ()=>{mounted=false;};
   },[publicCode]);
@@ -4302,7 +4302,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       sessionStorage.removeItem("qrtoprint.customer-session");
       setResult(value);
     }catch(exception){
-      setError(exception instanceof Error?exception.message:t("Could not start a new print session."));
+      setError(exception instanceof Error?t(exception.message):t("Could not start a new print session."));
     }finally{
       setLoading(false);
     }
@@ -5406,7 +5406,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       rememberCustomerStatus(refreshed);
     }).catch(exception=>{
-      if(active)setError(exception instanceof ApiError?exception.message:t("Could not restore this print request."));
+      if(active)setError(exception instanceof ApiError?t(exception.message):t("Could not restore this print request."));
     });
     return ()=>{active=false;};
   },[sessionToken,uploaded?.job.id]);
@@ -5940,7 +5940,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       if(failures.length) setError(t("Could not quote: {files}. Retry the batch quote.").replace("{files}", failures.join(", ")));
       else if(!Object.keys(nextQuotes).length) setError(t("No files are waiting for a quote."));
     } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:t("The shop could not calculate the batch quote."));
+      setError(exception instanceof ApiError?t(exception.message):t("The shop could not calculate the batch quote."));
     } finally {setBusy(false);}
   }
 
@@ -5979,7 +5979,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       setQuote(uploaded?nextQuotes[uploaded.job.id]??null:null);
       if(failures.length)setError(t("Could not send: {files}. Refresh and retry.").replace("{files}", failures.join(", ")));
     } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:t("The batch could not be sent to the shop."));
+      setError(exception instanceof ApiError?t(exception.message):t("The batch could not be sent to the shop."));
     } finally {setBusy(false);}
   }
 
@@ -5990,7 +5990,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       const refreshed=await getCustomerJobStatus(sessionToken,uploaded.job.id);
       rememberCustomerStatus(refreshed);
     }
-    catch(exception){setError(exception instanceof ApiError?exception.message:t("Could not refresh job status."));}
+    catch(exception){setError(exception instanceof ApiError?t(exception.message):t("Could not refresh job status."));}
     finally {setBusy(false);}
   }
 
@@ -6091,7 +6091,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         rememberBatchPayment(refreshed.payment?.batchPayment);
       }
     } catch(exception) {
-      setError(exception instanceof ApiError?exception.message:t("The payment reference could not be submitted."));
+      setError(exception instanceof ApiError?t(exception.message):t("The payment reference could not be submitted."));
     } finally {setBusy(false);}
   }
 
