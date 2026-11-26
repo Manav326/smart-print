@@ -21,6 +21,18 @@ This repository uses one versioned GitHub release to produce the website downloa
 
 A PR merge never submits an app to either public Store. A stable release build and a separate explicit publishing dispatch are required.
 
+## Microsoft Store certification risk: Windows Agent service
+
+SmartPrint's installer creates the `QRtoPrintSmartPrintAgent` Windows NT service. The current installer configures it to run as the built-in `NT AUTHORITY\LocalService` account (not `LocalSystem`), with automatic startup and service recovery. The Agent is required for SmartPrint's local printer integration. It is not a kernel-mode printer driver.
+
+**This must be disclosed in Partner Center.** On the MSI/EXE submission's Properties page, select the declaration that the app depends on non-Microsoft drivers or NT services, and explain the dependency in Notes for certification. Microsoft's policy says these dependencies are generally not allowed and are reviewed case by case; disclosure does not guarantee approval. Do not claim accessibility certification or any other declaration unless separately tested.
+
+Suggested certification note (review against the final Agent implementation before submission):
+
+> SmartPrint installs one Windows NT service named QRtoPrintSmartPrintAgent. The service runs under the built-in NT AUTHORITY\LocalService account, not LocalSystem, and no kernel-mode driver is installed. It provides the local printer-integration component required by the SmartPrint desktop application, including local printer inventory and secure communication with the desktop client. The installer configures automatic startup and service recovery. The service is removed during application uninstall. The installer does not install unrelated third-party applications.
+
+If Microsoft rejects this dependency, stop the submission. The next decision would be a Store-specific architecture that does not require a non-Microsoft NT service (for example, a user-session Agent), followed by a full printing regression test. Do not switch to MSIX as a superficial workaround: packaged services use restricted capabilities and also require Microsoft approval.
+
 ## Release provenance verification
 
 Each release includes a signed SLSA provenance attestation created by GitHub Actions. The release workflow attests the Windows and Android binaries plus `BUILD-INFO.txt`; the attestation bundle is included as `attestation.sigstore.json` in the GitHub release. The checksum manifest covers the stable binaries and build metadata, while the Sigstore bundle is independently signed. The bundle is not copied to immutable R2 storage because its timestamped signature can differ when a release workflow is retried. The Store publishing workflow verifies the relevant artifact attestation before it calls either Store API. The publishing runners require GitHub CLI 2.102.0 or newer for secure attestation verification.
