@@ -107,6 +107,12 @@ The release build already expects the existing Android upload keystore and signi
 | `ANDROID_SIGNING_KEY_ALIAS` | Existing key alias |
 | `ANDROID_SIGNING_KEY_PASSWORD` | Key password |
 
+Add this optional GitHub repository Actions variable if the app already has Play uploads with a versionCode at or above the default:
+
+| Variable | Value |
+|---|---|
+| `ANDROID_VERSION_CODE_BASE` | Non-negative integer greater than the highest previously used Play versionCode; defaults to `100000` when unset |
+
 Never generate a new upload key for a later release. Keep a secure offline backup of the keystore and passwords. If the existing key is lost, stop and plan Google's upload-key reset process rather than silently replacing it.
 
 ### F. Microsoft Partner Center (one-time manual setup)
