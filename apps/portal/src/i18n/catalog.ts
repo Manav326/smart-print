@@ -652,6 +652,11 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "recorded": "दर्ज",
     "Cash refund": "नकद रिफंड",
     "Live figures from this shop’s recorded print jobs and verified collections.": "इस शॉप के दर्ज प्रिंट जॉब और सत्यापित भुगतान के लाइव आँकड़े।",
+    "← Previous": "← पिछला",
+    "Next →": "अगला →",
+    "Recorded as sent": "भेजा गया दर्ज",
+    "Save as PDF · ": "PDF के रूप में सेव करें · ",
+    "The Agent could not identify this Windows job. Manually check the {queue} queue for {job}, then inspect every printed page before reconciling.": "Agent इस Windows जॉब की पहचान नहीं कर सका। {job} के लिए {queue} कतार स्वयं जाँचें और समाधान से पहले सभी प्रिंटेड पेज देखें।",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -1045,6 +1050,11 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "recorded": "recorded",
     "Cash refund": "Cash refund",
     "Live figures from this shop’s recorded print jobs and verified collections.": "Is shop ke recorded print jobs aur verified collections ke live figures.",
+    "← Previous": "← Previous",
+    "Next →": "Next →",
+    "Recorded as sent": "Sent ke roop mein recorded",
+    "Save as PDF · ": "PDF ke roop mein save karein · ",
+    "The Agent could not identify this Windows job. Manually check the {queue} queue for {job}, then inspect every printed page before reconciling.": "Agent is Windows job ko identify nahi kar saka. {job} ke liye {queue} queue manually check karein aur reconcile karne se pehle saare printed pages inspect karein.",
   },
 };
 
