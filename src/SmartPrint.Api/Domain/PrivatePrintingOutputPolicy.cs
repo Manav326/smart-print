@@ -1,8 +1,9 @@
 namespace SmartPrint.Api.Domain;
 
 /// <summary>
-/// Private Printing may use a virtual PDF destination only as an explicitly
-/// enabled non-production test output. A virtual output is never physical fulfilment.
+/// Private Printing may use PDF Export only when the central non-production
+/// setting is enabled. Other virtual Windows queues require their own current
+/// shop-scoped grant. Neither virtual path is physical fulfilment.
 /// </summary>
 public static class PrivatePrintingOutputPolicy
 {
