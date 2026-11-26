@@ -484,19 +484,19 @@ function PlanVersionEditor({ form, onChange }: {
   const priceStep = 10 ** -currencyMinorUnitDigits(form.currency);
   return (
     <div className="platform-plan-version-editor">
-      <div className="platform-plan-subheading"><div><h4>{t("Pricing")}</h4><p>{t("Enter amounts in {currency}").replace("{currency}", currencyLabel)}; SmartPrint stores the currency's minor units.</p></div><Field label={t("Currency")}><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder="INR"/></Field></div>
+      <div className="platform-plan-subheading"><div><h4>{t("Pricing")}</h4><p>{t("Enter amounts in {currency}").replace("{currency}", currencyLabel)}; SmartPrint stores the currency's minor units.</p></div><Field label={t("Currency")}><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder={t("INR")}/></Field></div>
       <div className="platform-plan-meta-grid">
-        <Field label={t("Monthly price ({currency})").replace("{currency}",currencyLabel)}><input type="number" min="0" step={priceStep} value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="e.g. 149"/></Field>
-        <Field label={t("Annual price ({currency})").replace("{currency}",currencyLabel)}><input type="number" min="0" step={priceStep} value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="e.g. 1499"/></Field>
+        <Field label={t("Monthly price ({currency})").replace("{currency}",currencyLabel)}><input type="number" min="0" step={priceStep} value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder={t("e.g. 149")}/></Field>
+        <Field label={t("Annual price ({currency})").replace("{currency}",currencyLabel)}><input type="number" min="0" step={priceStep} value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder={t("e.g. 1499")}/></Field>
       </div>
 
       <div className="platform-plan-subheading"><div><h4>{t("Usage limits")}</h4><p>{t("Blank means no configured cap; positive numbers enforce the configured limit when enforcement is connected.")}</p></div><span className="platform-plan-unlimited">Optional limits</span></div>
       <div className="platform-plan-meta-grid platform-plan-limits-grid">
         <Field label={t("Printers")}><input type="number" min="1" step="1" value={form.maxPrinters} onChange={event => onChange("maxPrinters", event.target.value)} placeholder={t("No configured cap")}/></Field>
-        <Field label={t("Agent computers")}><input type="number" min="1" step="1" value={form.maxAgentDevices} onChange={event => onChange("maxAgentDevices", event.target.value)} placeholder="No configured cap"/></Field>
-        <Field label={t("QR stations")}><input type="number" min="1" step="1" value={form.maxQrStations} onChange={event => onChange("maxQrStations", event.target.value)} placeholder="No configured cap"/></Field>
-        <Field label={t("Print jobs / month")}><input type="number" min="1" step="1" value={form.maxMonthlyPrintJobs} onChange={event => onChange("maxMonthlyPrintJobs", event.target.value)} placeholder="No configured cap"/></Field>
-        <Field label={t("Maximum document size · bytes")}><input type="number" min="1" step="1" value={form.maxDocumentBytes} onChange={event => onChange("maxDocumentBytes", event.target.value)} placeholder="No configured cap"/></Field>
+        <Field label={t("Agent computers")}><input type="number" min="1" step="1" value={form.maxAgentDevices} onChange={event => onChange("maxAgentDevices", event.target.value)} placeholder={t("No configured cap")}/></Field>
+        <Field label={t("QR stations")}><input type="number" min="1" step="1" value={form.maxQrStations} onChange={event => onChange("maxQrStations", event.target.value)} placeholder={t("No configured cap")}/></Field>
+        <Field label={t("Print jobs / month")}><input type="number" min="1" step="1" value={form.maxMonthlyPrintJobs} onChange={event => onChange("maxMonthlyPrintJobs", event.target.value)} placeholder={t("No configured cap")}/></Field>
+        <Field label={t("Maximum document size · bytes")}><input type="number" min="1" step="1" value={form.maxDocumentBytes} onChange={event => onChange("maxDocumentBytes", event.target.value)} placeholder={t("No configured cap")}/></Field>
       </div>
 
       <div className="platform-plan-subheading"><div><h4>{t("Product capabilities")}</h4><p>{t("Saved centrally and intended to be evaluated by the server.")}</p></div></div>
