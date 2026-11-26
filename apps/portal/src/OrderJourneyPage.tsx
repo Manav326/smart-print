@@ -210,7 +210,7 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
       {journey.photoPageCount>0&&<div><strong>{journey.photoPageCount}</strong><span>{t("Photo layout pages")}</span></div>}
     </div>
     <div className={styles.orderSignals}>
-      <div className={styles.signalRow}><span className={styles.signalIcon+(journey.payment?.status==="VERIFIED"||journey.payment?.status==="PARTIALLY_REFUNDED"?" "+styles.signalGood:"")}><CreditCard size={15}/></span><div><strong>{t("Payment")}</strong><small>{paymentLabel(journey.payment,journey.stage,locale)} · {money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</small></div></div>
+      <div className={styles.signalRow}><span className={styles.signalIcon+(journey.payment?.status==="VERIFIED"||journey.payment?.status==="PARTIALLY_REFUNDED"?" "+styles.signalGood:"")}><CreditCard size={15}/></span><div><strong>{t("Payment")}</strong><small>{paymentLabel(journey.payment,journey.stage,locale)} · {money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency,locale)}</small></div></div>
       <div className={styles.signalRow}><span className={styles.signalIcon+(printer.ready?" "+styles.signalGood:"")}><Printer size={15}/></span><div><strong>{printer.name}</strong><small>{printer.detail}</small></div></div>
       {journey.attentionJobs.length>0&&<div className={styles.attentionLine}><AlertTriangle size={14}/><span>{journey.attentionJobs.length} {t("file(s) need attention. Check the original output destination before retrying.")}</span></div>}
     </div>
