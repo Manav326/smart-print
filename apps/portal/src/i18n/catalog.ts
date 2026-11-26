@@ -1817,6 +1817,9 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "photos": "फोटो",
     "per A4 sheet": "हर A4 शीट पर",
     "saved": "सेव",
+    "Original stays private · {finish} A4 photo sheets saved here.": "ओरिजिनल निजी रहती है · {finish} A4 फोटो शीट यहाँ सेव होती हैं।",
+    "New order · Verify payment before printing.": "नया ऑर्डर · प्रिंटिंग से पहले भुगतान सत्यापित करें।",
+    "photo paper": "फोटो पेपर",
 
   },
   hinglish: {
@@ -3262,6 +3265,9 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "photos": "photos",
     "per A4 sheet": "per A4 sheet",
     "saved": "saved",
+    "Original stays private · {finish} A4 photo sheets saved here.": "Original private rehti hai · {finish} A4 photo sheets yahan save hoti hain.",
+    "New order · Verify payment before printing.": "Naya order · printing se pehle payment verify karein.",
+    "photo paper": "photo paper",
 
   },
 };
