@@ -294,7 +294,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
 
   return <main className={"private-photo-studio-entry"+(dark?" dark":"")} style={{minHeight:"100dvh",padding:"24px 18px 36px",background:"var(--surface,#f6f8fc)",color:"var(--text,#172033)"}}>
     <section style={{width:"min(100%,760px)",margin:"0 auto"}}>
-      <header style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:18}}>
+      <header style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:12,marginBottom:18}}>
         <div>
           <div style={{fontSize:10,fontWeight:800,letterSpacing:".14em",color:"var(--accent,#5366c9)"}}>SMARTPRINT BY QUANTAEDGE</div>
           <h1 style={{fontSize:26,lineHeight:1.2,margin:"7px 0 4px"}}>{t("Photo Studio")}</h1>
